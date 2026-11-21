@@ -2,6 +2,7 @@ import AppModel
 import CoreBridge
 import Editor
 import Home
+import Review
 import SwiftUI
 
 /// The root of the window (KTD10): the tab layout at compact width, the
@@ -92,6 +93,10 @@ struct RootView: View {
         .focusedSceneValue(\.nativeCommandContext, collection.map { NativeCommandContext(collection: $0, host: .main, layout: layout) })
         .background {
             if let collection { FindSecondKey(context: NativeCommandContext(collection: collection, host: .main, layout: layout)) }
+        }
+        // The next session's card pages, beneath everything and never seen (R1813, N16.8).
+        .background {
+            if let collection { ReviewBackgroundCardHost(collection: collection) }
         }
         #if os(macOS)
         // Hide only the presenting shell; sheets and alerts own their AX tree.

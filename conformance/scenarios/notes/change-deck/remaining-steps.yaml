@@ -1,0 +1,72 @@
+# Change Deck translates the remaining steps of learning and relearning
+# cards from the home deck's preset to the target's (specs/sched/step-remap.md
+# R2, R4; specs/browser/bulk-actions.md B7.2 step 3.1; R645).
+# Two: learning 2m 20m, relearning 15m. Three: learning 2m 20m 3h,
+# relearning 5m 15m 2h. Bare: no learning or relearning steps.
+# Decks: Lower uses Two, Upper and Twin Three, Plain Bare; Cram is a filtered
+# deck.
+# Cards (left before the move), all moved to Upper in one step:
+#  c1 Lower learning, 2 (first step, nothing passed)
+#  c2 Lower learning, 1 (passed 2m)
+#  c3 Lower relearning, 1 (its only step)
+#  c4 Plain learning, 2 (the old list is empty)
+#  c5 Lower review, left 0
+#  c6 learning in Cram from Lower, 1 (passed 2m): its home preset counts
+#  c7 Plain relearning, 2 (the old list is empty)
+#  c8 Twin learning, 7 (more than the list holds): the translation also runs
+#     when both decks share a preset, so the count becomes the list length
+#  c9 Twin relearning, 0 (passed every step): same preset, at least 1
+id: notes/change-deck/remaining-steps
+clock: {tz: UTC, start: "2030-03-04T09:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Two, learn_steps: [2m, 20m], relearn_steps: [15m]}
+    - {name: Three, learn_steps: [2m, 20m, 3h], relearn_steps: [5m, 15m, 2h]}
+    - {name: Bare, learn_steps: [], relearn_steps: []}
+  decks: [{name: Lower, preset: Two}, {name: Upper, preset: Three}, {name: Plain, preset: Bare}, {name: Twin, preset: Three}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lower, fields: [one, a]}
+    - {notetype: Pair, deck: Lower, fields: [two, a]}
+    - {notetype: Pair, deck: Lower, fields: [three, a]}
+    - {notetype: Pair, deck: Plain, fields: [four, a]}
+    - {notetype: Pair, deck: Lower, fields: [five, a]}
+    - {notetype: Pair, deck: Lower, fields: [six, a]}
+    - {notetype: Pair, deck: Plain, fields: [seven, a]}
+    - {notetype: Pair, deck: Twin, fields: [eight, a]}
+    - {notetype: Pair, deck: Twin, fields: [nine, a]}
+steps:
+  - observe: [timing]
+  # Card states, matched by row number (card ids follow creation order).
+  # Learning cards are due in ten minutes (1898845800), the review card on
+  # day 5.
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, left = v.column7
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 1, 1, 1898845800, 0, 1, 2),
+          (2, 1, 1, 1898845800, 0, 2, 1),
+          (3, 3, 1, 1898845800, 3, 5, 1),
+          (4, 1, 1, 1898845800, 0, 2, 2),
+          (5, 2, 2, 5, 5, 4, 0),
+          (6, 1, 1, 1898845800, 0, 2, 1),
+          (7, 3, 1, 1898845800, 3, 5, 2),
+          (8, 1, 1, 1898845800, 0, 3, 7),
+          (9, 3, 1, 1898845800, 3, 6, 0)
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  # c6 sits in Cram, its home deck Lower in odid.
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = due WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"
+  - db_exec: {sql: "UPDATE cards SET usn = 0, mod = 1700000000"}
+  - advance: 1h
+  - change_deck: {cards: ["#c1", "#c2", "#c3", "#c4", "#c5", "#c6", "#c7", "#c8", "#c9"], deck: Upper}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5)", "card(#c6, #c7, #c8, #c9)"]

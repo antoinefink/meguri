@@ -149,6 +149,14 @@ import Darwin
         #endif
     }
 
+    /// The Study timings probe (R1813) is off unless asked for, and takes on or off.
+    @Test func studyTimingsIsAnOnOffProbe() throws {
+        #expect(try Options(arguments: []).studyTimings == false)
+        #expect(try Options(arguments: ["-MeguriStudyTimings", "on"]).studyTimings)
+        #expect(try Options(arguments: ["-MeguriStudyTimings", "off"]).studyTimings == false)
+        #expect(throws: TestHookError.self) { try Options(arguments: ["-MeguriStudyTimings", "yes"]) }
+    }
+
     /// The size class is iOS's (the Mac has none), the integrations flag the
     /// Mac's (R11).
     @Test func theSizeClassIsIOSOnlyAndTheIntegrationsFlagMacOnly() throws {

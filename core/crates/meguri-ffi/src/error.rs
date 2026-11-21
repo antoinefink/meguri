@@ -108,6 +108,12 @@ pub enum CoreError {
         seq: u64,
         message: String,
     },
+    /// A Browse search session's refusal (`browser/result-sets` H14): a
+    /// search error, an unsortable column, a stale revision, a released
+    /// handle, an index out of range, or a handle not yet complete.
+    Browse {
+        failure: crate::browse_search::BrowseFailure,
+    },
 }
 
 impl fmt::Display for CoreError {
@@ -147,6 +153,7 @@ impl fmt::Display for CoreError {
             CoreError::CommitCompleted { seq, message } => {
                 write!(f, "operation {seq} committed; post-commit failure: {message}")
             }
+            CoreError::Browse { .. } => write!(f, "{self:?}"),
         }
     }
 }
@@ -290,6 +297,9 @@ impl From<CoreError> for EngineError {
             CoreError::CommitCompleted { seq, message } => EngineError::CommitCompleted {
                 seq: meguri_engine::Seq(seq),
                 message,
+            },
+            CoreError::Browse { failure } => EngineError::Internal {
+                message: format!("browse: {failure:?}"),
             },
         }
     }

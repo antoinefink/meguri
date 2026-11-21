@@ -48,6 +48,13 @@ public enum IntervalNames {
 
     /// Starting a review → the first card visible (R1813).
     public static let reviewStartToFirstCard = IntervalName("review.startToFirstCard", .review)
+    /// Starting a review → both card pages loaded for its session: next to
+    /// nothing when warm pages were waiting (a part of `startToFirstCard`).
+    public static let reviewStartPagesReady = IntervalName("review.startPagesReady", .review)
+    /// The session's first head → its first card ready in the idle page:
+    /// render and page update, or a check of the preloaded card (a part of
+    /// `startToFirstCard`).
+    public static let reviewStartCardReady = IntervalName("review.startCardReady", .review)
     /// Card N presented → card N+1 settled in the idle page (U176, U241).
     public static let reviewPresentToNextSettled = IntervalName("review.presentToNextSettled", .review)
     /// A card rendered on demand because nothing was prepared (U176).
@@ -88,7 +95,8 @@ public enum IntervalNames {
     public static let all: [IntervalName] = [
         answerToNextVisible, revealToAnswerVisible, launchToDeckListInteractive, keystrokeToResultsVisible,
         browserOpenToFirstPage, statsFirstGraphs, editorOpenToEditable, syncStartToEnd,
-        reviewStartToFirstCard, reviewPresentToNextSettled, reviewOnDemandRender, reviewAnswerMainThread,
+        reviewStartToFirstCard, reviewStartPagesReady, reviewStartCardReady,
+        reviewPresentToNextSettled, reviewOnDemandRender, reviewAnswerMainThread,
         reviewUndoToCardVisible, reviewActionToNextVisible, reviewTouchDownToTint, searchFirstPage,
         statsAllGraphs, statsScopeChange, heatmapRender, cardInfoOpen,
         probeSyntheticDelay, probeNativeSwap,
@@ -380,6 +388,22 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let startNotetypeRemovalCounts = BridgeCall("start_notetype_removal_counts")
     public static let notetypeRemovalCountsJobResult = BridgeCall("NotetypeRemovalCountsJob.result")
     public static let notetypeNearFieldName = BridgeCall("notetype_near_field_name")
+
+    public static let openSearchSession = BridgeCall("open_search_session")
+    public static let browseStartSearch = BridgeCall("BrowseSearchSession.start_search")
+    public static let browseResort = BridgeCall("BrowseSearchSession.resort")
+    public static let browseToggle = BridgeCall("BrowseSearchSession.toggle")
+    public static let browseReverse = BridgeCall("BrowseSearchSession.reverse")
+    public static let browseInvalidatedRows = BridgeCall("BrowseSearchSession.invalidated_rows")
+    public static let browseRows = BridgeCall("BrowseSearchSession.rows")
+    public static let browseQaCells = BridgeCall("BrowseSearchSession.qa_cells")
+    public static let browseIndexOf = BridgeCall("BrowseSearchSession.index_of")
+    public static let browseMapSelection = BridgeCall("BrowseSearchSession.map_selection")
+    public static let browseResolveSelection = BridgeCall("BrowseSearchSession.resolve_selection")
+    public static let browseSelection = BridgeCall("BrowseSearchSession.selection")
+    public static let browseHandleState = BridgeCall("BrowseSearchSession.handle_state")
+    public static let browseClose = BridgeCall("BrowseSearchSession.close")
+    public static let browseSelectionResolve = BridgeCall("BrowseSelection.resolve")
 
     public static let startCreateBackup = BridgeCall("start_create_backup")
     public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
@@ -685,5 +709,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
+        openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
     ]
 }

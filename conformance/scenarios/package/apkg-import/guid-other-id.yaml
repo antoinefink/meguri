@@ -23,7 +23,7 @@ steps:
   - advance: 1m
   - export: {format: apkg, name: moved.apkg, limit: collection, scheduling: true, presets: false, media: false}
   - db_exec: {sql: "UPDATE notes SET id = 4242, mod = 1894701500, flds = 'one' || char(31) || 'local' WHERE sfld = 'one'"}
-  - db_exec: {sql: "UPDATE cards SET nid = 4242 WHERE nid NOT IN (SELECT id FROM notes)"}
+  - db_exec: {sql: "UPDATE cards SET nid = 4242 WHERE NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = cards.nid)"}
   - db_exec: {sql: "SELECT id, flds, mod FROM notes ORDER BY id"}
   - advance: 1m
   - import: {format: apkg, name: moved.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}

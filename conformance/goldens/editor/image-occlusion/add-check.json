@@ -66,10 +66,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "1f74ff830687a0af6480a3656e077572b2e1751857b0d0baeec4e5437c5f1f94",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "editor/image-occlusion/add-check",
-  "scenario_sha256": "f6382b488237652ea5e8f89038970bc609a1700675917da7c6a25e029bfa804d",
+  "scenario_sha256": "57b310abf9383d8e61dccf6ba521c1c6adb1184308fc4a1646b5d24bed7d0f51",
   "tz": "UTC"
 }

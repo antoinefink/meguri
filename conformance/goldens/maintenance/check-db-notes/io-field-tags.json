@@ -266,10 +266,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "f56dfee581132fb4520f3c81c0e71d532e710ff1542696ad5e809b2dfb75e465",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "maintenance/check-db-notes/io-field-tags",
-  "scenario_sha256": "d20a45f883af71313e94a63fbe2eec19c66552f528ff43e5d727ff589079ad8d",
+  "scenario_sha256": "624f7e2e36587b8233235ced6003107e7d9f4097b03b0ebd68990b1c242ae2a1",
   "tz": "UTC"
 }

@@ -30,5 +30,5 @@ it needs Docker and builds the oracle image unless given `--tag`.
 - Remaking changes the notes' guids and the page layout, never the recipe
   golden: re-record the `preservation/` goldens that open the fixture
   (`tools/mg oracle record preservation/fixture preservation/churn
-  preservation/edit preservation/review preservation/render`) and compare
-  three times.
+  preservation/edit preservation/notetype preservation/review
+  preservation/render`) and compare three times.

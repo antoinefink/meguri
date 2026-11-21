@@ -48,6 +48,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "storage/revlog/studied-today-window",
-  "scenario_sha256": "11469246d1898a8d67bf2e21293c25dc5a2c3c47658b5f79a153d1dd35695e49",
+  "scenario_sha256": "20aab712b849e4c27fd4c4ae2e2df370ea6d812936ae3e5b5fb5da415ce563ba",
   "tz": "Europe/Paris"
 }

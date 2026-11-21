@@ -48,6 +48,11 @@ import Testing
         ] {
             #expect(IntervalNames.named(name) != nil, "\(name)")
         }
+        // The parts of the start of a review (R1813), in its category.
+        for name in ["review.startPagesReady", "review.startCardReady"] {
+            #expect(IntervalNames.named(name)?.category == .review, "\(name)")
+            #expect(IntervalNames.named(name)?.fieldReported == false, "\(name)")
+        }
         // The rendering spike's baseline swap (U65), a test probe.
         #expect(IntervalNames.named("probe.nativeSwap")?.category == .probe)
     }
@@ -120,6 +125,7 @@ import Testing
             "parse_due_days", "start_sched_op", "SchedOpJob.result", "start_buried_kinds", "BuriedKindsJob.result",
             "DeckOptionsEditor.snapshot", "DeckOptionsEditor.edit", "DeckOptionsEditor.validate", "parse_option_steps", "format_option_steps", "start_deck_options", "start_save_deck_options", "start_option_ignore_count", "start_scheduling_preferences", "start_save_scheduling_preferences", "DeckOptionsReadJob.result", "DeckOptionsSaveJob.result", "OptionIgnoreCountJob.result", "SchedulingPreferencesJob.result", "SchedulingPreferencesSaveJob.result", "validate_scheduling_preferences",
             "notetype_list", "start_notetype_note_counts", "NotetypeNoteCountsJob.result", "start_notetype_field_content_counts", "NotetypeFieldContentCountsJob.result", "start_notetype_draft_summary", "NotetypeDraftSummaryJob.result", "start_notetype_notes_without_card", "NotetypeNotesWithoutCardJob.result", "start_notetype_removal_counts", "NotetypeRemovalCountsJob.result", "notetype_near_field_name",
+            "open_search_session", "BrowseSearchSession.start_search", "BrowseSearchSession.resort", "BrowseSearchSession.toggle", "BrowseSearchSession.reverse", "BrowseSearchSession.invalidated_rows", "BrowseSearchSession.rows", "BrowseSearchSession.qa_cells", "BrowseSearchSession.index_of", "BrowseSearchSession.map_selection", "BrowseSearchSession.resolve_selection", "BrowseSearchSession.selection", "BrowseSearchSession.handle_state", "BrowseSearchSession.close", "BrowseSelection.resolve",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)

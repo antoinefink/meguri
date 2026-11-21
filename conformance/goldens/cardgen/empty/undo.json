@@ -817,10 +817,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "f10b3fbfa80664e6e78893185d28ae464f9aee3722a2473391b90ca2c16d7cfa",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "cardgen/empty/undo",
-  "scenario_sha256": "a6b7993bcbffc11a669e0dd15eacb8b19a7d963659b8ff5647d253195dafb879",
+  "scenario_sha256": "dee7334e59a31f95530b3ec88b4699a3ca8e3c0ec098051c0cc40a7ac3e27f19",
   "tz": "UTC"
 }

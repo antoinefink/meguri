@@ -79,6 +79,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/widget/day-start-legacy",
-  "scenario_sha256": "27b680622c5c10b684f750eb433264192dcd31ad28d680d1d388aae83b90417d",
+  "scenario_sha256": "b61e96f21c5151d472fe00b3bddfa35a3b352e35d9ff692916ce6012b984ee24",
   "tz": "Europe/Paris"
 }

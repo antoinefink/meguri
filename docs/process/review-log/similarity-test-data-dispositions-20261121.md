@@ -149,6 +149,16 @@ compatible app must accept. Pull request #79 adds three exact whole-file
 allowlist entries for them (text channel only, no pattern, each with the
 file's reviewed SHA-256).
 
+## Class (b) rewrites, 2026-11-21
+
+By spec-writer sessions `s-20261121T180133Z-9326df1d` (stats), `s-20261121T180626Z-6fb8c9f6` (sched), `s-20261121T180837Z-26a035e5` (rest), `s-20261121T183023Z-cec6463f` (review fixtures) and `s-20261121T182409Z-4e4281b1` (sync). Each PR has an independent review in `review-log/class-b-*-20261121.md`.
+
+- #86 stats (63), #87 sched (20), #88 the other areas (23), #89 `render/image-occlusion/review/fixtures` (needs an implementer to copy six app fixture sides from its golden), #90 the two sync actor scenarios (golden and recording re-recorded).
+- With all five merged locally on `f17019af5`: `similarity/20261121T184754Z-1299`, 2,528 files, 1 flagged, 65 oracle output, 3 allowlisted. `goldens-check` passes.
+- Left: `preservation/recipe/kitchen-sink`. A rewrite touches the preservation fixture; the options and a proposed exact-file entry are in #88 for the coordinator.
+- `preservation/recipe/kitchen-sink`, decided by the coordinator: option 2 of #88 (no exception, no allowlist entry). Pull request #97 (oracle-maintainer session `s-20261121T202427Z-c7524e47`) drops the column list from the insert. The values are already in table order, and the recipe golden's observations are unchanged. It remakes the fixture with `make.sh` (every N9.2 check passed) and re-records the seven goldens that open it (guids only; `fixture/open` only its driver hash). `oracle compare preservation` passed three times, and `goldens-check` passes.
+- Whole tree after #97: on its branch alone, `similarity/20261121T202925Z-80259` gives 2,528 files and 1 flagged (`render/image-occlusion/review/fixtures`, which #89 clears). With #89 merged on top, `similarity/20261121T204106Z-19903` gives 2,528 files, **0 flagged**, 65 oracle output and 3 allowlisted (status `warn` only for the 346 files below the fingerprint limits).
+
 ## Hosted check
 
 Linux · similarity fails only on flags in files a change adds or modifies,
@@ -190,26 +200,26 @@ classes and most areas.
 
 | File | Class | Channels | Regions | What matches | State |
 |---|---|---|---|---|---|
-| `scenarios/cardgen/empty/keep-notes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/cardgen/empty/occlusion.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `scenarios/cardgen/empty/recheck.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/cardgen/empty/undo.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/cardgen/empty/keep-notes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#88); clear |
+| `scenarios/cardgen/empty/occlusion.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
+| `scenarios/cardgen/empty/recheck.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#88); clear |
+| `scenarios/cardgen/empty/undo.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#88); clear |
 | `goldens/editor/cloze/output/read-back.json` | a | text | 1 | oracle output: cloze span HTML | open |
-| `scenarios/editor/cloze/output/read-back.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `scenarios/editor/image-occlusion/add-check.yaml` | b | text | 6 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `scenarios/editor/image-occlusion/audio-fields.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `goldens/maintenance/check-db-notes/all-notes.json` | b | text | 1 | echo of the scenario's own Image Occlusion field (format keywords and coordinates .1/.1/.2) | open |
-| `scenarios/maintenance/check-db-notes/all-notes.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits), and a generic note-type subquery | open |
-| `scenarios/maintenance/check-db-notes/io-field-tags.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
+| `scenarios/editor/cloze/output/read-back.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
+| `scenarios/editor/image-occlusion/add-check.yaml` | b | text | 6 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
+| `scenarios/editor/image-occlusion/audio-fields.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
+| `goldens/maintenance/check-db-notes/all-notes.json` | b | text | 1 | echo of the scenario's own Image Occlusion field (format keywords and coordinates .1/.1/.2) | rewritten (#88); clear |
+| `scenarios/maintenance/check-db-notes/all-notes.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits), and a generic note-type subquery | rewritten (#88); clear |
+| `scenarios/maintenance/check-db-notes/io-field-tags.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
 | `scenarios/maintenance/check-db/all-records.yaml` | c | text | 1 | orphan-card count query was an Anki test query (count() spelled count(*)) | rewritten; clear |
-| `goldens/media/add/lowercase.json` | b | lex | 5 | lex: long runs of a repeated letter (case-folding names) against one repetitive Anki literal | open |
+| `goldens/media/add/lowercase.json` | b | lex | 5 | lex: long runs of a repeated letter (case-folding names) against one repetitive Anki literal | reported as oracle output (#79 rule) |
 | `goldens/model/card-data/rewrite.json` | c | text | 1 | input row was the four values of an Anki card-data unit test; the golden shows Anki's asserted output | rewritten; clear |
-| `scenarios/notetypes/change/template-map.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/notetypes/change/template-map.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#88); clear |
 | `scenarios/notetypes/structure/template-swap-replace.yaml` | c | text | 1 | same orphan-card query as an Anki test with the same purpose (no card left without its note after removing templates) | rewritten; clear |
-| `scenarios/package/apkg-export/selection/invalid-ids.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/package/apkg-import/guid-other-id.yaml` | b | text | 1 | generic orphan-card subquery (nid not in (select id from notes)) in a different statement | open |
+| `scenarios/package/apkg-export/selection/invalid-ids.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#88); clear |
+| `scenarios/package/apkg-import/guid-other-id.yaml` | b | text | 1 | generic orphan-card subquery (nid not in (select id from notes)) in a different statement | rewritten (#88); clear |
 | `goldens/preservation/render/every-card.json` | a | text | 6 | oracle output: hint-filter HTML | open |
-| `scenarios/preservation/recipe/kitchen-sink.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/preservation/recipe/kitchen-sink.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#97, fixture remade); clear |
 | `goldens/render/cloze/blank-check.json` | a | text | 1 | oracle output: cloze span HTML | open |
 | `goldens/render/cloze/encoding.json` | a | text | 1 | oracle output: cloze span HTML | open |
 | `goldens/render/cloze/markers.json` | a | text | 1 | oracle output: cloze span HTML | open |
@@ -261,35 +271,35 @@ classes and most areas.
 | `goldens/render/type-answer/meguri-modifiers.json` | a | text | 6 | oracle output: type-answer comparison HTML | open |
 | `goldens/render/type-answer/modifiers.json` | a | text | 6 | oracle output: type-answer comparison HTML | open |
 | `goldens/render/type-answer/question.json` | a | text | 2 | oracle output: type-answer comparison HTML | open |
-| `scenarios/render/cloze/nesting.yaml` | b | text | 1 | numbered sequence (c1, c2, ... or #c1, #c2, ...) against a numbered table literal | open |
-| `scenarios/render/cloze/numbers.yaml` | b | text | 1 | numbered sequence (c1, c2, ... or #c1, #c2, ...) against a numbered table literal | open |
-| `scenarios/render/image-occlusion/format/cards.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `scenarios/render/image-occlusion/format/parse-escapes.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `scenarios/render/image-occlusion/format/parse-numbers.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `scenarios/render/image-occlusion/render/audio-tags.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `scenarios/render/image-occlusion/render/audio.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `scenarios/render/image-occlusion/render/divs.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `scenarios/render/image-occlusion/review/fixtures.yaml` | b | text | 3 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
-| `scenarios/sched/answer/state-kinds.yaml` | b | lex,text | 4 | numbered sequence (c1, c2, ... or #c1, #c2, ...) against a numbered table literal | open |
-| `scenarios/sched/compat/enable-fsrs.yaml` | b | text | 2 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/compat/re-enable.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/loadbalancer/crafted-days.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/loadbalancer/siblings.yaml` | b | text | 1 | generic subquery nid in (select id from notes where mid ...) | open |
-| `scenarios/sched/memory/crafted-rows.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
-| `scenarios/sched/memory/ignore-before-boundary.yaml` | b | text | 3 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/memory/ignore-before-count.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/memory/ignore-before.yaml` | b | text | 5 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/memory/lrt-repair.yaml` | b | text | 10 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/memory/no-history.yaml` | b | text | 3 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
-| `scenarios/sched/memory/on-the-fly.yaml` | b | text | 4 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/memory/recompute.yaml` | b | text | 11 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
-| `scenarios/sched/memory/reset.yaml` | b | text | 7 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
-| `scenarios/sched/memory/skipped-rows.yaml` | b | text | 6 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/memory/sm2-history.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
-| `scenarios/sched/options/missing-preset.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/options/remap-steps.yaml` | b | text | 5 | numbered sequence (c1, c2, ... or #c1, #c2, ...) against a numbered table literal | open |
-| `scenarios/sched/options/undo-save.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/revlog/kept-rows.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/render/cloze/nesting.yaml` | b | text | 1 | numbered sequence (c1, c2, ... or #c1, #c2, ...) against a numbered table literal | rewritten (#88); clear |
+| `scenarios/render/cloze/numbers.yaml` | b | text | 1 | numbered sequence (c1, c2, ... or #c1, #c2, ...) against a numbered table literal | rewritten (#88); clear |
+| `scenarios/render/image-occlusion/format/cards.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
+| `scenarios/render/image-occlusion/format/parse-escapes.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
+| `scenarios/render/image-occlusion/format/parse-numbers.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
+| `scenarios/render/image-occlusion/render/audio-tags.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
+| `scenarios/render/image-occlusion/render/audio.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
+| `scenarios/render/image-occlusion/render/divs.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#88); clear |
+| `scenarios/render/image-occlusion/review/fixtures.yaml` | b | text | 3 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | rewritten (#89); clear |
+| `scenarios/sched/answer/state-kinds.yaml` | b | lex,text | 4 | numbered sequence (c1, c2, ... or #c1, #c2, ...) against a numbered table literal | rewritten (#87); clear |
+| `scenarios/sched/compat/enable-fsrs.yaml` | b | text | 2 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/compat/re-enable.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/loadbalancer/crafted-days.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/loadbalancer/siblings.yaml` | b | text | 1 | generic subquery nid in (select id from notes where mid ...) | rewritten (#87); clear |
+| `scenarios/sched/memory/crafted-rows.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | rewritten (#87); clear |
+| `scenarios/sched/memory/ignore-before-boundary.yaml` | b | text | 3 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/memory/ignore-before-count.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/memory/ignore-before.yaml` | b | text | 5 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/memory/lrt-repair.yaml` | b | text | 10 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/memory/no-history.yaml` | b | text | 3 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | rewritten (#87); clear |
+| `scenarios/sched/memory/on-the-fly.yaml` | b | text | 4 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/memory/recompute.yaml` | b | text | 11 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | rewritten (#87); clear |
+| `scenarios/sched/memory/reset.yaml` | b | text | 7 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | rewritten (#87); clear |
+| `scenarios/sched/memory/skipped-rows.yaml` | b | text | 6 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/memory/sm2-history.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | rewritten (#87); clear |
+| `scenarios/sched/options/missing-preset.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/options/remap-steps.yaml` | b | text | 5 | numbered sequence (c1, c2, ... or #c1, #c2, ...) against a numbered table literal | rewritten (#87); clear |
+| `scenarios/sched/options/undo-save.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
+| `scenarios/sched/revlog/kept-rows.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#87); clear |
 | `goldens/stats/studied-today/refresh.json` | a | text | 2 | oracle output: Studied-today line | open |
 | `goldens/stats/studied-today/zero-line.json` | a | text | 1 | oracle output: Studied-today line | open |
 | `goldens/stats/today/empty.json` | a | text | 1 | oracle output: Studied-today line | open |
@@ -302,73 +312,73 @@ classes and most areas.
 | `scenarios/stats/browse-queries/ae60-young.yaml` | a | text | 1 | search texts that Anki's Card Counts graph opens in the browser (interface constants in specs/stats/browse-queries.md) | open |
 | `scenarios/stats/browse-queries/card-counts-labels.yaml` | a | text | 6 | search texts that Anki's Card Counts graph opens in the browser (interface constants in specs/stats/browse-queries.md) | open |
 | `scenarios/stats/browse-queries/parse-all.yaml` | a | text | 7 | search texts that Anki's Card Counts graph opens in the browser (interface constants in specs/stats/browse-queries.md) | open |
-| `scenarios/stats/browse-queries/calendar-cells.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/card-info/ae46-no-state.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/card-info/edge-values.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/card-info/intraday-learning.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/card-info/mixed-history.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/card-info/no-lrt-elapsed.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/card-info/params.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/card-info/times.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/card-info/zone-dst.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/buttons/groups.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/buttons/scope-parts.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/buttons/tz-matrix/kathmandu-scopes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/buttons/tz-matrix/kathmandu.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/buttons/tz-matrix/lord-howe-dst-scopes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/buttons/tz-matrix/lord-howe-dst.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/buttons/tz-matrix/other-creation-zone-scopes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/buttons/tz-matrix/other-creation-zone.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/buttons/tz-matrix/st-johns-scopes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/buttons/tz-matrix/st-johns.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/calendar/ae58-paris-spring-forward.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/calendar/history-years.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/hourly/current-offset.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/hourly/kathmandu-edges.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/hourly/near-epoch.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/hourly/range-edges.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/hourly/row-kinds.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/retention/ae59-history-parts.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/retention/periods.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/retention/row-filter.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/reviews/day-edges.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/reviews/kinds-split.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/reviews/time-wrap.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/reviews/window-start.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/scope/deleted-card-rows.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/scope/filtered-deck-card.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/scope/history-window.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/scope/moved-card.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/scope/odd-row-values.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/scope/read-only.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/scope/scope-follows-retag.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/scope/unreadable-card.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/graphs/scope/unreadable-row.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/studied-today/time-units.yaml` | b | text | 4 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/ae53-deleted-card.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/day-start-chatham.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/day-start-kathmandu.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/day-start-los-angeles-dst.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/day-start-paris-dst.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/day-start-st-johns.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/day-start-utc.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/deck-subtree.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/empty.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/lines-mix.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/no-mature.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/odd-values.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/today/search-scopes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/widget/day-start-fall-back.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/widget/day-start-future-row.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/widget/day-start-legacy.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/widget/day-start-spring-forward-r2-early-row.yaml` | b | text | 2 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/widget/day-start-spring-forward-r2.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/widget/day-start-spring-forward-r4.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/stats/widget/day-start-summer.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/stats/browse-queries/calendar-cells.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/card-info/ae46-no-state.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/card-info/edge-values.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/card-info/intraday-learning.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/card-info/mixed-history.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/card-info/no-lrt-elapsed.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/card-info/params.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/card-info/times.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/card-info/zone-dst.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/buttons/groups.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/buttons/scope-parts.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/buttons/tz-matrix/kathmandu-scopes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/buttons/tz-matrix/kathmandu.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/buttons/tz-matrix/lord-howe-dst-scopes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/buttons/tz-matrix/lord-howe-dst.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/buttons/tz-matrix/other-creation-zone-scopes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/buttons/tz-matrix/other-creation-zone.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/buttons/tz-matrix/st-johns-scopes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/buttons/tz-matrix/st-johns.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/calendar/ae58-paris-spring-forward.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/calendar/history-years.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/hourly/current-offset.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/hourly/kathmandu-edges.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/hourly/near-epoch.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/hourly/range-edges.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/hourly/row-kinds.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/retention/ae59-history-parts.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/retention/periods.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/retention/row-filter.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/reviews/day-edges.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/reviews/kinds-split.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/reviews/time-wrap.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/reviews/window-start.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/scope/deleted-card-rows.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/scope/filtered-deck-card.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/scope/history-window.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/scope/moved-card.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/scope/odd-row-values.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/scope/read-only.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/scope/scope-follows-retag.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/scope/unreadable-card.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/graphs/scope/unreadable-row.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/studied-today/time-units.yaml` | b | text | 4 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/ae53-deleted-card.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/day-start-chatham.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/day-start-kathmandu.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/day-start-los-angeles-dst.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/day-start-paris-dst.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/day-start-st-johns.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/day-start-utc.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/deck-subtree.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/empty.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/lines-mix.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/no-mature.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/odd-values.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/today/search-scopes.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/widget/day-start-fall-back.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/widget/day-start-future-row.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/widget/day-start-legacy.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/widget/day-start-spring-forward-r2-early-row.yaml` | b | text | 2 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/widget/day-start-spring-forward-r2.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/widget/day-start-spring-forward-r4.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
+| `scenarios/stats/widget/day-start-summer.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#86); clear |
 | `goldens/stats/studied-today/format-table.json` | c | text | 1 | two inputs were the two cases of an Anki unit test; the golden showed its asserted lines | rewritten; residual (a): the zero line |
 | `goldens/storage/revlog/studied-today-window.json` | a | text | 1 | oracle output: Studied-today line | open |
-| `scenarios/storage/revlog/last-review-pick.yaml` | b | text | 11 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
-| `scenarios/storage/revlog/studied-today-window.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sync/normal/many-objects.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sync/wire/records-up.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/undo/revlog-taken-id.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/storage/revlog/last-review-pick.yaml` | b | text | 11 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | rewritten (#88); clear |
+| `scenarios/storage/revlog/studied-today-window.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#88); clear |
+| `scenarios/sync/normal/many-objects.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#90); clear |
+| `scenarios/sync/wire/records-up.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#90); clear |
+| `scenarios/undo/revlog-taken-id.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#88); clear |

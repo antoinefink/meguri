@@ -603,7 +603,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 - Review's states are plain text, centred in N16.4's column: a title, an optional message in secondary text and standard bordered buttons. No symbol.
 - Waiting for a learning card that is not ready: "Waiting for Learning", "Your next learning card is not ready yet." and Check Now.
 - Paused by an error: "Review Paused", the message and Try Again. Ended: "Session Ended".
-- Loading keeps the system progress indicator with its label.
+- Loading shows the system progress indicator alone, and only for a start slower than Study's wait (N16.8, changed 2026-11-21; it had a "Preparing review…" label).
 - A notice above the card keeps its warning symbol and text, centred across the review's width (N16.4); a long one still scrolls within its limit.
 
 ### N16.7 No session timer
@@ -613,6 +613,16 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 - Answer time is still measured and saved with each answer, up to the preset's maximum answer seconds.
 - Replaces: R364's on-screen timer in N11.1 and N13.3.
 - Specs aligned 2026-11-19: `review/timers` T2 and `review/reviewer-strings` S17 are removed, and Deck Options shows neither timer option (`sched/deck-options` O3).
+
+### N16.8 Study starts on the card
+
+Decided by Antoine on 2026-11-21 ("When you click on Study, there's a screen that shows 'Preparing review' for a very short moment … I would like to remove that screen … but also to make the Study click instant"; `decisions.md`).
+
+- Study keeps the screen it was clicked on until the session's first card is ready, then the review appears with that card on it: no screen between the two, in every layout and for every Study entry point (the deck page, Today, the deck menu, the Deck menu bar command, the deck list's keys and double-click). The Study button keeps its normal look meanwhile; a second click does nothing.
+- Only when the start takes longer than 500 ms does the review appear before its card, with the system progress indicator alone in the card area: no title, no "Preparing review…". It shows for a slow start, such as FSRS being turned on (`sched/app-coordination` F5.1), and then the card replaces it. A start that fails or is refused within the wait never shows the review: the deck page keeps its error, or the F5.3 alert shows; one that fails after the indicator showed closes the review again, as before. Going elsewhere during the wait ends the session without showing it, as choosing another row ends an open review (R22).
+- Meguri keeps one set of card pages loaded while a collection is open and no review runs, beneath the window's content and never seen, and prepares in it the first card of the deck the visible Study targets (the deck page's deck; on Today, the first deck the walk starts). Media that arrives drops the prepared card, and Study's own deck selection keeps it. It reads only: no session starts, no deck is selected and no count or undo step changes until Study is clicked. No audio plays and nothing counts as shown until the card is on screen. The session uses the prepared card only when its own first card is the same card in the same state with the same content; otherwise it prepares that card as before. The pages are given up under memory pressure, in the background and when the collection closes.
+- VoiceOver lands on the review as it does today; there is no loading announcement for a screen that does not appear. Reduce Motion keeps the system's own transition.
+- Replaces: N16.6's "Loading keeps the system progress indicator with its label", and the review's loading screen with "Preparing review…".
 
 ## N17. Round 5 editor and file transfer decisions (2026-11-19)
 

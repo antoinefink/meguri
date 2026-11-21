@@ -16,7 +16,7 @@ setup:
   notes:
     - notetype: Mask audio
       fields:
-        - "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>{{c2::image-occlusion:rect:left=.4:top=.1:width=.2:height=.1}}<br>{{c3::image-occlusion:rect:left=.7:top=.1:width=.2:height=.1}}<br>"
+        - "{{c1::image-occlusion:rect:left=.15:top=.12:width=.2:height=.1}}<br>{{c2::image-occlusion:rect:left=.4:top=.1:width=.2:height=.1}}<br>{{c3::image-occlusion:rect:left=.7:top=.1:width=.2:height=.1}}<br>"
         - "<img src=\"chart.png\">"
         - "{{c1::[sound:a.mp3]}}"
         - "{{c2::[sound:b.mp3]}}"

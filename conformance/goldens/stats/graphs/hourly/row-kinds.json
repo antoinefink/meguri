@@ -109,10 +109,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/graphs/hourly/row-kinds",
-  "scenario_sha256": "6db753ae7b7dae50e5a9890c70e8b40cf164b8545be4a4af9f59b7e18989d5b2",
+  "scenario_sha256": "263d2de6f88fe261c4e42d955aeb1a221e6f181327e25b243536db6817cf2cf4",
   "tz": "Europe/Paris"
 }

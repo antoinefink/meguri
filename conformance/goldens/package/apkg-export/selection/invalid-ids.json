@@ -265,6 +265,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "package/apkg-export/selection/invalid-ids",
-  "scenario_sha256": "e4f9d8837a7da8599ae381a6d4368d8d2a02b2fd5ca9707c4b56766ea15ce1ef",
+  "scenario_sha256": "378a8d452b95802d8d9848bb8d7df33c67e54c2f6510b5dfdedcf27f553117f6",
   "tz": "UTC"
 }

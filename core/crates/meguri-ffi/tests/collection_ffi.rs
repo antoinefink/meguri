@@ -1055,9 +1055,33 @@ fn typed_surface(
     let decks_before = deck_tree::deck_tree_with_counts().unwrap();
     let deletion_before = decks::deck_deletion_summary(vec![deck.id]).unwrap();
     assert_eq!(deletion_before.cards, 1);
+    // D8 step 6: a confirmation that showed no card refuses with the live
+    // counts before any backup, and writes nothing.
+    let stale = decks::start_delete_decks(
+        vec![deck.id],
+        decks::DeckDeletionSummary {
+            decks: deletion_before.decks,
+            cards: 0,
+        },
+    )
+    .unwrap();
+    let (outcome, more) = finish(rx, stale.handle.id);
+    events.extend(more);
+    assert_eq!(
+        outcome,
+        JobOutcome::Failed {
+            error: CoreError::DeckRefused {
+                refusal: meguri_ffi::error_types::DeckRefusal::LossesChanged {
+                    decks: deletion_before.decks,
+                    cards: 1
+                }
+            }
+        }
+    );
+    assert!(stale.result.result().unwrap().is_none());
     // Refuse deletion through the real safety provider's capacity preflight.
     low_space.store(true, Ordering::SeqCst);
-    let deletion = decks::start_delete_decks(vec![deck.id]).unwrap();
+    let deletion = decks::start_delete_decks(vec![deck.id], deletion_before.clone()).unwrap();
     let (outcome, more) = finish(rx, deletion.handle.id);
     low_space.store(false, Ordering::SeqCst);
     events.extend(more);
@@ -1083,7 +1107,7 @@ fn typed_surface(
     // Drain a final real job, then compare exact exported metadata to the
     // process dispatcher's commit envelopes (not a racing stream last_seq).
     let empty = decks::add_deck("Empty Surface".into()).unwrap();
-    let deletion = decks::start_delete_decks(vec![empty.id]).unwrap();
+    let deletion = decks::start_delete_decks(vec![empty.id], decks::deck_deletion_summary(vec![empty.id]).unwrap()).unwrap();
     let (outcome, more) = finish(rx, deletion.handle.id);
     events.extend(more);
     assert_eq!(outcome, JobOutcome::Succeeded);
