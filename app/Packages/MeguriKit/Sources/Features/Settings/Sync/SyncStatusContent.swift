@@ -7,6 +7,9 @@ struct SyncNowButton: View {
     let collection: ReviewCollection
     var identifier = "sync.status.syncNow"
     var showsUnavailableReason = true
+    /// N23.3: the panel's Sync Now is disabled while the status moves, even
+    /// where a press would join the running exchange (P12.1).
+    var disabledWhileMoving = false
     private var meguri: Bool { collection.sync.providerState?.selection == .meguri }
     private var reason: String? { SyncStatusCopy.unavailable(collection) }
     private var available: Bool {
@@ -16,7 +19,8 @@ struct SyncNowButton: View {
     }
     var body: some View {
         Button(SyncText.value("sync.now.command")) { collection.requestSyncNow() }
-            .disabled(!available || collection.navigation.sheet != nil)
+            .disabled(!available || collection.navigation.sheet != nil
+                || (disabledWhileMoving && collection.sync.panelProgress != nil))
             .help(reason ?? SyncText.value("sync.now.command"))
             .accessibilityIdentifier(identifier)
             #if DEBUG
@@ -33,6 +37,28 @@ struct SyncNowButton: View {
 }
 
 enum SyncStatusCopy {
+    /// The main status's detail as the Sync section's status row and the panel show it.
+    @MainActor static func detail(_ sync: SyncCoordinator, now: Date) -> String? {
+        let status = sync.mainStatus
+        if let key = status.detailKey {
+            // N23.1: a detail that repeats the title is not shown ("Setting Up…").
+            if key == status.titleKey { return nil }
+            if let count = status.detailCount { return SyncText.format(key, Int64(clamping: count)) }
+            return SyncText.value(key)
+        }
+        // Both services use "Last synced" for a completed exchange (MP6.6).
+        guard status.titleKey == "sync.status.upToDate.title" else { return nil }
+        let instant: Int64?
+        if sync.providerState?.selection == .meguri {
+            instant = sync.meguriLastExchange
+        } else if case .upToDate(let at) = sync.status?.state {
+            instant = at
+        } else if case .upToDate(let at) = sync.status?.stateWithoutAttention {
+            // T19.4: with only issues present the row shows the state underneath, detail included.
+            instant = at
+        } else { instant = nil }
+        return instant.map { SyncText.format("sync.status.upToDate.detail", SyncText.instant($0, now: now)) }
+    }
     static func keepsLocally(_ status: CloudPolicyStatus) -> Bool {
         guard status.attention[.collectionCorrupt] == nil, status.attention[.localStorageFull] == nil,
               status.attention[.trackingError] == nil else { return false }

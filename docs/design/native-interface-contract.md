@@ -1113,7 +1113,7 @@ The first row that applies decides, in this order.
 ### N23.4 The exception: Meguri Sync's cloud shapes
 
 - Need: compatibility with Apple's terms for SF Symbols (above). No unrestricted SF Symbol puts a check, two arrows, an alert or a slash inside a cloud.
-- What is drawn: the view `CloudShapeSymbol` (`DesignSystem`, in the component gallery) shows the unrestricted `cloud` symbol with `checkmark`, `arrow.trianglehead.2.clockwise.rotate.90` or `exclamationmark` inside it, or a slash symbol across it, in the style of the `icloud` shapes. Apple's symbols are drawn as they are, and `icloud` symbols refer to iCloud only.
+- What is drawn: the view `CloudShapeSymbol` (`DesignSystem`, in the component gallery) shows the unrestricted `cloud` symbol with `checkmark`, `arrow.trianglehead.2.clockwise.rotate.90` or `exclamationmark` inside it, or a drawn slash across it, in the style of the `icloud` shapes. Apple's symbols are drawn as they are, and `icloud` symbols refer to iCloud only.
 - Why a view and not a custom symbol: Apple's way is a custom symbol made in the SF Symbols app, which this project cannot run unattended, and the system draws symbols only as images, so no outline can be taken from them to build a template. The view keeps the font, weight, foreground and rotate effect of its place (the effect turns the inner arrows only); it does not get a custom symbol's rendering modes or variable values, which these places do not use. A custom symbol made from the same unrestricted symbols replaces it when one is made.
 - Verification: the built app in the test VM, each shape beside its `icloud` counterpart, light and dark, regular and the largest text size, on Mac, iPad and iPhone (the pull request's captures).
 

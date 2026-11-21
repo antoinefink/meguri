@@ -109,6 +109,14 @@ public struct MeguriBootstrapMediaProgress: Sendable {
         phase = .init(raw.phase); checked = raw.checked; uploadedFiles = raw.uploadedFiles; downloadedFiles = raw.downloadedFiles
         bytesUploaded = raw.bytesUploaded; bytesDownloaded = raw.bytesDownloaded; awaiting = raw.awaiting
     }
+    private init(downloadedFiles: UInt64, awaiting: UInt64) {
+        phase = .downloading; checked = downloadedFiles + awaiting; uploadedFiles = 0
+        self.downloadedFiles = downloadedFiles; bytesUploaded = 0; bytesDownloaded = 0; self.awaiting = awaiting
+    }
+    /// Rendering fixtures only (`SyncCoordinator.renderFixture`): no transfer stands behind it.
+    public static func renderFixture(downloadedFiles: UInt64, awaiting: UInt64) -> MeguriBootstrapMediaProgress {
+        .init(downloadedFiles: downloadedFiles, awaiting: awaiting)
+    }
 }
 public final class MeguriBootstrapPreview: Sendable {
     private let handle: MeguriCoreBindings.ProviderBootstrapPreview?

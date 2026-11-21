@@ -38,6 +38,35 @@ extension TestHooks {
             registry.register("settings/sync/status-needs-you") { context in
                 .screen { SyncSettingsPreview.screen(.iCloudNeedsYou, page: .statusPopover, configuration: context.configuration) }
             }
+            // N23 (round 10): the status panel in each state, drawn in the window.
+            registry.register("settings/sync/panel/off") { panel(.off, $0) }
+            registry.register("settings/sync/panel/meguri-up-to-date") { panel(.meguriConnected, $0) }
+            registry.register("settings/sync/panel/meguri-syncing") { panel(.meguriSyncing, $0) }
+            registry.register("settings/sync/panel/meguri-setup-media") { panel(.meguriSetupMedia, $0) }
+            registry.register("settings/sync/panel/meguri-preparing") { panel(.meguriPreparing, $0) }
+            registry.register("settings/sync/panel/icloud-no-account") { panel(.iCloudNoAccount, $0) }
+            registry.register("settings/sync/panel/meguri-round-failed") { panel(.meguriRoundFailed, $0) }
+            registry.register("settings/sync/panel/meguri-sign-in-refused") { panel(.meguriSignInRefused, $0) }
+            registry.register("settings/sync/panel/meguri-choose-collection") { panel(.meguriNeedsYou, $0) }
+            registry.register("settings/sync/panel/meguri-blocked") { panel(.meguriBlocked, $0) }
+            registry.register("settings/sync/panel/icloud-up-to-date") { panel(.iCloudConnected, $0) }
+            registry.register("settings/sync/panel/icloud-syncing") { panel(.iCloudSyncing, $0) }
+            registry.register("settings/sync/panel/icloud-needs-you") { panel(.iCloudNeedsYou, $0) }
+            registry.register("settings/sync/panel/icloud-issues") { panel(.iCloudIssues, $0) }
+            registry.register("settings/sync/panel/icloud-not-set-up") { panel(.iCloudSelected, $0) }
+            // The popover itself, opened from the toolbar (iPhone: the sheet; iPad: the popover).
+            registry.register("settings/sync/status/meguri-setup-media") { context in
+                .screen { SyncSettingsPreview.screen(.meguriSetupMedia, page: .statusPopover, configuration: context.configuration) }
+            }
+            registry.register("settings/sync/status/off") { context in
+                .screen { SyncSettingsPreview.screen(.off, page: .statusPopover, configuration: context.configuration) }
+            }
+            registry.register("settings/sync/status/meguri-up-to-date") { context in
+                .screen { SyncSettingsPreview.screen(.meguriConnected, page: .statusPopover, configuration: context.configuration) }
+            }
+        }
+        private static func panel(_ state: SyncCoordinator.RenderState, _ context: RouteContext) -> InitialPresentation {
+            .screen { SyncSettingsPreview.screen(state, page: .statusPanel, configuration: context.configuration) }
         }
         private static func settings(_ state: SyncCoordinator.RenderState, _ context: RouteContext) -> InitialPresentation {
             .screen { SyncSettingsPreview.screen(state, configuration: context.configuration) }

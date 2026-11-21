@@ -17,10 +17,17 @@ public struct CloudSyncStatusButton: View {
     #endif
     public init(collection: ReviewCollection) { self.collection = collection }
     private var meguri: Bool { collection.sync.providerState?.selection == .meguri }
+    /// T20.1: the service's name, or `sync.button.label.off` with no service.
+    private var accessibilityLabelKey: String {
+        switch collection.sync.providerState?.selection {
+        case .meguri: "sync.meguri.button.label"
+        case .iCloud: "sync.button.label"
+        case .localOnly, nil: "sync.button.label.off"
+        }
+    }
     /// N15.4: the needs-attention symbol only for needs you; otherwise the state underneath.
     private var main: SyncMainStatus { collection.sync.mainStatus }
     private var titleKey: String { main.titleKey }
-    private var detailKey: String? { main.detailCount == nil ? main.detailKey : nil }
     private var presented: Binding<Bool> {
         Binding(get: { collection.navigation.sheet == nil && collection.syncPresentation.statusPresented },
             set: { collection.syncPresentation.statusPresented = $0 })
@@ -43,23 +50,23 @@ public struct CloudSyncStatusButton: View {
                     .accessibilityIdentifier("sync.status.mediaIndicator")
             }
             Button { presented.wrappedValue.toggle() } label: {
-                Image(systemName: main.symbol)
-                    .symbolEffect(.rotate, options: .repeating,
-                        isActive: !reduceMotion && (meguri ? collection.sync.meguriStatus.isBusy : collection.sync.status?.state == .syncingCollection))
+                // N23.2: the moving symbol turns exactly while the panel's bar shows.
+                SyncStatusSymbol(status: main, iCloud: collection.sync.symbolsAreICloud,
+                    turning: !reduceMotion && collection.sync.panelProgress != nil)
             }
-            .accessibilityLabel(SyncText.value(meguri ? "sync.meguri.button.label" : "sync.button.label"))
+            .accessibilityLabel(SyncText.value(accessibilityLabelKey))
             .accessibilityValue(SyncText.value(titleKey).replacingOccurrences(of: "…", with: ""))
-            .help([SyncText.value(titleKey), detailKey.map(SyncText.value)].compactMap { $0 }.joined(separator: "\n"))
+            .help([SyncText.value(titleKey), SyncStatusCopy.detail(collection.sync, now: clock.now())]
+                .compactMap { $0 }.joined(separator: "\n"))
             .accessibilityIdentifier("sync.status.button")
             .disabled(collection.syncPresentation.statusHandoffPending)
             .popover(isPresented: presented(compact: false)) {
-                status
-                    // A navigation stack has no size of its own: without one the popover
-                    // shrinks to the two buttons under the form and hides the status.
-                    .frame(idealWidth: ContentWidth.primaryAction,
-                        idealHeight: ContentWidth.primaryAction + ControlMetrics.minimumTarget + ControlMetrics.minimumTarget)
+                // N23.1: 320 points wide, as tall as its content.
+                panel
+                    .padding()
+                    .frame(width: ContentWidth.primaryAction)
                     .presentationCompactAdaptation(.sheet)
-                    .presentationDetents([.medium, .large])
+                    .presentationDetents([.medium])
             }
             #if os(iOS)
             // Keep status and connection separate; native dismissal, rather
@@ -69,8 +76,11 @@ public struct CloudSyncStatusButton: View {
                 nativeCompactStatusID = nil
                 collection.compactSyncStatusDidDismiss(id)
             }) {
-                status
+                // The same panel as the popover; it scrolls at the largest text sizes.
+                ScrollView { panel.padding() }
+                    .scrollBounceBehavior(.basedOnSize)
                     .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
                     .onAppear {
                         if nativeCompactStatusID == nil {
                             nativeCompactStatusID = collection.syncPresentation.statusPresentationID
@@ -84,30 +94,11 @@ public struct CloudSyncStatusButton: View {
             #endif
         }
     }
-    private var status: some View {
-        NavigationStack {
-            VStack {
-                Form {
-                    Section {
-                        SyncMainStatusRows(collection: collection, openEntry: openStatusEntry,
-                            showInSettings: { showSettings(keepCollection: $0) })
-                        if meguri, MeguriMediaFactRows.isVisible(collection.sync) {
-                            MeguriMediaFactRows(collection: collection)
-                        }
-                    }
-                }
-                .formStyle(.grouped)
-                Divider()
-                VStack(spacing: Spacing.medium) {
-                    SyncNowButton(collection: collection)
-                    Button(SyncText.value("sync.status.openSettings")) { showSettings() }
-                        .accessibilityIdentifier("sync.status.settings")
-                }
-                .padding()
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("sync.status.popover")
+    private var panel: some View {
+        SyncStatusPanel(collection: collection, openEntry: openStatusEntry,
+            showSettings: { showSettings(keepCollection: $0) })
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("sync.status.popover")
     }
     private var mediaLine: String? {
         if meguri { return nil }
