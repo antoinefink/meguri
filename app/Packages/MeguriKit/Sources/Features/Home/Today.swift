@@ -83,15 +83,13 @@ extension ReviewCounts {
     }
 }
 
-/// The Today page (N14.1).
-/// The sidebar layouts show it with no deck selected; an unfolded iPhone shows it beside the deck list.
+/// The Today page (N14.1, N24.2): Study for every deck with cards waiting, Studied Today,
+/// the previous session and the collection's activity.
+/// The sidebar layouts show it with no deck selected; an unfolded iPhone held wide shows it beside the deck list.
 public struct TodayView: View {
     public let collection: ReviewCollection
     private let besideDeckList: Bool
     @Environment(\.locale) private var locale
-    #if !os(macOS)
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    #endif
 
     /// `besideDeckList` on an unfolded iPhone held wide: no Home screen around it names
     /// the page, and the deck list beside it already shows the collection's error line.
@@ -100,94 +98,91 @@ public struct TodayView: View {
     }
 
     public var body: some View {
-        let today = TodayDecks(nodes: collection.decks)
+        let totals = TodayDecks(nodes: collection.decks).totals
+        TodaySummaryContent(
+            summary: TodaySummary(nodes: collection.decks, studied: collection.studiedToday, previous: previous),
+            nextLearningReadyAt: collection.nextLearningReadyAt, totals: totals,
+            error: besideDeckList ? nil : collection.error,
+            canStudy: collection.studyAllAvailable,
+            study: { Task { await collection.startStudyAll() } },
+            activity: collection.activity, widths: collection.navigation.activityRowWidths)
+            .activityLoading(collection.activity, scope: .collection, active: collection.heatmapRefreshes,
+                             widths: collection.navigation.activityRowWidths, page: .today)
+            .modifier(TodayTitle(enabled: besideDeckList, subtitle: HomeHeading.todaySubtitle(totals, locale: locale)))
+    }
+
+    /// The walk's in this launch, else the last deck's session the store keeps (N24.2).
+    private var previous: TodaySummary.PreviousSession? {
+        if let walk = collection.previousWalk {
+            return .init(deckNames: walk.decks.compactMap { collection.fullDeckName($0) }, walk: true,
+                         cards: walk.cards, endedAt: walk.endedAt)
+        }
+        guard let record = collection.previousRecord, let last = record.answers.last else { return nil }
+        return .init(deckNames: collection.fullDeckName(record.deckID).map { [$0] } ?? [], walk: false,
+                     cards: Set(record.answers.map(\.cardID)).count, endedAt: record.endedAt ?? last.answeredAt)
+    }
+}
+
+/// N24.2's list, from values: the live page and its DTO preview draw the same tree.
+struct TodaySummaryContent: View {
+    let summary: TodaySummary
+    let nextLearningReadyAt: Date?
+    let totals: ReviewCounts
+    let error: String?
+    let canStudy: Bool
+    let study: () -> Void
+    let activity: ActivityHeatmapStore
+    let widths: ActivityRowWidths
+    @Environment(\.locale) private var locale
+    @Environment(\.calendar) private var calendar
+    @Environment(\.timeZone) private var timeZone
+    @Environment(\.appClock) private var clock
+    #if !os(macOS)
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    #endif
+
+    var body: some View {
         List {
-            if today.entries.isEmpty {
-                // No totals and no header over the one line (N14.1).
-                Text("Nothing to study right now", bundle: .module)
-                    .quietText()
-                    .listRowSeparator(.hidden)
-                    .accessibilityIdentifier("home.today.empty")
-            } else {
-                #if !os(macOS)
-                // The Mac shows the totals as the window's subtitle.
-                Text(verbatim: today.totals.summary(locale: locale))
-                    .foregroundStyle(.token(.textSecondary))
-                    .listRowSeparator(.hidden)
-                    .accessibilityIdentifier("home.today.totals")
-                #endif
-                // No header: the title and totals already say what the rows are (N14.1).
-                ForEach(today.entries) { row($0) }
+            #if !os(macOS)
+            // The Mac shows the totals as the window's subtitle; both hide while nothing waits (N14.4).
+            if totals.waiting > 0 {
+                Section {
+                    Text(verbatim: totals.summary(locale: locale))
+                        .foregroundStyle(.token(.textSecondary))
+                        .listRowBackground(Color.clear)
+                        .accessibilityIdentifier("home.today.totals")
+                }
             }
-            // N14.11: the collection's activity, after the decks.
-            ActivityHeatmapSection(store: collection.activity, scope: .collection,
-                                   widths: collection.navigation.activityRowWidths, page: .today)
-            if let error = collection.error, !besideDeckList {
+            #endif
+            Section {
+                if summary.nothingWaiting { nothingWaiting } else { studyGroup }
+            }
+            Section { studiedRow }
+            // Only after a session with at least one answer.
+            if let value = summary.previousValue(now: clock.now(), calendar: zoned, locale: locale) {
+                Section { previousRow(decks: summary.previousDecks(locale: locale), value: value) }
+            }
+            // N14.11, N24.6: the collection's activity, with its header.
+            ActivityHeatmapSection(store: activity, scope: .collection, widths: widths, page: .today)
+            if let error {
                 Section {
                     Text(verbatim: error)
                         .foregroundStyle(.token(.statusError))
                         .accessibilityIdentifier("home.collection.error")
                 }
             }
-            if let record = collection.previousRecord, !record.answers.isEmpty {
-                Section {
-                    Text("\(record.answers.count) answers recorded", bundle: .module)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("home.session.recorded")
-                } header: {
-                    Text("Previous Session", bundle: .module)
-                        .accessibilityIdentifier("home.collection.previousSessionHeader")
-                }
-            }
         }
         #if !os(macOS)
-        .listStyle(.plain)
+        // N24.5: the deck page's inset grouped list (N14.3).
+        .listStyle(.insetGrouped)
         #endif
-        .activityLoading(collection.activity, scope: .collection, active: collection.heatmapRefreshes,
-                         widths: collection.navigation.activityRowWidths, page: .today)
-        .modifier(TodayTitle(enabled: besideDeckList, subtitle: HomeHeading.todaySubtitle(today.totals, locale: locale)))
     }
 
-    private func row(_ entry: TodayDecks.Entry) -> some View {
-        // At the accessibility sizes the count and Study go under the name, as other Home rows stack.
-        (stacks ? AnyLayout(VStackLayout(alignment: .leading)) : AnyLayout(HStackLayout())) {
-            VStack(alignment: .leading) {
-                Text(verbatim: entry.name)
-                if !entry.ancestors.isEmpty {
-                    // A flat list: the parents as text, not as indentation (N14.1).
-                    Text(verbatim: entry.ancestors.joined(separator: " › "))
-                        .font(.caption)
-                        .quietText()
-                }
-            }
-            if !stacks { Spacer() }
-            HStack {
-                #if os(macOS)
-                Text(verbatim: nonZeroCounts(entry.counts))
-                    .foregroundStyle(.secondary)
-                #else
-                Text(entry.counts.waiting, format: .number)
-                    .quietText()
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .fixedSize()
-                    // A bare number says nothing to VoiceOver.
-                    .accessibilityLabel(Text("\(entry.counts.waiting) cards waiting", bundle: .module))
-                #endif
-                Button { Task { await collection.startStudy(deckID: entry.id) } } label: {
-                    Label { Text("Study", bundle: .module) } icon: { Image(systemName: "play.fill") }
-                }
-                .buttonStyle(.bordered)
-                // The deck page's Study target.
-                .frame(minHeight: ControlMetrics.minimumTarget)
-                .contentShape(Rectangle())
-                .disabled(!collection.canStudy || collection.navigation.sheet != nil || collection.addNotePresentation.opening)
-                .accessibilityLabel(Text("Study \(entry.path)", bundle: .module))
-                .accessibilityIdentifier("home.today.study.\(entry.id)")
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("home.today.deck.\(entry.id)")
+    /// The device's calendar in the device's zone (N24.2's "Yesterday").
+    private var zoned: Calendar {
+        var calendar = calendar
+        calendar.timeZone = timeZone
+        return calendar
     }
 
     private var stacks: Bool {
@@ -198,15 +193,116 @@ public struct TodayView: View {
         #endif
     }
 
-    #if os(macOS)
-    /// As the Decks rows had them (N11.5): only the counts that are not zero.
-    private func nonZeroCounts(_ counts: ReviewCounts) -> String {
-        [counts.new == 0 ? nil : String(localized: "\(counts.new.formatted(.number.locale(locale))) new", bundle: .module),
-         counts.learning == 0 ? nil : String(localized: "\(counts.learning.formatted(.number.locale(locale))) learning", bundle: .module),
-         counts.review == 0 ? nil : String(localized: "\(counts.review.formatted(.number.locale(locale))) to review", bundle: .module)]
-            .compactMap { $0 }.joined(separator: " · ")
+    // MARK: Study
+
+    /// The deck page's Study button, with the walk's lines beside it on the Mac and under it on touch.
+    @ViewBuilder private var studyGroup: some View {
+        let first = summary.studyLine(locale: locale)
+        #if os(macOS)
+        HStack(alignment: .center, spacing: Spacing.medium) {
+            studyButton(value: first)
+            studyLines(first: first)
+        }
+        .listRowSeparator(.hidden)
+        #else
+        VStack(alignment: .leading, spacing: Spacing.small) {
+            studyButton(value: first)
+            studyLines(first: first)
+        }
+        #endif
     }
-    #endif
+
+    private func studyButton(value: String) -> some View {
+        Button(action: study) {
+            #if os(macOS)
+            Label { Text("Study", bundle: .module) } icon: { Image(systemName: "play.fill") }
+            #else
+            Text("Study", bundle: .module).font(.headline)
+            #endif
+        }
+        .buttonStyle(.borderedProminent)
+        // The deck page's Study target (N14.3).
+        .frame(minHeight: ControlMetrics.minimumTarget)
+        .contentShape(Rectangle())
+        .disabled(!canStudy)
+        .accessibilityLabel(Text("Study All Decks", bundle: .module))
+        .accessibilityInputLabels([Text("Study", bundle: .module), Text("Study All Decks", bundle: .module)])
+        .accessibilityValue(Text(verbatim: value))
+        .accessibilityIdentifier("home.today.studyAll")
+    }
+
+    private func studyLines(first: String) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            Text(verbatim: first)
+                .accessibilityIdentifier("home.today.studyAll.summary")
+            if let order = summary.orderLine(locale: locale) {
+                Text(verbatim: order)
+                    .accessibilityIdentifier("home.today.studyAll.order")
+            }
+        }
+        .quietText()
+        // Both lines wrap and never truncate.
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var nothingWaiting: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            Text("Nothing to study right now", bundle: .module)
+                .accessibilityIdentifier("home.today.empty")
+            if let next = nextLearningReadyAt, next > clock.now() {
+                let time = next.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale,
+                                                           calendar: zoned, timeZone: timeZone))
+                Text("Next learning card at \(time)", bundle: .module)
+                    .quietText()
+                    .accessibilityIdentifier("home.today.nextLearning")
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .listRowSeparator(.hidden)
+    }
+
+    // MARK: Rows
+
+    /// Studied Today: the label, the system's linear bar in the accent colour, and the value.
+    private var studiedRow: some View {
+        let value = summary.studiedValue(locale: locale)
+        return Group {
+            if stacks {
+                rowLayout {
+                    Text("Studied Today", bundle: .module)
+                        .fixedSize(horizontal: false, vertical: true)
+                    studiedBar
+                    Text(verbatim: value).quietText()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                StudiedTodayLine(value: value, fraction: summary.studiedFraction)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Studied Today", bundle: .module))
+        .accessibilityValue(Text(verbatim: summary.studiedAccessibilityValue(locale: locale)))
+        .accessibilityIdentifier("home.today.studied")
+        .listRowSeparator(.hidden)
+    }
+
+    private var studiedBar: some View {
+        ProgressView(value: summary.studiedFraction).progressViewStyle(.linear)
+    }
+
+    private func previousRow(decks: String?, value: String) -> some View {
+        PreviousSessionLine(decks: decks, value: value, stacks: stacks)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("home.today.previous")
+        .listRowSeparator(.hidden)
+    }
+
+    /// A row's label and value side by side; at the accessibility text sizes the value goes under it.
+    private func rowLayout<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        (stacks ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xSmall))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: Spacing.medium))) { content() }
+    }
 }
 
 private struct TodayTitle: ViewModifier {
@@ -222,5 +318,91 @@ private struct TodayTitle: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// Studied Today's row where it does not stack (N24.2): one line while the label, a usable
+/// bar and the value fit; otherwise the bar goes on its own line under them; at the
+/// narrowest the label and the value wrap, never running past the row.
+struct StudiedTodayLine: View {
+    let value: String
+    let fraction: Double
+
+    /// The narrowest bar still worth drawing beside the label and value.
+    private static let usableBar = Spacing.xxLarge * 2
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: Spacing.medium) {
+                label.lineLimit(1).fixedSize()
+                bar.frame(minWidth: Self.usableBar, idealWidth: Self.usableBar, maxWidth: .infinity)
+                valueText.lineLimit(1).fixedSize()
+            }
+            VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+                    label.lineLimit(1).fixedSize()
+                    Spacer(minLength: Spacing.small)
+                    valueText.lineLimit(1).fixedSize()
+                }
+                bar
+            }
+            VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+                    label
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    valueText
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                bar
+            }
+        }
+    }
+
+    private var label: Text { Text("Studied Today", bundle: .module) }
+    private var valueText: some View { Text(verbatim: value).quietText() }
+    private var bar: some View { ProgressView(value: fraction).progressViewStyle(.linear) }
+}
+
+/// Previous Session's row (N24.2): the label, with the decks under it, and the value beside
+/// them while both fit on one line; otherwise, and always at the accessibility text sizes,
+/// the value goes under them. Every text wraps, never running past the row.
+struct PreviousSessionLine: View {
+    let decks: String?
+    let value: String
+    let stacks: Bool
+
+    var body: some View {
+        if stacks {
+            stacked
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: Spacing.medium) {
+                    label
+                    Spacer(minLength: Spacing.small)
+                    Text(verbatim: value).quietText().lineLimit(1).fixedSize()
+                }
+                stacked
+            }
+        }
+    }
+
+    private var stacked: some View {
+        VStack(alignment: .leading, spacing: Spacing.xSmall) {
+            label
+            Text(verbatim: value).quietText()
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var label: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            Text("Previous Session", bundle: .module)
+            if let decks {
+                Text(verbatim: decks).quietText()
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

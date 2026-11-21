@@ -130,6 +130,8 @@ pub mod session_predict;
 pub mod skipped_incoming;
 #[path = "stock_kinds.rs"]
 pub mod stock_kinds;
+#[path = "studied_today_numbers.rs"]
+pub mod studied_today_numbers;
 #[path = "tags.rs"]
 pub mod tags;
 #[path = "tags_conformance.rs"]

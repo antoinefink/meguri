@@ -265,7 +265,7 @@ impl SessionShared {
         if let (Some(caller), Some(registry)) = (cancel, self.registry.upgrade()) {
             registry::bridge(caller, &token, &registry);
         }
-        let epoch = self.registry.upgrade().map_or(0, |registry| registry.epoch());
+        let (epoch, stopping) = self.registry.upgrade().map_or((0, false), |registry| registry.epoch());
         let mut state = self.lock();
         self.supersede(&mut state);
         state.next_seq += 1;
@@ -273,6 +273,9 @@ impl SessionShared {
         if state.closed {
             token.cancel();
         }
+        // H3: a request made while the generation changes (or the
+        // collection suspends or closes) fails with the engine's refusal.
+        let job = if stopping { Job::Refused } else { job };
         state.queue.push_back(QueuedJob { seq, token, epoch, job });
         if !state.worker {
             state.worker = true;
@@ -575,6 +578,13 @@ impl SearchSession {
     /// H16: how many of H11's extra tests the session's toggles made.
     pub fn extra_tests_for_testing(&self) -> u64 {
         self.shared.testing.extra_tests.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Runs `during` while every search of the engine is stopping, as a
+    /// replacement, a suspend or a close halts them.
+    pub fn while_searches_stopped_for_testing<T>(engine: &Engine, during: impl FnOnce() -> T) -> T {
+        let _halt = engine.inner.searches.halt();
+        during()
     }
 
     /// H16: how many predicate runs the session's requests made.

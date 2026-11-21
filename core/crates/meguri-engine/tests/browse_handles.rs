@@ -950,4 +950,43 @@ fn a_slow_search_streams_and_equals_the_whole_statement_q10_h3_h10_h13() {
     let (pairs, count) = fx.search("re:n00[0-4] card:1", SearchMode::Notes, asc("noteFld"));
     assert_eq!(count, 50);
     assert_eq!(fx.ids(pairs), fx.notes[..50].iter().map(|note| note.0).collect::<Vec<_>>());
+/// H15: handle ids are unique across engines too; each session refuses
+/// the other's handle although both hold results.
+#[test]
+fn sessions_on_two_engines_refuse_each_others_handles_h15() {
+    let first = fixture(2);
+    let second = fixture(3);
+    let (a, _) = first.search("", SearchMode::Cards, asc("cardDue"));
+    let (b, _) = second.search("", SearchMode::Cards, asc("cardDue"));
+    assert_ne!(a, b);
+    assert_eq!(second.session.handle_state(a), Err(BrowseError::UnknownHandle));
+    assert_eq!(first.session.handle_state(b), Err(BrowseError::UnknownHandle));
+    assert_eq!(first.session.handle_state(a).unwrap().count, 4);
+    assert_eq!(second.session.handle_state(b).unwrap().count, 6);
+}
+
+/// H3: a request made while searches are stopping (a replacement, a suspend
+/// or a close in progress) fails with the engine's refusal, even when its
+/// worker starts after the halt ends; the one-shot search is refused too.
+#[test]
+fn a_request_made_during_a_halt_fails_with_the_engines_refusal_h3() {
+    let fx = fixture(2);
+    let held = hold_search_readers(&fx.h);
+    let seq = SearchSession::while_searches_stopped_for_testing(&fx.h.engine, || {
+        assert!(matches!(
+            search_ids(&fx.h.engine, "", SearchMode::Cards),
+            Err(BrowseError::Engine(EngineError::CollectionUnavailable { .. }))
+        ));
+        fx.session.start_search("", SearchMode::Cards, asc("cardDue"), None)
+    });
+    drop(held);
+    assert!(matches!(
+        fx.until(seq).as_slice(),
+        [SearchEvent::Failed {
+            error: BrowseError::Engine(EngineError::CollectionUnavailable { .. }),
+            ..
+        }]
+    ));
+    // Afterwards searches run again.
+    assert_eq!(fx.search("", SearchMode::Cards, asc("cardDue")).1, 4);
 }

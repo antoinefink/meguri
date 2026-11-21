@@ -18,7 +18,13 @@ pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i
     // Listed for halts (replace, suspend, close), so its reader comes back
     // at once.
     let token = crate::cancel::CancelToken::new();
-    let _running = engine.inner.searches.run(&token, engine.inner.searches.epoch());
+    let (epoch, stopping) = engine.inner.searches.epoch();
+    if stopping {
+        return Err(BrowseError::Engine(crate::error::EngineError::unavailable(
+            "the collection is changing generation, suspending or closing",
+        )));
+    }
+    let _running = engine.inner.searches.run(&token, epoch);
     let index = engine.inner.searches.server_reader();
     let lease = collection.server_reader(index)?;
     let snapshot = lease.snapshot()?;

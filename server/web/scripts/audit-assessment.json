@@ -194,8 +194,8 @@
         "sha256": "9cefc3723cf52869ccaf3d2dbe1b775b0668c77570945ea3e448f971cf4ccad8"
       },
       "tests/browser/accounts.spec.ts": {
-        "bytes": 45782,
-        "sha256": "c54edd895ad46474b03411778575aeebe1a68c0383e6fca807307e2a05c288a4"
+        "bytes": 46075,
+        "sha256": "ca12f0a952651e7bbbf110916fc31759c4e43679e59d0da776523afd5f6fa06d"
       },
       "tests/browser/mcp.spec.ts": {
         "bytes": 37427,

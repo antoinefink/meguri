@@ -73,7 +73,7 @@ The checksum is computed from the first field (index 0), whatever the sort field
 The editor's first-field checks (R807, R808; built in U191 and U27) use the comparison text: the candidate's first field, NFC-normalized when `normalize_note_text` is on (no control-character removal, since the candidate is not saved yet), then `strip-html.md` H5.
 
 - The first field counts as empty when the comparison text, with Unicode whitespace removed from both ends, is empty.
-- Otherwise a note is a duplicate when another note of the same note type (a different note id) has the checksum C4 computes from the comparison text, and the H5 text of that note's stored first field equals the comparison text exactly. So `<b>私</b>` duplicates a stored `私`, while `私 ` does not.
+- Changed 2026-11-21 (implementation review): otherwise a note is a duplicate when another note of the same note type (a different note id) has as its stored `csum` the result of C4 steps 2 and 3 on the comparison text as it is, and the H5 text of that note's stored first field equals the comparison text exactly. The comparison text is already stripped, so there is no second H5 (H5 is not idempotent) and no further NFC or control-character removal, as `notes/field-check` K4 says; the earlier wording, "the checksum C4 computes from the comparison text", would strip it twice. So `<b>私</b>` duplicates a stored `私`, while `私 ` does not; and a draft `&lt;b&gt;Cat`, whose comparison text is `<b>Cat`, duplicates a stored `&lt;b&gt;Cat`, which all of C4 would miss by stripping `<b>Cat` again to `Cat` (scenario `notes/fields-check/entity-markup`).
 
 ## C6. Scenarios
 

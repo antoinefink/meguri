@@ -31,7 +31,9 @@ window's SwiftUI scene id, a navigation bar named after its title, an SF
 Symbol's name on its image, and on the Mac a SwiftUI List's ListColumn and a
 NavigationSplitView's '<scene id>, SidebarNavigationSplitView', and AppKit's
 exact NSOutlineViewDisclosureButtonKey on a disclosure triangle directly in
-a cell under an outline row in an outline), elements
+a cell under an outline row in an outline; on iOS a sidebar disclosure row's
+system button, which copies its label's identifier, with its own chevron; and
+on the Mac the window toolbar's title and subtitle, reported at one frame), elements
 with an empty frame, and transient elements (activity and progress
 indicators) with everything inside them. Wrong colors, broken alignment and
 unreadable text are judgments for the critic (U10), not checks here.
@@ -396,6 +398,61 @@ def native_replay_identities(document, root):
     return identities, issues
 
 
+def native_disclosure_row_parts(document, root):
+    """iOS sidebar rows in a DisclosureGroup: UIKit wraps the row's label in a
+    system button that copies the label's identifier, label and value, and adds
+    an unlabelled chevron button of its own. Both are system parts of one row.
+
+    Returns (labels, chevrons): the row's own label texts under such a button,
+    which are not a second element with that identifier, and the chevrons,
+    which carry no identifier. Exact shape only: platform ios, a button with an
+    identifier, a static-text child with the same identifier, label and value
+    inside its frame, and an unidentified, unlabelled small button child at its
+    trailing end, under a cell.
+    """
+    labels, chevrons = set(), set()
+    if document.get("platform") != "ios":
+        return labels, chevrons
+    for e in root.walk():
+        if e.type != "button" or not e.identifier or not any(a.type == "cell" for a in e.ancestors):
+            continue
+        own = [c for c in e.children if c.type == "staticText" and c.identifier == e.identifier
+               and c.label == e.label and c.raw.get("value") == e.raw.get("value")
+               and c.x >= e.x and c.y >= e.y and c.x + c.w <= e.x + e.w and c.y + c.h <= e.y + e.h]
+        if len(own) != 1:
+            continue
+        labels.add(own[0])
+        for c in e.children:
+            if (c.type == "button" and not c.identifier and not c.label and 0 < c.w <= 24 and 0 < c.h <= 24
+                    and c.x + c.w <= e.x + e.w and c.x >= e.x + e.w * 0.75
+                    and c.y >= e.y and c.y + c.h <= e.y + e.h):
+                chevrons.add(c)
+    return labels, chevrons
+
+
+def native_toolbar_title_pairs(document, root):
+    """The Mac window toolbar's title and subtitle (a page's navigationTitle and
+    navigationSubtitle): two unidentified, unlabelled static texts directly in
+    the window with the same frame, each with a value. AppKit reports both at
+    the title area's frame; they are drawn one above the other, so they do not
+    overlap on screen. Exactly two at a frame: three or more are not this shape
+    and keep their overlaps. Returns the set of such pairs as frozensets.
+    """
+    pairs = set()
+    if document.get("platform") != "mac":
+        return pairs
+    for window in root.walk():
+        if window.type != "window":
+            continue
+        texts = [c for c in window.children if c.type == "staticText" and not c.identifier and not c.label
+                 and isinstance(c.raw.get("value"), str) and c.raw.get("value")]
+        by_frame = {}
+        for t in texts:
+            by_frame.setdefault(tuple(sorted(t.frame.items())), []).append(t)
+        pairs.update(frozenset(group) for group in by_frame.values() if len(group) == 2)
+    return pairs
+
+
 def check(document):
     """The issues in one hierarchy export, as a list of dicts with a `kind`."""
     if not isinstance(document, dict) or document.get("schema") != 1 or not isinstance(document.get("root"), dict):
@@ -420,6 +477,8 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     elements = [e for e in root.walk() if not e.under(SYSTEM_UI) and not e.under(TRANSIENT)]
     sheet_grabbers = native_sheet_grabbers(document, root)
     toggle_parts = native_toggle_switch_parts(document, root) | native_stepper_arrows(document, root)
+    disclosure_labels, disclosure_chevrons = native_disclosure_row_parts(document, root)
+    title_pairs = native_toolbar_title_pairs(document, root)
     issues = []
 
     for e in elements:
@@ -432,6 +491,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
                                    for a in e.ancestors))
         if ((e.type in INTERACTIVE or e.type in ROWS) and not e.identifier and e not in native_ids and not comparison_link and e.visible and not e.in_system_alert()
                 and not e.is_sidebar_toggle() and e not in sheet_grabbers and e not in toggle_parts
+                and e not in disclosure_chevrons
                 and not (e.type in ROWS and e.identified_inside())):
             issues.append(dict(kind="missing-identifier", message="%s '%s' has no accessibility identifier" % (e.type, e.label),
                                **describe(e)))
@@ -442,7 +502,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
 
     by_identifier = {}
     for e in elements:
-        if not e.identifier or is_system_identifier(e):
+        if not e.identifier or is_system_identifier(e) or e in disclosure_labels:
             continue
         if not IDENTIFIER.match(e.identifier):
             issues.append(dict(kind="bad-identifier",
@@ -464,7 +524,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     shown = [(e, r) for e, r in shown if r]
     for i, (a, (ax, ay, aw, ah)) in enumerate(shown):
         for b, (bx, by, bw, bh) in shown[i + 1:]:
-            if a in b.ancestors or b in a.ancestors or a.window() is not b.window():
+            if a in b.ancestors or b in a.ancestors or a.window() is not b.window() or frozenset((a, b)) in title_pairs:
                 continue
             dx = min(ax + aw, bx + bw) - max(ax, bx)
             dy = min(ay + ah, by + bh) - max(ay, by)

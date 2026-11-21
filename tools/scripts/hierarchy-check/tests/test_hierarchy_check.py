@@ -1106,3 +1106,60 @@ class CommandLine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NativeSidebarDisclosureRowParts(unittest.TestCase):
+    """iOS: a DisclosureGroup row's system button copies its label's identifier
+    and adds a chevron; invented trees, never captured fixtures."""
+
+    def row(self, label_id="home.sidebar.deck.1", value="6 new", chevron=(277, 263, 10, 14)):
+        text = el("staticText", label_id, "Languages", f=(32, 259, 237, 20))
+        text["value"] = value
+        children = [text]
+        if chevron:
+            children.append(el("button", f=chevron))
+        button = el("button", "home.sidebar.deck.1", "Languages", f=(16, 244, 288, 52), children=children)
+        button["value"] = "6 new"
+        return doc(el("cell", f=(16, 244, 288, 52), children=[el("other", f=(16, 244, 288, 52), children=[button])]))
+
+    def test_the_rows_own_label_and_the_system_chevron_are_not_issues(self):
+        self.assertEqual(hierarchy_check.check(self.row()), [])
+
+    def test_a_different_label_or_value_is_still_a_duplicate(self):
+        self.assertIn("duplicate-identifier", kinds(hierarchy_check.check(self.row(value="other"))))
+
+    def test_a_chevron_away_from_the_trailing_end_still_needs_an_identifier(self):
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(self.row(chevron=(40, 263, 10, 14)))))
+
+    def test_a_chevron_outside_the_row_vertically_still_needs_an_identifier(self):
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(self.row(chevron=(277, 320, 10, 14)))))
+
+    def test_only_on_ios(self):
+        tree = self.row()
+        tree["platform"] = "mac"
+        self.assertIn("duplicate-identifier", kinds(hierarchy_check.check(tree)))
+
+
+class NativeMacToolbarTitlePair(unittest.TestCase):
+    def tree(self, second_frame=(224, 30, 952, 52), label=""):
+        title = el("staticText", "", label, f=(224, 30, 952, 52))
+        title["value"] = "Today"
+        subtitle = el("staticText", "", "", f=second_frame)
+        subtitle["value"] = "35 new · 5 learning · 342 to review"
+        tree = doc(title, subtitle, window=(0, 0, 1200, 800))
+        tree["platform"] = "mac"
+        return tree
+
+    def test_the_title_and_subtitle_at_one_frame_do_not_overlap(self):
+        self.assertEqual(hierarchy_check.check(self.tree()), [])
+
+    def test_other_overlapping_texts_still_overlap(self):
+        self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(second_frame=(230, 40, 900, 40)))))
+        self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(label="Today"))))
+
+    def test_three_texts_at_one_frame_still_overlap(self):
+        tree = self.tree()
+        third = el("staticText", "", "", f=(224, 30, 952, 52))
+        third["value"] = "Another"
+        tree["root"]["children"][0]["children"].append(third)
+        self.assertIn("text-overlap", kinds(hierarchy_check.check(tree)))

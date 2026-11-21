@@ -65,9 +65,11 @@ impl SearchRegistry {
         state.next_session
     }
 
-    /// The halt epoch a request queued now records.
-    pub(super) fn epoch(&self) -> u64 {
-        self.lock().epoch
+    /// The halt epoch a request queued now records, and whether a halt is
+    /// in force (a request made during one is refused, H3).
+    pub(super) fn epoch(&self) -> (u64, bool) {
+        let state = self.lock();
+        (state.epoch, state.halts > 0)
     }
 
     /// A request takes its worker: its token is listed for [`Self::halt`],

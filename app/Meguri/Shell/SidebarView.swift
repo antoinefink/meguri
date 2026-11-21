@@ -1,6 +1,9 @@
 import AppModel
 import DesignSystem
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// The sidebar (R17): Home, Browse, Stats, Note Types and Settings, then the
 /// "Decks" group with the collection's deck tree. One selection covers both
@@ -66,6 +69,35 @@ struct SidebarView: View {
                 }
             }
         }
+        #if os(macOS)
+        // H12: in the Mac's sidebar layout Return starts the selected deck's review, or
+        // Today's Study with Today selected, whether the sidebar or the page beside it has
+        // focus (H9.2 gives Return the same meaning on a deck page). A row's click leaves
+        // focus with SwiftUI's button, not the list, so neither the table nor a primary
+        // action sees the key: a key monitor of this window does. Never while a text input,
+        // a sheet or a review has the keys, and never on a key's repeat. S is not bound on
+        // the Mac sidebar: the list's type-select keeps the letters (H12).
+        .background(ReturnKeyStudyMonitor(
+            allowed: { (navigation.review == nil, navigation.sheet == nil, !textInputHasFocus) },
+            act: { features.sidebarStudy(navigation.sidebarSelection) }))
+        #else
+        // H12: with the list focused (a hardware keyboard), Return or S starts the selected
+        // deck's review, or Today's Study on the Today row; once per press, never on a key's
+        // repeat, and never while a text input (the deck search field) has focus (R197).
+        .onKeyPress(keys: [.return, KeyEquivalent("s")], phases: .down) { press in
+            guard press.modifiers.isEmpty, !textInputHasFocus,
+                  features.sidebarStudy(navigation.sidebarSelection) else { return .ignored }
+            return .handled
+        }
+        #endif
+    }
+
+    private var textInputHasFocus: Bool {
+        #if os(macOS)
+        NSApp.keyWindow?.firstResponder is NSText
+        #else
+        TextInputFocus.shared.editing
+        #endif
     }
 
     /// N14.1: with a collection, the first row is Today on every sidebar layout.
@@ -79,3 +111,37 @@ struct SidebarView: View {
         return features.todayRoot ? "sun.max" : section.systemImage
     }
 }
+
+#if os(macOS)
+/// H12: Return in the main window's sidebar layout, through a local key monitor that
+/// lives as long as the sidebar. `act` returns whether it used the key.
+private struct ReturnKeyStudyMonitor: View {
+    /// (no review, no app sheet, no text input): read when the key arrives.
+    let allowed: @MainActor () -> (noReview: Bool, noSheet: Bool, noTextInput: Bool)
+    let act: @MainActor () -> Bool
+    @State private var monitor: Any?
+    var body: some View {
+        Color.clear
+            .onAppear {
+                guard monitor == nil else { return }
+                monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    let used = MainActor.assumeIsolated { () -> Bool in
+                        let state = allowed()
+                        guard SidebarReturnKey.acts(keyCode: event.keyCode, isRepeat: event.isARepeat,
+                                modifiers: event.modifierFlags.intersection(.deviceIndependentFlagsMask),
+                                inMainWindow: event.window != nil && event.window === NSApp.mainWindow,
+                                windowSheet: event.window?.attachedSheet != nil, appSheet: !state.noSheet,
+                                review: !state.noReview, textInput: !state.noTextInput) else { return false }
+                        return act()
+                    }
+                    return used ? nil : event
+                }
+            }
+            .onDisappear {
+                if let monitor { NSEvent.removeMonitor(monitor) }
+                monitor = nil
+            }
+    }
+}
+#endif
+

@@ -43,6 +43,8 @@ pub(super) enum Job {
     },
     /// Superseded while queued: it ends `Cancelled` without running.
     Superseded,
+    /// Made during a halt: it ends `Failed` with the engine's refusal (H3).
+    Refused,
 }
 
 pub(super) struct QueuedJob {
@@ -227,6 +229,9 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
             Job::Resort { source, sort } => request.resort(source, &sort),
             Job::Toggle { source, sort } => request.toggle(source, &sort),
             Job::Superseded => Err(Stop::Cancelled),
+            Job::Refused => Err(Stop::Failed(BrowseError::Engine(EngineError::unavailable(
+                "the collection is changing generation, suspending or closing",
+            )))),
         }
     };
     let Err(stop) = result else { return };
