@@ -71,6 +71,8 @@ fn count(c: &Connection, sql: &str) -> Result<i64> {
     Ok(c.query_row(sql, [], |r| r.get(0))?)
 }
 pub(super) fn validate(root: &DataRoot, c: &Connection, allow_incomplete: bool) -> Result<()> {
+    // Validate every reset before allowing its ready store to be absent.
+    let resets = super::reset::pending(c)?;
     require(count(c, "SELECT count(*) FROM setup")? == 1)?;
     require(
         count(
@@ -162,7 +164,9 @@ pub(super) fn validate(root: &DataRoot, c: &Connection, allow_incomplete: bool) 
                         &crypto::digest(credentials.phc.as_bytes()),
                     ))?;
                 }
-                root.validate_stores(&identity.id)?;
+                if !resets.iter().any(|job| job.id == identity.id) {
+                    root.validate_stores(&identity.id)?;
+                }
             }
         }
     }
@@ -175,8 +179,8 @@ pub(super) fn validate(root: &DataRoot, c: &Connection, allow_incomplete: bool) 
     require(!c.prepare("SELECT 1 FROM capabilities k LEFT JOIN accounts i ON i.id=k.issuer LEFT JOIN accounts t ON t.id=k.target WHERE length(k.hash)<>32 OR (k.kind='setup' AND (k.issuer IS NOT NULL OR k.issuer_generation IS NOT NULL OR k.target IS NOT NULL OR k.target_generation IS NOT NULL OR k.expires_at IS NOT NULL)) OR (k.kind<>'setup' AND (i.role<>'admin' OR i.provisioning_state<>'ready' OR k.issuer_generation IS NULL OR k.issuer_generation<=0 OR k.issuer_generation>i.generation OR k.expires_at IS NULL)) OR (k.kind='invite' AND (k.target IS NOT NULL OR k.target_generation IS NOT NULL)) OR (k.kind='reset' AND (k.target IS NULL OR k.target_generation IS NULL OR k.target_generation<=0 OR k.target_generation>t.generation OR t.provisioning_state<>'ready' OR k.reserved_id IS NOT NULL OR k.state='provisioning')) OR (k.state='available' AND k.reserved_id IS NOT NULL) OR (k.state='provisioning' AND k.reserved_id IS NULL) OR (k.kind IN ('setup','invite') AND k.state='consumed' AND k.reserved_id IS NULL)")?.exists([])?)?;
     require(!c.prepare("SELECT 1 FROM credentials k JOIN accounts a ON a.id=k.account_id WHERE k.generation<=0 OR k.generation>a.generation OR a.provisioning_state<>'ready' OR (k.revoked=0 AND (k.generation<>a.generation OR a.enabled<>1))")?.exists([])?)?;
     let version:i64=c.pragma_query_value(None,"user_version",|r|r.get(0))?;
-    if matches!(version, 2 | 3 | 4) {crate::media::recovery::validate(root,c)?;}
-    if matches!(version, 3 | 4) { super::deletion::pending(c)?; }
-    if version == 4 { crate::accounts::oauth::validate(c)?; }
+    if matches!(version, 2 | 3 | 4 | 5) {crate::media::recovery::validate(root,c)?;}
+    if matches!(version, 3 | 4 | 5) { super::deletion::pending(c)?; }
+    if matches!(version, 4 | 5) { crate::accounts::oauth::validate(c)?; }
     Ok(())
 }

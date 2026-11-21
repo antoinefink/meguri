@@ -2,7 +2,7 @@
 // Real service only. Parent provides a fresh synthetic Rust root behind HTTPS.
 import { readFileSync, writeFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
-import type { Page, Response } from "@playwright/test";
+import type { Locator, Page, Response } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { storageValue } from "../../src/storage";
 const fixture: { setup_token: string } = JSON.parse(readFileSync("/fixture/fixture.json", "utf8"));
@@ -11,6 +11,10 @@ const replacedPassword = "é".repeat(6);
 const resetPassword = "Synthetic reset password 2026";
 const memberUsername = "member." + "long".repeat(14) + "x"; // Maximum 64-character username.
 const fontResponses = new WeakMap<Page, Response[]>();
+async function accountAction(row: Locator, name: string) {
+  await row.getByRole("button", { name: /^Actions for / }).click();
+  await row.getByRole("button", { name, exact: true }).click();
+}
 async function loadedFont(page: Page) {
   const evidence = await page.evaluate(async () => {
     const text = "Meguri 0123456789 ilMW";
@@ -617,7 +621,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await accountShell(member, memberUsername, false);
   expect(await member.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await member.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "Refresh accounts", exact: true }).click();
+  await page.reload();
   const memberRow = page.getByRole("listitem", { name: `Account ${memberUsername}`, exact: true });
   await expect(memberRow).toBeVisible();
   const storage = memberRow.getByRole("list", { name: "Storage on server", exact: true });
@@ -627,11 +631,29 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await expect(amounts.nth(0)).toHaveText(/^[1-9][\d,.]* (B|kB|MB|GB)$/);
   await expect(amounts.nth(1)).toHaveText("0 B");
   await expect(amounts.nth(2)).toHaveText(await amounts.nth(0).innerText());
-  await memberRow.getByRole("button", { name: `Create reset link for ${memberUsername}`, exact: true }).click();
+  await expect(page.getByRole("button", { name: "Refresh accounts", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Server accounts", exact: true }).getByRole("status").filter({ hasText: "2 accounts" })).toBeVisible();
+  await accountAction(memberRow, `Reset data for ${memberUsername}`);
+  const resetDataConfirmation = memberRow.getByRole("region", { name: `Confirm resetting data for ${memberUsername}` });
+  await expect(resetDataConfirmation.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+  await expect(resetDataConfirmation).toContainText("The account and device copies are kept.");
+  await page.keyboard.press("Escape");
+  await expect(memberRow.getByRole("button", { name: `Actions for ${memberUsername}`, exact: true })).toBeFocused();
+  await accountAction(memberRow, `Reset data for ${memberUsername}`);
+  const resetDataResponse = page.waitForResponse(response => response.url().endsWith("/reset-data") && response.request().method() === "POST");
+  await resetDataConfirmation.getByRole("button", { name: `Confirm reset data for ${memberUsername}`, exact: true }).click();
+  const resetDataResult = (await (await resetDataResponse).json()).data;
+  expect(resetDataResult.username).toBe(memberUsername);
+  expect(resetDataResult.storage.collection_bytes).toBeGreaterThan(0);
+  expect(resetDataResult.storage.media_bytes).toBe(0);
+  await expect(amounts.nth(0)).toHaveText(storageValue(resetDataResult.storage.collection_bytes));
+  await expect(memberRow.getByRole("button", { name: `Actions for ${memberUsername}`, exact: true })).toBeFocused();
+  expect((await context.request.get(`${baseURL}/api/me`)).status()).toBe(200);
+  await accountAction(memberRow, `Create reset link for ${memberUsername}`);
   const firstReset = await memberRow.getByLabel("One-time link", { exact: true }).inputValue();
   await memberRow.getByRole("button", { name: "Copy One-time link", exact: true }).click();
   await expect(memberRow.getByRole("status").filter({ hasText: /Copied\.|text is selected/ })).toBeVisible();
-  await memberRow.getByRole("button", { name: `Create reset link for ${memberUsername}`, exact: true }).click();
+  await accountAction(memberRow, `Create reset link for ${memberUsername}`);
   await expect(memberRow.getByLabel("One-time link", { exact: true })).not.toHaveValue(firstReset);
   await expect(memberRow.getByRole("status").filter({ hasText: /Copied\.|text is selected/ })).toHaveCount(0);
   const reset = await memberRow.getByLabel("One-time link", { exact: true }).inputValue();
@@ -656,17 +678,21 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await expect(member.getByLabel("New password", { exact: true })).toHaveValue("");
   const adminRow = page.getByRole("listitem", { name: "Account root.admin", exact: true });
   await expect(adminRow.getByRole("button", { name: "Delete root.admin", exact: true })).toHaveCount(0);
-  await adminRow.getByRole("button", { name: "Disable root.admin", exact: true }).click();
+  await accountAction(adminRow, "Reset data for root.admin");
+  await adminRow.getByRole("button", { name: "Confirm reset data for root.admin", exact: true }).click();
+  await expect(adminRow.getByRole("status").filter({ hasText: "Reset server data for root.admin." })).toBeVisible();
+  await expect(adminRow.getByRole("button", { name: "Actions for root.admin", exact: true })).toBeFocused();
+  await accountAction(adminRow, "Disable root.admin");
   await adminRow.getByRole("button", { name: "Confirm disable root.admin", exact: true }).click();
   await expect(adminRow.getByRole("alert")).toContainText("sole enabled, ready administrator");
   await adminRow.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(adminRow.getByRole("button", { name: "Disable root.admin", exact: true })).toBeFocused();
+  await expect(adminRow.getByRole("button", { name: "Actions for root.admin", exact: true })).toBeFocused();
   await signIn(member, memberUsername, resetPassword);
   await context.request.post(`${baseURL}/api/logout`, { data: {}, headers: { Origin: baseURL! } });
   await member.getByRole("link", { name: "Password", exact: true }).click();
   await expect(member.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
   await expect(member.getByLabel("Username", { exact: true })).toHaveValue("");
-  await memberRow.getByRole("button", { name: `Disable ${memberUsername}`, exact: true }).click();
+  await accountAction(memberRow, `Disable ${memberUsername}`);
   await expect(memberRow.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
   await memberRow.getByRole("button", { name: `Confirm disable ${memberUsername}`, exact: true }).click();
   await expect(memberRow.getByText(/Member · Disabled · Ready/)).toBeVisible();
@@ -679,25 +705,24 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await audit(page);
   await page.setViewportSize({ width: 1280, height: 900 });
   await audit(page);
-  const deleteMember = memberRow.getByRole("button", { name: `Delete ${memberUsername}`, exact: true });
-  await deleteMember.click();
+  const memberActions = memberRow.getByRole("button", { name: `Actions for ${memberUsername}`, exact: true });
+  await accountAction(memberRow, `Delete ${memberUsername}`);
   const deleteConfirmation = memberRow.getByRole("region", { name: `Confirm deleting ${memberUsername}`, exact: true });
   await expect(deleteConfirmation.getByRole("heading")).toHaveText(`Delete ${memberUsername}?`);
   await expect(deleteConfirmation.getByText("This permanently deletes this member’s account, collection, and media from this server.", { exact: true })).toBeVisible();
   await expect(deleteConfirmation.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(deleteMember).toBeFocused();
+  await expect(memberActions).toBeFocused();
   await expect(deleteConfirmation).toHaveCount(0);
-  await deleteMember.click();
+  await accountAction(memberRow, `Delete ${memberUsername}`);
   await deleteConfirmation.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(deleteMember).toBeFocused();
+  await expect(memberActions).toBeFocused();
   await expect(memberRow).toBeVisible();
-  await deleteMember.click();
+  await accountAction(memberRow, `Delete ${memberUsername}`);
   await deleteConfirmation.getByRole("button", { name: `Confirm delete ${memberUsername}`, exact: true }).click();
   await expect(memberRow).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Refresh accounts", exact: true })).toBeFocused();
+  await expect(page.getByRole("heading", { name: /^Server accounts/ })).toBeFocused();
   await expect(page.getByRole("status").filter({ hasText: `Deleted ${memberUsername}.` })).toBeVisible();
-  await page.getByRole("button", { name: "Refresh accounts", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "1 account" })).toBeVisible();
   await expect(memberRow).toHaveCount(0);
   await page.reload();

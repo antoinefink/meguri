@@ -150,7 +150,7 @@ async fn dispatch(service:Arc<Service>,parts:&axum::http::request::Parts,method:
             // Streaming/storage path selection only follows native authority.
             let id=authority.account_id().to_owned();
             let metadata_reservation=service.temp.reserve(4096)?;
-            let generation=service.metadata.files(move |root|root.stage_collection(&id)).await?;
+            let generation=service.collection_operation(authority.clone(),false,move |root|root.stage_collection(&id)).await?;
             let budget=service.temp.clone();
             let upload=framing::receive(service.clone(),body,move |reader,limit| {
                 let _capacity=capacity;

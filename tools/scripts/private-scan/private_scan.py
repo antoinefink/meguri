@@ -1169,7 +1169,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        '22460e317bad8bd0767d96f242bafe2b82882bacf0bd263195af84a8a57e7585',
+        '41301426cd9758ae87f7b3b73a43acbfe054ea12e16ccf2225b0109f803b2b38',
     "specs/servers/meguri-collection-mcp.md":
         "013e3aa719a920b3d97e4a0792071b5f9d19b9a710e36f6082c1b399fe954fc8",
     "specs/conformance/meguri-sync-server.md":

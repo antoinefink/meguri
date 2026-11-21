@@ -69,20 +69,10 @@ impl Service {
         let guard = gate.enter().await;
         self.metadata.files(move |root| {
             let _publication = (gate, guard);
-            let path = root.collection_path(&id)?;
-            let mut c = crate::collection::schema::open(&path, false)?;
-            let tx = c.transaction()?;
-            // Establish one read snapshot before reading both PRAGMAs.
-            tx.query_row("SELECT count(*) FROM sqlite_schema", [], |r| r.get::<_, i64>(0))?;
-            let pages: i64 = tx.pragma_query_value(None, "page_count", |r| r.get(0))?;
-            let page_size: i64 = tx.pragma_query_value(None, "page_size", |r| r.get(0))?;
-            let pages = u64::try_from(pages).map_err(|_| Error::new("storage_unavailable"))?;
-            let page_size = u64::try_from(page_size).map_err(|_| Error::new("storage_unavailable"))?;
-            let collection_bytes = pages.checked_mul(page_size)
-                .filter(|n| *n > 0).ok_or(Error::new("storage_unavailable"))?;
-            let total_bytes = collection_bytes.checked_add(media_bytes)
-                .ok_or(Error::new("storage_unavailable"))?;
-            Ok(AccountStorage { collection_bytes, media_bytes, total_bytes })
+            let c = crate::storage::open(root.database(), false)?;
+            crate::storage::reset::admitted_epoch(&c, &id)?;
+            drop(c);
+            crate::storage::collection::storage(root, &id, media_bytes)
         }).await.ok()
     }
     pub async fn invitation(&self, authority: BrowserAuthority) -> Result<CapabilityLink> {

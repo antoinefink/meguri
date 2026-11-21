@@ -191,5 +191,8 @@ pub(crate) fn check_native_generation(c: &Connection, a: &NativeAuthority) -> Re
     read_account(c, &a.id)?
         .filter(|r| r.usable() && r.generation == a.generation)
         .ok_or(Error::new("authentication_failed"))?;
+    if crate::storage::reset::admitted_epoch(c, &a.id)? != a.data_epoch {
+        return Err(Error::new("authentication_failed"));
+    }
     Ok(())
 }

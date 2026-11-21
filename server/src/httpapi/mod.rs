@@ -364,7 +364,7 @@ fn mutation(path: &str) -> bool {
     ) || path
         .strip_prefix("/api/admin/accounts/")
         .and_then(|s| s.split_once('/'))
-        .is_some_and(|(id, action)| !id.is_empty() && matches!(action, "reset" | "disable" | "delete"))
+        .is_some_and(|(id, action)| !id.is_empty() && matches!(action, "reset" | "reset-data" | "disable" | "delete"))
         || path.strip_prefix("/api/me/mcp-grants/").and_then(|s| s.split_once('/'))
             .is_some_and(|(id, action)| !id.is_empty() && action == "revoke")
 }
@@ -524,11 +524,13 @@ async fn dispatch(
             }
             if let Some(suffix) = path.strip_prefix("/api/admin/accounts/") {
                 if let Some((id, action)) = suffix.split_once('/') {
-                    if !id.is_empty() && matches!(action, "reset" | "disable" | "delete") {
+                    if !id.is_empty() && matches!(action, "reset" | "reset-data" | "disable" | "delete") {
                         let _: Empty = parse(bytes)?;
                         let a = authority(service, &parts.headers).await?;
                         return if action == "reset" {
                             Ok(data(service.reset_link(a, id.into()).await?, true))
+                        } else if action == "reset-data" {
+                            Ok(data(service.reset_data(a, id.into()).await?, false))
                         } else {
                             if action == "delete" {
                                 service.delete_member(a, id.into()).await?;
