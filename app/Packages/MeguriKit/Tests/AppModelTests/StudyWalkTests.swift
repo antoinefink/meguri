@@ -416,6 +416,22 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+    /// N16.8, R22: the first turn's review has not shown yet; the person leaves and the
+    /// core then refuses the start. Study is not started again on the new screen.
+    @Test func aRefusedFirstTurnThePersonLeftIsNotStartedAgain() async throws {
+        let tree = [Self.node(1, "Languages", (1, 0, 0)), Self.node(2, "Science", (1, 0, 0))]
+        let client = WalkClient([1: [[11]], 2: [[21]]])
+        client.policyRefused = [1]
+        try await withWalkOwner(tree: tree, client: client) { owner in
+            client.onStart = { [unowned owner] deck in
+                if deck == 1 { owner.navigation.select(.section(.browse)) }
+            }
+            await owner.startStudyAll()
+            #expect(client.starts == [1])
+            #expect(owner.walk == nil && owner.review == nil && owner.navigation.review == nil)
+        }
+    }
+
     @Test func anInactiveWindowBetweenDecksStopsTheWalkAtToday() async throws {
         let tree = [Self.node(1, "Languages", (1, 0, 0)), Self.node(2, "Science", (1, 0, 0))]
         let client = WalkClient([1: [[11]], 2: [[21]]])

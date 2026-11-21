@@ -953,7 +953,8 @@ private nonisolated final class SelectedConflictOperation: CloudPreparedOwnOpera
     do {
         try await collection.open(location, randomSeed: 329)
         let allExisting = try await CoreDeckService().allDeckNames().decks.map(\.id)
-        let deletion = try await CoreDeckService().startDeleteDecks(ids: allExisting)
+        let deletion = try await CoreDeckService().startDeleteDecks(
+            ids: allExisting, confirmed: try await CoreDeckService().deckDeletionSummary(ids: allExisting))
         _ = try await deletion.value()
         _ = try await CoreDeckService().renameDeck(id: 1, name: "Generated-D1")
         let deck = try await CoreDeckService().addDeck(name: "Generated-D1::Generated-D2")

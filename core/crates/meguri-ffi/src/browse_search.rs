@@ -634,12 +634,22 @@ fn ranges(ranges: Vec<BrowseIndexRange>) -> Vec<Range<u64>> {
 #[derive(Debug, uniffi::Object)]
 pub struct BrowseSelection {
     selection: HandleSelection,
+    counts: CountsSlot,
 }
+
+/// A session's newest selection counts job: a newer one cancels it
+/// (`browse_query`).
+pub(crate) type CountsSlot = Arc<crate::browse_query::Newest>;
 
 impl BrowseSelection {
     /// The engine's selection, for a bulk action's target (U86, U87).
     pub fn engine_selection(&self) -> &HandleSelection {
         &self.selection
+    }
+
+    /// Its session's slot for the newest selection counts job.
+    pub(crate) fn counts_slot(&self) -> &CountsSlot {
+        &self.counts
     }
 }
 
@@ -662,6 +672,7 @@ pub struct BrowseSearchSession {
     session: Mutex<Option<Arc<SearchSession>>>,
     /// Held by `close` while it shuts the session down.
     closing: Mutex<()>,
+    counts: CountsSlot,
 }
 
 impl std::fmt::Debug for BrowseSearchSession {
@@ -679,6 +690,7 @@ pub fn open_search_session(listener: Arc<dyn BrowseSearchListener>) -> Result<Ar
     Ok(Arc::new(BrowseSearchSession {
         session: Mutex::new(Some(Arc::new(session))),
         closing: Mutex::new(()),
+        counts: CountsSlot::default(),
     }))
 }
 
@@ -870,6 +882,7 @@ impl BrowseSearchSession {
             selection: self
                 .session()?
                 .selection(HandleId(handle), revision, self::ranges(ranges)),
+            counts: Arc::clone(&self.counts),
         }))
     }
 

@@ -603,7 +603,7 @@ flowchart TB
 - R396. Field and tag edits save with the editor area's rules (debounced saves, one undo step per note per 60 s).
 - R397. The panel closes with ⌘Return, Esc, its Close button, or a swipe-down on iPhone.
 - R398. On close, the card is re-rendered on the side it was on (scripts run again), the answer timer restarts, and the button states are recomputed (Anki's redraw behaviour).
-- R399. If the edit leaves the card's front blank or removes its cloze, Anki's "front of card is blank" or missing-cloze message is shown as the card, and the user can still answer, bury or suspend it.
+- R399. If the edit leaves the card's front blank or removes its cloze, Anki's "front of card is blank" or missing-cloze message is shown as the card, and the user can still answer, bury or suspend it. (Superseded 2026-11-21 for the wording, noted 2026-11-21: the two blank-card notices use Meguri's own sentences, not Anki's; layout and links unchanged; `specs/render/display-transform.md` D10, D11; `docs/process/standing-decisions.md` 2026-11-21.)
 - R400. If the panel deletes the note or moves the card out of the session's deck tree, the session continues with the next card.
 
 **Tap zones (iPhone and iPad)**
@@ -771,7 +771,7 @@ flowchart TB
 - R528. On the answer side, `{{FrontSide}}` keeps the question's `play:q:N` buttons, which replay question audio and are never autoplayed on the answer side.
 - R529. The reviewer uses the shared template engine, so unknown filters (`{{editable:…}}`, `{{edit:…}}`, `{{clickable:…}}`) pass text through, HTML comments are never template-evaluated, filters apply right to left, and output is string-identical to the oracle's.
 - R530. Media filenames in `src` attributes are IRI-encoded as Anki does.
-- R531. Template syntax errors, "front of card is blank" and missing-cloze messages are shown as the card content with Anki's wording, and the card can still be answered.
+- R531. Template syntax errors, "front of card is blank" and missing-cloze messages are shown as the card content with Anki's wording, and the card can still be answered. (Superseded 2026-11-21 for the wording, noted 2026-11-21: the two blank-card notices use Meguri's own sentences, not Anki's; layout and links unchanged; `specs/render/display-transform.md` D10, D11; `docs/process/standing-decisions.md` 2026-11-21.)
 
 **Type-in answer**
 - R532. On the question side, `[[type:…]]` becomes `<center><input type=text id=typeans onkeypress="_typeAnsPress();" style="font-family: '<field font>'; font-size: <field size>px;"></center>`; an empty expected field removes the box, an unknown field shows Anki's warning text, and only the first type box per card is active.
@@ -1429,7 +1429,7 @@ flowchart TB
 - R973. Cloze parsing does not look at MathJax: a `}}` inside `\(…\)` or `\[…\]` closes a cloze like any other, as in Anki. HTML inside MathJax in `cloze:` output is stripped, even though MathJax rendering is out of scope, and where that removes one tag of a cloze span and not the other, the output stays unbalanced, as in Anki. (Amended 2026-10-16 to match the oracle, as R1907 requires: this first said that parsing ignores `}}` inside MathJax so a cloze around math does not close early, which Anki's main branch does and the pinned 26.09.3 does not; `docs/process/review-log/U61.md`, A1.)
 - R974. Front output for the active cloze is `<span class="cloze" data-cloze="<entity-encoded content>" data-ordinal="N">[...]</span>` (or `[hint]`), back output is `<span class="cloze" data-ordinal="N">content</span>`, and other clozes are `<span class="cloze-inactive" data-ordinal="M">content</span>` on both sides.
 - R975. A `{{cloze:Field}}` whose field contains no cloze for the current card renders as the empty string.
-- R976. A card whose cloze number appears in no field renders a "missing cloze" message, and a normal card whose front renders empty renders a "front of card is blank" message (both outside Browse).
+- R976. A card whose cloze number appears in no field renders a "missing cloze" message, and a normal card whose front renders empty renders a "front of card is blank" message (both outside Browse). (Superseded 2026-11-21 for the wording, noted 2026-11-21: the two blank-card notices use Meguri's own sentences, not Anki's; layout and links unchanged; `specs/render/display-transform.md` D10, D11; `docs/process/standing-decisions.md` 2026-11-21.)
 - R977. `{{type:cloze:Field}}` compares against the current card's cloze contents: the one answer when all of them are identical, and otherwise all of them in order, duplicates included, joined with ", ", as in Anki. (Amended 2026-10-16 to match the oracle: this first said "collapsing identical answers to one and otherwise joining them", which U61 read as dropping every duplicate; `docs/process/review-log/U61.md`, A2.)
 
 **Media in notes: naming and adding**

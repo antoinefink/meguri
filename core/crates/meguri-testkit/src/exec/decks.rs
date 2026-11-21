@@ -90,7 +90,15 @@ fn run(s: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
         }
         Step::DeleteDecks(a) => {
             let selected = ids(&*writer(s)?, &a.decks)?;
-            decks::delete(&c, selected, s.storage.host()?.backup())
+            // K5: the counts read at the step, right before submitting. The
+            // reader is released first: the delete plans and commits on its own.
+            let confirmed = {
+                let rows = writer(s)?;
+                decks::deletion_summary(&*rows, &selected)
+            };
+            let backup = s.storage.host()?.backup();
+            confirmed
+                .and_then(|confirmed| decks::delete(&c, selected, decks::ConfirmedLosses::Counts(confirmed), backup))
                 .map(|r| OpResult::Output(json!({"count": r.value.cards})))
         }
         Step::SetDeckCollapsed(a) => {

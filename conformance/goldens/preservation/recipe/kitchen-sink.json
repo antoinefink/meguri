@@ -2300,10 +2300,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "preservation/recipe/kitchen-sink",
-  "scenario_sha256": "42819aa25e421a0b77518a7bb384428b0b6adc8b84118747b935fa1fb4056322",
+  "scenario_sha256": "74f7259a0508be690b8be0d27837f1d85072a1affa7043cc59d1218fd2dfe405",
   "tz": "UTC"
 }

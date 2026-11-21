@@ -104,7 +104,9 @@ public struct ReviewView: View {
     @ViewBuilder private var phaseContent: some View {
         switch model.phase {
         case .loading:
-            ReviewStatusLayout { LoadingStateView(Text("Preparing review…", bundle: .module)) }
+            // Shown only for a start that takes longer than Study's wait (N16.8):
+            // the system indicator alone, no title.
+            ReviewStatusLayout { ProgressView() }
                 #if DEBUG
                 .debugStatusAccessibilityValue(model.debugSessionStatus)
                 #endif

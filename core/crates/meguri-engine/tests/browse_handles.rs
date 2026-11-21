@@ -1094,3 +1094,108 @@ fn a_request_no_worker_can_run_fails_with_one_terminal_event_h4() {
         );
     }
 }
+
+/// V7 and V8.1's selection counts (U264a) on a collection changed raw
+/// before the engine opens: a suspended card, a card buried by the
+/// scheduler and one by the user, a filtered card whose home deck is its
+/// original deck, a card in another deck, and a note without cards.
+#[test]
+fn selection_counts_take_b1_targets_home_decks_and_both_buried_queues() {
+    use meguri_engine::browse::{SelectionCounts, selection_counts};
+    let fx = fixture(3);
+    let Fx { h, kind, notes, cards, .. } = fx;
+    let Harness { dir, path, engine, .. } = h;
+    engine.close().unwrap();
+    let clock = meguri_model::clock::StepClock::new(common::NOW_MS, meguri_model::clock::UtcOffset::UTC, "UTC");
+    let card = |k: usize| meguri_storage::raw::SqlValue::Integer(cards[k].0);
+    common::day::raw(
+        &path,
+        &clock,
+        &[
+            ("UPDATE cards SET queue = -1 WHERE id = ?1", vec![card(0)]),
+            ("UPDATE cards SET queue = -2 WHERE id = ?1", vec![card(2)]),
+            ("UPDATE cards SET queue = -3 WHERE id = ?1", vec![card(3)]),
+            ("UPDATE cards SET odid = did, did = 777 WHERE id = ?1", vec![card(4)]),
+            ("UPDATE cards SET did = 888 WHERE id = ?1", vec![card(5)]),
+            (
+                "INSERT INTO notes SELECT id + 5000, guid || 'x', mid, mod, usn, tags, flds, sfld, csum, flags, data \
+                 FROM notes WHERE id = (SELECT min(id) FROM notes)",
+                Vec::new(),
+            ),
+        ],
+    );
+    let h = Harness::open_path(dir, path);
+    let (session, events) = session(&h);
+    let fx = Fx {
+        h,
+        kind,
+        notes,
+        cards,
+        session,
+        events,
+    };
+    let token = CancelToken::new();
+    let counts = |handle: HandleId, ranges: Vec<Range<u64>>| {
+        selection_counts(&fx.session.selection(handle, 0, ranges), &token)
+    };
+
+    // Cards mode, every card: one home deck for the filtered card (its
+    // original deck 1) and one other deck.
+    let (by_card, count) = fx.search("", SearchMode::Cards, asc("cardDue"));
+    assert_eq!(count, 6);
+    assert_eq!(
+        counts(by_card, vec![0..6]).unwrap(),
+        SelectionCounts {
+            cards: 6,
+            notes: 3,
+            suspended: 1,
+            buried: 2,
+            decks: 2,
+            deck: None,
+            notetypes: vec![fx.kind],
+        }
+    );
+    let first = fx.session.index_of(by_card, 0, SearchMode::Cards, fx.cards[4].0).unwrap().unwrap();
+    let alone = counts(by_card, vec![first..first + 1]).unwrap();
+    assert_eq!((alone.cards, alone.notes, alone.deck), (1, 1, Some(DeckId(1))));
+
+    // Notes mode: B1's target cards are every card of the selected notes;
+    // the note without cards adds a note and no card.
+    let (by_note, count) = fx.search("", SearchMode::Notes, asc("noteFld"));
+    assert_eq!(count, 4);
+    let lone = fx
+        .session
+        .index_of(by_note, 0, SearchMode::Notes, fx.notes[0].0 + 5000)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        counts(by_note, vec![lone..lone + 1]).unwrap(),
+        SelectionCounts {
+            cards: 0,
+            notes: 1,
+            suspended: 0,
+            buried: 0,
+            decks: 0,
+            deck: None,
+            notetypes: vec![fx.kind],
+        }
+    );
+    let all = counts(by_note, vec![0..4]).unwrap();
+    assert_eq!((all.cards, all.notes, all.suspended, all.buried, all.decks), (6, 4, 1, 2, 2));
+
+    // A deleted note's rows are no longer counted; a stale revision and a
+    // cancelled token are refused.
+    notes::delete(&fx.h.collection, vec![fx.notes[2]], OpSource::UserUndoable).unwrap();
+    let after = counts(by_card, vec![0..6]).unwrap();
+    assert_eq!((after.cards, after.notes, after.decks), (4, 2, 1));
+    assert_eq!(
+        selection_counts(&fx.session.selection(by_card, 3, vec![0..1]), &token),
+        Err(BrowseError::StaleRevision { current: 0 })
+    );
+    let cancelled = CancelToken::new();
+    cancelled.cancel();
+    assert_eq!(
+        selection_counts(&fx.session.selection(by_card, 0, vec![0..6]), &cancelled),
+        Err(BrowseError::Engine(EngineError::Cancelled))
+    );
+}

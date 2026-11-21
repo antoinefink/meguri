@@ -65,8 +65,51 @@ public final class ReviewCollection: ChangeFanoutSink {
         return proof.request.deckID
     }
     public private(set) var review: ReviewCoordinator? {
-        // A review that ends, however it ends, ends Study's walk with it (N24.3).
-        didSet { if review == nil, let walk { closeWalk(walk) } }
+        didSet {
+            // A review that ends, however it ends, ends Study's walk with it (N24.3).
+            if review == nil, let walk { closeWalk(walk) }
+            // Another session, or none, no longer waits to appear (N16.8).
+            if let pending = pendingReview, pending.model !== review { pending.deadline.cancel(); pendingReview = nil }
+            // The session's pages went with it: warm the next ones (R1813).
+            if review == nil, oldValue != nil { studyWarmup.warm() }
+        }
+    }
+    /// Warm card pages and the first card of the visible Study's deck (R1813, N16.8).
+    let studyWarmup = StudyWarmup(makeSurface: { ReviewPages(resolver: $0) })
+    /// A session Study started whose review waits for its first card (N16.8).
+    private struct PendingReview {
+        let model: ReviewCoordinator
+        let walk: StudyWalk?
+        /// The navigation Study was clicked in: another one by the time the
+        /// review would show ends the session instead (R22).
+        let intent: UInt64
+        let deadline: Task<Void, Never>
+    }
+    private var pendingReview: PendingReview?
+    /// How long Study's screen stays before a start that is not ready shows
+    /// the review with its progress indicator (N16.8). Zero shows it at once.
+    @ObservationIgnored var reviewRevealDelay: Duration = .milliseconds(500)
+    /// Waits out what is left of `reviewRevealDelay` (tests hold it).
+    @ObservationIgnored var reviewRevealWait: @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+    /// Study was clicked and its review has not appeared yet: the Study
+    /// button keeps its look meanwhile, and a second click does nothing (N16.8).
+    public var studyStarting: Bool { (starting || pendingReview != nil) && navigation.review == nil }
+    /// The card pages the window keeps beneath its content (R1813): a starting
+    /// session's until its review appears, else the warm pages.
+    public var backgroundCardPair: CardPagePair? {
+        guard navigation.review == nil else { return nil }
+        if let pending = pendingReview, pending.model === review { return pending.model.pair }
+        guard review == nil else { return nil }
+        return studyWarmup.surface?.pair
+    }
+    /// A screen whose primary action is Study for `deckID` appeared (or its
+    /// deck changed): that deck's first card is prepared beneath it.
+    public func showStudyAction(deckID: Int64?, owner: UUID) {
+        studyWarmup.setTarget(deckID, owner: .init(id: owner))
+    }
+    /// The screen of `owner` disappeared.
+    public func hideStudyAction(owner: UUID) {
+        studyWarmup.clearTarget(.init(id: owner))
     }
     public private(set) var previousRecord: ReviewRecord?
     /// Today's Study while it walks the decks (N24.3); its current session is `review`.
@@ -107,6 +150,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         public init(deckID: Int64, studyAll: Bool = false) { self.deckID = deckID; self.studyAll = studyAll }
     }
     public private(set) var studyRefusal: StudyRefusal?
+    /// The parts of the last Study's way to its first card (R1813), for the test hooks' probe.
+    public private(set) var lastStudyStart: StudyStartTrace.Timings?
     public private(set) var progress: CoreProgress?
     public private(set) var error: String?
     public private(set) var deferredSuspend: UInt64?
@@ -500,6 +545,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         records = ReviewRecordStore(file: configuration.collectionLocation.directory.appending(path: "meguri-review-session.json"))
         configureSyncOwnership()
         configureStudyPreparation()
+        configureStudyWarmup()
         navigation.deckSelectionAction = { [weak self] deck in
             self?.openDeckPage(deckID: deck.rawValue)
         }
@@ -824,6 +870,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         await studyPreparation.collectionOpened()
         await loadCounts()
         preparedGeneration = generation
+        studyWarmup.warm()
     }
     func prepareEntry() async throws -> CoreBridge.CollectionLocation {
         await sync.preparePlatform()
@@ -1056,6 +1103,19 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     private var isFailed: Bool { if case .failed = state { return true }; return false }
 
+    /// A change that only saved the selected deck (`curDeck`, `decks/decks` D11): it
+    /// moves no card, state token or render key (`sched/review-session` C5, C6), so
+    /// Study's own selection keeps the card prepared for that deck.
+    static func onlySelectsDeck(_ changes: ChangeSet) -> Bool {
+        !changes.wholeCollection && !changes.collectionRow && !changes.configKeys.isEmpty
+            && changes.configKeys.allSatisfy { $0.name == "curDeck" }
+            && changes.cards.isEmpty && changes.notes.isEmpty && changes.notetypes.isEmpty
+            && changes.decks.isEmpty && changes.deckConfigs.isEmpty && changes.tags.isEmpty
+            && changes.revlogAdded.isEmpty && changes.revlogRemoved.isEmpty
+            && changes.mediaAdded.isEmpty && changes.mediaRemoved.isEmpty
+            && changes.skippedIncomingCards.isEmpty && changes.skippedIncomingNotes.isEmpty
+            && changes.skippedIncomingDecks.isEmpty
+    }
     func receive(_ event: CoreEvent) {
         guard !closed else { return }
         // Never drop review commit failures behind a coalesced deck refresh.
@@ -1065,10 +1125,21 @@ public final class ReviewCollection: ChangeFanoutSink {
         switch event.kind {
         case .lifecycle(let value):
             receiveLifecycle(value)
-        case .nextDayAtChanged(let instant): if !opening { day?.event(nextDayAt: instant) }
-        case .rolledOver, .timeZoneChanged: refreshCounts()
+        case .nextDayAtChanged(let instant):
+            if !opening { day?.event(nextDayAt: instant) }
+            studyWarmup.invalidate()
+        case .rolledOver, .timeZoneChanged:
+            refreshCounts()
+            studyWarmup.invalidate()
         case .changes(let changes):
             refreshCounts()
+            // Any change, a sync's or an options save included, may move the first card;
+            // new or removed media make a prepared page's resources stale (R1813).
+            if !changes.mediaAdded.isEmpty || !changes.mediaRemoved.isEmpty || changes.wholeCollection {
+                studyWarmup.mediaChanged()
+            } else if !Self.onlySelectsDeck(changes) {
+                studyWarmup.invalidate()
+            }
             // Any write may be a new step (a text-only note edit changes no count); coalesced.
             if event.generation == generation { undoOwner?.scheduleRefresh() }
             if event.generation == generation { deckOptionsOwner?.changesCommitted(changes, generation: event.generation) }
@@ -1086,7 +1157,9 @@ public final class ReviewCollection: ChangeFanoutSink {
                changes.source == .cloudIncoming || changes.source == .syncIncoming {
                 Task { await studyPreparation.changesCommitted(changes) }
             }
-        case .mediaArrived(let names): scheduleMediaRefresh(names: names, generation: event.generation)
+        case .mediaArrived(let names):
+            scheduleMediaRefresh(names: names, generation: event.generation)
+            studyWarmup.mediaChanged()
         case .collectionReplaced(let next):
             sync.collectionReplaced(next)
             guard preparedGeneration != next else { return }
@@ -1334,6 +1407,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         do {
             let tree = try await loadDeckTree()
             guard expected == generation, tree.generation == generation, revision == deckTreeRevision, !closed else { return }
+            // New counts can mean another first card (a learning card came due).
+            if tree.nodes != decks { studyWarmup.invalidate() }
             decks = tree.nodes
             countsSnapshot &+= 1
             refreshTodayNumbers()
@@ -1449,6 +1524,17 @@ public final class ReviewCollection: ChangeFanoutSink {
         if refusal.studyAll { await startStudyAll(entry: .tryAgain) }
         else { _ = await startStudy(deckID: refusal.deckID, entry: .tryAgain) }
     }
+    private func configureStudyWarmup() {
+        studyWarmup.makeSurface = { [weak self] resolver in
+            self?.makeReviewSurface(resolver) ?? ReviewPages(resolver: resolver)
+        }
+        studyWarmup.admitted = { [weak self] in
+            guard let self else { return false }
+            return !closed && !closing && !opening && state == .ready && foreground && !resuming
+                && review == nil && walk == nil && !starting
+        }
+        studyWarmup.resolver = { [weak self] in self?.resolver }
+    }
     private func configureStudyPreparation() {
         studyPreparation.environment = .init(
             status: { try await Core.fsrsPolicyStatus() },
@@ -1496,7 +1582,12 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func startStudy(deckID: Int64, entry: StudyPreparation.Entry, walk: StudyWalk? = nil) async -> Bool {
         var entry = entry
         var retry = false
+        let intent = navigation.intentRevision
         while true {
+            // A Study the person left while it waited is not started again (R22): a
+            // deck's own, or a walk whose review has not shown yet (its first turn).
+            if retry, navigation.intentRevision != intent,
+               walk.map({ navigation.review?.session !== $0 }) ?? true { return false }
             switch await attemptStudy(deckID: deckID, entry: entry, walk: walk, retry: retry) {
             case .started: return true
             case .stopped: return false
@@ -1523,7 +1614,14 @@ public final class ReviewCollection: ChangeFanoutSink {
         // prepare, and after a failed step, where Try Again runs it (F5.3).
         if !studyPreparation.available || (entry == .study && studyPreparation.phase == .failed) { return .notReady }
         starting = true
-        defer { starting = false }
+        defer {
+            starting = false
+            // A start that did not keep a session leaves the warm pages to be made again.
+            if review == nil { studyWarmup.warm() }
+        }
+        let clicked = ContinuousClock.now
+        let trace = StudyStartTrace(deckID: deckID)
+        trace.finished = { [weak self] timings in self?.lastStudyStart = timings }
         let expected = generation, intent = navigation.intentRevision
         let current: @MainActor @Sendable () -> Bool = {
             expected == self.generation && intent == self.navigation.intentRevision &&
@@ -1532,15 +1630,31 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         do {
             try configuration.nativeReviewInput?.admitStudy(deck: deckID, name: fullDeckName(deckID))
-            guard await selectDeck(deckID: deckID, intent: intent, admission: current).value,
-                  current(), let resolver = await mediaResolverForReview(), current() else { return .stopped }
+            guard await selectDeck(deckID: deckID, intent: intent, admission: current).value, current() else {
+                trace.cancel(); return .stopped
+            }
+            trace.mark(.selected)
+            guard let resolver = await mediaResolverForReview(), current() else { trace.cancel(); return .stopped }
+            trace.mark(.media)
             // A deck's own session replaces the previous one, a walk's included (N24.2). A
             // walk's turn leaves it until the walk has an answer (`closeWalk`).
             if walk == nil { previousRecord = nil; previousWalk = nil }
-            let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
+            // The warm pages, with this deck's first card when it was prepared
+            // after the last change (R1813); otherwise new pages, as before.
+            let surface: any ReviewCardSurface
+            if let warm = studyWarmup.take(deckID: deckID, resolver: resolver) {
+                surface = warm.surface
+                trace.pagesWereWarm()
+            } else {
+                surface = makeReviewSurface(resolver)
+            }
+            trace.mark(.pages)
+            (surface as? ReviewPages)?.startTrace = trace
+            let model = ReviewCoordinator(deckID: deckID, surface: surface,
                 store: records, clock: configuration.clock, client: reviewSessionClient,
                 nativeInput: configuration.nativeReviewInput, nativeGeneration: expected,
                 recordDiagnostic: configuration.recordDiagnostic)
+            model.startTrace = trace
             model.nativeInputEligibility = { [weak self, weak model] in
                 guard let self, let model else { return false }
                 return self.generation == expected && self.reviewIsActive && self.foreground &&
@@ -1559,12 +1673,16 @@ public final class ReviewCollection: ChangeFanoutSink {
                     self.requestAdvance(walk)
                 }
             }
-            presentReview(model, walk: walk, retry: retry)
-            // The session's own loading state shows while the collection is
-            // prepared. No session is open yet, so the step may run.
+            // Study's screen stays until the first card is ready (N16.8): the
+            // review appears with it, or after `reviewRevealDelay` with its
+            // progress indicator while the collection is prepared or the
+            // session starts. No session is open yet, so the step may run.
+            presentReview(model, walk: walk, retry: retry, deferred: true, since: clicked)
             let prepared = await studyPreparation.prepare(for: entry)
+            trace.mark(.prepared)
             guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return .stopped }
             guard prepared else {
+                trace.cancel()
                 navigation.endReview(); review = nil
                 return .notReady
             }
@@ -1601,8 +1719,11 @@ public final class ReviewCollection: ChangeFanoutSink {
                 error = model.notice
                 return .stopped
             }
+            // A started session that has not shown yet (paused at once, say) shows now.
+            revealReview(model)
             return .started
         } catch {
+            trace.cancel()
             self.error = String(describing: error)
             return .stopped
         }
@@ -1614,7 +1735,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         logger.debug("\(stage, privacy: .public) currentOwner=\(currentOwner, privacy: .public) reviewIsActive=\(self.reviewIsActive, privacy: .public) paused=\(model.paused, privacy: .public) foreground=\(self.foreground, privacy: .public) sceneActive=\(self.sceneActive, privacy: .public) applicationActive=\(self.applicationActive, privacy: .public) windowVisible=\(self.windowVisible, privacy: .public) reviewWindowActive=\(self.reviewWindowActive, privacy: .public) reviewVisible=\(self.reviewVisible, privacy: .public) hostCountZero=\(self.visibleReviewHosts == 0, privacy: .public) presentationAllowsInput=\(self.reviewPresentationAllowsInput, privacy: .public)")
     }
     #endif
-    func presentReview(_ model: ReviewCoordinator, walk: StudyWalk? = nil, retry: Bool = false) {
+    func presentReview(_ model: ReviewCoordinator, walk: StudyWalk? = nil, retry: Bool = false, deferred: Bool = false,
+                       since clicked: ContinuousClock.Instant = .now) {
         reviewVisible = true
         review = model
         let expected = generation
@@ -1627,15 +1749,56 @@ public final class ReviewCollection: ChangeFanoutSink {
             self.sync.visibleMedia(names, generation: expected)
         }
         sync.visibleMedia(model.visibleMediaNames, generation: expected)
+        // The walk is the presentation: its next deck keeps the same review on screen.
+        walk?.present(model, retry: retry)
+        let shown = walk.map { navigation.review?.session === $0 } ?? false
+        // The wait counts from the click: the selection and the media binding are part of it.
+        let delay = reviewRevealDelay - (ContinuousClock.now - clicked)
+        guard deferred, !shown, delay > .zero else { return showReview(model, walk: walk) }
+        let wait = reviewRevealWait
+        let deadline = Task { [weak self, weak model] in
+            await wait(delay)
+            guard !Task.isCancelled, let self, let model else { return }
+            self.revealReview(model)
+        }
+        pendingReview = PendingReview(model: model, walk: walk, intent: navigation.intentRevision, deadline: deadline)
+        model.onFirstPresentation = { [weak self, weak model] in
+            guard let self, let model else { return }
+            self.revealReview(model)
+        }
+    }
+    /// Study's review appears: with its first card, or late with its progress indicator (N16.8).
+    private func revealReview(_ model: ReviewCoordinator) {
+        guard let pending = pendingReview, pending.model === model else { return }
+        pending.deadline.cancel()
+        pendingReview = nil
+        model.onFirstPresentation = nil
+        guard review === model, !closed, !closing, model.phase != .ended else { return }
+        // A start the core refused, or that failed before its session opened,
+        // never shows: `attemptStudy` ends it (N16.8).
+        guard model.sessionID != nil || model.phase != .error else { return }
+        // The person went elsewhere while Study waited: as a row change ends an
+        // open review (R22), the session ends without showing. One that cannot
+        // end shows with its error, so Back to Decks can try again.
+        guard navigation.intentRevision == pending.intent else {
+            let walk = pending.walk
+            Task {
+                await finishReview()
+                if review === model, model.phase != .ended { showReview(model, walk: walk) }
+            }
+            return
+        }
+        showReview(model, walk: pending.walk)
+    }
+    private func showReview(_ model: ReviewCoordinator, walk: StudyWalk?) {
         if let walk {
-            // The walk is the presentation: its next deck keeps the same review on screen.
-            walk.present(model, retry: retry)
             if navigation.review?.session !== walk {
                 navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: model.record.deckID), session: walk))
             }
         } else {
             navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: model.record.deckID), session: model))
         }
+        model.startTrace?.mark(.revealed)
     }
     public func finishReview() async {
         guard let review else { return }
@@ -1908,7 +2071,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         let cancelledEditor = active ? nil : cancelPendingEditorReplacement()
         if !active { syncPresentation.cancelStatusHandoff(); meguriSignInPreparationTask?.cancel() }
         resuming = active
-        if !active { review?.beginPause(); day?.pause(); countTimer?.invalidate() }
+        if !active { review?.beginPause(); day?.pause(); countTimer?.invalidate(); studyWarmup.release() }
         let previous = lifecycleTask
         lifecycleTask = Task {
             await cancelledEditor?.waitForFinish()
@@ -1956,6 +2119,7 @@ public final class ReviewCollection: ChangeFanoutSink {
                     resuming = false
                     deferredSuspend = nil
                     refreshCounts()
+                    studyWarmup.warm()
                     deckNamesOwner?.resumeResult()
                 } else {
                     do { try await review?.pause() }
@@ -2101,6 +2265,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         mediaRevision &+= 1
         mediaArrivals = ReviewMediaArrivals(); mediaArrivalReview = nil
         let old = resolver; resolver = nil
+        // Pages bound to the old media root never serve another session.
+        studyWarmup.release()
         let previous = mediaCloseTask
         mediaCloseTask = Task { await previous?.value; await old?.close() }
     }
