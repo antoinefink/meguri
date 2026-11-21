@@ -10,7 +10,7 @@ steps:
           fns: [parse]
           inputs:
             - "{{c1::image-occlusion:rect:left=.2081:top=0.2081:width=+.2081:height=2.081e-1}}"
-            - "{{c1::image-occlusion:rect:left=1.:top=1:width=1.0000:height=1E0}}"
+            - "{{c1::image-occlusion:rect:left=1E0:top=1.:width=1:height=1.0000}}"
             - "{{c1::image-occlusion:rect:left=.:top=-0.:width=.0000:height=-.}}"
             - "{{c1::image-occlusion:rect:left=-0.25:top=-1.:width=1e-3:height=.5E2}}"
             - "{{c1::image-occlusion:rect:left=abc:top= 1:width=1 :height=1,5}}"

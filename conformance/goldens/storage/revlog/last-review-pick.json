@@ -942,6 +942,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "storage/revlog/last-review-pick",
-  "scenario_sha256": "8e9f52e85e9d9ac129e9cff06829f8492163552217d04cf1e8a8ae3e1af665ca",
+  "scenario_sha256": "c4eb7ab80aeb79411797b36ddf03845ab5921ddfab72e422fc1381959b418228",
   "tz": "UTC"
 }

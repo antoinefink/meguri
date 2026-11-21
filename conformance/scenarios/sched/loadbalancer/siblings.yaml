@@ -130,8 +130,8 @@ steps:
       (32, 2, 2, 52, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'), (33, 2, 2, 53, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}')
       ) AS v ON v.column1 = c.n WHERE cards.id = c.cid
 - db_exec:
-    sql: UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'X0139') WHERE ord > 0 AND nid IN (SELECT id
-      FROM notes WHERE mid = (SELECT id FROM notetypes WHERE name = 'X0172'))
+    sql: UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'X0139') WHERE ord > 0 AND EXISTS (SELECT 1
+      FROM notes n JOIN notetypes t ON t.id = n.mid WHERE n.id = cards.nid AND t.name = 'X0172')
 - advance: 1h
 - observe:
   - queue

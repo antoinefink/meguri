@@ -55,7 +55,7 @@ steps:
   - advance: 1m
   - enable_fsrs: {}
   - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn, data FROM cards ORDER BY id"}
-  - db_exec: {sql: "SELECT id, cid, usn, ease, ivl, lastIvl, factor, time, type FROM revlog ORDER BY id"}
+  - db_exec: {sql: "SELECT * FROM revlog ORDER BY id"}
   - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'fsrs'"}
   - db_exec: {sql: "SELECT mod FROM col"}
   - advance: 1m

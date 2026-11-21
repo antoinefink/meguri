@@ -22,5 +22,5 @@ steps:
   - {"observe": [{"stats": [{"scope": {"deck": "A"}, "history": "year", "parts": ["reviews"]}, {"scope": {"deck": "B"}, "history": "year", "parts": ["reviews", "added"]}, {"scope": "collection", "history": "year", "parts": ["reviews"]}]}]}
   - {"db_exec": {"sql": "UPDATE cards SET queue = 0, due = 1099511627776, odue = 1099511627776 WHERE nid = (SELECT id FROM notes WHERE sfld = 'in-a')"}}
   - {"observe": [{"stats": [{"scope": {"deck": "A"}, "history": "year", "parts": ["reviews", "added", "card_counts"]}, {"scope": "collection", "history": "year", "parts": ["card_counts"]}]}]}
-  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791799200000, (SELECT id FROM cards WHERE nid = (SELECT id FROM notes WHERE sfld = 'in-b')), -1, 300, 1, 30, 2500, 0, 1)"}}
+  - {"db_exec": {"sql": "INSERT INTO revlog VALUES (1791799200000, (SELECT id FROM cards WHERE nid = (SELECT id FROM notes WHERE sfld = 'in-b')), -1, 300, 1, 30, 2500, 0, 1)"}}
   - {"observe": [{"stats": [{"scope": {"deck": "B"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "A"}, "history": "year", "parts": ["card_counts"]}, {"scope": "collection", "history": "year", "parts": ["card_counts"]}]}]}

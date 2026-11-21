@@ -2956,6 +2956,33 @@ fn optimize_is_a_typed_empty_mapping_operation() {
     }
 }
 
+/// bulk-ops.md X2: `change_deck: {cards, deck}` with distinct cards, at
+/// least one, and a non-empty deck name; any other key or shape is invalid.
+#[test]
+fn change_deck_reads_its_arguments_strictly() {
+    let with = |args: Value| {
+        scenario::Scenario::from_value(&json!({"id": "notes/change-deck/intake",
+            "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"}, "steps": [{"change_deck": args}]}))
+    };
+    let parsed = with(json!({"cards": ["#c1", "#c2"], "deck": "Target::Sub"})).unwrap();
+    let Step::ChangeDeck(args) = &parsed.steps[0] else {
+        panic!("not change_deck: {:?}", parsed.steps[0]);
+    };
+    assert_eq!((args.cards.len(), args.deck.as_str()), (2, "Target::Sub"));
+    assert_eq!(parsed.steps[0].name(), "change_deck");
+    for invalid in [
+        json!({"cards": [], "deck": "T"}),
+        json!({"cards": ["#c1", "#c1"], "deck": "T"}),
+        json!({"cards": ["#n1"], "deck": "T"}),
+        json!({"cards": ["#c1"], "deck": ""}),
+        json!({"cards": ["#c1"]}),
+        json!({"cards": ["#c1"], "deck": "T", "count": 1}),
+        json!([["#c1"], "T"]),
+    ] {
+        assert!(with(invalid.clone()).is_err(), "{invalid}");
+    }
+}
+
 // Prepared held vocabulary: recognition only, with no area activation.
 fn held_steps(steps: Value) -> Result<scenario::Scenario, scenario::FormatError> {
     scenario::Scenario::from_value(&json!({
@@ -2993,8 +3020,8 @@ fn held_step_vocabulary_is_strict_and_registered_only_where_supported() {
         ("tag_missing_media", json!({})),
     ];
     let capabilities = meguri_testkit::exec::MeguriExecutor::default().capabilities();
-    assert_eq!(Step::NAMES.len(), 88);
-    assert_eq!(Step::NAMES.iter().collect::<std::collections::BTreeSet<_>>().len(), 88);
+    assert_eq!(Step::NAMES.len(), 89);
+    assert_eq!(Step::NAMES.iter().collect::<std::collections::BTreeSet<_>>().len(), 89);
     for (op, args) in examples {
         let prefix = match op {
             "change_notetype" => json!({"change_notetype_info": {"notes": ["#n1"], "notetype": "Pair"}}),

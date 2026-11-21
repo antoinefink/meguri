@@ -42,7 +42,7 @@ This is a text search, not `render/cloze`'s reading: occurrences count wherever 
 | `<img alt="{{c5::">` | 6 | 5 |
 | `{{c1,3::x}}` | 1 | 1 |
 | `{{C2::x}}` | 1 | 1 |
-| a hidden Occlusion field with `{{c7::image-occlusion:rect:left=.1:top=.1:width=.2:height=.2}}` | 8 | 7 |
+| a hidden Occlusion field with `{{c7::image-occlusion:rect:left=.15:top=.12:width=.2:height=.2}}` | 8 | 7 |
 
 Decided 2026-10-27: digit runs are read as unsigned integers and saturate at 9007199254740991 (2^53 − 1), beyond which Anki's own arithmetic is inexact (a stated difference, W8); no scenario uses a run longer than 15 digits. N is written in decimal without leading zeros. A number above 65535 is written as computed, as Anki does, although `render/cloze` C2 does not read such a marker as a cloze.
 

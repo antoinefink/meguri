@@ -193,10 +193,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "9b5b72a872e653e261f80ba56ab4c80cb0ed388624fe2d866307a497a123e9af",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "sched/loadbalancer/crafted-days",
-  "scenario_sha256": "8141d9dd3c9a03585fbee5de7e75593e4cd5bfc294ec0751b8d6b51fd681dcfd",
+  "scenario_sha256": "bc60fc62833824e505a65cdee455597d03a5678ee0a199acbe08d8526563c5b4",
   "tz": "UTC"
 }

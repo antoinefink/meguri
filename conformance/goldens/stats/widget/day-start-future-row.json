@@ -60,6 +60,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/widget/day-start-future-row",
-  "scenario_sha256": "6a85c9df20a4bb6c2fa207e97e8209121a468331e70634cc9c26f04118650330",
+  "scenario_sha256": "eff95ef5c66cd3fb760690c26d8d8e2f1d47eb394fa7aaee707f5e66855a6b01",
   "tz": "Europe/Paris"
 }

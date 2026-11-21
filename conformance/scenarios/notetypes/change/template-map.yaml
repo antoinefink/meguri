@@ -30,7 +30,7 @@ setup:
     - {notetype: Pair Reverse, deck: Words, fields: [dral, tri]}
 steps:
   - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 5, reps = 3 WHERE ord = 1 AND nid = (SELECT id FROM notes WHERE sfld = 'zwei')"}
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT 1894700000000, id, -1, 3, 5, 1, 2500, 8000, 1 FROM cards WHERE ord = 1 AND nid = (SELECT id FROM notes WHERE sfld = 'zwei')"}
+  - db_exec: {sql: "INSERT INTO revlog SELECT 1894700000000, id, -1, 3, 5, 1, 2500, 8000, 1 FROM cards WHERE ord = 1 AND nid = (SELECT id FROM notes WHERE sfld = 'zwei')"}
   - advance: 1h
   - change_notetype_info: {notes: ["#n1"], notetype: Pair Reverse}
   - change_notetype: {templates: [null, 0]}
