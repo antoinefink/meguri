@@ -136,6 +136,11 @@ pub enum SearchEvent {
     Failed {
         seq: RequestSeq,
         error: BrowseError,
+        /// For a search error, the text of the request (its search, or the
+        /// toggled handle's): the error's range counts characters of it, and
+        /// the FFI converts them to UTF-16 against it (H15). `None` for
+        /// every other error.
+        text: Option<String>,
     },
     Cancelled {
         seq: RequestSeq,

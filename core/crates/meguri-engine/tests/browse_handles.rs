@@ -585,8 +585,12 @@ fn the_one_shot_search_lists_ids_ascending_with_failed_s_errors_h13() {
     match fx.until(seq).as_slice() {
         [SearchEvent::Failed {
             error: BrowseError::Search(failed),
+            text,
             ..
         }] => {
+            // H15: the range counts in the request's text, which the event
+            // gives with it.
+            assert_eq!(text.as_deref(), Some("deck:x ("));
             let BrowseError::Search(one_shot) = one_shot else {
                 panic!("{one_shot:?}")
             };
@@ -1047,7 +1051,7 @@ fn a_request_no_worker_can_run_fails_with_one_terminal_event_h4() {
         let seq = session.start_search("", SearchMode::Cards, asc("cardDue"), None);
         let event = events.recv_timeout(WAIT).unwrap();
         assert!(
-            matches!(&event, SearchEvent::Failed { seq: failed, error: BrowseError::Engine(_) } if *failed == seq),
+            matches!(&event, SearchEvent::Failed { seq: failed, error: BrowseError::Engine(_), text: None } if *failed == seq),
             "{event:?}"
         );
     }

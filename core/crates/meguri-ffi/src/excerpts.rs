@@ -39,22 +39,34 @@ impl From<browse::CardExcerpt> for CardExcerpt {
             } => Self::Found {
                 card_id: card_id.0,
                 deck,
-                question: match question {
-                    Question::Text(text) => ExcerptQuestion::Text { text },
-                    Question::MissingCloze { kind, text } => ExcerptQuestion::MissingCloze {
-                        kind: match kind {
-                            meguri_engine::rendering::BlankKind::MissingCloze => RenderBlank::MissingCloze,
-                            meguri_engine::rendering::BlankKind::EmptyFront => RenderBlank::EmptyFront,
-                        },
-                        text,
-                    },
-                    Question::TemplateError { kind, side } => ExcerptQuestion::TemplateError {
-                        kind: kind.into(),
-                        side: side.into(),
-                    },
-                },
+                question: question.into(),
             },
         }
+    }
+}
+
+/// The Question cell (`browser/columns` C10), of an excerpt or of a Browse
+/// row (`browse_search`).
+impl From<Question> for ExcerptQuestion {
+    fn from(question: Question) -> Self {
+        match question {
+            Question::Text(text) => ExcerptQuestion::Text { text },
+            Question::MissingCloze { kind, text } => ExcerptQuestion::MissingCloze {
+                kind: blank(kind),
+                text,
+            },
+            Question::TemplateError { kind, side } => ExcerptQuestion::TemplateError {
+                kind: kind.into(),
+                side: side.into(),
+            },
+        }
+    }
+}
+
+pub(crate) fn blank(kind: meguri_engine::rendering::BlankKind) -> RenderBlank {
+    match kind {
+        meguri_engine::rendering::BlankKind::MissingCloze => RenderBlank::MissingCloze,
+        meguri_engine::rendering::BlankKind::EmptyFront => RenderBlank::EmptyFront,
     }
 }
 #[uniffi::export]

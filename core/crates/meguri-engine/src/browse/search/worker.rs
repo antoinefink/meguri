@@ -165,6 +165,7 @@ fn serve(shared: &Arc<SessionShared>, threads: &crate::threads::ThreadRegistry, 
                     let _ = outbox.send(SearchEvent::Failed {
                         seq,
                         error: BrowseError::Engine(EngineError::internal("the search worker panicked")),
+                        text: None,
                     });
                 }
                 drop(outbox);
@@ -208,6 +209,7 @@ fn refusal_event(seq: RequestSeq) -> SearchEvent {
         error: BrowseError::Engine(EngineError::unavailable(
             "the collection is changing generation, suspending or closing",
         )),
+        text: None,
     }
 }
 
@@ -224,6 +226,7 @@ pub(super) fn unstarted(job: &QueuedJob, why: &str) -> SearchEvent {
         SearchEvent::Failed {
             seq,
             error: BrowseError::Engine(EngineError::internal(why)),
+            text: None,
         }
     }
 }
@@ -247,14 +250,18 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
     // request parses, or began after it was queued, cancels it (H3).
     let registry = shared.registry.upgrade();
     let _running = registry.as_ref().map(|registry| registry.run(&job.token, job.epoch));
-    let result = if job.token.is_cancelled() {
-        Err(Stop::Cancelled)
+    // The text a search error's range counts in (H15).
+    let (result, text) = if job.token.is_cancelled() {
+        (Err(Stop::Cancelled), None)
     } else {
         match job.job {
-            Job::Search { text, mode, sort } => request.search(&text, mode, &sort),
-            Job::Resort { source, sort } => request.resort(source, &sort),
-            Job::Toggle { source, sort } => request.toggle(source, &sort),
-            Job::Superseded => Err(Stop::Cancelled),
+            Job::Search { text, mode, sort } => (request.search(&text, mode, &sort), Some(text)),
+            Job::Resort { source, sort } => (request.resort(source, &sort), None),
+            Job::Toggle { source, sort } => {
+                let text = source.text.clone();
+                (request.toggle(source, &sort), Some(text))
+            }
+            Job::Superseded => (Err(Stop::Cancelled), None),
             Job::Refused => unreachable!("answered above"),
         }
     };
@@ -270,7 +277,11 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
     let event = match stop {
         _ if job.token.is_cancelled() => SearchEvent::Cancelled { seq },
         Stop::Cancelled => SearchEvent::Cancelled { seq },
-        Stop::Failed(error) => SearchEvent::Failed { seq, error },
+        Stop::Failed(error) => SearchEvent::Failed {
+            seq,
+            text: text.filter(|_| matches!(error, BrowseError::Search(_))),
+            error,
+        },
     };
     let _ = outbox.send(event);
 }
