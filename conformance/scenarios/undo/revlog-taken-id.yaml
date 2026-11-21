@@ -22,7 +22,7 @@ steps:
   # When a pending review-log row is deleted, a row with the same id and
   # card, from elsewhere (usn 9), takes its place.
   - db_exec:
-      sql: "CREATE TRIGGER occupy AFTER DELETE ON revlog WHEN old.usn = -1 BEGIN INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (old.id, old.cid, 9, 4, 4, 0, 2500, 1500, 0); END"
+      sql: "CREATE TRIGGER occupy AFTER DELETE ON revlog WHEN old.usn = -1 BEGIN INSERT INTO revlog VALUES (old.id, old.cid, 9, 4, 4, 0, 2500, 1500, 0); END"
   - advance: 1h
   - answer: {card: "#c1", rating: good, time_ms: 2000}
   - observe: ["revlog(#c1)", undo_status]
