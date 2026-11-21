@@ -10,6 +10,7 @@ uniffi::setup_scaffolding!("meguri_ffi");
 
 pub mod activity;
 mod callback;
+pub mod bulk_actions;
 pub mod cancel;
 pub mod changes;
 pub mod cloud_asset_reads;
