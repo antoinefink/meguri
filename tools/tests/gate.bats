@@ -882,23 +882,43 @@ pub mod a;'
   mg static-checks --check golden-copies
   [ "$status" -eq 0 ]
 
-  # A golden re-recorded under the copies: each stale copy is one finding,
-  # in the working tree and in the committed tree (the merge's --rev run).
+  # A golden re-recorded under the copies: each stale copy is one finding.
   commit_in "$SB" conformance/goldens/demo/sides.json '{"steps": [{"q": "<b>uno</b>"}, {"q": "two", "a/b": "three"}]}'
   mg static-checks --check golden-copies
   [ "$status" -eq 1 ]
   [ "$(field '[.failures[].id] | join(" ")')" = "golden-copies:$fx/one.html:0" ]
   [[ "$(field '.failures[0].message')" == *"differs from conformance/goldens/demo/sides.json at /steps/0/q"* ]]
-  mg static-checks --check golden-copies --rev HEAD
-  [ "$status" -eq 1 ]
-  validate "$result"
 
-  # --write rewrites the copies from the golden, and the check passes again.
+  # --write rewrites the copies from the golden: the working tree passes,
+  # while the committed tree (the merge's --rev run) still holds the stale copy.
   run python3 -I -B "$SB/tools/gate/static-checks/golden-copies.py" --write "$SB"
   [ "$status" -eq 0 ]
   [ "$(cat "$SB/$fx/one.html")" = "<b>uno</b>" ]
   mg static-checks --check golden-copies
   [ "$status" -eq 0 ]
+  mg static-checks --check golden-copies --rev HEAD
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "golden-copies:$fx/one.html:0" ]
+  validate "$result"
+  git -C "$SB" commit -qam "copy the new golden"
+  mg static-checks --check golden-copies --rev HEAD
+  [ "$status" -eq 0 ]
+
+  # A copy listed twice, by one manifest or two, is one finding.
+  commit_in "$SB" app/Tests/Fixtures/golden-copies.json '{"golden": "conformance/goldens/demo/sides.json", "copies": [{"file": "demo/three.html", "pointer": "/steps/1/a~1b"}]}'
+  mg static-checks --check golden-copies
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "golden-copies:$fx/three.html:0" ]
+  [[ "$(field '.failures[0].message')" == *"listed as a copy twice"* ]]
+  git -C "$SB" rm -q app/Tests/Fixtures/golden-copies.json
+  git -C "$SB" commit -qm "drop the second manifest"
+
+  # A copy outside the manifest's directory is refused, never written.
+  printf '{"golden": "conformance/goldens/demo/sides.json", "copies": [{"file": "../escape.html", "pointer": "/steps/0/q"}]}\n' >"$SB/$fx/golden-copies.json"
+  run python3 -I -B "$SB/tools/gate/static-checks/golden-copies.py" --write "$SB"
+  [ "$status" -eq 1 ]
+  [ ! -e "$SB/app/Tests/Fixtures/escape.html" ]
+  git -C "$SB" checkout -q -- "$fx/golden-copies.json"
 
   # A missing copy, a pointer the golden lacks, or a pointer at a non-string.
   rm "$SB/$fx/three.html"

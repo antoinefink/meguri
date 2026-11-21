@@ -90,15 +90,23 @@ def expected(tree, manifest_path, present, finding):
     except (ValueError, KeyError, TypeError) as error:
         finding(manifest_path, 0, "unreadable manifest: %s" % error)
         return []
+    if outside(golden_path) or golden_path.startswith("oracle/"):
+        finding(manifest_path, 0, "names golden %s, outside the checkout or under oracle/" % golden_path)
+        return []
     if golden_path not in present:
         finding(manifest_path, 0, "names golden %s, which does not exist" % golden_path)
         return []
     try:
         golden = json.loads(tree.read(golden_path).decode("utf-8"))
     except ValueError as error:
-        finding(golden_path, 0, "the golden that %s copies from is not JSON: %s" % (manifest_path, error))
+        finding(manifest_path, 0, "its golden %s is not JSON: %s" % (golden_path, error))
         return []
     base, out = posixpath.dirname(manifest_path), []
+    escaping = [name for name, _ in entries if posixpath.isabs(name)
+                or not posixpath.normpath(posixpath.join(base, name)).startswith(base + "/")]
+    if escaping:
+        finding(manifest_path, 0, "copies outside the manifest's directory: %s" % ", ".join(escaping))
+        return []
     for name, pointer in entries:
         path = posixpath.normpath(posixpath.join(base, name))
         try:
@@ -115,6 +123,12 @@ def expected(tree, manifest_path, present, finding):
     return out
 
 
+def outside(path):
+    """True when a checkout-relative path leaves the checkout."""
+    path = posixpath.normpath(path)
+    return posixpath.isabs(path) or path == ".." or path.startswith("../")
+
+
 def check(tree, write=False):
     paths = tree.paths()
     present = set(paths)
@@ -123,10 +137,15 @@ def check(tree, write=False):
     def finding(path, line, message):
         findings.append({"check": "golden-copies", "path": path, "line": line, "message": message})
 
+    owner = {}
     for manifest_path in paths:
-        if posixpath.basename(manifest_path) != MANIFEST:
+        if posixpath.basename(manifest_path) != MANIFEST or manifest_path.startswith("oracle/"):
             continue
         for path, want, golden_path, pointer in expected(tree, manifest_path, present, finding):
+            if path in owner:
+                finding(path, 0, "listed as a copy twice (%s and %s)" % (owner[path], manifest_path))
+                continue
+            owner[path] = manifest_path
             if write:
                 with open(posixpath.join(tree.checkout, path), "wb") as f:
                     f.write(want)
@@ -154,7 +173,7 @@ def main(argv):
                 rev = subprocess.run(["git", "-C", argv[1], "rev-parse", "--verify", "-q", argv[2] + "^{commit}"],
                                      check=True, stdout=subprocess.PIPE).stdout.decode().strip()
             findings = check(Tree(argv[1], rev))
-    except (OSError, subprocess.CalledProcessError, UnicodeDecodeError) as error:
+    except (OSError, subprocess.CalledProcessError, ValueError, RecursionError) as error:
         print("golden-copies: cannot check: %s" % error, file=sys.stderr)
         return 2
     for f in findings:
