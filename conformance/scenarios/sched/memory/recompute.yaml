@@ -47,13 +47,13 @@ steps:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
       params: [2, 2, -86, 25, 2300, 9, 1, 0, "{}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200001, 3, -600, -60, 0, 0), (1759309800001, 3, 1, -600, 2500, 0), (1759399200001, 3, 3, 1, 2500, 1), (1759658400001, 3, 9, 3, 2500, 1), (1760436000001, 1, -600, 9, 2300, 1), (1760436600001, 3, 2, -600, 2300, 2), (1760608800001, 3, 6, 2, 2300, 1), (1761127200001, 4, 20, 6, 2450, 1), (1762855200001, 2, 25, 20, 2300, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200001, 3, -600, -60, 0, 0), (1759309800001, 3, 1, -600, 2500, 0), (1759399200001, 3, 3, 1, 2500, 1), (1759658400001, 3, 9, 3, 2500, 1), (1760436000001, 1, -600, 9, 2300, 1), (1760436600001, 3, 2, -600, 2300, 2), (1760608800001, 3, 6, 2, 2300, 1), (1761127200001, 4, 20, 6, 2450, 1), (1762855200001, 2, 25, 20, 2300, 1)) AS v"
   # c2: Words: H without its learning rows, a stale state
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
       params: [2, 2, -86, 25, 2300, 9, 1, 0, "{\"s\":1.0,\"d\":5.0,\"dr\":0.7,\"decay\":0.5}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759399200002, 3, 3, 1, 2500, 1), (1759658400002, 3, 9, 3, 2500, 1), (1760436000002, 1, -600, 9, 2300, 1), (1760436600002, 3, 2, -600, 2300, 2), (1760608800002, 3, 6, 2, 2300, 1), (1761127200002, 4, 20, 6, 2450, 1), (1762855200002, 2, 25, 20, 2300, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759399200002, 3, 3, 1, 2500, 1), (1759658400002, 3, 9, 3, 2500, 1), (1760436000002, 1, -600, 9, 2300, 1), (1760436600002, 3, 2, -600, 2300, 2), (1760608800002, 3, 6, 2, 2300, 1), (1761127200002, 4, 20, 6, 2450, 1), (1762855200002, 2, 25, 20, 2300, 1)) AS v"
   # c3: Words: no review log, a stale state and lrt
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"
@@ -63,7 +63,7 @@ steps:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"
       params: [2, 2, -5, 20, 2500, 9, 1, 0, "{\"s\":1.0,\"d\":5.0,\"dr\":0.7,\"decay\":0.5}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1770717600004, 0, 20, 25, 2500, 4)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1770717600004, 0, 20, 25, 2500, 4)) AS v"
   # c5: Words: a new card with a stale dr and decay
   - db_exec:
       sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"
@@ -73,29 +73,29 @@ steps:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"
       params: [2, 2, -86, 25, 2300, 9, 1, 0, "{}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200006, 3, -600, -60, 0, 0), (1759309800006, 3, 1, -600, 2500, 0), (1759399200006, 3, 3, 1, 2500, 1), (1759658400006, 3, 9, 3, 2500, 1), (1760436000006, 1, -600, 9, 2300, 1), (1760436600006, 3, 2, -600, 2300, 2), (1760608800006, 3, 6, 2, 2300, 1), (1761127200006, 4, 20, 6, 2450, 1), (1762855200006, 2, 25, 20, 2300, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200006, 3, -600, -60, 0, 0), (1759309800006, 3, 1, -600, 2500, 0), (1759399200006, 3, 3, 1, 2500, 1), (1759658400006, 3, 9, 3, 2500, 1), (1760436000006, 1, -600, 9, 2300, 1), (1760436600006, 3, 2, -600, 2300, 2), (1760608800006, 3, 6, 2, 2300, 1), (1761127200006, 4, 20, 6, 2450, 1), (1762855200006, 2, 25, 20, 2300, 1)) AS v"
   # c7: Misc: H, no memory state
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"
       params: [2, 2, -86, 25, 2300, 9, 1, 0, "{}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200007, 3, -600, -60, 0, 0), (1759309800007, 3, 1, -600, 2500, 0), (1759399200007, 3, 3, 1, 2500, 1), (1759658400007, 3, 9, 3, 2500, 1), (1760436000007, 1, -600, 9, 2300, 1), (1760436600007, 3, 2, -600, 2300, 2), (1760608800007, 3, 6, 2, 2300, 1), (1761127200007, 4, 20, 6, 2450, 1), (1762855200007, 2, 25, 20, 2300, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200007, 3, -600, -60, 0, 0), (1759309800007, 3, 1, -600, 2500, 0), (1759399200007, 3, 3, 1, 2500, 1), (1759658400007, 3, 9, 3, 2500, 1), (1760436000007, 1, -600, 9, 2300, 1), (1760436600007, 3, 2, -600, 2300, 2), (1760608800007, 3, 6, 2, 2300, 1), (1761127200007, 4, 20, 6, 2450, 1), (1762855200007, 2, 25, 20, 2300, 1)) AS v"
   # c8: Words: a suspended review card, H
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"
       params: [2, -1, -86, 25, 2300, 9, 1, 0, "{}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200008, 3, -600, -60, 0, 0), (1759309800008, 3, 1, -600, 2500, 0), (1759399200008, 3, 3, 1, 2500, 1), (1759658400008, 3, 9, 3, 2500, 1), (1760436000008, 1, -600, 9, 2300, 1), (1760436600008, 3, 2, -600, 2300, 2), (1760608800008, 3, 6, 2, 2300, 1), (1761127200008, 4, 20, 6, 2450, 1), (1762855200008, 2, 25, 20, 2300, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200008, 3, -600, -60, 0, 0), (1759309800008, 3, 1, -600, 2500, 0), (1759399200008, 3, 3, 1, 2500, 1), (1759658400008, 3, 9, 3, 2500, 1), (1760436000008, 1, -600, 9, 2300, 1), (1760436600008, 3, 2, -600, 2300, 2), (1760608800008, 3, 6, 2, 2300, 1), (1761127200008, 4, 20, 6, 2450, 1), (1762855200008, 2, 25, 20, 2300, 1)) AS v"
   # Every save below starts from cards stamped long ago (mod 1700000000) with
   # a server usn, so that a card a save stamps shows mod = now, usn -1.
   - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
   - advance: 1h
-  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - observe: ["card(#c1, #c3, #c5, #c7, #c2, #c4, #c6, #c8)"]
   - db_exec: {sql: "SELECT count(*), total(id), total(cid), total(usn), total(ease), total(ivl), total(lastIvl), total(factor), total(time), total(type) FROM revlog"}
   # 1. Lang's desired retention 0.9 -> 0.85 from the Words screen: Words is
   # recomputed; Phrases keeps its own 0.8 and Misc uses Other: untouched.
   - save_deck_options: {deck: Words, options: {desired_retention: 0.85}}
-  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - observe: ["card(#c1, #c3, #c5, #c7, #c2, #c4, #c6, #c8)"]
   - db_exec: {sql: "SELECT count(*), total(id), total(cid), total(usn), total(ease), total(ivl), total(lastIvl), total(factor), total(time), total(type) FROM revlog"}
   - db_exec: {sql: "UPDATE cards SET usn = 6, mod = 1700000000"}
   - advance: 1h
@@ -111,15 +111,15 @@ steps:
   - advance: 1h
   # 3. Phrases' own desired retention 0.8 -> 0.75: only Phrases.
   - save_deck_options: {deck: Phrases, deck_desired_retention: 0.75}
-  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - observe: ["card(#c1, #c3, #c5, #c7, #c2, #c4, #c6, #c8)"]
   - db_exec: {sql: "UPDATE cards SET usn = 8, mod = 1700000000"}
   - advance: 1h
   # 4. Historical retention and the ignore date alone: no deck is recomputed.
   - save_deck_options: {deck: Words, options: {historical_retention: 0.8, ignore_reviews_before: "2025-10-03"}}
-  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - observe: ["card(#c1, #c3, #c5, #c7, #c2, #c4, #c6, #c8)"]
   - db_exec: {sql: "UPDATE cards SET usn = 9, mod = 1700000000"}
   - advance: 1h
   # 5. Misc moves from Other to Lang: Misc is recomputed with Lang's values.
   - save_deck_options: {deck: Misc, preset: Lang}
-  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8)"]
+  - observe: ["card(#c1, #c3, #c5, #c7, #c2, #c4, #c6, #c8)"]
   - db_exec: {sql: "SELECT count(*), total(id), total(cid), total(usn), total(ease), total(ivl), total(lastIvl), total(factor), total(time), total(type) FROM revlog"}
