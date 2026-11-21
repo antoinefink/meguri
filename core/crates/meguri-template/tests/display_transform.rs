@@ -278,3 +278,85 @@ fn generated_replay_accessibility_preserves_display_contract() {
     }
     assert_eq!(card, original);
 }
+
+#[test]
+fn blank_notices_use_meguri_wording() {
+    use meguri_template::{
+        CardSpecials, FieldMap, ParsedTemplate,
+        card::{self, RenderMode},
+    };
+    // D7 layout around D10 text; the docs host is built from parts (R1876).
+    let notice = |text: &str, anchor: &str| {
+        format!(
+            "<div>{text}<br><a href='{}templates/errors.html#{anchor}'>More information</a></div>",
+            concat!("https://docs.", "anki", "web", ".net/")
+        )
+    };
+    let css = ".card { color: navy; }";
+    for (front, back, cloze, ord, question_text, text, anchor) in [
+        (
+            "Prompt {{Blank}}",
+            "{{FrontSide}}",
+            false,
+            0,
+            "Prompt ",
+            "This card’s front shows no field content.",
+            "front-of-card-is-blank",
+        ),
+        (
+            "{{cloze:Text}}",
+            "{{cloze:Text}}",
+            true,
+            0,
+            "",
+            "This card’s note has no cloze 1.",
+            "no-cloze-filter-on-cloze-note-type",
+        ),
+        (
+            "{{cloze:Text}}",
+            "{{cloze:Text}}",
+            true,
+            9,
+            "",
+            "This card’s note has no cloze 10.",
+            "no-cloze-filter-on-cloze-note-type",
+        ),
+    ] {
+        assert!(text.contains('\u{2019}') && !text.contains('\'') && !text.contains('\n'));
+        let fields = FieldMap::new(
+            [("Blank", ""), ("Text", "{{c2::word}}")],
+            &CardSpecials {
+                ord,
+                notetype_name: "Custom",
+                template_name: "Card",
+                deck_name: Some("Deck"),
+                flags: 0,
+                card_id: 1,
+                tags: &[],
+            },
+        );
+        let card = card::render(
+            &ParsedTemplate::parse(front),
+            &ParsedTemplate::parse(back),
+            &fields,
+            cloze,
+            RenderMode::Review,
+        );
+        let notice = notice(text, anchor);
+        for platform in [Platform::Mac, Platform::Ios] {
+            for hide_play_buttons in [false, true] {
+                let output = display::compose(
+                    &card,
+                    css,
+                    ord,
+                    RenderHost {
+                        platform,
+                        hide_play_buttons,
+                    },
+                );
+                assert_eq!(output.question, format!("<style>{css}</style>{question_text}{notice}"));
+                assert_eq!(output.answer, format!("<style>{css}</style>{notice}"));
+            }
+        }
+    }
+}
