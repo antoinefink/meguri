@@ -4,6 +4,8 @@ import DesignSystem
 import SwiftUI
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 
 public struct HomeView: View {
@@ -112,6 +114,17 @@ public struct HomeView: View {
             DeckSearchFocus.request(collection, layout: searchLayout)
             return .handled
         }
+        #if os(macOS)
+        // H12: Return and S on Today's page start Study, the walk of N24.3. The Mac only:
+        // Today's page takes keyboard focus there; on the iPad the sidebar's Today row has the keys.
+        // Never while a text input has focus (R197).
+        .onKeyPress(keys: [.return, KeyEquivalent("s")], phases: .down) { press in
+            guard press.modifiers.isEmpty, deckID == nil, showsRootDeckList, showsToday, homeKeyboardActive,
+                  !(NSApp.keyWindow?.firstResponder is NSText) else { return .ignored }
+            DeckListStudy.startAll(collection: collection)
+            return .handled
+        }
+        #endif
         // H9.2: O on a normal deck's page opens its Deck Options (N20.9).
         .onKeyPress(keys: [KeyEquivalent("o")], phases: .down) { press in
             guard press.modifiers.isEmpty, !press.phase.contains(.repeat), let deckID,
@@ -982,19 +995,27 @@ public struct HomeSidebarDecks: View {
 }
 
 private struct HomeSidebarBranch: View {
-    let collection: ReviewCollection
+    /// Nil in the DTO preview (`HomeSidebarPreview`): the rows draw and do nothing.
+    let collection: ReviewCollection?
     let node: CountedDeckNode
     let ancestors: [String]
+    /// The preview's selection; the live rows read the navigation's.
+    var previewSelection: SidebarItem? = nil
+    @Environment(\.locale) private var locale
     private var name: String { node.name.components(separatedBy: "::").last ?? node.name }
+    /// N24.4: the full path, then the three counts, zeros included.
+    private var helpTag: Text { Text(verbatim: path + "\n" + node.counts.summary(locale: locale)) }
+    /// N24.4: the same three counts, "to review" in place of "due".
+    private var countsValue: Text { Text(verbatim: node.counts.summary(locale: locale)) }
     /// N20.3: shown and spoken paths join their components with " › ".
     private var path: String { (ancestors + [name]).joined(separator: " › ") }
     private var quiet: Bool {
         DeckWaiting(counts: node.counts, filtered: node.filtered)
-            .quietInSidebar(selected: collection.navigation.sidebarSelection == .deck(DeckID(node.id)))
+            .quietInSidebar(selected: (collection?.navigation.sidebarSelection ?? previewSelection) == .deck(DeckID(node.id)))
     }
     private var expanded: Binding<Bool> {
-        Binding(get: { collection.studyExpanded(deckID: node.id) }, set: {
-            collection.setStudyExpanded(deckID: node.id, expanded: $0,
+        Binding(get: { collection?.studyExpanded(deckID: node.id) ?? !node.studyCollapsed }, set: {
+            collection?.setStudyExpanded(deckID: node.id, expanded: $0,
                 includingDescendants: studyDisclosureIncludesDescendants())
         })
     }
@@ -1007,18 +1028,15 @@ private struct HomeSidebarBranch: View {
                 DisclosureGroup(isExpanded: expanded) {
                     ForEach(node.children, id: \.id) { child in
                         // AnyView hides the row's own tag, so the group's would reach it and select it too.
-                        AnyView(HomeSidebarBranch(collection: collection, node: child, ancestors: ancestors + [name]))
+                        AnyView(HomeSidebarBranch(collection: collection, node: child, ancestors: ancestors + [name],
+                                                  previewSelection: previewSelection))
                             .tag(SidebarItem.deck(DeckID(child.id)))
                     }
                 } label: { row }
                 .tag(SidebarItem.deck(DeckID(node.id)))
-                #if !os(macOS)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(Text(verbatim: path))
-                .accessibilityValue(expanded.wrappedValue
-                    ? Text("Expanded", bundle: .module) : Text("Collapsed", bundle: .module))
-                .accessibilityIdentifier("home.sidebar.disclosure.\(node.id)")
-                #endif
+                // No accessibility of the group's own on iOS: the list flattens its rows, so
+                // an identifier here reached every row under it (the parent's and each
+                // subdeck's cell). The system's disclosure control reports its own state.
             }
         }
         .id(node.id)
@@ -1027,7 +1045,7 @@ private struct HomeSidebarBranch: View {
     private var row: some View {
         Group {
             #if os(macOS)
-            Button { collection.openDeckPage(deckID: node.id) } label: {
+            Button { collection?.openDeckPage(deckID: node.id) } label: {
                 Text(verbatim: name)
                     // N14.6: nothing waiting reads quieter, except on the selection highlight.
                     .foregroundStyle(quiet ? .secondary : .primary)
@@ -1036,9 +1054,13 @@ private struct HomeSidebarBranch: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(Text(verbatim: path))
+            // H12: the first click opens the page, as a click does; the second starts the review.
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                if let collection { DeckListStudy.start(deckID: node.id, collection: collection) }
+            })
+            .help(helpTag)
             .accessibilityLabel(Text(verbatim: path))
-            .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
+            .accessibilityValue(countsValue)
             .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
             .tag(SidebarItem.deck(DeckID(node.id)))
             #else
@@ -1058,20 +1080,107 @@ private struct HomeSidebarBranch: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text(verbatim: path))
-            .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
+            .accessibilityValue(countsValue)
+            // N24.4: the help tag with a pointer.
+            .help(helpTag)
             #endif
         }
         #if !os(macOS)
         .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
         #endif
+        #if os(iOS)
+        // H12: a double-click with the iPad's pointer starts the review; touch has no double tap.
+        .gesture(PointerDoubleClick { if let collection { DeckListStudy.start(deckID: node.id, collection: collection) } })
+        #endif
         .deckMenu(collection: collection, deck: node, place: "sidebar")
         .tag(SidebarItem.deck(DeckID(node.id)))
         #if os(macOS)
-        // An integer badge, which the system hides at zero (N11.5).
-        .badge(Int(node.counts.review))
+        // N24.4: every card waiting, as an integer badge the system hides at zero.
+        .badge(node.counts.waiting)
         #endif
     }
 }
+
+/// The production sidebar's deck rows over sample decks (route `home/sidebar/typical`):
+/// one with only new cards, one with nothing waiting, nested decks and a filtered deck, so
+/// the badge (cards waiting) and the quieter nothing-waiting name can be captured.
+public enum HomeSidebarPreview {
+    public static var nodes: [CountedDeckNode] {
+        func deck(_ id: Int64, _ name: String, _ counts: (UInt32, UInt32, UInt32), filtered: Bool = false,
+                  collapsed: Bool = false, _ children: [CountedDeckNode] = []) -> CountedDeckNode {
+            CountedDeckNode(id: id, name: name, filtered: filtered, studyCollapsed: collapsed, browserCollapsed: false,
+                counts: ReviewCounts(new: counts.0, learning: counts.1, review: counts.2), children: children)
+        }
+        return [
+            deck(1, "Languages", (6, 23, 382), [
+                deck(2, "Languages::Español", (6, 23, 382), [deck(3, "Languages::Español::Vocabulary", (6, 3, 120))]),
+                deck(4, "Languages::日本語", (0, 0, 0)),
+            ]),
+            deck(5, "Music Theory", (12, 0, 0)),
+            deck(6, "Quick Review", (0, 0, 30), filtered: true),
+            deck(7, "Reading", (0, 0, 0)),
+            deck(8, "Science", (10, 2, 85), collapsed: true, [deck(9, "Science::Chemistry", (10, 2, 85))]),
+        ]
+    }
+
+    /// The rows, each tagged as the live list tags them; `selection` marks one.
+    public static func decks(selection: SidebarItem?) -> some View {
+        ForEach(nodes, id: \.id) { node in
+            HomeSidebarBranch(collection: nil, node: node, ancestors: [], previewSelection: selection)
+                .tag(SidebarItem.deck(DeckID(node.id)))
+        }
+    }
+}
+
+/// Starting a deck from the deck list (H3, H12): a double-click, or Return or S on its
+/// selected row. A filtered deck shows R53's explanation and a deck with nothing to study
+/// its page's state, on its page; any other goes through the deck page's Study path.
+public enum DeckListStudy {
+    /// After the press's own actions: the double-click's second click and the selection's
+    /// open run first, and the page they open never ends the review this starts.
+    /// A later selection (another row, Today) cancels the request: see
+    /// `ReviewCollection.startFromDeckList`.
+    public static func start(deckID: Int64, collection: ReviewCollection) {
+        let request = collection.deckListStudyRequest(deckID: deckID)
+        Task { await collection.startFromDeckList(request) }
+    }
+
+    /// Today's Study (N24.3) from its keys: nothing while nothing waits or Study is unavailable,
+    /// when the key arrives and again when the start runs.
+    public static func startAll(collection: ReviewCollection) {
+        guard collection.studyAllAvailable else { return }
+        Task { await collection.startStudyAll() }
+    }
+}
+
+#if os(iOS)
+/// A double-click with a pointer (trackpad or mouse) only: touches never reach it, and it
+/// recognizes alongside the list's own selection, so a click (a tap) still selects the row.
+private struct PointerDoubleClick: UIGestureRecognizerRepresentable {
+    let action: () -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UITapGestureRecognizer {
+        let recognizer = UITapGestureRecognizer()
+        recognizer.numberOfTapsRequired = 2
+        recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
+        recognizer.cancelsTouchesInView = false
+        recognizer.delaysTouchesEnded = false
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UITapGestureRecognizer, context: Context) {
+        if recognizer.state == .ended { action() }
+    }
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    }
+}
+#endif
 
 private func studyDisclosureIncludesDescendants() -> Bool {
     #if os(macOS)
