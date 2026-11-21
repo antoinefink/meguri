@@ -411,7 +411,9 @@ fn new_observations_and_stats_are_language_only_with_pure_search_d8() {
         let value = json!({kind:args});
         let parsed = request(value.clone()).unwrap();
         let before = parsed.needs();
-        assert!(executor.missing(&before).observations.contains(kind));
+        // U88a runs `search_build` (S6); the others are still language only.
+        let implemented = kind == "search_build";
+        assert_eq!(executor.missing(&before).observations.contains(kind), !implemented, "{kind}");
         assert_eq!(before, parsed.needs());
         assert_eq!(caps, executor.capabilities());
         assert_eq!(parsed.starts_from_new_collection(), !kind.starts_with("search_"));

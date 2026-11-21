@@ -82,6 +82,13 @@ impl ObserverRows<'_> {
     pub fn row_image(&self, table: Table, key: &RowKey) -> Result<Option<RowImage>, StorageError> {
         self.writer.row_image(table, key)
     }
+
+    /// One keyset page of a table's stored rows from this commit, as
+    /// [`ReadRows::row_page`] reads it: for an observer that must reread a
+    /// whole table, as after a whole-collection change, which lists no rows.
+    pub fn row_page(&self, table: Table, after: Option<&RowKey>) -> Result<Vec<RowImage>, StorageError> {
+        self.writer.row_page(table, after)
+    }
 }
 
 /// One committed op as observers see it.

@@ -77,7 +77,7 @@ fn misplaced(operator: BoolOperator) -> ErrorKind {
 }
 
 /// G2: an unquoted term whose whole text is `and` or `or`, any ASCII case.
-fn operator_word(text: &[char]) -> Option<BoolOperator> {
+pub(crate) fn operator_word(text: &[char]) -> Option<BoolOperator> {
     let word: String = text.iter().collect();
     if word.eq_ignore_ascii_case("and") {
         Some(BoolOperator::And)
