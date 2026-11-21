@@ -1,0 +1,88 @@
+import Foundation
+import Testing
+@testable import CoreBridge
+
+private final class QueryClock: CollectionClock {
+    func nowMilliseconds() -> Int64 { 1_894_701_600_000 }
+    func utcOffsetSeconds(atMilliseconds: Int64) -> Int32 { 0 }
+    func zoneIdentifier() -> String { "UTC" }
+}
+
+private final class QueryDiskCapacity: DiskSpaceProviding {
+    func availableBytes(at directory: URL) throws -> UInt64 { .max }
+}
+
+extension EventTests {
+    /// U264a through CoreBridge on an opened collection: T7's reading and
+    /// T4's run text, the commit, the incomplete text, the suggestions with
+    /// a UTF-16 caret, the filter counts and selection counts as jobs, and
+    /// a column set change.
+    @Test(.timeLimit(.minutes(2))) @MainActor func browseQueriesSuggestCountAndChangeColumnsThroughCoreBridge() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let directory = root.appending(path: "collection")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root.appending(path: "backups"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let location = CoreBridge.CollectionLocation(collectionDirectory: directory,
+            backupsDirectory: root.appending(path: "backups"), appGroupSnapshot: root.appending(path: "widget.snapshot"),
+            manualTransferDirectory: root.appending(path: "ManualTransfers"))
+        try await MaintenanceLane.shared.bootstrapCollection(location)
+        let service = CoreCollectionService(clock: QueryClock(), diskSpace: QueryDiskCapacity())
+        let notes = CoreNoteService(), types = CoreNotetypeService()
+        do {
+            try await service.open(location, randomSeed: 47)
+            let added = try await types.addNotetype(.init(name: "Duo", cloze: false, fields: ["Front", "Back"],
+                templates: [.init(name: "Forward", front: "{{Front}}", back: "{{FrontSide}}", browserFront: "", browserBack: "")],
+                css: ""))
+            for (front, tag) in [("alpha", "\u{1D11E}zorb"), ("beta", "plain")] {
+                _ = try await notes.addNote(.init(notetypeId: added.id, fields: [front, "x"], tags: [tag], deckId: 1, guid: nil,
+                                                  updateAddDefaults: false))
+            }
+
+            let read = try await CoreBrowseQuery.read("-is:suspended tag:plain word")
+            #expect(read == FilterQuery(tokens: [.value([.state(.suspended)], negated: true), .value([.tag("plain")], negated: false)],
+                                        text: "word"))
+            let run = try await CoreBrowseQuery.runText(read)
+            #expect(try await CoreBrowseQuery.read(run) == read)
+            #expect(try await CoreBrowseQuery.commit(FilterQuery(text: "tag:plain more"))
+                == FilterQuery(tokens: [.value([.tag("plain")], negated: false)], text: "more"))
+            #expect(try await CoreBrowseQuery.isIncomplete("deck:", caret: 5))
+            #expect(try await CoreBrowseQuery.deckValue(1)?.deckName == "Default")
+
+            // The caret counts UTF-16 units: the tag starts with a character
+            // outside the BMP.
+            let typed = "\u{1D11E}cl"
+            let rows = try await CoreBrowseQuery.suggestions(for: FilterQuery(text: typed), caret: typed.utf16.count,
+                                                             labels: .english)
+            #expect(rows.first?.row == .contains(typed))
+            #expect(rows.contains { $0.row == .value(.tag("\u{1D11E}zorb")) && $0.section == .tags && $0.key != nil })
+
+            let counts = try await CoreBrowseQuery.startFilterCounts(.notes, items: [.value(.tag("plain")), .saved("tag:*")])
+            #expect(try await counts.value() == [1, 2])
+
+            let shown = try await CoreBrowseQuery.columnSet(notetype: nil)
+            #expect(shown.set == .standard && shown.columns(.cards).first == "noteFld")
+            let change = try await CoreBrowseQuery.changeColumnSet(.standard, mode: .notes, change: .hide("noteCrt"))
+            #expect(change.written && change.summary.undoName == nil)
+            #expect(try await CoreBrowseQuery.columnSet(notetype: nil).notes.contains("noteCrt") == false)
+
+            let session = try await BrowseSearchSession.open()
+            var events = session.events.makeAsyncIterator()
+            let seq = try await session.startSearch("", mode: .notes, sort: BrowseSort(key: "noteFld", direction: .ascending))
+            var handle: BrowseHandle?
+            while handle == nil, let event = await events.next() {
+                if case .complete(seq, let done, _, _) = event { handle = done }
+            }
+            let notesHandle = try #require(handle)
+            let selection = try await session.selection(notesHandle, revision: 0, ranges: [0..<2])
+            let selected = try await CoreBrowseQuery.startSelectionCounts(selection).value()
+            #expect(selected == BrowseSelectionCounts(cards: 2, notes: 2, suspended: 0, buried: 0, decks: 1, deck: 1,
+                                                      notetypes: [added.id]))
+            try await session.close()
+            try await service.close()
+        } catch {
+            try? await service.close()
+            throw error
+        }
+    }
+}

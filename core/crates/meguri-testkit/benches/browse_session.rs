@@ -13,6 +13,9 @@
 //! - `browse.reverse.cards`, `browse.rows.page`: a reverse in memory, and a
 //!   page of 400 rows (the visible rows and 200 each side, H7) with the
 //!   default cards-mode columns.
+//! - `browse.selection_counts.<mode>`: U264a's counts of Select All on a
+//!   whole-collection handle (`browser/workspace` V7, V8.1): resolution and
+//!   the counting reads.
 //!
 //! Sizes come from `$MEGURI_BENCH_SIZES` (default `10k,150k`), made first by
 //! `tools/mg bench`. The result goes to `$MEGURI_BENCH_RESULTS`.
@@ -24,6 +27,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use criterion::Criterion;
+use meguri_engine::CancelToken;
+use meguri_engine::browse::selection_counts;
 use meguri_engine::browse::search::{
     HandleId, RequestSeq, SearchEvent, SearchListener, SearchSession, SortDirection, SortSpec,
 };
@@ -241,6 +246,24 @@ fn main() -> ExitCode {
                             .expect("a page")
                             .len()
                     })
+                })
+            });
+            push(&mut suite, measurement);
+        }
+        // U264a: the counts of Select All (V7, V8.1) in both modes.
+        for mode in [SearchMode::Cards, SearchMode::Notes] {
+            let name = format!("browse.selection_counts.{}", mode_name(mode));
+            let (_, handle) = search(&session, &events, "", mode, "noteFld");
+            let state = session.handle_state(handle).expect("the handle");
+            let all: std::ops::Range<u64> = 0..state.count;
+            let every = session.selection(handle, state.revision, std::iter::once(all).collect());
+            let collection = host.collection().expect("the open collection");
+            let token = CancelToken::new();
+            black_box(selection_counts(&collection, &every, &token).expect("the counts"));
+            let mut measurement = Measurement::start(&name, Some(&size));
+            criterion.bench_function(&format!("{name}/{size}"), |b| {
+                b.iter_custom(|n| {
+                    measurement.run(n, |_| selection_counts(&collection, &every, &token).expect("the counts").cards)
                 })
             });
             push(&mut suite, measurement);
