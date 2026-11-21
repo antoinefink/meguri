@@ -73,3 +73,35 @@ CodeRabbit, second pass (three Minor points, all answered on their threads):
 - `conformance/search-ops` S1 now separates the two sides: Meguri writes nothing, and the oracle may write the two timing keys.
 - Q8 says why its two differences have no `deviations.yaml` entry: no scenario observes them. This is not changed.
 - T7.1 puts the query-wide `search_failed` refusals of T7.2 and T7.3 first.
+
+## U260 readings in `search/filter-tokens` (added to this PR)
+
+The coordinator added the six readings that the U260 implementer (PR #38) made where filter-tokens says nothing. Each decision keeps the implementer's reading, with three exceptions.
+
+Kept:
+- T3: card type names that are not offered, and a `card:` term reads back only for an existing card type.
+- T5: a field term names no field only when its name has no wildcard, in any mode.
+- T7: a negation holding No Flag, Any Flag or Untagged becomes advanced.
+- T7: `tag:re:` in J3.2's form reads back as a Tag value; field names fold letter case and keep their stored spelling.
+- T7.1: a Field Contains text holding other white space stays offered and comes back advanced; so does a field name holding such a character; Leech beside a Card State token.
+
+Changed:
+- T5: `-10:45` stays text, as the negation of its literal. The implementer made it an advanced token, which finds nothing.
+- New T3.2 and T4: the written-text item keeps F7's shapes unchanged in the run text, in brackets unless it is a single term. A negated operator word runs and fails with E3's error. The implementer had no run text for it, and wrote `preset:` values in their broken canonical form.
+- T6: whether a token keeps its written text depends on the item read back (`has\-cd:x`).
+
+Independent review: a separate Claude subagent (Opus), given the commit, the questions and PR #38's code.
+- P1, fixed: with no stated way to place a kept token among other filters, its meaning was at risk, and T4 contradicted itself. The new T3.2 says how that kept form is written and bracketed, and T4 writes all of the query through J4.
+- P2, fixed:
+  - The plan lacked the `has\-cd:x` code change.
+  - A query with no run text had no rule for its consumers. There is now always a run text.
+  - T7.1 lacked the field-name exception.
+- P3, fixed:
+  - The flag row now comes before row 2, and its unreachable case is removed.
+  - A group of one item, a group of `tag:leech` items, and the quotes of a T5 literal are now stated.
+  - The stored spelling when note types differ is stated.
+  - Wording fixes.
+  - The plan now lists tests.
+- P3, noted:
+  - `my_var:3` with no such field becomes an advanced token that finds nothing.
+  - Refused card types get no filter.
