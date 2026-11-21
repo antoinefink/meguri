@@ -16,6 +16,10 @@ pub mod add_screen_writer;
 pub mod answer;
 #[path = "bootstrap.rs"]
 pub mod bootstrap;
+#[path = "browse_handles.rs"]
+pub mod browse_handles;
+#[path = "browse_no_writes.rs"]
+pub mod browse_no_writes;
 #[path = "browse_rows.rs"]
 pub mod browse_rows;
 #[path = "browser_config.rs"]

@@ -154,6 +154,8 @@ pub(crate) struct EngineInner {
     pub(crate) threads: ThreadRegistry,
     pub(crate) jobs: JobRegistry,
     pub(crate) maintenance: std::sync::OnceLock<Arc<crate::maintenance::Maintenance>>,
+    /// Browse search sessions' workers and readers (`browser/result-sets`).
+    pub(crate) searches: Arc<crate::browse::search::SearchRegistry>,
     generation: Arc<AtomicU64>,
     state: Mutex<LcState>,
     pub(crate) changed: Condvar,
@@ -203,6 +205,7 @@ impl Engine {
                 threads,
                 jobs,
                 maintenance: std::sync::OnceLock::new(),
+                searches: Arc::default(),
                 generation: Arc::new(AtomicU64::new(0)),
                 state: Mutex::new(LcState {
                     suspended: false,
@@ -774,6 +777,8 @@ impl Engine {
         cleanup: Option<impl FnOnce(Option<Collection>) -> Result<(), EngineError>>,
     ) -> Result<(), EngineError> {
         let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        // `browser/result-sets` H3: searches stop so their readers return.
+        let _searches = self.inner.searches.halt();
         if self.slot_holder() == Some(LongOp::CollectionExportHandoff) {
             return Err(EngineError::Busy {
                 running_op: LongOp::CollectionExportHandoff.name().into(),

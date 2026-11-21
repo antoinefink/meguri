@@ -15,7 +15,7 @@
 use crate::config::{Column, Refusal, SortDirection};
 use crate::context::{ContextReads, ContextValue, SearchContext};
 
-use super::{Param, Params, Plan, Rows, SearchMode, props};
+use super::{Param, Params, Plan, Rows, SearchMode, props, sql};
 
 /// The prefix of a field column key (`browser/workspace` V3).
 pub const FIELD_COLUMN_PREFIX: &str = "fld:";
@@ -41,6 +41,14 @@ impl SortColumn {
         match Column::from_key(key) {
             Some(column) if column.sortable(mode) => Ok(SortColumn::Column(column)),
             _ => Err(Refusal::UnsortableColumn),
+        }
+    }
+
+    /// The key that names the column (K3, `browser/workspace` V3).
+    pub fn key(&self) -> String {
+        match self {
+            SortColumn::Column(column) => column.key().to_owned(),
+            SortColumn::Field(name) => format!("{FIELD_COLUMN_PREFIX}{name}"),
         }
     }
 }
@@ -98,7 +106,11 @@ pub enum SortError {
 pub struct SortedQuery {
     mode: SearchMode,
     sql: String,
+    pairs_sql: String,
     runs_sql: String,
+    /// Cards mode: the keys read the note row, so cards without one are
+    /// left out of the list (S9).
+    needs_note: bool,
     params: Vec<Param>,
     reads: ContextReads,
     slow: bool,
@@ -140,7 +152,7 @@ impl SortedQuery {
     /// is missing (S9). The ids are parameter `?1`, a JSON array.
     pub fn for_ids(ids: &[i64], sort: &Sort, ctx: &SearchContext) -> Result<SortedQuery, SortError> {
         let mut params = Params::default();
-        let list = params.bind(ids_param(ids));
+        let list = params.bind(sql::id_list(ids));
         let keys = keys(sort, ctx, &mut params)?;
         let filter = match sort.mode {
             SearchMode::Cards => format!("c.id IN (SELECT value FROM json_each({list}))"),
@@ -191,9 +203,15 @@ impl SortedQuery {
         if keys.id_after_aggregate {
             run_keys.push(format!("CASE WHEN {} IS NULL THEN NULL ELSE n.id END", keys.keys[0]));
         }
+        let pairs = match sort.mode {
+            SearchMode::Cards => "c.id, c.nid",
+            SearchMode::Notes => "n.id",
+        };
         SortedQuery {
             mode: sort.mode,
             sql: format!("{with}SELECT {id} {body}"),
+            pairs_sql: format!("{with}SELECT {pairs} {body}"),
+            needs_note: sort.mode == SearchMode::Cards && keys.needs_note,
             runs_sql: format!(
                 "{with}SELECT {id}, DENSE_RANK() OVER (ORDER BY {}) {body}",
                 run_keys.join(", ")
@@ -211,6 +229,18 @@ impl SortedQuery {
     /// One statement selecting the ids, each once, in the sort's order.
     pub fn sql(&self) -> &str {
         &self.sql
+    }
+
+    /// The same rows in the same order, in cards mode each with its card's
+    /// `nid` as a second column (`browser/result-sets` H6).
+    pub fn pairs_sql(&self) -> &str {
+        &self.pairs_sql
+    }
+
+    /// Cards mode: whether the list holds the cards without a note row
+    /// (false under S9's six note-column sorts, which leave them out).
+    pub fn lists_lone_cards(&self) -> bool {
+        !self.needs_note
     }
 
     /// The same rows in the same order, each with a second column that is
@@ -235,20 +265,6 @@ impl SortedQuery {
     pub fn is_slow(&self) -> bool {
         self.slow
     }
-}
-
-/// The id list of [`SortedQuery::for_ids`] as one JSON array text.
-fn ids_param(ids: &[i64]) -> Param {
-    let mut text = String::with_capacity(ids.len() * 14 + 2);
-    text.push('[');
-    for (k, id) in ids.iter().enumerate() {
-        if k > 0 {
-            text.push(',');
-        }
-        text.push_str(&id.to_string());
-    }
-    text.push(']');
-    Param::Text(text)
 }
 
 /// The keys of one column in one mode, ascending, without the final key.

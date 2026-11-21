@@ -90,6 +90,8 @@ pub mod savepoints;
 #[cfg(feature = "test-hooks")]
 #[path = "schema_objects.rs"]
 pub mod schema_objects;
+#[path = "search_rows.rs"]
+pub mod search_rows;
 #[path = "sidecar.rs"]
 pub mod sidecar;
 #[path = "smoke_integrity.rs"]
