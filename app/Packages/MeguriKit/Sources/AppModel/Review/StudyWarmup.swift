@@ -114,6 +114,14 @@ final class StudyWarmup {
         schedule(after: settleDelay)
     }
 
+    /// Media came or went: a prepared card may have been settled without a
+    /// file it shows, which its payload does not tell. Prepare it again.
+    func mediaChanged() {
+        guard surface != nil else { return }
+        dropPrepared()
+        schedule(after: settleDelay)
+    }
+
     /// Releases the pages: memory pressure, the background, a new media
     /// binding, the collection closing or being replaced.
     func release() {

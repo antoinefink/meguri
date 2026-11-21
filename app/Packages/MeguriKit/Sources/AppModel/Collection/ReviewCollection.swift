@@ -80,6 +80,9 @@ public final class ReviewCollection: ChangeFanoutSink {
     private struct PendingReview {
         let model: ReviewCoordinator
         let walk: StudyWalk?
+        /// The navigation Study was clicked in: another one by the time the
+        /// review would show ends the session instead (R22).
+        let intent: UInt64
         let deadline: Task<Void, Never>
     }
     private var pendingReview: PendingReview?
@@ -1098,6 +1101,19 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     private var isFailed: Bool { if case .failed = state { return true }; return false }
 
+    /// A change that only saved the selected deck (`curDeck`, `decks/decks` D11): it
+    /// moves no card, state token or render key (`sched/review-session` C5, C6), so
+    /// Study's own selection keeps the card prepared for that deck.
+    static func onlySelectsDeck(_ changes: ChangeSet) -> Bool {
+        !changes.wholeCollection && !changes.collectionRow && !changes.configKeys.isEmpty
+            && changes.configKeys.allSatisfy { $0.name == "curDeck" }
+            && changes.cards.isEmpty && changes.notes.isEmpty && changes.notetypes.isEmpty
+            && changes.decks.isEmpty && changes.deckConfigs.isEmpty && changes.tags.isEmpty
+            && changes.revlogAdded.isEmpty && changes.revlogRemoved.isEmpty
+            && changes.mediaAdded.isEmpty && changes.mediaRemoved.isEmpty
+            && changes.skippedIncomingCards.isEmpty && changes.skippedIncomingNotes.isEmpty
+            && changes.skippedIncomingDecks.isEmpty
+    }
     func receive(_ event: CoreEvent) {
         guard !closed else { return }
         // Never drop review commit failures behind a coalesced deck refresh.
@@ -1115,8 +1131,13 @@ public final class ReviewCollection: ChangeFanoutSink {
             studyWarmup.invalidate()
         case .changes(let changes):
             refreshCounts()
-            // Any change, a sync's or an options save included, may move the first card.
-            studyWarmup.invalidate()
+            // Any change, a sync's or an options save included, may move the first card;
+            // new or removed media make a prepared page's resources stale (R1813).
+            if !changes.mediaAdded.isEmpty || !changes.mediaRemoved.isEmpty || changes.wholeCollection {
+                studyWarmup.mediaChanged()
+            } else if !Self.onlySelectsDeck(changes) {
+                studyWarmup.invalidate()
+            }
             // Any write may be a new step (a text-only note edit changes no count); coalesced.
             if event.generation == generation { undoOwner?.scheduleRefresh() }
             if event.generation == generation { deckOptionsOwner?.changesCommitted(changes, generation: event.generation) }
@@ -1134,7 +1155,9 @@ public final class ReviewCollection: ChangeFanoutSink {
                changes.source == .cloudIncoming || changes.source == .syncIncoming {
                 Task { await studyPreparation.changesCommitted(changes) }
             }
-        case .mediaArrived(let names): scheduleMediaRefresh(names: names, generation: event.generation)
+        case .mediaArrived(let names):
+            scheduleMediaRefresh(names: names, generation: event.generation)
+            studyWarmup.mediaChanged()
         case .collectionReplaced(let next):
             sync.collectionReplaced(next)
             guard preparedGeneration != next else { return }
@@ -1382,11 +1405,11 @@ public final class ReviewCollection: ChangeFanoutSink {
         do {
             let tree = try await loadDeckTree()
             guard expected == generation, tree.generation == generation, revision == deckTreeRevision, !closed else { return }
+            // New counts can mean another first card (a learning card came due).
+            if tree.nodes != decks { studyWarmup.invalidate() }
             decks = tree.nodes
             countsSnapshot &+= 1
             refreshTodayNumbers()
-            // New counts can mean another first card (a learning card came due).
-            studyWarmup.invalidate()
             countTimer?.invalidate(); countTimer = nil
             if foreground && !configuration.clock.isFixed && Double(tree.nextChangeAt) < Date.distantFuture.timeIntervalSince1970 {
                 let date = max(Date(timeIntervalSince1970: Double(tree.nextChangeAt)),
@@ -1584,7 +1607,11 @@ public final class ReviewCollection: ChangeFanoutSink {
         // prepare, and after a failed step, where Try Again runs it (F5.3).
         if !studyPreparation.available || (entry == .study && studyPreparation.phase == .failed) { return .notReady }
         starting = true
-        defer { starting = false }
+        defer {
+            starting = false
+            // A start that did not keep a session leaves the warm pages to be made again.
+            if review == nil { studyWarmup.warm() }
+        }
         let trace = StudyStartTrace(deckID: deckID)
         trace.finished = { [weak self] timings in self?.lastStudyStart = timings }
         let expected = generation, intent = navigation.intentRevision
@@ -1723,7 +1750,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             guard !Task.isCancelled, let self, let model else { return }
             self.revealReview(model)
         }
-        pendingReview = PendingReview(model: model, walk: walk, deadline: deadline)
+        pendingReview = PendingReview(model: model, walk: walk, intent: navigation.intentRevision, deadline: deadline)
         model.onFirstPresentation = { [weak self, weak model] in
             guard let self, let model else { return }
             self.revealReview(model)
@@ -1736,6 +1763,12 @@ public final class ReviewCollection: ChangeFanoutSink {
         pendingReview = nil
         model.onFirstPresentation = nil
         guard review === model, !closed, !closing, model.phase != .ended else { return }
+        // The person went elsewhere while Study waited: as a row change ends an
+        // open review (R22), the session ends without showing.
+        guard navigation.intentRevision == pending.intent else {
+            Task { await finishReview() }
+            return
+        }
         showReview(model, walk: pending.walk)
     }
     private func showReview(_ model: ReviewCoordinator, walk: StudyWalk?) {

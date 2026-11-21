@@ -64,6 +64,66 @@ extension ReviewCollectionStartupTests {
             await owner.startStudy(deckID: 1)
             #expect(!changed.value && owner.navigation.review == nil && owner.review == nil)
             #expect(owner.error != nil)
+            // The deck page gets warm pages again for its next Study.
+            await owner.studyWarmup.settled()
+            #expect(owner.studyWarmup.surface != nil)
+        }
+    }
+
+    /// Going elsewhere while Study waits ends the session without showing it (R22).
+    @Test func goingElsewhereDuringTheWaitEndsTheSessionUnseen() async throws {
+        try await withOwner { owner, client, _ in
+            let gate = ReviewCoordinatorTests.CancellableGate()
+            client.onStartResult = { try await gate.wait() }
+            let study = Task { await owner.startStudy(deckID: 1) }
+            await gate.requested()
+            owner.navigation.select(.section(.browse))
+            gate.release()
+            await study.value
+            let deadline = ContinuousClock.now + .seconds(5)
+            while owner.review != nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            #expect(owner.navigation.review == nil && owner.review == nil && client.ends == 1)
+        }
+    }
+
+    /// The core's two renders of the first card are the same payload, so the
+    /// session can use the one prepared before it (`sched/review-session` C3, C6).
+    @Test func thePeekedCardsRenderIsTheSessionsOwn() async throws {
+        try await withOwner(realDecks: true) { owner, _, _ in
+            let deck: Int64 = 1_788_249_600_212
+            guard case .card(let peeked) = try await Core.peekFirstCard(deckID: deck) else {
+                Issue.record("The fixture deck has no first card"); return
+            }
+            let early = try await Core.renderCard(id: peeked.cardId, mode: .review, platform: .mac)
+            guard case .started(let session, _, let head, _) = try await Core.startSession(deckID: deck) else {
+                Issue.record("The session did not start"); return
+            }
+            let first = try #require(head.items.first)
+            #expect(StudyWarmup.sameCard(first, peeked))
+            let rendered = try await Core.renderSessionHead(sessionID: session, keys: [first.renderKey], platform: .mac)
+            #expect(rendered == [early])
+            let sessionCard = try #require(rendered.first)
+            #expect(CardPayload(early, audioPolicy: .init()) == CardPayload(sessionCard, audioPolicy: .init()))
+            try await Core.endSession(sessionID: session)
+        }
+    }
+
+    /// Study's own deck selection moves no card: the preload stays.
+    @Test func selectingTheDeckKeepsThePreload() async throws {
+        try await withOwner { owner, _, _ in
+            owner.studyWarmup.peek = { _ in .card(item: ReviewCoordinatorTests.head(1).items[0]) }
+            owner.studyWarmup.settleDelay = .seconds(60)
+            owner.showStudyAction(deckID: 1, owner: UUID())
+            await owner.studyWarmup.settled()
+            owner.receive(Self.event(owner.generation, .changes(changes: .init(
+                wholeCollection: false, source: .userNonUndoable, cards: [], notes: [], notetypes: [], decks: [], deckConfigs: [],
+                configKeys: [.init(name: "curDeck", kind: .updated)], tags: [], revlogAdded: [], revlogRemoved: [],
+                mediaAdded: [], mediaRemoved: [], skippedIncomingCards: [], skippedIncomingNotes: [],
+                skippedIncomingDecks: [], collectionRow: false))))
+            #expect(!owner.studyWarmup.stale && owner.studyWarmup.prepared?.deckID == 1)
+            let resolver = try #require(await owner.mediaResolverForReview())
+            let taken = try #require(owner.studyWarmup.take(deckID: 1, resolver: resolver))
+            #expect(taken.preloaded)
         }
     }
 
@@ -114,9 +174,17 @@ extension ReviewCollectionStartupTests {
             case .dayRollover: owner.receive(Self.event(owner.generation, .rolledOver(oldDay: 10, newDay: 11)))
             case .nextDay: owner.receive(Self.event(owner.generation, .nextDayAtChanged(nextDayAt: 1_900_000_000)))
             case .timeZone: owner.receive(Self.event(owner.generation, .timeZoneChanged(zoneId: "Asia/Tokyo")))
-            case .countRefresh: await owner.loadCounts()
+            case .countRefresh:
+                // A learning card came due: the counts moved.
+                owner.loadDeckTree = { [unowned owner] in
+                    CountedDeckTree(generation: owner.generation, nextChangeAt: Int64.max, nodes: [
+                        CountedDeckNode(id: 1, name: "Default", filtered: false, studyCollapsed: false, browserCollapsed: false,
+                                        counts: CoreBridge.ReviewCounts(new: 1, learning: 1, review: 0), children: [])])
+                }
+                await owner.loadCounts()
             case .deckSwitch: owner.showStudyAction(deckID: 2, owner: screen)
             case .screenDisappears: owner.hideStudyAction(owner: screen)
+            case .mediaArrived: owner.receive(Self.event(owner.generation, .mediaArrived(names: ["late.png"])))
             }
             let taken = owner.studyWarmup.take(deckID: 1, resolver: try #require(await owner.mediaResolverForReview()))
             let warm = try #require(taken)
@@ -126,7 +194,7 @@ extension ReviewCollectionStartupTests {
     }
 
     enum Trigger: CaseIterable, Sendable {
-        case localChange, sync, optionsChange, dayRollover, nextDay, timeZone, countRefresh, deckSwitch, screenDisappears
+        case localChange, sync, optionsChange, dayRollover, nextDay, timeZone, countRefresh, deckSwitch, screenDisappears, mediaArrived
     }
 
     // MARK: Support
@@ -147,7 +215,7 @@ extension ReviewCollectionStartupTests {
             skippedIncomingCards: [], skippedIncomingNotes: [], skippedIncomingDecks: [], collectionRow: false)))
     }
 
-    private func withOwner(revealDelay: Duration = .seconds(60),
+    private func withOwner(revealDelay: Duration = .seconds(60), realDecks: Bool = false,
                            _ body: (ReviewCollection, ReviewCoordinatorTests.Client, StartSurface) async throws -> Void) async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -170,8 +238,10 @@ extension ReviewCollectionStartupTests {
                                     counts: CoreBridge.ReviewCounts(new: 1, learning: 0, review: 0), children: []),
                     CountedDeckNode(id: 2, name: "Other", filtered: false, studyCollapsed: false, browserCollapsed: false,
                                     counts: CoreBridge.ReviewCounts(new: 1, learning: 0, review: 0), children: [])]
-        owner.loadDeckTree = { [unowned owner] in CountedDeckTree(generation: owner.generation, nextChangeAt: Int64.max, nodes: tree) }
-        owner.saveSelectedDeck = { [unowned owner] _ in owner.generation }
+        if !realDecks {
+            owner.loadDeckTree = { [unowned owner] in CountedDeckTree(generation: owner.generation, nextChangeAt: Int64.max, nodes: tree) }
+            owner.saveSelectedDeck = { [unowned owner] _ in owner.generation }
+        }
         owner.studyWarmup.settleDelay = .zero
         owner.studyWarmup.peek = { _ in .empty }
         owner.studyWarmup.render = { id in CardPayload(cardID: id, question: "Q", answer: "A") }
