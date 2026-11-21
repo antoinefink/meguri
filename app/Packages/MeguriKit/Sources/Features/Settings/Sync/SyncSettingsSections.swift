@@ -8,6 +8,8 @@ struct SyncSettingsSections: View {
     var host: AppNavigation.SheetHost = .main
     /// The sign-in fields' text, owned above any layout that rebuilds this section.
     var draft: MeguriSignInDraft
+    /// The Mac Settings pane already names the section in its title bar.
+    var showsHeading = true
     private var sync: SyncCoordinator { collection.sync }
     private var selection: SyncProviderSelection? {
         switch sync.providerState?.selection {
@@ -34,8 +36,10 @@ struct SyncSettingsSections: View {
                     showsUnavailableReason: sync.serviceConnected)
             }
         } header: {
-            Text(SyncText.value("sync.settings.sync.section"))
-                .accessibilityIdentifier("settings.sync.heading")
+            if showsHeading {
+                Text(SyncText.value("sync.settings.sync.section"))
+                    .accessibilityIdentifier("settings.sync.heading")
+            }
         } footer: {
             Text(SyncText.value(selection == nil ? "sync.service.none.footer" : "sync.settings.automatic.footer"))
                 .accessibilityIdentifier("settings.sync.footer")
@@ -288,10 +292,10 @@ struct MeguriAccountRows: View {
             if collection.meguriSignInPreparing {
                 ProgressView(SyncText.value("sync.meguri.signIn.preparing"))
                     .accessibilityIdentifier("settings.sync.meguri.signInProgress")
-            } else if sync.meguriBusy {
-                if let progress = sync.meguriProgress, let total = progress.total, total > 0 {
-                    ProgressView(value: Double(progress.completed), total: Double(total))
-                } else { ProgressView() }
+            } else if let progress = sync.meguriProgressValue {
+                // One indicator: a value that becomes unknown leaves it in place, indeterminate.
+                ProgressView(value: progress.fraction, total: 1)
+                    .progressViewStyle(.linear)
             }
         }
         .onAppear { if address.isEmpty { address = sync.meguriEndpoint }; startSetupIfAsked() }
@@ -582,8 +586,8 @@ struct SyncMainStatusRows: View {
                     }
                     .font(.footnote).foregroundStyle(.secondary)
                 }
-                if meguri, sync.meguriStage == .media, let progress = sync.meguriMediaProgress {
-                    Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: progress.awaiting)))
+                if meguri, let left = sync.meguriMediaFilesLeft {
+                    Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: left)))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -664,7 +668,7 @@ struct SyncMainStatusRows: View {
             // The damaged-collection screen (V19) is not built: Copy Debug Info
             // is the one action that can run for that row.
             if let callbacks = collection.configuration.fieldDiagnostics {
-                SyncCopyDebugInfoButton(callbacks: callbacks, identifier: id)
+                SyncCopyDebugInfoButton(callbacks: callbacks, sync: sync, identifier: id)
             }
         case .serviceRecovery:
             Button(title) { recovering = true }
@@ -721,13 +725,14 @@ struct SyncMainStatusRows: View {
 /// Copy Debug Info (T9.2): the safe export, with no secrets or card content (N7).
 struct SyncCopyDebugInfoButton: View {
     let callbacks: FieldDiagnosticsCallbacks
+    let sync: SyncCoordinator
     var identifier = "settings.sync.copyDebugInfo"
     @State private var copying = false
     var body: some View {
         Button(SyncText.value("sync.action.copyDebugInfo")) {
             copying = true
             Task {
-                if let data = try? await callbacks.safeExport(), let text = String(data: data, encoding: .utf8) {
+                if let data = try? await callbacks.readableExport(sync: sync.debugFacts), let text = String(data: data, encoding: .utf8) {
                     _ = callbacks.writeClipboard(text)
                 }
                 copying = false
@@ -807,13 +812,13 @@ struct SyncTroubleshootingPage: View {
                     NavigationLink {
                         Form {
                             SyncDiagnosticsContent(snapshot: { try await callbacks.snapshot() },
-                                safeExport: { try await callbacks.safeExport() }, writeClipboard: callbacks.writeClipboard)
+                                safeExport: { try await callbacks.readableExport(sync: sync.debugFacts) }, writeClipboard: callbacks.writeClipboard)
                         }
                         .formStyle(.grouped)
                         .navigationTitle(SyncText.value("sync.trouble.log"))
                     } label: { Text(SyncText.value("sync.trouble.log")) }
                         .accessibilityIdentifier("sync.trouble.log")
-                    SyncCopyDebugInfoButton(callbacks: callbacks, identifier: "sync.trouble.copyDebugInfo")
+                    SyncCopyDebugInfoButton(callbacks: callbacks, sync: sync, identifier: "sync.trouble.copyDebugInfo")
                 }
             }
             if !meguri, let copies = SyncKinds.conflictCopies(sync.status?.attention ?? [:]) {

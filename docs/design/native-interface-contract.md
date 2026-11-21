@@ -283,7 +283,7 @@ Decided 2026-10-27 (screen contract `deckOptions.options`):
 
 ### N11.10 Note types (U200, U201, U203)
 
-Replaced 2026-11-20 by N22 (round 9), under review until Antoine approves it: the Note Types section, one draft and one Save sheet. The text below stays until then.
+Replaced 2026-11-20 by N22 (round 9), approved by Antoine that day: the Note Types section, one draft and one Save sheet. The text below describes the screens until the N22 units replace them.
 
 Decided 2026-10-27 (screen contracts `noteTypes.list`, `noteTypes.templates`, `noteTypes.fields`, `noteTypes.changeNoteType`):
 
@@ -481,6 +481,7 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`: `set
 
 - Settings is one flat page: a grouped form whose sections are Sync, then Collection. The sections' rows are on the page itself; no row pushes a form that only repeats a section.
 - Mac, and the iPhone Duo's inner display held wide: the sections are a list beside the selected section, as in the system's Settings. Mac keeps N5's Settings scene and N11.4's search field; the list has Sync and Collection. The last selected section is restored (N5).
+- Changed 2026-11-20 (first-run fix; approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs). In the Mac Settings window the selected section's title bar names it, so its form shows no second Sync or Collection heading. The flat page and the Duo's wide layout keep each section's heading.
 - iPhone, the Duo folded or held tall, and iPad: the flat page, in the Settings tab or sidebar section (N11.4), with N14.8's title in the tab layout.
 - A Settings section that N11.4 lists and whose unit lands later joins as a further section after Collection, in N11.4's order. This section decides only Sync and Collection.
 - Collection keeps N5's and N12.4's file import and export. Import and export always carry cards and media; there is no media-scope choice (N5).
@@ -554,9 +555,10 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 
 ### N16.1 Session progress
 
-- One thin grey bar along the very bottom edge, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint. No text, no counts, no accent colour.
+- One thin grey bar along the very bottom edge, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint (on the Mac a drawn bar, the exception below). No text, no counts, no accent colour.
 - Touch: the bar spans the screen's width on its bottom edge, inside the bottom safe area, so the home indicator lies over its middle. iPhone Duo: the same edge folded, held wide and held tall; held wide it runs under both halves and across the fold. It is not a control, so it may cross (R9 covers controls).
-- Mac: the bar is the window's last row, under the answer buttons. The Mac had no bar before.
+- Mac: the bar is the window's last row, under the answer buttons, on the window's bottom edge and across its full width. The Mac had no bar before.
+- Mac exception (2026-11-20; need: the bottom-edge, full-width bar above, which the system indicator did not meet; Antoine reported the gap below the bar and at its leading end on 2026-11-20 and asked for the bar to sit on the edge, PR #24): the bar is drawn, not the system's linear indicator, which draws its rounded track inset in its frame. The drawn bar is a 4 pt track in the quaternary fill with the value in the secondary fill; the window's rounded bottom corners clip its ends, as they clip any content on that edge. Its accessibility below is unchanged. Verification: `ReviewLayoutTests.progressBarIsTheBottomEdge` (light and dark), and the Mac review drives in the test VM on 2026-11-20 (light and dark, 800, 1000 and 1600 pt windows), in PR #24. Touch keeps the system indicator, which lies on the screen's bottom edge.
 - The bar shows on the question and answer sides and between cards. Loading, waiting, paused and finished states have none.
 - Its value is the answers given over those answers plus the cards left (new, learning and to review). Accessibility: label "Session Progress", value "12 of 40", identifier `review.session.progress`. It takes no input and is read as text, so the hit-region audit does not ask a touch target of it.
 - Replaces: N11.1's bar across the top and its device setting (R341–R345), N13.3's counts line and top bar.
@@ -575,14 +577,15 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 
 - Show Answer is centred in the answer row on touch, as wide as two answer buttons. At the accessibility text sizes it keeps the full row.
 - With a fold through the row (iPhone Duo held wide) it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9).
-- The answer buttons' group is centred: on touch it is the reading column's width (N16.4), on Mac the four standard buttons are centred in it, as is Show Answer.
+- The answer buttons' group is centred: on touch it is at most `ContentWidth.readable` wide and spans the full width when a fold crosses it; on Mac the four standard buttons are centred in the window, as is Show Answer.
 - Replaces: N13.3's trailing-half Show Answer where no fold crosses the row.
 
 ### N16.4 Reading column
 
-- iPad and Mac: the card, any notice above it and the review's states sit in one centred column, `ContentWidth.readable` wide, the width the touch answer row already had. A narrower window uses its full width.
-- iPhone and iPhone Duo are unchanged: the card takes the full width in every position. The choice is by idiom, as N13.1's layout choice is.
-- The window beside the column shows the card page colour. A template's own background does not reach it yet (N13.4, R335).
+- Changed 2026-11-20 (Antoine asked "do we really want a max width at all?"; decided by the coordinator under his standing delegation; `decisions.md`): the card and any notice above it take the review's full width on every device, as on iPhone. Card styling is the user's and is written for a card that fills the window, so a narrower column would change how it looks. A card whose own content is wider than the window, such as a wide table or image, scrolls sideways inside the card page; any other card shows no horizontal scroll bar at any window width, also with scroll bars always shown.
+- iPad and Mac keep the review's states (N16.6) in one centred column, `ContentWidth.readable` wide. A narrower window uses its full width. iPhone and iPhone Duo are unchanged: the card, its notice and the states take the full width in every position. The choice is by idiom, as N13.1's layout choice is. The touch answer row keeps its own width (N16.3).
+- Around the answer row and the states the window shows the card page colour. A template's own background does not reach it yet (N13.4, R335).
+- Replaced (2026-11-19 text): "iPad and Mac: the card, any notice above it and the review's states sit in one centred column, `ContentWidth.readable` wide".
 
 ### N16.5 End of a session
 
@@ -599,7 +602,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 - Waiting for a learning card that is not ready: "Waiting for Learning", "Your next learning card is not ready yet." and Check Now.
 - Paused by an error: "Review Paused", the message and Try Again. Ended: "Session Ended".
 - Loading keeps the system progress indicator with its label.
-- A notice above the card keeps its warning symbol and text, centred in the column; a long one still scrolls within its limit.
+- A notice above the card keeps its warning symbol and text, centred across the review's width (N16.4); a long one still scrolls within its limit.
 
 ### N16.7 No session timer
 
@@ -908,7 +911,7 @@ Decided 2026-11-20 (`decisions.md`, `deck.options`, option 6B). The scope, the s
 
 ## N21. Round 8: Browse (2026-11-20)
 
-Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `home.deckList`; round 8 answers 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A, with the forgetting curve in the first version, system symbols on the Today and Browse rows, every bulk action in the first version, a Note menu and ⇧⌘B). Where earlier text differs, this section wins. Behaviour is `browser/workspace` and `search/filter-tokens`; this section is the layout. Under review with those specs until Antoine approves them. Strings: `browser/workspace` V16 and `search/filter-tokens` T15.
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `home.deckList`; round 8 answers 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A, with the forgetting curve in the first version, system symbols on the Today and Browse rows, every bulk action in the first version, a Note menu and ⇧⌘B). Where earlier text differs, this section wins. Behaviour is `browser/workspace` and `search/filter-tokens`; this section is the layout. Approved with those specs by Antoine on 2026-11-20. Strings: `browser/workspace` V16 and `search/filter-tokens` T15.
 
 ### N21.1 Where Browse lives (11A)
 
@@ -1004,7 +1007,7 @@ R1076, R1086, R1090, R1093 (canonical text, syntax mode and reference: dropped; 
 
 ## N22. Round 9: Note Types (2026-11-20)
 
-Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` rows; round 9 answers 1B 2B 3C 4B 5A 6B 7B 8B, with a preview that has a Light and Dark switch and no device picker, and ⇧⌘T). Behaviour is `notetypes/workspace` and `notetypes/draft-save`; this section is the layout. Under review with those specs until Antoine approves them.
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` rows; round 9 answers 1B 2B 3C 4B 5A 6B 7B 8B, with a preview that has a Light and Dark switch and no device picker, and ⇧⌘T). Behaviour is `notetypes/workspace` and `notetypes/draft-save`; this section is the layout. Approved with those specs by Antoine on 2026-11-20.
 
 ### N22.1 Where Note Types lives (1B)
 

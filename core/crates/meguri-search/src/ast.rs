@@ -25,6 +25,11 @@ impl NodeId {
     pub fn index(self) -> usize {
         self.0
     }
+
+    /// The node at `index` of an arena whose ids this crate assigns.
+    pub(crate) fn at(index: usize) -> NodeId {
+        NodeId(index)
+    }
 }
 
 /// One node and the characters of the source it was read from (offsets into
@@ -392,6 +397,15 @@ impl QueryBuilder {
 
     pub(crate) fn span(&self, id: NodeId) -> Range<usize> {
         self.nodes[id.index()].span.clone()
+    }
+
+    pub(crate) fn kind(&self, id: NodeId) -> &NodeKind {
+        &self.nodes[id.index()].kind
+    }
+
+    /// The number of nodes pushed so far: the id the next push gets.
+    pub(crate) fn len(&self) -> usize {
+        self.nodes.len()
     }
 
     pub(crate) fn finish(self, root: NodeId, source: Option<String>) -> Query {

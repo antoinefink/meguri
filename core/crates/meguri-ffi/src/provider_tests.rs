@@ -292,6 +292,50 @@ fn ffi_failed_pause_refresh_stays_blocked_and_explicit_retry_publishes_the_pause
     host.close().unwrap();
 }
 
+/// The first-run fix narrows only the Meguri setup transfer's closure. Any
+/// other closed admission, with Meguri Sync selected and its document
+/// readable, still reads as MP1's blocked phase.
+#[test]
+fn ffi_closed_admission_without_a_setup_transfer_stays_blocked_for_meguri() {
+    let root = tempfile::tempdir().unwrap();
+    let host = host(root.path());
+    let owner = owner(host.clone());
+    owner.clone().configure_meguri("https://first-run.synthetic.example/".into()).unwrap();
+    let handoff = owner.clone().begin_handoff(ProviderSelection::Meguri, false).unwrap();
+    assert_eq!(owner.clone().finish_handoff(handoff).unwrap().phase, ProviderPhase::SetupRequired);
+    assert!(host.manual_transfer_history().active().unwrap().is_none());
+    host.provider_authority().close_admission();
+    assert!(!host.meguri_setup_transfer_holds_admission());
+    let closed = owner.snapshot().unwrap();
+    assert_eq!(closed.selection, Some(ProviderSelection::Meguri));
+    assert_eq!(closed.phase, ProviderPhase::Blocked);
+    assert_eq!(owner.refresh().unwrap().phase, ProviderPhase::SetupRequired);
+    host.close().unwrap();
+}
+
+/// The phase mapping itself: the setup transfer's closure reports the
+/// document's phase; unreadable metadata and any other closure stay Blocked.
+#[test]
+fn ffi_setup_transfer_closure_maps_to_the_document_phase_only() {
+    let root = tempfile::tempdir().unwrap();
+    let host = host(root.path());
+    let owner = owner(host.clone());
+    owner.clone().configure_meguri("https://first-run.synthetic.example/".into()).unwrap();
+    let handoff = owner.clone().begin_handoff(ProviderSelection::Meguri, false).unwrap();
+    owner.clone().finish_handoff(handoff).unwrap();
+    let doc = || host.provider_authority().snapshot();
+    let setup = admitted_snapshot(doc(), true, true);
+    assert_eq!((setup.selection, setup.phase), (Some(ProviderSelection::Meguri), ProviderPhase::SetupRequired));
+    assert!(setup.settings.is_some());
+    assert_eq!(admitted_snapshot(doc(), true, false).phase, ProviderPhase::Blocked);
+    assert_eq!(admitted_snapshot(doc(), false, false).phase, ProviderPhase::SetupRequired);
+    let unreadable = admitted_snapshot(Err(meguri_storage::StorageError::DestinationExists), true, true);
+    assert_eq!((unreadable.selection, unreadable.phase), (None, ProviderPhase::Blocked));
+    assert_eq!(admitted_snapshot(Err(meguri_storage::StorageError::DestinationExists), false, false).phase,
+        ProviderPhase::Blocked);
+    host.close().unwrap();
+}
+
 #[cfg(feature = "test-hooks")]
 mod fixture_transport_tests {
     use super::*;

@@ -4,7 +4,7 @@ Spec: package/backup-triggers
 Requirements: R1630, R1631, R1632, R1637 (core), R1638, R2008, R1475 (backup side), R2010, R2020 (backup side), R1662 (backup side), R1539 (provider to U109), R2056 (local side of the iCloud replacements); budgets R1848, R1854
 Anki: 26.09.3 for T2.1, T2.2 and T4.1 (when Anki makes a backup and which operations force one); every other section is Meguri design from the Product Contract and the plan (U127)
 Scenarios: conformance/scenarios/package/backup-triggers/
-Status: Approved 2026-10-27 (R2066) for the two iCloud rows of T6.1 and the T6.1 bullet that explains them, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
+Status: Approved 2026-10-27 (R2066) for the two iCloud rows of T6.1 and the T6.1 bullet that explains them, with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. The lines that begin "Changed 2026-11-20 (round 9 review)", or that carry that marker inline, are in force: written and decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after the second independent review and its re-review (`docs/process/review-log/browse-note-types-specs-20261120.md`). Every other section is in force and unchanged.
 
 When Meguri backs up: periodic backups (T2, T3), "Back Up Now" (T5), safety backups before destructive operations (T6), the byte copy of a damaged collection (T7), and restore (T8). Names, the writer, retention, the limits and the listing are `package/backups`; the package format is `package/container`; the swap is `engine/collection-replace`. The scenario vocabulary is `specs/conformance/backup-trigger-ops.md` on top of `specs/conformance/backup-ops.md`.
 
@@ -153,6 +153,7 @@ Anki's desktop makes a forced backup (interval ignored, T2.1 still applied, the 
 - It writes the record (T2.3, except a T7 copy); the scheduler re-evaluates (T3.3).
 - **Failure**: the op is refused with `SafetyBackupFailed{cause}` (cause: the B4 or T7 error), none of its writes runs and the collection is unchanged. It never proceeds without the backup.
 - **Cancel**: cancelling the op while its backup runs cancels the backup (B4) and the op ends `Cancelled`. A backup already published stays.
+- **Refused after the backup** (Changed 2026-11-20 (round 9 review)): an op refused inside its write transaction after its backup was published (`Stale`, `schema_changed`, `LossesChanged` of `notetypes/draft-save` D8) writes nothing; the backup stays and keeps its protection until the op ends. T6.1's coalescing may count it for a retry of a structural edit; a note type removal always takes a new one.
 - **Nothing to back up**: with no collection file at the collection path (a first download into an empty directory, or a `CloudAdopt` at a first connection with no local collection, `sync/cloudkit-recovery#V13.3`), the op proceeds without a safety backup.
 
 ## T7. Safety backup of a damaged collection

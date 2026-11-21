@@ -370,18 +370,21 @@ pub enum ServicePort {
     Backup,
     DeckCounts,
     Review,
+    /// The name index of `search/editing-services` D6.7.
+    NameIndex,
     Sync,
     Statistics,
     Widgets,
 }
 
 impl ServicePort {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::DerivedStore,
         Self::Media,
         Self::Backup,
         Self::DeckCounts,
         Self::Review,
+        Self::NameIndex,
         Self::Sync,
         Self::Statistics,
         Self::Widgets,
