@@ -80,10 +80,10 @@ pub(crate) fn commit_layout(ctx: &mut OpContext<'_, '_>, layout: &Layout) -> Res
     meguri_model::faultpoint!("notetypes.structure.write_phase")
         .map_err(|error| EngineError::internal(format!("injected write-phase failure: {error}")))?;
     let mut saved = layout.saved.clone();
-    // N4 step 7 re-derived on the live rows (O7): another note type may
-    // have taken the name since planning.
+    // N4 step 7 re-derived on the live rows (O7) from the requested name:
+    // another note type may have taken it, or freed it, since planning.
     let others: Vec<_> = read::names(scope)?.into_iter().filter(|(other, _)| *other != saved.id).collect();
-    saved.name = names::unique_among(&saved.name, saved.id, &others);
+    saved.name = names::unique_among(&layout.requested_name, saved.id, &others);
     result.name.clone_from(&saved.name);
     for (field, fresh) in saved.fields.iter_mut().zip(&layout.fresh_fields) {
         if *fresh {
@@ -149,7 +149,7 @@ fn rewrite_cards(scope: &mut WriteScope<'_>, layout: &Layout) -> Result<(u64, u6
                     scope.add_grave(card.id.0, GraveKind::Card, Usn::PENDING)?;
                     // Its id, grave and review log stay its own: G9 below
                     // never gives the id to a new card.
-                    scope.retire_card_ids_through(card.id);
+                    scope.retire_card_id(card.id);
                     gone += 1;
                 }
             }

@@ -15,7 +15,7 @@
 #[path = "write_scope_structure.rs"]
 mod structure;
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -87,12 +87,11 @@ pub struct WriteScope<'c> {
     open: bool,
     pub(crate) normal_stage: bool,
     /// Open savepoints, innermost last: whether the scope had a change when
-    /// each was taken.
-    savepoints: Vec<bool>,
-    /// New card ids are allocated at or above this: ids of cards removed
-    /// earlier in the transaction are never given to a new card. `None`
-    /// once a removed card had the largest possible id: no id is left above.
-    card_id_floor: Option<i64>,
+    /// each was taken, and the retired card ids then.
+    savepoints: Vec<(bool, BTreeSet<i64>)>,
+    /// Ids of cards removed earlier in the transaction: never given to a
+    /// new card in it (`ids::allocate_avoiding`).
+    retired_card_ids: BTreeSet<i64>,
 }
 
 /// A savepoint inside a write scope (`engine/op-model` O3): one step of a
@@ -143,7 +142,7 @@ impl<'c> WriteScope<'c> {
             open: true,
             normal_stage: false,
             savepoints: Vec::new(),
-            card_id_floor: Some(i64::MIN),
+            retired_card_ids: BTreeSet::new(),
         })
     }
 
@@ -152,7 +151,7 @@ impl<'c> WriteScope<'c> {
     pub fn savepoint(&mut self) -> Result<Savepoint, StorageError> {
         let depth = self.savepoints.len();
         self.conn.execute_batch(&format!("SAVEPOINT meguri_step_{depth}"))?;
-        self.savepoints.push(self.changed);
+        self.savepoints.push((self.changed, self.retired_card_ids.clone()));
         if let Some(journal) = &mut self.journal {
             journal.push_mark();
         }
@@ -192,8 +191,9 @@ impl<'c> WriteScope<'c> {
         let name = format!("meguri_step_{}", savepoint.depth);
         self.conn
             .execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"))?;
-        if let Some(changed) = self.savepoints.pop() {
+        if let Some((changed, retired)) = self.savepoints.pop() {
             self.changed = changed;
+            self.retired_card_ids = retired;
         }
         if let Some(journal) = &mut self.journal {
             journal.rollback_mark();
@@ -403,12 +403,12 @@ impl<'c> WriteScope<'c> {
     }
 
     fn add<R: Record>(&mut self, record: &R) -> Result<i64, StorageError> {
-        let mut at = self.now().0;
-        if R::TABLE == Table::Cards {
-            let floor = self.card_id_floor.ok_or(StorageError::IdsExhausted { table: "cards" })?;
-            at = at.max(floor);
-        }
-        let id = ids::allocate(self.conn, R::TABLE, at)?;
+        let now = self.now().0;
+        let id = if R::TABLE == Table::Cards {
+            ids::allocate_avoiding(self.conn, R::TABLE, now, &self.retired_card_ids)?
+        } else {
+            ids::allocate(self.conn, R::TABLE, now)?
+        };
         let mut cells = record.to_cells();
         cells[0] = Cell::Integer(id);
         self.put_cells(R::TABLE, cells, false)?;
@@ -420,15 +420,12 @@ impl<'c> WriteScope<'c> {
         self.add(note).map(NoteId)
     }
 
-    /// Keeps the ids up to `id` from every card this scope adds later: a
-    /// card removed with its grave and review log must never see its id
-    /// given to a new card in the same transaction, whatever the allocator
-    /// (I3) would pick once the row is gone.
-    pub fn retire_card_ids_through(&mut self, id: CardId) {
-        self.card_id_floor = match (self.card_id_floor, id.0.checked_add(1)) {
-            (Some(floor), Some(next)) => Some(floor.max(next)),
-            _ => None,
-        };
+    /// Keeps `id` from every card this scope adds later: a card removed with
+    /// its grave and review log must never see its id given to a new card in
+    /// the same transaction, whatever the allocator (I3) would pick once the
+    /// row is gone. A savepoint rolled back forgets the ids retired after it.
+    pub fn retire_card_id(&mut self, id: CardId) {
+        self.retired_card_ids.insert(id.0);
     }
 
     /// Adds a card under a new id (I2, I3).
