@@ -97,11 +97,12 @@ import Testing
             #expect(R.outcome(refused: failure, accounting: nil) == .unfinished, "\(failure)")
         }
         // A changed account or connection is setup's sign-in row; a new sign-in lets the step continue.
-        for failure in [MeguriBootstrapFailure.accountChanged, .connectionChanged, .username, .notSelected] {
+        for failure in [MeguriBootstrapFailure.accountChanged, .connectionChanged, .username] {
             #expect(R.outcome(refused: failure, accounting: nil) == .failed, "\(failure)")
             var resume = R()
             #expect(resume.finished(.failed) == nil && !resume.stopped)
         }
+        #expect(R.outcome(refused: .notSelected, accounting: nil) == .notRun)
         // Anything else waits for Try Again rather than showing a setup failure with no action.
         for failure in [MeguriBootstrapFailure.diskFull, .storage, .notComplete, .mediaEpochMissing, .mediaEpochChanged,
                         .publicationChanged, .documentChanged, .bindingChanged, .operationMismatch] {

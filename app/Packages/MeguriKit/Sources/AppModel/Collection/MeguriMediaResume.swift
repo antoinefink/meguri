@@ -81,7 +81,9 @@ struct MeguriMediaResume: Equatable, Sendable {
         switch failure {
         case .busy, .cancelled, .unavailable, .mediaIncomplete: return .unfinished
         // Identity: setup's sign-in row (T19.5).
-        case .accountChanged, .connectionChanged, .username, .notSelected: return .failed
+        case .accountChanged, .connectionChanged, .username: return .failed
+        // The service is no longer selected: nothing of this step is shown.
+        case .notSelected: return .notRun
         case .transfer(let transfer):
             if transfer.issue == .server, transfer.serverKind == "auth_failed" { return .failed }
             if transfer.boundary == .identityChanged { return .failed }

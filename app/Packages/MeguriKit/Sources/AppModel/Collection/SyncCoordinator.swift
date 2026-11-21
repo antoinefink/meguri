@@ -643,6 +643,8 @@ public final class SyncCoordinator {
         if round2MigrationPending { rememberAutomatic(false) }
         setDeviceSettings(paused: false, automatic: settings.automatic && storedAutomatic)
         if let write = providerSettingsTask { await write.value }
+        // A paused setup media step waited for the hold (MP6.5).
+        if !updateHold { resumeMeguriMediaIfNeeded(.recovered) }
         return !settings.paused
     }
     /// P25.1, P25.2: runs at each attachment until it has succeeded once, before
@@ -960,7 +962,7 @@ public final class SyncCoordinator {
     }
     public var meguriCanRetryMedia: Bool {
         if renderRetryMedia { return true }
-        return !meguriBusy && !settings.paused && meguriOperation != nil
+        return !meguriBusy && !updateHold && meguriOperation != nil
             && (meguriStage == .mediaBlocked || meguriStage == .mediaPaused || meguriStage == .mediaStopped)
     }
     public var deviceSettingsSettling: Bool { desiredProviderSettings != nil }
@@ -1881,8 +1883,9 @@ public final class SyncCoordinator {
     func resumeMeguriMediaIfNeeded(_ trigger: MeguriMediaResume.Trigger) {
         meguriMediaResumeObserver?(trigger)
         guard meguriStage == .mediaPaused, meguriOperation != nil, meguriMediaResume.admits(trigger) else { return }
-        // A setup action that still runs reads Core again when it ends.
-        if meguriBusy { meguriMediaResumePending = trigger; return }
+        // A setup action that still runs reads Core again when it ends. A wait
+        // that ends during an attempt is that attempt's: it schedules its own.
+        if meguriBusy { if trigger != .retry { meguriMediaResumePending = trigger }; return }
         runMeguriMedia(trigger)
     }
     private func runMeguriMedia(_ trigger: MeguriMediaResume.Trigger) {
@@ -1903,8 +1906,11 @@ public final class SyncCoordinator {
                 }
                 return
             }
-            // The read may find setup already complete, or the step no longer this one's.
-            guard !self.meguriReady, let current = self.meguriOperation,
+            // The read may find setup already complete (a stop after completion):
+            // setup's last steps then run, with no media attempt.
+            if self.meguriReady { await self.adoptMeguriReady(); self.recordMeguriMediaAttempt(.ready); return }
+            // An edited address reloads nothing until it is signed in to.
+            guard !self.meguriAddressDirty, let current = self.meguriOperation,
                   [.mediaPaused, .mediaStopped, .mediaBlocked].contains(self.meguriStage) else { return }
             await self.runMeguriMediaStep(current, id: id)
         }
@@ -1915,9 +1921,14 @@ public final class SyncCoordinator {
         do { outcome = try await continueMeguriMedia(operation, id: id) }
         catch {
             meguriLastError = error
-            // An error is not a refusal: the operation and its media stay for the next attempt.
-            if meguriStage == .media { pauseMeguriMedia(operation) }
-            outcome = .unfinished
+            if suspended || closing || replacing || providerHandoffInProgress {
+                // The app or the connection ended the step: it waits, uncounted.
+                outcome = interruptMeguriMedia(operation)
+            } else {
+                // An error is not a refusal: the operation and its media stay for the next attempt.
+                if meguriStage == .media { pauseMeguriMedia(operation) }
+                outcome = .unfinished
+            }
         }
         recordMeguriMediaAttempt(outcome)
     }
@@ -1937,6 +1948,23 @@ public final class SyncCoordinator {
             self.meguriMediaRetry = nil
             self.resumeMeguriMediaIfNeeded(.retry)
         }
+    }
+    private func adoptMeguriReadySettings(_ state: SyncProviderState, _ committed: CloudPolicyDeviceSettings) {
+        providerState = state; settings = committed
+        // P25.3: a stored off outlives a setup that committed automatic on.
+        if committed.automatic, !storedAutomatic {
+            setDeviceSettings(paused: committed.paused, automatic: false)
+        }
+    }
+    /// Setup completed, but a stop or an error came before its last steps:
+    /// read the settings Ready committed, and ask for the first round.
+    private func adoptMeguriReady() async {
+        let expected = generation, revision = hostRevision
+        guard let state = try? await provider?.refresh(), let committed = state.settings,
+              generation == expected, hostRevision == revision, !closing, !replacing else { return }
+        adoptMeguriReadySettings(state, committed)
+        meguriOperation = nil
+        meguriReadyWakePending = true
     }
     /// The step was stopped from outside (the app went to the background, the
     /// connection was edited or replaced): it is paused, not counted, and the
@@ -2011,10 +2039,7 @@ public final class SyncCoordinator {
         // Whole-operation Ready is Core's durable automatic-sync consent.
         let state = try await provider?.refresh()
         guard meguriCurrent(owner, expected, revision), let state, let committed = state.settings else { return .notRun }
-        providerState = state; settings = committed
-        if committed.automatic, !storedAutomatic {
-            setDeviceSettings(paused: committed.paused, automatic: false)
-        }
+        adoptMeguriReadySettings(state, committed)
         try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
         guard meguriCurrent(owner, expected, revision), meguriReady else { return .notRun }
         meguriOperation = nil
