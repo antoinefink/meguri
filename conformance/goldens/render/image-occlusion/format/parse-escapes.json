@@ -208,8 +208,8 @@
                   "shapes": [
                     {
                       "props": [
-                        ["left", ".1"],
-                        ["top", ".1"],
+                        ["left", ".15"],
+                        ["top", ".12"],
                         ["width", ".1"],
                         ["height", ".1"],
                         ["note\\", "key=v"],
@@ -229,8 +229,8 @@
                   "shapes": [
                     {
                       "props": [
-                        ["left", ".1"],
-                        ["top", ".1"],
+                        ["left", ".15"],
+                        ["top", ".12"],
                         ["width", ".1"],
                         ["height", ".1"],
                         ["fill", "rgb(1:2)"]
@@ -248,10 +248,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "6ec0471caa7ac410187b9a65e4f507f035131593c035c72ebe301727f32db313",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "render/image-occlusion/format/parse-escapes",
-  "scenario_sha256": "0ac0a5336036183c1edecd958b7afda058e66062c3a7c200d3778e922d255698",
+  "scenario_sha256": "925c40ae22275af9e5f464d448761c453e5cc3797814e48f4a9e4aa611abfaa5",
   "tz": "UTC"
 }

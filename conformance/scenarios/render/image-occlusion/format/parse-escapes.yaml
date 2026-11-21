@@ -18,5 +18,5 @@ steps:
             - "{{c0::image-occlusion:text:left=.1:top=.1:text=::double::colons:scale=1.}}<br>"
             - "{{c0::image-occlusion:text:left=.1:top=.1:text=h\\:m\\:s:scale=1.}}<br>"
             - "{{c0::image-occlusion:text:left=.1:top=.1:text=x\\:y:z:scale=1.:fs=.05}}<br>"
-            - "{{c1::image-occlusion:rect:left=.1:top=.1:width=.1:height=.1:note\\=key=v:pa\\th=1}}<br>"
-            - "{{c1::image-occlusion:rect:left=.1:top=.1:width=.1:height=.1:fill=rgb(1\\:2)}}<br>"
+            - "{{c1::image-occlusion:rect:left=.15:top=.12:width=.1:height=.1:note\\=key=v:pa\\th=1}}<br>"
+            - "{{c1::image-occlusion:rect:left=.15:top=.12:width=.1:height=.1:fill=rgb(1\\:2)}}<br>"

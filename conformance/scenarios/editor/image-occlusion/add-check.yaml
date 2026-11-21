@@ -22,7 +22,7 @@ steps:
             # two masks and a label
             - notetype: Image Occlusion
               fields:
-                Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.4:rx=.1:ry=.05:oi=1}}<br>{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
+                Occlusion: "{{c1::image-occlusion:rect:left=.15:top=.12:width=.2:height=.1:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.4:rx=.1:ry=.05:oi=1}}<br>{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
                 Image: "<img src=\"probe-check.png\">"
             # a text label only
             - notetype: Image Occlusion
@@ -32,7 +32,7 @@ steps:
             # a mask stored with number 0 only
             - notetype: Image Occlusion
               fields:
-                Occlusion: "{{c0::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>"
+                Occlusion: "{{c0::image-occlusion:rect:left=.15:top=.12:width=.2:height=.1}}<br>"
                 Image: "<img src=\"probe-check.png\">"
             # no shape at all
             - notetype: Image Occlusion
@@ -42,19 +42,19 @@ steps:
             # a cloze typed in Header
             - notetype: Image Occlusion
               fields:
-                Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>"
+                Occlusion: "{{c1::image-occlusion:rect:left=.15:top=.12:width=.2:height=.1}}<br>"
                 Image: "<img src=\"probe-check.png\">"
                 Header: "{{c2::title}}"
             # Header first and empty, with a mask
             - notetype: Header First
               fields:
-                Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>"
+                Occlusion: "{{c1::image-occlusion:rect:left=.15:top=.12:width=.2:height=.1}}<br>"
                 Image: "<img src=\"probe-check.png\">"
             # Header first and filled, with a mask
             - notetype: Header First
               fields:
                 Header: "Title"
-                Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>"
+                Occlusion: "{{c1::image-occlusion:rect:left=.15:top=.12:width=.2:height=.1}}<br>"
                 Image: "<img src=\"probe-check.png\">"
             # Header first and filled, no shape
             - notetype: Header First
@@ -64,6 +64,6 @@ steps:
   - add_note:
       notetype: Image Occlusion
       fields:
-        Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.4:rx=.1:ry=.05:oi=1}}<br>{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
+        Occlusion: "{{c1::image-occlusion:rect:left=.15:top=.12:width=.2:height=.1:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.4:rx=.1:ry=.05:oi=1}}<br>{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
         Image: "<img src=\"probe-check.png\">"
   - db_exec: {sql: "SELECT c.ord FROM cards c ORDER BY c.ord"}

@@ -15,11 +15,11 @@ steps:
   - add_note:
       notetype: Mask Probe
       fields:
-        - "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.4:rx=.1:ry=.05:oi=1}}<br>{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
+        - "{{c1::image-occlusion:rect:left=.15:top=.12:width=.2:height=.1:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.4:rx=.1:ry=.05:oi=1}}<br>{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
         - "<img src=\"probe-a.png\">"
   - add_note:
       notetype: Mask Probe
       fields:
-        - "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>{{c3::image-occlusion:rect:left=.4:top=.1:width=.2:height=.1}}<br>{{c3::image-occlusion:polygon:left=.4:top=.4:points=.4,.4 .6,.45 .5,.6}}<br>{{c0::image-occlusion:text:left=.1:top=.8:text=A:scale=1.:fs=.05}}<br>{{c0::image-occlusion:text:left=.3:top=.8:text=B:scale=1.:fs=.05}}<br>"
+        - "{{c1::image-occlusion:rect:left=.15:top=.12:width=.2:height=.1}}<br>{{c3::image-occlusion:rect:left=.4:top=.1:width=.2:height=.1}}<br>{{c3::image-occlusion:polygon:left=.4:top=.4:points=.4,.4 .6,.45 .5,.6}}<br>{{c0::image-occlusion:text:left=.1:top=.8:text=A:scale=1.:fs=.05}}<br>{{c0::image-occlusion:text:left=.3:top=.8:text=B:scale=1.:fs=.05}}<br>"
         - "<img src=\"probe-b.png\">"
   - observe: [card]
