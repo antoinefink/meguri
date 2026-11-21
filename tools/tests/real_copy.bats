@@ -58,7 +58,7 @@ done
 mkdir -p "$result"
 p="$dd/Build/Products/$config/Meguri.app"
 w="$p/Contents/PlugIns/MeguriWidget.appex"
-mkdir -p "$p/Contents/MacOS" "$w/Contents/MacOS"
+mkdir -p "$p/Contents/MacOS" "$w/Contents/MacOS" "$dd/Build/Products/$config/MeguriWidget.appex"
 echo "synthetic app" >"$p/Contents/MacOS/Meguri"
 echo "synthetic widget" >"$w/Contents/MacOS/MeguriWidget"
 cp "$FX/info.json" "$p/Contents/Info.plist"
@@ -224,6 +224,8 @@ EOF
   called "^lsregister -u $(built)$"
   [ -f "$SB/build/app/real-copy/Meguri.zip" ]
   [ ! -e "$(built)" ]
+  [ ! -e "$SB/build/app/RealCopyDerivedData/Build/Products/Release/MeguriWidget.appex" ]
+  called "^pluginkit -r $SB/build/app/RealCopyDerivedData/Build/Products/Release/MeguriWidget.appex$"
   [ "$(field .details.real_copy.built_app_forgotten)" = true ]
   [ "$(field .details.real_copy.zip)" = build/app/real-copy/Meguri.zip ]
   [ "$(field .details.real_copy_product.bundle_id)" = com.antoinefink.meguri ]
@@ -286,7 +288,7 @@ EOF
 }
 
 @test "the real copy fails when LaunchServices still holds the built app" {
-  FX_STILL_REGISTERED="$(built)" real_copy
+  FX_STILL_REGISTERED="$(built)/Contents/PlugIns/MeguriWidget.appex" real_copy
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-forget ]
   [ ! -e "$(built)" ]

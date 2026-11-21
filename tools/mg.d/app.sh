@@ -736,16 +736,23 @@ mg_app_real_copy_identity() {
 # Unregister and delete the built app (and the widget inside), then check
 # LaunchServices and PlugInKit no longer know it. Runs on every exit path.
 mg_app_real_copy_forget() {
-  local app="$1" records
+  local app="$1" products records
   [ -n "$app" ] || return 0
+  products="${app%/Meguri.app}"
   if [ -e "$app" ]; then
     pluginkit -r "$app/Contents/PlugIns/MeguriWidget.appex" >/dev/null 2>&1
     "$MG_LSREGISTER" -u "$app" >/dev/null 2>&1
     rm -rf "$app" || return 1
   fi
+  # Xcode also leaves the widget product itself beside the app.
+  if [ -e "$products/MeguriWidget.appex" ]; then
+    pluginkit -r "$products/MeguriWidget.appex" >/dev/null 2>&1
+    rm -rf "$products/MeguriWidget.appex" || return 1
+  fi
   records="$("$MG_LSREGISTER" -dump 2>/dev/null | sed -n 's/^path: *\(.*\) (0x[0-9a-fA-F]*)$/\1/p'
     pluginkit -mADvvv -i com.antoinefink.meguri.widget 2>/dev/null | sed -n 's/^[[:space:]]*Path = //p')"
-  ! awk -v p="$app" '$0 == p || index($0, p "/") == 1 { found = 1 } END { exit !found }' <<<"$records"
+  # Nothing registered from this build's products directory.
+  ! awk -v p="$products" '$0 == p || index($0, p "/") == 1 { found = 1 } END { exit !found }' <<<"$records"
 }
 
 # What Antoine runs, read-only, once he has installed the zip.
