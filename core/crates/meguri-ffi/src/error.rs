@@ -204,6 +204,10 @@ impl From<EngineError> for CoreError {
             EngineError::Open(failure) => CoreError::Open {
                 failure: failure.into(),
             },
+            // Its own refusal kind comes with the Find and Replace exports.
+            EngineError::FindReplace(_) => CoreError::InvalidArgument {
+                message: error.to_string(),
+            },
             EngineError::InvalidIgnoreBeforeDate { .. } => CoreError::InvalidArgument {
                 message: error.to_string(),
             },

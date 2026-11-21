@@ -18,6 +18,7 @@ pub mod backup_limits;
 pub mod bootstrap;
 pub mod browse;
 pub mod browser_config;
+pub mod bulk;
 pub mod cancel;
 pub mod cardgen;
 pub mod cards;
