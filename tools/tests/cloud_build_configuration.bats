@@ -212,3 +212,60 @@ for name, sdk in (("Info-iOS.plist", "iphone*"), ("Info-macOS.plist", "macosx*")
         assert actual == plistlib.loads(literal.encode())
 PY_INPUT
 }
+
+@test "only the team-signed Release real copy may sign development push over production CloudKit" {
+  python3 - "$REPO_ROOT" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]) / "tools/tests/cloud_build_configuration.py"
+spec = importlib.util.spec_from_file_location("cloud_configuration", path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+def settings(push):
+    return {"MEGURI_BUNDLE_ID_SUFFIX": "", "PRODUCT_BUNDLE_IDENTIFIER": "com.antoinefink.meguri",
+            "MEGURI_CLOUD_CONTAINER_development": "iCloud.example.dev",
+            "MEGURI_CLOUD_CONTAINER_production": "iCloud.example.daily",
+            "MEGURI_CLOUD_CONFIGURATION": "production", "MEGURI_CLOUD_CONTAINER": "iCloud.example.daily",
+            "MEGURI_CLOUD_ENVIRONMENT": "production", "MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT": "Production",
+            "MEGURI_CLOUD_PUSH_ENVIRONMENT": push,
+            "INFOPLIST_KEY_MeguriCloudContainer": "iCloud.example.daily", "INFOPLIST_KEY_MeguriCloudEnvironment": "production",
+            "MEGURI_CLOUD_SCHEMA_CONFIGURED_development": "YES", "MEGURI_CLOUD_SCHEMA_CONFIGURED_production": "NO",
+            "MEGURI_CLOUD_SCHEMA_CONFIGURED": "NO", "MEGURI_CLOUD_SCHEMA_BOOLEAN": "0"}
+
+def entitlements(push):
+    return {"com.apple.developer.icloud-container-identifiers": ["iCloud.example.daily"],
+            "com.apple.developer.icloud-services": ["CloudKit"],
+            "com.apple.developer.icloud-container-environment": "Production",
+            "com.apple.developer.aps-environment": push}
+
+info = {"MeguriCloudContainer": "iCloud.example.daily", "MeguriCloudEnvironment": "production",
+        "MeguriCloudSchemaConfigured": False}
+
+def rejected(*args, **kwargs):
+    try:
+        module.check(*args, **kwargs)
+    except ValueError:
+        return
+    raise AssertionError((args, kwargs))
+
+# The real copy: development push, production CloudKit.
+module.check(settings("development"), "Release", "mac", "team", info, entitlements("development"), {}, real_copy=True)
+rejected(settings("production"), "Release", "mac", "team", real_copy=True)
+rejected(settings("development"), "Release", "mac", "team", info, entitlements("production"), {}, real_copy=True)
+# Everything else keeps production push for Release.
+module.check(settings("production"), "Release", "mac", "team", info, entitlements("production"), {})
+rejected(settings("development"), "Release", "mac", "team")
+rejected(settings("development"), "Release", "mac", "team", info, entitlements("development"), {})
+# Only the team-signed Mac Release can be the real copy.
+# The iPhone real copy signs development aps-environment too.
+ios_ent = dict(entitlements("development"))
+ios_ent["aps-environment"] = ios_ent.pop("com.apple.developer.aps-environment")
+module.check(settings("development"), "Release", "ios", "team", info, ios_ent, {}, real_copy=True)
+for args in (("AppStore", "mac", "team"), ("Release", "mac", "adhoc"), ("Release", "ios", "adhoc")):
+    rejected(settings("development"), *args, real_copy=True)
+rejected(settings("development"), "Release", "mac", "team", real_copy=True, personal_preview=True)
+PY
+}

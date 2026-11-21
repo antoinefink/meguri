@@ -268,6 +268,52 @@ fn typed_key(query: &Query, span: &Range<usize>, term: &Term) -> String {
     format!("{key}:")
 }
 
+/// A query's WHERE expression for one mode, compiled into parameters that
+/// other expressions share (`search/filter-tokens` T12.4: one count
+/// statement holds the predicates of several values).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Predicate {
+    /// The rows Q5 tests for the query in its mode.
+    pub rows: Rows,
+    /// An SQL boolean expression over the aliases of `rows`.
+    pub sql: String,
+    /// The context values it read (Q8).
+    pub reads: ContextReads,
+}
+
+/// [`Plan::build`]'s predicate of `query` for `mode`, its parameters bound
+/// after those already in `params`. On an error `params` is left as it was,
+/// so no parameter of a failed query stays bound.
+pub fn compile_predicate(
+    query: &Query,
+    mode: SearchMode,
+    ctx: &SearchContext,
+    notetypes: &SearchNotetypes,
+    params: &mut Params,
+) -> Result<Predicate, BuildError> {
+    let bound = params.len();
+    let compiled = compile_query(query, mode, ctx, notetypes, &mut sql::compile_term, false, params);
+    match compiled {
+        Ok(compiled) => Ok(Predicate {
+            rows: compiled.rows,
+            sql: compiled.predicate,
+            reads: compiled.reads,
+        }),
+        Err(error) => {
+            params.truncate(bound);
+            Err(error)
+        }
+    }
+}
+
+/// What [`compile_query`] gives.
+struct Compiled {
+    rows: Rows,
+    predicate: String,
+    slow: Vec<NodeId>,
+    reads: ContextReads,
+}
+
 fn build_with(
     query: &Query,
     mode: SearchMode,
@@ -276,6 +322,33 @@ fn build_with(
     compile: &mut Compile<'_>,
     relaxed: bool,
 ) -> Result<Plan, BuildError> {
+    let mut params = Params::default();
+    let Compiled {
+        rows,
+        predicate,
+        slow,
+        reads,
+    } = compile_query(query, mode, ctx, notetypes, compile, relaxed, &mut params)?;
+    Ok(Plan {
+        mode,
+        rows,
+        sql: sql::statement(mode, rows, &predicate),
+        predicate,
+        params: params.into_vec(),
+        slow,
+        reads,
+    })
+}
+
+fn compile_query(
+    query: &Query,
+    mode: SearchMode,
+    ctx: &SearchContext,
+    notetypes: &SearchNotetypes,
+    compile: &mut Compile<'_>,
+    relaxed: bool,
+    params: &mut Params,
+) -> Result<Compiled, BuildError> {
     let rows = Rows::for_query(mode, query_scope(query));
     let env = TermEnv {
         rows,
@@ -283,7 +356,6 @@ fn build_with(
         notetypes,
         negated: false,
     };
-    let mut params = Params::default();
     let mut predicate = String::new();
     let mut slow = Vec::new();
     let mut reads = ContextReads::NONE;
@@ -328,7 +400,7 @@ fn build_with(
                 }
                 let term_env = TermEnv { negated, ..env };
                 let bound = params.len();
-                let term_sql = match compile(term, &term_env, &mut params) {
+                let term_sql = match compile(term, &term_env, params) {
                     Ok(term_sql) => term_sql,
                     Err(kind) if sql::is_pattern_error(&kind) => {
                         pattern_error.get_or_insert_with(|| SearchError::new(kind, node.span.clone()));
@@ -369,12 +441,9 @@ fn build_with(
     if let Some(error) = pattern_error {
         return Err(error.into());
     }
-    Ok(Plan {
-        mode,
+    Ok(Compiled {
         rows,
-        sql: sql::statement(mode, rows, &predicate),
         predicate,
-        params: params.into_vec(),
         slow,
         reads,
     })

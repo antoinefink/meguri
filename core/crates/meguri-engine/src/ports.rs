@@ -372,19 +372,22 @@ pub enum ServicePort {
     Review,
     /// The name index of `search/editing-services` D6.7.
     NameIndex,
+    /// Browse's filter counts and their cache (`search/filter-tokens` T12.4).
+    FilterCounts,
     Sync,
     Statistics,
     Widgets,
 }
 
 impl ServicePort {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::DerivedStore,
         Self::Media,
         Self::Backup,
         Self::DeckCounts,
         Self::Review,
         Self::NameIndex,
+        Self::FilterCounts,
         Self::Sync,
         Self::Statistics,
         Self::Widgets,

@@ -24,6 +24,8 @@ pub mod config_keys;
 pub mod edit_services;
 #[path = "field_columns.rs"]
 pub mod field_columns;
+#[path = "filter_suggestions.rs"]
+pub mod filter_suggestions;
 #[path = "filter_tokens.rs"]
 pub mod filter_tokens;
 #[path = "name_index.rs"]
@@ -38,5 +40,7 @@ pub mod props_and_history;
 pub mod sort_props;
 #[path = "state_and_flags.rs"]
 pub mod state_and_flags;
+#[path = "suggest_terms.rs"]
+pub mod suggest_terms;
 #[path = "text_matching.rs"]
 pub mod text_matching;

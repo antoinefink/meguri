@@ -369,20 +369,15 @@ mg_doctor() {
     (.provisioning_UDID // .platform_UUID) // empty' 2>/dev/null)"
   daily="$(python3 "$MG_TOOLS/scripts/daily-driver-profiles.py" --device "$daily_udid" 2>/dev/null)" || daily=""
   if [ -n "$daily" ]; then
-    daily_missing="$(jq -r '.mac.missing | join(", ")' <<<"$daily")"
-    daily_ios="$(jq -r '.ios.state' <<<"$daily")"
+    daily_missing="$(jq -r '.mac.missing | if length == 0 then "set up" else join(", ") end' <<<"$daily")"
+    daily_ios="$(jq -r '"app " + .ios.state + ", widget " + .ios_widget.state' <<<"$daily")"
   fi
-  if [ -n "$daily" ] && jq -e '.mac.state == "authorized"' >/dev/null 2>&1 <<<"$daily"; then
-    printf '  %-4s  %-16s %s\n' info daily-driver "an installed Mac profile authorizes the real copy (com.antoinefink.meguri)$([ -n "$daily_udid" ] || echo ", but this Mac's UDID could not be read, so its coverage is unchecked"); iOS: $daily_ios"
-  elif [ "$daily_missing" = push-production ]; then
-    # Done on the account side; development profiles never grant production push.
-    printf '  %-4s  %-16s %s\n' info daily-driver "the real copy's profile is installed but grants push development only: waiting on the push decision (one-time-setup.md); iOS: $daily_ios"
-    mg_user_step daily-driver-account missing false "Decide how the real copy signs push (daily driver)" \
-      "Its Mac profile is installed; a development profile grants push development only, while Release signs production. Choose Developer ID signing or development push for the personal Release (one-time-setup.md)."
+  if [ -n "$daily" ] && jq -e '.mac.state == "authorized" and .ios.state == "authorized" and .ios_widget.state == "authorized"' >/dev/null 2>&1 <<<"$daily"; then
+    printf '  %-4s  %-16s %s\n' info daily-driver "installed profiles authorize the real copy (com.antoinefink.meguri) on this Mac$([ -n "$daily_udid" ] || echo ", whose UDID could not be read, so its coverage is unchecked") and on iOS; the iPhone's coverage is checked when the route runs"
   else
-    printf '  %-4s  %-16s %s\n' info daily-driver "optional: no installed Mac profile authorizes the real copy (com.antoinefink.meguri); missing: $daily_missing; iOS: $daily_ios"
+    printf '  %-4s  %-16s %s\n' info daily-driver "optional: the real copy (com.antoinefink.meguri) is not fully set up; Mac: $daily_missing; iOS: $daily_ios"
     mg_user_step daily-driver-account missing false "Set up the real copy's identifiers and profiles (daily driver)" \
-      "In Certificates, Identifiers & Profiles: register com.antoinefink.meguri and com.antoinefink.meguri.widget, the App Group group.com.antoinefink.meguri on both, iCloud (iCloud.com.antoinefink.meguri) and Push on the app, and a macOS development profile for each that includes this Mac. See the push note in the doc."
+      "In Certificates, Identifiers & Profiles: register com.antoinefink.meguri and com.antoinefink.meguri.widget, the App Group group.com.antoinefink.meguri on both, iCloud (iCloud.com.antoinefink.meguri) and Push Notifications on the app, then development profiles with this Mac's certificate: macOS for the app with this Mac, iOS for the app and the widget with the iPhone (docs/process/one-time-setup.md#daily-driver-account)."
   fi
   [ -z "$daily" ] || mg_detail daily_driver_profiles "$daily"
 

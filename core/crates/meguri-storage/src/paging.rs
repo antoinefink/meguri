@@ -264,6 +264,43 @@ pub trait ReadRows: sealed::Connected {
     ) -> Result<(), StorageError> {
         crate::search_rows::visit(self.connection(), sql, params, cancel, visit)
     }
+
+    /// Runs one read-only statement of Browse's filter counts compiled by
+    /// the search crate (`search/filter-tokens` T12.4), whose columns are
+    /// integers (at most [`crate::search_rows::COUNT_COLUMNS`]), each row
+    /// handed to `visit`; cancelled as [`ReadRows::visit_id_rows`] is.
+    fn visit_count_rows(
+        &self,
+        sql: &str,
+        params: &[Cell],
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[i64]) -> bool,
+    ) -> Result<(), StorageError> {
+        crate::search_rows::visit_counts(self.connection(), sql, params, cancel, visit)
+    }
+
+    /// Every note's id, its `mid`, and its `tags` read as a tag term reads
+    /// it (T12.4's tag and note type counts): text, or none for NULL and
+    /// BLOB; cancelled as [`ReadRows::visit_id_rows`] is.
+    fn visit_note_tags(
+        &self,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut crate::search_rows::NoteVisit<'_>,
+    ) -> Result<(), StorageError> {
+        crate::search_rows::visit_note_tags(self.connection(), cancel, visit)
+    }
+
+    /// Every deck's id and its `name` read as a deck term reads it (T12.4's
+    /// deck counts): text, or none for NULL and BLOB.
+    fn deck_names(&self) -> Result<Vec<(i64, Option<String>)>, StorageError> {
+        crate::search_rows::deck_names(self.connection())
+    }
+
+    /// Every note type's id and its `name` as text (T12.4's note type
+    /// counts).
+    fn notetype_names(&self) -> Result<Vec<(i64, Option<String>)>, StorageError> {
+        crate::search_rows::notetype_names(self.connection())
+    }
     /// M3's indexed fallback; Reset does not truncate this lookup.
     fn fsrs_last_review_time(&self, card: CardId) -> Result<Option<i64>, StorageError> {
         crate::queries::revlog_fsrs::last_review_time(self.connection(), card)

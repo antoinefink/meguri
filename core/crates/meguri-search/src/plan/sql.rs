@@ -28,11 +28,11 @@ impl Params {
         format!("?{}", self.0.len())
     }
 
-    pub(super) fn into_vec(self) -> Vec<Param> {
+    pub(crate) fn into_vec(self) -> Vec<Param> {
         self.0
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
 

@@ -51,11 +51,11 @@ pub(crate) struct ExecShared {
     pub(crate) after_commit: Mutex<Option<AfterCommitHook>>,
     #[cfg(feature = "test-hooks")]
     pub(crate) fail_sync_after_commit: std::sync::atomic::AtomicBool,
-    /// WAL syncs and write phases, recorded only after a test asks
+    /// WAL syncs and write phases that start after a test asks
     /// (`Collection::record_durability_events`), so long runs with test hooks
     /// on (benches, fault loops) keep no growing log.
     #[cfg(feature = "test-hooks")]
-    durability_events: Mutex<Option<durability_events::DurabilityEvents>>,
+    durability_events: Mutex<Option<durability_events::Recording>>,
     queue: Mutex<QueueState>,
     /// The writer waits here for tasks.
     wake: Condvar,
@@ -205,25 +205,29 @@ impl ExecShared {
     }
 
     #[cfg(feature = "test-hooks")]
-    fn lock_durability(&self) -> MutexGuard<'_, Option<durability_events::DurabilityEvents>> {
+    fn lock_durability(&self) -> MutexGuard<'_, Option<durability_events::Recording>> {
         self.durability_events.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     #[cfg(feature = "test-hooks")]
     pub(crate) fn start_durability_recording(&self) {
-        self.lock_durability().get_or_insert_with(Default::default);
+        self.lock_durability()
+            .get_or_insert_with(|| durability_events::Recording::new(crate::monotonic::now()));
     }
 
     #[cfg(feature = "test-hooks")]
     pub(crate) fn durability_events(&self) -> durability_events::DurabilityEvents {
-        self.lock_durability().clone().unwrap_or_default()
+        self.lock_durability()
+            .as_ref()
+            .map(|recording| recording.events().clone())
+            .unwrap_or_default()
     }
 
     /// Adds to the durability log when a test turned recording on.
     #[cfg(feature = "test-hooks")]
-    pub(crate) fn record_durability(&self, record: impl FnOnce(&mut durability_events::DurabilityEvents)) {
-        if let Some(events) = self.lock_durability().as_mut() {
-            record(events);
+    pub(crate) fn record_durability(&self, record: impl FnOnce(&mut durability_events::Recording)) {
+        if let Some(recording) = self.lock_durability().as_mut() {
+            record(recording);
         }
     }
 
