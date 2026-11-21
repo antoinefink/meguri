@@ -1063,7 +1063,7 @@ jobs:
             xargs -0 awk 'FNR == 1 { p = 0 } /^\[package\]/ { p = 1; next } /^\[/ { p = 0 }
               p && /^name[[:space:]]*=/ { gsub(/[" ]/, ""); sub(/^name=/, ""); print }' | sort -u)"
           [[ -n "$pkgs" ]] || { echo "::error::No local packages found"; exit 1; }
-          for dir in core/target/*/*/; do
+          for dir in core/target/*/ core/target/*/*/; do
             [[ -d "$dir/deps" ]] || continue
             rm -rf -- "$dir/incremental"
             while IFS= read -r p; do
