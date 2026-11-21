@@ -1,5 +1,6 @@
-//! Built searches (`specs/search/join-and-replace.md` J1, J3 to J5, and the
-//! two field items of `specs/search/filter-tokens.md` T3.1): the search text
+//! Built searches (`specs/search/join-and-replace.md` J1, J3 to J5, the two
+//! field items of `specs/search/filter-tokens.md` T3.1 and its written-text
+//! item, T3.2): the search text
 //! Meguri writes for a UI action from a structured item. Nothing here reads
 //! a collection, config or clock. Items are walked with an explicit stack
 //! and dropped without recursion, and a parsed-text item's query is copied
@@ -110,6 +111,10 @@ pub enum BuiltItem {
     /// The items `grammar.md` reads from `text`. `field_text` is set when the
     /// text comes from a search field (J2 then applies first).
     Parsed { text: String, field_text: bool },
+    /// `search/filter-tokens` T3.2: the text as the user or a stored search
+    /// wrote it, read by `grammar.md` after J2 and written unchanged, in
+    /// brackets inside a longer search unless it is one item.
+    Written(String),
     /// AND or OR over one or more items.
     Group { joiner: Joiner, items: Vec<BuiltItem> },
     /// The item negated by J5.
@@ -147,7 +152,8 @@ pub enum InvalidItem {
     UnrepresentableName,
     /// An empty deck, tag, note type or field name.
     EmptyName,
-    /// An empty literal, or an empty "field contains" text.
+    /// An empty literal, an empty "field contains" text, or an empty
+    /// written text.
     EmptyText,
     /// A template ordinal above 65534.
     OrdinalOutOfRange,
@@ -332,9 +338,30 @@ impl Writer {
     }
 
     /// J5: a negation gives the item it negates; anything else is negated.
+    /// A written-text item keeps its text (T3.2): `-` goes before it, and
+    /// before brackets around it unless it is one term or one bracketed
+    /// group, since `--x` or `--and` would read as another search.
     fn negated(&mut self, item: NodeId) -> NodeId {
+        if self.builder.is_written(item) {
+            let inner = match self.builder.kind(item) {
+                NodeKind::Term(_) | NodeKind::Group(_) => item,
+                _ => self.push(NodeKind::Group(item)),
+            };
+            return self.push(NodeKind::Not(inner));
+        }
         match self.builder.kind(item) {
-            NodeKind::Not(inner) => *inner,
+            // The brackets put around a negated written negation or
+            // operator word above go too; those of two or more items stay.
+            NodeKind::Not(inner) => match self.builder.kind(*inner) {
+                NodeKind::Group(child)
+                    if !self.builder.is_written(*inner)
+                        && self.builder.is_written(*child)
+                        && matches!(self.builder.kind(*child), NodeKind::Not(_) | NodeKind::NegatedOperator(_)) =>
+                {
+                    *child
+                }
+                _ => *inner,
+            },
             _ => self.push(NodeKind::Not(item)),
         }
     }
@@ -356,6 +383,7 @@ impl Writer {
             },
             BuiltItem::Negated(_) => self.negated(children[0]),
             BuiltItem::Parsed { text, field_text } => self.parsed(text, *field_text, path)?,
+            BuiltItem::Written(text) => self.written(text, path)?,
             BuiltItem::Untagged => {
                 let any = self.term(any_tag());
                 self.push(NodeKind::Not(any))
@@ -374,6 +402,36 @@ impl Writer {
     /// A parsed-text item: its only item, or a group of all of them. The
     /// parsed nodes are copied in arena order, children before parents.
     fn parsed(&mut self, text: &str, field_text: bool, path: &[usize]) -> Result<NodeId, BuilderError> {
+        let root = self.copied(text, field_text, path)?;
+        Ok(self.grouped(root))
+    }
+
+    /// T3.2's written-text item: its nodes as a parsed-text item's (J2
+    /// first), the text marked on its top item so the canonical writer puts
+    /// it there unchanged. Two or more items at its top level sit in a group,
+    /// whose brackets are written inside a longer search.
+    fn written(&mut self, text: &str, path: &[usize]) -> Result<NodeId, BuilderError> {
+        // T3.2 refuses only the empty text. White_Space alone reads as the
+        // whole collection and is written as it stands; T4 never makes it.
+        if text.is_empty() {
+            return Err(refused(InvalidItem::EmptyText, path));
+        }
+        let root = self.copied(text, true, path)?;
+        self.builder.mark_written(root, text.to_owned());
+        Ok(self.grouped(root))
+    }
+
+    /// A group around `root` when it is two or more items.
+    fn grouped(&mut self, root: NodeId) -> NodeId {
+        match self.builder.kind(root) {
+            NodeKind::And(_) | NodeKind::Or(_) => self.push(NodeKind::Group(root)),
+            _ => root,
+        }
+    }
+
+    /// The nodes `grammar.md` reads from `text`, copied in arena order,
+    /// children before parents; the root's new id.
+    fn copied(&mut self, text: &str, field_text: bool, path: &[usize]) -> Result<NodeId, BuilderError> {
         let text = if field_text {
             search_field_text(text)
         } else {
@@ -396,11 +454,7 @@ impl Writer {
             };
             self.push(kind);
         }
-        let root = moved(&query.root());
-        Ok(match self.builder.kind(root) {
-            NodeKind::And(_) | NodeKind::Or(_) => self.push(NodeKind::Group(root)),
-            _ => root,
-        })
+        Ok(moved(&query.root()))
     }
 }
 
@@ -494,6 +548,7 @@ fn leaf_term(item: &BuiltItem) -> Result<Term, InvalidItem> {
             }
         }
         BuiltItem::Parsed { .. }
+        | BuiltItem::Written(_)
         | BuiltItem::Group { .. }
         | BuiltItem::Negated(_)
         | BuiltItem::Untagged

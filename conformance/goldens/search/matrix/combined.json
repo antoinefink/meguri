@@ -50,15 +50,19 @@
         "card": {
           "#c1": {
             "data": {
+              "d": 1.0,
+              "decay": 0.154,
+              "dr": 0.9,
               "lrt": 1930395600,
-              "pos": 1
+              "pos": 1,
+              "s": 8.2956
             },
             "did": "Lang",
-            "due": 3,
+            "due": 7,
             "factor": 2500,
             "flags": 0,
             "id": "#c1",
-            "ivl": 3,
+            "ivl": 7,
             "lapses": 0,
             "left": 0,
             "mod": 1930395600,
@@ -73,8 +77,12 @@
           },
           "#c3": {
             "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.9,
               "lrt": 1930395600,
-              "pos": 2
+              "pos": 2,
+              "s": 2.3065
             },
             "did": "Lang::Verbs",
             "due": 1930396335,
@@ -96,15 +104,19 @@
           },
           "#c5": {
             "data": {
+              "d": 1.0,
+              "decay": 0.154,
+              "dr": 0.9,
               "lrt": 1930395600,
-              "pos": 4
+              "pos": 4,
+              "s": 8.2956
             },
             "did": "Sums",
-            "due": 6,
+            "due": 8,
             "factor": 2650,
             "flags": 0,
             "id": "#c5",
-            "ivl": 6,
+            "ivl": 8,
             "lapses": 0,
             "left": 0,
             "mod": 1930395600,
@@ -119,8 +131,12 @@
           },
           "#c6": {
             "data": {
+              "d": 6.413,
+              "decay": 0.154,
+              "dr": 0.9,
               "lrt": 1930395600,
-              "pos": 4
+              "pos": 4,
+              "s": 0.212
             },
             "did": "Sums",
             "due": 1930396312,
@@ -625,6 +641,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "search/matrix/combined",
-  "scenario_sha256": "55ee9a120a96aeee405eaf8830b2cf94d3e5738ada5ed15f0ef4c08b0acaf3d0",
+  "scenario_sha256": "633831b6d07f6cede982b656e725b4a34e16bab53e2556b16347192729120810",
   "tz": "UTC"
 }
