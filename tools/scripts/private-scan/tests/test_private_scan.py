@@ -1585,5 +1585,78 @@ class PublicNoticeTests(unittest.TestCase):
         self.assertEqual(found, [{"path": "report.txt", "lines": [1]}])
 
 
+class StalePublicArtifactTests(unittest.TestCase):
+    """A reviewed file edited after its review: its reviewed lines are
+    scanned again, the finding says so, and `pins` lists it without a token
+    set. Every token here is made up and already in this repository."""
+
+    PATH = "docs/reviewed.md"
+    REVIEWED = b"schmetterling was reviewed as public\nsecond line\n"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = os.path.join(self.tmp.name, "repo")
+        os.makedirs(self.repo)
+        git(self.repo, "init", "-q")
+        self.full = os.path.join(self.repo, self.PATH)
+        write(self.full, self.REVIEWED, "wb")
+        write(os.path.join(self.repo, "plain.md"), "nothing\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "reviewed bytes")
+        self.matcher = private_scan.Matcher({("schmetterling",), ("sentinelprivate",)})
+        patch = mock.patch.object(private_scan, "PUBLIC_ARTIFACTS",
+                                  {self.PATH: hashlib.sha256(self.REVIEWED).hexdigest(), "gone.md": "0" * 64})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.addCleanup(self.tmp.cleanup)
+
+    def head(self):
+        return subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], stdout=subprocess.PIPE,
+                              universal_newlines=True, check=True).stdout.strip()
+
+    def test_reviewed_bytes_pass_and_an_edit_elsewhere_makes_the_reviewed_line_count_again(self):
+        self.assertEqual(private_scan.scan_paths(self.matcher, [self.full], self.repo)[0], [])
+        self.assertEqual(private_scan.pins(self.repo),
+                         {"commit": self.head(), "pinned": 1, "stale": [], "absent": ["gone.md"]})
+        # An ordinary edit to another line: the commit that adds it is clean.
+        write(self.full, self.REVIEWED + b"third line\n", "wb")
+        git(self.repo, "add", "-A")
+        self.assertEqual(private_scan.scan_staged(self.matcher, self.repo)[0], [])
+        git(self.repo, "commit", "-qm", "edit another line")
+        # The whole file no longer has its reviewed bytes: line 1 counts.
+        self.assertEqual(private_scan.scan_paths(self.matcher, [self.full], self.repo)[0],
+                         [{"path": self.full, "lines": [1], "stale_public_artifact": True}])
+        self.assertEqual(private_scan.pins(self.repo)["stale"], [self.PATH])
+
+    def test_a_merge_from_a_base_older_than_the_reviewed_line_is_marked_stale_not_plain(self):
+        git(self.repo, "checkout", "-q", "--orphan", "old")
+        git(self.repo, "rm", "-rqf", ".")
+        write(os.path.join(self.repo, "other.md"), "unrelated\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "old base")
+        # What the old checkout's merge stages: the edited file, whole.
+        write(self.full, self.REVIEWED + b"third line\n", "wb")
+        write(os.path.join(self.repo, "new.md"), "sentinelprivate\n")
+        git(self.repo, "add", "-A")
+        self.assertEqual(private_scan.scan_staged(self.matcher, self.repo)[0], [
+            {"path": self.PATH, "lines": [1], "stale_public_artifact": True},
+            {"path": "new.md", "lines": [1]},
+        ])
+
+    def test_pins_reads_no_token_set_and_needs_a_full_commit_id(self):
+        r = run("pins", "--repo", self.repo)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sorted(json.loads(r.stdout)), ["absent", "commit", "pinned", "stale"])
+        self.assertEqual(run("pins", "--repo", self.repo, "--commit", "HEAD").returncode, 2)
+
+    def test_an_empty_token_set_is_an_error_not_a_clean_scan(self):
+        empty = os.path.join(self.tmp.name, "tokens.txt")
+        write(empty, "\n")
+        for mode in (["--staged", "--repo", self.repo], [self.full]):
+            r = run("scan", "--tokens", empty, *mode)
+            self.assertEqual(r.returncode, 2, r.stdout)
+            self.assertEqual(r.stdout, "")
+
+
 if __name__ == "__main__":
     unittest.main()

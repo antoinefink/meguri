@@ -88,6 +88,8 @@ EOF
 # that could change system state are stubbed too, so a call to them shows up
 # in the log instead of failing silently with "command not found".
 make_stubs() {
+  # A set-up checkout has the commit hooks (doctor: private-hooks).
+  "$SB/tools/mg" hooks install >/dev/null
   STUBS="$BATS_TEST_TMPDIR/stubs"
   mkdir -p "$STUBS"
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
@@ -685,6 +687,55 @@ EOF
   assert_read_only_calls
   validate "$result"
   assert_doctor_result "$result" "$status"
+}
+
+@test "doctor checks the commit hooks and the one private token set every worktree reads, from counts and hashes only" {
+  make_stubs
+  check() { jq -r --arg id "$1" '.details.checks[] | select(.id == $id) | .status + " " + .message' "$result"; }
+  mg doctor
+  [[ "$(check private-hooks)" == "pass "* ]]
+  [[ "$(check private-scan)" == "pass no private collection or token set on this machine"* ]]
+  # A shim that is missing, foreign or bypassed by core.hooksPath fails.
+  rm "$SB/.git/hooks/pre-merge-commit"
+  mg doctor
+  [ "$(field .status)" = fail ]
+  [[ "$(check private-hooks)" == "fail "*"pre-merge-commit (shim)"* ]]
+  "$SB/tools/mg" hooks install >/dev/null
+  printf '#!/bin/sh\nexit 0\n' >"$SB/.git/hooks/pre-commit"
+  mg doctor
+  [[ "$(check private-hooks)" == "fail "*"pre-commit (shim)"* ]]
+  rm "$SB/.git/hooks/pre-commit"
+  "$SB/tools/mg" hooks install >/dev/null
+  git -C "$SB" config core.hooksPath .githooks
+  mg doctor
+  [[ "$(check private-hooks)" == "fail core.hooksPath is set"* ]]
+  git -C "$SB" config --unset core.hooksPath
+  # Expected but missing: the hooks refuse commits, so doctor fails.
+  git -C "$SB" config meguri.privateTokenSet required
+  mg doctor
+  [ "$(field .status)" = fail ]
+  [[ "$(check private-scan)" == "fail no private token set at "* ]]
+  # Present with an unknown baseline warns; counts and a hash, never text.
+  mkdir -p "$SB/build/private/tokens"
+  printf 'madeupdoctorword\nanothermadeupword\n' >"$SB/build/private/tokens/tokens.txt"
+  mg doctor
+  [[ "$(check private-scan)" == "warn 2 tokens, sha256 "*"public baseline is unknown"* ]]
+  ! grep -q madeupdoctorword "$result"
+  # A linked worktree reports the main checkout's set, not one of its own.
+  git -C "$SB" worktree add -q "$BATS_TEST_TMPDIR/wt" -b other
+  run --separate-stderr "$BATS_TEST_TMPDIR/wt/tools/mg" doctor
+  [[ "$(jq -r '.details.checks[] | select(.id == "private-scan") | .message' "${lines[${#lines[@]} - 1]}")" == "2 tokens, sha256 "* ]]
+  # A baseline for these bytes passes; one for other bytes is unknown again.
+  jq -n --arg head "$(git -C "$SB" rev-parse HEAD)" --arg sha "$(sha256sum "$SB/build/private/tokens/tokens.txt" | cut -c1-64)" \
+    '{head: $head, by: "refresh-public", at: "2026-01-01T00:00:00Z", sha256: $sha, tokens: 2}' >"$SB/build/private/tokens/baseline.json"
+  mg doctor
+  [[ "$(check private-scan)" == "pass 2 tokens, sha256 "*"public baseline $(git -C "$SB" rev-parse HEAD | cut -c1-12)"* ]]
+  printf 'thirdmadeupword\n' >>"$SB/build/private/tokens/tokens.txt"
+  mg doctor
+  [[ "$(check private-scan)" == "warn 3 tokens"* ]]
+  : >"$SB/build/private/tokens/tokens.txt"
+  mg doctor
+  [[ "$(check private-scan)" == "fail the private token set "*"not a readable, non-empty regular file"* ]]
 }
 
 @test "doctor on a fully set-up Mac passes and still lists the steps it cannot verify" {

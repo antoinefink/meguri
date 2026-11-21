@@ -3,6 +3,7 @@
 
     private_scan.py build --candidates <jsonl> --repo <dir> --out <tokens.txt>
     private_scan.py scan --tokens <tokens.txt> [--tokens ...] (--staged --repo <dir> | <path>...)
+    private_scan.py pins --repo <dir> [--commit <full-oid>]
 
 `build` turns the candidate strings `meguri-cli private tokens` read from a
 copy of the collection into tokens: each deck name, tag and media name is one
@@ -21,7 +22,13 @@ for paths (folders are walked), or the lines a commit adds for `--staged`
 (binary files whole, as runs of printable text: see PRINTABLE). A line
 also counts when its HTML entities, JSON or Python escapes, or URL
 percent-escapes hide a token. It prints the files and line numbers, never a
-token.
+token. A file listed with `stale_public_artifact` has a whole-file digest in
+PUBLIC_ARTIFACTS that its bytes no longer match: it was admitted by a public
+review and edited since, so its reviewed lines are scanned again.
+
+`pins` reads no token set: it lists the PUBLIC_ARTIFACTS paths whose
+committed bytes (HEAD, or `--commit`) differ from the pinned digest, and
+those the commit does not hold.
 
 Words are maximal runs of letters and digits (`str.isalnum`) after NFC
 normalization and case folding, so `Hörverstehen` in a deck name matches
@@ -1448,6 +1455,42 @@ def public_artifact(path, data):
     return expected is not None and hashlib.sha256(data).hexdigest() == expected
 
 
+def found_file(path, relative, **what):
+    """A scan finding. A pinned path found here has bytes its pin no longer
+    covers (a matching pin is never scanned): say so, since its reviewed
+    lines then count like new ones."""
+    entry = dict(path=path, **what)
+    if public_artifact_digest(relative) is not None:
+        entry["stale_public_artifact"] = True
+    return entry
+
+
+def pins(repo, commit=None):
+    """The pinned paths of a commit whose bytes differ from their pin, and
+    the pinned paths it lacks. No token set is read."""
+    if commit is None:
+        commit = git(repo, "rev-parse", "--verify", "HEAD^{commit}").decode("ascii").strip()
+    elif re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit) is None:
+        raise ValueError("pins needs a full commit oid")
+    pinned, stale, seen = 0, [], set()
+    for record in git(repo, "ls-tree", "-r", "-z", "--full-tree", commit).split(b"\0"):
+        if not record:
+            continue
+        meta, raw = record.split(b"\t", 1)
+        mode, kind, sha = meta.split(b" ")
+        path = os.fsdecode(raw)
+        expected = public_artifact_digest(path)
+        if expected is None:
+            continue
+        pinned += 1
+        seen.add(path)
+        if kind != b"blob" or mode not in (b"100644", b"100755") or \
+                hashlib.sha256(git(repo, "cat-file", "blob", sha.decode("ascii"))).hexdigest() != expected:
+            stale.append(path)
+    absent = sorted(set(PUBLIC_ARTIFACTS) - seen)
+    return {"commit": commit, "pinned": pinned, "stale": sorted(stale), "absent": absent}
+
+
 def source_lines(data):
     """Raw LF-delimited lines, retaining terminators and all other bytes."""
     lines = data.split(b"\n")
@@ -1493,11 +1536,11 @@ def scan_paths(matcher, paths, repo=None):
             continue
         if is_binary(data):
             if binary_hit(matcher, data):
-                found.append({"path": path, "binary": True})
+                found.append(found_file(path, relative, binary=True))
         else:
             hits = source_line_hits(matcher, relative, data)
             if hits:
-                found.append({"path": path, "lines": hits})
+                found.append(found_file(path, relative, lines=hits))
     return found, len(files)
 
 
@@ -1603,11 +1646,11 @@ def scan_staged(matcher, repo):
                 if path not in public and not exact_public_line and any(matcher.hit(v, context) for v in decoded):
                     found.setdefault(path, []).append(line_no)
                 line_no += 1
-    out = [{"path": p, "lines": found[p]} for p in sorted(found)]
+    out = [found_file(p, p, lines=found[p]) for p in sorted(found)]
     for path in binary:
         data = git(repo, "cat-file", "blob", ":" + path)
         if path not in public and binary_hit(matcher, data):
-            out.append({"path": path, "binary": True})
+            out.append(found_file(path, path, binary=True))
     return out, len(staged)
 
 
@@ -1622,6 +1665,9 @@ def main(argv):
     r.add_argument("--repo", required=True)
     r.add_argument("--head", required=True)
     r.add_argument("--shared-main", action="store_true")
+    n = sub.add_parser("pins")
+    n.add_argument("--repo", required=True)
+    n.add_argument("--commit")
     s = sub.add_parser("scan")
     s.add_argument("--tokens", action="append", required=True)
     s.add_argument("--staged", action="store_true")
@@ -1632,12 +1678,19 @@ def main(argv):
         if args.command == "refresh-public":
             print(json.dumps(refresh_public(args.repo, args.head, args.shared_main), sort_keys=True))
             return 0
+        if args.command == "pins":
+            print(json.dumps(pins(args.repo, args.commit), sort_keys=True))
+            return 0
         if args.command == "build":
             print(json.dumps(build(args.candidates, args.repo, args.out), sort_keys=True))
             return 0
         if args.staged == bool(args.paths) or (args.staged and not args.repo):
             parser.error("give --staged with --repo, or paths")
         matcher = load_tokens(args.tokens)
+        if not matcher.count:
+            # An empty set would pass everything: a truncated or unreadable
+            # file must not look like a clean scan.
+            raise ValueError("the token set is empty")
         if args.staged:
             found, scanned = scan_staged(matcher, args.repo)
         else:

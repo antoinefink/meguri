@@ -267,6 +267,51 @@ mg__doctor_run_output() {
   fi
 }
 
+# The private-token scan (U15, R1940): the three hook shims, and the one
+# token set every worktree's hooks and scan-outputs read (the main
+# checkout's). Reads stat, a line count and a hash of the set, never its
+# text. Where a set is expected (mg__private_required) a missing, empty or
+# unreadable one fails: the hooks refuse commits there. The baseline is the
+# commit whose text the set last dropped as public; an unknown one warns
+# (docs/process/provenance.md#one-answer-in-every-checkout).
+mg__doctor_private_scan() {
+  if ! mg_hooks_check; then
+    mg__doctor_check private-hooks fail "$MG_HOOKS_MESSAGE; commits are not checked for provenance trailers or private tokens until tools/mg hooks install succeeds"
+  else
+    mg__doctor_check private-hooks pass "commit-msg, pre-commit and pre-merge-commit shims in $MG_HOOKS_DIR, shared by every worktree"
+  fi
+  local main facts required=false behind="" head note
+  main="$(mg__private_main)"
+  facts="$(mg__private_set_facts "$main")"
+  ! mg__private_required || required=true
+  if [ "$(jq -r .present <<<"$facts")" != true ]; then
+    if [ "$required" = true ]; then
+      mg__doctor_check private-scan fail "no private token set at $main/$MG_PRIVATE_TOKENS, though this repository is expected to have one: the hooks refuse every commit until tools/mg private copy (main checkout) builds it"
+    else
+      mg__doctor_check private-scan pass "no private collection or token set on this machine; the hooks have nothing to check commits against"
+    fi
+    return 0
+  fi
+  if [ "$(jq -r '.readable and .tokens > 0' <<<"$facts")" != true ]; then
+    mg__doctor_check private-scan fail "the private token set $main/$MG_PRIVATE_TOKENS is not a readable, non-empty regular file from this session: the hooks refuse every commit"
+    return 0
+  fi
+  note="$(jq -r '"\(.tokens) tokens, sha256 \(.sha256[0:12]), changed \(.modified), read by every worktree"' <<<"$facts")"
+  if [ "$(jq -r .baseline_current <<<"$facts")" != true ]; then
+    mg__doctor_check private-scan warn "$note; its public baseline is unknown (no $MG_PRIVATE_BASELINE for these bytes): tools/mg private refresh-public --head <full-oid> records one (docs/process/provenance.md#one-answer-in-every-checkout)"
+    return 0
+  fi
+  head="$(jq -r .baseline.head <<<"$facts")"
+  if git -C "$MG_ROOT" rev-parse -q --verify 'refs/remotes/origin/master^{commit}' >/dev/null 2>&1 &&
+     git -C "$MG_ROOT" cat-file -e "$head^{commit}" 2>/dev/null; then
+    behind="$(git -C "$MG_ROOT" rev-list --count "$head..refs/remotes/origin/master" 2>/dev/null || true)"
+  fi
+  # Behind is the normal state and no fault: lines committed through the
+  # hook hold no token. It matters only for text that reached master
+  # unscanned or by a whole-file review (tools/mg private pins).
+  mg__doctor_check private-scan pass "$note; public baseline ${head:0:12}${behind:+, $behind commits behind origin/master}"
+}
+
 mg_doctor() {
   : >"$MG_RUN_DIR/checks.jsonl"
   : >"$MG_RUN_DIR/environment.jsonl"
@@ -456,6 +501,7 @@ mg_doctor() {
     mg__doctor_check disk fail "$gib GiB free; need at least $MG_DOCTOR_FAIL_DISK_GIB GiB"
   fi
   mg__doctor_run_output
+  mg__doctor_private_scan
 
   # The Mac UI test VM (U8b)
   MG_DOCTOR_VMS='[]'

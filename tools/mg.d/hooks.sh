@@ -84,6 +84,37 @@ mg_hooks_install() {
   done
 }
 
+# mg_hooks_check: whether every shim is installed as mg_hooks_install would
+# write it and this checkout has the hook each one runs. Read-only. Returns
+# 1 with MG_HOOKS_MESSAGE set to what is wrong; MG_HOOKS_DIR is the hooks
+# directory.
+mg_hooks_check() {
+  MG_HOOKS_MESSAGE="" MG_HOOKS_DIR=""
+  local hooks_path common name wrong=""
+  hooks_path="$(git -C "$MG_ROOT" config --get core.hooksPath || true)"
+  if [ -n "$hooks_path" ]; then
+    MG_HOOKS_MESSAGE="core.hooksPath is set ($hooks_path), so git does not run the installed shims"
+    return 1
+  fi
+  if ! common="$(git -C "$MG_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+    MG_HOOKS_MESSAGE="$MG_ROOT is not a git checkout"
+    return 1
+  fi
+  MG_HOOKS_DIR="$common/hooks"
+  for name in $MG_HOOK_NAMES; do
+    if [ ! -f "$MG_HOOKS_DIR/$name" ] || [ ! -x "$MG_HOOKS_DIR/$name" ] ||
+       [ "$(cat "$MG_HOOKS_DIR/$name" 2>/dev/null)" != "$(mg__hook_shim "$name")" ]; then
+      wrong="$wrong $name (shim)"
+    elif [ ! -f "$MG_ROOT/tools/hooks/$name" ] || [ ! -x "$MG_ROOT/tools/hooks/$name" ]; then
+      wrong="$wrong $name (tools/hooks/$name of this checkout)"
+    fi
+  done
+  if [ -n "$wrong" ]; then
+    MG_HOOKS_MESSAGE="missing, not executable or not the current Meguri shim:$wrong"
+    return 1
+  fi
+}
+
 mg_hooks() {
   if [ "${1:-}" != install ]; then
     mg_failure usage "usage: tools/mg hooks install"
