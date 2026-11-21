@@ -101,6 +101,19 @@ struct NativeCommandContext {
         collection.deckDeletion.delete(deckID: deck, host: host)
     }
 
+    // MARK: View
+
+    /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review
+    /// and with no sheet over the window.
+    var canShowNoteTypes: Bool {
+        host == .main && layout == .sidebar && collection.navigation.sheet == nil
+            && collection.review == nil && collection.navigation.review == nil
+    }
+    func showNoteTypes() {
+        guard canShowNoteTypes else { return }
+        collection.navigation.select(.section(.noteTypes))
+    }
+
     // MARK: Card
 
     var review: ReviewCoordinator? {
@@ -145,6 +158,11 @@ struct NativeCommandContext {
             let available = redo ? review.canRedo : review.canUndo
             inputs.reviewStep = available ? CollectionUndoModel.stepName(redo ? review.redoStatus : review.undoStatus) : nil
         }
+        // W13: while Note Types shows, its draft's own steps come before the collection's.
+        if !inputs.reviewShown, !inputs.textOwnsUndo, collection.navigation.section == .noteTypes {
+            let draft = collection.noteTypes
+            inputs.draftStep = (redo ? draft.redoStep : draft.undoStep)?.rawValue
+        }
         let history = collection.collectionUndo
         inputs.collectionStep = (redo ? history.canRedo : history.canUndo) ? (redo ? history.redoName : history.undoName) : nil
         return EditUndoRouting.route(inputs)
@@ -161,6 +179,8 @@ struct NativeCommandContext {
         case .review:
             guard reviewInputAvailable else { return }
             review?.restore(redo: redo)
+        case .draft:
+            if redo { collection.noteTypes.redo() } else { collection.noteTypes.undo() }
         case .collection:
             if redo { collection.collectionUndo.redo() } else { collection.collectionUndo.undo() }
         }
@@ -213,6 +233,13 @@ struct AppCommands: Commands {
         // The system's Find, Spelling, Substitutions and other text groups stay;
         // Find… comes first, so ⌘F reaches it while the deck workspace shows and
         // the text inputs' own Find otherwise (when it is disabled).
+        // W14: View › Note Types; ⇧⌘N stays New Deck… (N22.1).
+        CommandGroup(before: .sidebar) {
+            Button("Note Types") { context?.showNoteTypes() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .disabled(context?.canShowNoteTypes != true)
+            Divider()
+        }
         CommandGroup(before: .textEditing) {
             Button("Find…") { context?.find() }
                 .keyboardShortcut("f", modifiers: .command)

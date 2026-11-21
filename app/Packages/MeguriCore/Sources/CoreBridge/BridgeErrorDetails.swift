@@ -173,6 +173,11 @@ public struct NotetypeDraftSummary: Sendable, Hashable {
     public let reasons: [SchemaChangeReason]
     public let changes: [NotetypeDraftChange]
     public let losesContent: Bool
+    public init(reasons: [SchemaChangeReason], changes: [NotetypeDraftChange], losesContent: Bool) {
+        self.reasons = reasons
+        self.changes = changes
+        self.losesContent = losesContent
+    }
     init(_ raw: MeguriCoreBindings.NotetypeDraftSummary) {
         reasons = raw.reasons.map(SchemaChangeReason.init)
         changes = raw.changes.map(NotetypeDraftChange.init)
