@@ -891,6 +891,21 @@ impl Engine {
         };
         Ok(self.inner.jobs.start(kind.name(), self.generation(), slot, work))
     }
+
+    /// [`Engine::start_job`] for a read that must yield to searches
+    /// (`search/filter-tokens` T12.4: "at lower priority than a search"):
+    /// its worker runs at utility QoS while the work runs.
+    pub fn start_utility_job(
+        &self,
+        kind: JobKind,
+        work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
+    ) -> Result<JobHandle, EngineError> {
+        let threads = self.threads().clone();
+        self.start_job(kind, move |job| {
+            let _qos = threads.utility_scope();
+            work(job)
+        })
+    }
 }
 
 /// Whether `core` is the open collection.
