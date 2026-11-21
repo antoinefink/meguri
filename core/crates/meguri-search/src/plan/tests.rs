@@ -38,13 +38,33 @@ fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermS
             slow: true,
             reads: ContextReads::NONE.with(crate::context::ContextValue::NormalizeNoteText),
         },
+        // A slow term that takes the `-` before it (T9.4).
+        Term::StripCloze(text) => {
+            let bound = params.bind(Param::Text(text.clone()));
+            TermSql {
+                sql: if env.negated {
+                    format!("n.flds != {bound}")
+                } else {
+                    format!("n.flds = {bound}")
+                },
+                slow: true,
+                reads: ContextReads::NONE,
+            }
+        }
         other => return sql::compile_term(other, env, params),
     })
 }
 
 fn plan(text: &str, mode: SearchMode) -> Plan {
     let query = parse(text).unwrap_or_else(|e| panic!("{text}: {e}"));
-    build_with(&query, mode, &context(), &SearchNotetypes::default(), &mut stand_in).unwrap_or_else(|e| panic!("{text}: {e:?}"))
+    build_with(&query, mode, &context(), &SearchNotetypes::default(), &mut stand_in, false)
+        .unwrap_or_else(|e| panic!("{text}: {e:?}"))
+}
+
+fn relaxed(text: &str, mode: SearchMode) -> Plan {
+    let query = parse(text).unwrap_or_else(|e| panic!("{text}: {e}"));
+    build_with(&query, mode, &context(), &SearchNotetypes::default(), &mut stand_in, true)
+        .unwrap_or_else(|e| panic!("{text}: {e:?}"))
 }
 
 /// Notes 1 (`dog`, cards 10 and 11, 11 suspended) and 2 (`cat`, card 20);
@@ -151,7 +171,7 @@ fn operators_compile_in_source_order_with_bound_text() {
 #[test]
 fn slow_terms_and_context_reads_are_recorded() {
     let query = parse("is:suspended dog").unwrap();
-    let plan = build_with(&query, SearchMode::Cards, &context(), &SearchNotetypes::default(), &mut stand_in).unwrap();
+    let plan = build_with(&query, SearchMode::Cards, &context(), &SearchNotetypes::default(), &mut stand_in, false).unwrap();
     assert_eq!(plan.slow_terms().len(), 1);
     assert!(matches!(
         query.node(plan.slow_terms()[0]).kind,
@@ -167,6 +187,7 @@ fn slow_terms_and_context_reads_are_recorded() {
         &context(),
         &SearchNotetypes::default(),
         &mut stand_in,
+        false,
     )
     .unwrap();
     assert!(!fast.is_slow() && fast.reads().is_empty());
@@ -194,4 +215,56 @@ fn statement_checks_fail_wherever_they_stand() {
             3..10
         ))
     );
+}
+
+// Q10 steps 1 to 3: slow terms become TRUE under an even number of
+// negations and FALSE under an odd one, their parameters go, the rows are
+// the original query's, and the relaxed result holds the original one.
+#[test]
+fn the_relaxed_query_replaces_slow_terms_by_negation_parity_q10() {
+    let cases = [
+        ("dog (cat or -is:suspended)", "((1) AND ((1) OR NOT (c.queue = -1)))"),
+        ("-(dog is:suspended)", "NOT ((0) AND (c.queue = -1))"),
+        ("-dog or is:suspended", "(NOT (0) OR (c.queue = -1))"),
+        ("-(-dog)", "NOT NOT (1)"),
+        ("-sc:dog", "(1)"),
+        ("-(-sc:dog is:suspended)", "NOT ((0) AND (c.queue = -1))"),
+    ];
+    for (text, predicate) in cases {
+        let original = plan(text, SearchMode::Cards);
+        let loose = relaxed(text, SearchMode::Cards);
+        assert!(loose.sql().ends_with(&format!("WHERE {predicate}")), "{text}: {}", loose.sql());
+        assert!(loose.params().is_empty() && !loose.is_slow(), "{text}");
+        assert_eq!(loose.rows(), original.rows(), "{text}");
+        let all = ids(&loose);
+        assert!(ids(&original).iter().all(|id| all.contains(id)), "{text}");
+    }
+    // A slow term keeps the rows its scope needs: cards with their note.
+    assert_eq!(relaxed("dog", SearchMode::Cards).rows(), Rows::CardsWithNotes);
+    assert_eq!(ids(&relaxed("dog", SearchMode::Cards)), [10, 11, 20]);
+}
+
+// Q10 step 4: the plan restricted to a chunk of candidates.
+#[test]
+fn the_restricted_statement_tests_only_the_listed_ids_q10() {
+    let conn = collection();
+    let original = plan("dog", SearchMode::Cards);
+    let sql = original.restricted_sql("?2");
+    let mut statement = conn.prepare(&sql).unwrap();
+    let mut found: Vec<i64> = statement
+        .query_map(params_from_iter(["dog", "[11, 20, 30]"]), |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    found.sort_unstable();
+    assert_eq!(found, [11]);
+    let notes = plan("is:suspended", SearchMode::Notes);
+    let sql = notes.restricted_pairs_sql("?1").unwrap();
+    let mut statement = conn.prepare(&sql).unwrap();
+    let pairs: Vec<(i64, i64)> = statement
+        .query_map(params_from_iter(["[1, 2, 3]"]), |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(pairs, [(11, 1)]);
 }
