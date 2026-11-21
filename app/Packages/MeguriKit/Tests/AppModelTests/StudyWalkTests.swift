@@ -451,7 +451,117 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+    @Test func aStartThatStopsWithItsSessionOpenStaysOnScreen() async throws {
+        let tree = [Self.node(1, "Languages", (1, 0, 0)), Self.node(2, "Science", (1, 0, 0))]
+        let client = WalkClient([1: [[11]], 2: [[21]]])
+        try await withWalkOwner(tree: tree, client: client) { owner in
+            let record = owner.configuration.collectionLocation.directory.appending(path: "meguri-review-session.json")
+            await owner.startStudyAll()
+            let walk = try #require(owner.walk)
+            // Science's start: the window stops being active and the session record cannot be
+            // saved, so the pause after startup fails while the core's session is open.
+            client.onStart = { [unowned owner] deck in
+                guard deck == 2 else { return }
+                try? FileManager.default.removeItem(at: record)
+                try? FileManager.default.createDirectory(at: record, withIntermediateDirectories: false)
+                owner.setSceneActive(false)
+            }
+            try await answer(owner)
+            let open = try #require(owner.review)
+            #expect(open.record.deckID == 2 && open.sessionID != nil && open.phase != .ended)
+            #expect(walk.stopped && owner.navigation.review != nil && client.endedDecks == [1])
+            // Back to Decks closes it once the record can be saved again.
+            try FileManager.default.removeItem(at: record)
+            owner.setSceneActive(true)
+            await owner.waitForLifecycle()
+            await owner.finishReview()
+            #expect(owner.review == nil && owner.walk == nil && owner.navigation.review == nil)
+            #expect(client.endedDecks == [1, 2] && owner.previousWalk?.cards == 1)
+        }
+    }
+
+    @Test func finishingAReviewThatWasReplacedMeanwhileLeavesTheSuccessor() async throws {
+        let tree = [Self.node(1, "Languages", (1, 0, 0))]
+        let client = WalkClient([1: [[11]]])
+        let successor = ReviewCoordinatorTests.Fixture()
+        try await withWalkOwner(tree: tree, client: client) { owner in
+            await owner.startStudy(deckID: 1)
+            let first = try #require(owner.review)
+            // While the first review's session ends, another review takes its place.
+            client.onEnd = { [unowned owner] deck in if deck == 1 { owner.presentReview(successor.model) } }
+            await owner.finishReview()
+            #expect(owner.review === successor.model && owner.navigation.review != nil)
+            #expect(owner.previousRecord == nil && first.phase == .ended)
+            client.onEnd = nil
+            await owner.finishReview()
+            #expect(owner.review == nil)
+        }
+    }
+
+    @Test func aWalkWithNoAnswerLeavesThePreviousSessionAsItWas() async throws {
+        let tree = [Self.node(1, "Languages", (1, 0, 0)), Self.node(2, "Science", (1, 0, 0))]
+        let client = WalkClient([1: [[11]], 2: [[21]]])
+        try await withWalkOwner(tree: tree, client: client) { owner in
+            await owner.startStudy(deckID: 2)
+            try await answer(owner)
+            await owner.finishReview()
+            #expect(owner.previousRecord?.deckID == 2)
+            // A walk stopped before its first answer.
+            await owner.startStudyAll()
+            #expect(owner.review?.record.deckID == 1)
+            await owner.finishReview()
+            #expect(owner.previousRecord?.deckID == 2 && owner.previousWalk == nil)
+            // A walk whose every deck is skipped: nothing is presented and nothing changes.
+            await owner.startStudy(deckID: 1)
+            try await answer(owner)
+            await owner.finishReview()
+            #expect(owner.previousRecord?.deckID == 1)
+            await owner.startStudyAll()
+            #expect(owner.walk == nil && owner.review == nil && client.starts == [2, 1, 1])
+            #expect(owner.previousRecord?.deckID == 1 && owner.previousWalk == nil)
+        }
+    }
+
     // MARK: Today's numbers
+
+    @Test func aDeckThatCannotBeReadLeavesTheNextLearningTimeUnknown() async throws {
+        let tree = [Self.node(1, "Languages", (0, 0, 0)), Self.node(2, "Science", (0, 0, 0))]
+        try await withWalkOwner(tree: tree, client: WalkClient([:])) { owner in
+            // A read that succeeds with no learning card still counts.
+            owner.loadDeckStudyState = { deck in
+                WalkClient.state(deck: deck, ready: false, learningLater: deck == 1, readyAt: deck == 1 ? 1_894_705_400 : nil)
+            }
+            await owner.loadTodayNumbers()
+            #expect(owner.nextLearningReadyAt == Date(timeIntervalSince1970: 1_894_705_400))
+            // One deck that cannot be read: the time is unknown, not the other deck's.
+            owner.loadDeckStudyState = { deck in
+                if deck == 2 { throw BridgeError.internal("Not readable now") }
+                return WalkClient.state(deck: deck, ready: false, learningLater: true, readyAt: 1_894_705_400)
+            }
+            await owner.loadTodayNumbers()
+            #expect(owner.nextLearningReadyAt == nil)
+        }
+    }
+
+    @Test func aScanOfOlderCountsIsDropped() async throws {
+        let tree = [Self.node(1, "Languages", (0, 0, 0))]
+        try await withWalkOwner(tree: tree, client: WalkClient([:])) { owner in
+            let once = Calls()
+            owner.loadDeckStudyState = { [unowned owner] deck in
+                if once.decks.isEmpty {
+                    once.decks.append(deck)
+                    // Newer counts arrive while the scan reads: it belongs to the old ones.
+                    await owner.loadCounts()
+                }
+                return WalkClient.state(deck: deck, ready: false, learningLater: true, readyAt: 1_894_705_400)
+            }
+            await owner.loadTodayNumbers()
+            #expect(owner.nextLearningReadyAt == nil)
+            // The newer counts' own scan sets it.
+            await owner.waitForTodayNumbers()
+            #expect(owner.nextLearningReadyAt == Date(timeIntervalSince1970: 1_894_705_400))
+        }
+    }
 
     @Test func todaysNumbersAndTheNextLearningCardWhileNothingWaits() async throws {
         let tree = [Self.node(1, "Languages", (0, 0, 0)), Self.node(2, "Science", (0, 0, 0)),

@@ -90,6 +90,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         try await CoreDeckService().studyState(deckID: $0)
     }
     @ObservationIgnored private var todayTask: Task<Void, Never>?
+    /// Moves with each count read that `loadCounts` applies: Today's learning-card scan
+    /// belongs to the counts it started from.
+    @ObservationIgnored private var countsSnapshot: UInt64 = 0
     @ObservationIgnored private var todayRevision: UInt64 = 0
     /// Turns FSRS on by itself for an open collection (`sched/fsrs-policy` A1).
     public let studyPreparation = StudyPreparation()
@@ -1332,6 +1335,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             let tree = try await loadDeckTree()
             guard expected == generation, tree.generation == generation, revision == deckTreeRevision, !closed else { return }
             decks = tree.nodes
+            countsSnapshot &+= 1
             refreshTodayNumbers()
             countTimer?.invalidate(); countTimer = nil
             if foreground && !configuration.clock.isFixed && Double(tree.nextChangeAt) < Date.distantFuture.timeIntervalSince1970 {
@@ -1530,9 +1534,9 @@ public final class ReviewCollection: ChangeFanoutSink {
             try configuration.nativeReviewInput?.admitStudy(deck: deckID, name: fullDeckName(deckID))
             guard await selectDeck(deckID: deckID, intent: intent, admission: current).value,
                   current(), let resolver = await mediaResolverForReview(), current() else { return .stopped }
-            previousRecord = nil
-            // A deck's own session replaces the walk on Today's Previous Session (N24.2).
-            if walk == nil { previousWalk = nil }
+            // A deck's own session replaces the previous one, a walk's included (N24.2). A
+            // walk's turn leaves it until the walk has an answer (`closeWalk`).
+            if walk == nil { previousRecord = nil; previousWalk = nil }
             let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
                 store: records, clock: configuration.clock, client: reviewSessionClient,
                 nativeInput: configuration.nativeReviewInput, nativeGeneration: expected,
@@ -1647,11 +1651,14 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard await editFlowOwner?.requestCancel() != false, self.review === review else { return }
         // Back to Decks, Esc and Done stop the walk: no other deck starts (N24.3).
         walk?.stop()
+        let expected = generation
         guard await review.end() else { return }
-        // A deck page shows a previous session only for a single-deck session (N24.2),
-        // and a single-deck session replaces an earlier walk on Today.
-        previousRecord = walk == nil ? review.record : nil
-        if walk == nil { previousWalk = nil }
+        // Another owner (a new collection, a successor review) can have taken over meanwhile.
+        guard self.review === review, expected == generation else { return }
+        // A deck page shows a previous session only for a single-deck session (N24.2), and
+        // a single-deck session replaces an earlier walk on Today. A walk's is written
+        // when it closes, only if it answered a card.
+        if walk == nil { previousRecord = review.record; previousWalk = nil }
         self.review = nil; navigation.endReview()
         await studyPreparation.sessionEnded()
         refreshCounts()
@@ -1717,7 +1724,6 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard canStudy, !list.isEmpty else { return }
         let walk = StudyWalk(decks: list)
         self.walk = walk
-        previousWalk = nil
         let task = Task { await advance(walk, entry: entry) }
         walkTask = task
         await task.value
@@ -1768,7 +1774,16 @@ public final class ReviewCollection: ChangeFanoutSink {
             }
             let started = await startStudy(deckID: deck.id, entry: entry, walk: walk)
             guard self.walk === walk, !walk.stopped else { return }
-            guard started else { endWalkAtToday(walk); return }
+            guard started else {
+                // A start that stopped with its session open (a pause that could not save)
+                // stays on screen, as a failed end does, so Back to Decks closes it.
+                if let model = review, model.sessionID != nil, model.phase != .ended {
+                    walk.stop()
+                    return
+                }
+                endWalkAtToday(walk)
+                return
+            }
             // A start that found no card has asked for the next step already.
             if let model = walk.current, model.phase != .waiting, model.phase != .finished { walk.settle() }
             return
@@ -1803,7 +1818,10 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func closeWalk(_ walk: StudyWalk) {
         walk.stop()
         if self.walk === walk {
-            previousWalk = walk.previousSession(at: configuration.clock.now())
+            // Only a walk that answered a card replaces the previous session (N24.2).
+            if let summary = walk.previousSession(at: configuration.clock.now()) {
+                previousWalk = summary; previousRecord = nil
+            }
             self.walk = nil
         }
     }
@@ -1833,21 +1851,24 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
 
     func loadTodayNumbers() async {
-        let expected = generation
+        let expected = generation, snapshot = countsSnapshot
         if let numbers = try? await studiedTodayService.numbers(),
            expected == generation, numbers.generation == expected, !closed {
             studiedToday = numbers
         }
         guard expected == generation, !closed else { return }
         guard studyAllDecks.isEmpty else { nextLearningReadyAt = nil; return }
-        // Only while nothing waits: one C7 read per top-level normal deck.
+        // Only while nothing waits: one C7 read per top-level normal deck. A deck that could
+        // not be read leaves the time unknown, so none shows until a later refresh reads it.
         var earliest: Int64?
+        var unread = false
         for node in decks where !node.filtered {
-            guard let state = try? await loadDeckStudyState(node.id), let ready = state.nextLearningReadyAt else { continue }
-            earliest = min(earliest ?? ready, ready)
+            guard let state = try? await loadDeckStudyState(node.id) else { unread = true; break }
+            if let ready = state.nextLearningReadyAt { earliest = min(earliest ?? ready, ready) }
         }
-        guard expected == generation, !closed, studyAllDecks.isEmpty else { return }
-        nextLearningReadyAt = earliest.map { Date(timeIntervalSince1970: Double($0)) }
+        // A newer count read asked for its own scan meanwhile: this one is dropped.
+        guard expected == generation, snapshot == countsSnapshot, !closed, studyAllDecks.isEmpty else { return }
+        nextLearningReadyAt = unread ? nil : earliest.map { Date(timeIntervalSince1970: Double($0)) }
     }
     public func navigationChanged() {
         if navigation.review == nil, review != nil { Task { await finishReview() } }

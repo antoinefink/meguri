@@ -94,9 +94,11 @@ import Testing
         // 29 pt: the newest would run past the edge (70 + 29 > 98), so it ends at the edge
         // (x 69), which still clears the label before it (20 + 29).
         #expect(labels(grid, (2026, 11, 21), labelWidth: 29) == [[2, 10, 20], [7, 11, 69]])
-        // 60 pt: pulled back to x 38 it would overlap the label before it (20 + 60), so the
-        // newest is left out and the one before it stays.
-        #expect(labels(grid, (2026, 11, 21), labelWidth: 60) == [[2, 10, 20]])
+        // 60 pt: pulled back to x 38 the newest is kept; the older labels it would overlap
+        // give way, as older labels always do.
+        #expect(labels(grid, (2026, 11, 21), labelWidth: 60) == [[7, 11, 38]])
+        // A label wider than the whole grid is left out, then the next one is tried.
+        #expect(labels(grid, (2026, 11, 21), labelWidth: 99) == [])
     }
 
     @Test func rightToLeftMirrorsTheLabels() {

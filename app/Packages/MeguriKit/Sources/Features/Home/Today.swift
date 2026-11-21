@@ -265,9 +265,6 @@ struct TodaySummaryContent: View {
     // MARK: Rows
 
     /// Studied Today: the label, the system's linear bar in the accent colour, and the value.
-    /// The narrowest bar still worth drawing beside the label and value.
-    private static let usableBar = Spacing.xxLarge * 2
-
     private var studiedRow: some View {
         let value = summary.studiedValue(locale: locale)
         return Group {
@@ -280,23 +277,7 @@ struct TodaySummaryContent: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                // One line while the label, a usable bar and the value fit; otherwise the
-                // bar goes on its own line under them. The label never wraps.
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .center, spacing: Spacing.medium) {
-                        studiedLabel
-                        studiedBar.frame(minWidth: Self.usableBar, idealWidth: Self.usableBar, maxWidth: .infinity)
-                        studiedValue(value)
-                    }
-                    VStack(alignment: .leading, spacing: Spacing.xSmall) {
-                        HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
-                            studiedLabel
-                            Spacer(minLength: Spacing.small)
-                            studiedValue(value)
-                        }
-                        studiedBar
-                    }
-                }
+                StudiedTodayLine(value: value, fraction: summary.studiedFraction)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -306,16 +287,8 @@ struct TodaySummaryContent: View {
         .listRowSeparator(.hidden)
     }
 
-    private var studiedLabel: some View {
-        Text("Studied Today", bundle: .module).lineLimit(1).fixedSize()
-    }
-
     private var studiedBar: some View {
         ProgressView(value: summary.studiedFraction).progressViewStyle(.linear)
-    }
-
-    private func studiedValue(_ value: String) -> some View {
-        Text(verbatim: value).quietText().lineLimit(1).fixedSize()
     }
 
     private func previousRow(decks: String?, value: String) -> some View {
@@ -358,4 +331,48 @@ private struct TodayTitle: ViewModifier {
             content
         }
     }
+}
+
+/// Studied Today's row where it does not stack (N24.2): one line while the label, a usable
+/// bar and the value fit; otherwise the bar goes on its own line under them; at the
+/// narrowest the label and the value wrap, never running past the row.
+struct StudiedTodayLine: View {
+    let value: String
+    let fraction: Double
+
+    /// The narrowest bar still worth drawing beside the label and value.
+    private static let usableBar = Spacing.xxLarge * 2
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: Spacing.medium) {
+                label.lineLimit(1).fixedSize()
+                bar.frame(minWidth: Self.usableBar, idealWidth: Self.usableBar, maxWidth: .infinity)
+                valueText.lineLimit(1).fixedSize()
+            }
+            VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+                    label.lineLimit(1).fixedSize()
+                    Spacer(minLength: Spacing.small)
+                    valueText.lineLimit(1).fixedSize()
+                }
+                bar
+            }
+            VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+                    label
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    valueText
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                bar
+            }
+        }
+    }
+
+    private var label: Text { Text("Studied Today", bundle: .module) }
+    private var valueText: some View { Text(verbatim: value).quietText() }
+    private var bar: some View { ProgressView(value: fraction).progressViewStyle(.linear) }
 }

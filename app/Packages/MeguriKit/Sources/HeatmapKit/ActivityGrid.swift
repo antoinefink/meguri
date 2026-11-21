@@ -127,8 +127,8 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
     /// 1st's month; the first column is also labelled with its own month when at least
     /// three columns of that month are shown. Labels are placed from the newest column
     /// back; one that would overlap a label already placed is left out. The newest label,
-    /// when it would run past the grid's trailing edge, is pulled back to end there if it
-    /// still clears the label before it, and is left out otherwise.
+    /// when it would run past the grid's trailing edge, is pulled back to end there (older
+    /// labels then give way to it); one wider than the grid is left out.
     /// - Parameters:
     ///   - pitch: where each column starts (`Geometry.pitch`).
     ///   - width: the grid's width.
@@ -159,14 +159,14 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
         let labelled = (0..<weeks).reversed().compactMap { column in candidates[column].map { (column: column, month: $0) } }
         var placed: [(column: Int, month: Int, x: CGFloat, width: CGFloat)] = []
         var limit = width
-        for (index, label) in labelled.enumerated() {
+        for label in labelled {
             let size = labelWidth(label.month)
             var x = CGFloat(label.column) * pitch
+            // Only the first label placed can run past the edge: it ends there instead.
+            // Older labels are placed after it, so they give way to it.
             if placed.isEmpty, x + size > width {
                 x = width - size
-                let previous = labelled.dropFirst(index + 1).first
-                let clears = previous.map { CGFloat($0.column) * pitch + labelWidth($0.month) <= x } ?? true
-                guard x >= 0, clears else { continue }
+                guard x >= 0 else { continue }
             }
             guard x + size <= limit else { continue }
             placed.append((label.column, label.month, x, size))
