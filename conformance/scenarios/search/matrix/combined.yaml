@@ -14,8 +14,8 @@
 # results sorted by several columns (browser/sorting). Pair has two
 # templates; its note with an empty first field has only the second card.
 # Ids come from the frozen clock: 1930395600000 + note (card) number - 1.
-# FSRS is on and the load balancer off, as in every scenario that answers
-# cards (specs/sched/answering.md "FSRS" and A9): Meguri answers only with
+# FSRS is on and the load balancer off, as in the sched/answer scenarios
+# (specs/sched/answering.md "FSRS" and A9): Meguri answers only with
 # FSRS on, so a golden recorded with FSRS off cannot match its card rows.
 id: search/matrix/combined
 tags: [needs-text, needs-tag, needs-deck, needs-notetype, needs-template, needs-ids, needs-state, needs-prop, needs-history]
