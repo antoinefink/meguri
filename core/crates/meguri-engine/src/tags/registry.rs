@@ -81,21 +81,43 @@ pub enum Spelling {
     New(String),
 }
 
+/// The two registry reads T3's spelling makes: on the stored rows for every
+/// reader, and on a registry a caller extends in memory (the Find and
+/// Replace preview, which spells as its write phase would, registering
+/// nothing).
+pub trait TagNames {
+    /// The spelling of the row equal to `name` under `unicase`.
+    fn registered_name(&self, name: &str) -> Result<Option<String>, StorageError>;
+    /// The spelling of the first row at or after `from` in the table's key
+    /// order (`unicase`).
+    fn first_name_from(&self, from: &str) -> Result<Option<String>, StorageError>;
+}
+
+impl<R: ReadRows + ?Sized> TagNames for R {
+    fn registered_name(&self, name: &str) -> Result<Option<String>, StorageError> {
+        Ok(self.tag(name)?.map(|row| row.name))
+    }
+
+    fn first_name_from(&self, from: &str) -> Result<Option<String>, StorageError> {
+        Ok(self.tag_rows_from(from, 1)?.pop().map(|row| row.name))
+    }
+}
+
 /// T3 on the registry as `reader` sees it, registering nothing. A row equal
 /// to `normalized` lends its spelling (step 1). Otherwise the longest
 /// leading part of `normalized` that is a node (T1), trying the name itself
 /// and then its ancestors from its parent outward, lends its tree spelling
 /// to that part (step 2).
-pub fn spelling_of(reader: &(impl ReadRows + ?Sized), normalized: &str) -> Result<Spelling, StorageError> {
-    if let Some(row) = reader.tag(normalized)? {
-        return Ok(Spelling::Registered(row.name));
+pub fn spelling_of(reader: &(impl TagNames + ?Sized), normalized: &str) -> Result<Spelling, StorageError> {
+    if let Some(name) = reader.registered_name(normalized)? {
+        return Ok(Spelling::Registered(name));
     }
     if let Some(node) = implicit_spelling(reader, normalized)? {
         return Ok(Spelling::New(node));
     }
     for ancestor in ancestors(normalized) {
-        let node = match reader.tag(ancestor)? {
-            Some(row) => Some(row.name),
+        let node = match reader.registered_name(ancestor)? {
+            Some(name) => Some(name),
             None => implicit_spelling(reader, ancestor)?,
         };
         if let Some(node) = node {
@@ -113,15 +135,15 @@ pub fn spelling_of(reader: &(impl ReadRows + ?Sized), normalized: &str) -> Resul
 /// ancestor of a row beginning that way depends on `name` alone (`a:` is
 /// none of `a:::b`'s, whose components are `a` and `:b`), so when that row
 /// does not have it, no row does.
-fn implicit_spelling(reader: &(impl ReadRows + ?Sized), name: &str) -> Result<Option<String>, StorageError> {
+fn implicit_spelling(reader: &(impl TagNames + ?Sized), name: &str) -> Result<Option<String>, StorageError> {
     let below = format!("{name}{LEVEL}");
-    let Some(row) = reader.tag_rows_from(&below, 1)?.pop() else {
+    let Some(row) = reader.first_name_from(&below)? else {
         return Ok(None);
     };
-    if !folded(&row.name).starts_with(&folded(&below)) {
+    if !folded(&row).starts_with(&folded(&below)) {
         return Ok(None);
     }
-    Ok(ancestors(&row.name)
+    Ok(ancestors(&row)
         .find(|ancestor| compare_folded(ancestor, name) == Ordering::Equal)
         .map(str::to_owned))
 }
