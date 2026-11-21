@@ -122,6 +122,9 @@ pub const SYNC_INCOMING_MERGE: OpDef = OpDef::long_write("sync_incoming_merge", 
 pub const CLOUD_INCOMING_APPLY: OpDef = OpDef::long_write("cloud_incoming_apply", UndoClass::NonDestructive, true);
 /// A note type structure change on a large note type (U34): undoable.
 pub const NOTETYPE_STRUCTURE_CHANGE: OpDef = OpDef::long_write("notetype_structure_change", UndoClass::Undoable, false);
+/// Change Note Type over a large selection (U35, `notetypes/change-notetype`
+/// M10): one "Change Note Type" undo step.
+pub const CHANGE_NOTETYPE: OpDef = OpDef::long_write("change_notetype", UndoClass::Undoable, false);
 /// A bulk op over a large selection (U86): one undo step named after it.
 pub const BULK_OP: OpDef = OpDef::long_write("bulk_op", UndoClass::Undoable, false);
 /// Memory-only recompute (U46), with transaction rollback on cancellation.
@@ -149,12 +152,13 @@ pub const ANALYZE: OpDef = OpDef::maintenance("analyze");
 pub const WAL_CHECKPOINT: OpDef = OpDef::maintenance("wal_checkpoint");
 
 /// Every catalog entry, in the spec's order.
-pub const CATALOG: [OpDef; 17] = [
+pub const CATALOG: [OpDef; 18] = [
     CHECK_DATABASE,
     APKG_APPLY,
     SYNC_INCOMING_MERGE,
     CLOUD_INCOMING_APPLY,
     NOTETYPE_STRUCTURE_CHANGE,
+    CHANGE_NOTETYPE,
     BULK_OP,
     MEMORY_RECOMPUTE,
     ENABLE_FSRS,

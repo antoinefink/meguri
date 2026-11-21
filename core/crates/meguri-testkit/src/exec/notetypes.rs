@@ -4,9 +4,12 @@
 //! `ensure_io_notetype` and `update_notetype` (T5: a plain save for the
 //! plain edits of T10.1, U34's draft apply op for the others), and the
 //! observations `notetype_structure` (T8) and `notetype_templates`
-//! (`notetype-structure-ops.md` M3). Each op uses the public hosted engine
-//! API, including undo and stale-draft checks.
+//! (`notetype-structure-ops.md` M3), and Change Note Type's
+//! `change_notetype_info` and `change_notetype` (`change-notetype-ops.md`
+//! H1, H2). Each op uses the public hosted engine API, including undo and
+//! stale-draft checks.
 
+use meguri_engine::notetypes::change::{self, ChangeInfo, ChangeNotetype};
 use meguri_engine::notetypes::remove::{RemoveNotetype, remove};
 use meguri_engine::notetypes::restore::{RestoreNotetype, restore, restore_summary};
 use meguri_engine::notetypes::structure::{
@@ -17,7 +20,7 @@ use meguri_engine::notetypes::{
 };
 use meguri_engine::{CancelToken, EngineError, ProgressSink};
 use meguri_model::deck::{human_name, native_name};
-use meguri_model::ids::DeckId;
+use meguri_model::ids::{DeckId, NoteId};
 use meguri_model::notetype::Notetype;
 use meguri_storage::{ReadRows, StorageError, Table};
 use serde_json::{Map, Value, json};
@@ -70,6 +73,16 @@ pub(super) fn register(registry: &mut Registry) {
     registry.op("ensure_io_notetype", ensure_io_notetype);
     registry.op("remove_notetype", remove_notetype);
     registry.op_rejecting("restore_notetype", &["needs_stock_kind"], restore_notetype);
+    registry.op_rejecting(
+        "change_notetype_info",
+        &["not_found", "multiple_notetypes"],
+        change_notetype_info,
+    );
+    registry.op_rejecting(
+        "change_notetype",
+        &["no_changes", "schema_changed", "not_found", "multiple_notetypes"],
+        change_notetype,
+    );
     registry.observation("notetype_structure", notetype_structure);
     registry.observation("notetype_templates", notetype_templates);
 }
@@ -350,6 +363,174 @@ fn restore_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, 
         Ok(_) => Ok(OpResult::Done),
         Err(EngineError::NotetypeStructure(StructureRefusal::NeedsStockKind)) => Ok(OpResult::Rejected("needs_stock_kind")),
         Err(error) => Err(core(error)),
+    }
+}
+
+/// What the latest `change_notetype_info` step kept (H1): the selection,
+/// the new note type and the info read there (old note type, default maps,
+/// stamp).
+#[derive(Clone, Debug)]
+pub struct ChangeScreen {
+    notes: Vec<NoteId>,
+    info: ChangeInfo,
+}
+
+/// H1's and H2's rejections; anything else is a run error.
+fn change_refusal(error: &EngineError) -> Option<&'static str> {
+    match error {
+        EngineError::NotetypeStructure(
+            refusal @ (StructureRefusal::NoChanges
+            | StructureRefusal::SchemaChanged
+            | StructureRefusal::MultipleNotetypes),
+        ) => Some(refusal.kind()),
+        // H1, H2: `not_found` is a listed note; a missing note type is a
+        // run error (the remembered note types come from the info step).
+        EngineError::NotFound { table: Table::Notes, .. } => Some("not_found"),
+        _ => None,
+    }
+}
+
+/// H1: the change screen opening on a selection.
+fn change_notetype_info(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    let Step::ChangeNotetypeInfo(args) = step else {
+        return Err(invalid("expected change_notetype_info"));
+    };
+    // A refused step replaces what an earlier one kept with nothing.
+    session.change_notetype = None;
+    let notes = args
+        .notes
+        .iter()
+        .map(|r| {
+            session
+                .notes
+                .get(r.0.index())
+                .copied()
+                .map(NoteId)
+                .ok_or_else(|| unknown_ref(format!("note {} was not created", r.0)))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    // H1 changes nothing: one snapshot of the session's collection, never
+    // a promotion to the hosted engine (whose open runs the day check).
+    let collection = session
+        .storage
+        .collection()
+        .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
+    let read = collection.with_snapshot(|snapshot| {
+        let new = find(snapshot, &args.notetype).map_err(core)?.map_err(unknown_ref)?.id;
+        Ok(change::info_on(snapshot, &notes, new, &CancelToken::new(), &ProgressSink::new()))
+    })?;
+    let info = match read {
+        Ok(info) => info,
+        Err(error) => return change_refusal(&error).map(OpResult::Rejected).ok_or_else(|| core(error)),
+    };
+    let ord = |o: &Option<u32>| o.map_or(Value::Null, Value::from);
+    let output = json!({
+        "old_notetype": info.old.name,
+        "new_notetype": info.new.name,
+        "old_fields": info.old.fields,
+        "new_fields": info.new.fields,
+        "old_templates": info.old.templates,
+        "new_templates": info.new.templates,
+        "fields": info.fields.iter().map(ord).collect::<Vec<_>>(),
+        "templates": info.templates.as_ref().map(|map| map.iter().map(ord).collect::<Vec<_>>()),
+        "discarded_fields": info.preview.discarded_fields,
+        "dropped_templates": info.preview.dropped_templates,
+        "removed_cards": info.preview.removed_cards,
+        "field_content": info.field_content,
+        "card_counts": info.card_counts.iter().map(|(o, n)| json!([o, n])).collect::<Vec<_>>(),
+        "schema": info.schema,
+    });
+    session.change_notetype = Some(ChangeScreen { notes, info });
+    Ok(OpResult::Output(output))
+}
+
+/// H2's map arguments against what the info step read: a wrong length, an
+/// ordinal the old note type does not have, an ordinal twice in
+/// `templates`, or `templates` where the info step has none are
+/// `invalid_scenario`.
+fn scenario_map(given: Option<&[Option<u64>]>, default: Option<&[Option<u32>]>, len: usize, old: usize, what: &str)
+-> Result<Option<Vec<Option<u32>>>, ExecError> {
+    let Some(given) = given else {
+        return Ok(default.map(<[Option<u32>]>::to_vec));
+    };
+    if default.is_none() {
+        return Err(invalid(format!("change_notetype takes no {what} map here (H2)")));
+    }
+    if given.len() != len {
+        return Err(invalid(format!("the {what} map has {} entries for {len} (H2)", given.len())));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    given
+        .iter()
+        .map(|entry| {
+            entry
+                .map(|o| {
+                    let o = u32::try_from(o).ok().filter(|o| (*o as usize) < old);
+                    let o = o.ok_or_else(|| invalid(format!("the {what} map names an ordinal the old note type lacks (H2)")))?;
+                    if what == "template" && !seen.insert(o) {
+                        return Err(invalid("the template map names an ordinal twice (H2)"));
+                    }
+                    Ok(o)
+                })
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+/// H2: saving the change screen with the remembered selection, note types
+/// and stamp. The confirmed losses are a fresh M5 and M6 at this step over
+/// the remembered selection and maps (T9); when that read is refused, the
+/// info step's counts, and the op's own checks give the answer.
+fn change_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    let Step::ChangeNotetype(args) = step else {
+        return Err(invalid("expected change_notetype"));
+    };
+    let screen = session
+        .change_notetype
+        .clone()
+        .ok_or_else(|| invalid("change_notetype needs an earlier successful change_notetype_info (H2)"))?;
+    let info = &screen.info;
+    let fields = scenario_map(
+        args.fields.as_deref(),
+        Some(&info.fields),
+        info.new.fields.len(),
+        info.old.fields.len(),
+        "field",
+    )?
+    .unwrap_or_default();
+    let templates = scenario_map(
+        args.templates.as_deref(),
+        info.templates.as_deref(),
+        info.new.templates.len(),
+        info.old.templates.len(),
+        "template",
+    )?;
+    let collection = session.engine_collection()?;
+    let fresh = change::info(&collection, &screen.notes, info.new.id, &CancelToken::new(), &ProgressSink::new());
+    // T9: that read decides no refusal. Refused in any way (a listed note
+    // deleted, a note now of a note type that no longer exists), the info
+    // step's counts go in and the op's own checks give the one answer.
+    let confirmed = match fresh {
+        Ok(fresh) => fresh.preview(&fields, templates.as_deref()).losses,
+        Err(EngineError::NotFound { .. } | EngineError::NotetypeStructure(_)) => {
+            info.preview(&fields, templates.as_deref()).losses
+        }
+        Err(error) => return Err(core(error)),
+    };
+    let request = ChangeNotetype {
+        notes: screen.notes.clone(),
+        old_notetype: info.old.id,
+        new_notetype: info.new.id,
+        fields,
+        templates,
+        schema: info.schema,
+        layout: info.layout,
+        confirmed,
+    };
+    match change::change(&collection, request, CancelToken::new(), ProgressSink::new()) {
+        Ok(changed) => Ok(OpResult::Output(json!({ "notes": changed.value.notes }))),
+        Err(error) => change_refusal(&error).map(OpResult::Rejected).ok_or_else(|| core(error)),
     }
 }
 

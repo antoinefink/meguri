@@ -44,6 +44,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "backup",
             "browser_config_set",
             "bury",
+            "change_notetype",
+            "change_notetype_info",
             "clear_unused_tags",
             "clone_notetype",
             "clone_preset",

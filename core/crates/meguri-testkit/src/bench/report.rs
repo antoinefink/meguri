@@ -55,6 +55,19 @@ impl Measurement {
         self.samples.run(iters, op)
     }
 
+    /// Like [`Measurement::run`] for an operation whose measured part ends
+    /// before the call returns (a search's first page, before the rest of
+    /// its events are drained): `op` times that part itself and returns it.
+    pub fn run_timed(&mut self, iters: u64, mut op: impl FnMut(u64) -> Duration) -> Duration {
+        let mut batch = Duration::ZERO;
+        for i in 0..iters {
+            let elapsed = op(i);
+            self.samples.record(elapsed);
+            batch += elapsed;
+        }
+        batch
+    }
+
     pub fn samples(&self) -> &OpSamples {
         &self.samples
     }

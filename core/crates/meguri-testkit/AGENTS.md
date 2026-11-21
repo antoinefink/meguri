@@ -43,4 +43,5 @@
 - After a hosted sync replaces the generation, refresh with `Session::engine_collection` before observations (U117); it rebinds the cached reader handle and backup witness.
 
 - New observation kinds also change the CLI capability contract in `core/tools/meguri-cli/tests/cli.rs`. Include that test in focused verification; provider-only tests do not cover this separate consumer.
+- A `browser/` scenario's `search` goes through `exec/browser.rs` (result-sets H16): unsorted through `search_ids`, sorted through an engine session. Its first search promotes the session, and the open's day check unburies stale buried cards, so a raw-fixture scenario buries its cards after that search (`tests/search_no_writes.rs`).
 - A search never writes, sorted or not, and neither does `browser_rows`: `exec/search.rs` and `exec/browser.rs` read the day with `sched::day_without_writes` (meguri-sched's pure `sched_day`), never `day_query_now`, which unburies cards and stores timing keys (browser-ops B1, B3; `tests/search_no_writes.rs`). Sorted searches (`exec/search.rs`) read the equal-key runs from `SortedQuery::runs_sql` and list each run in S1's order (browser-ops B2).

@@ -45,6 +45,8 @@ fn every_catalog_op_declares_an_undo_class_and_destructive_ones_confirmation_and
     assert_eq!(class("check_database"), Some(UndoClass::DestructiveNonUndoable));
     assert_eq!(class("apkg_apply"), Some(UndoClass::Undoable));
     assert_eq!(class("notetype_structure_change"), Some(UndoClass::Undoable));
+    assert_eq!(class("change_notetype"), Some(UndoClass::Undoable));
+    assert!(catalog::CHANGE_NOTETYPE.may_declare_long_write() && !catalog::CHANGE_NOTETYPE.cancellable_write());
     assert_eq!(class("bulk_op"), Some(UndoClass::Undoable));
     assert_eq!(class("memory_recompute"), Some(UndoClass::Undoable));
     assert!(catalog::MEMORY_RECOMPUTE.cancellable_write());
