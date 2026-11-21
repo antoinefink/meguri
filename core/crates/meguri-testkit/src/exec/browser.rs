@@ -293,6 +293,9 @@ pub(super) fn search(
     use std::time::Duration;
     session.engine_collection()?;
     let engine = session.storage.host()?.engine().clone();
+    // H16: a plan with slow terms streams with one candidate per chunk, so
+    // the streamed scenarios test Q10's path.
+    engine.set_search_stream_chunk_for_testing(1);
     let (sender, events) = std::sync::mpsc::channel();
     let browse = engine.open_search_session(std::sync::Arc::new(Events(std::sync::Mutex::new(sender))));
     let failed = |error: BrowseError| -> Result<Value, ExecError> {

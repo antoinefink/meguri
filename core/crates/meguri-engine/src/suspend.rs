@@ -105,8 +105,6 @@ impl Engine {
         let deadline = monotonic::now() + timeout_budget;
         let _lane = self.control_lane_until(deadline)?;
         self.collection()?;
-        // `browser/result-sets` H3: searches stop so their readers return.
-        let _searches = self.inner.searches.halt();
         self.jobs().pause(true);
         let jobs = self.jobs().running();
         for job in &jobs {
@@ -118,6 +116,9 @@ impl Engine {
             self.jobs().pause(false);
             return Ok(SuspendOutcome::Deferred { job_id: job.id });
         }
+        // `browser/result-sets` H3: searches stop so their readers return,
+        // once the suspend goes on to quiesce (a deferred one leaves them).
+        let _searches = self.inner.searches.halt();
         self.quiesce_for_suspend(deadline)?;
         Ok(SuspendOutcome::Suspended)
     }

@@ -22,6 +22,8 @@ pub(crate) struct SearchRegistry {
     /// Notified when a reader comes back, a token is set or a halt ends.
     changed: Condvar,
     next_server_reader: AtomicUsize,
+    /// Q10's chunk size when a test sets one (H16); 0 otherwise.
+    stream_chunk: AtomicUsize,
 }
 
 /// Handle ids are unique across every session of every engine in the
@@ -98,6 +100,20 @@ impl SearchRegistry {
             }
             state = self.changed.wait(state).unwrap_or_else(PoisonError::into_inner);
         }
+    }
+
+    /// Q10 step 4's chunk size a test set (fixed), or none (the default
+    /// chunks, which grow).
+    pub(super) fn stream_chunk(&self) -> Option<usize> {
+        match self.stream_chunk.load(Ordering::Relaxed) {
+            0 => None,
+            chunk => Some(chunk),
+        }
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn set_stream_chunk(&self, chunk: usize) {
+        self.stream_chunk.store(chunk, Ordering::Relaxed);
     }
 
     /// A handle id no session in the process has used.

@@ -32,6 +32,15 @@ impl Params {
         self.0
     }
 
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Drops the parameters bound after the first `len`.
+    pub(super) fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+
     /// Parameters already bound (a plan's), so that more follow them.
     pub(super) fn from_vec(params: Vec<Param>) -> Params {
         Params(params)

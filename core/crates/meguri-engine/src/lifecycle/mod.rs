@@ -777,8 +777,6 @@ impl Engine {
         cleanup: Option<impl FnOnce(Option<Collection>) -> Result<(), EngineError>>,
     ) -> Result<(), EngineError> {
         let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
-        // `browser/result-sets` H3: searches stop so their readers return.
-        let _searches = self.inner.searches.halt();
         if self.slot_holder() == Some(LongOp::CollectionExportHandoff) {
             return Err(EngineError::Busy {
                 running_op: LongOp::CollectionExportHandoff.name().into(),
@@ -787,6 +785,9 @@ impl Engine {
         if matches!(self.state(), LifecycleState::Opening | LifecycleState::Upgrading { .. }) {
             return Err(EngineError::unavailable("the collection is opening"));
         }
+        // `browser/result-sets` H3: searches stop so their readers return,
+        // once the close is allowed.
+        let _searches = self.inner.searches.halt();
         self.jobs().pause(true);
         for job in self.jobs().running() {
             job.cancel.interrupt();

@@ -8,6 +8,8 @@
 //!   outside the sample.
 //! - `browse.resort.<mode>.<key>`: from `resort` of a whole-collection
 //!   handle to its `FirstPage`.
+//! - `browse.toggle.<from>.<key>`: from `toggle` of a whole-collection
+//!   handle to its `FirstPage`, derived without a predicate run (H11).
 //! - `browse.reverse.cards`, `browse.rows.page`: a reverse in memory, and a
 //!   page of 400 rows (the visible rows and 200 each side, H7) with the
 //!   default cards-mode columns.
@@ -186,10 +188,34 @@ fn main() -> ExitCode {
             });
             push(&mut suite, measurement);
         }
+        // A toggle of `is:new` (card scope) is derived from the handle.
+        for (mode, from, to) in [(SearchMode::Cards, "noteFld", "noteFld"), (SearchMode::Notes, "noteFld", "cardDue")] {
+            let name = format!("browse.toggle.{}.{to}", mode_name(mode));
+            let toggle = |handle: HandleId| {
+                let watch = Stopwatch::start();
+                let seq = session
+                    .toggle(handle, SortSpec::new(to, SortDirection::Ascending), None)
+                    .expect("a complete handle");
+                first_page(&events, seq, watch)
+            };
+            let (_, source) = search(&session, &events, "is:new", mode, from);
+            black_box(toggle(source));
+            let mut measurement = Measurement::start(&name, Some(&size));
+            criterion.bench_function(&format!("{name}/{size}"), |b| {
+                b.iter_custom(|n| {
+                    measurement.run_timed(n, |_| {
+                        let (_, source) = search(&session, &events, "is:new", mode, from);
+                        toggle(source).0
+                    })
+                })
+            });
+            push(&mut suite, measurement);
+        }
         {
             let (_, handle) = search(&session, &events, "", SearchMode::Cards, "noteFld");
             let name = "browse.reverse.cards";
-            let mut revision = 0;
+            // Warm up outside the samples.
+            let mut revision = session.reverse(handle, 0).expect("a complete handle");
             let mut measurement = Measurement::start(name, Some(&size));
             criterion.bench_function(&format!("{name}/{size}"), |b| {
                 b.iter_custom(|n| {
@@ -201,14 +227,17 @@ fn main() -> ExitCode {
             push(&mut suite, measurement);
             let name = "browse.rows.page";
             let columns = ["noteFld", "template", "cardDue", "deck"];
-            let span = session.handle_state(handle).expect("the handle").count.saturating_sub(400).max(1);
+            let count = session.handle_state(handle).expect("the handle").count;
+            let page = count.min(400);
+            let span = count - page + 1;
+            black_box(session.rows(handle, revision, 0..page, &columns).expect("a page"));
             let mut measurement = Measurement::start(name, Some(&size));
             criterion.bench_function(&format!("{name}/{size}"), |b| {
                 b.iter_custom(|n| {
                     measurement.run(n, |i| {
                         let start = (i * 997) % span;
                         session
-                            .rows(handle, revision, start..start + 400, &columns)
+                            .rows(handle, revision, start..start + page, &columns)
                             .expect("a page")
                             .len()
                     })

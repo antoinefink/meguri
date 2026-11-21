@@ -87,6 +87,11 @@ pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Pr
             undo_session: None,
         }
     });
+    // H6: a generation that moved releases the old handles, also when the
+    // reopen failed after it moved (no `CollectionReplaced` then).
+    if core.exec.generation() != old {
+        engine.inner.searches.release_before(core.exec.generation());
+    }
     drop(searches);
     if reopened {
         engine.set_exclusive_phase(core, ExclusivePhase::Working);

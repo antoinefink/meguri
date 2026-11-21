@@ -1,6 +1,7 @@
 //! A search never writes (`browser/result-sets` H3, H9; `specs/conformance/
 //! browser-ops.md` B1, B3): a session's sorted searches in both modes,
-//! terms and sort keys that read the day, a resort, a reverse, row pages,
+//! terms and sort keys that read the day, a resort, a toggle, a reverse,
+//! row pages,
 //! Question and Answer cells, a selection and the one-shot search leave
 //! queues, stamps, `col` and every config row as they were, and commit no
 //! op, although the day has moved past `lastUnburied` and a day query would
@@ -130,6 +131,11 @@ fn a_session_and_the_one_shot_search_write_nothing_even_past_last_unburied() {
                 .unwrap();
             assert!(rows.iter().all(Result::is_ok));
             session.qa_cells(sorted_again, 1, 0..count, QaWhich::Both, None).unwrap();
+            // A toggle, derived or run, writes nothing either.
+            let seq = session
+                .toggle(sorted_again, SortSpec::new("cardDue", SortDirection::Ascending), None)
+                .unwrap();
+            wait(seq);
         }
     }
     let mut one_shot = search_ids(&h.engine, "is:buried -is:due", SearchMode::Cards).unwrap();

@@ -93,7 +93,21 @@ impl Plan {
         ctx: &SearchContext,
         notetypes: &SearchNotetypes,
     ) -> Result<Plan, BuildError> {
-        build_with(query, mode, ctx, notetypes, &mut sql::compile_term)
+        build_with(query, mode, ctx, notetypes, &mut sql::compile_term, false)
+    }
+
+    /// Q10 step 1: the relaxed plan, in which every slow term is TRUE under
+    /// an even number of negations (none counts as even) and FALSE under an
+    /// odd number; groups, AND and OR do not count. It tests the rows Q5
+    /// gives the original query (step 2), and holds no slow term. Its errors
+    /// are the original plan's.
+    pub fn build_relaxed(
+        query: &Query,
+        mode: SearchMode,
+        ctx: &SearchContext,
+        notetypes: &SearchNotetypes,
+    ) -> Result<Plan, BuildError> {
+        build_with(query, mode, ctx, notetypes, &mut sql::compile_term, true)
     }
 
     /// Test-only (KTD18): [`Plan::build`] with `compile` in place of
@@ -106,7 +120,7 @@ impl Plan {
         ctx: &SearchContext,
         compile: &mut dyn FnMut(&Term, &TermEnv<'_>, &mut Params) -> Result<TermSql, ErrorKind>,
     ) -> Result<Plan, BuildError> {
-        build_with(query, mode, ctx, &SearchNotetypes::default(), compile)
+        build_with(query, mode, ctx, &SearchNotetypes::default(), compile, false)
     }
 
     pub fn mode(&self) -> SearchMode {
@@ -158,6 +172,21 @@ impl Plan {
         )
     }
 
+    /// [`Plan::pairs_sql`] restricted to the notes of the JSON array bound
+    /// as `list`: Q10 step 4 in notes mode with card or card-and-note scope,
+    /// where a note is kept through one of its card-and-note pairs, and
+    /// those pairs are H11's match data. `None` for the other plans.
+    pub fn restricted_pairs_sql(&self, list: &str) -> Option<String> {
+        match (self.mode, self.rows) {
+            (SearchMode::Notes, Rows::Cards | Rows::CardsWithNotes) => Some(format!(
+                "SELECT c.id, c.nid FROM cards c JOIN notes n ON n.id = c.nid \
+                 WHERE n.id IN (SELECT value FROM json_each({list})) AND ({})",
+                self.predicate
+            )),
+            _ => None,
+        }
+    }
+
     /// `browser/result-sets` H5, H11: the lone rows (Q6) the query matches,
     /// tested on those rows alone. Cards mode with card scope: each card
     /// without a note row, with its `nid` (two columns). Notes mode with note
@@ -194,10 +223,13 @@ impl Plan {
 /// The signature of a term compiler: [`sql::compile_term`] in the product.
 type Compile<'a> = dyn FnMut(&Term, &TermEnv<'_>, &mut Params) -> Result<TermSql, ErrorKind> + 'a;
 
+/// A piece of the predicate. `odd` is whether an odd number of negations
+/// stand above the piece (Q10 step 1); for [`Piece::Negated`], above the
+/// negation the term takes.
 enum Piece {
-    Node(NodeId),
+    Node(NodeId, bool),
     /// A term that takes the `-` before it itself ([`sql::takes_negation`]).
-    Negated(NodeId),
+    Negated(NodeId, bool),
     Text(&'static str),
 }
 
@@ -242,6 +274,7 @@ fn build_with(
     ctx: &SearchContext,
     notetypes: &SearchNotetypes,
     compile: &mut Compile<'_>,
+    relaxed: bool,
 ) -> Result<Plan, BuildError> {
     let rows = Rows::for_query(mode, query_scope(query));
     let env = TermEnv {
@@ -259,25 +292,25 @@ fn build_with(
     // statement checks.
     let mut pattern_error = None;
     // Left to right, so the first error the source names is the one raised.
-    let mut stack = vec![Piece::Node(query.root())];
+    let mut stack = vec![Piece::Node(query.root(), false)];
     while let Some(piece) = stack.pop() {
-        let (id, negated) = match piece {
+        let (id, negated, odd) = match piece {
             Piece::Text(text) => {
                 predicate.push_str(text);
                 continue;
             }
-            Piece::Node(id) => (id, false),
-            Piece::Negated(id) => (id, true),
+            Piece::Node(id, odd) => (id, false, odd),
+            Piece::Negated(id, odd) => (id, true, odd),
         };
         let node = query.node(id);
         match &node.kind {
-            NodeKind::And(items) => joined(&mut stack, items, " AND "),
-            NodeKind::Or(items) => joined(&mut stack, items, " OR "),
-            NodeKind::Group(inside) => stack.push(Piece::Node(*inside)),
+            NodeKind::And(items) => joined(&mut stack, items, " AND ", odd),
+            NodeKind::Or(items) => joined(&mut stack, items, " OR ", odd),
+            NodeKind::Group(inside) => stack.push(Piece::Node(*inside, odd)),
             NodeKind::Not(item) => match &query.node(*item).kind {
-                NodeKind::Term(term) if sql::takes_negation(term) => stack.push(Piece::Negated(*item)),
+                NodeKind::Term(term) if sql::takes_negation(term) => stack.push(Piece::Negated(*item, odd)),
                 _ => {
-                    stack.push(Piece::Node(*item));
+                    stack.push(Piece::Node(*item, !odd));
                     stack.push(Piece::Text("NOT "));
                 }
             },
@@ -294,6 +327,7 @@ fn build_with(
                     return Err(SearchError::new(kind, node.span.clone()).into());
                 }
                 let term_env = TermEnv { negated, ..env };
+                let bound = params.len();
                 let term_sql = match compile(term, &term_env, &mut params) {
                     Ok(term_sql) => term_sql,
                     Err(kind) if sql::is_pattern_error(&kind) => {
@@ -311,6 +345,17 @@ fn build_with(
                     }
                     Err(kind) => return Err(SearchError::new(kind, node.span.clone()).into()),
                 };
+                if relaxed && term_sql.slow {
+                    // Q10 step 1. Under an even number of negations the
+                    // term is TRUE. A term that takes its `-` stands for
+                    // that negation, one more above the term, so its SQL
+                    // is NOT of the term's value: again TRUE when `odd`,
+                    // the count above the `-`, is even. Its parameters go:
+                    // the statement no longer uses them.
+                    params.truncate(bound);
+                    predicate.push_str(if odd { "(0)" } else { "(1)" });
+                    continue;
+                }
                 predicate.push('(');
                 predicate.push_str(&term_sql.sql);
                 predicate.push(')');
@@ -336,10 +381,10 @@ fn build_with(
 }
 
 /// Pushes `( item joiner item ... )` so the pieces pop in order.
-fn joined(stack: &mut Vec<Piece>, items: &[NodeId], joiner: &'static str) {
+fn joined(stack: &mut Vec<Piece>, items: &[NodeId], joiner: &'static str, odd: bool) {
     stack.push(Piece::Text(")"));
     for (k, item) in items.iter().enumerate().rev() {
-        stack.push(Piece::Node(*item));
+        stack.push(Piece::Node(*item, odd));
         if k > 0 {
             stack.push(Piece::Text(joiner));
         }

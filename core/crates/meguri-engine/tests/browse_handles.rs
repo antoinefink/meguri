@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use common::Harness;
 use meguri_engine::browse::search::{
-    BrowseError, HandleId, QaWhich, Refetch, RequestSeq, SearchEvent, SearchListener, SearchSession, SortDirection,
+    BrowseError, HandleId, MapFrom, Mapped, QaWhich, Refetch, Selection, RequestSeq, SearchEvent, SearchListener, SearchSession, SortDirection,
     SortSpec, search_ids,
 };
 use meguri_engine::browse::{Answer, Cell, Question};
@@ -660,6 +660,11 @@ fn damaged() -> Fx {
             "INSERT INTO cards SELECT id + 1000, 4242, did, ord, mod, usn, type, queue, due + 50, ivl, factor, reps, \
              lapses, left, odue, odid, flags, data FROM cards WHERE id = (SELECT min(id) FROM cards)",
             Vec::new(),
+        ), (
+            // A note without cards, `n0000` as the first note.
+            "INSERT INTO notes SELECT id + 5000, guid || 'x', mid, mod, usn, tags, flds, sfld, csum, flags, data \
+             FROM notes WHERE id = (SELECT min(id) FROM notes)",
+            Vec::new(),
         )],
     );
     let h = Harness::open_path(dir, path);
@@ -699,6 +704,268 @@ fn a_note_column_sort_sets_lone_cards_aside_and_a_resort_brings_them_back_h5_h8(
     assert!(!fx.ids(scoped).contains(&lone));
     let reader = fx.h.collection.reader(ReaderRole::Query).unwrap();
     assert!(reader.card(CardId(lone)).unwrap().is_some());
+}
+
+impl Fx {
+    /// Toggles a complete handle and returns the new complete handle.
+    fn toggle(&self, handle: HandleId, sort: SortSpec) -> (HandleId, u64) {
+        let seq = self.session.toggle(handle, sort, None).unwrap();
+        complete(&self.until(seq))
+    }
+}
+
+/// H11's table on a sound collection: every scope but "either" derives the
+/// other mode's set with no predicate run and no extra test, and the set
+/// equals the search run in that mode; "either" runs the query.
+#[test]
+fn a_toggle_derives_the_other_mode_without_a_run_on_a_sound_collection_h11() {
+    let fx = fixture(12);
+    sched::ops::run(
+        &fx.h.collection,
+        sched::ops::Request::Suspend(sched::ops::Targets::Cards(vec![fx.cards[3], fx.cards[8]])),
+        &Default::default(),
+    )
+    .unwrap();
+    // Card scope, note scope, card and note, either.
+    let cases = [("is:suspended", true), ("n0001 or n0004", true), ("is:suspended n0004", true), ("", false)];
+    for (text, derived) in cases {
+        for (from, to, from_key, to_key) in [
+            (SearchMode::Cards, SearchMode::Notes, "cardDue", "noteFld"),
+            (SearchMode::Notes, SearchMode::Cards, "noteFld", "cardDue"),
+        ] {
+            let (handle, _) = fx.search(text, from, asc(from_key));
+            let runs = fx.session.predicate_runs_for_testing();
+            let (toggled, _) = fx.toggle(handle, desc(to_key));
+            let ran = fx.session.predicate_runs_for_testing() - runs;
+            assert_eq!(ran, u64::from(!derived), "{text:?} {from:?}");
+            let (direct, _) = fx.search(text, to, desc(to_key));
+            assert_eq!(fx.ids(toggled), fx.ids(direct), "{text:?} {from:?}");
+            assert_eq!(fx.session.handle_state(toggled).unwrap().mode, to);
+        }
+    }
+    assert_eq!(fx.session.extra_tests_for_testing(), 0);
+}
+
+#[test]
+fn a_toggle_runs_the_query_after_a_commit_or_a_changed_context_and_refuses_a_handle_in_progress_h11() {
+    let fx = fixture(4);
+    let (handle, _) = fx.search("n0001", SearchMode::Cards, asc("cardDue"));
+    common::set_first_field(&fx.h.collection, OpSource::UserUndoable, fx.notes[2], "n0001 too").unwrap();
+    let runs = fx.session.predicate_runs_for_testing();
+    let (toggled, count) = fx.toggle(handle, asc("noteFld"));
+    assert_eq!(fx.session.predicate_runs_for_testing(), runs + 1, "an op committed after the match seq");
+    assert_eq!(count, 2);
+    assert_eq!(fx.ids(toggled), vec![fx.notes[1].0, fx.notes[2].0]);
+    // `is:due` reads now: a second later the context differs.
+    let (due, _) = fx.search("is:due or n0003", SearchMode::Cards, asc("cardDue"));
+    fx.h.clock.set_now_ms(common::NOW_MS + 2_000);
+    let runs = fx.session.predicate_runs_for_testing();
+    fx.toggle(due, asc("noteFld"));
+    assert_eq!(fx.session.predicate_runs_for_testing(), runs + 1, "the context changed");
+    // In progress: NotComplete, and the request goes on.
+    let (go, wait) = mpsc::channel::<()>();
+    fx.session.after_first_page_for_testing(move || {
+        let _ = wait.recv_timeout(WAIT);
+    });
+    let seq = fx.session.start_search("", SearchMode::Cards, asc("cardDue"), None);
+    let handle = match fx.events.recv_timeout(WAIT).unwrap() {
+        SearchEvent::FirstPage { handle, .. } => handle,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(fx.session.toggle(handle, asc("noteFld"), None), Err(BrowseError::NotComplete));
+    go.send(()).unwrap();
+    assert!(matches!(fx.until(seq).last(), Some(SearchEvent::Complete { count: 8, .. })));
+    let seq = fx.session.toggle(handle, asc("nope"), None).unwrap();
+    assert!(matches!(
+        fx.until(seq).as_slice(),
+        [SearchEvent::Failed {
+            error: BrowseError::UnsortableColumn,
+            ..
+        }]
+    ));
+}
+
+/// H11's extra rows on a collection with a card without a note and a note
+/// without cards (`toggle-damaged`, `sorted-damaged`), and S9 in the derived
+/// cards mode.
+#[test]
+fn a_toggle_on_a_damaged_collection_adds_exactly_the_lone_rows_a_run_gives_h5_h11() {
+    let fx = damaged();
+    let lone_card = fx.cards[0].0 + 1000;
+    let lone_note = fx.notes[0].0 + 5000;
+    let check = |text: &str, from: SearchMode, from_key: &str, to_key: &str| {
+        let to = match from {
+            SearchMode::Cards => SearchMode::Notes,
+            SearchMode::Notes => SearchMode::Cards,
+        };
+        let (handle, _) = fx.search(text, from, asc(from_key));
+        let runs = fx.session.predicate_runs_for_testing();
+        let (toggled, _) = fx.toggle(handle, asc(to_key));
+        assert_eq!(fx.session.predicate_runs_for_testing(), runs, "{text} {from:?}: derived");
+        let (direct, _) = fx.search(text, to, asc(to_key));
+        assert_eq!(fx.ids(toggled), fx.ids(direct), "{text} {from:?} to {to_key}");
+        fx.ids(toggled)
+    };
+    // Cards to notes, card scope: no note for the lone card.
+    let notes = check("is:new", SearchMode::Cards, "cardDue", "noteFld");
+    assert!(!notes.contains(&4242));
+    // Notes to cards, card scope: the lone card joins under cardDue and is
+    // set aside under noteFld, as a run does.
+    let extra = fx.session.extra_tests_for_testing();
+    assert!(check("is:new", SearchMode::Notes, "noteFld", "cardDue").contains(&lone_card));
+    assert!(!check("is:new", SearchMode::Notes, "noteFld", "noteFld").contains(&lone_card));
+    assert_eq!(fx.session.extra_tests_for_testing(), extra + 2);
+    // Cards to notes, note scope: the note without cards joins.
+    assert!(check("n0000", SearchMode::Cards, "cardDue", "noteFld").contains(&lone_note));
+    // A derived cards handle keeps the lone card aside and a resort brings
+    // it back (H5, H8).
+    let (notes_handle, _) = fx.search("is:new", SearchMode::Notes, asc("noteFld"));
+    let (by_field, count) = fx.toggle(notes_handle, asc("noteFld"));
+    assert_eq!(count, 6);
+    let seq = fx.session.resort(by_field, asc("cardDue"), None).unwrap();
+    let (by_due, count) = complete(&fx.until(seq));
+    assert_eq!(count, 7);
+    assert!(fx.ids(by_due).contains(&lone_card));
+}
+
+#[test]
+fn index_of_finds_ids_of_either_kind_h12() {
+    let fx = fixture(3);
+    let (cards, _) = fx.search("", SearchMode::Cards, desc("noteFld"));
+    let (notes_handle, _) = fx.search("", SearchMode::Notes, asc("noteFld"));
+    // Cards descending: note 2's cards first.
+    assert_eq!(fx.session.index_of(cards, 0, SearchMode::Cards, fx.cards[5].0), Ok(Some(0)));
+    assert_eq!(fx.session.index_of(cards, 0, SearchMode::Notes, fx.notes[1].0), Ok(Some(2)));
+    assert_eq!(fx.session.index_of(notes_handle, 0, SearchMode::Cards, fx.cards[5].0), Ok(Some(2)));
+    assert_eq!(fx.session.index_of(notes_handle, 0, SearchMode::Notes, fx.notes[0].0), Ok(Some(0)));
+    // Card ids and note ids are separate spaces.
+    if !fx.notes.iter().any(|note| note.0 == fx.cards[0].0) {
+        assert_eq!(fx.session.index_of(notes_handle, 0, SearchMode::Notes, fx.cards[0].0), Ok(None));
+    }
+    assert_eq!(fx.session.index_of(cards, 0, SearchMode::Cards, -1), Ok(None));
+    assert_eq!(
+        fx.session.index_of(cards, 1, SearchMode::Cards, -1),
+        Err(BrowseError::StaleRevision { current: 0 })
+    );
+}
+
+#[test]
+fn map_selection_follows_rows_into_a_re_search_and_a_toggle_h12() {
+    let fx = fixture(4);
+    sched::ops::run(
+        &fx.h.collection,
+        sched::ops::Request::Suspend(sched::ops::Targets::Cards(vec![fx.cards[2]])),
+        &Default::default(),
+    )
+    .unwrap();
+    let (all, _) = fx.search("", SearchMode::Cards, asc("noteFld"));
+    let (active, _) = fx.search("-is:suspended", SearchMode::Cards, asc("noteFld"));
+    // A re-search: cards 1 to 3 selected, card 2 current; card 2 is gone.
+    let mapped = fx
+        .session
+        .map_selection(
+            MapFrom::Handle { handle: all, revision: 0 },
+            Selection::Ranges(vec![1..4]),
+            Some(fx.cards[2].0),
+            active,
+            0,
+        )
+        .unwrap();
+    assert_eq!(mapped, Mapped { selected: vec![1..3], current: None });
+    // Cards to notes: the notes of the selected cards.
+    let (notes_handle, _) = fx.search("", SearchMode::Notes, asc("noteFld"));
+    let mapped = fx
+        .session
+        .map_selection(
+            MapFrom::Handle { handle: active, revision: 0 },
+            Selection::Ranges(vec![1..3]),
+            Some(fx.cards[3].0),
+            notes_handle,
+            0,
+        )
+        .unwrap();
+    assert_eq!(mapped, Mapped { selected: vec![0..2], current: Some(1) });
+    // Notes to cards: every card of the selected notes in `to`; the current
+    // note's first card, or its lowest-id card in `to` when the first is
+    // not there (card 2 is note 1's first card and is suspended).
+    let mapped = fx
+        .session
+        .map_selection(
+            MapFrom::Handle { handle: notes_handle, revision: 0 },
+            Selection::Ranges(vec![1..2]),
+            Some(fx.notes[1].0),
+            active,
+            0,
+        )
+        .unwrap();
+    assert_eq!(mapped, Mapped { selected: vec![2..3], current: Some(2) });
+    // From a released handle: ids the caller holds.
+    let mapped = fx
+        .session
+        .map_selection(
+            MapFrom::Mode(SearchMode::Cards),
+            Selection::Ids(vec![fx.cards[6].0, fx.cards[0].0]),
+            Some(fx.cards[6].0),
+            notes_handle,
+            0,
+        )
+        .unwrap();
+    assert_eq!(mapped, Mapped { selected: vec![0..1, 3..4], current: Some(3) });
+    assert!(matches!(
+        fx.session.map_selection(MapFrom::Mode(SearchMode::Cards), Selection::Ranges(vec![0..1]), None, notes_handle, 0),
+        Err(BrowseError::InvalidArgument { .. })
+    ));
+}
+
+/// Q10 through a session, one candidate per chunk: the streamed list equals
+/// the same rows sorted without the predicate, the first page goes out
+/// while the run goes on, a note deleted beyond the prefix never joins it
+/// (H10), and the one-shot search streams to the same set (H13).
+#[test]
+fn a_slow_search_streams_and_equals_the_whole_statement_q10_h3_h10_h13() {
+    let fx = fixture(150);
+    fx.h.engine.set_search_stream_chunk_for_testing(1);
+    let (handle, count) = fx.search("re:n00[0-4]", SearchMode::Cards, desc("noteFld"));
+    assert_eq!(count, 100);
+    let seq = fx.session.resort(handle, desc("noteFld"), None).unwrap();
+    let (sorted_again, _) = complete(&fx.until(seq));
+    assert_eq!(fx.ids(handle), fx.ids(sorted_again));
+    // Notes mode with card scope keeps notes through their pairs.
+    let (notes_handle, count) = fx.search("re:n00[0-4] -is:new", SearchMode::Notes, asc("noteFld"));
+    assert_eq!(count, 0);
+    assert!(fx.session.handle_state(notes_handle).unwrap().complete);
+    // The first page is final before the run ends.
+    let (go, wait) = mpsc::channel::<()>();
+    fx.session.after_first_page_for_testing(move || {
+        let _ = wait.recv_timeout(WAIT);
+    });
+    let seq = fx.session.start_search("n0", SearchMode::Cards, asc("noteFld"), None);
+    let (handle, first) = match fx.events.recv_timeout(WAIT).unwrap() {
+        SearchEvent::FirstPage { handle, ids, .. } => (handle, ids),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(first, card_ids(&fx.cards[..200]));
+    assert!(!fx.session.handle_state(handle).unwrap().complete);
+    let deleted = notes::delete(&fx.h.collection, vec![fx.notes[149]], OpSource::UserUndoable)
+        .unwrap()
+        .unwrap();
+    fx.session
+        .invalidated_rows(handle, 0, &[(deleted.seq, &deleted.changes)])
+        .unwrap();
+    go.send(()).unwrap();
+    let events = fx.until(seq);
+    assert!(matches!(events.last(), Some(SearchEvent::Complete { count: 298, .. })), "{events:?}");
+    assert_eq!(fx.ids(handle), card_ids(&fx.cards[..298]));
+    // The one-shot search streams to every matching id, ascending.
+    let streamed = search_ids(&fx.h.engine, "re:n00[0-4]", SearchMode::Notes).unwrap();
+    let mut expected: Vec<i64> = fx.notes[..50].iter().map(|note| note.0).collect();
+    expected.sort_unstable();
+    assert_eq!(streamed, expected);
+    // In notes mode with card scope a note is kept through one of its
+    // card-and-note pairs.
+    let (pairs, count) = fx.search("re:n00[0-4] card:1", SearchMode::Notes, asc("noteFld"));
+    assert_eq!(count, 50);
+    assert_eq!(fx.ids(pairs), fx.notes[..50].iter().map(|note| note.0).collect::<Vec<_>>());
 }
 
 /// H15: handle ids are unique across engines too; each session refuses

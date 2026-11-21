@@ -11,7 +11,7 @@ use meguri_sched::model::sched_config::SchedConfig;
 use meguri_search::plan::ids;
 use meguri_search::plan::sql::id_list;
 use meguri_search::{
-    BuildError, ContextReads, ErrorKind, Param, Plan, SearchContext, SearchError, SearchFailure, SearchMode,
+    BuildError, ContextReads, ContextValue, ErrorKind, Param, Plan, SearchContext, SearchError, SearchFailure, SearchMode,
     SearchNotetypes, Sort, SortError, SortedQuery,
 };
 use meguri_storage::{Cell, ReadRows};
@@ -37,6 +37,10 @@ pub(super) enum Job {
         source: Source,
         sort: SortSpec,
     },
+    Toggle {
+        source: Source,
+        sort: SortSpec,
+    },
     /// Superseded while queued: it ends `Cancelled` without running.
     Superseded,
     /// Made during a halt: it ends `Failed` with the engine's refusal (H3).
@@ -58,6 +62,8 @@ pub(super) struct Source {
     context: SearchContext,
     reads: ContextReads,
     ids: Vec<i64>,
+    /// Cards mode: the note id of each card of `ids`.
+    nids: Vec<i64>,
     set_aside: Vec<(i64, i64)>,
     match_seq: Seq,
     match_data: Option<Vec<i64>>,
@@ -72,6 +78,7 @@ impl Source {
             context: handle.context.clone(),
             reads: handle.reads,
             ids: handle.ids.clone(),
+            nids: handle.nids.clone(),
             set_aside: handle.set_aside.clone(),
             match_seq: handle.match_seq,
             match_data: handle.match_data.clone(),
@@ -86,6 +93,8 @@ impl Source {
 pub(crate) struct Testing {
     /// Predicate runs: executions of a plan over the collection's rows.
     pub(crate) runs: std::sync::atomic::AtomicU64,
+    /// H11's extra tests: the query on lone rows alone.
+    pub(crate) extra_tests: std::sync::atomic::AtomicU64,
     /// Runs on the worker once, after the next `FirstPage` went out and
     /// before the handle completes, so tests see a handle in progress.
     pub(crate) after_first_page: Mutex<Option<Box<dyn FnOnce() + Send>>>,
@@ -244,6 +253,7 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
         match job.job {
             Job::Search { text, mode, sort } => request.search(&text, mode, &sort),
             Job::Resort { source, sort } => request.resort(source, &sort),
+            Job::Toggle { source, sort } => request.toggle(source, &sort),
             Job::Superseded => Err(Stop::Cancelled),
             Job::Refused => unreachable!("answered above"),
         }
@@ -316,30 +326,6 @@ impl Request<'_> {
                     Stop::Failed(BrowseError::Engine(error.into()))
                 }
             })
-    }
-
-    /// The statement of a search's own plan (H3 step 4): a database error
-    /// is `search_failed` over the whole text (`search/errors` E3, E5).
-    fn visit_search(
-        &self,
-        rows: &impl ReadRows,
-        text: &str,
-        sql: &str,
-        params: &[Param],
-        visit: &mut dyn FnMut(&[i64]) -> bool,
-    ) -> Result<(), Stop> {
-        let result = match self.visit(rows, sql, params, visit) {
-            Err(Stop::Failed(BrowseError::Engine(_))) => Err(Stop::Failed(BrowseError::Search(refusal(text)))),
-            other => other,
-        };
-        #[cfg(feature = "test-hooks")]
-        if result.is_ok() {
-            self.shared
-                .testing
-                .runs
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
-        result
     }
 
     /// Reads one-or-two-column rows into a list.
@@ -442,10 +428,11 @@ impl Request<'_> {
         Ok(())
     }
 
-    /// Publishes `handle` with `first` as its first page and prefix.
-    fn publish_first(&self, mut handle: Handle, first: Listed) -> Result<(HandleId, Arc<Mutex<Handle>>), Stop> {
-        handle.ids = first.ids;
-        handle.nids = first.nids;
+    /// Moves the first page of `pending` into `handle` and publishes it.
+    fn publish_first(&self, mut handle: Handle, pending: &mut Listed) -> Result<(HandleId, Arc<Mutex<Handle>>), Stop> {
+        let first = pending.ids.len().min(PAGE);
+        handle.ids = pending.ids.drain(..first).collect();
+        handle.nids = pending.nids.drain(..first.min(pending.nids.len())).collect();
         let published = self.first_page(handle)?;
         #[cfg(feature = "test-hooks")]
         if let Some(hook) = self
@@ -461,9 +448,18 @@ impl Request<'_> {
         Ok(published)
     }
 
-    /// One row of one integer: not 0 (`plan::ids::ANY_LONE_CARD`).
-    fn any(&self, rows: &impl ReadRows, sql: &str) -> Result<bool, Stop> {
-        Ok(self.list(rows, sql, &[])?.ids.first().is_some_and(|value| *value != 0))
+    /// Runs `work` on a search reader's snapshot of the current collection,
+    /// with the request listed for halts.
+    fn with_snapshot<T>(
+        &self,
+        work: impl FnOnce(&Collection, &crate::readers::Snapshot<'_>) -> Result<T, Stop>,
+    ) -> Result<T, Stop> {
+        let (_engine, collection) = self.collection()?;
+        let registry = self.shared.registry.upgrade().ok_or(Stop::Cancelled)?;
+        let slot = registry.reader(self.token).ok_or(Stop::Cancelled)?;
+        let lease = collection.search_reader(slot.index)?;
+        let snapshot = lease.snapshot()?;
+        work(&collection, &snapshot)
     }
 
     /// H3: parse, check the sort, build the context and the plan, run the
@@ -473,43 +469,45 @@ impl Request<'_> {
         // run errors.
         let query = meguri_search::parse(text).map_err(|error| Stop::Failed(BrowseError::Search(error)))?;
         let sort = Sort::new(mode, &sort.key, sort.direction).map_err(|_| Stop::Failed(BrowseError::UnsortableColumn))?;
-        let (_engine, collection) = self.collection()?;
-        let registry = self.shared.registry.upgrade().ok_or(Stop::Cancelled)?;
-        let slot = registry.reader(self.token).ok_or(Stop::Cancelled)?;
-        let lease = collection.search_reader(slot.index)?;
-        let snapshot = lease.snapshot()?;
-        let context = context(&collection, &*snapshot)?;
-        let notetypes = SearchNotetypes::read(&*snapshot)?;
-        let plan = Plan::build(&query, mode, &context, &notetypes).map_err(|BuildError::Search(error)| {
-            Stop::Failed(BrowseError::Search(error))
-        })?;
-        let sorted = SortedQuery::for_plan(&plan, &sort, &context).map_err(sort_error)?;
-        let rows = &*snapshot;
-        // The first page comes from the same statement with a LIMIT, which
-        // SQLite orders with a bounded heap rather than a full sort: equal
-        // rows, final, earlier (H3 budgets). The whole list then comes
-        // from the full statement in the same snapshot.
-        let mut first = Listed::default();
-        self.visit_search(
-            rows,
+        self.with_snapshot(|collection, snapshot| {
+            let context = context(collection, &**snapshot)?;
+            let notetypes = SearchNotetypes::read(&**snapshot)?;
+            let plan = Plan::build(&query, mode, &context, &notetypes).map_err(build_error)?;
+            self.run_query(
+                snapshot,
+                QueryRun {
+                    text,
+                    query: &query,
+                    sort,
+                    context,
+                    notetypes: &notetypes,
+                    plan,
+                },
+            )
+        })
+    }
+
+    /// H3 step 4 and Q10: one predicate run of `plan` sorted, streamed when
+    /// the plan has slow terms; then the set-aside cards (H5) and the match
+    /// data (H11), in the same snapshot.
+    fn run_query(&self, snapshot: &crate::readers::Snapshot<'_>, run: QueryRun<'_>) -> Result<(), Stop> {
+        let QueryRun {
             text,
-            &format!("{} LIMIT {PAGE}", sorted.pairs_sql()),
-            sorted.params(),
-            &mut |row| {
-                first.ids.push(row[0]);
-                if let Some(nid) = row.get(1) {
-                    first.nids.push(*nid);
-                }
-                true
-            },
-        )?;
+            query,
+            sort,
+            context,
+            notetypes,
+            plan,
+        } = run;
+        let mode = plan.mode();
+        let sorted = SortedQuery::for_plan(&plan, &sort, &context).map_err(sort_error)?;
         let template = Handle {
             mode,
-            sort,
+            sort: sort.clone(),
             text: text.to_owned(),
             context: context.clone(),
             reads: plan.reads(),
-            sort_clock: context,
+            sort_clock: context.clone(),
             ids: Vec::new(),
             nids: Vec::new(),
             set_aside: Vec::new(),
@@ -522,8 +520,184 @@ impl Request<'_> {
             removed_while_running: Default::default(),
             prefix: 0,
         };
+        let rows = &**snapshot;
+        let (id, handle, match_data) = if streams(
+            rows,
+            &plan,
+            self.shared.registry.upgrade().as_deref(),
+            &|| self.token.is_cancelled(),
+        )? {
+            self.streamed(rows, text, query, &sort, &context, notetypes, &plan, template)?
+        } else {
+            let (id, handle) = self
+                .paged(rows, &sorted, template)
+                .map_err(|stop| refused(stop, text))?;
+            self.count_run();
+            // H11's match data: the cards of the matching card-and-note
+            // pairs.
+            let match_data = match plan.pairs_sql() {
+                Some(sql) => Some(self.list(rows, &sql, plan.params()).map_err(|stop| refused(stop, text))?.ids),
+                None => None,
+            };
+            (id, handle, match_data)
+        };
+        // H5: under S9's note-column sorts the matched cards without a note
+        // row are kept aside, not listed; a sound collection has none.
+        let set_aside = match (mode == SearchMode::Cards && !sorted.lists_lone_cards(), plan.lone_rows_sql()) {
+            (true, Some(sql)) if self.any(rows, ids::ANY_LONE_CARD)? => {
+                let lone = self.list(rows, &sql, plan.params()).map_err(|stop| refused(stop, text))?;
+                lone.ids.into_iter().zip(lone.nids).collect()
+            }
+            _ => Vec::new(),
+        };
+        {
+            let mut handle = lock(&handle);
+            handle.set_aside = set_aside;
+            handle.match_data = match_data;
+        }
+        self.complete(id, &handle)
+    }
+
+    /// Q10: the relaxed query sorted gives the candidates in final order;
+    /// the original query tests them a chunk at a time, so the kept rows so
+    /// far are the start of the result. The first page goes out as soon as
+    /// it is full; `Progress` follows at most every 100 ms (`engine/jobs`
+    /// J5). Returns the published handle and, in notes mode with card or
+    /// card-and-note scope, the cards of the kept pairs as match data.
+    #[allow(clippy::too_many_arguments)]
+    fn streamed(
+        &self,
+        rows: &meguri_storage::ReadSnapshot<'_>,
+        text: &str,
+        query: &meguri_search::Query,
+        sort: &Sort,
+        context: &SearchContext,
+        notetypes: &SearchNotetypes,
+        plan: &Plan,
+        template: Handle,
+    ) -> Result<Published, Stop> {
+        let mode = plan.mode();
+        let relaxed = Plan::build_relaxed(query, mode, context, notetypes).map_err(build_error)?;
+        let candidates = SortedQuery::for_plan(&relaxed, sort, context).map_err(sort_error)?;
+        let candidates = self
+            .list(rows, candidates.pairs_sql(), candidates.params())
+            .map_err(|stop| refused(stop, text))?;
+        let fixed = self.shared.registry.upgrade().and_then(|registry| registry.stream_chunk());
+        let chunk = fixed.unwrap_or(DEFAULT_CHUNK);
+        let list = format!("?{}", plan.params().len() + 1);
+        let pairs_sql = plan.restricted_pairs_sql(&list);
+        let sql = plan.restricted_sql(&list);
+        let mut params = plan.params().to_vec();
+        params.push(Param::Integer(0));
+        let mut pending = Listed::default();
+        let mut pairs: Option<Vec<i64>> = pairs_sql.as_ref().map(|_| Vec::new());
+        let mut template = Some(template);
+        let mut published: Option<(HandleId, Arc<Mutex<Handle>>)> = None;
+        let mut scanned = 0u64;
+        let mut last_progress = crate::monotonic::now();
+        // Chunks start at `chunk` and double up to MAX_CHUNK, so a sparse
+        // result does not pay one statement per few hundred candidates,
+        // while a dense one fills its first page from the first chunks. A
+        // chunk size a test sets stays fixed (H16).
+        let grows = fixed.is_none();
+        let mut windows = Vec::new();
+        let mut start = 0usize;
+        let mut size = chunk;
+        while start < candidates.ids.len() {
+            let end = (start + size).min(candidates.ids.len());
+            windows.push(start..end);
+            start = end;
+            if grows {
+                size = (size * 2).min(MAX_CHUNK);
+            }
+        }
+        for range in windows {
+            let window = &candidates.ids[range.clone()];
+            *params.last_mut().expect("the list parameter") = id_list(window);
+            let keep: std::collections::HashSet<i64> = match &pairs_sql {
+                Some(sql) => {
+                    let found = self.list(rows, sql, &params).map_err(|stop| refused(stop, text))?;
+                    if let Some(pairs) = pairs.as_mut() {
+                        pairs.extend(found.ids.iter().copied());
+                    }
+                    found.nids.into_iter().collect()
+                }
+                None => self
+                    .list(rows, &sql, &params)
+                    .map_err(|stop| refused(stop, text))?
+                    .ids
+                    .into_iter()
+                    .collect(),
+            };
+            let base = range.start;
+            for (offset, id) in window.iter().enumerate() {
+                if keep.contains(id) {
+                    pending.ids.push(*id);
+                    if let Some(nid) = candidates.nids.get(base + offset)
+                        && mode == SearchMode::Cards
+                    {
+                        pending.nids.push(*nid);
+                    }
+                }
+            }
+            scanned += window.len() as u64;
+            match &published {
+                None if pending.ids.len() >= PAGE => {
+                    let handle = template.take().expect("published once");
+                    let first = self.publish_first(handle, &mut pending)?;
+                    Self::append(&first.1, std::mem::take(&mut pending));
+                    published = Some(first);
+                }
+                None => {}
+                Some((_, handle)) => Self::append(handle, std::mem::take(&mut pending)),
+            }
+            if let Some((_, handle)) = &published
+                && crate::monotonic::now().saturating_sub(last_progress) >= PROGRESS_EVERY
+            {
+                last_progress = crate::monotonic::now();
+                // The rows confirmed so far become the announced prefix.
+                let (matched, revision) = {
+                    let mut handle = lock(handle);
+                    handle.prefix = handle.ids.len();
+                    (handle.count(), handle.revision)
+                };
+                self.send(SearchEvent::Progress {
+                    seq: RequestSeq(self.seq),
+                    matched,
+                    scanned,
+                    revision,
+                });
+            }
+        }
+        let (id, handle) = match published {
+            Some(published) => {
+                Self::append(&published.1, pending);
+                published
+            }
+            None => {
+                let handle = template.take().expect("published once");
+                let first = self.publish_first(handle, &mut pending)?;
+                Self::append(&first.1, pending);
+                first
+            }
+        };
+        self.count_run();
+        Ok((id, handle, pairs))
+    }
+
+    /// Publishes a sorted statement's rows: the first page from the same
+    /// statement with a LIMIT, which SQLite orders with a bounded heap rather
+    /// than a full sort (equal rows, final, earlier: H3, H8 budgets), then
+    /// the rest from the full statement in the same snapshot.
+    fn paged(
+        &self,
+        rows: &meguri_storage::ReadSnapshot<'_>,
+        sorted: &SortedQuery,
+        template: Handle,
+    ) -> Result<(HandleId, Arc<Mutex<Handle>>), Stop> {
+        let mut first = self.list(rows, &format!("{} LIMIT {PAGE}", sorted.pairs_sql()), sorted.params())?;
         let paged = first.ids.len();
-        let (id, handle) = self.publish_first(template, first)?;
+        let (id, handle) = self.publish_first(template, &mut first)?;
         if paged == PAGE {
             let mut rest = Listed::default();
             let mut index = 0usize;
@@ -536,30 +710,33 @@ impl Request<'_> {
                 }
                 index += 1;
                 true
-            })
-            .map_err(|stop| refused(stop, text))?;
+            })?;
             Self::append(&handle, rest);
         }
-        // H5: under S9's note-column sorts the matched cards without a note
-        // row are kept aside, not listed; a sound collection has none.
-        let set_aside = match (mode == SearchMode::Cards && !sorted.lists_lone_cards(), plan.lone_rows_sql()) {
-            (true, Some(sql)) if self.any(rows, ids::ANY_LONE_CARD)? => {
-                let lone = self.list(rows, &sql, plan.params()).map_err(|stop| refused(stop, text))?;
-                lone.ids.into_iter().zip(lone.nids).collect()
-            }
-            _ => Vec::new(),
-        };
-        // H11's match data: the cards of the matching card-and-note pairs.
-        let match_data = match plan.pairs_sql() {
-            Some(sql) => Some(self.list(rows, &sql, plan.params()).map_err(|stop| refused(stop, text))?.ids),
-            None => None,
-        };
-        {
-            let mut handle = lock(&handle);
-            handle.set_aside = set_aside;
-            handle.match_data = match_data;
-        }
-        self.complete(id, &handle)
+        Ok((id, handle))
+    }
+
+    /// One row of one integer: not 0 (`plan::ids::ANY_LONE_CARD`).
+    fn any(&self, rows: &impl ReadRows, sql: &str) -> Result<bool, Stop> {
+        Ok(self.list(rows, sql, &[])?.ids.first().is_some_and(|value| *value != 0))
+    }
+
+    /// H16: counts one predicate run.
+    fn count_run(&self) {
+        #[cfg(feature = "test-hooks")]
+        self.shared
+            .testing
+            .runs
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// H16: counts one of H11's extra tests.
+    fn count_extra_test(&self) {
+        #[cfg(feature = "test-hooks")]
+        self.shared
+            .testing
+            .extra_tests
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// H8: the source's ids and set-aside cards sorted by `sort` in a new
@@ -568,68 +745,295 @@ impl Request<'_> {
     fn resort(&self, source: Source, sort: &SortSpec) -> Result<(), Stop> {
         let sort =
             Sort::new(source.mode, &sort.key, sort.direction).map_err(|_| Stop::Failed(BrowseError::UnsortableColumn))?;
-        let (_engine, collection) = self.collection()?;
-        let registry = self.shared.registry.upgrade().ok_or(Stop::Cancelled)?;
-        let slot = registry.reader(self.token).ok_or(Stop::Cancelled)?;
-        let lease = collection.search_reader(slot.index)?;
-        let snapshot = lease.snapshot()?;
-        if snapshot.generation() != source.generation {
-            return Err(Stop::Failed(BrowseError::Engine(EngineError::StaleGeneration {
-                planned: source.generation,
-                current: snapshot.generation(),
-            })));
-        }
-        let clock = context(&collection, &*snapshot)?;
-        let mut all = source.ids;
-        all.extend(source.set_aside.iter().map(|(card, _)| *card));
-        let sorted = SortedQuery::for_ids(&all, &sort, &clock).map_err(sort_error)?;
-        // The first page from the statement with a LIMIT, as a search's
-        // (H8's budget); the rest after it is published.
-        let first = self.list(&*snapshot, &format!("{} LIMIT {PAGE}", sorted.pairs_sql()), sorted.params())?;
-        let set_aside = if source.mode == SearchMode::Cards && !sorted.lists_lone_cards() {
-            let lone = self.list(&*snapshot, ids::LONE_CARDS_AMONG, &[id_list(&all)])?;
+        self.with_snapshot(|collection, snapshot| {
+            check_generation(snapshot, source.generation)?;
+            let clock = context(collection, &**snapshot)?;
+            let mut all = source.ids;
+            all.extend(source.set_aside.iter().map(|(card, _)| *card));
+            let template = Handle {
+                mode: source.mode,
+                sort: sort.clone(),
+                text: source.text,
+                context: source.context,
+                reads: source.reads,
+                sort_clock: clock.clone(),
+                ids: Vec::new(),
+                nids: Vec::new(),
+                set_aside: Vec::new(),
+                match_seq: source.match_seq,
+                applied_seq: snapshot.seq(),
+                generation: snapshot.generation(),
+                revision: 0,
+                match_data: source.match_data,
+                complete: false,
+                removed_while_running: Default::default(),
+                prefix: 0,
+            };
+            self.sort_ids(snapshot, &all, &sort, &clock, template)
+        })
+    }
+
+    /// Sorts `ids` of the template's mode in the snapshot (H8, H11): those
+    /// that no longer exist are left out, and in cards mode a note-column
+    /// sort sets the cards without a note row aside (S9).
+    fn sort_ids(
+        &self,
+        snapshot: &crate::readers::Snapshot<'_>,
+        ids: &[i64],
+        sort: &Sort,
+        clock: &SearchContext,
+        template: Handle,
+    ) -> Result<(), Stop> {
+        let rows = &**snapshot;
+        let sorted = SortedQuery::for_ids(ids, sort, clock).map_err(sort_error)?;
+        let cards = template.mode == SearchMode::Cards;
+        let (id, handle) = self.paged(rows, &sorted, template)?;
+        let set_aside = if cards && !sorted.lists_lone_cards() {
+            let lone = self.list(rows, ids::LONE_CARDS_AMONG, &[id_list(ids)])?;
             lone.ids.into_iter().zip(lone.nids).collect()
         } else {
             Vec::new()
         };
-        let template = Handle {
-            mode: source.mode,
-            sort,
-            text: source.text,
-            context: source.context,
-            reads: source.reads,
-            sort_clock: clock,
-            ids: Vec::new(),
-            nids: Vec::new(),
-            set_aside,
-            match_seq: source.match_seq,
-            applied_seq: snapshot.seq(),
-            generation: snapshot.generation(),
-            revision: 0,
-            match_data: source.match_data,
-            complete: false,
-            removed_while_running: Default::default(),
-            prefix: 0,
-        };
-        let paged = first.ids.len();
-        let (id, handle) = self.publish_first(template, first)?;
-        if paged == PAGE {
-            let mut rest = Listed::default();
-            let mut index = 0usize;
-            self.visit(&*snapshot, sorted.pairs_sql(), sorted.params(), &mut |row| {
-                if index >= PAGE {
-                    rest.ids.push(row[0]);
-                    if let Some(nid) = row.get(1) {
-                        rest.nids.push(*nid);
-                    }
-                }
-                index += 1;
-                true
-            })?;
-            Self::append(&handle, rest);
-        }
+        lock(&handle).set_aside = set_aside;
         self.complete(id, &handle)
     }
+
+    /// H11: the handle's text in the other mode, sorted by `sort`, with a
+    /// context of its own. Derived from the handle without a predicate run
+    /// when no op committed after its match seq and the context reads the
+    /// same values; otherwise the query runs.
+    fn toggle(&self, source: Source, sort: &SortSpec) -> Result<(), Stop> {
+        let mode = match source.mode {
+            SearchMode::Cards => SearchMode::Notes,
+            SearchMode::Notes => SearchMode::Cards,
+        };
+        let query = meguri_search::parse(&source.text).map_err(|error| Stop::Failed(BrowseError::Search(error)))?;
+        let sort = Sort::new(mode, &sort.key, sort.direction).map_err(|_| Stop::Failed(BrowseError::UnsortableColumn))?;
+        self.with_snapshot(|collection, snapshot| {
+            check_generation(snapshot, source.generation)?;
+            let context = context(collection, &**snapshot)?;
+            let notetypes = SearchNotetypes::read(&**snapshot)?;
+            let plan = Plan::build(&query, mode, &context, &notetypes).map_err(build_error)?;
+            let reads = source.reads.union(plan.reads());
+            let same = snapshot.seq() == source.match_seq
+                && reads.iter().all(|value| same_value(value, &source.context, &context));
+            let derived = if same {
+                self.derive(snapshot, &source, &query, &plan)?
+            } else {
+                None
+            };
+            let Some(derived) = derived else {
+                return self.run_query(
+                    snapshot,
+                    QueryRun {
+                        text: &source.text,
+                        query: &query,
+                        sort,
+                        context,
+                        notetypes: &notetypes,
+                        plan,
+                    },
+                );
+            };
+            let template = Handle {
+                mode,
+                sort: sort.clone(),
+                text: source.text.clone(),
+                context: context.clone(),
+                reads: plan.reads(),
+                sort_clock: context.clone(),
+                ids: Vec::new(),
+                nids: Vec::new(),
+                set_aside: Vec::new(),
+                match_seq: snapshot.seq(),
+                applied_seq: snapshot.seq(),
+                generation: snapshot.generation(),
+                revision: 0,
+                match_data: derived.match_data,
+                complete: false,
+                removed_while_running: Default::default(),
+                prefix: 0,
+            };
+            self.sort_ids(snapshot, &derived.ids, &sort, &context, template)
+        })
+    }
+
+    /// H11's table: the set in the other mode, from the handle; `None` when
+    /// the query must run.
+    fn derive(
+        &self,
+        rows: &meguri_storage::ReadSnapshot<'_>,
+        source: &Source,
+        query: &meguri_search::Query,
+        plan: &Plan,
+    ) -> Result<Option<Derived>, Stop> {
+        use meguri_search::Scope;
+        let scope = meguri_search::plan::query_scope(query);
+        let any = |sql: &str| -> Result<bool, Stop> {
+            let found = self.list(rows, sql, &[])?;
+            Ok(found.ids.first().is_some_and(|value| *value != 0))
+        };
+        Ok(match (source.mode, scope) {
+            (_, Scope::Either) => None,
+            (SearchMode::Cards, scope) => {
+                // The handle's whole membership, set-aside cards included.
+                let matched: Vec<(i64, i64)> = source
+                    .ids
+                    .iter()
+                    .copied()
+                    .zip(source.nids.iter().copied())
+                    .chain(source.set_aside.iter().copied())
+                    .collect();
+                let mut seen = std::collections::HashSet::new();
+                let mut notes: Vec<i64> = matched.iter().map(|(_, note)| *note).filter(|note| seen.insert(*note)).collect();
+                let mut pairs = matched;
+                // A sound collection has no card without a note row: every
+                // matched card's note exists.
+                if scope == Scope::Card && any(ids::ANY_LONE_CARD)? {
+                    let existing: std::collections::HashSet<i64> =
+                        self.list(rows, ids::EXISTING_NOTES, &[id_list(&notes)])?.ids.into_iter().collect();
+                    notes.retain(|note| existing.contains(note));
+                    pairs.retain(|(_, note)| existing.contains(note));
+                }
+                if scope == Scope::Note && any(ids::ANY_LONE_NOTE)? {
+                    if let Some(sql) = plan.lone_rows_sql() {
+                        self.count_extra_test();
+                        notes.extend(
+                            self.list(rows, &sql, plan.params())
+                                .map_err(|stop| refused(stop, &source.text))?
+                                .ids,
+                        );
+                    }
+                }
+                let match_data = (scope != Scope::Note).then(|| pairs.iter().map(|(card, _)| *card).collect());
+                Some(Derived {
+                    ids: notes,
+                    match_data,
+                })
+            }
+            (SearchMode::Notes, Scope::Note) => {
+                let cards = self.list(rows, ids::CARDS_OF_NOTES, &[id_list(&source.ids)])?;
+                Some(Derived {
+                    ids: cards.ids,
+                    match_data: None,
+                })
+            }
+            (SearchMode::Notes, scope) => {
+                let Some(pairs) = &source.match_data else { return Ok(None) };
+                let mut cards: Vec<i64> = pairs.clone();
+                if scope == Scope::Card && any(ids::ANY_LONE_CARD)? {
+                    if let Some(sql) = plan.lone_rows_sql() {
+                        self.count_extra_test();
+                        cards.extend(
+                            self.list(rows, &sql, plan.params())
+                                .map_err(|stop| refused(stop, &source.text))?
+                                .ids,
+                        );
+                    }
+                }
+                Some(Derived {
+                    ids: cards,
+                    match_data: None,
+                })
+            }
+        })
+    }
+}
+
+/// A plan's run, for [`Request::run_query`].
+struct QueryRun<'a> {
+    text: &'a str,
+    query: &'a meguri_search::Query,
+    sort: Sort,
+    context: SearchContext,
+    notetypes: &'a SearchNotetypes,
+    plan: Plan,
+}
+
+/// A handle published by a run, with its match data.
+type Published = (HandleId, Arc<Mutex<Handle>>, Option<Vec<i64>>);
+
+/// H11: a toggle's set without a predicate run.
+struct Derived {
+    ids: Vec<i64>,
+    match_data: Option<Vec<i64>>,
+}
+
+/// Q10 step 4's chunk of candidates, unless a test sets another (H16).
+pub(super) const DEFAULT_CHUNK: usize = 500;
+/// The largest chunk the doubling reaches.
+pub(super) const MAX_CHUNK: usize = 32_768;
+/// `engine/jobs` J5: at most one `Progress` per 100 ms.
+const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Collections up to this many rows of the mode run a slow plan as one
+/// statement, its first page from its `LIMIT` form. On the 150k fixture
+/// that is faster than streaming, which sorts every candidate before its
+/// first test. Larger collections stream.
+pub(super) const STREAM_ROWS: u64 = 300_000;
+
+/// Q10 "may": whether a plan with slow terms takes the two stages. Always
+/// when a test set a chunk size (H16).
+pub(super) fn streams(
+    rows: &impl ReadRows,
+    plan: &Plan,
+    registry: Option<&super::SearchRegistry>,
+    cancel: &dyn Fn() -> bool,
+) -> Result<bool, Stop> {
+    if !plan.is_slow() {
+        return Ok(false);
+    }
+    if registry.and_then(super::SearchRegistry::stream_chunk).is_some() {
+        return Ok(true);
+    }
+    let table = match plan.mode() {
+        SearchMode::Cards => meguri_storage::Table::Cards,
+        SearchMode::Notes => meguri_storage::Table::Notes,
+    };
+    // Counts at most one row past the threshold, under the request's
+    // cancel test.
+    let mut seen = 0u64;
+    rows.visit_id_rows(
+        &format!("SELECT 1 FROM {} LIMIT {}", table.name(), STREAM_ROWS + 1),
+        &[],
+        cancel,
+        &mut |_| {
+            seen += 1;
+            true
+        },
+    )
+    .map_err(|error| if cancel() { Stop::Cancelled } else { Stop::from(error) })?;
+    Ok(seen > STREAM_ROWS)
+}
+
+/// Q8: whether two contexts hold the same `value`.
+fn same_value(value: ContextValue, a: &SearchContext, b: &SearchContext) -> bool {
+    match value {
+        ContextValue::Now => a.now == b.now,
+        ContextValue::Today => a.today == b.today,
+        ContextValue::NextDayAt => a.next_day_at == b.next_day_at,
+        ContextValue::LearnAhead => a.learn_ahead_secs == b.learn_ahead_secs,
+        ContextValue::CurrentDeck => a.current_deck == b.current_deck,
+        ContextValue::NormalizeNoteText => a.normalize_note_text == b.normalize_note_text,
+        ContextValue::IgnoreAccents => a.ignore_accents == b.ignore_accents,
+        ContextValue::Fold => a.fold == b.fold,
+    }
+}
+
+/// A request on a handle reads the generation the handle was made in.
+fn check_generation(snapshot: &crate::readers::Snapshot<'_>, planned: Generation) -> Result<(), Stop> {
+    if snapshot.generation() == planned {
+        Ok(())
+    } else {
+        Err(Stop::Failed(BrowseError::Engine(EngineError::StaleGeneration {
+            planned,
+            current: snapshot.generation(),
+        })))
+    }
+}
+
+fn build_error(BuildError::Search(error): BuildError) -> Stop {
+    Stop::Failed(BrowseError::Search(error))
 }
 
 /// A database error of a search's own statement is `search_failed` over the
