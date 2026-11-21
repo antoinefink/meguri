@@ -354,14 +354,29 @@ pub trait ReadRows: sealed::Connected {
         after: Option<NoteId>,
         limit: usize,
     ) -> Result<Vec<Note>, StorageError> {
-        let mut statement = self.connection().prepare_cached(
-            "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes WHERE mid = ?1 AND id > ?2 ORDER BY id LIMIT ?3")?;
-        let found = statement.query_map(
-            (notetype.0, after.map_or(i64::MIN, |id| id.0), limit_value(limit)),
-            |row| rows::row_image(row, Table::Notes),
-        )?;
-        found
-            .map(|cells| Note::from_cells(&cells?).map_err(StorageError::from))
+        // The first page has no id bound, so a note whose id is i64::MIN is
+        // read like any other.
+        let images: Vec<RowImage> = match after {
+            None => self
+                .connection()
+                .prepare_cached(
+                    "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes \
+                     WHERE mid = ?1 ORDER BY id LIMIT ?2",
+                )?
+                .query_map((notetype.0, limit_value(limit)), |row| rows::row_image(row, Table::Notes))?
+                .collect::<rusqlite::Result<_>>()?,
+            Some(after) => self
+                .connection()
+                .prepare_cached(
+                    "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes \
+                     WHERE mid = ?1 AND id > ?2 ORDER BY id LIMIT ?3",
+                )?
+                .query_map((notetype.0, after.0, limit_value(limit)), |row| rows::row_image(row, Table::Notes))?
+                .collect::<rusqlite::Result<_>>()?,
+        };
+        images
+            .iter()
+            .map(|cells| Note::from_cells(cells).map_err(StorageError::from))
             .collect()
     }
 
