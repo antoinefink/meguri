@@ -1266,7 +1266,9 @@ public final class SyncCoordinator {
                 self.meguriBootstrap = facade
                 try await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
                 // A sign-in that setup's row asked for lets a paused media step continue (MP6.5).
-                if self.meguriStage == .mediaPaused { self.meguriMediaResumePending = .recovered }
+                if self.meguriStage == .mediaPaused || (self.meguriReady && self.meguriReadyAdoptionPending) {
+                    self.meguriMediaResumePending = .recovered
+                }
             } catch {
                 self.meguriLastError = error
                 if self.generation == expected, self.hostRevision == revision, editRevision == self.meguriAddressEditRevision {
@@ -1988,9 +1990,11 @@ public final class SyncCoordinator {
     /// Setup completed, but a stop or an error came before its last steps:
     /// read the settings Ready committed, and ask for the first round.
     @discardableResult private func adoptMeguriReady() async -> Bool {
-        let expected = generation, revision = hostRevision
+        let expected = generation, revision = hostRevision, settingsRevision = providerSettingsRevision
         guard let state = try? await provider?.refresh(), let committed = state.settings,
               generation == expected, hostRevision == revision, !closing, !replacing else { return false }
+        // A settings write made meanwhile is newer than this read: read again later.
+        guard settingsRevision == providerSettingsRevision else { meguriReadyAdoptionPending = true; return false }
         adoptMeguriReadySettings(state, committed)
         meguriOperation = nil
         meguriReadyWakePending = true
@@ -2011,6 +2015,13 @@ public final class SyncCoordinator {
             if await self.adoptMeguriReady() { self.requestMeguriWakeIfReadyPending() }
             else { self.retryMeguriReadyAdoption(attempt: attempt + 1) }
         }
+    }
+    /// A provider action (a service change) refused a Meguri start while it ran:
+    /// the trigger kept for it is tried when the action ends.
+    private func replayMeguriMediaResume() {
+        guard let trigger = meguriMediaResumePending, !meguriBusy else { return }
+        meguriMediaResumePending = nil
+        Task { self.resumeMeguriMediaIfNeeded(trigger) }
     }
     private func requestMeguriWakeIfReadyPending() {
         guard meguriReadyWakePending, !meguriBusy else { return }
@@ -2861,7 +2872,7 @@ public final class SyncCoordinator {
             connectionFailure = .busy; return false
         }
         providerActionInProgress = true
-        defer { providerActionInProgress = false }
+        defer { providerActionInProgress = false; replayMeguriMediaResume() }
         let expected = generation, revision = hostRevision
         func current(_ attachment: UInt64) -> Bool {
             self.provider === provider && expected == generation && attachment == hostRevision
@@ -2940,7 +2951,7 @@ public final class SyncCoordinator {
               providerState?.phase == .handoffRecovery || providerRecoveryDrain != nil,
               !closing || providerRecoveryDrain != nil else { return false }
         providerActionInProgress = true
-        defer { providerActionInProgress = false }
+        defer { providerActionInProgress = false; replayMeguriMediaResume() }
         let token = providerRecoveryDrain ?? UUID()
         providerRecoveryDrain = token
         let expected = generation, revision = hostRevision
@@ -2985,7 +2996,7 @@ public final class SyncCoordinator {
         guard recoveryDrain != nil || desiredProviderSettings != nil || providerState?.phase == .blocked else { return false }
         guard recoveryDrain == nil ? !closing && !drained && !backendRetired : drained && providerChangeAllowed() else { return false }
         providerActionInProgress = true
-        defer { providerActionInProgress = false }
+        defer { providerActionInProgress = false; replayMeguriMediaResume() }
         let expected = generation, revision = hostRevision
         func current() -> Bool {
             self.provider === provider && expected == generation && revision == hostRevision
