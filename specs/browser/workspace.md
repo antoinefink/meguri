@@ -281,7 +281,7 @@ New text unless marked. Plurals are String Catalog plural entries.
 | Sidebar and suggestion counts | 200 ms for all visible | T12.4's grouped reads, cached by change seq |
 | Select All on 150,000 rows | 50 ms (R1153) | a selection is an index range on the handle, never a list of rows in Swift |
 | Bulk command on 10,000 notes | 2 s with progress (R1831) | one op over the resolved ids (H12), off the main thread |
-| Find and Replace preview over all found notes | count within 1 s for 10,000 notes, streamed; Replace within 5 s for 150,000 (R1832) | the preview stops at the first 100 notes that change for its list while it keeps counting. Changed 2026-11-21 (implementation review): it reads its own snapshot of the maintenance reader, as the run's compute phase does (`browser/bulk-framework` K3), not the search session's, so it counts as the run counts, on the rows as they are now (the run counts again, `browser/find-replace` F11's confirmed count) |
+| Find and Replace preview over all found notes | count within 1 s for 10,000 notes, streamed; Replace within 5 s for 150,000 (R1832) | the preview stops at the first 100 notes that change for its list while it keeps counting. Changed 2026-11-21 (implementation review): it reads its own snapshot of the maintenance reader, as the run's compute phase does (`browser/bulk-framework` K3), not the search session's, so it counts as the run counts, on the rows as they are when it reads them. The count is provisional: a note can change before the run's own snapshot, so the run counts again (`browser/find-replace` F11's confirmed count) |
 | Inspector on row change | 100 ms (R1830) | the note and card are read by id; the preview renders after the fields show |
 
 ## V18. Tests
