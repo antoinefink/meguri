@@ -1,0 +1,236 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-03-04T09:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1898913600,
+          "now": 1898845200,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "change_deck": {
+          "count": 9
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Upper",
+            "due": 1898845800,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 3,
+            "mod": 1898848800,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Upper",
+            "due": 1898845800,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1898848800,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 2,
+            "type": 1,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {},
+            "did": "Upper",
+            "due": 1898845800,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 3,
+            "lapses": 0,
+            "left": 3,
+            "mod": 1898848800,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 5,
+            "type": 3,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {},
+            "did": "Upper",
+            "due": 1898845800,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1898848800,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 2,
+            "type": 1,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {},
+            "did": "Upper",
+            "due": 5,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 5,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1898848800,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          },
+          "#c6": {
+            "data": {},
+            "did": "Upper",
+            "due": 1898845800,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1898848800,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 2,
+            "type": 1,
+            "usn": -1
+          },
+          "#c7": {
+            "data": {},
+            "did": "Upper",
+            "due": 1898845800,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 3,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1898848800,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 5,
+            "type": 3,
+            "usn": -1
+          },
+          "#c8": {
+            "data": {},
+            "did": "Upper",
+            "due": 1898845800,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 3,
+            "mod": 1898848800,
+            "nid": "#n8",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 3,
+            "type": 1,
+            "usn": -1
+          },
+          "#c9": {
+            "data": {},
+            "did": "Upper",
+            "due": 1898845800,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c9",
+            "ivl": 3,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1898848800,
+            "nid": "#n9",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 6,
+            "type": 3,
+            "usn": -1
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notes/change-deck/remaining-steps",
+  "scenario_sha256": "f4df5542f1096177a0b410419537b86c6ebe7926c286381ea146e64945692b65",
+  "tz": "UTC"
+}

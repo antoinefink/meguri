@@ -190,7 +190,7 @@ Model: `core/crates/meguri-testkit/src/scenario/{model,prepared,intake}.rs`. Meg
 ## 6. Traps
 
 - **Goldens.** Only `tools/mg oracle record` writes them; never bless Meguri output. Mark scenarios active in `area.yaml` in the same change that lands their adapter (`conformance/AGENTS.md`).
-- **Held scenarios.** Committing the held `find-replace/*` or `change-deck/*` files before the model parses their op or kind makes T0 and goldens-check fail as `invalid` (`conformance/dsl#D10`).
+- **Held scenarios.** Committing the held `find-replace/*` or `change-deck/*` files before the model parses their op or kind makes T0 and goldens-check fail as `invalid` (`conformance/dsl#D10`). Changed 2026-11-21 (implementation review): both ops now parse (U86, U87); the held rows of `held/harvest-batch-2` are on `master`.
 - **Equal-key runs.** Both sides list ties in logical-id order (`conformance/browser-ops#B2`). Meguri finds runs from its own S4/S5 keys; differing keys give differing lists.
 - **Final key direction.** The final id key follows the sort direction, so an in-memory reverse equals a descending query (`browser/sorting#S8`).
 - **No schema objects.** No TEMP tables or created objects: readers are `query_only` (`browser/sorting#S10`, R2016).
@@ -209,7 +209,7 @@ Model: `core/crates/meguri-testkit/src/scenario/{model,prepared,intake}.rs`. Meg
   - After `invalid_regex` or `field_count`, Anki empties its histories and Meguri keeps them. Observe undo only when the history was already empty, otherwise add a deviation (`conformance/bulk-ops#X1`, `browser/find-replace#F9`).
 - **Stamping.** Find and Replace and Edit Field write only changed notes; Anki stamps unchanged matches (deviation `find-replace-unchanged-match`, only on `unchanged-match`) (`browser/find-replace#F6`, X4).
 - **Engine refusals.** `InvalidArgument` for an empty or repeated id list and an empty field name. These are Meguri-only (`browser/find-replace#F11`, `browser/bulk-actions#B7.2`).
-- **Preview error range.** It comes from a second `regex-syntax` parse of the typed text, without `(?i)` and without NFC (`browser/find-replace#F10`). The plan's "`re:(`" wording means a regex find text, not search syntax.
+- **Preview error range.** Changed 2026-11-21 (implementation review): there is none. The preview's error is `InvalidRegex{message}`, the message only, with no second parse (`browser/find-replace#F10`). The plan's "`re:(`" wording means a regex find text, not search syntax.
 - **Change Deck.**
   - An inline new deck is part of the one "Change Deck" step.
   - Memory states are computed inside the op, not through the `memory_recompute` catalog entry.
