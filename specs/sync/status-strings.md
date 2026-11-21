@@ -15,7 +15,7 @@ T19 (2026-11-19) gives the text of the Sync section that replaces Account & Sync
 
 T20 (2026-11-21, round 10) gives the text of the status panel that the sync button opens, for both services (`docs/design/native-interface-contract.md` N23). It adds three keys and changes no state or existing value.
 
-The lines and rows marked "changed 2026-11-21 (resume fix)" in T19.1 and T19.5 give the text of `sync/meguri-provider#MP6.5`'s paused setup media step. In force: decided by Claude (coordinator) under Antoine's delegation of 2026-11-21 and his permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/sync-media-resume-20261121.md`).
+The lines and rows marked "changed 2026-11-21 (resume fix)" in T19.1, T19.2, T19.5, T19.7, T19.8 and T20.1 give the text of `sync/meguri-provider#MP6.5`'s paused setup media step and of the Sync section's one status row (`docs/design/native-interface-contract.md` N15.2). In force: decided by Claude (coordinator) under Antoine's delegation of 2026-11-21 and his permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/sync-media-resume-20261121.md`).
 
 ## T1. Keys, arguments and plurals
 
