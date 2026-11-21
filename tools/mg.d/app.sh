@@ -740,9 +740,15 @@ mg_app_real_copy_identity() {
 # Unregister and delete the built app (and the widget inside), then check
 # LaunchServices and PlugInKit no longer know it. Runs on every exit path.
 mg_app_real_copy_forget() {
-  local app="$1" products records dump
+  local app="$1" products records dump path
   [ -n "$app" ] || return 0
   products="${app%/Meguri.app}"
+  # Never follow a link out of the checkout (to /Applications, say): refuse.
+  path="$app"
+  while [ "$path" != "$MG_ROOT" ] && [ -n "$path" ] && [ "$path" != / ]; do
+    [ ! -L "$path" ] || return 1
+    path="${path%/*}"
+  done
   if [ -e "$app" ]; then
     pluginkit -r "$app/Contents/PlugIns/MeguriWidget.appex" >/dev/null 2>&1
     "$MG_LSREGISTER" -u "$app" >/dev/null 2>&1

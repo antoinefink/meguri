@@ -321,6 +321,17 @@ EOF
   not_called '^xcodebuild'
 }
 
+@test "the real copy never follows a linked products directory when it forgets a build" {
+  local outside="$BATS_TEST_TMPDIR/outside"
+  mkdir -p "$outside/Meguri.app" "$SB/build/app/RealCopyDerivedData/Build/Products"
+  ln -s "$outside" "$SB/build/app/RealCopyDerivedData/Build/Products/Release"
+  real_copy
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-forget ]
+  [ -d "$outside/Meguri.app" ]
+  not_called '^(lsregister -u|pluginkit -r|lint|xcodebuild)'
+}
+
 @test "the real copy needs this Mac's provisioning UDID to check profile coverage" {
   FX_NO_UDID=1 real_copy
   [ "$status" -eq 1 ]

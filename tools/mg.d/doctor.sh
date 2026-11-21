@@ -323,14 +323,17 @@ mg_doctor() {
   # cannot see the developer portal, only what Xcode installed. Informational:
   # the real copy is optional, so this never changes doctor's status; the
   # line, details.daily_driver_profiles and the optional step say it.
-  local daily="" daily_missing="the installed profiles could not be read" daily_ios=unknown
-  daily="$(python3 "$MG_TOOLS/scripts/daily-driver-profiles.py" 2>/dev/null)" || daily=""
+  local daily="" daily_missing="the installed profiles could not be read" daily_ios=unknown daily_udid
+  # Coverage of this Mac, by its provisioning UDID (read-only).
+  daily_udid="$(system_profiler SPHardwareDataType -json 2>/dev/null | jq -r '.SPHardwareDataType[0] |
+    (.provisioning_UDID // .platform_UUID) // empty' 2>/dev/null)"
+  daily="$(python3 "$MG_TOOLS/scripts/daily-driver-profiles.py" --device "$daily_udid" 2>/dev/null)" || daily=""
   if [ -n "$daily" ]; then
     daily_missing="$(jq -r '.mac.missing | join(", ")' <<<"$daily")"
     daily_ios="$(jq -r '.ios.state' <<<"$daily")"
   fi
   if [ -n "$daily" ] && jq -e '.mac.state == "authorized"' >/dev/null 2>&1 <<<"$daily"; then
-    printf '  %-4s  %-16s %s\n' info daily-driver "an installed Mac profile authorizes the real copy (com.antoinefink.meguri); iOS: $daily_ios"
+    printf '  %-4s  %-16s %s\n' info daily-driver "an installed Mac profile authorizes the real copy (com.antoinefink.meguri)$([ -n "$daily_udid" ] || echo ", but this Mac's UDID could not be read, so its coverage is unchecked"); iOS: $daily_ios"
   elif [ "$daily_missing" = push-production ]; then
     # Done on the account side; development profiles never grant production push.
     printf '  %-4s  %-16s %s\n' info daily-driver "the real copy's profile is installed but grants push development only: waiting on the push decision (one-time-setup.md); iOS: $daily_ios"

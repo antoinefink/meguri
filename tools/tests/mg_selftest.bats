@@ -137,6 +137,7 @@ case "$name $*" in
     fi ;;
   "docker compose version --short") echo 5.5.0 ;;
   "security cms -D -i "*) cat "$4" ;;
+  "system_profiler SPHardwareDataType -json") echo '{"SPHardwareDataType":[{"provisioning_UDID":"X"}]}' ;;
   "tart list --format json")
     echo "[{\"Source\": \"local\", \"Name\": \"meguri-mac\", \"Running\": true, \"State\": \"${STUB_VM_STATE:-running}\"}]" ;;
   "vm-ssh xcodebuild -version")
@@ -202,7 +203,7 @@ assert_read_only_calls() {
     -e '^uname -[a-z]+$' \
     -e '^sw_vers -(productVersion|buildVersion)$' \
     -e '^ioreg -n Root -d1$' \
-    -e '^system_profiler SPDisplaysDataType -json$' \
+    -e '^system_profiler SP(Displays|Hardware)DataType -json$' \
     -e '^xcode-select -p$' \
     -e '^xcodebuild -(version|license check)$' \
     -e '^xcrun simctl list runtimes --json$' \
