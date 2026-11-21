@@ -40,6 +40,15 @@ pub enum Cell {
     Empty,
     Question(Question),
     Answer(Answer),
+    /// A field column on a row whose note type has no field of that name
+    /// (`browser/workspace` V3): shown as an en dash.
+    NoField,
+    /// A field column on a field holding media (V3): its first sound tag's
+    /// and its first image's file names, at least one present.
+    Media {
+        sound: Option<String>,
+        image: Option<String>,
+    },
 }
 
 /// A percent value (C9): an integer for Ease, an `f32` shown rounded for

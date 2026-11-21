@@ -8,8 +8,9 @@
 //! sort's direction makes the order total (S8), so reversing an ascending
 //! result equals the descending one.
 //!
-//! Field columns `fld:<name>` (`browser/workspace` V4.2) are recognised here
-//! and sort in both modes; their key is U261's ([`field_keys`]).
+//! Field columns `fld:<name>` (`browser/workspace` V4.2) sort in both modes
+//! by one blob key per row ([`field_keys`]), computed from the stored field
+//! by `meguri_field_sort_key` (`browser::fields::sort_key`).
 
 use crate::config::{Column, Refusal, SortDirection};
 use crate::context::{ContextReads, ContextValue, SearchContext};
@@ -90,9 +91,6 @@ impl Sort {
 pub enum SortError {
     /// The plan was built for the other mode.
     ModeMismatch,
-    /// The field column sort key (`browser/workspace` V4.2) is U261's and
-    /// has not landed; the key is accepted, not refused (S1).
-    FieldColumnNotYetSupported { name: String },
 }
 
 /// A sorted statement: the ids in order, one column.
@@ -109,8 +107,8 @@ pub struct SortedQuery {
 impl SortedQuery {
     /// The search's matching rows sorted (S9: in cards mode a sort that reads
     /// note columns tests only cards whose note exists). The plan's
-    /// parameters come first; a key's own (a field column's name, U261)
-    /// follow them.
+    /// parameters come first; a key's own (a field column's name) follow
+    /// them.
     pub fn for_plan(plan: &Plan, sort: &Sort, ctx: &SearchContext) -> Result<SortedQuery, SortError> {
         if plan.mode() != sort.mode {
             return Err(SortError::ModeMismatch);
@@ -297,7 +295,7 @@ fn over_cards(expr: &str, condition: &str) -> String {
 
 fn keys(sort: &Sort, ctx: &SearchContext, params: &mut Params) -> Result<Keys, SortError> {
     match &sort.column {
-        SortColumn::Field(name) => field_keys(name, sort.mode, params),
+        SortColumn::Field(name) => Ok(field_keys(name, sort.mode, params)),
         SortColumn::Column(column) => Ok(match sort.mode {
             SearchMode::Cards => card_keys(*column, ctx),
             SearchMode::Notes => note_keys(*column, ctx),
@@ -305,11 +303,25 @@ fn keys(sort: &Sort, ctx: &SearchContext, params: &mut Params) -> Result<Keys, S
     }
 }
 
-/// `browser/workspace` V4.2, U261: the field column's key goes here. The
-/// field name is user text: bind it with `params`, never write it into the
+/// `browser/workspace` V4.2: the field's position in the row's note type,
+/// by exact name (`COLLATE BINARY`: the column's own collation is
+/// `unicase`), NULL when the note type has no such field; one row per note
+/// type, so a damaged note type with the name twice adds no rows. The key
+/// is one blob per row whose byte order is V4.2's steps 1 to 3; the final
+/// id key follows (S8). The name is bound, never written into the
 /// statement.
-fn field_keys(name: &str, _mode: SearchMode, _params: &mut Params) -> Result<Keys, SortError> {
-    Err(SortError::FieldColumnNotYetSupported { name: name.to_owned() })
+fn field_keys(name: &str, mode: SearchMode, params: &mut Params) -> Keys {
+    let name = params.bind(Param::Text(name.to_owned()));
+    Keys {
+        joins: vec![format!(
+            "LEFT JOIN (SELECT ntid, MIN(ord) AS ord FROM fields WHERE name = {name} COLLATE BINARY GROUP BY ntid) \
+             mfo ON mfo.ntid = n.mid"
+        )],
+        keys: vec!["meguri_field_sort_key(n.flds, mfo.ord)".to_owned()],
+        needs_note: mode == SearchMode::Cards,
+        slow: true,
+        ..Keys::default()
+    }
 }
 
 fn day_reads() -> ContextReads {
