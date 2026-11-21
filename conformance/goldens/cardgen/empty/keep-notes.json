@@ -210,10 +210,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "cardgen/empty/keep-notes",
-  "scenario_sha256": "385b9de854f32816fbc72214fc3101dc9d863e18770a56cab0d008639ec4b815",
+  "scenario_sha256": "a33df0592cf3285ed43ec668bbe5e8d2d4f4330f09564540b3aeefb29b8c39e9",
   "tz": "UTC"
 }
