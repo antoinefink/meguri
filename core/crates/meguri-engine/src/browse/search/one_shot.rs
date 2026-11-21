@@ -17,7 +17,7 @@ pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i
     // Listed for halts (replace, suspend, close), so its reader comes back
     // at once.
     let token = crate::cancel::CancelToken::new();
-    let _running = engine.inner.searches.run(&token);
+    let _running = engine.inner.searches.run(&token, engine.inner.searches.epoch());
     let index = engine.inner.searches.server_reader();
     let lease = collection.server_reader(index)?;
     let snapshot = lease.snapshot()?;

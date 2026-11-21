@@ -45,6 +45,10 @@ pub(super) struct Handle {
     /// H10: ids of the handle's mode listed `Removed` while the request
     /// runs; the worker leaves them out of the rows it confirms later.
     pub(super) removed_while_running: HashSet<i64>,
+    /// While in progress, the final prefix's length the caller was told
+    /// (`FirstPage`, then `Progress`): rows appended beyond it are not
+    /// addressable until announced (H6).
+    pub(super) prefix: usize,
 }
 
 /// What [`Handle::invalidate`] says to refetch (H10).
@@ -69,8 +73,13 @@ pub struct Invalidation {
 }
 
 impl Handle {
+    /// The final prefix's length while in progress, the whole count after.
     pub(super) fn count(&self) -> u64 {
-        self.ids.len() as u64
+        if self.complete {
+            self.ids.len() as u64
+        } else {
+            self.prefix.min(self.ids.len()) as u64
+        }
     }
 
     /// H8: the list in the other direction; index i becomes count − 1 − i.
@@ -131,17 +140,23 @@ impl Handle {
             if !self.complete {
                 self.removed_while_running.extend(removed_ids.iter().copied());
             }
-            removed = (0..self.ids.len())
+            // Indexes in the revision the call named: only the announced
+            // prefix is addressable while the request runs.
+            let addressable = self.count() as usize;
+            removed = (0..addressable)
                 .filter(|&index| removed_ids.contains(&self.ids[index]))
                 .map(|index| index as u64)
                 .collect();
-            if !removed.is_empty() {
-                let keep = |index: usize| !removed_ids.contains(&self.ids[index]);
-                let kept: Vec<usize> = (0..self.ids.len()).filter(|&index| keep(index)).collect();
+            let keep = |index: usize| !removed_ids.contains(&self.ids[index]);
+            let kept: Vec<usize> = (0..self.ids.len()).filter(|&index| keep(index)).collect();
+            if kept.len() != self.ids.len() {
+                self.prefix -= removed.len().min(self.prefix);
                 self.ids = kept.iter().map(|&index| self.ids[index]).collect();
                 if !self.nids.is_empty() {
                     self.nids = kept.iter().map(|&index| self.nids[index]).collect();
                 }
+            }
+            if !removed.is_empty() {
                 self.revision += 1;
             }
         }
@@ -149,7 +164,7 @@ impl Handle {
             Refetch::All
         } else {
             Refetch::Rows(
-                (0..self.ids.len())
+                (0..self.count() as usize)
                     .filter(|&index| match self.mode {
                         SearchMode::Cards => {
                             updated_cards.contains(&self.ids[index]) || updated_notes.contains(&self.nids[index])

@@ -277,12 +277,16 @@ fn a_session_keeps_the_two_newest_complete_handles_h6() {
     // holds handles of its own (H15).
     let (other, events) = session(&fx.h);
     let seq = other.start_search("", SearchMode::Notes, asc("noteFld"), None);
-    let own = loop {
-        match events.recv_timeout(WAIT).unwrap() {
-            SearchEvent::Complete { handle, seq: done, .. } if done == seq => break handle,
-            _ => {}
+    let mut seen = Vec::new();
+    loop {
+        let event = events.recv_timeout(WAIT).unwrap();
+        let done = event.seq() == seq && event.is_terminal();
+        seen.push(event);
+        if done {
+            break;
         }
-    };
+    }
+    let (own, _) = complete(&seen);
     assert!(other.handle_state(own).is_ok());
     for handle in [a, b, c] {
         assert_eq!(other.handle_state(handle), Err(BrowseError::UnknownHandle));

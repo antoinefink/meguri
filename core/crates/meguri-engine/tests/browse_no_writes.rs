@@ -80,9 +80,10 @@ fn a_session_and_the_one_shot_search_write_nothing_even_past_last_unburied() {
         &Default::default(),
     )
     .unwrap();
-    // Three days on, with no day check meanwhile.
-    h.clock.set_now_ms(common::NOW_MS + 3 * DAY_MS);
+    // Settle the day check the bury may have queued while the clock still
+    // reads the same day; then three days on, with no day check meanwhile.
     barrier(&h);
+    h.clock.set_now_ms(common::NOW_MS + 3 * DAY_MS);
     let before = dump(&h);
     let seq_before = h.collection.last_seq();
 

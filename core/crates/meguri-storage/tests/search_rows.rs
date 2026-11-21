@@ -1,13 +1,10 @@
 //! `ReadRows::visit_id_rows`, the statement runner of Browse searches
 //! (`browser/result-sets` H3): rows in statement order, one or two integer
 //! columns, an early stop, read-only statements only, and a cancel test
-//! that interrupts a running statement promptly and is gone afterwards.
+//! that interrupts a running statement and is gone afterwards.
 
 mod common;
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 use common::{empty_collection, open};
 use meguri_storage::{Cell, ReadRows, ReaderRole, StorageError};
@@ -58,20 +55,18 @@ fn a_cancel_interrupts_a_running_statement_and_leaves_the_next_one_alone() {
     // Set before the call: nothing runs.
     let err = visit(&reader, COUNT, &[Cell::Integer(1)], &|| true).unwrap_err();
     assert!(matches!(err, StorageError::Sqlite { code: 9, .. }), "{err:?}");
-    // Set from another thread while the statement counts to 10^12, which
-    // would take hours: the call returning at all is the interrupt.
-    let stop = Arc::new(AtomicBool::new(false));
-    let setter = {
-        let stop = Arc::clone(&stop);
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(50));
-            stop.store(true, Ordering::SeqCst);
-        })
-    };
-    let long = "WITH RECURSIVE r(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM r WHERE x < 1000000000000) SELECT max(x) FROM r";
-    let err = visit(&reader, long, &[], &|| stop.load(Ordering::SeqCst)).unwrap_err();
-    setter.join().unwrap();
+    // Set from inside the statement: the test passes at the call, then the
+    // progress handler sees it on its third call. A broken handler lets the
+    // finite statement finish, which fails the test.
+    let calls = std::cell::Cell::new(0u32);
+    let long = "WITH RECURSIVE r(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM r WHERE x < 10000000) SELECT max(x) FROM r";
+    let err = visit(&reader, long, &[], &|| {
+        calls.set(calls.get() + 1);
+        calls.get() >= 3
+    })
+    .unwrap_err();
     assert!(matches!(err, StorageError::Sqlite { code: 9, .. }), "{err:?}");
+    assert_eq!(calls.get(), 3, "the handler ran inside the statement");
     // The handler went with the statement: the next one runs whole.
     assert_eq!(visit(&reader, COUNT, &[Cell::Integer(2)], &|| false).unwrap().len(), 2);
     assert_eq!(reader.row_count(meguri_storage::Table::Cards).unwrap(), 0);

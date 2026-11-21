@@ -239,8 +239,11 @@ impl SessionShared {
                 state.handles.remove(&handle);
             }
         }
-        for job in &state.queue {
+        for job in &mut state.queue {
             job.token.cancel();
+            // Only its seq is needed now, for its `Cancelled`; a resort's
+            // copy of its ids goes at once.
+            job.job = Job::Superseded;
         }
         if let Some(registry) = self.registry.upgrade() {
             registry.wake();
@@ -253,6 +256,7 @@ impl SessionShared {
         if let (Some(caller), Some(registry)) = (cancel, self.registry.upgrade()) {
             registry::bridge(caller, &token, &registry);
         }
+        let epoch = self.registry.upgrade().map_or(0, |registry| registry.epoch());
         let mut state = self.lock();
         self.supersede(&mut state);
         state.next_seq += 1;
@@ -260,36 +264,60 @@ impl SessionShared {
         if state.closed {
             token.cancel();
         }
-        state.queue.push_back(QueuedJob { seq, token, job });
+        state.queue.push_back(QueuedJob { seq, token, epoch, job });
         if !state.worker {
             state.worker = true;
             drop(state);
             if let Err(error) = worker::spawn(self) {
-                // No thread: every queued request fails (H4: one terminal
-                // event each).
-                let jobs: Vec<_> = {
-                    let mut state = self.lock();
-                    state.worker = false;
-                    state.queue.drain(..).collect()
-                };
-                for job in jobs {
-                    self.listener.event(SearchEvent::Failed {
-                        seq: RequestSeq(job.seq),
-                        error: BrowseError::Engine(EngineError::internal(format!(
-                            "cannot start a search worker: {error}"
-                        ))),
-                    });
-                }
+                self.fail_queue(&error.to_string());
             }
         }
         RequestSeq(seq)
     }
 
+    /// No worker thread could start: every queued request ends with
+    /// `Failed`, or `Cancelled` when it was cancelled (H4: one terminal event
+    /// each, in order). The session keeps its worker flag until the queue is
+    /// empty, so a request queued meanwhile cannot overtake these.
+    fn fail_queue(&self, error: &str) {
+        loop {
+            let jobs: Vec<QueuedJob> = {
+                let mut state = self.lock();
+                if state.queue.is_empty() {
+                    state.worker = false;
+                    return;
+                }
+                state.queue.drain(..).collect()
+            };
+            for job in jobs {
+                let seq = RequestSeq(job.seq);
+                self.listener.event(if job.token.is_cancelled() {
+                    SearchEvent::Cancelled { seq }
+                } else {
+                    SearchEvent::Failed {
+                        seq,
+                        error: BrowseError::Engine(EngineError::internal(format!(
+                            "cannot start a search worker: {error}"
+                        ))),
+                    }
+                });
+            }
+        }
+    }
+
     /// The handle `id` names, if this session holds it in the current
-    /// generation; one of an older generation is released (H6).
+    /// generation; one of an older generation is released (H6), and so is
+    /// the running request's handle once that request is cancelled.
     fn handle(&self, id: HandleId) -> Result<Arc<Mutex<Handle>>, BrowseError> {
         let current = self.engine()?.generation();
         let mut state = self.lock();
+        if let Some(running) = &state.current
+            && running.handle == Some(id)
+            && running.token.is_cancelled()
+        {
+            state.handles.remove(&id);
+            return Err(BrowseError::UnknownHandle);
+        }
         let handle = state.handles.get(&id).cloned().ok_or(BrowseError::UnknownHandle)?;
         if lock(&handle).generation != current {
             state.handles.remove(&id);

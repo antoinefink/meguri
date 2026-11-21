@@ -37,11 +37,15 @@ pub(super) enum Job {
         source: Source,
         sort: SortSpec,
     },
+    /// Superseded while queued: it ends `Cancelled` without running.
+    Superseded,
 }
 
 pub(super) struct QueuedJob {
     pub(super) seq: u64,
     pub(super) token: Arc<CancelToken>,
+    /// The registry's halt epoch when it was queued.
+    pub(super) epoch: u64,
     pub(super) job: Job,
 }
 
@@ -156,11 +160,15 @@ fn serve(shared: &Arc<SessionShared>, threads: &crate::threads::ThreadRegistry, 
                 let _ = delivery.join();
             }
             Err(error) => {
-                shared.listener.event(SearchEvent::Failed {
-                    seq,
-                    error: BrowseError::Engine(EngineError::internal(format!(
-                        "cannot start the search event thread: {error}"
-                    ))),
+                shared.listener.event(if job.token.is_cancelled() {
+                    SearchEvent::Cancelled { seq }
+                } else {
+                    SearchEvent::Failed {
+                        seq,
+                        error: BrowseError::Engine(EngineError::internal(format!(
+                            "cannot start the search event thread: {error}"
+                        ))),
+                    }
                 });
             }
         }
@@ -198,12 +206,17 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
         outbox,
         published: std::cell::Cell::new(None),
     };
+    // Listed for halts from the start, so a halt that begins while the
+    // request parses, or began after it was queued, cancels it (H3).
+    let registry = shared.registry.upgrade();
+    let _running = registry.as_ref().map(|registry| registry.run(&job.token, job.epoch));
     let result = if job.token.is_cancelled() {
         Err(Stop::Cancelled)
     } else {
         match job.job {
             Job::Search { text, mode, sort } => request.search(&text, mode, &sort),
             Job::Resort { source, sort } => request.resort(source, &sort),
+            Job::Superseded => Err(Stop::Cancelled),
         }
     };
     let Err(stop) = result else { return };
@@ -317,6 +330,8 @@ impl Request<'_> {
     /// superseded meanwhile.
     fn first_page(&self, handle: Handle) -> Result<(HandleId, Arc<Mutex<Handle>>), Stop> {
         let ids = handle.ids[..handle.ids.len().min(PAGE)].to_vec();
+        let mut handle = handle;
+        handle.prefix = ids.len();
         let handle = Arc::new(Mutex::new(handle));
         let mut state = self.shared.lock();
         let live = state
@@ -362,6 +377,16 @@ impl Request<'_> {
     /// Completes the handle and sends `Complete`, unless the request was
     /// superseded. Set-aside cards H10 recorded as removed go too.
     fn complete(&self, id: HandleId, handle: &Mutex<Handle>) -> Result<(), Stop> {
+        // One transition under the session's lock, then the handle's: no
+        // call sees the handle complete while its request is still current.
+        let mut state = self.shared.lock();
+        let live = state
+            .current
+            .as_ref()
+            .is_some_and(|current| current.seq == self.seq && !current.token.is_cancelled());
+        if !live || state.closed {
+            return Err(Stop::Cancelled);
+        }
         let (count, revision) = {
             let mut handle = lock(handle);
             let removed = std::mem::take(&mut handle.removed_while_running);
@@ -371,14 +396,6 @@ impl Request<'_> {
             handle.complete = true;
             (handle.count(), handle.revision)
         };
-        let mut state = self.shared.lock();
-        let live = state
-            .current
-            .as_ref()
-            .is_some_and(|current| current.seq == self.seq && !current.token.is_cancelled());
-        if !live || state.closed {
-            return Err(Stop::Cancelled);
-        }
         state.current = None;
         state.complete.push_back(id);
         while state.complete.len() > 2 {
@@ -429,7 +446,6 @@ impl Request<'_> {
         let sort = Sort::new(mode, &sort.key, sort.direction).map_err(|_| Stop::Failed(BrowseError::UnsortableColumn))?;
         let (_engine, collection) = self.collection()?;
         let registry = self.shared.registry.upgrade().ok_or(Stop::Cancelled)?;
-        let _running = registry.run(self.token);
         let slot = registry.reader(self.token).ok_or(Stop::Cancelled)?;
         let lease = collection.search_reader(slot.index)?;
         let snapshot = lease.snapshot()?;
@@ -475,6 +491,7 @@ impl Request<'_> {
             match_data: None,
             complete: false,
             removed_while_running: Default::default(),
+            prefix: 0,
         };
         let paged = first.ids.len();
         let (id, handle) = self.publish_first(template, first)?;
@@ -524,7 +541,6 @@ impl Request<'_> {
             Sort::new(source.mode, &sort.key, sort.direction).map_err(|_| Stop::Failed(BrowseError::UnsortableColumn))?;
         let (_engine, collection) = self.collection()?;
         let registry = self.shared.registry.upgrade().ok_or(Stop::Cancelled)?;
-        let _running = registry.run(self.token);
         let slot = registry.reader(self.token).ok_or(Stop::Cancelled)?;
         let lease = collection.search_reader(slot.index)?;
         let snapshot = lease.snapshot()?;
@@ -562,6 +578,7 @@ impl Request<'_> {
             match_data: source.match_data,
             complete: false,
             removed_while_running: Default::default(),
+            prefix: 0,
         };
         let first = Listed {
             ids: listed.ids.drain(..listed.ids.len().min(PAGE)).collect(),
