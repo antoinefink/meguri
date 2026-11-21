@@ -389,14 +389,8 @@ pub enum RunTextError {
     InvalidToken { token: usize },
     /// A value T3 does not offer (it has no built item).
     NotOffered { token: usize, value: usize },
-    /// An advanced token holding a negated operator word (`-and`, `-or`),
-    /// which `errors.md` E3 never runs.
-    NegatedOperator { token: usize },
-    /// An advanced token whose text the canonical writer would change into
-    /// another search (`canonical-form` F7's shapes).
-    Unwritable { token: usize },
-    /// An advanced token whose text does not parse (its path's first step
-    /// is the token's index).
+    /// An advanced token whose text does not parse, or is empty (its path's
+    /// first step is the token's index).
     Build(BuilderError),
 }
 
@@ -471,25 +465,20 @@ impl FilterQuery {
 
 /// T4 steps 1 and 2: a value token's item, the group OR of its values'
 /// items when it has several, negated by J5 when it is "is not"; an
-/// advanced token's parsed text.
+/// advanced token's parsed text, or T3.2's written-text item when the token
+/// keeps its written text (T6: F7's first three shapes would not read back
+/// as the same item). A negated operator word so runs, and fails as E3
+/// says.
 fn token_item(k: usize, token: &Token) -> Result<BuiltItem, RunTextError> {
     match token {
-        Token::Advanced(text) => {
-            // E3: a negated operator word never runs, and the canonical
-            // writer could not keep it (F7), so the query has no run text.
-            if read::holds_negated_operator(text) {
-                return Err(RunTextError::NegatedOperator { token: k });
-            }
-            // Other F7 shapes (`has\-cd:x`, R-read values) would run as
-            // another search once the builder writes them.
-            if read::writes_unchanged(text) == Ok(false) {
-                return Err(RunTextError::Unwritable { token: k });
-            }
-            Ok(BuiltItem::Parsed {
+        Token::Advanced(text) => Ok(if read::writes_unchanged(text) == Ok(false) {
+            BuiltItem::Written(text.clone())
+        } else {
+            BuiltItem::Parsed {
                 text: text.clone(),
                 field_text: false,
-            })
-        }
+            }
+        }),
         Token::Value(value_token) => {
             if value_token.kind().is_none() {
                 return Err(RunTextError::InvalidToken { token: k });
