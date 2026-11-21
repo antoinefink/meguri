@@ -7,11 +7,11 @@
 //! `JobFinished`. A refusal is the job's `Failed` outcome (`result` then
 //! returns it as its error).
 //!
-//! The scheduling actions run admitted by the open collection's review
-//! service, so answers it accepted are written first and an active session
-//! sees the change (`ReviewService::admit_card_action`); the others run as
-//! their engine ops do. Selections of a search handle arrive with the Browse
-//! FFI (U264); these exports take the ids.
+//! Every action runs admitted by the open collection's review service
+//! (`ReviewService::admit_card_action`): the answers it accepted are written
+//! first, so none fails on a card row the action rewrote or removed, and an
+//! active session sees the change. Selections of a search handle arrive
+//! with the Browse FFI (U264); these exports take the ids.
 use crate::{CoreError, callback, jobs::JobHandle, mutations::MutationSummary, runtime};
 use meguri_engine::bulk::cards::{self, CardAction};
 use meguri_engine::bulk::change_deck::{self, DeckTarget};
@@ -152,37 +152,50 @@ impl From<BulkNoteAction> for NoteAction {
     }
 }
 
+/// Runs `run` as a bulk job admitted by the host's review service.
+fn admitted(
+    run: impl FnOnce(&meguri_engine::Collection, Arc<meguri_engine::CancelToken>, meguri_engine::ProgressSink)
+        -> Result<BulkOutcome, meguri_engine::EngineError>
+        + Send
+        + 'static,
+) -> Result<BulkActionJobStart, CoreError> {
+    let host = runtime::host()?;
+    let job = bulk::start(runtime::engine()?, move |context| {
+        let (cancel, progress) = (Arc::clone(&context.cancel), context.progress.clone());
+        host.review().admit_card_action(
+            &context.cancel,
+            |collection| run(collection, cancel, progress),
+            |outcome: &BulkOutcome| outcome.seq,
+        )
+    })?;
+    Ok(started(job))
+}
+
 /// Starts a card action on `cards` (in table order, B1).
 #[uniffi::export]
 pub fn start_bulk_card_action(cards: Vec<i64>, action: BulkCardAction) -> Result<BulkActionJobStart, CoreError> {
     callback::enter("start_bulk_card_action");
-    let host = runtime::host()?;
-    let engine = runtime::engine()?;
     let target = CardTarget::Cards(cards.into_iter().map(CardId).collect());
-    let job = match EngineAction::from(action) {
-        EngineAction::ChangeDeck(deck) => change_deck::start(engine, host.collection()?, target, deck)?,
-        EngineAction::Card(action) if action.writes_scheduling() => bulk::start(engine, move |context| {
-            let cancel = Arc::clone(&context.cancel);
-            let progress = context.progress.clone();
-            host.review()
-                .admit_card_action(&context.cancel, |collection| {
-                    cards::run_admitted(collection, &target, &action, cancel, progress)
-                })
-                .map(BulkOutcome::of)
-        })?,
-        EngineAction::Card(action) => cards::start(engine, host.collection()?, target, action)?,
-    };
-    Ok(started(job))
+    match EngineAction::from(action) {
+        EngineAction::ChangeDeck(deck) => admitted(move |collection, cancel, progress| {
+            change_deck::run(collection, &target, &deck, cancel, progress).map(BulkOutcome::of)
+        }),
+        EngineAction::Card(action) => admitted(move |collection, cancel, progress| {
+            cards::run_admitted(collection, &target, &action, cancel, progress).map(BulkOutcome::of)
+        }),
+    }
 }
 
 /// Starts a note action on `notes` (in table order, B1).
 #[uniffi::export]
 pub fn start_bulk_note_action(notes: Vec<i64>, action: BulkNoteAction) -> Result<BulkActionJobStart, CoreError> {
     callback::enter("start_bulk_note_action");
-    let host = runtime::host()?;
     let target = NoteTarget::Notes(notes.into_iter().map(NoteId).collect());
-    let job = notes::start(runtime::engine()?, host.collection()?, target, action.into())?;
-    Ok(started(job))
+    let action = NoteAction::from(action);
+    admitted(move |collection, cancel, progress| {
+        notes::run(collection, &target, &action, cancel, progress)
+            .map(|result| BulkOutcome::split(result, |value| (value.counts, value.cards_removed)))
+    })
 }
 
 #[cfg(test)]

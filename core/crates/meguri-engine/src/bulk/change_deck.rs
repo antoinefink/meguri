@@ -76,7 +76,9 @@ pub enum DeckTarget {
 /// The target as the compute phase resolved it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Resolved {
-    Existing(DeckId),
+    /// A deck by id, or the deck a typed name names (its stored name, to
+    /// find it again by that name in the commit).
+    Existing { id: DeckId, name: Option<String> },
     /// Step 0's deck to create: the typed text and the stored name it gives
     /// (D1, D3's case adoption).
     Create { typed: String, name: String },
@@ -115,6 +117,10 @@ struct Planned {
     /// The processed cards' values: every processed moved card, and the
     /// set's other cards whose values differ from the stored ones (M4.2).
     memory: HashMap<CardId, MemoryValues>,
+    /// For each card of the set, how many review-log rows the plan read and
+    /// the highest id among them (0 for none): a row added or removed since,
+    /// which need not touch the card row, makes the commit stale.
+    histories: Vec<(CardId, (u64, i64))>,
     considered: u64,
 }
 
@@ -158,15 +164,18 @@ fn facts_of(rows: &impl ReadRows, deck: &Deck) -> Result<TargetFacts, EngineErro
 
 /// Step 0 and step 1's deck refusals, in order, on `decks`.
 fn resolve_target(decks: &[Deck], target: &DeckTarget) -> Result<Resolved, EngineError> {
-    let existing = match target {
-        DeckTarget::Deck(id) => decks.iter().find(|deck| deck.id == *id).ok_or_else(|| EngineError::NotFound {
-            table: Table::Decks,
-            key: id.0.to_string(),
-        })?,
+    let (existing, typed_name) = match target {
+        DeckTarget::Deck(id) => (
+            decks.iter().find(|deck| deck.id == *id).ok_or_else(|| EngineError::NotFound {
+                table: Table::Decks,
+                key: id.0.to_string(),
+            })?,
+            None,
+        ),
         DeckTarget::NewDeck(typed) => {
             let name = names::native_name(typed);
             match names::find(decks, &name) {
-                Some(deck) => deck,
+                Some(deck) => (deck, Some(name)),
                 // D3's refusals (`filtered_parent`, `too_deep`), then case
                 // adoption.
                 None => {
@@ -181,7 +190,10 @@ fn resolve_target(decks: &[Deck], target: &DeckTarget) -> Result<Resolved, Engin
     if decks::is_filtered(existing) {
         return Err(EngineError::DeckRefused(DeckRefusal::FilteredDeck));
     }
-    Ok(Resolved::Existing(existing.id))
+    Ok(Resolved::Existing {
+        id: existing.id,
+        name: typed_name,
+    })
 }
 
 /// The compute phase (steps 0 to 4 on the snapshot).
@@ -195,7 +207,7 @@ fn plan(
     let decks = reader.deck_rows()?;
     let resolved = resolve_target(&decks, target)?;
     let (target_id, target_deck) = match &resolved {
-        Resolved::Existing(id) => (
+        Resolved::Existing { id, .. } => (
             Some(*id),
             decks.iter().find(|deck| deck.id == *id).cloned().ok_or_else(|| stale(Table::Decks, id.0.to_string()))?,
         ),
@@ -225,6 +237,7 @@ fn plan(
     // Step 4.
     let mut set = None;
     let mut memory = HashMap::new();
+    let mut histories = Vec::new();
     if facts.fsrs && !moved.is_empty() {
         let moving: HashSet<CardId> = moved.iter().copied().collect();
         let mut members: BTreeSet<CardId> = moving.iter().copied().collect();
@@ -248,6 +261,8 @@ fn plan(
                 if visited.is_multiple_of(PAGE) {
                     context.check_cancel()?;
                 }
+                let last = history.iter().map(|row| row.id.0).max().unwrap_or(0);
+                histories.push((card.id, (history.len() as u64, last)));
                 if card.card_type == CardType::New || history.is_empty() {
                     return Ok::<_, EngineError>(());
                 }
@@ -292,6 +307,7 @@ fn plan(
             moved,
             set,
             memory,
+            histories,
             considered: total,
         },
         preconditions,
@@ -319,12 +335,16 @@ fn commit(context: &mut OpContext<'_, '_>, planned: Planned) -> Result<BulkCount
         return Err(stale(Table::Config, "fsrs"));
     }
     let existing = match &planned.target {
-        Resolved::Existing(id) => {
+        Resolved::Existing { id, name } => {
             let deck = live
                 .iter()
                 .find(|deck| deck.id == *id)
                 .ok_or_else(|| stale(Table::Decks, id.0.to_string()))?;
-            if decks::is_filtered(deck) || facts_of(&*scope, deck)? != planned.facts {
+            // A typed name still names the deck it named.
+            let renamed = name
+                .as_ref()
+                .is_some_and(|name| names::find(&live, name).map(|found| found.id) != Some(*id));
+            if renamed || decks::is_filtered(deck) || facts_of(&*scope, deck)? != planned.facts {
                 return Err(stale(Table::Decks, id.0.to_string()));
             }
             Some(*id)
@@ -343,6 +363,13 @@ fn commit(context: &mut OpContext<'_, '_>, planned: Planned) -> Result<BulkCount
             return Err(stale(Table::Cards, format!("memory-state set of deck {}", id.0)));
         }
     }
+    // K3: answering writes the review log, so no table precondition covers
+    // it; each history step 4 computed from is compared with its live rows.
+    for (id, extent) in &planned.histories {
+        if scope.revlog_extent(*id)? != *extent {
+            return Err(stale(Table::Revlog, format!("card {}", id.0)));
+        }
+    }
     // Step 0: the deck and its missing ancestors (D5 step 3).
     let target = match (&planned.target, existing) {
         (_, Some(id)) => decks::require(&*scope, id)?,
@@ -353,7 +380,9 @@ fn commit(context: &mut OpContext<'_, '_>, planned: Planned) -> Result<BulkCount
             }
             deck
         }
-        (Resolved::Existing(_), None) => return Err(EngineError::internal("an existing target without its id")),
+        (Resolved::Existing { .. }, None) => {
+            return Err(EngineError::internal("an existing target without its id"));
+        }
     };
     let target_config = preset_of(&*scope, Some(&target))?.config.for_use();
     let mut home_presets: HashMap<DeckId, DeckConfigMessage> = HashMap::new();

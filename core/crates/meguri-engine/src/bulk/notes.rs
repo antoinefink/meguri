@@ -131,8 +131,9 @@ fn commit(
         NoteAction::AddTags(_) => (crate::tags::add_in(context.scope(), &notes, text)?, None),
         NoteAction::RemoveTags(_) => (crate::tags::remove_in(context.scope(), &notes, text)?, None),
         NoteAction::DeleteNotes => {
-            // The cards that go with the notes, counted before they go.
-            let cards = context.scope().cards_of_notes_with_ids(&notes)?.len() as u64;
+            // The cards that go with the notes that exist, counted before
+            // they go.
+            let cards = context.scope().card_count_of_notes(&notes)?;
             let removed = crate::notes::delete_in(context.scope(), path, &notes)?;
             (removed, Some(cards))
         }

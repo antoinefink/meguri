@@ -121,6 +121,18 @@ pub trait ReadRows: sealed::Connected {
             })?)
     }
 
+    /// How many review-log rows the card has and the highest id among them
+    /// (0 for none): what a plan that read its history compares again in
+    /// its commit (Change Deck's step 4, `browser/bulk-actions` B7.2).
+    fn revlog_extent(&self, card: CardId) -> Result<(u64, i64), StorageError> {
+        let (count, max) = self.connection().query_row(
+            "SELECT count(*), coalesce(max(id),0) FROM revlog WHERE cid=?1",
+            [card.0],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )?;
+        Ok((u64::try_from(count).unwrap_or(0), max))
+    }
+
     /// Maximum below an exclusive id bound, for a held-image history that
     /// omits newly created review rows without scanning the whole collection.
     fn max_revlog_id_before(&self, card: CardId, before: i64) -> Result<i64, StorageError> {
@@ -468,10 +480,26 @@ pub trait ReadRows: sealed::Connected {
         Ok(self
             .connection()
             .prepare_cached(
-                "SELECT id FROM cards WHERE (did = ?1 OR odid = ?1) AND meguri_card_f32(data, 's') IS NULL ORDER BY id",
+                // `odid != 0` lets SQLite use the partial `idx_cards_odid`.
+                "SELECT id FROM cards WHERE (did = ?1 OR (odid = ?1 AND odid != 0)) \
+                 AND meguri_card_f32(data, 's') IS NULL ORDER BY id",
             )?
             .query_map([id.0], |row| row.get::<_, i64>(0).map(CardId))?
             .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// How many cards the listed notes that exist hold (Delete Notes'
+    /// second count, `browser/bulk-actions` B11); a card whose note row is
+    /// missing is not counted. Repeated ids count once.
+    fn card_count_of_notes(&self, notes: &[NoteId]) -> Result<u64, StorageError> {
+        let ids = serde_json::to_string(&notes.iter().map(|id| id.0).collect::<Vec<_>>())
+            .expect("integer ids serialize");
+        let count = self.connection().query_row(
+            "SELECT count(*) FROM cards WHERE nid IN (SELECT id FROM notes WHERE id IN (SELECT value FROM json_each(?1)))",
+            [ids],
+            |row| row.get::<_, i64>(0),
+        )?;
+        Ok(u64::try_from(count).unwrap_or(0))
     }
 
     fn deck_has_cards(&self, id: DeckId) -> Result<bool, StorageError> {

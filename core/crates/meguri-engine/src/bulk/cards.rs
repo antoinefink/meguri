@@ -22,7 +22,8 @@
 //! precondition). Like `sched::ops::run` they refuse while a review session
 //! is active (`SessionActive`) unless the review service admitted them
 //! ([`run_admitted`]): it drains the answers it accepted first. Flag
-//! re-reads its cards too and needs no admission, as `flags::set_flag`.
+//! re-reads its cards too; a caller with a review service runs it admitted
+//! as well, so a held answer is written before the card row changes.
 
 use std::sync::Arc;
 

@@ -630,20 +630,46 @@ fn b7_2_step_4_memory_states() {
     assert_eq!(dump(c), before, "nothing computed when nothing moved");
 }
 
-/// K3 and B7.2 step 4: a target card whose `s` another writer removes
-/// between the compute phase and the commit joins the set, so the commit
-/// is stale and the action plans again; a moved card edited meanwhile keeps
-/// the edit. Nothing the compute phase read is written over.
-#[test]
-fn b7_2_a_card_changed_between_the_phases_replans() {
+/// Change Deck with `edit` run once by another writer after the compute
+/// phase's snapshot was taken; returns the result and how many commits it
+/// took (2: the first was stale and the action planned again).
+fn change_with_edit(
+    c: &Collection,
+    cards: &[CardId],
+    deck: DeckTarget,
+    edit: impl Fn(&Collection) + Send + Sync + 'static,
+) -> (OpResult<BulkCounts>, u64) {
     struct Listener<F: Fn(&Progress) + Send + Sync>(F);
     impl<F: Fn(&Progress) + Send + Sync> ProgressListener for Listener<F> {
         fn on_progress(&self, progress: &Progress) {
             (self.0)(progress)
         }
     }
-    let w = world();
-    let c = &w.h.collection;
+    static NOW: AtomicU64 = AtomicU64::new(0);
+    let progress = ProgressSink::with_clock(|| Duration::from_secs(NOW.fetch_add(1, Ordering::SeqCst)));
+    let edited = Arc::new(AtomicBool::new(false));
+    let commits = Arc::new(AtomicU64::new(0));
+    let (collection, flag, count) = (c.clone(), Arc::clone(&edited), Arc::clone(&commits));
+    progress.set_listener(Arc::new(Listener(move |p: &Progress| {
+        if p.phase == ProgressPhase::Committing {
+            count.fetch_add(1, Ordering::SeqCst);
+        }
+        if p.phase == ProgressPhase::Planning
+            && p.completed == 0
+            && p.total.is_some()
+            && !flag.swap(true, Ordering::SeqCst)
+        {
+            edit(&collection);
+        }
+    })));
+    let done = change_deck::run(c, &CardTarget::Cards(cards.to_vec()), &deck, CancelToken::new(), progress).unwrap();
+    assert!(edited.load(Ordering::SeqCst), "the edit ran");
+    (done, commits.load(Ordering::SeqCst))
+}
+
+/// Two review cards with a learning and a review row each, holding a
+/// memory state: one in Home, one in Target.
+fn two_with_states(w: &World) -> (CardId, CardId) {
     let now = common::NOW_MS;
     let ids = w.cards(move |s, w| {
         let review = |card: &mut Card| {
@@ -661,46 +687,86 @@ fn b7_2_a_card_changed_between_the_phases_replans() {
         }
         vec![moved, stays]
     });
-    set_fsrs(c, true);
-    let [moved, stays] = ids[..] else { unreachable!() };
-    static NOW: AtomicU64 = AtomicU64::new(0);
-    let progress = ProgressSink::with_clock(|| Duration::from_secs(NOW.fetch_add(1, Ordering::SeqCst)));
-    let edited = Arc::new(AtomicBool::new(false));
-    let commits = Arc::new(AtomicU64::new(0));
-    let (collection, flag, count) = (c.clone(), Arc::clone(&edited), Arc::clone(&commits));
-    progress.set_listener(Arc::new(Listener(move |p: &Progress| {
-        if p.phase == ProgressPhase::Committing {
-            count.fetch_add(1, Ordering::SeqCst);
-        }
-        if p.phase == ProgressPhase::Planning && p.completed == 0 && p.total.is_some() && !flag.swap(true, Ordering::SeqCst) {
-            collection
-                .run(OpSpec::named("another writer", OpSource::UserUndoable), move |ctx| {
-                    let mut card = ctx.scope().card(stays)?.unwrap();
-                    card.data.memory_state = None;
-                    ctx.scope().put(&card)?;
-                    let mut card = ctx.scope().card(moved)?.unwrap();
-                    card.interval = 11;
-                    ctx.scope().put(&card)?;
-                    Ok(())
-                })
-                .unwrap();
-        }
-    })));
-    let done = change_deck::run(
-        c,
-        &CardTarget::Cards(vec![moved]),
-        &DeckTarget::Deck(w.target),
-        CancelToken::new(),
-        progress,
-    )
-    .unwrap();
-    assert_eq!(commits.load(Ordering::SeqCst), 2, "the first commit was stale: planned again");
+    set_fsrs(&w.h.collection, true);
+    (ids[0], ids[1])
+}
+
+/// K3 and B7.2 step 4: a target card whose `s` another writer removes
+/// between the compute phase and the commit joins the set, so the commit
+/// is stale and the action plans again; a moved card edited meanwhile keeps
+/// the edit. Nothing the compute phase read is written over.
+#[test]
+fn b7_2_a_card_changed_between_the_phases_replans() {
+    let w = world();
+    let c = &w.h.collection;
+    let (moved, stays) = two_with_states(&w);
+    let (done, commits) = change_with_edit(c, &[moved], DeckTarget::Deck(w.target), move |collection| {
+        collection
+            .run(OpSpec::named("another writer", OpSource::UserUndoable), move |ctx| {
+                let mut card = ctx.scope().card(stays)?.unwrap();
+                card.data.memory_state = None;
+                ctx.scope().put(&card)?;
+                let mut card = ctx.scope().card(moved)?.unwrap();
+                card.interval = 11;
+                ctx.scope().put(&card)?;
+                Ok(())
+            })
+            .unwrap();
+    });
+    assert_eq!(commits, 2, "the first commit was stale: planned again");
     assert_eq!(done.value, counts(1, 1));
     assert_eq!(read(c, moved).interval, 11, "the edit stands");
     assert_eq!(read(c, moved).deck_id, w.target);
     let joined = read(c, stays);
     assert!(joined.data.memory_state.is_some(), "the card that lost its state meanwhile is computed");
     assert_eq!(joined.data.desired_retention, Some(0.85));
+}
+
+/// B7.2 step 4: a review-log row added to a moved card between the phases,
+/// without touching its card row, makes the commit stale: the memory state
+/// is computed from the history that holds it.
+#[test]
+fn b7_2_a_review_row_added_between_the_phases_replans() {
+    let w = world();
+    let c = &w.h.collection;
+    let (moved, _) = two_with_states(&w);
+    let (done, commits) = change_with_edit(c, &[moved], DeckTarget::Deck(w.target), move |collection| {
+        collection
+            .run(OpSpec::named("a review row alone", OpSource::Maintenance), move |ctx| {
+                graded(ctx.scope(), moved, RevlogKind::Review, 30, common::NOW_MS - DAY_MS);
+                Ok(())
+            })
+            .unwrap();
+    });
+    assert_eq!(commits, 2, "the first commit was stale: planned again");
+    assert_eq!(done.value, counts(1, 1));
+    assert!(read(c, moved).data.memory_state.is_some());
+}
+
+/// B7.2 step 0: a typed name resolves to the deck that bears it when the
+/// commit runs. When the deck it named is renamed between the phases, the
+/// action plans again, and the name then makes a new deck.
+#[test]
+fn b7_2_a_typed_name_renamed_between_the_phases_replans() {
+    let w = world();
+    let c = &w.h.collection;
+    let (moved, _) = two_with_states(&w);
+    let target = w.target;
+    let (done, commits) = change_with_edit(c, &[moved], DeckTarget::NewDeck("target".into()), move |collection| {
+        // A plain op: the deck rename op plans on the maintenance reader,
+        // which the compute phase holds now.
+        collection
+            .run(OpSpec::named("rename elsewhere", OpSource::UserUndoable), move |ctx| {
+                decks::rename_in(ctx.scope(), target, "Elsewhere")?;
+                Ok(())
+            })
+            .unwrap();
+    });
+    assert_eq!(commits, 2, "the first commit was stale: planned again");
+    assert_eq!(done.value, counts(1, 1));
+    let named = deck_named(c, "target").expect("a new deck of the typed name");
+    assert_ne!(named.id, target);
+    assert_eq!(read(c, moved).deck_id, named.id);
 }
 
 /// K4: a cancel before the commit writes nothing and records no step.
@@ -928,15 +994,19 @@ fn a_review_session_admits_the_scheduling_actions() {
     let cancel = CancelToken::new();
     let done = h
         .review
-        .admit_card_action(&cancel, |c| {
-            cards::run_admitted(
-                c,
-                &CardTarget::Cards(vec![target]),
-                &CardAction::Suspend,
-                Arc::clone(&cancel),
-                ProgressSink::new(),
-            )
-        })
+        .admit_card_action(
+            &cancel,
+            |c| {
+                cards::run_admitted(
+                    c,
+                    &CardTarget::Cards(vec![target]),
+                    &CardAction::Suspend,
+                    Arc::clone(&cancel),
+                    ProgressSink::new(),
+                )
+            },
+            |done| done.seq,
+        )
         .unwrap();
     assert_eq!(done.value, counts(1, 1));
     assert_eq!(read(&h.collection, target).queue, CardQueue::Suspended);
@@ -1076,7 +1146,10 @@ fn b11_delete_notes_reports_notes_and_cards() {
             s.add_card(&common::card(one, 0))?;
             let gone = s.add_note(&common::note(&["gone", "back"]))?;
             s.remove_note_and_cards(gone)?;
-            Ok(vec![two, one, gone])
+            // A damaged card whose note row is missing: not removed, not
+            // counted.
+            s.add_card(&common::card(NoteId(424_242), 0))?;
+            Ok(vec![two, one, gone, NoteId(424_242)])
         })
         .unwrap()
         .value;
@@ -1084,11 +1157,12 @@ fn b11_delete_notes_reports_notes_and_cards() {
     let before = dump(c);
     let job = note_actions::start(&w.h.engine, c.clone(), NoteTarget::Notes(notes.clone()), NoteAction::DeleteNotes).unwrap();
     let outcome = job.wait(Duration::from_secs(30)).expect("a result").unwrap();
-    assert_eq!(outcome.counts, counts(2, 3));
+    assert_eq!(outcome.counts, counts(2, 4));
     assert_eq!(outcome.cards_removed, Some(3));
     assert_eq!(outcome.undo.map(|u| u.name), Some("Delete Note"));
     let r = c.reader(ReaderRole::Query).unwrap();
     assert!(notes.iter().all(|id| r.note(*id).unwrap().is_none()));
+    assert_eq!(r.cards_of_note(NoteId(424_242)).unwrap().len(), 1, "the damaged card stays");
     drop(r);
     exact_undo_redo(c, &before, "Delete Note");
 }

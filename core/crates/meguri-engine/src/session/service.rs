@@ -949,7 +949,16 @@ impl ReviewService {
                 .filter(|s| s.id == id)
                 .map(|s| s.last.items.clone())
         });
-        let mut result = crate::sched::ops::run_admitted(&c, request, session, options)?;
+        let mut result = match crate::sched::ops::run_admitted(&c, request, session, options) {
+            Ok(result) => result,
+            // The op committed and then failed: the session still settles
+            // on the committed change before the error goes back.
+            Err(error @ EngineError::CommitCompleted { .. }) => {
+                let _ = self.settle_after_commit();
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
         // run() returns after observers have enqueued Work::Observe. A worker
         // barrier therefore witnesses that exact stream, never a preview or a
         // caller-synthesized replacement queue.
@@ -976,18 +985,20 @@ impl ReviewService {
         })?;
         Ok(result)
     }
-    /// A Browse bulk action that writes scheduling (`browser/workspace`
-    /// V8.1: Suspend, Unsuspend, Bury, Unbury, Set Due Date, Forget),
-    /// admitted as [`Self::sched_op`] admits an operation with no session:
+    /// A Browse bulk action (`browser/workspace` V8.1), admitted as
+    /// [`Self::sched_op`] admits an operation with no session:
     /// new answers wait, the answers already accepted are written first, and
     /// once the action committed the session's observer has seen it and the
-    /// session's redo is gone. `run` is the action (`bulk::cards::run_admitted`)
-    /// on the bound collection; it is not a step of the session.
+    /// session's redo is gone. `run` is the action on the bound collection
+    /// (`bulk::cards::run_admitted` for the scheduling ones), `seq_of` its
+    /// commit's seq; it is not a step of the session. A held answer whose card the action rewrote
+    /// would otherwise fail its row precondition and be dropped.
     pub fn admit_card_action<T>(
         &self,
         cancel: &Arc<crate::CancelToken>,
-        run: impl FnOnce(&Collection) -> Result<crate::OpResult<T>, EngineError>,
-    ) -> Result<crate::OpResult<T>, EngineError> {
+        run: impl FnOnce(&Collection) -> Result<T, EngineError>,
+        seq_of: impl Fn(&T) -> crate::Seq,
+    ) -> Result<T, EngineError> {
         let _control = self.control.try_acquire()?;
         cancel.check()?;
         let (c, journal) = self.bound()?;
@@ -1011,23 +1022,36 @@ impl ReviewService {
         let _admission = MutationAdmission(&self.inner.state);
         self.drain_until(crate::monotonic::now() + Duration::from_secs(5))?;
         cancel.check()?;
-        let result = run(&c)?;
-        // As in `sched_op`: the barrier witnesses the observer's work for
-        // this commit before the admission closes.
-        let settled = (|| {
-            let (tx, rx) = mpsc::sync_channel(1);
-            self.inner.tx.send(Work::ApplicationBarrier(tx)).map_err(invalid)?;
-            rx.recv().map_err(invalid)?;
-            if let Some(s) = self.inner.state.lock().unwrap().session.as_mut() {
-                s.redo.clear();
-            }
-            Ok::<_, EngineError>(())
-        })();
+        let result = run(&c);
+        // An error after the commit (`CommitCompleted`) still committed: the
+        // session settles as for a result. Any other error wrote nothing.
+        let committed = match &result {
+            Ok(done) => Some(seq_of(done)),
+            Err(EngineError::CommitCompleted { seq, .. }) => Some(*seq),
+            Err(_) => None,
+        };
+        let Some(seq) = committed else {
+            return result;
+        };
+        let settled = self.settle_after_commit();
+        let result = result?;
         settled.map_err(|error| EngineError::CommitCompleted {
-            seq: result.seq,
+            seq,
             message: error.to_string(),
         })?;
         Ok(result)
+    }
+    /// After an admitted commit: the barrier witnesses the observer's work
+    /// for it before the admission closes, and the session's redo goes, as
+    /// in `sched_op`.
+    fn settle_after_commit(&self) -> Result<(), EngineError> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        self.inner.tx.send(Work::ApplicationBarrier(tx)).map_err(invalid)?;
+        rx.recv().map_err(invalid)?;
+        if let Some(s) = self.inner.state.lock().unwrap().session.as_mut() {
+            s.redo.clear();
+        }
+        Ok(())
     }
     /// `review/edit-current` E2: Edit Note's save from the review, admitted
     /// as a card action is (the open session, not ending or restoring; answers
