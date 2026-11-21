@@ -77,8 +77,9 @@ struct SidebarView: View {
         // action sees the key: a key monitor of this window does. Never while a text input,
         // a sheet or a review has the keys, and never on a key's repeat. S is not bound on
         // the Mac sidebar: the list's type-select keeps the letters (H12).
-        .background(ReturnKeyStudyMonitor { navigation.review == nil && navigation.sheet == nil
-            && !textInputHasFocus && features.sidebarStudy(navigation.sidebarSelection) })
+        .background(ReturnKeyStudyMonitor(
+            allowed: { (navigation.review == nil, navigation.sheet == nil, !textInputHasFocus) },
+            act: { features.sidebarStudy(navigation.sidebarSelection) }))
         #else
         // H12: with the list focused (a hardware keyboard), Return or S starts the selected
         // deck's review, or Today's Study on the Today row; once per press, never on a key's
@@ -115,6 +116,8 @@ struct SidebarView: View {
 /// H12: Return in the main window's sidebar layout, through a local key monitor that
 /// lives as long as the sidebar. `act` returns whether it used the key.
 private struct ReturnKeyStudyMonitor: View {
+    /// (no review, no app sheet, no text input): read when the key arrives.
+    let allowed: @MainActor () -> (noReview: Bool, noSheet: Bool, noTextInput: Bool)
     let act: @MainActor () -> Bool
     @State private var monitor: Any?
     var body: some View {
@@ -122,11 +125,16 @@ private struct ReturnKeyStudyMonitor: View {
             .onAppear {
                 guard monitor == nil else { return }
                 monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                    guard !event.isARepeat, event.keyCode == 36 || event.keyCode == 76,
-                          event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function]).isEmpty,
-                          let window = event.window, window === NSApp.mainWindow, window.attachedSheet == nil,
-                          MainActor.assumeIsolated({ act() }) else { return event }
-                    return nil
+                    let used = MainActor.assumeIsolated { () -> Bool in
+                        let state = allowed()
+                        guard SidebarReturnKey.acts(keyCode: event.keyCode, isRepeat: event.isARepeat,
+                                modifiers: event.modifierFlags.intersection(.deviceIndependentFlagsMask),
+                                inMainWindow: event.window != nil && event.window === NSApp.mainWindow,
+                                windowSheet: event.window?.attachedSheet != nil, appSheet: !state.noSheet,
+                                review: !state.noReview, textInput: !state.noTextInput) else { return false }
+                        return act()
+                    }
+                    return used ? nil : event
                 }
             }
             .onDisappear {
