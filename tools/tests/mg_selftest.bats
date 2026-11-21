@@ -1573,6 +1573,21 @@ core_report_names() {
     | ($a | index($c[0])) != null and ($b | index($c[0])) != null
     and (($a - $c) + ($b - $c) + $c | sort) == $q'
 
+  # A run's extraction is gone when it ends; one a cancelled run left behind
+  # (its run has a result.json) goes at the next archive run.
+  [ -z "$(ls -A "$CARGO_TARGET_DIR/nextest-archive")" ]
+  mkdir -p "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-1" "$SB/build/mg/core-test/20000101T000000Z-1"
+  echo '{}' >"$SB/build/mg/core-test/20000101T000000Z-1/result.json"
+  mkdir -p "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-2"
+  mg core-test --quick --archive build/archive/core-tests.tar.zst --partition hash:1/2 --exclude-list list.txt
+  [ "$status" -eq 0 ]
+  [ "$(ls "$CARGO_TARGET_DIR/nextest-archive")" = 20000101T000000Z-2 ]
+
+  # The timing-sensitive job's run: exactly the listed test, from the archive.
+  mg core-test --quick --archive build/archive/core-tests.tar.zst --only-list list.txt
+  [ "$status" -eq 0 ]
+  jq -e '[.details.listed_results[].event] == ["ok"]' "$result"
+
   # A canary that fails in the archive stops the shard before its tests.
   write_file core/crates/meguri-engine/tests/canary_pins.rs '#[test] fn pin_held() { panic!("pin drifted"); }'
   mg core-test --build-archive build/archive/core-tests.tar.zst

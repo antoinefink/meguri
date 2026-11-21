@@ -335,12 +335,32 @@ mg_core_test() {
     quick|stress) features=(--features meguri-ffi/test-hooks) ;;
   esac
   # scope: what nextest builds and lists. From an archive, the binaries
-  # --build-archive built with quick's features, extracted beside the Cargo
-  # target (on disk, not the /tmp tmpfs); nothing is compiled.
+  # --build-archive built with quick's features, extracted once beside the
+  # Cargo target (on disk, not the /tmp tmpfs) before anything runs, so the
+  # settle step's flush comes after the last write; nothing is compiled.
   if [ -n "$archive" ]; then
-    extract="${CARGO_TARGET_DIR:-$MG_RUN_DIR}/nextest-archive-$MG_RUN_ID"
+    local archives="${CARGO_TARGET_DIR:-$MG_RUN_DIR}/nextest-archive" old
+    mkdir -p "$archives"
+    # A cancelled run cannot remove its extraction: remove those of runs that
+    # have ended (they have a result.json); a live run has none yet.
+    for old in "$archives"/*/; do
+      [ -d "$old" ] || continue
+      old="${old%/}"
+      old="${old##*/}"
+      [ ! -f "$MG_ROOT/build/mg/core-test/$old/result.json" ] || rm -rf "${archives:?}/$old"
+    done
+    extract="$archives/$MG_RUN_ID"
     rm -rf "$extract" && mkdir -p "$extract"
-    scope=(--archive-file "$MG_ROOT/$archive" --extract-to "$extract" --extract-overwrite)
+    if ! (cd core && cargo nextest list --archive-file "$MG_ROOT/$archive" --extract-to "$extract" -E 'none()') >/dev/null; then
+      rm -rf "$extract"
+      mg_failure archive-extract "cargo nextest could not extract $archive; see log.txt" "tools/mg core-test --build-archive $archive"
+      mg_message "core-test: the test archive $archive could not be extracted"
+      mg_status fail
+      return 0
+    fi
+    scope=(--binaries-metadata "$extract/target/nextest/binaries-metadata.json"
+      --cargo-metadata "$extract/target/nextest/cargo-metadata.json"
+      --target-dir-remap "$extract/target" --workspace-remap "$MG_ROOT/core")
   else
     scope=(--workspace ${features[0]+"${features[@]}"})
   fi
