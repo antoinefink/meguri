@@ -165,6 +165,10 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// predicate binds its task, operation and accepted candidate, not just a generation.
     func prepareEditorReplacement(operation: String, decision: EditorReplacementDecision,
                                   current: @MainActor () -> Bool) async -> EditorReplacementAdmission? {
+        // review/edit-current E2: a replacement asks as Cancel does before it starts.
+        if let edit = editFlowOwner, edit.isPresented {
+            guard await edit.requestCancel(), !decision.cancelled, current(), !Task.isCancelled else { return nil }
+        }
         guard editorReplacement == nil, addFlowOwner?.isPresented != true || foreground, !closed, !closing, !opening,
               addFlowOwner?.opening != true, !decision.cancelled, current(), !Task.isCancelled else { return nil }
         let id = decision.id, editor = addFlowOwner, expected = generation
@@ -200,6 +204,14 @@ public final class ReviewCollection: ChangeFanoutSink {
     public var addNoteFlow: AddNoteFlow {
         if let addFlowOwner { return addFlowOwner }
         let flow = AddNoteFlow(owner: self); addFlowOwner = flow
+        return flow
+    }
+    private var editFlowOwner: EditNoteFlow?
+    /// Edit Note during a review (N20.8). Its entries all use this flow's
+    /// `canOpen` and `open` (N4).
+    public var editNoteFlow: EditNoteFlow {
+        if let editFlowOwner { return editFlowOwner }
+        let flow = EditNoteFlow(owner: self); editFlowOwner = flow
         return flow
     }
     // Accepted Add work may finish while background/close waits for it. New
@@ -1031,6 +1043,9 @@ public final class ReviewCollection: ChangeFanoutSink {
                changes.wholeCollection || !changes.notetypes.isEmpty || !changes.decks.isEmpty {
                 addFlowOwner?.selectionChanged(generation: event.generation)
             }
+            if event.generation == generation {
+                editFlowOwner?.receive(changes, seq: event.seq, generation: event.generation)
+            }
             if changes.wholeCollection || !changes.mediaAdded.isEmpty || !changes.mediaRemoved.isEmpty {
                 scheduleMediaRefresh(names: changes.mediaAdded, generation: event.generation)
             }
@@ -1045,6 +1060,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             exportOwner?.generationChanged()
             invalidateDeckActions()
             addFlowOwner?.generationEnded()
+            editFlowOwner?.generationEnded()
             generation = next; day?.pause()
             invalidateMedia()
             review?.generationEnded(); review = nil; navigation.endReview()
@@ -1101,6 +1117,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             activity.collectionReady()
             if generation != next {
                 addFlowOwner?.generationEnded()
+                editFlowOwner?.generationEnded()
                 invalidateDeckActions(); invalidateMedia(); exportOwner?.generationChanged()
             }
             generation = next
@@ -1541,6 +1558,14 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     public func finishReview() async {
         guard let review else { return }
+        // E7: leaving the review closes Edit Note as Cancel does, asking first.
+        // The question lives in the review's form: a navigation that already
+        // dropped the review (another row, another section) presents it again
+        // first, so the question shows and Keep Editing leaves it on screen.
+        if editFlowOwner?.isPresented == true, navigation.review == nil {
+            navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: review.record.deckID), session: review))
+        }
+        guard await editFlowOwner?.requestCancel() != false, self.review === review else { return }
         guard await review.end() else { return }
         previousRecord = review.record
         self.review = nil; navigation.endReview()
@@ -1622,7 +1647,10 @@ public final class ReviewCollection: ChangeFanoutSink {
                     let report = try await collection.resume()
                     lifecycle = try await collection.lifecycle()
                     if let began { day?.result(nextDayAt: report.nextDayAt, beganAt: began) }
-                    if report.activeSession != review?.sessionID { review?.generationEnded(); review = nil; navigation.endReview() }
+                    if report.activeSession != review?.sessionID {
+                        editFlowOwner?.generationEnded()
+                        review?.generationEnded(); review = nil; navigation.endReview()
+                    }
                     await refreshMedia()
                     if reviewIsActive, resolver != nil { try await review?.resume() }
                     await sync.foregroundAfterLocalResume()
@@ -1697,6 +1725,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         // The editor guard precedes cancellation, Core flush and Core close.
         // Keep Editing cancels quit without retiring the collection owner.
+        guard await editFlowOwner?.requestCancel() != false else { return false }
         guard await addFlowOwner?.requestClose() != false else { return false }
         meguriSignInPreparationTask?.cancel()
         await meguriSignInPreparationTask?.value

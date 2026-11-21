@@ -119,8 +119,40 @@ public struct SyncMainStatus: Sendable, Equatable {
     public var hasIssues: Bool { !issues.isEmpty }
 }
 
+/// N23.2: one cloud family for both services. Shape first; only needs you has a
+/// colour. The names are the `icloud` symbols, which Apple reserves for iCloud:
+/// `glyph` draws them for iCloud only, and the same shapes from the unrestricted
+/// `cloud` symbol for Meguri Sync and Off (N23.4).
+public enum SyncSymbol {
+    public static let upToDate = "checkmark.icloud"
+    /// Something moves; it turns while the work lasts.
+    public static let moving = "arrow.trianglehead.2.clockwise.rotate.90.icloud"
+    /// Waiting, or not sent yet.
+    public static let waiting = "icloud"
+    public static let needsYou = "exclamationmark.icloud"
+    public static let off = "icloud.slash"
+
+    /// What draws a shape: a system symbol (iCloud only) or a drawn cloud.
+    public enum Glyph: Equatable, Sendable {
+        case system(String)
+        /// `cloud` with its badge: none, checkmark, arrows, exclamationmark, slash.
+        case cloud(String)
+    }
+    /// N23.2: the `icloud` symbols only refer to Apple's iCloud.
+    public static func glyph(_ shape: String, iCloud: Bool) -> Glyph {
+        if iCloud, shape != off { return .system(shape) }
+        return switch shape {
+        case upToDate: .cloud("checkmark")
+        case moving: .cloud("arrows")
+        case needsYou: .cloud("exclamationmark")
+        case off: .cloud("slash")
+        default: .cloud("none")
+        }
+    }
+}
+
 public enum SyncKinds {
-    public static let needsYouSymbol = "exclamationmark.icloud"
+    public static let needsYouSymbol = SyncSymbol.needsYou
 
     // MARK: iCloud (T19.4)
 
@@ -319,14 +351,15 @@ public enum SyncKinds {
     }
 
     private static func meguriTitle(_ facts: MeguriKindFacts) -> (symbol: String, key: String) {
-        let busy = "arrow.triangle.2.circlepath"
-        let stopped = "exclamationmark.arrow.triangle.2.circlepath"
+        let busy = SyncSymbol.moving
+        let stopped = SyncSymbol.waiting
         if facts.connection == .authenticating { return (busy, "sync.meguri.status.signingIn.title") }
         if let stage = facts.stage {
             return switch stage {
-            case .required: (busy, "sync.service.settingUp")
+            // Nothing moves before preparation or while the sheet asks (N23.2).
+            case .required: (stopped, "sync.service.settingUp")
             case .preparing: (busy, "sync.meguri.status.preparing.title")
-            case .preview: (busy, "sync.service.settingUp")
+            case .preview: (stopped, "sync.service.settingUp")
             case .collection: (busy, "sync.meguri.status.transferringCollection.title")
             case .media: (busy, "sync.meguri.status.transferringMedia.title")
             case .mediaBlocked: (stopped, "sync.meguri.status.mediaBlocked.title")
@@ -337,11 +370,11 @@ public enum SyncKinds {
         }
         switch facts.routine {
         case .idle?:
-            return facts.automatic ? ("checkmark.circle", "sync.status.upToDate.title")
-                : ("pause.circle", "sync.status.automaticOff.title")
+            return facts.automatic ? (SyncSymbol.upToDate, "sync.status.upToDate.title")
+                : (SyncSymbol.waiting, "sync.status.automaticOff.title")
         case .exchanging?: return (busy, "sync.status.syncing.title")
         case .mediaBlocked?: return (stopped, "sync.meguri.status.mediaBlocked.title")
-        case .pending?, .waiting?, .cancelled?: return ("arrow.up.circle", "sync.status.pending.title")
+        case .pending?, .waiting?, .cancelled?: return (SyncSymbol.waiting, "sync.status.pending.title")
         case .acceptanceUnknown?: return (stopped, "sync.meguri.status.acceptanceUnknown.title")
         case .network?, .server?: return (stopped, "sync.meguri.status.failed.title")
         default: return (stopped, "sync.meguri.status.signedIn.title")

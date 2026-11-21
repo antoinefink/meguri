@@ -13,6 +13,8 @@ T18 gives the text of the second service, Meguri Sync (`sync/meguri-provider` MP
 
 T19 (2026-11-19) gives the text of the Sync section that replaces Account & Sync: one Service control, setup without a Connect step, the sheet that asks which collection to keep, problems in three kinds, and Troubleshooting. It adds keys and lists the keys of T3 to T18 that become unused (T19.8); it changes the value of no existing key.
 
+T20 (2026-11-21, round 10) gives the text of the status panel that the sync button opens, for both services (`docs/design/native-interface-contract.md` N23). It adds three keys and changes no state or existing value.
+
 ## T1. Keys, arguments and plurals
 
 - Every string is an entry of the Sync String Catalog with the stable key given here. The English value is the one given; other languages are Meguri's own translations of the English. Keys never change once shipped; a changed meaning gets a new key.
@@ -1168,3 +1170,42 @@ The same four rules make the main status. The first condition that applies decid
 - `SyncKindsPresentationTests` (in `app/Packages/MeguriKit/Tests/AppModelTests/`): each row of T19.4's two tables and of T19.5 gives its kind, its text key and its action; with two needs you rows the first in order shows; with only waiting or issues rows the title is `stateWithoutAttention`'s; `conflicts` alone changes nothing in the main status and shows `sync.trouble.conflictCopies` in Troubleshooting; a failed Meguri setup's own line is in the log entry.
 - A source check that no view of the app names a key of T19.8.
 - U161's snapshots cover the Sync section for Off, each service set up, a needs you row, an issues row, `sync.keepCollection` for both services and in its one-direction form, and Troubleshooting for both services.
+
+## T20. The status panel (2026-11-21, round 10)
+
+Changed 2026-11-21 (round 10). Decided by Antoine on 2026-11-20 (`docs/design/decisions.md`, row `sync.statusPopover`, answer 6A; `docs/design/native-interface-contract.md` N23). In force: approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/round10-sync-panel-20261121.md`). The text of the panel that the sync status button opens, for both services. It replaces, for the popover only, the parts of T2, T3, T6, T7, T8, T9.2, T18.3, T18.7, T19.3, T19.4 and T19.7 that N23.5 lists; T19.4 and T19.5 still make the status, and no state, condition or existing value changes.
+
+### T20.1 What the panel shows
+
+| Part | Text | Shown |
+|---|---|---|
+| status line | the main status's title (T19.4 rule 1 or 2; T19.5) | always |
+| sentence | the Text column of T19.4 or T19.5 for the row that applies, or, where T19.4 rule 2 applies, the T3 detail of the state; for an up-to-date status `sync.status.upToDate.detail` with its instant (MP6.6) | when the status has a detail that differs from the title |
+| files left | `sync.meguri.media.filesLeft`: `%lld media file left` / `%lld media files left` | under the bar, while media transfers and a count is known: Meguri Sync's setup media step (its files left); iCloud's `syncingMedia` (its upload and download files) |
+| issues | `sync.issues.row`, or `sync.meguri.media.notTransferred` for Meguri Sync's media-blocked row (T19.5) when the affected count is known, else `sync.issues.row` | while the status has issues; plain text, no link |
+| button | `sync.status.openSettings`: Sync Settings | always |
+| button | `sync.now.command`: Sync Now | in the action's place, as N23.3 says |
+| button | the status action's key (T19.4, T19.5) | in the action's place, as N23.3 says |
+| button | `sync.status.signIn`: Sign In… | in place of `sync.meguri.signIn` for Meguri Sync's needs you rows whose action it is; opens the Sync section at the sign-in fields |
+| button | `sync.status.cancelSetup`: Cancel Setup | in place of `sync.meguri.cancel` while setup prepares; never the default |
+
+- `sync.meguri.media.filesLeft` names no service, so iCloud's panel uses it too; T5's `sync.media.filesLeft` stays the media indicator's text beside the button.
+- The panel shows none of T4's lines, T5's other lines, T7's step and result lines or T19.3's setup-done lines; the Sync section's status row keeps them. VoiceOver still announces the end of a Sync Now the person started, by its T7 title (T1).
+- No reason line under a disabled Sync Now or Try Again. The reason stays the Mac help tag of the panel's button and the line under the Sync section's Sync Now and File › Sync Now (T19.7).
+- Copy Debug Info (`sync.action.copyDebugInfo`) is a button of the panel only where it is the status action as built: T19.4's `setupNeeded` state and row 1 (until the damaged-collection screen exists, row 1's built action is Copy Debug Info), and T19.5's blocked provider and `localUnusable` row.
+- The button's accessibility label (T2): `sync.button.label` with iCloud selected, `sync.meguri.button.label` with Meguri Sync, `sync.button.label.off` with no service.
+
+### T20.2 Keys added
+
+| Key | English | Use |
+|---|---|---|
+| `sync.status.signIn` | Sign In… | T20.1; the label ends with "…" because it opens the fields and changes nothing (T1) |
+| `sync.status.cancelSetup` | Cancel Setup | T20.1; names what it cancels, since a plain Cancel in a panel reads as closing the panel |
+| `sync.button.label.off` | Sync | the sync button's accessibility label while no service is selected |
+
+### T20.3 Tests
+
+- `SyncStringCatalogTests`: a row for each key of T20.2.
+- `SyncPanelPresentationTests` (`app/Packages/MeguriKit/Tests/AppModelTests/`), over `SyncPanel` (AppModel): each row of N23.3's table gives its buttons and which is the default, or none; Sync Now stays, disabled, while the status moves; a needs you row with a built action shows that action and no Sync Now; with no service the only button is Sync Settings; an issues row's action never reaches the panel; Finish Setup, Resume and Cancel Setup are never the default; the bar's value for Meguri Sync's setup equals the Account row's value; iCloud's media transfer under an up-to-date state shows no bar; a detail equal to the title is not shown; both services' states map to N23.2's five shapes, iCloud's to the `icloud` symbols and Meguri Sync's and Off's to the drawn shapes, with no `icloud` symbol outside iCloud.
+- The panel's states rendered in the test VM through the routes `settings/sync/panel/<state>` and `settings/sync/status/<state>` (Mac, iPad, iPhone; light and dark).
+- `SyncStatusPanelKeyTests` (Mac UI test, in the VM): Return runs the default button (Sync Off: Sync Settings opens the Settings window); Esc closes the panel and runs nothing. It is recorded as queued while macOS drops XCUITest input (`mac-input`) and runs again from `tools/mg catch-up`.

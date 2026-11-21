@@ -10,7 +10,7 @@ public final class NoteEditorDraft {
     public enum Mode: String, Codable, Sendable { case rich, html }
     public struct Field: Sendable, Equatable {
         public let definition: NotetypeField
-        public let baseline: String
+        public fileprivate(set) var baseline: String
         public fileprivate(set) var target: String
         public fileprivate(set) var changed: Bool
         public fileprivate(set) var mode: Mode
@@ -26,10 +26,15 @@ public final class NoteEditorDraft {
     }
     public let identity = UUID()
     public let generation: UInt64
+    /// Edit mode (`review/edit-current`): the stored note the fields were
+    /// loaded from. Nil for an Add draft.
+    public let noteID: Int64?
     public let notetype: NotetypeRecord
     public private(set) var deck: DeckNameEntry
     public private(set) var fields: [Field]
     public private(set) var tags: [String]
+    /// Edit mode: the tags as stored when the note was loaded or reloaded.
+    private var baselineTags: [String]
     public private(set) var pendingFields: Set<Int> = []
     public private(set) var focusedField: Int?
     public private(set) var fieldCheck: FieldCheck?
@@ -43,14 +48,30 @@ public final class NoteEditorDraft {
     private var lastAddedValues: [String]?
     private let html = CoreEditorFieldHTML()
 
-    public init(generation: UInt64, notetype: NotetypeRecord, deck: DeckNameEntry,
-                values: [String]? = nil, tags: [String] = []) throws {
-        guard !deck.filtered, notetype.originalStockKind != 6, !notetype.fields.isEmpty,
+    public convenience init(generation: UInt64, notetype: NotetypeRecord, deck: DeckNameEntry,
+                            values: [String]? = nil, tags: [String] = []) throws {
+        try self.init(generation: generation, notetype: notetype, deck: deck, values: values, tags: tags, noteID: nil)
+    }
+
+    /// Edit mode: the stored note's fields are the baselines, so a field is
+    /// changed only once its target differs from what is stored. The card's
+    /// deck may be a filtered one; it is shown, never chosen, here.
+    public convenience init(editing note: NoteRecord, notetype: NotetypeRecord, deck: DeckNameEntry, generation: UInt64) throws {
+        guard note.notetypeId == notetype.id else {
+            throw BridgeError.stale(table: .notetypes, key: String(note.notetypeId))
+        }
+        try self.init(generation: generation, notetype: notetype, deck: deck, values: note.fields, tags: note.tags, noteID: note.id)
+    }
+
+    private init(generation: UInt64, notetype: NotetypeRecord, deck: DeckNameEntry,
+                 values: [String]?, tags: [String], noteID: Int64?) throws {
+        guard noteID != nil || !deck.filtered, notetype.originalStockKind != 6, !notetype.fields.isEmpty,
               notetype.fields.enumerated().allSatisfy({ Int($0.element.ord) == $0.offset }),
               values == nil || values?.count == notetype.fields.count else {
             throw BridgeError.invalidArgument("This note type or field layout is not supported by the field editor.")
         }
         self.generation = generation; self.notetype = notetype; self.deck = deck; self.tags = tags
+        self.noteID = noteID; baselineTags = tags
         fields = notetype.fields.enumerated().map { index, definition in
             let value = values?[index] ?? ""
             return Field(definition: definition, baseline: value, target: value, changed: false,
@@ -91,6 +112,52 @@ public final class NoteEditorDraft {
         next.lastAddedValues = values
         next.focusedField = fields.indices.first
         return next
+    }
+
+    /// Edit mode: input not committed yet, a committed field that differs from
+    /// its stored HTML, or changed tags (`review/edit-current` E2).
+    public var hasChanges: Bool {
+        !pendingFields.isEmpty || tags != baselineTags || fields.contains { $0.target != $0.baseline }
+    }
+
+    /// Edit mode, after a flush: one patch with every field whose target
+    /// differs from its stored HTML and the tags when they changed
+    /// (`editor/field-html` S2). Nil when there is nothing to send.
+    public func patch() -> NoteFieldPatch? {
+        guard let noteID, pendingFields.isEmpty else { return nil }
+        var changed: [Int: String] = [:]
+        for (ord, field) in fields.enumerated() where field.target != field.baseline { changed[ord] = field.target }
+        let tags = self.tags == baselineTags ? nil : self.tags
+        guard !changed.isEmpty || tags != nil else { return nil }
+        return NoteFieldPatch(id: noteID, notetype: notetype, fields: changed, tags: tags, generation: generation)
+    }
+
+    /// Edit mode, for a change made elsewhere (`editor/edit-flows` W5.2 with
+    /// E2's rule): every field without an unsaved edit takes the stored value
+    /// as its baseline and target; a changed or pending field keeps the
+    /// draft. Returns the ordinals the page must load again.
+    @discardableResult
+    public func reloadUnchanged(stored values: [String], tags stored: [String]) -> [Int] {
+        guard noteID != nil, values.count == fields.count else { return [] }
+        var reloaded: [Int] = []
+        for index in fields.indices where !pendingFields.contains(index) && fields[index].target == fields[index].baseline {
+            guard fields[index].baseline != values[index] else { continue }
+            fields[index].baseline = values[index]; fields[index].target = values[index]
+            fields[index].changed = false
+            reloaded.append(index)
+        }
+        if tags == baselineTags { tags = stored }
+        baselineTags = stored
+        if !reloaded.isEmpty { revision &+= 1 }
+        return reloaded
+    }
+
+    /// The page's display form of one field's target (B4).
+    public func displayValue(_ ord: Int) async throws -> String {
+        guard fields.indices.contains(ord) else { throw BridgeError.invalidArgument("Invalid editor field.") }
+        let converted = try await html.convert([fields[ord].target], forDisplay: true)
+        guard let value = converted.first, converted.count == 1 else { throw BridgeError.internal("Invalid editor conversion result.") }
+        return value
     }
 
     /// Explicit recovery acknowledges WebKit's lost uncommitted input; the

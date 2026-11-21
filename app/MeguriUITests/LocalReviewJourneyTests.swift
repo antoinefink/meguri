@@ -115,8 +115,8 @@ final class LocalReviewJourneyTests: XCTestCase {
             let command = editItem(menu, verb)
             XCTAssertTrue(command.waitForExistence(timeout: 10))
             XCTAssertEqual(command.isEnabled, enabled, "Edit > \(verb) must respect history and native input ownership")
-            // R173: "Undo Answer Card" while there is a step, plain "Undo" otherwise.
-            XCTAssertEqual(command.title, enabled ? "\(verb) Answer Card" : verb)
+            // R173 with S5's display name: "Undo Answer" while there is a step, plain "Undo" otherwise.
+            XCTAssertEqual(command.title, enabled ? "\(verb) Answer" : verb)
         }
         // Escape belongs to the open menu and must not exit the review.
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
@@ -312,6 +312,55 @@ final class LocalReviewJourneyTests: XCTestCase {
         try click(element(app, "review.session.close"), in: app, bundleIdentifier: bundleIdentifier)
         try assertSavedAndRestart(app, bundleIdentifier: bundleIdentifier, answers: answers, evidence: "waiting")
     }
+
+    #if os(macOS)
+    /// N20.8 on the Mac: Card › Edit Note (⌘E) opens the form over the card,
+    /// Esc is its Cancel and not Back to Decks, and Bury Card (⌘J) names
+    /// Edit › Undo after itself.
+    func testCardMenuKeysEditTheNoteAndBuryTheCard() throws {
+        let (app, bundleIdentifier) = try startFreshReview()
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
+        let menu = editMenu(app)
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        let undo = editItem(menu, "Undo")
+        /// Opens Edit until its Undo reads `title` (the step lands asynchronously).
+        func undoReads(_ title: String) throws -> Bool {
+            for _ in 0..<5 {
+                try click(menu, in: app, bundleIdentifier: bundleIdentifier)
+                XCTAssertTrue(undo.waitForExistence(timeout: 10))
+                if undo.title == title { return true }
+                try app.bringToFront(bundleIdentifier: bundleIdentifier)
+                app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+                Thread.sleep(forTimeInterval: 1)
+            }
+            return false
+        }
+        // ⌘J buries the card; Edit › Undo names the bury and brings it back.
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey("j", modifierFlags: .command)
+        XCTAssertTrue(try undoReads("Undo Bury Card"), "Edit › Undo names the bury: \(undo.title)")
+        try click(undo, in: app, bundleIdentifier: bundleIdentifier)
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
+        XCTAssertTrue(try undoReads("Undo"), "Nothing left to undo after the bury is undone")
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        // ⌘E opens Edit Note over the card; Esc is its Cancel, not Back to Decks.
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey("e", modifierFlags: .command)
+        let form = element(app, "review.editCurrent")
+        XCTAssertTrue(form.waitForExistence(timeout: 15), "⌘E reaches Card › Edit Note")
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(form.waitForNonExistence(timeout: 10), "Esc is the form's Cancel")
+        XCTAssertTrue(element(app, "review.session.screen").exists, "Esc did not leave the review")
+        // The keys are the card's again: ⌘J buries it.
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey("j", modifierFlags: .command)
+        XCTAssertTrue(try undoReads("Undo Bury Card"), "After the form closes, ⌘J reaches the card")
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+    }
+    #endif
 
     func testAllEasyExhaustionAndRestart() throws {
         let (app, bundleIdentifier) = try startFreshReview()

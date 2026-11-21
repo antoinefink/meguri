@@ -544,6 +544,48 @@ public final class SyncCoordinator {
             status = .renderFixture(state: .needsAttention, stateWithoutAttention: .upToDate(asOfMilliseconds: recent),
                 attention: [.oversize: 2, .refused: 1, .conflicts: 3],
                 controls: .init(bindingUsable: true, bindingActive: true, automaticEligible: true))
+        case .iCloudSyncing:
+            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
+            settings = .init(enabled: true, paused: false, automatic: true, media: true)
+            status = .renderFixture(state: .syncingCollection,
+                controls: .init(bindingUsable: true, bindingActive: true, automaticEligible: true))
+        case .iCloudSetupNeeded:
+            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
+            settings = .init(enabled: true, paused: false, automatic: true, media: true)
+            status = .renderFixture(state: .iCloudUnavailable(.setupNeeded), accountStatus: .configuration,
+                syncNow: .unavailable(.iCloudUnavailable))
+        case .meguriSyncing, .meguriRoundFailed, .meguriSignInRefused, .meguriMediaBlocked, .meguriAcceptanceUnknown:
+            providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+            meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
+            meguriRoutine = switch state {
+            case .meguriSyncing: .exchanging
+            case .meguriRoundFailed: .network
+            case .meguriMediaBlocked: .mediaBlocked
+            case .meguriAcceptanceUnknown: .acceptanceUnknown
+            default: .authentication
+            }
+            meguriLastExchange = recent
+            renderConnected = true
+        case .meguriSetupMedia:
+            providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+            meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
+            meguriStage = .media; meguriBusy = true
+            meguriMediaProgress = .renderFixture(downloadedFiles: 18_945, awaiting: 25_055)
+            renderConnected = false
+        case .meguriPreparing:
+            providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+            meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
+            meguriStage = .preparing; meguriBusy = true
+            renderConnected = false
+        case .iCloudNoAccount:
+            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
+            settings = .init(enabled: true, paused: false, automatic: true, media: true)
+            status = .renderFixture(state: .iCloudUnavailable(.noAccount), accountStatus: .noAccount,
+                syncNow: .unavailable(.iCloudUnavailable))
+        case .meguriBlocked:
+            providerState = .renderFixture(selection: .meguri, phase: .blocked)
+            meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
+            renderConnected = false
         }
     }
     /// P25.3 "connected": the selected service has a ready binding.
@@ -751,6 +793,33 @@ public final class SyncCoordinator {
         guard meguriStage == .media, !providerNeedsAttention else { return nil }
         return meguriMediaProgress?.awaiting
     }
+    /// N23.1: the status panel's one bar, from the same status as the Sync section.
+    public var panelProgress: SyncPanel.Progress? {
+        let status = self.status
+        let shown = status?.state == .needsAttention ? status?.stateWithoutAttention : status?.state
+        return SyncPanel.progress(mainStatus, meguri: providerState?.selection == .meguri || providerNeedsAttention,
+            setupValue: meguriProgressValue,
+            meguriMoving: meguriAuthenticating || (meguriStage == nil && meguriRoutine == .exchanging), cloudState: shown)
+    }
+    /// N23.1: the files line under the bar, while media transfers and a count is known.
+    public var panelFilesLeft: UInt64? {
+        guard panelProgress != nil else { return nil }
+        if providerState?.selection == .meguri { return meguriMediaFilesLeft }
+        let shown = status?.state == .needsAttention ? status?.stateWithoutAttention : status?.state
+        guard shown == .syncingMedia, let media = status?.media,
+              let upload = media.uploadFiles, let download = media.downloadFiles else { return nil }
+        let sum = upload.addingReportingOverflow(download)
+        return sum.overflow ? nil : sum.partialValue
+    }
+    /// N23.3: a service is selected, so Sync Now has a place in the panel.
+    public var panelServiceSelected: Bool {
+        switch providerState?.selection {
+        case .meguri, .iCloud: true
+        case .localOnly, nil: false
+        }
+    }
+    /// N23.2: draw the `icloud` symbols, which refer to Apple's iCloud only.
+    public var symbolsAreICloud: Bool { providerState?.selection == .iCloud && !providerNeedsAttention }
     /// Sync waits on the person, so review shows its status button (N16.2).
     public var needsUser: Bool {
         if providerNeedsAttention { return true }
@@ -4626,6 +4695,9 @@ public final class SyncCoordinator {
 extension SyncCoordinator {
     public enum RenderState: String, Equatable, CaseIterable, Sendable {
         case off, meguriConnected, meguriSignIn, meguriNeedsYou, iCloudSelected, iCloudConnected, iCloudNeedsYou, iCloudIssues
+        /// N23's panel states (round 10).
+        case meguriSyncing, meguriSetupMedia, meguriRoundFailed, meguriBlocked, meguriSignInRefused, iCloudSyncing
+        case meguriPreparing, iCloudNoAccount, meguriMediaBlocked, meguriAcceptanceUnknown, iCloudSetupNeeded
     }
     /// Builds synthetic Sync section examples. The coordinator is never
     /// attached: it owns no collection, account, binding or server, and its

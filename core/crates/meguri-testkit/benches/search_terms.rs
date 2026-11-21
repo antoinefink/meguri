@@ -1,10 +1,11 @@
-//! U82: one search statement per term family of `specs/search/names-and-ids`,
-//! `state-and-flags`, `properties` and `history`, run whole on a working
-//! copy of a generated collection (plan section 3: every unit that adds a
-//! query adds its bench row). Each sample builds the plan and reads every
-//! matching card id, unsorted, on a query reader with the product's SQL
-//! functions; the first-page and streaming budgets (R1825, R1826) are U90's
-//! once sessions exist (U85).
+//! U82 and U81: one search statement per term family of
+//! `specs/search/names-and-ids`, `state-and-flags`, `properties`, `history`,
+//! `text-matching` and `fields`, run whole on a working copy of a generated
+//! collection (plan section 3: every unit that adds a query adds its bench
+//! row). Each sample builds the plan and reads every matching id, unsorted,
+//! on a query reader with the product's SQL functions; the note types are
+//! read once per collection, outside the samples. The first-page and
+//! streaming budgets (R1825, R1826) are U90's once sessions exist (U85).
 //!
 //! Sizes come from `$MEGURI_BENCH_SIZES` (default `10k,150k`), made first by
 //! `tools/mg bench`. The result goes to `$MEGURI_BENCH_RESULTS`.
@@ -17,7 +18,7 @@ use criterion::Criterion;
 use meguri_model::clock::{FixedClock, UtcOffset};
 use meguri_model::ids::DeckId;
 use meguri_model::rng::SeededRandom;
-use meguri_search::{FoldMode, Param, Plan, SearchContext, SearchMode, parse};
+use meguri_search::{FoldMode, Param, Plan, SearchContext, SearchMode, SearchNotetypes, parse};
 use meguri_storage::raw::SqlValue;
 use meguri_storage::{Initializers, OpenOptions, ReaderRole, open_collection};
 use meguri_testkit::bench::fixtures;
@@ -29,8 +30,9 @@ use meguri_testkit::generate::DEFAULT_NOW_MS;
 #[global_allocator]
 static ALLOC: PeakAlloc = PeakAlloc;
 
-/// The benchmark name of each search: `search.terms.<family>.<term>`.
-const SEARCHES: [(&str, &str); 25] = [
+/// The benchmark name of each search, `search.terms.<family>.<term>`, in
+/// cards mode.
+const SEARCHES: [(&str, &str); 33] = [
     ("names.tag", "tag:a*"),
     ("names.tag_regex", "tag:re:^a"),
     ("names.deck", "deck:a*"),
@@ -57,6 +59,22 @@ const SEARCHES: [(&str, &str); 25] = [
     ("history.introduced_wide", "introduced:36500"),
     ("history.rated_wide", "rated:36500"),
     ("history.prop_rated_wide", "prop:rated<=0"),
+    // U81: the generator's fields are words of its syllables.
+    ("text.plain", "kariwa"),
+    ("text.field", "front:ka*"),
+    ("text.field_regex", "front:re:wa$"),
+    ("text.regex", "re:^ka.*wa"),
+    ("text.nc", "nc:kariwa"),
+    ("text.sc", "sc:kariwa"),
+    ("text.word", "w:kamo"),
+    ("text.all_fields", "*:ka*"),
+];
+
+/// Text searches in notes mode, `search.terms.<family>.<term>`.
+const NOTE_SEARCHES: [(&str, &str); 3] = [
+    ("text.plain_notes", "kariwa"),
+    ("text.field_notes", "front:ka*"),
+    ("text.regex_notes", "re:^ka.*wa"),
 ];
 
 fn sizes() -> Vec<String> {
@@ -105,10 +123,15 @@ fn main() -> ExitCode {
         let db = open_collection(&copy.path, &OpenOptions::new(&clock, &random).initializers(initializers))
             .expect("the collection opens");
         let reader = db.open_reader(ReaderRole::Query).expect("a query reader");
-        for (name, text) in SEARCHES {
+        let notetypes = SearchNotetypes::read(&reader).expect("the note types read");
+        let searches = SEARCHES
+            .iter()
+            .map(|&(name, text)| (name, text, SearchMode::Cards))
+            .chain(NOTE_SEARCHES.iter().map(|&(name, text)| (name, text, SearchMode::Notes)));
+        for (name, text, mode) in searches {
             let query = parse(text).expect("the search parses");
             let run = || {
-                let plan = Plan::build(&query, SearchMode::Cards, &ctx).expect("the plan builds");
+                let plan = Plan::build(&query, mode, &ctx, &notetypes).expect("the plan builds");
                 let params: Vec<SqlValue> = plan
                     .params()
                     .iter()
@@ -121,7 +144,7 @@ fn main() -> ExitCode {
                 reader.execute_raw(plan.sql(), &params).expect("the search runs").rows.len()
             };
             // Warm the pages and the statement cache outside the samples.
-            eprintln!("search-terms {size} {name}: {} cards", black_box(run()));
+            eprintln!("search-terms {size} {name}: {} {mode:?}", black_box(run()));
             let mut measurement = Measurement::start(&format!("search.terms.{name}"), Some(&size));
             criterion.bench_function(&format!("{name}/{size}"), |b| {
                 b.iter_custom(|n| measurement.run(n, |_| black_box(run())))

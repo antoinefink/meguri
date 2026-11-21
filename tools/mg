@@ -127,11 +127,87 @@ mg_detail() { jq -nc --arg k "$1" --argjson v "$2" '{($k): $v}' >>"$MG_STATE/det
 
 # Compose for this checkout: one project per checkout path, so worktrees never
 # share an image tag or a target volume.
-mg_compose_project() {
+mg_compose_project() { mg_compose_project_for "$MG_ROOT"; }
+mg_compose_project_for() {
   local base sum
-  base="$(basename "$MG_ROOT" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-')"
-  sum="$(printf '%s' "$MG_ROOT" | cksum | cut -d' ' -f1)"
+  base="$(basename "$1" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-')"
+  sum="$(printf '%s' "$1" | cksum | cut -d' ' -f1)"
   printf 'meguri-%s-%s\n' "$base" "$sum"
+}
+
+# Every checkout mounts at /work, so two checkouts sharing one Cargo target
+# replay each other's fingerprints and test binaries. An explicit
+# MEGURI_DOCKER_CARGO_TARGET (an absolute path) is honoured only for the
+# checkout that owns it: the checkout it lies in (or would lie in, for a
+# directory not made yet), else the one named in its .meguri-checkout marker,
+# which the first real run on an unmarked directory outside every checkout
+# writes. Any other checkout falls back to its own volume
+# <project>_cargo-target, and so do the jobs it nests.
+
+# mg_cargo_target_owner <dir>: the owning checkout, `?` for a relative path
+# (nobody's), or nothing when unowned.
+mg_cargo_target_owner() {
+  local p="$1"
+  case "$p" in /*) ;; *) echo '?'; return 0 ;; esac
+  while [ ! -d "$p" ]; do p="$(dirname "$p")"; done
+  p="$(cd "$p" && pwd -P)" || return 0
+  if [ -d "$1" ] && [ -f "$p/.meguri-checkout" ]; then
+    head -n 1 "$p/.meguri-checkout"
+    return 0
+  fi
+  while [ -n "$p" ] && [ "$p" != / ]; do
+    if [ -e "$p/.git" ]; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+    p="$(dirname "$p")"
+  done
+}
+
+# mg_cargo_target_for <checkout> <requested dir or empty>: what that checkout's
+# Docker cargo runs use, `dir:<path>` or `volume:<name>`. Reads only.
+mg_cargo_target_for() {
+  local owner
+  if [ -n "$2" ]; then
+    owner="$(mg_cargo_target_owner "$2")"
+    if [ -z "$owner" ] || [ "$owner" = "$1" ]; then
+      printf 'dir:%s\n' "$2"
+      return 0
+    fi
+  fi
+  printf 'volume:%s_cargo-target\n' "$(mg_compose_project_for "$1")"
+}
+
+# mg__resolve_cargo_target <claim: true|false> <log>: host only, before a job
+# runs; dry runs and doctor pass false and write nothing.
+mg__resolve_cargo_target() {
+  local want="${MEGURI_DOCKER_CARGO_TARGET:-}" owner why
+  MG_CARGO_TARGET_REQUESTED="$want"
+  [ -n "$want" ] && [ -z "${MG_CONTAINER:-}" ] || return 0
+  owner="$(mg_cargo_target_owner "$want")"
+  if [ -z "$owner" ]; then
+    [ "$1" = true ] || return 0
+    # noclobber: of two first runs at once, only one creates the marker; the
+    # other reads the winner below.
+    (mkdir -p "$want" && set -C && printf '%s\n' "$MG_ROOT" >"$want/.meguri-checkout") 2>/dev/null
+    owner="$(mg_cargo_target_owner "$want")"
+    if [ "$owner" = "$MG_ROOT" ]; then
+      return 0
+    elif [ -n "$owner" ]; then
+      why="belongs to checkout $owner"
+    else
+      why="cannot be claimed for this checkout (no writable $want/.meguri-checkout)"
+    fi
+  elif [ "$owner" = '?' ]; then
+    why="is not an absolute path"
+  elif [ "$owner" != "$MG_ROOT" ]; then
+    why="belongs to checkout $owner"
+  else
+    return 0
+  fi
+  echo "tools/mg: MEGURI_DOCKER_CARGO_TARGET=$want $why; this checkout uses its own volume $(mg_compose_project)_cargo-target" |
+    tee -a "$2" >&2
+  unset MEGURI_DOCKER_CARGO_TARGET
 }
 
 # BUILDX_NO_DEFAULT_ATTESTATIONS: a provenance attestation carries build
@@ -559,6 +635,11 @@ mg__run() {
   local log="$MG_RUN_DIR/log.txt"
   : >"$log"
   mg_artifact log "$log"
+  if [ "$dry" = true ] || [ "$job" = doctor ]; then
+    mg__resolve_cargo_target false "$log"
+  else
+    mg__resolve_cargo_target true "$log"
+  fi
 
   local rc=0
   if [ -n "$MG_REGISTRY_ERRORS" ]; then

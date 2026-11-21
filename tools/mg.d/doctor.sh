@@ -175,6 +175,58 @@ mg__doctor_mac_input() {
     "Mac UI runs are queued while macOS drops the input XCUITest synthesizes (macOS 27.0.1 does). Update macOS or Xcode where they run (docs/process/one-time-setup.md); tools/mg catch-up runs them again once doctor sees another pair."
 }
 
+# Docker Rust targets: every checkout of this repository must resolve to its
+# own (mg_cargo_target_for in tools/mg), or one checkout's cargo run replays
+# another's build output: they all mount at /work.
+mg__doctor_cargo_targets() {
+  local want="${MG_CARGO_TARGET_REQUESTED:-}" here field checkout shared="" n=0 i j count first second note="" listed=true
+  local list="$MG_RUN_DIR/worktrees.z"
+  local targets=() checkouts=()
+  here="$(mg_cargo_target_for "$MG_ROOT" "$want")"
+  mg__doctor_env docker_cargo_target "$here"
+  # NUL-separated records: a worktree path may hold any character.
+  git -C "$MG_ROOT" worktree list --porcelain -z >"$list" 2>/dev/null || listed=false
+  while IFS= read -r -d '' field; do
+    case "$field" in worktree\ *) checkout="${field#worktree }" ;; *) continue ;; esac
+    [ -d "$checkout" ] || continue
+    checkout="$(cd "$checkout" && pwd -P)" || continue
+    targets[$n]="$(mg_cargo_target_for "$checkout" "$want")"
+    checkouts[$n]="$checkout"
+    n=$((n + 1))
+  done <"$list"
+  rm -f "$list"
+  # "<count> checkouts share <target> (<first>, <second>, ...)" per shared target.
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    count=0 first="" second="" j=0
+    while [ "$j" -lt "$n" ]; do
+      if [ "${targets[$j]}" = "${targets[$i]}" ]; then
+        [ "$j" -ge "$i" ] || { count=-1; break; } # reported with its first checkout
+        count=$((count + 1))
+        if [ -z "$first" ]; then first="${checkouts[$j]}"; elif [ -z "$second" ]; then second="${checkouts[$j]}"; fi
+      fi
+      j=$((j + 1))
+    done
+    if [ "$count" -gt 1 ]; then
+      [ -z "$shared" ] || shared="$shared; "
+      shared="$shared$count checkouts share ${targets[$i]#*:} ($first, $second$([ "$count" -le 2 ] || echo ', ...'))"
+    fi
+    i=$((i + 1))
+  done
+  if [ -n "$want" ] && [ "${here%%:*}" = volume ]; then
+    note="$(mg_cargo_target_owner "$want")"
+    [ "$note" = '?' ] && note="is not an absolute path" || note="belongs to $note"
+    note=" (MEGURI_DOCKER_CARGO_TARGET $note; ignored here)"
+  fi
+  if [ "$listed" = false ] || [ "$n" -eq 0 ]; then
+    mg__doctor_check cargo-target warn "this checkout builds in ${here#*:}$note; git could not list this repository's worktrees, so shared targets were not checked"
+  elif [ -n "$shared" ]; then
+    mg__doctor_check cargo-target warn "$shared: their Docker cargo runs can replay each other's builds; give each checkout its own MEGURI_DOCKER_CARGO_TARGET or unset it"
+  else
+    mg__doctor_check cargo-target pass "this checkout builds in ${here#*:}$note; $n checkouts, $n separate targets"
+  fi
+}
+
 mg_doctor() {
   : >"$MG_RUN_DIR/checks.jsonl"
   : >"$MG_RUN_DIR/environment.jsonl"
@@ -300,6 +352,7 @@ mg_doctor() {
   mg__doctor_env docker_server "$server"
   mg__doctor_env docker_compose "$compose"
   mg_detail docker_resources "$(jq -nc --argjson c "${cpus:-0}" --argjson m "${mem:-0}" '{cpus: $c, memory_bytes: $m}')"
+  mg__doctor_cargo_targets
 
   # Rust toolchain from core/rust-toolchain.toml (agents may install it; not a user step)
   local channel missing="" want have
