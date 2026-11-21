@@ -44,4 +44,7 @@ active:
   - "tags/*"
   - "text/*"
   # U84: sorted search, covered by the same search-data scan.
+  # matrix/combined follows (2026-11-21) once its setup turned FSRS on
+  # (specs/sched/answering.md A9); its old golden answered with SM-2.
+  - "matrix/combined"
   - "unsorted/configured-sort-ignored"
