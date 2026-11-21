@@ -740,7 +740,7 @@ mg_app_real_copy_identity() {
 # Unregister and delete the built app (and the widget inside), then check
 # LaunchServices and PlugInKit no longer know it. Runs on every exit path.
 mg_app_real_copy_forget() {
-  local app="$1" products records dump path
+  local app="$1" products records dump plugins path
   [ -n "$app" ] || return 0
   products="${app%/Meguri.app}"
   # Never follow a link out of the checkout (to /Applications, say): refuse.
@@ -761,8 +761,9 @@ mg_app_real_copy_forget() {
   fi
   # An unreadable LaunchServices database proves nothing: fail.
   dump="$("$MG_LSREGISTER" -dump 2>/dev/null)" && grep -q '^path: ' <<<"$dump" || return 1
+  plugins="$(pluginkit -mADvvv -i com.antoinefink.meguri.widget 2>/dev/null)" || return 1
   records="$(sed -n 's/^path: *\(.*\) (0x[0-9a-fA-F]*)$/\1/p' <<<"$dump"
-    pluginkit -mADvvv -i com.antoinefink.meguri.widget 2>/dev/null | sed -n 's/^[[:space:]]*Path = //p')"
+    sed -n 's/^[[:space:]]*Path = //p' <<<"$plugins")"
   # Nothing registered from this build's products directory.
   ! awk -v p="$products" '$0 == p || index($0, p "/") == 1 { found = 1 } END { exit !found }' <<<"$records"
 }
@@ -1546,7 +1547,7 @@ mg_build_app__real_copy() {
   fi
   mg_detail daily_driver_profiles "$profiles"
   # Whatever happens next, no built daily-driver app stays on disk or registered.
-  mg_on_exit "mg_app_real_copy_forget $(mvl_q "$app") || mg_failure real-copy-forget $(mvl_q "the built daily-driver app is still on disk or registered: $app")"
+  mg_on_exit "mg_app_real_copy_forget $(mvl_q "$app") || { mg_failure real-copy-forget $(mvl_q "the built daily-driver app is still on disk or registered: $app"); mg_status fail; }"
   input="$(mg_app_input_digest)"
   mg_app_build_action real-copy mac Release || return 0
   if ! printf '%s\n' "$input" | grep -Eq '^[0-9a-f]{64}$' ||

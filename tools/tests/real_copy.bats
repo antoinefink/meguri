@@ -94,12 +94,15 @@ case "$5" in -) cat ;; *) cat "$5" ;; esac'
   stub system_profiler 'echo "system_profiler $*" >>"$STUB_LOG"
 if [ -n "${FX_NO_UDID:-}" ]; then echo "{\"SPHardwareDataType\":[{}]}"; exit 0; fi
 echo "{\"SPHardwareDataType\":[{\"provisioning_UDID\":\"00000000-0000-4000-8000-000000000009\"}]}"'
-  stub pluginkit 'echo "pluginkit $*" >>"$STUB_LOG"'
+  stub pluginkit 'echo "pluginkit $*" >>"$STUB_LOG"
+case "$1" in -m*) [ -z "${FX_PLUGINKIT_FAILS:-}" ] || exit 1 ;; esac'
   # -dump lists one unrelated app; FX_LS_UNREADABLE empties it; once a build
   # ran, FX_KEEP_REGISTERED keeps the built widget listed.
   stub lsregister 'echo "lsregister $*" >>"$STUB_LOG"
 if [ "$1" = -dump ]; then
   [ -z "${FX_LS_UNREADABLE:-}" ] || exit 1
+  n=$(( $(cat "$FX/dumps" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$FX/dumps"
+  [ -z "${FX_LS_FAIL_FROM:-}" ] || [ "$n" -lt "$FX_LS_FAIL_FROM" ] || exit 1
   echo "path: /Applications/Other.app (0x1)"
   if [ -n "${FX_KEEP_REGISTERED:-}" ] && [ -f "$FX/built" ]; then echo "path: $FX_KEEP_REGISTERED (0x2)"; fi
 fi
@@ -308,6 +311,21 @@ EOF
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-forget ]
   not_called '^(lint|xcframework|xcodebuild|ditto)'
+}
+
+@test "a failed PlugInKit query or a failed final cleanup fails the run" {
+  FX_PLUGINKIT_FAILS=1 real_copy
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-forget ]
+  not_called '^xcodebuild'
+  # Start, after the zip, then the exit cleanup: only the last one fails.
+  rm -f "$FX/dumps"
+  : >"$STUB_LOG"
+  FX_LS_FAIL_FROM=3 real_copy
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = real-copy-forget ]
+  [ -f "$SB/build/app/real-copy/Meguri.zip" ]
 }
 
 @test "the real copy removes an earlier run's leftover build before anything else" {
