@@ -1345,6 +1345,10 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "docs/process/review-log/U195-add-coordinator-cleanroom-20261118.md":
         "14622ebedb2c73a88ac7e4f6285ff2d1d1f9a548825d660f324d7b6dee345601",
+    # Complete-content PUBLIC review: independent non-author reviewer, 2026-11-21
+    # (docs/process/review-log/card-text-keywords-privacy-20261121.md).
+    'core/crates/meguri-engine/src/notetypes/card_text/keywords.rs':
+        '88590bbdd44094ec0fdc7ae5942ca26bfa4fcb22810067ee3cb68e72e9a86893',
 }
 
 
