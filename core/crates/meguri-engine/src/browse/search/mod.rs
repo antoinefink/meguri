@@ -33,8 +33,8 @@ pub use handle::{Invalidation, Refetch};
 pub use one_shot::search_ids;
 pub use page::{QaCells, QaWhich};
 pub use selection::{MapFrom, Mapped, Selection};
-pub(crate) use registry::SearchRegistry;
-pub(crate) use worker::OWNER;
+pub(crate) use registry::{SearchRegistry, bridge};
+pub(crate) use worker::{OWNER, cells, context};
 
 use handle::Handle;
 use worker::{Job, QueuedJob};
