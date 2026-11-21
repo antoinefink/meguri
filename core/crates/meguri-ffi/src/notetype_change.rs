@@ -92,12 +92,12 @@ impl From<ChangePreview> for NotetypeChangePreview {
 /// Only the refusal's way back into the engine (`CoreError` to
 /// `EngineError` inside a job): the preview the counts came from, its
 /// discarded fields and dropped templates being their keys.
-pub(crate) fn preview_of_losses(losses: NotetypeChangeLosses, removed_cards: u64) -> ChangePreview {
+pub(crate) fn preview_of_losses(losses: NotetypeChangeLosses, removed_cards: u64, template_map: bool) -> ChangePreview {
     let fields: BTreeMap<u32, u64> = losses.fields.iter().map(|c| (c.ord, c.count)).collect();
     let templates: BTreeMap<u32, u64> = losses.templates.iter().map(|c| (c.ord, c.count)).collect();
     ChangePreview {
         discarded_fields: fields.keys().copied().collect(),
-        dropped_templates: (!templates.is_empty()).then(|| templates.keys().copied().collect()),
+        dropped_templates: template_map.then(|| templates.keys().copied().collect()),
         removed_cards,
         losses: ChangeLosses {
             fields,
@@ -173,6 +173,9 @@ pub struct NotetypeChangeInfo {
     /// The two note types' layouts as read (32 bytes), which the change
     /// takes back with the stamp.
     pub layout: Vec<u8>,
+    /// The collection generation the info query read, which the change
+    /// takes back: a save never reaches another collection opened since.
+    pub generation: u64,
 }
 
 fn layout(bytes: Vec<u8>) -> Result<LayoutToken, CoreError> {
@@ -201,6 +204,7 @@ impl From<ChangeInfo> for NotetypeChangeInfo {
                 .collect(),
             schema: i.schema,
             layout: i.layout.0.to_vec(),
+            generation: 0,
         }
     }
 }
@@ -263,7 +267,9 @@ pub fn start_notetype_change_info(
     let out = result.clone();
     let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |job| {
         let read = change::info(&collection, &notes, NotetypeId(new_notetype_id), &job.cancel, &job.progress)?;
-        *out.lock().unwrap() = Some(read.into());
+        let mut read = NotetypeChangeInfo::from(read);
+        read.generation = collection.generation().0;
+        *out.lock().unwrap() = Some(read);
         Ok(())
     })?;
     Ok(NotetypeChangeInfoJobStart {
@@ -298,6 +304,8 @@ pub struct NotetypeChangeRequest {
     pub schema: i64,
     /// `NotetypeChangeInfo.layout`.
     pub layout: Vec<u8>,
+    /// `NotetypeChangeInfo.generation`.
+    pub generation: u64,
     /// `NotetypeChangePreview.losses` of the preview the sheet showed.
     pub confirmed: NotetypeChangeLosses,
 }
@@ -351,10 +359,17 @@ pub struct NotetypeChangeJobStart {
 #[uniffi::export]
 pub fn start_notetype_change(request: NotetypeChangeRequest) -> Result<NotetypeChangeJobStart, CoreError> {
     callback::enter("start_notetype_change");
+    let planned = request.generation;
     let request = ChangeNotetype::try_from(request)?;
-    // The collection the info query read: a handle of an older generation
-    // refuses the op if a replacement lands while the job waits.
+    // The collection the info query read, and no other: a collection
+    // opened or replaced since refuses the save here, and a handle of an
+    // older generation refuses the op if a replacement lands while the job
+    // waits.
     let collection = runtime::host()?.collection()?;
+    let current = collection.generation().0;
+    if current != planned {
+        return Err(CoreError::StaleGeneration { planned, current });
+    }
     let result = Arc::new(Mutex::new(None));
     let out = result.clone();
     let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |job| {
@@ -398,6 +413,7 @@ mod tests {
             card_counts: vec![OrdinalCount { ord: 0, count: 3 }, OrdinalCount { ord: 1, count: 2 }],
             schema: 7,
             layout: vec![3; 32],
+            generation: 1,
         }
     }
 
@@ -427,6 +443,7 @@ mod tests {
             templates: None,
             schema: 0,
             layout: vec![0; 32],
+            generation: 1,
             confirmed: NotetypeChangeLosses {
                 fields: vec![OrdinalCount { ord: 1, count: 1 }, OrdinalCount { ord: 1, count: 2 }],
                 ..Default::default()

@@ -1258,3 +1258,28 @@ fn the_preview_ignores_entries_outside_both_note_types() {
     assert_eq!(p.discarded_fields, [0, 1]);
     assert_eq!(p.dropped_templates, Some(vec![0, 1]));
 }
+
+/// A note type the plan found, deleted while the backup ran in the same
+/// millisecond (so `col.scm` reads as the screen's stamp): the screen is
+/// stale, `schema_changed`, not `not_found`; nothing is written.
+#[test]
+fn a_note_type_deleted_during_the_backup_is_schema_changed() {
+    let (h, backups) = harness();
+    let pair = pair(&h);
+    let target = made(&h, "Target", false, &["Front", "Back"], &["{{Front}}"]);
+    let a = add(&h.collection, pair, &["a", "b"]);
+    let read = info(&h, &[a], target).unwrap();
+    backups.then(move |c| {
+        let request = meguri_engine::notetypes::remove::RemoveNotetype {
+            notetype: target,
+            confirmed_notes: 0,
+            confirmed_cards: 0,
+        };
+        meguri_engine::notetypes::remove::remove(c, request, CancelToken::new(), ProgressSink::new()).unwrap();
+    });
+    let stamp = read.schema;
+    let e = run(&h, request(&read, &[a])).unwrap_err();
+    assert_eq!(scm(&h), stamp, "the removal kept the stamp's millisecond");
+    assert_eq!(refusal(&e), Some(&StructureRefusal::SchemaChanged));
+    assert_eq!(note(&h, a).notetype_id, pair);
+}

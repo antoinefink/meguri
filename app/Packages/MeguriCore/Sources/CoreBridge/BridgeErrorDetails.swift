@@ -223,7 +223,7 @@ public enum NotetypeStructureRefusal: Sendable, Hashable {
     case schemaChanged
     case multipleNotetypes
     /// Change Note Type's losses grew: show the sheet again with these counts.
-    case changeLossesChanged(losses: NotetypeChangeLosses, removedCards: UInt64)
+    case changeLossesChanged(losses: NotetypeChangeLosses, removedCards: UInt64, templateMap: Bool)
     init(_ raw: MeguriCoreBindings.NotetypeStructureRefusal) {
         switch raw {
         case .protectedField(let field): self = .protectedField(field: field)
@@ -236,8 +236,9 @@ public enum NotetypeStructureRefusal: Sendable, Hashable {
         case .noChanges: self = .noChanges
         case .schemaChanged: self = .schemaChanged
         case .multipleNotetypes: self = .multipleNotetypes
-        case .changeLossesChanged(let losses, let removedCards):
-            self = .changeLossesChanged(losses: NotetypeChangeLosses(losses), removedCards: removedCards)
+        case .changeLossesChanged(let losses, let removedCards, let templateMap):
+            self = .changeLossesChanged(
+                losses: NotetypeChangeLosses(losses), removedCards: removedCards, templateMap: templateMap)
         }
     }
 }

@@ -12,8 +12,7 @@ use meguri_storage::ReadRows;
 use meguri_storage::journal::{LayoutShape, StructureReason, StructureReport, TypeChangeReport};
 
 use super::{
-    ChangeNotetype, CardEffect, LayoutToken, NotetypeChanged, Planned, Rules, Shape, census, card_effect, losses_changed, note_not_found,
-    notetype_not_found, preview,
+    ChangeNotetype, CardEffect, LayoutToken, NotetypeChanged, Planned, Rules, Shape, census, card_effect, losses_changed, note_not_found, preview,
 };
 use crate::executor::op::OpContext;
 use crate::notetypes::NotetypeKind;
@@ -34,12 +33,11 @@ fn check_live(ctx: &mut OpContext<'_, '_>, planned: &Planned) -> Result<(Notetyp
     // Check 3 passing guarantees the note type records checks 1 and 2 read
     // (a field, template or kind change and a deletion set `scm`, G2); they
     // are read again so every value written comes from the live rows.
-    let old = scope
-        .notetype(request.old_notetype)?
-        .ok_or_else(|| notetype_not_found(request.old_notetype))?;
-    let new = scope
-        .notetype(request.new_notetype)?
-        .ok_or_else(|| notetype_not_found(request.new_notetype))?;
+    // Planning found both; one deleted since (in the stamp's millisecond)
+    // means the screen is stale, as for any other layout change.
+    let stale = || EngineError::from(StructureRefusal::SchemaChanged);
+    let old = scope.notetype(request.old_notetype)?.ok_or_else(stale)?;
+    let new = scope.notetype(request.new_notetype)?.ok_or_else(stale)?;
     // `scm` is the clock's millisecond, so two schema changes in one
     // millisecond leave it equal: the note types are compared as planned
     // too, and any difference is the same refusal.
@@ -104,7 +102,6 @@ fn report(old: &Notetype, new: &Notetype, request: &ChangeNotetype) -> Result<St
 pub(super) fn commit(ctx: &mut OpContext<'_, '_>, planned: &Planned) -> Result<NotetypeChanged, EngineError> {
     let (old, new) = check_live(ctx, planned)?;
     let request = &planned.request;
-    let progress = ctx.progress().cloned().unwrap_or_else(ProgressSink::new);
     let scope = ctx.scope();
     // Step 1: G5.
     crate::mark_schema_change(scope, &[SchemaReason::NotesNotetypeChanged])?;
@@ -133,7 +130,10 @@ pub(super) fn commit(ctx: &mut OpContext<'_, '_>, planned: &Planned) -> Result<N
     }
     // Step 3: each note in selection order.
     let total = request.notes.len() as u64;
-    for (done, &id) in request.notes.iter().enumerate() {
+    // No progress from here: a report can reach the host's listener, which
+    // the writer never calls inside a transaction. Planning's pass over the
+    // same notes is the op's progress (M10).
+    for &id in &request.notes {
         let mut note = scope.note(id)?.ok_or_else(|| note_not_found(id))?;
         let values: Vec<&str> = note.field_values().collect();
         let fields: Vec<String> = request
@@ -156,7 +156,6 @@ pub(super) fn commit(ctx: &mut OpContext<'_, '_>, planned: &Planned) -> Result<N
         // G7 over the live cards, G6 for a note left with none; D3 item 3 is
         // the new note type's last deck; P2 draws per note.
         crate::cardgen::generate_in(scope, &new, &note, None)?;
-        progress.report(done as u64 + 1, Some(total));
     }
     meguri_model::faultpoint!("notetypes.change.write_phase")
         .map_err(|error| EngineError::internal(format!("injected write-phase failure: {error}")))?;

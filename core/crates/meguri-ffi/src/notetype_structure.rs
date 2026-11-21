@@ -358,6 +358,9 @@ pub enum NotetypeStructureRefusal {
     ChangeLossesChanged {
         losses: crate::notetype_change::NotetypeChangeLosses,
         removed_cards: u64,
+        /// Whether the change has a template map (M1): with one, the
+        /// dropped templates are the `templates` keys, possibly none.
+        template_map: bool,
     },
 }
 
@@ -375,6 +378,7 @@ impl From<StructureRefusal> for NotetypeStructureRefusal {
                     summary: summary.into(),
                 },
                 Losses::Change(preview) => Self::ChangeLossesChanged {
+                    template_map: preview.dropped_templates.is_some(),
                     losses: preview.losses.into(),
                     removed_cards: preview.removed_cards,
                 },
@@ -402,9 +406,15 @@ impl From<NotetypeStructureRefusal> for StructureRefusal {
             R::NoChanges => Self::NoChanges,
             R::SchemaChanged => Self::SchemaChanged,
             R::MultipleNotetypes => Self::MultipleNotetypes,
-            R::ChangeLossesChanged { losses, removed_cards } => Self::LossesChanged(Box::new(Losses::Change(
-                crate::notetype_change::preview_of_losses(losses, removed_cards),
-            ))),
+            R::ChangeLossesChanged {
+                losses,
+                removed_cards,
+                template_map,
+            } => Self::LossesChanged(Box::new(Losses::Change(crate::notetype_change::preview_of_losses(
+                losses,
+                removed_cards,
+                template_map,
+            )))),
         }
     }
 }
@@ -675,6 +685,12 @@ mod tests {
                     other_cards: 1,
                 },
                 removed_cards: 3,
+                template_map: true,
+            },
+            NotetypeStructureRefusal::ChangeLossesChanged {
+                losses: crate::notetype_change::NotetypeChangeLosses::default(),
+                removed_cards: 0,
+                template_map: true,
             },
         ] {
             let error = CoreError::NotetypeStructureRefused { refusal };

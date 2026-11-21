@@ -409,12 +409,17 @@ fn change_notetype_info(session: &mut Session<'_>, step: &Step) -> Result<OpResu
                 .ok_or_else(|| unknown_ref(format!("note {} was not created", r.0)))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let collection = session.engine_collection()?;
-    let new = {
-        let reader = collection.reader(meguri_storage::ReaderRole::Query).map_err(core)?;
-        find(&*reader, &args.notetype).map_err(core)?.map_err(unknown_ref)?.id
-    };
-    let info = match change::info(&collection, &notes, new, &CancelToken::new(), &ProgressSink::new()) {
+    // H1 changes nothing: one snapshot of the session's collection, never
+    // a promotion to the hosted engine (whose open runs the day check).
+    let collection = session
+        .storage
+        .collection()
+        .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
+    let read = collection.with_snapshot(|snapshot| {
+        let new = find(snapshot, &args.notetype).map_err(core)?.map_err(unknown_ref)?.id;
+        Ok(change::info_on(snapshot, &notes, new, &CancelToken::new(), &ProgressSink::new()))
+    })?;
+    let info = match read {
         Ok(info) => info,
         Err(error) => return change_refusal(&error).map(OpResult::Rejected).ok_or_else(|| core(error)),
     };
@@ -503,9 +508,14 @@ fn change_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, E
     )?;
     let collection = session.engine_collection()?;
     let fresh = change::info(&collection, &screen.notes, info.new.id, &CancelToken::new(), &ProgressSink::new());
+    // T9: that read decides no refusal. Refused in any way (a listed note
+    // deleted, a note now of a note type that no longer exists), the info
+    // step's counts go in and the op's own checks give the one answer.
     let confirmed = match fresh {
         Ok(fresh) => fresh.preview(&fields, templates.as_deref()).losses,
-        Err(error) if change_refusal(&error).is_some() => info.preview(&fields, templates.as_deref()).losses,
+        Err(EngineError::NotFound { .. } | EngineError::NotetypeStructure(_)) => {
+            info.preview(&fields, templates.as_deref()).losses
+        }
         Err(error) => return Err(core(error)),
     };
     let request = ChangeNotetype {
