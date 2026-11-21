@@ -28,3 +28,12 @@ pub const ANY_LONE_CARD: &str =
 /// One row, 1 when some note has no card (Q6).
 pub const ANY_LONE_NOTE: &str =
     "SELECT EXISTS (SELECT 1 FROM notes n WHERE NOT EXISTS (SELECT 1 FROM cards k WHERE k.nid = n.id))";
+
+/// The cards of `?1` that exist, each with its home deck (`odid` for a card
+/// in a filtered deck, else `did`) and its stored queue (Browse's selection
+/// counts, `browser/workspace` V7 and V8.1's "shown when").
+pub const HOME_DECKS_AND_QUEUES: &str = "SELECT c.id, CASE WHEN c.odid != 0 THEN c.odid ELSE c.did END, c.queue FROM cards c \
+     WHERE c.id IN (SELECT value FROM json_each(?1))";
+
+/// The notes of `?1` that exist, each with its note type (V8.1).
+pub const NOTETYPES_OF_NOTES: &str = "SELECT n.id, n.mid FROM notes n WHERE n.id IN (SELECT value FROM json_each(?1))";

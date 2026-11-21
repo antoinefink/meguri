@@ -9,6 +9,8 @@
 uniffi::setup_scaffolding!("meguri_ffi");
 
 pub mod activity;
+pub mod browse_query;
+pub mod browse_search;
 mod callback;
 pub mod cancel;
 pub mod changes;

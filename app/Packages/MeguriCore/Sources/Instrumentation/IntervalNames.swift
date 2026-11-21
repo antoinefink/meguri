@@ -381,6 +381,36 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let notetypeRemovalCountsJobResult = BridgeCall("NotetypeRemovalCountsJob.result")
     public static let notetypeNearFieldName = BridgeCall("notetype_near_field_name")
 
+    public static let openSearchSession = BridgeCall("open_search_session")
+    public static let browseStartSearch = BridgeCall("BrowseSearchSession.start_search")
+    public static let browseResort = BridgeCall("BrowseSearchSession.resort")
+    public static let browseToggle = BridgeCall("BrowseSearchSession.toggle")
+    public static let browseReverse = BridgeCall("BrowseSearchSession.reverse")
+    public static let browseInvalidatedRows = BridgeCall("BrowseSearchSession.invalidated_rows")
+    public static let browseRows = BridgeCall("BrowseSearchSession.rows")
+    public static let browseQaCells = BridgeCall("BrowseSearchSession.qa_cells")
+    public static let browseIndexOf = BridgeCall("BrowseSearchSession.index_of")
+    public static let browseMapSelection = BridgeCall("BrowseSearchSession.map_selection")
+    public static let browseResolveSelection = BridgeCall("BrowseSearchSession.resolve_selection")
+    public static let browseSelection = BridgeCall("BrowseSearchSession.selection")
+    public static let browseHandleState = BridgeCall("BrowseSearchSession.handle_state")
+    public static let browseClose = BridgeCall("BrowseSearchSession.close")
+    public static let browseSelectionResolve = BridgeCall("BrowseSelection.resolve")
+
+    public static let filterRunText = BridgeCall("filter_run_text")
+    public static let filterReadText = BridgeCall("filter_read_text")
+    public static let filterCommit = BridgeCall("filter_commit")
+    public static let filterTextIncomplete = BridgeCall("filter_text_incomplete")
+    public static let filterDeckValue = BridgeCall("filter_deck_value")
+    public static let filterSuggestions = BridgeCall("filter_suggestions")
+    public static let startFilterCounts = BridgeCall("start_filter_counts")
+    public static let filterCountsJobResult = BridgeCall("FilterCountsJob.result")
+    public static let browserColumnSet = BridgeCall("browser_column_set")
+    public static let changeBrowserColumnSet = BridgeCall("change_browser_column_set")
+    public static let useStandardBrowserColumns = BridgeCall("use_standard_browser_columns")
+    public static let startBrowseSelectionCounts = BridgeCall("start_browse_selection_counts")
+    public static let browseSelectionCountsJobResult = BridgeCall("BrowseSelectionCountsJob.result")
+
     public static let startCreateBackup = BridgeCall("start_create_backup")
     public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
     public static let startRestoreBackup = BridgeCall("start_restore_backup")
@@ -685,5 +715,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
+        openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
+        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, startBrowseSelectionCounts, browseSelectionCountsJobResult,
     ]
 }

@@ -17,6 +17,10 @@ fn cloud_child_entry() {
     meguri_testkit::cloud::child_driver::child_entry().unwrap();
 }
 
+#[path = "browse_query_ffi.rs"]
+pub mod browse_query_ffi;
+#[path = "browse_search_ffi.rs"]
+pub mod browse_search_ffi;
 #[path = "cloud_composition_ffi.rs"]
 pub mod cloud_composition_ffi;
 #[path = "cloud_initial_app_fixture.rs"]
