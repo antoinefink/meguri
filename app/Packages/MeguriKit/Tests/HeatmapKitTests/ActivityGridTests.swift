@@ -34,10 +34,14 @@ import Testing
         #expect(ActivityGrid(counts: [UInt32](repeating: 0, count: 371), weeks: 53, todayWeekday: 1, firstWeekday: 1).maximum == 0)
     }
 
-    /// N24.6: the system green's opacity per level, one table for light, dark and Increase
-    /// Contrast; level 0 keeps the fill.
+    /// N24.6: the system green's opacity per level: one standard table for light and dark,
+    /// and stronger Increase Contrast tables; level 0 keeps the fill.
     @Test func levelOpacitiesAreFixed() {
-        #expect((0...4).map { ActivityGrid.opacity(level: $0) } == [nil, 0.3, 0.5, 0.75, 1])
+        for dark in [false, true] {
+            #expect((0...4).map { ActivityGrid.opacity(level: $0, dark: dark) } == [nil, 0.3, 0.5, 0.75, 1])
+        }
+        #expect((0...4).map { ActivityGrid.opacity(level: $0, increasedContrast: true) } == [nil, 0.8, 0.87, 0.94, 1])
+        #expect((0...4).map { ActivityGrid.opacity(level: $0, increasedContrast: true, dark: true) } == [nil, 0.55, 0.7, 0.85, 1])
         #expect(ActivityGrid.opacity(level: 5) == nil)
     }
 

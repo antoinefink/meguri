@@ -81,17 +81,19 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
     }
 
     /// N24.6: a level's opacity of the system green; nil for level 0, which keeps the
-    /// system's secondary fill. One table for light, dark and Increase Contrast: green is
-    /// light enough on a dark background that its first step stands clear of the empty
-    /// day's fill without the stronger dark steps the accent needed.
-    public static func opacity(level: Int) -> Double? {
-        switch level {
-        case 1: 0.3
-        case 2: 0.5
-        case 3: 0.75
-        case 4: 1
-        default: nil
+    /// system's secondary fill. The standard table serves light and dark: a graded scale
+    /// whose first step is light on purpose (N24.6's exception). With Increase Contrast
+    /// every step reaches 3:1 against the surface, even before the empty day's fill
+    /// drawn under it: in light the steps sit between 3:1 and the green's own ratio, in
+    /// dark they start higher.
+    public static func opacity(level: Int, increasedContrast: Bool = false, dark: Bool = false) -> Double? {
+        guard (1...4).contains(level) else { return nil }
+        let steps: [Double] = switch (increasedContrast, dark) {
+        case (false, _): [0.3, 0.5, 0.75, 1]
+        case (true, false): [0.8, 0.87, 0.94, 1]
+        case (true, true): [0.55, 0.7, 0.85, 1]
         }
+        return steps[level - 1]
     }
 
     /// AH9: a month's name leading-aligned with its column.

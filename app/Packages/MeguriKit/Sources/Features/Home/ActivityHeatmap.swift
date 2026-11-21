@@ -155,6 +155,7 @@ private struct ActivityGridView: View {
     let geometry: ActivityGrid.Geometry
     let today: ActivityDays.Day
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
     #if os(macOS)
     @Environment(\.locale) private var locale
     #endif
@@ -188,7 +189,7 @@ private struct ActivityGridView: View {
         let level = grid.level(daysAgo: daysAgo)
         let increased = contrast == .increased
         return shape
-            .fill(Self.style(level: level))
+            .fill(Self.style(level: level, increasedContrast: increased, dark: colorScheme == .dark))
             // N24.6: with Increase Contrast the steps lie over the empty day's own fill.
             .background { if increased && level > 0 { shape.fill(.fill.secondary) } }
             .overlay {
@@ -200,9 +201,11 @@ private struct ActivityGridView: View {
     /// The secondary fill for no reviews; the system green at N24.6's fixed opacities for
     /// the levels (`ActivityGrid.opacity`). Green is a decided colour (Antoine, 2026-11-21),
     /// not the accent: it stays green whatever accent the person picks. The system colour
-    /// adapts to dark mode and Increase Contrast by itself.
-    static func style(level: Int) -> AnyShapeStyle {
-        guard let opacity = ActivityGrid.opacity(level: level) else { return AnyShapeStyle(.fill.secondary) }
+    /// itself adapts to dark mode and Increase Contrast; the opacities follow both too.
+    static func style(level: Int, increasedContrast: Bool, dark: Bool) -> AnyShapeStyle {
+        guard let opacity = ActivityGrid.opacity(level: level, increasedContrast: increasedContrast, dark: dark) else {
+            return AnyShapeStyle(.fill.secondary)
+        }
         return AnyShapeStyle(Color.green.opacity(opacity))
     }
 }
