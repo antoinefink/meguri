@@ -119,6 +119,11 @@ harness = false
 name = "browser_sort"
 harness = false
 
+# U85's search sessions: first pages, resorts, reverse and a row page.
+[[bench]]
+name = "browse_session"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]

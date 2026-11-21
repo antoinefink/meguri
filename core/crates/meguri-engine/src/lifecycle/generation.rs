@@ -39,6 +39,9 @@ pub(crate) struct Replacement {
 /// nothing open, as a failed reopen does.
 pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Privilege, swap: Swap) -> Replacement {
     engine.set_exclusive_phase(core, ExclusivePhase::Replacing);
+    // `browser/result-sets` H3: every search stops so its reader returns at
+    // once, and none starts until the readers reopen.
+    let searches = engine.inner.searches.halt();
     core.exec.wait_idle();
     core.readers.close_all();
     let old = core.exec.generation();
@@ -69,6 +72,8 @@ pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Pr
     }
     let moved = replaced.generation.map(|moved: NewGeneration| {
         let new = moved.generation;
+        // H6: handles of the old generation go before the event does.
+        engine.inner.searches.release_before(new);
         moved
             .announce
             .fill(new, None, EventKind::CollectionReplaced { generation: new });
@@ -82,6 +87,12 @@ pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Pr
             undo_session: None,
         }
     });
+    // H6: a generation that moved releases the old handles, also when the
+    // reopen failed after it moved (no `CollectionReplaced` then).
+    if core.exec.generation() != old {
+        engine.inner.searches.release_before(core.exec.generation());
+    }
+    drop(searches);
     if reopened {
         engine.set_exclusive_phase(core, ExclusivePhase::Working);
     } else if let Some(error) = &replaced.error {

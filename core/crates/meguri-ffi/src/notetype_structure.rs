@@ -344,6 +344,24 @@ pub enum NotetypeStructureRefusal {
     RestoreLossesChanged { summary: NotetypeRestoreSummary },
     LastNotetype,
     NeedsStockKind,
+    /// Change Note Type M7: the change would change nothing.
+    NoChanges,
+    /// Change Note Type M8 check 3: another schema change since the info
+    /// query; open the screen again.
+    SchemaChanged,
+    /// Change Note Type M4, M8 check 4: the notes do not share one note type.
+    MultipleNotetypes,
+    /// Change Note Type's losses grew: show the sheet again with these
+    /// counts (the fresh M6 preview's: the discarded fields and dropped
+    /// templates are their keys) and pass them back once accepted. Kept
+    /// small: `CoreError` carries this refusal inline.
+    ChangeLossesChanged {
+        losses: crate::notetype_change::NotetypeChangeLosses,
+        removed_cards: u64,
+        /// Whether the change has a template map (M1): with one, the
+        /// dropped templates are the `templates` keys, possibly none.
+        template_map: bool,
+    },
 }
 
 impl From<StructureRefusal> for NotetypeStructureRefusal {
@@ -359,9 +377,17 @@ impl From<StructureRefusal> for NotetypeStructureRefusal {
                 Losses::Restore(summary) => Self::RestoreLossesChanged {
                     summary: summary.into(),
                 },
+                Losses::Change(preview) => Self::ChangeLossesChanged {
+                    template_map: preview.dropped_templates.is_some(),
+                    losses: preview.losses.into(),
+                    removed_cards: preview.removed_cards,
+                },
             },
             StructureRefusal::LastNotetype => Self::LastNotetype,
             StructureRefusal::NeedsStockKind => Self::NeedsStockKind,
+            StructureRefusal::NoChanges => Self::NoChanges,
+            StructureRefusal::SchemaChanged => Self::SchemaChanged,
+            StructureRefusal::MultipleNotetypes => Self::MultipleNotetypes,
         }
     }
 }
@@ -377,6 +403,18 @@ impl From<NotetypeStructureRefusal> for StructureRefusal {
             R::RestoreLossesChanged { summary } => Self::LossesChanged(Box::new(Losses::Restore(summary.into()))),
             R::LastNotetype => Self::LastNotetype,
             R::NeedsStockKind => Self::NeedsStockKind,
+            R::NoChanges => Self::NoChanges,
+            R::SchemaChanged => Self::SchemaChanged,
+            R::MultipleNotetypes => Self::MultipleNotetypes,
+            R::ChangeLossesChanged {
+                losses,
+                removed_cards,
+                template_map,
+            } => Self::LossesChanged(Box::new(Losses::Change(crate::notetype_change::preview_of_losses(
+                losses,
+                removed_cards,
+                template_map,
+            )))),
         }
     }
 }
@@ -637,6 +675,23 @@ mod tests {
             NotetypeStructureRefusal::RestoreLossesChanged { summary: restore },
             NotetypeStructureRefusal::LastNotetype,
             NotetypeStructureRefusal::NeedsStockKind,
+            NotetypeStructureRefusal::NoChanges,
+            NotetypeStructureRefusal::SchemaChanged,
+            NotetypeStructureRefusal::MultipleNotetypes,
+            NotetypeStructureRefusal::ChangeLossesChanged {
+                losses: crate::notetype_change::NotetypeChangeLosses {
+                    fields: vec![OrdinalCount { ord: 1, count: 2 }],
+                    templates: vec![OrdinalCount { ord: 0, count: 2 }],
+                    other_cards: 1,
+                },
+                removed_cards: 3,
+                template_map: true,
+            },
+            NotetypeStructureRefusal::ChangeLossesChanged {
+                losses: crate::notetype_change::NotetypeChangeLosses::default(),
+                removed_cards: 0,
+                template_map: true,
+            },
         ] {
             let error = CoreError::NotetypeStructureRefused { refusal };
             assert_eq!(CoreError::from(EngineError::from(error.clone())), error);

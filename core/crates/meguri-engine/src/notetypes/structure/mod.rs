@@ -238,8 +238,9 @@ pub struct StructureSaved {
     pub reasons: Vec<SchemaReason>,
 }
 
-/// A refusal of a structure save beyond `notetypes/validation`'s: nothing
-/// was written and no undo step was recorded.
+/// A refusal of a note type structure op (a structure save, a removal, a
+/// restore, Change Note Type) beyond `notetypes/validation`'s: nothing was
+/// written and no undo step was recorded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StructureRefusal {
     /// S1.2 item 3: the draft removes a protected field (its base ordinal).
@@ -254,6 +255,14 @@ pub enum StructureRefusal {
     LastNotetype,
     /// `restore-to-default` D2: no usable stock kind.
     NeedsStockKind,
+    /// `notetypes/change-notetype` M7: the change would change nothing.
+    NoChanges,
+    /// Change Note Type M8 check 3: `col.scm` differs from the info query's
+    /// stamp.
+    SchemaChanged,
+    /// Change Note Type M4 and M8 check 4: the selected notes do not share
+    /// one note type (the old one, at the change).
+    MultipleNotetypes,
 }
 
 /// `LossesChanged`'s payload: the op's own read, taken in the refusing
@@ -266,6 +275,8 @@ pub enum Losses {
     Removal { notes: u64, cards: u64 },
     /// Restore to Default: a new `restore_summary` (D7.1).
     Restore(RestoreSummary),
+    /// Change Note Type: a new M6 preview with its counts (M8).
+    Change(crate::notetypes::change::ChangePreview),
 }
 
 impl StructureRefusal {
@@ -277,6 +288,9 @@ impl StructureRefusal {
             StructureRefusal::LossesChanged(_) => "losses_changed",
             StructureRefusal::LastNotetype => "last_notetype",
             StructureRefusal::NeedsStockKind => "needs_stock_kind",
+            StructureRefusal::NoChanges => "no_changes",
+            StructureRefusal::SchemaChanged => "schema_changed",
+            StructureRefusal::MultipleNotetypes => "multiple_notetypes",
         }
     }
 }

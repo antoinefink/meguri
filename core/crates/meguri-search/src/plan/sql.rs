@@ -32,10 +32,34 @@ impl Params {
         self.0
     }
 
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Drops the parameters bound after the first `len`.
+    pub(super) fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+
     /// Parameters already bound (a plan's), so that more follow them.
     pub(super) fn from_vec(params: Vec<Param>) -> Params {
         Params(params)
     }
+}
+
+/// An id list as one JSON array text, for statements that read it through
+/// `json_each` (a resort's ids, a chunk of candidates).
+pub fn id_list(ids: &[i64]) -> Param {
+    let mut text = String::with_capacity(ids.len() * 14 + 2);
+    text.push('[');
+    for (k, id) in ids.iter().enumerate() {
+        if k > 0 {
+            text.push(',');
+        }
+        text.push_str(&id.to_string());
+    }
+    text.push(']');
+    Param::Text(text)
 }
 
 /// What a term compiles against: the rows the statement tests (aliases `c`
