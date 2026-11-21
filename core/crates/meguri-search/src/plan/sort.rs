@@ -309,16 +309,22 @@ fn keys(sort: &Sort, ctx: &SearchContext, params: &mut Params) -> Result<Keys, S
 /// type, so a damaged note type with the name twice adds no rows. The key
 /// is one blob per row whose byte order is V4.2's steps 1 to 3; the final
 /// id key follows (S8). The name is bound, never written into the
-/// statement.
+/// statement. In cards mode the note comes from a join of its own, so a
+/// card whose note is gone stays listed, as a row without the field: S9
+/// leaves such cards out only under its six note-column sorts.
 fn field_keys(name: &str, mode: SearchMode, params: &mut Params) -> Keys {
     let name = params.bind(Param::Text(name.to_owned()));
+    let (note, own_join) = match mode {
+        SearchMode::Cards => ("mfn", Some("LEFT JOIN notes mfn ON mfn.id = c.nid".to_owned())),
+        SearchMode::Notes => ("n", None),
+    };
+    let field = format!(
+        "LEFT JOIN (SELECT ntid, MIN(ord) AS ord FROM fields WHERE name = {name} COLLATE BINARY GROUP BY ntid) \
+         mfo ON mfo.ntid = {note}.mid"
+    );
     Keys {
-        joins: vec![format!(
-            "LEFT JOIN (SELECT ntid, MIN(ord) AS ord FROM fields WHERE name = {name} COLLATE BINARY GROUP BY ntid) \
-             mfo ON mfo.ntid = n.mid"
-        )],
-        keys: vec!["meguri_field_sort_key(n.flds, mfo.ord)".to_owned()],
-        needs_note: mode == SearchMode::Cards,
+        joins: own_join.into_iter().chain([field]).collect(),
+        keys: vec![format!("meguri_field_sort_key({note}.flds, mfo.ord)")],
         slow: true,
         ..Keys::default()
     }

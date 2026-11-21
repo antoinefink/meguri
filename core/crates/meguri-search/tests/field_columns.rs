@@ -203,6 +203,21 @@ impl Db {
             .collect()
     }
 
+    /// Every row of the mode, unsorted.
+    fn unsorted(&self, mode: SearchMode) -> Vec<i64> {
+        let plan = self.plan(mode);
+        self.reader
+            .execute_raw(plan.sql(), &values(plan.params()))
+            .unwrap()
+            .rows
+            .into_iter()
+            .map(|row| match row[0] {
+                SqlValue::Integer(id) => id,
+                ref other => panic!("not an id: {other:?}"),
+            })
+            .collect()
+    }
+
     fn plan(&self, mode: SearchMode) -> Plan {
         Plan::build(&parse("").unwrap(), mode, &context(), &SearchNotetypes::default()).unwrap()
     }
@@ -210,8 +225,7 @@ impl Db {
     fn sorted(&self, mode: SearchMode, key: &str, direction: SortDirection) -> Vec<i64> {
         let sort = Sort::new(mode, key, direction).unwrap();
         let from_plan = self.ids(&SortedQuery::for_plan(&self.plan(mode), &sort, &context()).unwrap());
-        let by_note = Sort::new(mode, "noteCrt", Ascending).unwrap();
-        let mut all = self.ids(&SortedQuery::for_plan(&self.plan(mode), &by_note, &context()).unwrap());
+        let mut all = self.unsorted(mode);
         all.reverse();
         let from_ids = self.ids(&SortedQuery::for_ids(&all, &sort, &context()).unwrap());
         assert_eq!(from_plan, from_ids, "{mode:?} {key} {direction:?}: a resort gives the search's order");
@@ -267,7 +281,8 @@ fn mixed() -> Db {
     db.note(118, 10, &["f"], &[1180]);
     // A note whose note type is gone.
     db.note(119, 99, &["f", "1"], &[1190]);
-    // A card whose note is gone (S9: left out of cards mode).
+    // A card whose note is gone: listed in cards mode, as a row without the
+    // field (S9 leaves it out only under its six note-column sorts; H8).
     db.card(9990, 999);
     db
 }
@@ -297,10 +312,12 @@ fn rows_sort_by_presence_emptiness_numbers_then_texts_v4_2() {
     );
 
     // Cards mode: each card by its note's value, then by card id.
-    let cards: Vec<i64> = NOTES_ASCENDING
+    let mut cards: Vec<i64> = NOTES_ASCENDING
         .iter()
         .flat_map(|&note| if note == 101 { vec![1010, 1011] } else { vec![note * 10] })
         .collect();
+    cards.push(9990);
+    assert!(db.unsorted(SearchMode::Cards).contains(&9990));
     assert_eq!(db.sorted(SearchMode::Cards, "fld:Back", Ascending), cards);
     let mut descending = cards.clone();
     descending.reverse();
@@ -316,6 +333,7 @@ fn equal_keys_form_one_run_before_the_final_key_s8() {
     assert_eq!(runs.len(), 14 + 2, "every value apart: {runs:?}");
     let runs = db.runs(SearchMode::Cards, "fld:Back");
     assert!(runs.contains(&vec![1010, 1011]), "{runs:?}");
+    assert!(runs.contains(&vec![1170, 1190, 9990]), "{runs:?}");
 }
 
 #[test]
@@ -339,4 +357,52 @@ fn the_name_is_matched_exactly_and_bound() {
     assert_eq!(by_id, sorted);
     by_id.reverse();
     assert_eq!(db.sorted(SearchMode::Notes, "fld:Nowhere", Descending), by_id);
+}
+
+/// Folding that is not lower-casing, equal numbers and a number past the
+/// binary64 range, through the product SQL.
+#[test]
+fn equal_folds_order_by_code_point_and_equal_numbers_by_text() {
+    let db = Db::new();
+    db.notetype(10, "A", &["Back"]);
+    let long = format!("1{}", "0".repeat(400));
+    let notes: [(i64, &str); 9] = [
+        (1, "strasse"),
+        (2, "Stra\u{df}e"),
+        (3, "STRASSE"),
+        (4, "\u{212a}"),
+        (5, "k"),
+        (6, "0"),
+        (7, "-0"),
+        (8, &long),
+        (9, "99"),
+    ];
+    for (id, back) in notes {
+        db.note(id, 10, &[back], &[id * 10]);
+    }
+    // Numbers: -0 equals 0, then by text ("-0" first); the long one is
+    // infinite. Texts: equal folds, then code points.
+    let ascending = [7, 6, 9, 8, 5, 4, 3, 2, 1];
+    assert_eq!(db.sorted(SearchMode::Notes, "fld:Back", Ascending), ascending);
+    let mut descending = ascending.to_vec();
+    descending.reverse();
+    assert_eq!(db.sorted(SearchMode::Notes, "fld:Back", Descending), descending);
+}
+
+/// A search whose plan binds parameters: the name's parameter follows them.
+#[test]
+fn a_sorted_search_binds_the_name_after_the_plans_parameters() {
+    let db = mixed();
+    let plan = Plan::build(
+        &parse("deck:Default").unwrap(),
+        SearchMode::Notes,
+        &context(),
+        &SearchNotetypes::default(),
+    )
+    .unwrap();
+    assert!(!plan.params().is_empty(), "the predicate binds a parameter");
+    let sort = Sort::new(SearchMode::Notes, "fld:Back", Ascending).unwrap();
+    let query = SortedQuery::for_plan(&plan, &sort, &context()).unwrap();
+    assert_eq!(query.params().len(), plan.params().len() + 1);
+    assert_eq!(db.ids(&query), NOTES_ASCENDING);
 }
