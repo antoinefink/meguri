@@ -436,25 +436,46 @@ pub(crate) enum Class {
 
 /// Candidates in D6.5's groups.
 #[derive(Default)]
-struct Ranked {
+struct Ranked<'n> {
     as_typed: Option<Candidate>,
     fixed: Vec<Candidate>,
     /// Name candidates with their class and source (field keys 0, saved
-    /// searches 1), in each source's name order.
-    names: Vec<(Class, u8, Candidate)>,
+    /// searches 1), in each source's name order; each made only when the
+    /// list needs it (a deck or tag's insert text is built then).
+    names: Vec<(Class, u8, Lazy<'n>)>,
 }
 
-impl Ranked {
+/// A name candidate, or what makes it (a deck gives its `Name::*` too).
+enum Lazy<'n> {
+    Ready(Candidate),
+    Make(Box<dyn FnOnce() -> Vec<Candidate> + 'n>),
+}
+
+impl Lazy<'_> {
+    fn make(self) -> Vec<Candidate> {
+        match self {
+            Lazy::Ready(candidate) => vec![candidate],
+            Lazy::Make(make) => make(),
+        }
+    }
+}
+
+impl<'n> Ranked<'n> {
     fn fixed(&mut self, candidate: Candidate) {
         self.fixed.push(candidate);
     }
 
     fn name(&mut self, class: Class, source: u8, candidate: Candidate) {
-        self.names.push((class, source, candidate));
+        self.names.push((class, source, Lazy::Ready(candidate)));
+    }
+
+    fn lazy(&mut self, class: Class, source: u8, make: impl FnOnce() -> Vec<Candidate> + 'n) {
+        self.names.push((class, source, Lazy::Make(Box::new(make))));
     }
 
     /// D6.5: `as_typed`, the fixed candidates, the prefix class, the inner
-    /// class; recent ones first inside each group; cut at `limit`.
+    /// class; recent ones first inside each group; cut at `limit`. Without
+    /// recent texts, a group is made only up to the limit.
     fn finish(self, recent: &[String], limit: usize) -> Vec<Candidate> {
         let rank = |candidate: &Candidate| {
             candidate
@@ -470,12 +491,15 @@ impl Ranked {
         out.extend(fixed);
         let mut names = self.names;
         names.sort_by_key(|(class, source, _)| (*class, *source));
+        let mut names = names.into_iter().peekable();
         for class in [Class::Prefix, Class::Inner] {
-            let mut group: Vec<Candidate> = names
-                .iter()
-                .filter(|(c, _, _)| *c == class)
-                .map(|(_, _, candidate)| candidate.clone())
-                .collect();
+            let mut group: Vec<Candidate> = Vec::new();
+            while let Some((_, _, lazy)) = names.next_if(|(c, _, _)| *c == class) {
+                if recent.is_empty() && out.len() + group.len() >= limit {
+                    continue;
+                }
+                group.extend(lazy.make());
+            }
             group.sort_by_key(|candidate| rank(candidate));
             out.extend(group);
         }
@@ -505,7 +529,7 @@ impl Matcher {
     }
 
     pub(crate) fn substring(&self, name: &str) -> Option<Class> {
-        match simple_fold(name).find(&self.word)? {
+        match find_folded(name, &self.word)? {
             0 => Some(Class::Prefix),
             _ => Some(Class::Inner),
         }
@@ -517,11 +541,29 @@ impl Matcher {
         let mut parts = components.enumerate();
         let mut prefix = true;
         for (k, filter) in self.filters.iter().enumerate() {
-            let (index, offset) = parts.find_map(|(index, part)| simple_fold(part).find(filter.as_str()).map(|at| (index, at)))?;
+            let (index, offset) = parts.find_map(|(index, part)| find_folded(part, filter).map(|at| (index, at)))?;
             prefix &= index == k && offset == 0;
         }
         Some(if prefix { Class::Prefix } else { Class::Inner })
     }
+}
+
+/// Where `folded` (a simple folding) occurs in `text` simply folded: 0 when
+/// at its start. ASCII text is searched in place, without a folded copy;
+/// such text holds no folding of a character beyond ASCII.
+fn find_folded(text: &str, folded: &str) -> Option<usize> {
+    if !text.is_ascii() {
+        return simple_fold(text).find(folded);
+    }
+    if !folded.is_ascii() {
+        return None;
+    }
+    let (text, folded) = (text.as_bytes(), folded.as_bytes());
+    if folded.is_empty() {
+        return Some(0);
+    }
+    text.windows(folded.len())
+        .position(|window| window.iter().zip(folded).all(|(a, b)| a.to_ascii_lowercase() == *b))
 }
 
 /// C5: one leading `:` when the text begins with a single colon, one
@@ -642,7 +684,7 @@ fn saved_text(stored: &str) -> Option<String> {
     canonical_text(&search_field_text(stored)).ok()
 }
 
-fn saved_searches(out: &mut Ranked, names: &NameIndex, matcher: &Matcher, range: Range<usize>) {
+fn saved_searches(out: &mut Ranked<'_>, names: &NameIndex, matcher: &Matcher, range: Range<usize>) {
     for saved in names.saved_searches() {
         let Some(class) = matcher.substring(&saved.name) else { continue };
         if let Some(c) = saved_text(&saved.text) {
@@ -655,7 +697,7 @@ fn saved_searches(out: &mut Ranked, names: &NameIndex, matcher: &Matcher, range:
     }
 }
 
-fn decks(out: &mut Ranked, names: &NameIndex, value: &str, matcher: &Matcher, range: Range<usize>) {
+fn decks<'n>(out: &mut Ranked<'n>, names: &'n NameIndex, value: &str, matcher: &Matcher, range: Range<usize>) {
     for special in ["current", "filtered", "*"] {
         if starts_with_ascii_folded(special, value) {
             out.fixed(candidate(CandidateKind::Deck, special, None, range.clone(), format!("deck:{special}"), true));
@@ -665,25 +707,25 @@ fn decks(out: &mut Ranked, names: &NameIndex, value: &str, matcher: &Matcher, ra
         let Some(class) = matcher.components(deck.native.split('\u{1f}')) else {
             continue;
         };
-        let Some(value) = DeckValue::of(names, deck.id) else { continue };
-        let Some(item) = Value::Deck(value).item() else { continue };
-        let Ok(insert) = build(&item) else { continue };
-        let detail = deck.filtered.then_some(Detail::Filtered);
-        out.name(class, 0, candidate(CandidateKind::Deck, &deck.name, detail, range.clone(), insert, true));
-        // `Name::*` follows a deck with subdecks written by name.
-        if deck.has_subdecks && matches!(item, BuiltItem::Deck(_)) {
-            let any = quoted(&format!("deck:{}::*", escape_name(&deck.name)));
-            let label = format!("{}::*", deck.name);
-            out.name(class, 0, candidate(CandidateKind::Deck, &label, detail_of(deck.filtered), range.clone(), any, true));
-        }
+        let range = range.clone();
+        out.lazy(class, 0, move || {
+            let Some(value) = DeckValue::of(names, deck.id) else { return Vec::new() };
+            let Some(item) = Value::Deck(value).item() else { return Vec::new() };
+            let Ok(insert) = build(&item) else { return Vec::new() };
+            let detail = deck.filtered.then_some(Detail::Filtered);
+            let mut made = vec![candidate(CandidateKind::Deck, &deck.name, detail.clone(), range.clone(), insert, true)];
+            // `Name::*` follows a deck with subdecks written by name.
+            if deck.has_subdecks && matches!(item, BuiltItem::Deck(_)) {
+                let any = quoted(&format!("deck:{}::*", escape_name(&deck.name)));
+                let label = format!("{}::*", deck.name);
+                made.push(candidate(CandidateKind::Deck, &label, detail, range, any, true));
+            }
+            made
+        });
     }
 }
 
-fn detail_of(filtered: bool) -> Option<Detail> {
-    filtered.then_some(Detail::Filtered)
-}
-
-fn tags(out: &mut Ranked, names: &NameIndex, value: &str, matcher: &Matcher, range: Range<usize>) {
+fn tags<'n>(out: &mut Ranked<'n>, names: &'n NameIndex, value: &str, matcher: &Matcher, range: Range<usize>) {
     if starts_with_ascii_folded("none", value) {
         out.fixed(candidate(CandidateKind::Tag, "none", None, range.clone(), "tag:none".to_owned(), true));
     }
@@ -691,13 +733,15 @@ fn tags(out: &mut Ranked, names: &NameIndex, value: &str, matcher: &Matcher, ran
         let Some(class) = matcher.components(tag.split("::")) else {
             continue;
         };
-        if let Ok(insert) = build(&BuiltItem::Tag(tag.clone())) {
-            out.name(class, 0, candidate(CandidateKind::Tag, tag, None, range.clone(), insert, true));
-        }
+        let range = range.clone();
+        out.lazy(class, 0, move || match build(&BuiltItem::Tag(tag.clone())) {
+            Ok(insert) => vec![candidate(CandidateKind::Tag, tag, None, range, insert, true)],
+            Err(_) => Vec::new(),
+        });
     }
 }
 
-fn days(out: &mut Ranked, key: &str, value: &str, range: Range<usize>) {
+fn days(out: &mut Ranked<'_>, key: &str, value: &str, range: Range<usize>) {
     for d in DAYS {
         let text = d.to_string();
         if text.starts_with(value) {
@@ -714,7 +758,7 @@ fn days(out: &mut Ranked, key: &str, value: &str, range: Range<usize>) {
 }
 
 /// D6.3.1.
-fn properties(out: &mut Ranked, value: &str, range: Range<usize>) {
+fn properties(out: &mut Ranked<'_>, value: &str, range: Range<usize>) {
     for property in PROPERTIES {
         if property != value && starts_with_ascii_folded(property, value) {
             out.fixed(candidate(
