@@ -46,9 +46,12 @@ old_run() {
   mkdir -p "$MG/$1/$id"
   printf '{"job":"%s","run_id":"%s","status":"pass"}\n' "$1" "$id" >"$MG/$1/$id/result.json"
   echo log >"$MG/$1/$id/log.txt"
-  touch -t 202501010000 "$MG/$1/$id/result.json"
+  age "$MG/$1/$id"
   echo "$id"
 }
+
+# age <folder>: date the files at its top 2025-01-01, as an old run's are.
+age() { find "$1" -maxdepth 1 -type f -exec touch -t 202501010000 {} +; }
 
 # cleanroom_run <n> <month> [status]: an exported cleanroom run of 2025-<month>
 # with its records, a source copy and codex-home; prints its id.
@@ -66,7 +69,7 @@ cleanroom_run() {
   jq -n --arg id "$id" --arg c "$(git -C "$SB" rev-parse HEAD)" --arg s "${3:-pass}" \
     '{job: "cleanroom", run_id: $id, status: $s, dry_run: false,
       args: ["--prompt", "p.md", "--session", "s"], details: {source_commit: $c}}' >"$d/result.json"
-  touch -t 202501010000 "$d/result.json"
+  age "$d"
   echo "$id"
 }
 
@@ -137,6 +140,8 @@ member() { # member <archive> <name>: its content
   printf '{"run":"%s"}\n' "${ids[6]}" >"$MG/catch-up/queue.jsonl"
   printf '{"child":"%s"}\n' "${ids[7]}" >"$MG/gamma/${ids[8]}/receipt.json"
   echo "${ids[10]}" >>"$MG/gamma/${ids[9]}/log.txt"
+  age "$MG/gamma/${ids[8]}"
+  age "$MG/gamma/${ids[9]}"
   echo "staged ${ids[11]}" >"$SB/docs/staged.md"
   git -C "$SB" add docs/staged.md
   prune --apply
@@ -146,6 +151,29 @@ member() { # member <archive> <name>: its content
   for n in 7 8 9 10; do [ ! -e "$MG/gamma/${ids[$n]}" ] || { echo "run $n was kept"; false; }; done
   for n in $(seq 12 31); do [ -d "$MG/gamma/${ids[$n]}" ]; done
   jq -e --arg id "${ids[5]}" '.[] | select(.run == $id and .reasons == ["referenced"])' "$(plan)"
+}
+
+@test "prune keeps runs named in build/ handoffs, stash entries, file names and receipts behind links, and runs written to recently" {
+  local ids=() n outside="$BATS_TEST_TMPDIR/outside"
+  for n in $(seq 1 26); do ids[$n]="$(old_run alpha "$n")"; done
+  printf '{"checkpoint":"build/mg/alpha/%s"}\n' "${ids[1]}" >"$SB/build/active-checkpoint.json"
+  mkdir -p "$SB/docs"
+  echo base >"$SB/docs/stashme.md"
+  git -C "$SB" add docs/stashme.md
+  commit stashme
+  echo "${ids[2]}" >"$SB/docs/stashme.md"
+  git -C "$SB" -c user.name=selftest -c user.email=selftest@localhost stash -q
+  mkdir -p "$SB/evidence"
+  printf '\211PNG\r\n' >"$SB/evidence/${ids[3]}-shot.png"
+  mkdir -p "$outside/job/20250101T000000Z-4190600"
+  printf '{"child":"%s"}\n' "${ids[4]}" >"$outside/job/20250101T000000Z-4190600/receipt.json"
+  ln -s "$outside/job" "$MG/linked"
+  echo "still writing" >>"$MG/alpha/${ids[5]}/console.log"
+  prune --apply
+  [ "$(jq -r .status "$result")" = pass ]
+  for n in 1 2 3 4 5; do [ -d "$MG/alpha/${ids[$n]}" ] || { echo "run $n was deleted"; false; }; done
+  [ ! -e "$MG/alpha/${ids[6]}" ]
+  jq -e --arg id "${ids[5]}" '.[] | select(.run == $id and .reasons == ["recent"])' "$(plan)"
 }
 
 @test "prune keeps unfinished runs and runs whose tools/mg process still runs" {
@@ -161,7 +189,7 @@ member() { # member <archive> <name>: its content
   live="20250101T000030Z-$FAKE_PID"
   mkdir -p "$MG/delta/$live"
   echo '{}' >"$MG/delta/$live/result.json"
-  touch -t 202501010000 "$MG/delta/$live/result.json"
+  age "$MG/delta/$live"
   prune --apply
   [ "$status" -eq 0 ]
   [ -d "$MG/delta/${ids[1]}" ]
@@ -221,6 +249,7 @@ member() { # member <archive> <name>: its content
   echo '{}' >"$outside/job/20250101T000000Z-4190600/result.json"
   for n in $(seq 1 25); do ids[$n]="$(old_run alpha "$n")"; done
   ln -s "$outside/file" "$MG/alpha/${ids[1]}/link-to-file"
+  touch -h -t 202501010000 "$MG/alpha/${ids[1]}/link-to-file"
   ln -s "$outside" "$MG/alpha/${ids[1]}/link-to-folder"
   ln -s "$outside/run" "$MG/alpha/$linked"
   ln -s "$outside/job" "$MG/linked"
@@ -317,17 +346,19 @@ EOF
   [ "$(cat "$MG/cleanroom-archive/2025-11.tar.xz")" = "not an archive" ]
 }
 
-@test "prune --cleanroom keeps the source of a run that did not pass and leaves runs with unexpected files" {
+@test "prune --cleanroom keeps whole a run that did not pass and a run with unexpected files" {
   local ok failed odd
   ok="$(cleanroom_run 1 10)"
   failed="$(cleanroom_run 2 10 error)"
   odd="$(cleanroom_run 3 10)"
   echo '{}' >"$MG/cleanroom/$odd/smoke-evidence.json"
+  age "$MG/cleanroom/$odd"
   prune --cleanroom --apply
   [ "$(jq -r .status "$result")" = pass ]
   [ ! -e "$MG/cleanroom/$ok/source" ]
   [ -d "$MG/cleanroom/$failed/source" ]
-  [ ! -e "$MG/cleanroom/$failed/codex-home" ]
+  [ -d "$MG/cleanroom/$failed/codex-home" ]
+  [ -z "$(members "$MG/cleanroom-archive/2025-10.tar.xz" | grep "^$failed/" || true)" ]
   [ -d "$MG/cleanroom/$odd/source" ]
   [ -d "$MG/cleanroom/$odd/codex-home" ]
   [ -z "$(members "$MG/cleanroom-archive/2025-10.tar.xz" | grep "^$odd/" || true)" ]

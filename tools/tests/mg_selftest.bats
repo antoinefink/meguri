@@ -652,13 +652,13 @@ EOF
   assert_read_only_calls
   assert_doctor_result "$result" "$status"
   # A du that outlasts the time limit is stopped, and the tree counts as too large.
-  printf '#!/bin/sh\nexec sleep 30\n' >"$STUBS/du"
+  printf '#!/bin/sh\necho $$ >"%s"\nexec sleep 30\n' "$BATS_TEST_TMPDIR/du.pid" >"$STUBS/du"
   chmod +x "$STUBS/du"
   sed -i 's/^MG_DOCTOR_RUN_OUTPUT_SECONDS=.*/MG_DOCTOR_RUN_OUTPUT_SECONDS=1/' "$SB/tools/mg.d/doctor.sh"
   mg doctor
   jq -e '.details.checks[] | select(.id == "run-output" and .status == "warn"
     and (.message | startswith("build/mg is too large to measure in 1 s")))' "$result"
-  [ "$(ps -A -o command= | grep -cx 'sleep 30' || true)" = 0 ]
+  ! kill -0 "$(cat "$BATS_TEST_TMPDIR/du.pid")" 2>/dev/null
 }
 
 # --- doctor (host commands stubbed) ----------------------------------------

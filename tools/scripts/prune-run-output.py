@@ -57,6 +57,12 @@ JOB_DIR = re.compile(r"^[a-z][a-z0-9-]*$")
 RECEIPT_SUFFIXES = (".json", ".jsonl")
 MEMBER = re.compile(r"^(\d{8}T\d{6}Z-\d+)/([^/]+)$")
 STATE_DEPTH = 4
+# build/ outside build/mg holds handoffs that name runs (orchestration
+# checkpoints, prompts, saved logs): read for references, BUILD_DEPTH deep.
+# These folders hold only build products, caches and private data copies.
+BUILD_UNREAD = ("mg", "private", "docker-cargo", "app", "xcode-check", "swift-test",
+                "selftest-xcframework", "oracle-macos-venv")
+BUILD_DEPTH = 3
 DU_BATCH = 400
 SMALL = 100 << 20  # build/ entries below this are summed in the printed report
 USAGE = "usage: tools/mg prune [--cleanroom] [--apply] [--root <checkout>] [--all-worktrees] [--no-docker]"
@@ -144,6 +150,7 @@ class Refs:
 
     def file(self, path, out=None):
         out = self.ids if out is None else out
+        out.update(ids_in(os.fsencode(path)))  # an id in a file or folder name counts too
         try:
             st = os.lstat(path)
             if stat.S_ISLNK(st.st_mode):
@@ -158,6 +165,14 @@ class Refs:
             pass
         except OSError as e:
             self.errors.append("cannot read %s: %s" % (path, e.strerror or e))
+
+    def tree_or_file(self, path, depth, out):
+        st = lstat(path)
+        if st is not None and stat.S_ISDIR(st.st_mode):
+            out.update(ids_in(os.fsencode(path)))
+            self.tree(path, depth, out)
+        else:
+            self.file(path, out)
 
     def tree(self, path, depth, out):
         try:
@@ -199,12 +214,19 @@ def scan_exact(f, size, out):
 def git_refs(repo, heads, staged, refs, scratch):
     """Run ids in every object of every local and remote branch tip and worktree HEAD
     (their commits, trees and files), and in every worktree's staged files."""
-    out = git(["for-each-ref", "--format=%(objectname) %(objecttype)", "refs/heads", "refs/remotes"], repo)
+    out = git(["for-each-ref", "--format=%(objectname) %(objecttype) %(*objectname)",
+               "refs/heads", "refs/remotes", "refs/tags"], repo)
     commits = set(h for h in heads if h)
     for line in out.decode().splitlines():
-        sha, _, kind = line.partition(" ")
-        if kind == "commit":
-            commits.add(sha)
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == "commit":
+            commits.add(parts[0])
+        elif len(parts) == 3 and parts[1] == "tag":
+            commits.add(parts[2])
+    # Every stash entry (shared by all worktrees): its work tree, index and untracked commits.
+    if subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "-q", "refs/stash"],
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        commits.update(git(["log", "-g", "--format=%H %P", "refs/stash"], repo).decode().split())
     listing = os.path.join(scratch, "objects.txt")
     with open(listing, "wb") as f:
         f.write("".join(c + "\n" for c in sorted(commits)).encode())
@@ -262,6 +284,7 @@ class Run:
         self.pid = int(m.group(2))
         self.entries = {}
         self.result_mtime = None
+        self.written = 0  # newest mtime of a file at the top of the folder (a log still growing)
         self.result = None
         self.receipts = set()
         self.parts = {}
@@ -291,8 +314,10 @@ class Run:
             self.entries[e.name] = mode
             if mode != stat.S_IFREG:
                 continue
+            mtime = e.stat(follow_symlinks=False).st_mtime
+            self.written = max(self.written, mtime)
             if e.name == "result.json":
-                self.result_mtime = e.stat(follow_symlinks=False).st_mtime
+                self.result_mtime = mtime
             # prune's own receipts list every run it considered: never references.
             if e.name.endswith(RECEIPT_SUFFIXES) and self.job != PRUNE:
                 refs.file(e.path, self.receipts)
@@ -323,6 +348,8 @@ class Checkout:
         if not stat.S_ISDIR(st.st_mode):
             self.skipped.append({"path": self.mg, "why": "build/mg is not a directory (a symbolic link is never followed)"})
             refs.file(self.mg, self.state)
+            if os.path.isdir(self.mg):  # references behind the link still count
+                refs.tree(self.mg, STATE_DEPTH + 2, self.state)
             return
         for e in sorted(os.scandir(self.mg), key=lambda e: e.name):
             est = e.stat(follow_symlinks=False)
@@ -330,6 +357,8 @@ class Checkout:
                 refs.file(e.path, self.state)
                 if stat.S_ISLNK(est.st_mode):
                     self.skipped.append({"path": e.path, "why": "symbolic link; never followed"})
+                    if os.path.isdir(e.path):
+                        refs.tree(e.path, STATE_DEPTH + 1, self.state)
                 continue
             if not stat.S_ISDIR(est.st_mode):
                 continue
@@ -339,6 +368,13 @@ class Checkout:
                 refs.tree(e.path, STATE_DEPTH, self.state)
                 continue
             self.job_dirs.append((e.name, e.path))
+
+    def build_entries(self):
+        """Entries of build/ outside build/mg to read for references."""
+        try:
+            return [e.path for e in os.scandir(os.path.join(self.path, "build")) if e.name not in BUILD_UNREAD]
+        except FileNotFoundError:
+            return []
 
     def scan_job(self, job, path, refs):
         for c in sorted(os.scandir(path), key=lambda c: c.name):
@@ -354,6 +390,8 @@ class Checkout:
                     self.latest[job] = os.path.basename(target)
                 elif m:
                     self.skipped.append({"path": c.path, "why": "run folder is a symbolic link; never followed"})
+                    if os.path.isdir(c.path):
+                        refs.tree(c.path, 2, self.state)
                 continue
             if m and stat.S_ISDIR(cst.st_mode):
                 run = Run(self, job, c.name, c.path)
@@ -507,7 +545,7 @@ def protect(ctx, ck, cands, others, tracked):
             r.reasons.append("latest")
         if r.key in newest:
             r.reasons.append("newest")
-        if max(r.started, r.result_mtime or 0) > horizon:
+        if max(r.started, r.written) > horizon:
             r.reasons.append("recent")
     for r in cands:
         if r.reasons:
@@ -564,7 +602,9 @@ def plan_cleanroom(ctx, ck, tracked):
             continue
         r.source_ok = "source" not in r.entries or source_removable(ctx, r)
         if not r.source_ok:
-            r.reasons.append("source kept: the run did not pass or export its changes")
+            r.action = "untouched"
+            r.reasons.append("did not pass, export its changes from a commit a ref reaches: kept whole")
+            continue
         r.action = "strip" if r.reasons else "remove"
     return cands
 
@@ -573,7 +613,7 @@ def cleanroom_freed(r):
     if r.action == "remove":
         return r.bytes
     if r.action == "strip":
-        return r.parts.get("codex-home", 0) + (r.parts.get("source", 0) if r.source_ok else 0)
+        return r.parts.get("codex-home", 0) + r.parts.get("source", 0)
     return 0
 
 
@@ -607,16 +647,16 @@ def summarize_cleanroom(cands):
     for r in cands:
         s[r.action] += 1
         if r.action == "untouched":
+            if getattr(r, "source_ok", True) is False:
+                s["source_kept"] += 1
+                s["bytes_source_kept"] += r.bytes
+                continue
             s["untouched_runs"].append({"run": r.id, "why": [x for x in r.reasons if x not in ("newest", "recent", "latest", "referenced")] or r.reasons,
                                         "bytes": r.bytes})
             continue
         s["bytes_freed"] += cleanroom_freed(r)
         s["bytes_codex_home"] += r.parts.get("codex-home", 0)
-        if r.source_ok:
-            s["bytes_source"] += r.parts.get("source", 0)
-        else:
-            s["source_kept"] += 1
-            s["bytes_source_kept"] += r.parts.get("source", 0)
+        s["bytes_source"] += r.parts.get("source", 0)
         rec = sum(r.parts.get(n, 0) for n in records_of(r))
         s["bytes_records"] += rec
         month = "%s-%s" % (r.id[0:4], r.id[4:6])
@@ -748,6 +788,18 @@ def remove_at(dfd, name, dev):
     os.rmdir(name, dir_fd=dfd)
 
 
+def newest_write(path):
+    """Newest mtime of the plain files at the top of a folder (Run.written)."""
+    newest = 0
+    for e in os.scandir(path):
+        try:
+            if e.is_file(follow_symlinks=False):
+                newest = max(newest, e.stat(follow_symlinks=False).st_mtime)
+        except FileNotFoundError:
+            pass
+    return newest
+
+
 class Deleter:
     """Deletes only run folders (or a cleanroom run's runtime parts) below one
     checkout's build/mg, through descriptors opened from a checked build/mg."""
@@ -828,6 +880,13 @@ class Deleter:
             return "its tools/mg process runs"
         if run.key in self.tracked_now():
             return "holds a tracked file"
+        if any(c.path == run.path or c.path.startswith(run.path + os.sep) for c in self.ctx.checkouts):
+            return "holds a checkout"
+        # A detached writer (a VM's console log, a container's output) can
+        # outlive its job: a file written in that time keeps the folder.
+        quiet = 3600 if part is not None else KEEP_DAYS * 86400
+        if newest_write(run.path) > time.time() - quiet:
+            return "written to in the last %d s" % quiet
         if part is not None:
             # Only a cleanroom run's source/ or codex-home/; its folder stays.
             if part not in CLEANROOM_RUNTIME or run.job != CLEANROOM:
@@ -1103,7 +1162,12 @@ def archive_and_delete(ctx, ck, deleter, adfd, adir, cands, failures):
             try:
                 freed = 0
                 if r.action == "remove":
-                    why = deleter.remove(r)
+                    try:
+                        listed = set(os.listdir(r.path))
+                    except FileNotFoundError:
+                        listed = set(r.entries)
+                    # A file added since the plan would go unarchived.
+                    why = deleter.remove(r) if listed == set(r.entries) else "its folder changed since the plan"
                     if why is None:
                         report["removed_runs"] += 1
                         freed = r.bytes
@@ -1111,7 +1175,7 @@ def archive_and_delete(ctx, ck, deleter, adfd, adir, cands, failures):
                         report["skipped"].append({"run": r.id, "why": why})
                     report["bytes_freed"] += freed
                     continue
-                for part in ("codex-home",) + (("source",) if r.source_ok else ()):
+                for part in CLEANROOM_RUNTIME:
                     if part in r.entries:
                         why = deleter.remove(r, part)
                         if why is None:
@@ -1152,7 +1216,7 @@ def print_cleanroom(ck, s):
     if s["kept_because"]:
         log("  folders kept because: " + ", ".join("%s %d" % kv for kv in sorted(s["kept_because"].items(), key=lambda kv: -kv[1])))
     if s["source_kept"]:
-        log("  %d source copies kept (%s): their runs did not pass or export, so they may hold unexported work"
+        log("  %d runs kept whole (%s): they did not pass or export, so their source copy may hold unexported work"
             % (s["source_kept"], human(s["bytes_source_kept"])))
     for u in s["untouched_runs"]:
         log("  untouched %s (%s): %s" % (u["run"], human(u["bytes"]), "; ".join(u["why"])))
@@ -1274,6 +1338,7 @@ def run(args, ctx, wts, root, targets, out_path, mode):
         for ck in ctx.checkouts:
             ck.scan(refs)
             jobs += [pool.submit(ck.scan_job, job, path, refs) for job, path in ck.job_dirs]
+            jobs += [pool.submit(refs.tree_or_file, path, BUILD_DEPTH, ck.state) for path in ck.build_entries()]
         for j in jobs:
             j.result()
     for ck in ctx.checkouts:
