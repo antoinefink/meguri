@@ -974,3 +974,41 @@ fn a_field_replaced_under_the_same_name_recomputes_requirements() {
     let nt = read(&h, id);
     assert_eq!((nt.config.reqs[0].kind, nt.config.reqs[0].field_ords.clone()), (1, vec![0]));
 }
+
+/// I3 and S6/S7: a removed card dated more than a day ahead (a foreign or
+/// damaged collection) keeps its id, and does not push the generated card
+/// past I3's one-day window: the new card takes the clock's id.
+#[test]
+fn a_removed_card_far_ahead_does_not_move_the_generated_id() {
+    let (h, _) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    h.clock.step_ms(5_000);
+    let ahead = NOW_MS + 5_000 + 2 * 86_400_000;
+    let old = state(&h, id).cards.iter().find(|c| c.2 == 1).unwrap().0;
+    h.collection
+        .run(
+            OpSpec::named("seed future id", OpSource::UserNonUndoable)
+                .skip_undo()
+                .stamp(StampMode::Raw),
+            move |ctx| {
+                let key = meguri_storage::RowKey::Id(old);
+                let mut image = ctx.scope().row_image(meguri_storage::Table::Cards, &key)?.unwrap();
+                image[0] = meguri_storage::Cell::Integer(ahead);
+                ctx.scope().restore(meguri_storage::Table::Cards, &key, None)?;
+                ctx.scope()
+                    .restore(meguri_storage::Table::Cards, &meguri_storage::RowKey::Id(ahead), Some(&image))?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let mut draft = draft(&h, id);
+    without_template(&mut draft, "Reverse");
+    draft.templates.push(template("Reverse again", "{{Back}}"));
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!((saved.cards_removed, saved.cards_added), (1, 1));
+    let new = state(&h, id).cards.iter().find(|c| c.2 == 1).unwrap().0;
+    assert_ne!(new, ahead);
+    assert!(new <= NOW_MS + 5_000 + 86_400_000, "inside I3's window: {new}");
+    assert_eq!(new, NOW_MS + 5_000, "the clock's id, as with nothing retired");
+}

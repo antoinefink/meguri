@@ -49,15 +49,27 @@ pub(crate) fn check_live(scope: &WriteScope<'_>, layout: &Layout) -> Result<(), 
     plan::check_note_values(scope, layout, &CancelToken::new(), &ProgressSink::new())
 }
 
+/// N4 step 7 on the live rows of the write transaction, from the name the
+/// draft requested (after steps 1 and 2).
+fn stored_name(scope: &WriteScope<'_>, layout: &Layout) -> Result<String, EngineError> {
+    let id = layout.saved.id;
+    let others: Vec<_> = read::names(scope)?.into_iter().filter(|(other, _)| *other != id).collect();
+    Ok(names::unique_among(&layout.requested_name, id, &others))
+}
+
 pub(crate) fn commit_layout(ctx: &mut OpContext<'_, '_>, layout: &Layout) -> Result<StructureSaved, EngineError> {
     check_live(ctx.scope(), layout)?;
+    // N4 step 7 re-derived on the live rows (O7) from the requested name:
+    // another note type may have taken it, or freed it, since planning. A
+    // save that planned as unchanged writes when the name it gets differs.
+    let name = stored_name(ctx.scope(), layout)?;
     let mut result = StructureSaved {
         id: layout.saved.id,
-        name: layout.saved.name.clone(),
+        name: name.clone(),
         reasons: layout.reasons.clone(),
         ..StructureSaved::default()
     };
-    if !layout.changed {
+    if !layout.changed && name == layout.base.name {
         result.reasons.clear();
         return Ok(result);
     }
@@ -80,11 +92,7 @@ pub(crate) fn commit_layout(ctx: &mut OpContext<'_, '_>, layout: &Layout) -> Res
     meguri_model::faultpoint!("notetypes.structure.write_phase")
         .map_err(|error| EngineError::internal(format!("injected write-phase failure: {error}")))?;
     let mut saved = layout.saved.clone();
-    // N4 step 7 re-derived on the live rows (O7) from the requested name:
-    // another note type may have taken it, or freed it, since planning.
-    let others: Vec<_> = read::names(scope)?.into_iter().filter(|(other, _)| *other != saved.id).collect();
-    saved.name = names::unique_among(&layout.requested_name, saved.id, &others);
-    result.name.clone_from(&saved.name);
+    saved.name = name;
     for (field, fresh) in saved.fields.iter_mut().zip(&layout.fresh_fields) {
         if *fresh {
             field.config.id = Some(random_id(random));
