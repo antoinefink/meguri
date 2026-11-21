@@ -7,7 +7,7 @@ preview) are "Meguri Dev" with the blue AppIcon-Dev; daily-driver builds
 AppIcon (app/Config/Base.xcconfig). Stdlib only: it runs on the host.
 
   app_identity_check.py settings <showBuildSettings.json> --identity dev|daily
-      the resolved settings of the Meguri and MeguriWidget targets
+      the resolved settings of the Meguri target (and MeguriWidget when listed)
   app_identity_check.py product <Meguri.app> --identity dev|daily
       the built app: Info.plist and localized names, icon name, the colour of the icon the
       system shows (sips renders it; the dominant hue must be red or blue),
@@ -42,17 +42,20 @@ def check_settings(path, identity):
         entries = json.load(f)
     by_target = {e.get("target"): e.get("buildSettings", {}) for e in entries}
     problems = []
+    # The scheme's settings list the app target; the widget's appear only when
+    # it is resolved on its own, and its name is checked in products.
     app, widget = by_target.get("Meguri"), by_target.get("MeguriWidget")
-    if app is None or widget is None:
-        return [f"{path}: no Meguri or MeguriWidget target"]
+    if app is None:
+        return [f"{path}: no Meguri target"]
     expect = [
         (app, "Meguri", "PRODUCT_BUNDLE_IDENTIFIER", want["bundle"]),
         (app, "Meguri", "PRODUCT_NAME", "Meguri"),
         (app, "Meguri", "MEGURI_APP_NAME", want["name"]),
         (app, "Meguri", "INFOPLIST_KEY_CFBundleDisplayName", want["name"]),
         (app, "Meguri", "ASSETCATALOG_COMPILER_APPICON_NAME", want["icon"]),
-        (widget, "MeguriWidget", "INFOPLIST_KEY_CFBundleDisplayName", want["name"]),
     ]
+    if widget is not None:
+        expect.append((widget, "MeguriWidget", "INFOPLIST_KEY_CFBundleDisplayName", want["name"]))
     for settings, target, key, value in expect:
         if settings.get(key) != value:
             problems.append(f"{target} {key} is {settings.get(key)!r}, expected {value!r}")
