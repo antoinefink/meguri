@@ -419,6 +419,10 @@ public final class NoteTypesModel {
         }
     }
 
+    /// Meguri Sync's structure save job exists (U269); until it does, the
+    /// sheet says why Save and Upload is off.
+    public var canSaveWithMeguriSync: Bool { meguriSyncSave != nil }
+
     /// The sheet's confirm button is enabled: a local save, or Meguri
     /// Sync's job once it exists.
     public var canConfirm: Bool {

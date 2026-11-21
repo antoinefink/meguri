@@ -79,6 +79,26 @@ import AppKit
         #expect(settings.keyEquivalent == "," && settings.keyEquivalentModifierMask == .command, "Settings must use ⌘,")
     }
 
+    /// W14, N22.1: View › Note Types takes ⇧⌘T, and nothing else in the menu
+    /// bar does (the system's Show Tab Bar would, for a window that tabs).
+    @Test func viewNoteTypesOwnsShiftCommandT() throws {
+        let view = try #require(NSApp.mainMenu?.items.first { $0.title == "View" }?.submenu, "no View menu")
+        let item = try #require(view.items.first { $0.title == "Note Types" }, "\(view.items.map(\.title))")
+        func isShiftCommandT(_ item: NSMenuItem) -> Bool {
+            let mask = item.keyEquivalentModifierMask.intersection([.command, .shift, .option, .control])
+            return (item.keyEquivalent == "t" && mask == [.command, .shift])
+                || (item.keyEquivalent == "T" && mask.contains(.command) && !mask.contains(.option) && !mask.contains(.control))
+        }
+        #expect(isShiftCommandT(item), "key \(item.keyEquivalent) mask \(item.keyEquivalentModifierMask.rawValue)")
+        let claims = menuItems(NSApp.mainMenu).filter(isShiftCommandT).map(\.title)
+        #expect(claims == ["Note Types"], "\(claims)")
+        let titles = menuItems(NSApp.mainMenu).map(\.title)
+        #expect(!titles.contains("Show Tab Bar") && !titles.contains("Show All Tabs"), "\(titles)")
+        // The one main window never joins a tab group (R6).
+        #expect(!NSWindow.allowsAutomaticWindowTabbing || NSApp.windows.allSatisfy { $0.tabbingMode == .disallowed },
+                "\(NSApp.windows.map { "\($0.identifier?.rawValue ?? "-"): \($0.tabbingMode.rawValue)" })")
+    }
+
     @Test func theWindowMenuShowsTheMainWindow() throws {
         let window = try #require(NSApp.mainMenu?.items.first { $0.title == "Window" }?.submenu, "no Window menu")
         #expect(window.items.contains { $0.title == "Meguri" }, "\(window.items.map(\.title))")

@@ -273,6 +273,16 @@
         }
       }
     },
+    "noteTypes.fields.fieldOrder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show in Field Order"
+          }
+        }
+      }
+    },
     "noteTypes.fields.moveDown": {
       "localizations": {
         "en": {
@@ -777,6 +787,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Empty in every note."
+          }
+        }
+      }
+    },
+    "noteTypes.save.meguriUnavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving structure changes with Meguri Sync isn’t available yet."
           }
         }
       }

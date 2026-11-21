@@ -49,6 +49,8 @@ import Testing
             "noteTypes.inspector.collapsed": "Collapsed in Editor", "noteTypes.inspector.collapsedHelp": "Closed in Add Note until you open it",
             "noteTypes.inspector.rtl": "Right-to-Left", "noteTypes.inspector.placeholder": "Placeholder",
             "noteTypes.inspector.placeholderHelp": "Grey text shown while the field is empty",
+            "noteTypes.save.meguriUnavailable": "Saving structure changes with Meguri Sync isn’t available yet.",
+            "noteTypes.fields.fieldOrder": "Show in Field Order",
         ]
         for (key, value) in expected {
             #expect(bundle.localizedString(forKey: key, value: "missing", table: nil) == value, "\(key)")

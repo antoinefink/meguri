@@ -95,6 +95,14 @@ public struct NoteTypeSaveSheet: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("noteTypes.list.saveSheetBackup")
+            if question.decision.route == .meguriSync && !model.canSaveWithMeguriSync {
+                // Until Meguri Sync's structure save exists (U269), say why the button is off.
+                Text("noteTypes.save.meguriUnavailable", bundle: .module)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("noteTypes.list.saveSheetUnavailable")
+            }
         }
     }
 
@@ -107,13 +115,17 @@ public struct NoteTypeSaveSheet: View {
     @ViewBuilder private func confirm(_ question: NoteTypesModel.Question) -> some View {
         let label = question.decision.confirm == .saveAndUpload
             ? Text("noteTypes.save.confirm.saveAndUpload", bundle: .module) : Text("noteTypes.save.confirm.save", bundle: .module)
+        let unavailable = question.decision.route == .meguriSync && !model.canSaveWithMeguriSync
+        let help = unavailable ? Text("noteTypes.save.meguriUnavailable", bundle: .module) : Text(verbatim: "")
         if question.decision.destructive {
             Button(role: .destructive) { model.confirm() } label: { label }
+                .help(help)
                 .disabled(!model.canConfirm)
                 .accessibilityIdentifier("noteTypes.list.saveSheetConfirm")
         } else {
             Button { model.confirm() } label: { label }
                 .keyboardShortcut(.defaultAction)
+                .help(help)
                 .disabled(!model.canConfirm)
                 .accessibilityIdentifier("noteTypes.list.saveSheetConfirm")
         }

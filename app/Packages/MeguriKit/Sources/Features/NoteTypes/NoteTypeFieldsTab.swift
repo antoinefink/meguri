@@ -28,7 +28,8 @@ nonisolated struct FieldLine: Identifiable, Hashable, Sendable {
 struct NoteTypeFieldsTab: View {
     @Bindable var model: NoteTypesModel
     let id: Int64
-    @State private var sortOrder = [KeyPathComparator(\FieldLine.position)]
+    /// Empty: field order, with no sort indicator. A header click sorts the view.
+    @State private var sortOrder: [KeyPathComparator<FieldLine>] = []
     @State private var showsInspector = true
     @State private var columns = TableColumnCustomization<FieldLine>()
     @Environment(\.locale) private var locale
@@ -49,8 +50,8 @@ struct NoteTypeFieldsTab: View {
     }
 
     /// The table's order: the field order unless a header click sorted the view.
-    private var sortedLines: [FieldLine] { lines.sorted(using: sortOrder) }
-    private var inFieldOrder: Bool { sortOrder == [KeyPathComparator(\FieldLine.position)] }
+    private var sortedLines: [FieldLine] { sortOrder.isEmpty ? lines : lines.sorted(using: sortOrder) }
+    private var inFieldOrder: Bool { sortOrder.isEmpty }
 
     private var selection: Binding<Int?> {
         Binding(get: { model.selectedField[id] }, set: { model.selectedField[id] = $0 })
@@ -87,7 +88,7 @@ struct NoteTypeFieldsTab: View {
 
     private var table: some View {
         Table(of: FieldLine.self, selection: selection, sortOrder: $sortOrder, columnCustomization: $columns) {
-            TableColumn(Text("noteTypes.fields.name", bundle: .module), value: \.position) { line in
+            TableColumn(Text("noteTypes.fields.name", bundle: .module), value: \.name) { line in
                 FieldNameCell(model: model, id: id, line: line)
             }
             .customizationID("noteTypes.fields.columnName")
@@ -205,6 +206,11 @@ struct NoteTypeFieldsTab: View {
             .help(selectedDeleteHelp)
             .accessibilityIdentifier("noteTypes.fields.delete")
             Spacer()
+            if !inFieldOrder {
+                // A header click sorts the view only; this returns to the order the save keeps, where rows drag.
+                Button { sortOrder = [] } label: { Text("noteTypes.fields.fieldOrder", bundle: .module) }
+                    .accessibilityIdentifier("noteTypes.fields.fieldOrder")
+            }
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, Spacing.xSmall)
