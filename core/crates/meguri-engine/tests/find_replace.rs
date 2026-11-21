@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use common::Harness;
 use meguri_engine::browse::search::{SearchEvent, SearchListener, SearchMode, SortDirection, SortSpec};
-use meguri_engine::bulk::find_replace::{self, FindIn, FindReplace, Refusal};
+use meguri_engine::bulk::find_replace::{self, Edit, FindIn, FindReplace, Preview, Refusal};
 use meguri_engine::bulk::summary::{SelectionSummary, selection_summary};
 use meguri_engine::bulk::{BulkCounts, NoteTarget};
 use meguri_engine::notetypes::{self, NewNotetype, NewTemplate, NotetypeKind};
@@ -93,13 +93,17 @@ fn add(h: &Harness, mid: NotetypeId, fields: &[&str], tags: &[&str]) -> NoteId {
     .id
 }
 
+/// A request whose confirmation admits every count; [`run_on`] passes the
+/// preview's count instead.
 fn request(find: &str, replace: &str, within: FindIn) -> FindReplace {
     FindReplace {
         find: find.to_owned(),
         replace: replace.to_owned(),
         regex: false,
         ignore_case: true,
+        whole_words: false,
         within,
+        confirmed: u64::MAX,
     }
 }
 
@@ -107,12 +111,36 @@ fn field(name: &str) -> FindIn {
     FindIn::Field(name.to_owned())
 }
 
+fn preview_of(c: &Collection, target: &NoteTarget, request: &FindReplace) -> Result<Preview, EngineError> {
+    find_replace::preview(c, target, request, &CancelToken::new(), &ProgressSink::new())
+}
+
+/// The sheet's sequence: the preview, then the run confirmed with the
+/// preview's count. On the same rows the preview's counts are the run's,
+/// and a refused preview is refused the same way by the run. (Only an
+/// injected write-phase failure lets a run fail after a preview passed.)
 fn run_on(
     c: &Collection,
     target: NoteTarget,
     request: &FindReplace,
 ) -> Result<OpResult<BulkCounts>, EngineError> {
-    find_replace::run(c, &target, request, CancelToken::new(), ProgressSink::new())
+    let preview = preview_of(c, &target, request);
+    let confirmed = FindReplace {
+        confirmed: preview.as_ref().map_or(u64::MAX, |shown| shown.changed),
+        ..request.clone()
+    };
+    let result = find_replace::run(c, &target, &confirmed, CancelToken::new(), ProgressSink::new());
+    match (&preview, &result) {
+        (Ok(shown), Ok(done)) => assert_eq!(
+            (shown.changed, shown.considered),
+            (done.value.affected, done.value.considered),
+            "the preview counts what the run writes"
+        ),
+        (Err(refused), Err(error)) => assert_eq!(refused, error, "the preview refuses as the run does"),
+        (Err(refused), Ok(_)) => panic!("the preview refused ({refused:?}) a run that commits"),
+        (Ok(_), Err(_)) => {}
+    }
+    result
 }
 
 fn run(h: &Harness, notes: &[NoteId], request: &FindReplace) -> Result<BulkCounts, EngineError> {
@@ -1082,6 +1110,494 @@ fn a_handle_selection_resolves_to_its_notes() {
         .unwrap_err();
     assert!(is_invalid_argument(&e), "{e:?}");
     assert_eq!(rows(&h), before);
+}
+
+// --- U265, V9, F10: the preview --------------------------------------------------
+
+fn spans(entry: &find_replace::PreviewEntry) -> Vec<(Edit, &str)> {
+    entry.diff.iter().map(|span| (span.edit, span.text.as_str())).collect()
+}
+
+/// V9: the preview counts the notes the run writes (an unchanged match does
+/// not count), lists one entry per changed field in result order then field
+/// order, each with the note's Sort Field, the field's name and the
+/// character diff of the texts with HTML removed; Tags are one field. It
+/// writes nothing: rows, `col.mod` and both histories stay. The run that
+/// follows writes exactly the notes it listed.
+#[test]
+fn v9_the_preview_lists_what_the_run_then_writes() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let plain = plain(&h);
+    let a = add(&h, vocab, &["<b>rate</b>", "the cost of it"], &["keep"]);
+    let b = add(&h, plain, &["cost here", "Cost too"], &[]);
+    let same = add(&h, vocab, &["cost", "x"], &[]);
+    let none = add(&h, vocab, &["nothing", "x"], &[]);
+    // An undo step and a redo step to keep.
+    run(&h, &[none], &request("x", "y", FindIn::AllFields)).unwrap();
+    run(&h, &[none], &request("y", "z", FindIn::AllFields)).unwrap();
+    h.collection.undo(UndoScope::Global).unwrap();
+    let before = rows(&h);
+    let histories = (undo_name(&h), redo_name(&h));
+    // `same`'s match gives back what is stored (F6 step 6).
+    let regex = FindReplace {
+        regex: true,
+        ..request("(cost)", "$1", FindIn::AllFields)
+    };
+    assert_eq!(preview_of(&h.collection, &NoteTarget::Notes(vec![same]), &regex).unwrap().changed, 0);
+    let target = NoteTarget::Notes(vec![b, none, same, a]);
+    let shown = preview_of(&h.collection, &target, &request("cost", "$5", FindIn::AllFields)).unwrap();
+    assert_eq!(rows(&h), before, "the preview writes nothing");
+    assert_eq!((undo_name(&h), redo_name(&h)), histories, "both histories as they were");
+    assert_eq!((shown.changed, shown.considered), (3, 4));
+    let listed: Vec<_> = shown
+        .entries
+        .iter()
+        .map(|entry| (entry.note, entry.sort_field.as_str(), entry.field.as_deref()))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            (b, "cost here", Some("Text")),
+            (b, "cost here", Some("Extra")),
+            (same, "cost", Some("Word")),
+            (a, "rate", Some("Meaning")),
+        ],
+        "result order, then field order; the Sort Field without its HTML"
+    );
+    assert_eq!(spans(&shown.entries[1]), [(Edit::Removed, "Cost"), (Edit::Inserted, "$5"), (Edit::Kept, " too")]);
+    assert_eq!(
+        spans(&shown.entries[3]),
+        [(Edit::Kept, "the "), (Edit::Removed, "cost"), (Edit::Inserted, "$5"), (Edit::Kept, " of it")]
+    );
+    assert_eq!((shown.entries[3].old_text(), shown.entries[3].new_text()), ("the cost of it".into(), "the $5 of it".into()));
+    // The run, confirmed with that count, writes exactly those notes.
+    let done = run_on(&h.collection, target, &FindReplace {
+        confirmed: shown.changed,
+        ..request("cost", "$5", FindIn::AllFields)
+    })
+    .unwrap();
+    let written: std::collections::BTreeSet<NoteId> = done.changes.notes.iter().map(|change| change.id).collect();
+    let listed: std::collections::BTreeSet<NoteId> = shown.entries.iter().map(|entry| entry.note).collect();
+    assert_eq!(written, listed);
+    assert_eq!(fields_of(&h, b), ["$5 here", "$5 too"]);
+    assert_eq!(fields_of(&h, a)[1], "the $5 of it");
+    // Tags: one entry per note, the tags as C7.10 shows them, no field name.
+    let shown =
+        preview_of(&h.collection, &NoteTarget::Notes(vec![a]), &request("keep", "keep::new", FindIn::Tags)).unwrap();
+    assert_eq!(shown.changed, 1);
+    assert_eq!(shown.entries.len(), 1);
+    assert_eq!(shown.entries[0].field, None);
+    assert_eq!(shown.entries[0].sort_field, "rate");
+    assert_eq!(spans(&shown.entries[0]), [(Edit::Kept, "keep"), (Edit::Inserted, "::new")]);
+}
+
+/// V9, F7 step 5: the Tags preview spells as the run will, registering
+/// nothing: from the registry and from the rows the notes before it in
+/// ascending note id would register, so a tag the run would come out as
+/// stored does not count.
+#[test]
+fn v9_the_tags_preview_spells_as_the_run_does() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    // The lower note id registers `Fresh::One`; the higher one, listed
+    // first, spells `fresh::one` from it and comes out as stored.
+    let first = add(&h, vocab, &["one", "x"], &["alpha"]);
+    let second = add(&h, vocab, &["two", "x"], &[]);
+    raw_note(&h, second, |n| n.tags = " Fresh::One ".into());
+    let before = rows(&h);
+    let target = NoteTarget::Notes(vec![second, first]);
+    let request = FindReplace {
+        regex: true,
+        ..request("^(alpha|fresh::one)$", "Fresh::One", FindIn::Tags)
+    };
+    let shown = preview_of(&h.collection, &target, &request).unwrap();
+    assert_eq!(rows(&h), before, "nothing registered");
+    assert_eq!(shown.changed, 1);
+    assert_eq!(shown.entries.iter().map(|entry| entry.note).collect::<Vec<_>>(), [first]);
+    assert_eq!(shown.entries[0].new_text(), "Fresh::One");
+    assert_eq!(run(&h, &[second, first], &request).unwrap(), counts(1, 2));
+    assert_eq!(note(&h, first).tags, " Fresh::One ");
+    assert_eq!(note(&h, second).tags, " Fresh::One ");
+}
+
+/// V9, V17: the list holds the first 100 changed notes in result order
+/// while the count goes on; the all-notes target lists by note id.
+#[test]
+fn v9_the_preview_lists_the_first_hundred_notes() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let inputs = (0..150)
+        .map(|i| notes::AddNote {
+            notetype_id: vocab,
+            fields: vec![format!("cost {i}"), "x".to_owned()],
+            tags: Vec::new(),
+            deck_id: DeckId(1),
+            guid: None,
+            update_add_defaults: false,
+        })
+        .collect();
+    let mut ids: Vec<NoteId> = notes::bulk_add(&h.collection, inputs, OpSource::UserUndoable)
+        .unwrap()
+        .value
+        .into_iter()
+        .map(|added| added.id)
+        .collect();
+    ids.sort_unstable();
+    let reversed: Vec<NoteId> = ids.iter().rev().copied().collect();
+    let replace = request("cost", "fee", field("Word"));
+    let shown = preview_of(&h.collection, &NoteTarget::Notes(reversed.clone()), &replace).unwrap();
+    assert_eq!((shown.changed, shown.considered), (150, 150));
+    let listed: Vec<NoteId> = shown.entries.iter().map(|entry| entry.note).collect();
+    assert_eq!(listed, reversed[..find_replace::PREVIEW_NOTES], "the list's order");
+    let all = preview_of(&h.collection, &NoteTarget::AllNotes, &replace).unwrap();
+    assert_eq!(all.changed, 150);
+    let listed: Vec<NoteId> = all.entries.iter().map(|entry| entry.note).collect();
+    assert_eq!(listed, ids[..find_replace::PREVIEW_NOTES], "ascending note id");
+}
+
+/// V9's Whole Words, in the preview and the run alike.
+#[test]
+fn v9_whole_words_in_the_preview_and_the_run() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let a = add(&h, vocab, &["pim", "pims and a pim"], &["pim", "pims"]);
+    let b = add(&h, vocab, &["spim", "C++x"], &[]);
+    let words = |find: &str, replace: &str, within: FindIn| FindReplace {
+        whole_words: true,
+        ..request(find, replace, within)
+    };
+    assert_eq!(run(&h, &[a, b], &words("pim", "rok", FindIn::AllFields)).unwrap(), counts(1, 2));
+    assert_eq!(fields_of(&h, a), ["rok", "pims and a rok"]);
+    assert_eq!(fields_of(&h, b), ["spim", "C++x"]);
+    assert_eq!(run(&h, &[a, b], &words("C++", "x", FindIn::AllFields)).unwrap(), counts(0, 2));
+    assert_eq!(run(&h, &[a], &words("pim", "rok", FindIn::Tags)).unwrap(), counts(1, 1));
+    assert_eq!(note(&h, a).tags, " pims rok ");
+}
+
+/// V9: All Found is every note of the current results, as a selection of
+/// the handle's whole range: in cards mode a note with two cards counts
+/// once.
+#[test]
+fn v9_all_found_is_the_notes_of_every_result_row() {
+    struct Events(Mutex<Vec<SearchEvent>>);
+    impl SearchListener for Events {
+        fn event(&self, event: SearchEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+    let h = common::fresh();
+    let plain = plain(&h);
+    let two = add(&h, plain, &["cost a", "extra"], &[]);
+    let one = add(&h, plain, &["cost b", ""], &[]);
+    assert_eq!(card_count(&h, two), 2);
+    let events = Arc::new(Events(Mutex::new(Vec::new())));
+    let session = h.engine.open_search_session(events.clone());
+    session.start_search("cost", SearchMode::Cards, SortSpec::new("noteFld", SortDirection::Ascending), None);
+    // At most 30 s of 5 ms waits.
+    let mut waits = 6_000;
+    let (handle, revision, count) = loop {
+        let ended = events.0.lock().unwrap().iter().find_map(|event| match event {
+            SearchEvent::Complete {
+                handle,
+                revision,
+                count,
+                ..
+            } => Some(Ok((*handle, *revision, *count))),
+            SearchEvent::Failed { .. } | SearchEvent::Cancelled { .. } => Some(Err(format!("{event:?}"))),
+            _ => None,
+        });
+        match ended {
+            Some(Ok(found)) => break found,
+            Some(Err(event)) => panic!("the search ended without a result: {event}"),
+            None => {
+                waits -= 1;
+                assert!(waits > 0, "the search did not end");
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(count, 3, "three cards");
+    let whole: Vec<std::ops::Range<u64>> = std::iter::once(0..count).collect();
+    let found = NoteTarget::Selection(session.selection(handle, revision, whole));
+    let shown = preview_of(&h.collection, &found, &request("cost", "fee", field("Text"))).unwrap();
+    assert_eq!((shown.changed, shown.considered), (2, 2));
+    let done = run_on(&h.collection, found, &request("cost", "fee", field("Text"))).unwrap();
+    assert_eq!(done.value, counts(2, 2));
+    assert_eq!((fields_of(&h, two)[0].as_str(), fields_of(&h, one)[0].as_str()), ("fee a", "fee b"));
+}
+
+/// F10: a preview cancelled before it starts, or from its first progress
+/// report (the next keystroke superseding it), ends `Cancelled` and writes
+/// nothing.
+#[test]
+fn a_cancelled_preview_ends_without_a_result() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let inputs = (0..2_500)
+        .map(|i| notes::AddNote {
+            notetype_id: vocab,
+            fields: vec![format!("cost {i}"), "x".to_owned()],
+            tags: Vec::new(),
+            deck_id: DeckId(1),
+            guid: None,
+            update_add_defaults: false,
+        })
+        .collect();
+    notes::bulk_add(&h.collection, inputs, OpSource::UserUndoable).unwrap();
+    let before = rows(&h);
+    let replace = request("cost", "fee", FindIn::AllFields);
+    let token = CancelToken::new();
+    token.cancel();
+    let e = find_replace::preview(&h.collection, &NoteTarget::AllNotes, &replace, &token, &ProgressSink::new())
+        .unwrap_err();
+    assert_eq!(e, EngineError::Cancelled);
+    let token = CancelToken::new();
+    let progress = ProgressSink::with_clock(zip_time);
+    let cancel = Arc::clone(&token);
+    let reports = Arc::new(AtomicU64::new(0));
+    let seen = Arc::clone(&reports);
+    progress.set_listener(Arc::new(Listener(move |_: &Progress| {
+        seen.fetch_add(1, Ordering::SeqCst);
+        cancel.cancel();
+    })));
+    let e = find_replace::preview(&h.collection, &NoteTarget::AllNotes, &replace, &token, &progress).unwrap_err();
+    assert_eq!(e, EngineError::Cancelled);
+    assert!(reports.load(Ordering::SeqCst) >= 1);
+    assert_eq!(rows(&h), before);
+    // Not cancelled, the same preview counts every note.
+    let shown = find_replace::preview(&h.collection, &NoteTarget::AllNotes, &replace, &CancelToken::new(), &ProgressSink::new())
+        .unwrap();
+    assert_eq!(shown.changed, 2_500);
+}
+
+// --- The confirmed count (D8's pattern, ruled 2026-11-21) -------------------------
+
+fn count_changed(error: &EngineError) -> u64 {
+    match refusal(error) {
+        Refusal::CountChanged { notes } => *notes,
+        other => panic!("expected CountChanged, got {other:?}"),
+    }
+}
+
+/// A note that starts to match between the preview and the run makes the
+/// run write more than was confirmed: refused with the fresh count, nothing
+/// written, no step recorded, both histories kept. A listed note edited to
+/// match, and a note added under the all-notes target, both count.
+#[test]
+fn a_run_that_would_write_more_than_was_confirmed_is_refused() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let a = add(&h, vocab, &["cost", "x"], &[]);
+    let b = add(&h, vocab, &["price", "x"], &[]);
+    let replace = request("cost", "fee", field("Word"));
+    let listed = NoteTarget::Notes(vec![a, b]);
+    let shown = preview_of(&h.collection, &listed, &replace).unwrap();
+    assert_eq!(shown.changed, 1);
+    h.clock.step_ms(60_000);
+    notes::update::update(
+        &h.collection,
+        notes::update::UpdateNote {
+            id: b,
+            fields: vec!["cost too".into(), "x".into()],
+            tags: Vec::new(),
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    let before = rows(&h);
+    let histories = (undo_name(&h), redo_name(&h));
+    let confirmed = FindReplace {
+        confirmed: shown.changed,
+        ..replace.clone()
+    };
+    let e = find_replace::run(&h.collection, &listed, &confirmed, CancelToken::new(), ProgressSink::new()).unwrap_err();
+    assert_eq!(count_changed(&e), 2, "the fresh count");
+    assert_eq!(rows(&h), before, "nothing written");
+    assert_eq!((undo_name(&h), redo_name(&h)), histories, "no step recorded");
+    // The all-notes target: a note added after the preview.
+    let shown = preview_of(&h.collection, &NoteTarget::AllNotes, &replace).unwrap();
+    assert_eq!(shown.changed, 2);
+    add(&h, vocab, &["cost three", "x"], &[]);
+    let before = rows(&h);
+    let e = find_replace::run(
+        &h.collection,
+        &NoteTarget::AllNotes,
+        &FindReplace {
+            confirmed: shown.changed,
+            ..replace.clone()
+        },
+        CancelToken::new(),
+        ProgressSink::new(),
+    )
+    .unwrap_err();
+    assert_eq!(count_changed(&e), 3);
+    assert_eq!(rows(&h), before);
+    // Shown again with the fresh count, the run goes through.
+    let done = find_replace::run(
+        &h.collection,
+        &NoteTarget::AllNotes,
+        &FindReplace { confirmed: 3, ..replace },
+        CancelToken::new(),
+        ProgressSink::new(),
+    )
+    .unwrap();
+    assert_eq!(done.value.affected, 3);
+}
+
+/// A match set that shrank, or stayed as large with other notes, since the
+/// preview proceeds: the confirmation is a count, not a list of notes.
+#[test]
+fn a_run_that_writes_fewer_or_as_many_notes_proceeds() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let a = add(&h, vocab, &["cost", "x"], &[]);
+    let b = add(&h, vocab, &["cost", "y"], &[]);
+    let c = add(&h, vocab, &["price", "z"], &[]);
+    let replace = request("cost", "fee", field("Word"));
+    let listed = NoteTarget::Notes(vec![a, b, c]);
+    let shown = preview_of(&h.collection, &listed, &replace).unwrap();
+    assert_eq!(shown.changed, 2);
+    notes::delete(&h.collection, vec![b], OpSource::UserUndoable).unwrap();
+    let confirmed = FindReplace {
+        confirmed: shown.changed,
+        ..replace.clone()
+    };
+    let done = find_replace::run(&h.collection, &listed, &confirmed, CancelToken::new(), ProgressSink::new()).unwrap();
+    assert_eq!(done.value, counts(1, 3), "a smaller count proceeds");
+    // As many notes, but another one: proceeds too.
+    let shown = preview_of(&h.collection, &listed, &request("fee", "cost", field("Word"))).unwrap();
+    assert_eq!(shown.changed, 1);
+    h.clock.step_ms(60_000);
+    for (id, word) in [(a, "kept"), (c, "fee")] {
+        notes::update::update(
+            &h.collection,
+            notes::update::UpdateNote {
+                id,
+                fields: vec![word.into(), "x".into()],
+                tags: Vec::new(),
+            },
+            OpSource::UserUndoable,
+        )
+        .unwrap();
+    }
+    let done = find_replace::run(
+        &h.collection,
+        &listed,
+        &FindReplace {
+            confirmed: shown.changed,
+            ..request("fee", "cost", field("Word"))
+        },
+        CancelToken::new(),
+        ProgressSink::new(),
+    )
+    .unwrap();
+    assert_eq!(done.value.affected, 1);
+    assert_eq!(fields_of(&h, c)[0], "cost");
+}
+
+/// A note that starts to match between the compute phase and the commit:
+/// the commit's precondition fails first (`Stale` wins), the run plans
+/// again, and the new compute phase refuses with the fresh count. Nothing
+/// is written and no step recorded.
+#[test]
+fn a_note_matching_after_the_compute_phase_is_refused_on_the_new_plan() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let a = add(&h, vocab, &["cost", "x"], &[]);
+    let b = add(&h, vocab, &["price", "y"], &[]);
+    h.clock.step_ms(60_000);
+    let progress = ProgressSink::with_clock(zip_time);
+    let edited = Arc::new(AtomicBool::new(false));
+    let commits = Arc::new(AtomicU64::new(0));
+    let (collection, flag, count) = (h.collection.clone(), Arc::clone(&edited), Arc::clone(&commits));
+    progress.set_listener(Arc::new(Listener(move |p: &Progress| {
+        if p.phase == ProgressPhase::Committing {
+            count.fetch_add(1, Ordering::SeqCst);
+        }
+        if p.phase == ProgressPhase::Planning && p.completed == 0 && !flag.swap(true, Ordering::SeqCst) {
+            notes::update::update(
+                &collection,
+                notes::update::UpdateNote {
+                    id: b,
+                    fields: vec!["cost".into(), "y".into()],
+                    tags: Vec::new(),
+                },
+                OpSource::UserUndoable,
+            )
+            .unwrap();
+        }
+    })));
+    let e = find_replace::run(
+        &h.collection,
+        &NoteTarget::Notes(vec![a, b]),
+        &FindReplace {
+            confirmed: 1,
+            ..request("cost", "fee", field("Word"))
+        },
+        CancelToken::new(),
+        progress,
+    )
+    .unwrap_err();
+    assert_eq!(count_changed(&e), 2);
+    assert_eq!(commits.load(Ordering::SeqCst), 1, "one commit, stale, then the new plan refused");
+    assert_eq!(fields_of(&h, a), ["cost", "x"], "nothing written");
+    assert_eq!(fields_of(&h, b), ["cost", "y"]);
+    assert_eq!(undo_name(&h).as_deref(), Some("Update Note"), "no Find and Replace step");
+}
+
+/// The write transaction's own count: a Tags run whose spelling changes
+/// with the registry between the compute phase and the commit (the
+/// preconditions hold the notes, not the registry) would write a note the
+/// compute phase found unchanged. Counted again before the first write, it
+/// is refused with the fresh count and writes nothing.
+#[test]
+fn the_write_transaction_counts_again_before_its_first_write() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let a = add(&h, vocab, &["one", "x"], &["solo"]);
+    let replace = request("solo", "solo", FindIn::Tags);
+    let shown = preview_of(&h.collection, &NoteTarget::Notes(vec![a]), &replace).unwrap();
+    assert_eq!(shown.changed, 0, "the tag comes out as stored");
+    let progress = ProgressSink::with_clock(zip_time);
+    let plans = Arc::new(AtomicU64::new(0));
+    let (collection, planned) = (h.collection.clone(), Arc::clone(&plans));
+    progress.set_listener(Arc::new(Listener(move |p: &Progress| {
+        // Each compute phase reports its first page once.
+        if p.phase == ProgressPhase::Planning && (p.completed, p.total) == (0, Some(1)) {
+            if planned.fetch_add(1, Ordering::SeqCst) == 0 {
+                // The row's spelling changes; no note is touched.
+                collection
+                    .run(OpSpec::named("respell", OpSource::UserUndoable), |ctx| {
+                        let scope = ctx.scope();
+                        scope.remove_tag("solo")?;
+                        scope.put(&meguri_engine::tags::registry::new_row("SOLO"))?;
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+        }
+    })));
+    let before = rows(&h);
+    let e = find_replace::run(
+        &h.collection,
+        &NoteTarget::Notes(vec![a]),
+        &FindReplace {
+            confirmed: shown.changed,
+            ..replace.clone()
+        },
+        CancelToken::new(),
+        progress,
+    )
+    .unwrap_err();
+    assert_eq!(plans.load(Ordering::SeqCst), 1, "one compute phase: the commit refused, not a new plan");
+    assert_eq!(count_changed(&e), 1);
+    assert_eq!(rows(&h).notes, before.notes, "nothing written");
+    assert_eq!(note(&h, a).tags, " solo ");
+    assert_ne!(undo_name(&h).as_deref(), Some("Update Tag"), "no Find and Replace step");
+    // Shown again, the run spells from the live row.
+    assert_eq!(run(&h, &[a], &replace).unwrap(), counts(1, 1));
+    assert_eq!(note(&h, a).tags, " SOLO ");
 }
 
 // --- K6, F3: selection_summary --------------------------------------------------
