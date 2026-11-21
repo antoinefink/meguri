@@ -495,7 +495,7 @@ fn excluding_every_field_fails_the_terms_that_need_one() {
 // refusals come first.
 #[test]
 fn a_note_whose_note_type_is_missing() {
-    let mut f = excluded_fields();
+    let f = excluded_fields();
     // Note type 99 has no row: its notes hold `dog` and `secret`.
     f.note(20, 99, &["dog", "secret"]);
     f.note(21, 99, &["{{c1::dog}} secret"]);
@@ -519,7 +519,7 @@ fn a_note_whose_note_type_is_missing() {
 
     // No excluded field: such a note is tested like any note, except by
     // `sc:`, whose note types its `mid` is not one of.
-    let mut f = cloze_fixture();
+    let f = cloze_fixture();
     f.note(20, 99, &["capital", ""]);
     f.table(
         UNICODE,
