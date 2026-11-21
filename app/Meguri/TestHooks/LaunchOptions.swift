@@ -30,6 +30,7 @@ extension TestHooks {
     /// | `-MeguriIntegrations` | Mac only: `on` or `off`, the integrations flag U144 publishes (R11): on, closing the window keeps the app running; starts no server |
     /// | `-MeguriRoute` | a route registered in `RouteRegistry`, e.g. `sample/sheet` |
     /// | `-MeguriBackgroundLaunch` | Mac only: `YES` or `NO`; in Debug, `YES` keeps the app out of the Dock and never active (`BackgroundLaunch`, which reads it itself; Profile ignores it). Not a UI-state option: it changes neither the restored state nor the window size |
+    /// | `-MeguriStudyTimings` | `on` or `off` (default): a strip below the shell gives the last Study's way to its first card (`StudyStartTrace`, R1813) as `testhooks.studyStart.timings` |
     struct LaunchOptions: Equatable {
         enum WindowSize: Equatable {
             case minimum, standard, large
@@ -64,12 +65,13 @@ extension TestHooks {
         var sizeClass: SizeClass?
         var integrations: Bool?
         var route: Route?
+        var studyTimings = false
 
         static let prefix = "-Meguri"
         static let names = [
             "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
             "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "SizeClass",
-            "Integrations", "Route", "BackgroundLaunch", "ImportSource", "OwnedProviderFixture",
+            "Integrations", "Route", "BackgroundLaunch", "ImportSource", "OwnedProviderFixture", "StudyTimings",
             "NativeReviewRoot", "NativeReviewCase", "NativeReviewPlatform", "NativeReviewFreezeSHA256", "NativeReviewFreezeBytes",
         ]
 
@@ -199,6 +201,7 @@ extension TestHooks {
                 sizeClass = named
             }
             integrations = try values["Integrations"].map { value throws(TestHookError) in try Self.onOff(value, "Integrations") }
+            studyTimings = try values["StudyTimings"].map { value throws(TestHookError) in try Self.onOff(value, "StudyTimings") } ?? false
             if let value = values["Route"] {
                 route = try Route(value)
             }

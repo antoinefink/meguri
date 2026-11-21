@@ -13,6 +13,7 @@ mod one_shot;
 mod page;
 mod registry;
 mod selection;
+mod selection_counts;
 mod worker;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -33,6 +34,7 @@ pub use handle::{Invalidation, Refetch};
 pub use one_shot::search_ids;
 pub use page::{QaCells, QaWhich};
 pub use selection::{MapFrom, Mapped, Selection};
+pub use selection_counts::{SelectionCounts, selection_counts};
 pub(crate) use registry::{SearchRegistry, bridge};
 pub(crate) use worker::{OWNER, cells, context};
 

@@ -188,7 +188,7 @@ struct MeguriApp: App {
 
     @ViewBuilder private var root: some View {
         #if MEGURI_TEST_HOOKS
-        TestHooks.Root(session: hooks, configuration: configuration, navigation: navigation) {
+        TestHooks.Root(session: hooks, configuration: configuration, navigation: navigation, collection: collection) {
             if let ownedProvider = hooks.ownedProvider {
                 RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore, collection: collection)
                     .defaultAppStorage(ownedProvider.defaults)
