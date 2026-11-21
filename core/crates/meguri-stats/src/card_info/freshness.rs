@@ -35,7 +35,11 @@ impl Dependencies {
             || changes.notetypes.iter().any(|n| n.id == self.notetype)
             || changes.decks.iter().any(|d| d.id == self.deck || d.id == self.home_deck)
             || changes.deck_configs.iter().any(|p| p.id == self.preset)
-            || changes.config_keys.iter().any(|k| k.key == "rollover")
+            // Both keys feed `sched_day` (C10, ruled 2026-11-21).
+            || changes
+                .config_keys
+                .iter()
+                .any(|k| k.key == "rollover" || k.key == "creationOffset")
             || changes
                 .revlog_removed
                 .iter()

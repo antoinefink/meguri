@@ -970,6 +970,18 @@ fn c10_dependencies_and_the_change_test() {
         kind: ChangeKind::Updated,
     });
     assert!(deps.affected(&rollover, &reader).unwrap());
+    let mut offset = ChangeSet::empty(OpSource::UserUndoable);
+    offset.config_keys.push(ConfigKeyChange {
+        key: "creationOffset".into(),
+        kind: ChangeKind::Updated,
+    });
+    assert!(deps.affected(&offset, &reader).unwrap());
+    let mut other = ChangeSet::empty(OpSource::UserUndoable);
+    other.config_keys.push(ConfigKeyChange {
+        key: "curDeck".into(),
+        kind: ChangeKind::Updated,
+    });
+    assert!(!deps.affected(&other, &reader).unwrap());
     // An added row of this card, then one of another card.
     db.row((NOW - 10 * 86_400, 3, 5, 0, 2500, 3_000, 1));
     let mut added = ChangeSet::empty(OpSource::UserUndoable);
