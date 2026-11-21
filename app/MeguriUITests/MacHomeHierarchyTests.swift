@@ -543,16 +543,17 @@ final class MacHomeHierarchyTests: XCTestCase {
         return nil
     }
 
-    /// N14.1: with no deck selected the detail is Today: the decks with cards
-    /// waiting, each with its own Study, and no second deck outline.
+    /// N14.1, N24.2: with no deck selected the detail is Today: one Study for every
+    /// deck with cards waiting and its summary, no deck rows, and no second deck outline.
     private func assertTodayRoot(_ app: XCUIApplication, readyDeckID: String) {
         XCTAssertTrue(element(app, "home.collection.screen").exists)
         XCTAssertFalse(app.buttons["home.deck.study"].exists, "Disclosure must not select a deck or start Study")
-        XCTAssertTrue(element(app, "home.today.deck.\(readyDeckID)").waitForExistence(timeout: 10),
-            "Today must list the deck whose cards wait")
-        let study = app.buttons.matching(identifier: "home.today.study.\(readyDeckID)")
+        let study = app.buttons.matching(identifier: "home.today.studyAll")
+        XCTAssertTrue(study.element(boundBy: 0).waitForExistence(timeout: 10), "Today must offer Study while cards wait")
         XCTAssertEqual(study.count, 1)
         XCTAssertTrue(study.element(boundBy: 0).isEnabled)
+        XCTAssertTrue(element(app, "home.today.studyAll.summary").exists)
+        XCTAssertFalse(element(app, "home.today.deck.\(readyDeckID)").exists, "Today lists no decks (N24.2)")
         XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@", "home.deck.row.")).count, 0, "The sidebar is the only deck outline")
         XCTAssertFalse(element(app, "review.session.screen").exists)
