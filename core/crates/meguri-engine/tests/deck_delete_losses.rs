@@ -50,13 +50,21 @@ impl meguri_engine::ProgressListener for DuringPlanning {
 
 /// A sink whose listener makes `change` on the first planning pass only.
 fn on_first_plan(h: &Harness, change: impl Fn(&Collection) + Send + Sync + 'static) -> ProgressSink {
+    on_first_plan_counted(h, change).0
+}
+
+/// [`on_first_plan`], with the listener, whose `passes` counts the planning passes.
+fn on_first_plan_counted(
+    h: &Harness,
+    change: impl Fn(&Collection) + Send + Sync + 'static,
+) -> (ProgressSink, Arc<DuringPlanning>) {
     static TICK: AtomicU64 = AtomicU64::new(0);
     fn next_second() -> std::time::Duration {
         // Every report a second after the last, so the rate limit holds none back.
         std::time::Duration::from_secs(TICK.fetch_add(1, Ordering::SeqCst))
     }
     let sink = ProgressSink::with_clock(next_second);
-    sink.set_listener(Arc::new(DuringPlanning {
+    let listener = Arc::new(DuringPlanning {
         collection: h.collection.clone(),
         change: Box::new(move |c, pass| {
             if pass == 0 {
@@ -64,8 +72,9 @@ fn on_first_plan(h: &Harness, change: impl Fn(&Collection) + Send + Sync + 'stat
             }
         }),
         passes: AtomicUsize::new(0),
-    }));
-    sink
+    });
+    sink.set_listener(listener.clone());
+    (sink, listener)
 }
 
 fn deck(h: &Harness, name: &str) -> DeckId {
@@ -75,7 +84,11 @@ fn deck(h: &Harness, name: &str) -> DeckId {
 /// One note with one card in `deck`, through a raw undoable op (writer only,
 /// so it can run while a plan holds the maintenance reader).
 fn add_card(c: &Collection, deck: DeckId) -> NoteId {
-    c.run(OpSpec::named("concurrent_add", OpSource::UserUndoable), move |ctx| {
+    add_card_from(c, deck, OpSource::UserUndoable)
+}
+
+fn add_card_from(c: &Collection, deck: DeckId, source: OpSource) -> NoteId {
+    c.run(OpSpec::named("concurrent_add", source), move |ctx| {
         let nid = ctx.scope().add_note(&note(&["extra", "back"]))?;
         let mut card = card(nid, 0);
         card.deck_id = deck;
@@ -265,11 +278,14 @@ fn cards_found_at_commit_without_a_backup_replan_first() {
         let h = common::fresh();
         let home = deck(&h, "Home");
         let backups = Arc::new(Backups::default());
-        let progress = on_first_plan(&h, move |c| {
+        let (progress, listener) = on_first_plan_counted(&h, move |c| {
             add_card(c, home);
         });
         let result =
             decks::without_table_preconditions_for_testing(|| run(&h, &[home], confirmed, &backups, progress));
+        // The commit's backup check sent the op back to planning; without it
+        // the counts would have refused in the write transaction, in one pass.
+        assert_eq!(listener.passes.load(Ordering::SeqCst), 2);
         match confirmed {
             ConfirmedLosses::Any => {
                 assert_eq!(result.unwrap(), DeletionSummary { decks: 1, cards: 1 });
@@ -318,15 +334,18 @@ fn a_refusal_leaves_the_undo_and_redo_history() {
         losses(1, 1)
     );
     assert_eq!(history(&h.collection), before);
-    // In the write transaction: the history as the concurrent write left it.
+    // In the write transaction. The concurrent card comes from the local API,
+    // which keeps the unrelated redo step, so the refusal is seen to keep it too.
     let seen = Arc::new(Mutex::new(None));
     let record = seen.clone();
     let progress = on_first_plan(&h, move |c| {
-        add_card(c, home);
+        add_card_from(c, home, OpSource::LocalApi);
         *record.lock().unwrap() = Some(history(c));
     });
     let error = decks::without_table_preconditions_for_testing(|| run(&h, &[home], counts(1, 1), &backups, progress))
         .unwrap_err();
     assert_eq!(error, losses(1, 2));
-    assert_eq!(Some(history(&h.collection)), seen.lock().unwrap().clone());
+    let after = history(&h.collection);
+    assert_eq!(Some(after.clone()), seen.lock().unwrap().clone());
+    assert_eq!(after.1, before.1);
 }

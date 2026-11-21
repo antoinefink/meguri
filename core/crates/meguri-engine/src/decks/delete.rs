@@ -159,6 +159,8 @@ pub fn delete_controlled(
             let snapshot = lease.snapshot()?;
             let summary = deletion_summary(&*snapshot, &ids)?;
             // Counted on this snapshot: the decks this attempt plans to process.
+            // Made while the snapshot is held, so the D16 tests can commit a
+            // change between this planning and the commit here.
             progress.report(0, Some(summary.decks as u64));
             (summary, snapshot.seq())
         };
@@ -205,7 +207,27 @@ pub fn delete_controlled(
                     });
                 }
                 check(confirmed, live)?;
-                delete_in(ctx.scope(), &apply)
+                let removed = delete_in(ctx.scope(), &apply)?;
+                // `delete_in` finds each listed deck's descendants when it
+                // reaches it, so in a damaged collection the default deck's
+                // rename can bring in an orphan subtree the count missed. Roll
+                // back rather than remove more than was confirmed or backed up.
+                if removed.cards > live.cards {
+                    if !backed_up {
+                        return Err(EngineError::Stale {
+                            table: Table::Cards,
+                            key: "deck deletion".into(),
+                        });
+                    }
+                    check(
+                        confirmed,
+                        DeletionSummary {
+                            decks: live.decks.max(removed.decks),
+                            cards: removed.cards,
+                        },
+                    )?;
+                }
+                Ok(removed)
             },
         );
         match result {

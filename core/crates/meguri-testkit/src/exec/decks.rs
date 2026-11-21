@@ -90,7 +90,6 @@ fn run(s: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
         }
         Step::DeleteDecks(a) => {
             let selected = ids(&*writer(s)?, &a.decks)?;
-            // K5: the counts read at the step itself, right before submitting.
             // K5: the counts read at the step, right before submitting. The
             // reader is released first: the delete plans and commits on its own.
             let confirmed = {

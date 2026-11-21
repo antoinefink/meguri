@@ -141,10 +141,10 @@ impl DeckDeletionJob {
         Ok(self.result.lock().unwrap().clone())
     }
 }
-#[uniffi::export]
 /// `decks/decks` D8. `confirmed` is the last summary read before the delete
 /// (the question's counts, or the zero-card read's); a live count above it
 /// refuses with `DeckRefusal::LossesChanged` and writes nothing (D8 step 6).
+#[uniffi::export]
 pub fn start_delete_decks(ids: Vec<i64>, confirmed: DeckDeletionSummary) -> Result<DeckDeletionJobStart, CoreError> {
     callback::enter("start_delete_decks");
     let host = runtime::host()?;
