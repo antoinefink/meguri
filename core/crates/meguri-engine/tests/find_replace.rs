@@ -138,7 +138,12 @@ fn run_on(
         ),
         (Err(refused), Err(error)) => assert_eq!(refused, error, "the preview refuses as the run does"),
         (Err(refused), Ok(_)) => panic!("the preview refused ({refused:?}) a run that commits"),
-        (Ok(_), Err(_)) => {}
+        // An injected failure; never the confirmation itself, which would
+        // mean the preview counted fewer notes than the run writes.
+        (Ok(_), Err(error)) => assert!(
+            !matches!(error, EngineError::FindReplace(Refusal::CountChanged { .. })),
+            "the run refused the preview's own count: {error:?}"
+        ),
     }
     result
 }
@@ -1561,8 +1566,12 @@ fn the_write_transaction_counts_again_before_its_first_write() {
     assert_eq!(shown.changed, 0, "the tag comes out as stored");
     let progress = ProgressSink::with_clock(zip_time);
     let plans = Arc::new(AtomicU64::new(0));
-    let (collection, planned) = (h.collection.clone(), Arc::clone(&plans));
+    let commits = Arc::new(AtomicU64::new(0));
+    let (collection, planned, committed) = (h.collection.clone(), Arc::clone(&plans), Arc::clone(&commits));
     progress.set_listener(Arc::new(Listener(move |p: &Progress| {
+        if p.phase == ProgressPhase::Committing {
+            committed.fetch_add(1, Ordering::SeqCst);
+        }
         // Each compute phase reports its first page once.
         if p.phase == ProgressPhase::Planning && (p.completed, p.total) == (0, Some(1)) {
             if planned.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -1590,7 +1599,8 @@ fn the_write_transaction_counts_again_before_its_first_write() {
         progress,
     )
     .unwrap_err();
-    assert_eq!(plans.load(Ordering::SeqCst), 1, "one compute phase: the commit refused, not a new plan");
+    assert_eq!(plans.load(Ordering::SeqCst), 1, "one compute phase: no new plan");
+    assert_eq!(commits.load(Ordering::SeqCst), 1, "the write transaction refused, not the compute phase");
     assert_eq!(count_changed(&e), 1);
     assert_eq!(rows(&h).notes, before.notes, "nothing written");
     assert_eq!(note(&h, a).tags, " solo ");

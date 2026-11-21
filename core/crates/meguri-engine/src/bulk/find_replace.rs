@@ -1127,18 +1127,28 @@ pub fn preview_in(
     Ok(Preview {
         changed: scanned.changed,
         considered: scanned.considered,
-        entries: listed.entries.into_values().flatten().collect(),
+        entries: listed.finish(cancel)?,
     })
 }
 
+/// A preview entry before its diff: the texts it compares.
+struct Pending {
+    note: NoteId,
+    sort_field: String,
+    field: Option<String>,
+    old: String,
+    new: String,
+}
+
 /// The preview's list: the entries of the first [`PREVIEW_NOTES`] changed
-/// notes by result position, whatever order the read finds them in.
+/// notes by result position, whatever order the read finds them in. Their
+/// diffs are built once the read has ended, for the notes that stay.
 struct Listed<'r, R: ReadRows + ?Sized> {
     /// A listed note's position in the list; `None` for the all-notes
     /// target, whose position is the note id.
     positions: Option<HashMap<NoteId, usize>>,
     notetypes: Notetypes<'r, R>,
-    entries: BTreeMap<i64, Vec<PreviewEntry>>,
+    entries: BTreeMap<i64, Vec<Pending>>,
 }
 
 impl<'r, R: ReadRows + ?Sized> Listed<'r, R> {
@@ -1169,11 +1179,12 @@ impl<'r, R: ReadRows + ?Sized> Listed<'r, R> {
             Change::Fields { note, notetype, fields } => field_entries(note, notetype, fields),
             Change::Tags { note, tags } => {
                 let notetype = self.notetypes.get(note.notetype_id)?;
-                vec![PreviewEntry {
+                vec![Pending {
                     note: note.id,
                     sort_field: notetype.map_or_else(String::new, |notetype| sort_field_text(note, &notetype)),
                     field: None,
-                    diff: char_diff(&tags_line(&note.tags), &tags_line(tags)),
+                    old: tags_line(&note.tags),
+                    new: tags_line(tags),
                 }]
             }
         };
@@ -1182,6 +1193,22 @@ impl<'r, R: ReadRows + ?Sized> Listed<'r, R> {
             self.entries.pop_last();
         }
         Ok(())
+    }
+
+    /// The listed entries with their diffs, in result order, then field
+    /// order; `cancel` is checked before each diff.
+    fn finish(self, cancel: &CancelToken) -> Result<Vec<PreviewEntry>, EngineError> {
+        let mut out = Vec::new();
+        for pending in self.entries.into_values().flatten() {
+            cancel.check()?;
+            out.push(PreviewEntry {
+                note: pending.note,
+                sort_field: pending.sort_field,
+                field: pending.field,
+                diff: char_diff(&pending.old, &pending.new),
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -1201,20 +1228,18 @@ fn tags_line(tags: &str) -> String {
 
 /// V9's entries of a note whose fields change: one per field whose stored
 /// value changes (normalization included), in field order.
-fn field_entries(note: &Note, notetype: &Notetype, fields: &[String]) -> Vec<PreviewEntry> {
+fn field_entries(note: &Note, notetype: &Notetype, fields: &[String]) -> Vec<Pending> {
     let sort_field = sort_field_text(note, notetype);
     note.field_values()
         .zip(fields)
         .enumerate()
         .filter(|(_, (old, new))| *old != new.as_str())
-        .map(|(ord, (old, new))| PreviewEntry {
+        .map(|(ord, (old, new))| Pending {
             note: note.id,
             sort_field: sort_field.clone(),
             field: notetype.fields.get(ord).map(|field| field.name.clone()),
-            diff: char_diff(
-                &meguri_text::html::text_line_keep_media(old),
-                &meguri_text::html::text_line_keep_media(new),
-            ),
+            old: meguri_text::html::text_line_keep_media(old),
+            new: meguri_text::html::text_line_keep_media(new),
         })
         .collect()
 }
@@ -1482,6 +1507,11 @@ mod tests {
         assert_eq!(whole("_x", "y", false, "a_x _x"), (true, "a_x y".into()), "`_` is a word character");
         assert_eq!(whole(r"(\d+)", "<$1>", true, "12 a3 4b 5"), (true, "<12> a3 4b <5>".into()));
         assert_eq!(whole("a+", "-", true, "baa aa"), (true, "baa -".into()), "a dropped match is not retried");
+        assert_eq!(
+            whole("pim|pims", "-", true, "pims"),
+            (false, "pims".into()),
+            "the first match `pim` is dropped and `pims` is not tried at its start"
+        );
         assert_eq!(whole("", "|", false, "ab c"), (false, "ab c".into()), "every empty match touches a word");
         assert_eq!(whole("", "|", false, "- -"), (true, "|-| |-|".into()), "empty matches between non-word characters");
         assert_eq!(whole("cost", "$5", false, "cost"), (true, "$5".into()), "literal `$` kept");
