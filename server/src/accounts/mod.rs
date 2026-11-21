@@ -90,7 +90,7 @@ pub struct Service {
     pub(crate) attempts: Attempts,
     pub(crate) barriers: barrier::Barriers,
     #[cfg(feature = "test-hooks")]
-    pub hooks: crate::test_hooks::Hooks,
+    pub hooks: Arc<crate::test_hooks::Hooks>,
 }
 impl Drop for Service {
     fn drop(&mut self) { self.normal_sessions.close(); }
@@ -115,7 +115,7 @@ impl Service {
             attempts: Attempts::default(),
             barriers: barrier::Barriers::default(),
             #[cfg(feature = "test-hooks")]
-            hooks: crate::test_hooks::Hooks::default(),
+            hooks: Arc::new(crate::test_hooks::Hooks::default()),
         });
         service.recover_resets().await?;
         if service.admission_open().await? {

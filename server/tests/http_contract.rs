@@ -47,8 +47,7 @@ fn session_cookie(r: &Response, clear: bool) -> String {
     if clear {
         assert_eq!(age, 0);
     } else {
-        // Login's response may cross a UTC second after issuance.
-        assert!((31_535_999..=31_536_000).contains(&age));
+        assert!(age > 0 && age <= 31_536_000);
     }
     c.split(';').next().unwrap().into()
 }

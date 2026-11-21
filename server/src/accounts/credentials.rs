@@ -129,6 +129,8 @@ impl Service {
     /// Only the browser identity endpoint rolls sessions. Ordinary identity and
     /// authority reads stay read-only, including before the daily boundary.
     pub(crate) async fn browser_me(&self, authority: BrowserAuthority) -> Result<(Identity, i64)> {
+        #[cfg(feature = "test-hooks")]
+        let hooks = self.hooks.clone();
         self.metadata.run(move |c| {
             admission(c)?;
             let checked_at = now();
@@ -141,6 +143,9 @@ impl Service {
 
             // A competing renewal or revocation may have won while acquiring
             // the writer. Recheck original authority and expiry at a fresh time.
+            #[cfg(feature = "test-hooks")]
+            tokio::runtime::Handle::current()
+                .block_on(hooks.hit("browser_session_before_renewal"));
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             admission(&tx)?;
             let checked_at = now();
