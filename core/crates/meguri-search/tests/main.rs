@@ -28,5 +28,7 @@ pub mod names_and_ids;
 pub mod parse_props;
 #[path = "props_and_history.rs"]
 pub mod props_and_history;
+#[path = "sort_props.rs"]
+pub mod sort_props;
 #[path = "state_and_flags.rs"]
 pub mod state_and_flags;

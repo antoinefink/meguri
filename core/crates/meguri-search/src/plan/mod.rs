@@ -6,6 +6,7 @@
 mod history;
 mod names;
 mod props;
+pub mod sort;
 pub mod sql;
 mod state;
 
@@ -54,6 +55,9 @@ pub struct Plan {
     mode: SearchMode,
     rows: Rows,
     sql: String,
+    /// The WHERE expression of `sql`, over the aliases of `rows`, for the
+    /// sorted statements of [`sort`].
+    predicate: String,
     params: Vec<Param>,
     slow: Vec<NodeId>,
     reads: ContextReads,
@@ -267,6 +271,7 @@ fn build_with(
         mode,
         rows,
         sql: sql::statement(mode, rows, &predicate),
+        predicate,
         params: params.into_vec(),
         slow,
         reads,

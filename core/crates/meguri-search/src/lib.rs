@@ -16,6 +16,10 @@
 //! search text of built items, [`tail`] classifies the text at the cursor
 //! while the user types, and [`name_index`] holds the names suggestions
 //! read.
+//!
+//! U84 (`specs/browser/columns.md`, `specs/browser/sorting.md`): [`browser`]
+//! computes Browse cell values, [`config::Column`] holds the column catalog,
+//! and [`SortedQuery`] writes the sorted statement of a search or an id list.
 
 pub mod ast;
 pub mod browser;
@@ -39,4 +43,5 @@ pub use canonical::canonical_text;
 pub use context::{ContextReads, ContextValue, FoldMode, SearchContext};
 pub use error::{ErrorKind, SearchError, SearchFailure};
 pub use parser::parse;
+pub use plan::sort::{FIELD_COLUMN_PREFIX, Sort, SortColumn, SortError, SortedQuery};
 pub use plan::{BuildError, Param, Plan, Rows, SearchMode};
