@@ -60,7 +60,7 @@ Every `tools/mg` run leaves a folder under `build/mg/`, and nothing removes
 them automatically. `tools/mg doctor` warns when a checkout's `build/mg` passes
 20 GiB. `tools/mg prune` shows what would go and deletes nothing;
 `tools/mg prune --cleanroom` does the same for old clean-room runs. Once no job
-runs in the checkout, `tools/mg prune --apply` (or `--cleanroom --apply`)
+runs in any checkout, `tools/mg prune --apply` (or `--cleanroom --apply`)
 deletes it there. Prune never touches Docker volumes, Rust targets, derived
 data or anything else outside `build/mg`. It never deletes a run named in a
 tracked or uncommitted file, a branch, a state file or the receipt of a run it
