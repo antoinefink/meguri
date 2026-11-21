@@ -20,7 +20,7 @@ Branch `unit/u35-spec-record` (PR #57), spec-writer session `s-20261121T104205Z-
 
 ## Independent review
 
-Reviewer: an independent Claude subagent (Opus). It received the diff, PR #46 and its threads, and the questions, not the writer's conclusions. It checked the text against the merged code (`notetypes/change/mod.rs`, `commit.rs`, the testkit executor, `journal_structure.rs`, `undo/entry.rs`) and the neighbouring specs.
+Reviewer: an independent Claude subagent (Opus). It received the diff, PR #46 and its threads, the coordinator's framing of what the commit records, and the questions, not the writer's answers to them. It checked the text against the merged code (`notetypes/change/mod.rs`, `commit.rs`, the testkit executor, `journal_structure.rs`, `undo/entry.rs`) and the neighbouring specs.
 
 - P1: none.
 - P2, all fixed:
@@ -38,7 +38,7 @@ Reviewer: an independent Claude subagent (Opus). It received the diff, PR #46 an
 - P3, all fixed:
   - Status lines now cover the lists and sub-bullets a marked line introduces.
   - M8 check 1 names the rule that holds after U35a.
-  - H1 and H2 of `conformance/change-notetype-ops` are corrected as the reviewer asked (see their marked lines).
+  - H2 of `conformance/change-notetype-ops` is corrected as the reviewer asked (see its marked lines).
   - The staleness lists in M8 and in `notetypes/structure-changes` S1.2 and S12 name check 1's layout token.
   - M10 names the O9 catalog row.
   - The open point says the resolution must use a `TypeChange` entry or revisit K19.2.
@@ -56,3 +56,8 @@ Confirmed by the reviewer:
 - The changed lines agree with the neighbouring rules the reviewer was asked to check (draft save, structure changes, op model, undo, change stream, CloudKit records).
 - The cross-references are right.
 - No Anki code, path, test name or non-interface identifier appears in `specs/`.
+
+Second pass, on commit 76c730f61: every first-pass finding fixed, no P1 or P2. The reviewer rechecked the arithmetic of the inverse examples and of the composed report against the code. Three P3 notes were then taken:
+- K19.2's exactness claim is limited to one op's report. A copy edited between the ops of a joined generation falls under the Receivers rule.
+- The Receivers rule and K19.6 name the base text of the copy's origin.
+- Attribution: `notetypes/structure-changes`' Status line names this log for its two new additions, and `engine/undo` M9.11 says that undo and redo admit retained reports.
