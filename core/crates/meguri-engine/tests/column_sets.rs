@@ -161,8 +161,8 @@ fn members_of_another_shape_read_as_missing() {
         r#""not an object""#,
         r#"{"std":[1]}"#,
         r#"{"std":{"cards":"noteFld","notes":[],"sort":5}}"#,
-        r#"{"std":{"cards":["noteFld","noteFld"],"notes":["noteFld",3],"sort":{"cards":["deck"],"notes":["cardDue",1]}}}"#,
-        r#"{"std":{"cards":["noteFld","unknownColumn"],"sort":{"cards":["question",true],"notes":["stability",true]}}}"#,
+        r#"{"std":{"cards":["unknownColumn",3],"notes":[{"a":1}],"sort":{"cards":["deck"],"notes":["cardDue",1]}}}"#,
+        r#"{"std":{"cards":"noteFld","sort":{"cards":["question",true],"notes":["stability",true]}}}"#,
     ];
     for text in cases {
         let h = with_anki_keys();
@@ -485,4 +485,33 @@ fn a_column_change_records_no_step_and_keeps_undo_suspend() {
     assert!(!change(c, SetId::Standard, Cards, Change::Show(col(Column::SortField))));
     assert_eq!(config_rows(c), before);
     assert_eq!(redo(c), None);
+}
+
+/// V2.4 as decided on 2026-11-21: a list keeps its known keys in
+/// order, each once, so a layout a newer Meguri wrote survives here; its
+/// unknown keys go only when this device writes that set.
+#[test]
+fn unknown_column_keys_are_skipped_and_dropped_only_by_a_write_of_their_set() {
+    let h = with_anki_keys();
+    let c = &h.collection;
+    let nt = notetype(c);
+    let own = r#"{"cards":["laterColumn","fld:Front","deck","fld:Front"],"sort":{"cards":["deck",true]}}"#;
+    put(c, KEY, &format!(r#"{{"std":{{"cards":["noteFld","laterColumn","deck","noteFld"]}},"{}":{own}}}"#, nt.0));
+    let list = shown(c, None).columns;
+    assert_eq!(list.columns(Cards), [col(Column::SortField), col(Column::Deck)]);
+    let list = shown(c, Some(nt)).columns;
+    assert_eq!(list.columns(Cards), [field("Front"), col(Column::Deck)]);
+
+    // A write to the standard set leaves the own set's stored list alone.
+    assert!(change(c, SetId::Standard, Cards, Change::Show(col(Column::Tags))));
+    let value = stored(c).unwrap();
+    assert_eq!(value.get("std").unwrap().compact(), r#"{"cards":["noteFld","deck","noteTags"]}"#);
+    assert_eq!(value.get(&nt.0.to_string()), Some(&json(own)));
+
+    // A sort change writes the own set: its list is stored as it reads.
+    assert!(change(c, SetId::Notetype(nt), Cards, Change::SortBy(col(Column::Deck))));
+    assert_eq!(
+        stored(c).unwrap().get(&nt.0.to_string()).unwrap().compact(),
+        r#"{"cards":["fld:Front","deck"],"sort":{"cards":["deck",false]}}"#
+    );
 }
