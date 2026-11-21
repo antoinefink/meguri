@@ -164,6 +164,112 @@ impl From<&model::ChangeSet> for ChangeSet {
     }
 }
 
+impl From<OpSource> for model::OpSource {
+    fn from(source: OpSource) -> model::OpSource {
+        match source {
+            OpSource::UserUndoable => model::OpSource::UserUndoable,
+            OpSource::UserNonUndoable => model::OpSource::UserNonUndoable,
+            OpSource::SyncIncoming => model::OpSource::SyncIncoming,
+            OpSource::LocalApi => model::OpSource::LocalApi,
+            OpSource::Optimizer => model::OpSource::Optimizer,
+            OpSource::Rollover => model::OpSource::Rollover,
+            OpSource::Maintenance => model::OpSource::Maintenance,
+            OpSource::CloudIncoming => model::OpSource::CloudIncoming,
+            OpSource::CloudRekey => model::OpSource::CloudRekey,
+        }
+    }
+}
+
+impl From<ChangeKind> for model::ChangeKind {
+    fn from(kind: ChangeKind) -> model::ChangeKind {
+        match kind {
+            ChangeKind::Added => model::ChangeKind::Added,
+            ChangeKind::Updated => model::ChangeKind::Updated,
+            ChangeKind::Removed => model::ChangeKind::Removed,
+        }
+    }
+}
+
+/// A change set Swift received in a `Changes` event, back in the engine's
+/// terms: what Browse hands to `invalidated_rows` (`browser/result-sets`
+/// H10). Every list is copied as it is.
+impl From<&ChangeSet> for model::ChangeSet {
+    fn from(changes: &ChangeSet) -> model::ChangeSet {
+        use meguri_model::ids::{CardId, DeckConfigId, DeckId, NoteId, NotetypeId, RevlogId};
+        model::ChangeSet {
+            whole_collection: changes.whole_collection,
+            source: changes.source.into(),
+            cards: changes
+                .cards
+                .iter()
+                .map(|c| model::CardChange {
+                    id: CardId(c.id),
+                    note_id: NoteId(c.note_id),
+                    kind: c.kind.into(),
+                    memory_state_only: c.memory_state_only,
+                })
+                .collect(),
+            notes: changes
+                .notes
+                .iter()
+                .map(|n| model::NoteChange {
+                    id: NoteId(n.id),
+                    kind: n.kind.into(),
+                })
+                .collect(),
+            notetypes: changes
+                .notetypes
+                .iter()
+                .map(|n| model::NotetypeChange {
+                    id: NotetypeId(n.id),
+                    kind: n.kind.into(),
+                    schema_changed: n.schema_changed,
+                })
+                .collect(),
+            decks: changes
+                .decks
+                .iter()
+                .map(|d| model::DeckChange {
+                    id: DeckId(d.id),
+                    kind: d.kind.into(),
+                })
+                .collect(),
+            deck_configs: changes
+                .deck_configs
+                .iter()
+                .map(|d| model::DeckConfigChange {
+                    id: DeckConfigId(d.id),
+                    kind: d.kind.into(),
+                })
+                .collect(),
+            config_keys: changes
+                .config_keys
+                .iter()
+                .map(|c| model::ConfigKeyChange {
+                    key: c.name.clone(),
+                    kind: c.kind.into(),
+                })
+                .collect(),
+            tags: changes
+                .tags
+                .iter()
+                .map(|t| model::TagChange {
+                    name: t.name.clone(),
+                    kind: t.kind.into(),
+                })
+                .collect(),
+            revlog_added: changes.revlog_added.iter().copied().map(RevlogId).collect(),
+            revlog_removed: changes.revlog_removed.iter().copied().map(RevlogId).collect(),
+            media_added: changes.media_added.clone(),
+            media_removed: changes.media_removed.clone(),
+            skipped_incoming_cards: changes.skipped_incoming_cards.iter().copied().map(CardId).collect(),
+            skipped_incoming_notes: changes.skipped_incoming_notes.iter().copied().map(NoteId).collect(),
+            skipped_incoming_decks: changes.skipped_incoming_decks.iter().copied().map(DeckId).collect(),
+            collection_row: changes.collection_row,
+        }
+    }
+}
+
 fn id_changes<T>(list: &[T], entry: impl Fn(&T) -> (i64, model::ChangeKind)) -> Vec<IdChange> {
     list.iter()
         .map(|item| {
@@ -234,5 +340,16 @@ pub(crate) fn sample() -> model::ChangeSet {
         skipped_incoming_notes: vec![NoteId(71), NoteId(73)],
         skipped_incoming_decks: vec![DeckId(71), DeckId(74)],
         collection_row: true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_change_set_comes_back_from_swift_as_the_engine_sent_it() {
+        let engine = sample();
+        assert_eq!(model::ChangeSet::from(&ChangeSet::from(&engine)), engine);
     }
 }

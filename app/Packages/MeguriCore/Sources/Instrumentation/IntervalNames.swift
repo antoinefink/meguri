@@ -381,6 +381,22 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let notetypeRemovalCountsJobResult = BridgeCall("NotetypeRemovalCountsJob.result")
     public static let notetypeNearFieldName = BridgeCall("notetype_near_field_name")
 
+    public static let openSearchSession = BridgeCall("open_search_session")
+    public static let browseStartSearch = BridgeCall("BrowseSearchSession.start_search")
+    public static let browseResort = BridgeCall("BrowseSearchSession.resort")
+    public static let browseToggle = BridgeCall("BrowseSearchSession.toggle")
+    public static let browseReverse = BridgeCall("BrowseSearchSession.reverse")
+    public static let browseInvalidatedRows = BridgeCall("BrowseSearchSession.invalidated_rows")
+    public static let browseRows = BridgeCall("BrowseSearchSession.rows")
+    public static let browseQaCells = BridgeCall("BrowseSearchSession.qa_cells")
+    public static let browseIndexOf = BridgeCall("BrowseSearchSession.index_of")
+    public static let browseMapSelection = BridgeCall("BrowseSearchSession.map_selection")
+    public static let browseResolveSelection = BridgeCall("BrowseSearchSession.resolve_selection")
+    public static let browseSelection = BridgeCall("BrowseSearchSession.selection")
+    public static let browseHandleState = BridgeCall("BrowseSearchSession.handle_state")
+    public static let browseClose = BridgeCall("BrowseSearchSession.close")
+    public static let browseSelectionResolve = BridgeCall("BrowseSelection.resolve")
+
     public static let startCreateBackup = BridgeCall("start_create_backup")
     public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
     public static let startRestoreBackup = BridgeCall("start_restore_backup")
@@ -685,5 +701,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
+        openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
     ]
 }

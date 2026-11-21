@@ -39,6 +39,8 @@ import Testing
         (.Internal(message: "invariant"), .internal("invariant")),
         (.MediaCommitPending(seq: 17, message: "recover attachments"), .mediaCommitPending(sequence: 17, message: "recover attachments")),
         (.CommitCompleted(seq: 18, message: "refresh state"), .commitCompleted(sequence: 18, message: "refresh state")),
+        (.Browse(failure: .staleRevision(current: 4)), .browse(.staleRevision(current: 4))),
+        (.Browse(failure: .notComplete), .browse(.notComplete)),
     ]
 
     @Test(arguments: cases)

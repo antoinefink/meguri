@@ -44,6 +44,9 @@ public enum BridgeError: Error, Sendable, Hashable {
     case mediaCommitPending(sequence: UInt64, message: String)
     /// The write committed. Refresh its state without repeating it.
     case commitCompleted(sequence: UInt64, message: String)
+    /// A Browse search session refused a call or a request
+    /// (`browser/result-sets` H14).
+    case browse(BrowseFailure)
 }
 
 extension BridgeError {
@@ -94,6 +97,7 @@ extension BridgeError {
         case .Internal(let message): self = .internal(message)
         case .MediaCommitPending(let seq, let message): self = .mediaCommitPending(sequence: seq, message: message)
         case .CommitCompleted(let seq, let message): self = .commitCompleted(sequence: seq, message: message)
+        case .Browse(let failure): self = .browse(BrowseFailure(failure))
         }
     }
 }
