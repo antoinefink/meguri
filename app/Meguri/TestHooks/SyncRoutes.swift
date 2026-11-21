@@ -102,8 +102,11 @@ extension TestHooks {
                     Text(verbatim: "Settings window preview")
                         .accessibilityIdentifier("settings.sync.windowPreview")
                         .task {
-                            SettingsWindowPreview.shared.collection = ReviewCollection(configuration: configuration,
+                            let preview = ReviewCollection(configuration: configuration,
                                 navigation: AppNavigation(), sync: .renderFixture(state, clock: configuration.clock))
+                            // Whatever section was last chosen, the window opens at Sync.
+                            preview.syncPresentation.settingsRequest = UUID()
+                            SettingsWindowPreview.shared.collection = preview
                             openSettings()
                         }
                 }

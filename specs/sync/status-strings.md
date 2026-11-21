@@ -1074,7 +1074,7 @@ The same four rules make the main status. The first condition that applies decid
 | setup required, before preparation starts | none | `sync.service.settingUp` | |
 | setup preparing | none | `sync.meguri.status.preparing.title`, `sync.meguri.setup.preparing` | `sync.meguri.cancel` |
 | setup preview | none; `sync.keepCollection` is open | | |
-| setup transferring the collection, transferring media | none | T18.5 | |
+| setup transferring the collection (changed 2026-11-21 (resume fix): transferring media has the row below) | none | T18.5 | |
 | setup transferring media (changed 2026-11-21 (resume fix): in place of T18.5's row) | none | title `sync.meguri.status.downloadingMedia.title`: Downloading Media…, while files are left to download, otherwise `sync.meguri.status.transferringMedia.title`; detail `sync.meguri.media.left` with the files left, or `sync.meguri.media.left.unknown`, as for the paused row below. T18.5's `sync.meguri.setup.collectionDone` and its following `sync.meguri.media.filesLeft` line are not shown | |
 | setup acceptance unknown | waiting | `sync.meguri.setup.acceptanceUnknown` | `sync.recovery.tryAgain`: runs MP6.9's settling step (decided 2026-11-19 (review F4)) |
 | setup or round media blocked | issues | `sync.meguri.media.notTransferred` as the row that opens Affected Files (T18.6), in place of `sync.issues.row`; `sync.meguri.media.blocked` as the status detail | `sync.meguri.media.retry`, in the list. Changed 2026-11-21 (resume fix): while no affected files are known, the row is waiting, with no issues row, and its action `sync.recovery.tryAgain` is on the status row |
