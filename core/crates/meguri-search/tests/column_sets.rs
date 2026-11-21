@@ -209,3 +209,30 @@ fn a_note_types_first_change_writes_a_copy_of_the_standard_set() {
         "an own set's later change writes only its member, unknown members kept"
     );
 }
+
+/// V2.4 as decided on 2026-11-21: unknown and repeated keys are
+/// skipped on reading, and dropped only when their set is written.
+#[test]
+fn a_list_reads_as_its_known_keys_each_once() {
+    let sets = read(
+        r#"{"std":{"cards":["later","deck","noteFld","deck",7,"fld:A"],"notes":["future"],"x":{"keep":[1]}},"5":{"cards":["unknown","deck"]}}"#,
+    );
+    let std = sets.standard();
+    assert_eq!(std.columns(Cards), [col(Column::Deck), col(Column::SortField), field("A")]);
+    assert_eq!(std.columns(Notes), default_columns(Notes).as_slice(), "no known key: the default");
+    assert_eq!(sets.set(SetId::Notetype(NotetypeId(5))).columns(Cards), [col(Column::Deck)]);
+    assert_eq!(
+        written(&sets, SetId::Standard, Cards, Change::Show(col(Column::Tags))).as_deref(),
+        Some(
+            r#"{"5":{"cards":["unknown","deck"]},"std":{"cards":["deck","noteFld","fld:A","noteTags"],"notes":["noteFld","note","template","noteTags","noteCrt"],"x":{"keep":[1]}}}"#
+        )
+    );
+    assert_eq!(
+        written(&sets, SetId::Standard, Cards, Change::SortBy(col(Column::Deck))).as_deref(),
+        Some(
+            r#"{"5":{"cards":["unknown","deck"]},"std":{"cards":["deck","noteFld","fld:A"],"notes":["noteFld","note","template","noteTags","noteCrt"],"sort":{"cards":["deck",false]},"x":{"keep":[1]}}}"#
+        ),
+        "a sort change writes the set's lists as they read"
+    );
+    assert_eq!(written(&sets, SetId::Standard, Cards, Change::Show(col(Column::Deck))), None);
+}

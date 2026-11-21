@@ -9,11 +9,15 @@
 //!
 //! Shapes. The key is an object; member `std` is the standard set and a
 //! member named by a note type id in decimal is that note type's own set.
-//! A set is an object; its `cards` and `notes` are non-empty arrays of
-//! distinct column keys (V2.3: at least one column stays, and checking a
-//! column adds it once), and its `sort` is an object whose `cards` and
-//! `notes` are `[<column key>, <descending>]`. A member of another shape
-//! reads as missing; a member Meguri does not know is kept as it is.
+//! A set is an object; its `cards` and `notes` are arrays of column keys,
+//! and its `sort` is an object whose `cards` and `notes` are
+//! `[<column key>, <descending>]`. A list reads as its known column keys in
+//! order, each at its first occurrence: an entry that names no column (one
+//! a newer Meguri knows) is skipped, so the layout survives on an older
+//! device. A list with no known key, and any member of another shape, reads
+//! as missing. A member Meguri does not know is kept as it is. A write to a
+//! set stores each of its lists as it reads (decided 2026-11-21 by the
+//! coordinator; the spec sentence is pending).
 
 use meguri_model::ids::NotetypeId;
 use meguri_storage::ConfigValue;
@@ -103,19 +107,18 @@ impl SetSort {
     }
 }
 
-/// A mode's list as stored: `None` when the member is missing or of another
-/// shape.
+/// A mode's list as it reads: its known column keys in order, each at its
+/// first occurrence, entries that name no column skipped; `None` when the
+/// member is missing, is not an array or holds no known key.
 fn stored_columns(value: Option<&ConfigValue>) -> Option<Vec<ColumnKey>> {
     let ConfigValue::Array(items) = value? else {
         return None;
     };
     let mut columns: Vec<ColumnKey> = Vec::with_capacity(items.len());
-    for item in items {
-        let column = ColumnKey::parse(item.as_str()?)?;
-        if columns.contains(&column) {
-            return None;
+    for column in items.iter().filter_map(|item| ColumnKey::parse(item.as_str()?)) {
+        if !columns.contains(&column) {
+            columns.push(column);
         }
-        columns.push(column);
     }
     (!columns.is_empty()).then_some(columns)
 }
@@ -340,17 +343,20 @@ fn with_change(set: &ConfigValue, next: &ColumnSet, mode: SearchMode, change: &C
     }
 }
 
-/// A stored set with each known member of another shape replaced by
-/// what it reads as; missing and unknown members as they are (V2.4).
+/// A stored set as a write stores it: each list that is stored as it
+/// reads, each other known member of another shape replaced by what it
+/// reads as (a list's unknown and repeated keys are dropped then); missing
+/// and unknown members as they are (V2.4).
 fn repaired(stored: &ConfigValue) -> ConfigValue {
     let read = ColumnSet::from_stored(Some(stored));
     let mut value = stored.clone();
     for mode in MODES {
         let name = mode_member(mode);
+        let as_read = read.columns_value(mode);
         if let Some(member) = stored.get(name)
-            && stored_columns(Some(member)).is_none()
+            && *member != as_read
         {
-            value = value.with_member(name, read.columns_value(mode));
+            value = value.with_member(name, as_read);
         }
     }
     match stored.get(SORT) {
