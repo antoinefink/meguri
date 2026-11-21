@@ -15,6 +15,8 @@ T19 (2026-11-19) gives the text of the Sync section that replaces Account & Sync
 
 T20 (2026-11-21, round 10) gives the text of the status panel that the sync button opens, for both services (`docs/design/native-interface-contract.md` N23). It adds three keys and changes no state or existing value.
 
+The lines and rows marked "changed 2026-11-21 (resume fix)" in T19.1 and T19.5 give the text of `sync/meguri-provider#MP6.5`'s paused setup media step. In force: decided by Claude (coordinator) under Antoine's delegation of 2026-11-21 and his permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/sync-media-resume-20261121.md`).
+
 ## T1. Keys, arguments and plurals
 
 - Every string is an entry of the Sync String Catalog with the stable key given here. The English value is the one given; other languages are Meguri's own translations of the English. Keys never change once shipped; a changed meaning gets a new key.
@@ -850,7 +852,7 @@ Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`: `settings.root`, `
 - T1 and T18.1 apply, with the changes below.
 - Meguri's settings section for sync is "Sync". A sentence says "Sync settings". This replaces T1's "Account & Sync" for every key of T19; T1's rule that "Settings" alone is the system's stands.
 - The services are named "Meguri Sync" and "iCloud". Where iCloud is a choice, a heading or a row label, `sync.service.beta` follows it as a separate secondary label, never joined into one string; VoiceOver reads `sync.service.iCloud.accessibility`. Inside a sentence iCloud has no label.
-- A **needs you** text is exactly one sentence, with at most one action. A **waiting** text has no action, except Try Again on the two acceptance-unknown rows of T19.5 (decided 2026-11-19 (review F4)). An **issues** entry is a row of a list that opens.
+- A **needs you** text is exactly one sentence, with at most one action. A **waiting** text has no action, except Try Again on the two acceptance-unknown rows of T19.5 (decided 2026-11-19 (review F4)) and on its paused setup media row (changed 2026-11-21 (resume fix)). An **issues** entry is a row of a list that opens.
 - Both services use the same status words (T3's titles and "Last synced").
 - No text offers or names the user's Pause, Resume, Connect, Sign Out, Stop Using, a media setting, Review Conflicts or Show Details. No text says that cards and media sync together.
 
@@ -1073,6 +1075,8 @@ The same four rules make the main status. The first condition that applies decid
 | setup transferring the collection, transferring media | none | T18.5 | |
 | setup acceptance unknown | waiting | `sync.meguri.setup.acceptanceUnknown` | `sync.recovery.tryAgain`: runs MP6.9's settling step (decided 2026-11-19 (review F4)) |
 | setup or round media blocked | issues | `sync.meguri.media.notTransferred` as the row that opens Affected Files (T18.6), in place of `sync.issues.row`; `sync.meguri.media.blocked` as the status detail | `sync.meguri.media.retry`, in the list |
+| setup media paused: the media step stopped before it finished and continues by itself (`sync/meguri-provider#MP6.5`; changed 2026-11-21 (resume fix)) | waiting | title `sync.meguri.status.downloadPaused.title`: Media Download Paused, while files are left to download as last recorded, otherwise `sync.meguri.status.transferPaused.title`: Media Transfer Paused; detail `sync.meguri.media.left`: `%lld media file is left. Syncing starts when it finishes.` / `%lld media files are left. Syncing starts when they finish.`, with the files left the core recorded, or `sync.meguri.media.left.unknown`: Syncing starts when the media finishes., when none is recorded | `sync.recovery.tryAgain`: runs the media step now |
+| setup media stopped: its automatic attempts are used up, the device is full, or a refusal a later attempt is not known to clear (MP6.5; changed 2026-11-21 (resume fix)) | needs you | `sync.needsYou.meguri.mediaStopped.download`: Downloading the media didn’t finish, so syncing hasn’t started., while files are left to download as last recorded, otherwise `sync.needsYou.meguri.mediaStopped`: Transferring the media didn’t finish, so syncing hasn’t started. | `sync.recovery.tryAgain`: runs the media step now, and its automatic attempts start again |
 | the server accepted the upload, local activation unfinished | needs you while the core permits Finish Setup, otherwise waiting | `sync.needsYou.meguri.finishSetup`: The server accepted this device’s collection, but setup didn’t finish; finishing replaces any changes made here since the upload, and Meguri backs them up first. (Changed 2026-11-20, with `sync/meguri-provider#MP6.9`'s line under review; it said "…but setup didn’t finish on this device.", which left out that finishing replaces this device's later changes. Not built.) | `sync.meguri.setup.finish` |
 | setup failed, `activationInterrupted` | needs you while the core permits Finish Setup, otherwise waiting | `sync.needsYou.meguri.activation`: Replacing this device’s collection didn’t finish, and your backup is kept. | `sync.meguri.setup.finish` |
 | setup failed, `authentication`; round failed, authentication | needs you | `sync.needsYou.meguri.signIn`: The server didn’t accept your sign-in, so Meguri Sync stopped. | `sync.meguri.signIn` |

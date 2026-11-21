@@ -500,6 +500,7 @@ public final class SyncCoordinator {
     /// Rendering fixtures only: no binding stands behind this value.
     private var renderConnected: Bool?
     private var renderChoice = false
+    private var renderRetryMedia = false
     /// P25.3: on with no stored value. Written only when the person changes
     /// the switch or P25.2's migration writes off.
     public var storedAutomatic: Bool { (defaults?.object(forKey: Self.automaticKey) as? Bool) ?? memoryAutomatic }
@@ -572,6 +573,12 @@ public final class SyncCoordinator {
             meguriStage = .media; meguriBusy = true
             meguriMediaProgress = .renderFixture(downloadedFiles: 18_945, awaiting: 25_055)
             renderConnected = false
+        case .meguriSetupMediaPaused, .meguriSetupMediaStopped:
+            providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+            meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
+            meguriStage = state == .meguriSetupMediaPaused ? .mediaPaused : .mediaStopped
+            meguriMediaProgress = .renderFixture(downloadedFiles: 39_569, awaiting: 4_431)
+            renderConnected = false; renderRetryMedia = true
         case .meguriPreparing:
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
             meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
@@ -636,6 +643,8 @@ public final class SyncCoordinator {
         if round2MigrationPending { rememberAutomatic(false) }
         setDeviceSettings(paused: false, automatic: settings.automatic && storedAutomatic)
         if let write = providerSettingsTask { await write.value }
+        // A paused setup media step waited for the hold (MP6.5).
+        if !updateHold { resumeMeguriMediaIfNeeded(.recovered) }
         return !settings.paused
     }
     /// P25.1, P25.2: runs at each attachment until it has succeeded once, before
@@ -714,7 +723,9 @@ public final class SyncCoordinator {
             // Try Again or the sheet returns. A failed read never meant "gone".
             if oldValue?.phase == .blocked, providerState?.phase != .blocked {
                 meguriRecoveryReloadPending = true
-                Task { self.reloadMeguriAfterRecoveryIfNeeded() }
+                Task { self.reloadMeguriAfterRecoveryIfNeeded(); self.resumeMeguriMediaIfNeeded(.recovered) }
+            } else if oldValue?.phase == .handoffRecovery, !providerNeedsAttention {
+                Task { self.resumeMeguriMediaIfNeeded(.recovered) }
             }
         }
     }
@@ -787,6 +798,17 @@ public final class SyncCoordinator {
             mediaDone: media.map { $0.uploadedFiles.addingReportingOverflow($0.downloadedFiles) }
                 .flatMap { $0.overflow ? nil : $0.partialValue },
             mediaAwaiting: media?.awaiting)
+    }
+    /// The setup media step's files left to download: the running step's count,
+    /// else the one the core last recorded for the operation; nil when none is
+    /// recorded. Never a count Meguri works out itself.
+    public var meguriSetupMediaLeft: UInt64? {
+        switch meguriStage {
+        case .media?, .mediaPaused?, .mediaStopped?: break
+        default: return nil
+        }
+        let left = meguriMediaProgress?.awaiting ?? meguriReceipt?.media.awaiting ?? 0
+        return left > 0 ? left : nil
     }
     /// The setup's media files left, while its media step runs and nothing stopped it.
     public var meguriMediaFilesLeft: UInt64? {
@@ -867,7 +889,8 @@ public final class SyncCoordinator {
     public var meguriKindFacts: MeguriKindFacts {
         .init(handoffRecovery: providerState?.phase == .handoffRecovery, providerBlocked: providerState?.phase == .blocked,
             connection: meguriAuthenticating ? .authenticating : meguriPhase, stage: meguriStage, routine: meguriRoutine,
-            failureKey: meguriFailureKey, finishOffered: meguriCanFinish, automatic: settings.automatic && storedAutomatic)
+            failureKey: meguriFailureKey, finishOffered: meguriCanFinish, automatic: settings.automatic && storedAutomatic,
+            mediaFilesLeft: meguriSetupMediaLeft)
     }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
     private var providerDiscovery: ProviderDiscoveryOwnership?
@@ -938,7 +961,9 @@ public final class SyncCoordinator {
         !meguriBusy && !settings.paused && meguriOperation.map { MeguriSyncStatusPresentation.canRecover($0.receipt) } == true
     }
     public var meguriCanRetryMedia: Bool {
-        !meguriBusy && !settings.paused && meguriStage == .mediaBlocked && meguriOperation != nil
+        if renderRetryMedia { return true }
+        return !meguriBusy && !updateHold && meguriOperation != nil
+            && (meguriStage == .mediaBlocked || meguriStage == .mediaPaused || meguriStage == .mediaStopped)
     }
     public var deviceSettingsSettling: Bool { desiredProviderSettings != nil }
     public var meguriAutomaticSettingVisible: Bool {
@@ -987,6 +1012,15 @@ public final class SyncCoordinator {
     private var meguriWakeManual = false
     private var meguriReachabilityRecoveryRevision: UInt64 = 0
     private var meguriReadyWakePending = false
+    /// MP6.5 (resume fix): when setup's unfinished media step may continue by
+    /// itself, and a resume asked for while another setup action ran.
+    @ObservationIgnored private var meguriMediaResume = MeguriMediaResume()
+    @ObservationIgnored private var meguriMediaResumePending: MeguriMediaResume.Trigger?
+    @ObservationIgnored private var meguriMediaRetry: Task<Void, Never>?
+    @ObservationIgnored private var meguriReadyAdoptionPending = false
+    /// Tests only: replaces the wait before an automatic attempt, and sees each trigger.
+    @ObservationIgnored var meguriMediaRetryDelay: ((Duration?) -> Duration?)?
+    @ObservationIgnored var meguriMediaResumeObserver: ((MeguriMediaResume.Trigger) -> Void)?
     private var meguriWake: (id: UUID, task: Task<Void, Never>, availability: MeguriWakeAvailability)?
     private var meguriAddressDrain: Task<Void, Never>?
     private var meguriPauseDrain: Task<Void, Never>?
@@ -1000,9 +1034,9 @@ public final class SyncCoordinator {
         meguriConnectionOwner === owner && generation == expected && hostRevision == revision
             && !closing && !replacing && !suspended && !providerHandoffInProgress
     }
-    private func issueMeguri(_ body: @escaping @MainActor (UUID) async -> Void) {
+    @discardableResult private func issueMeguri(_ body: @escaping @MainActor (UUID) async -> Void) -> Bool {
         guard !meguriBusy, !meguriCancelling, !closing, !replacing, !suspended, !providerActionInProgress,
-              providerState?.selection == .meguri, !providerNeedsAttention else { return }
+              providerState?.selection == .meguri, !providerNeedsAttention else { return false }
         let id = UUID()
         meguriBusy = true
         let task = Task {
@@ -1014,9 +1048,14 @@ public final class SyncCoordinator {
                     meguriReadyWakePending = false
                     requestMeguriWake(automatic: true)
                 }
+                if let trigger = meguriMediaResumePending {
+                    meguriMediaResumePending = nil
+                    resumeMeguriMediaIfNeeded(trigger)
+                }
             }
         }
         meguriAction = (id, task)
+        return true
     }
     func waitForMeguriAction() async { await meguriAction?.task.value }
     var meguriSignInAddressRevision: UInt64 { meguriAddressEditRevision }
@@ -1095,6 +1134,13 @@ public final class SyncCoordinator {
                 // busy and requesting the wake; its normal gates still apply.
                 meguriReadyWakePending = true
             }
+            if meguriCurrent(owner, expected, revision), editRevision == meguriAddressEditRevision,
+               meguriBootstrap === facade,
+               let trigger = Self.meguriLaunchResume(stage: meguriStage, foreground: startupForeground?()) {
+                // MP6.5 (resume fix): setup's unfinished media step continues
+                // once this load's action ends, as Try Again would run it.
+                meguriMediaResumePending = trigger
+            }
         } catch {
             let phase = await owner.phase
             if meguriCurrent(owner, expected, revision) { meguriPhase = phase; meguriLastError = error }
@@ -1110,7 +1156,7 @@ public final class SyncCoordinator {
         case .ready:
             let round = try await owner.roundService()
             guard meguriCurrent(owner, expected, revision), meguriBootstrap === facade else { return }
-            meguriReady = true; meguriRound = round; meguriStage = nil
+            meguriReady = true; meguriRound = round; meguriStage = nil; meguriOperation = nil
             if meguriRoutine == nil { meguriRoutine = .unreported }
         case .unbound(let retained):
             meguriReady = false; meguriRound = nil; meguriRoutine = nil
@@ -1132,6 +1178,20 @@ public final class SyncCoordinator {
         case .notSelected, .stale:
             meguriReady = false; meguriStage = .failed; meguriFailureKey = nil
         }
+    }
+    /// A retained operation whose collection transferred and whose media step
+    /// has not finished setup, as a launch reads it: it continues by itself
+    /// (MP6.5, resume fix), or waits for Try Again once its automatic attempts
+    /// are used up. Only listed files make it media blocked, once a step has
+    /// read them (MP5). Nil for any other operation.
+    static func meguriRetainedMediaStage(_ receipt: MeguriBootstrapReceipt, stopped: Bool) -> MeguriSetupStage? {
+        guard MeguriMediaResume.continues(receipt) else { return nil }
+        return stopped ? .mediaStopped : .mediaPaused
+    }
+    /// Whether the launch's own load resumes setup's media step: in the
+    /// foreground, as for the ready binding's first round.
+    static func meguriLaunchResume(stage: MeguriSetupStage?, foreground: Bool?) -> MeguriMediaResume.Trigger? {
+        stage == .mediaPaused && foreground == true ? .launch : nil
     }
     private static func meguriRetainsEffects(_ receipt: MeguriBootstrapReceipt) -> Bool {
         receipt.phase == .collectionComplete || receipt.phase == .mediaIncomplete || receipt.phase == .complete
@@ -1193,6 +1253,10 @@ public final class SyncCoordinator {
                 guard self.meguriCurrent(owner, expected, revision) else { return }
                 self.meguriBootstrap = facade
                 try await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+                // A sign-in that setup's row asked for lets a paused media step continue (MP6.5).
+                if self.meguriStage == .mediaPaused || (self.meguriReady && self.meguriReadyAdoptionPending) {
+                    self.meguriMediaResumePending = .recovered
+                }
             } catch {
                 self.meguriLastError = error
                 if self.generation == expected, self.hostRevision == revision, editRevision == self.meguriAddressEditRevision {
@@ -1276,8 +1340,8 @@ public final class SyncCoordinator {
             meguriStage = .acceptanceUnknown
         } else if MeguriSyncStatusPresentation.canRecover(receipt) {
             meguriStage = .acceptedLocalIncomplete
-        } else if receipt.phase == .collectionComplete || receipt.phase == .mediaIncomplete || receipt.phase == .complete {
-            meguriStage = .mediaBlocked
+        } else if let stage = Self.meguriRetainedMediaStage(receipt, stopped: meguriMediaResume.stopped) {
+            meguriStage = stage
         } else if MeguriSyncStatusPresentation.canDiscard(receipt) {
             meguriStage = .required; meguriChoiceAllowed = true
         } else { meguriStage = .failed }
@@ -1450,14 +1514,14 @@ public final class SyncCoordinator {
             // Reload after Host adoption or validation of the retained
             // NoCollection attachment. Old opaque handles are never rebound.
             try await current.refreshMeguriAfterCollection()
-            if let operation = current.meguriOperation,
-               operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete {
-                // T19.3: what setup did when it asked nothing, from the end of the collection's transfer.
-                if let done = self.meguriSetupDonePending { current.meguriSetupDone = done }
-                self.meguriSetupDonePending = nil
-                try await current.continueMeguriMedia(operation, id: id)
-            }
-        } catch { current.meguriLastError = error; current.meguriStage = .failed }
+        } catch { current.meguriLastError = error; current.meguriStage = .failed; return current }
+        if let operation = current.meguriOperation,
+           operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete {
+            // T19.3: what setup did when it asked nothing, from the end of the collection's transfer.
+            if let done = self.meguriSetupDonePending { current.meguriSetupDone = done }
+            self.meguriSetupDonePending = nil
+            await current.runMeguriMediaStep(operation, id: id)
+        }
         return current
     }
 
@@ -1803,61 +1867,238 @@ public final class SyncCoordinator {
                 current.meguriCollectionCommand = self.meguriCollectionCommand; current.meguriCollectionError = self.meguriCollectionError
                 current.meguriFailureKey = self.meguriFailureKey
             }
+            do { try await current.refreshMeguriAfterCollection() }
+            catch { current.meguriLastError = error; current.meguriStage = .failed; return }
+            if let operation = current.meguriOperation,
+               operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete {
+                await current.runMeguriMediaStep(operation, id: id)
+            }
+        }
+    }
+    /// Try Again on a paused, stopped or blocked setup media step. It runs the
+    /// step now and starts its automatic attempts again (MP6.5, resume fix).
+    public func retryMeguriMedia() { runMeguriMedia(.user) }
+    /// MP6.5 (resume fix): continue setup's unfinished media step without the
+    /// person, when Meguri launches, comes back to the foreground, gets its
+    /// network back, the blocked phase clears or a wait after a failure ends.
+    /// Sync Automatically does not hold it: the person started setup, and
+    /// setup ends only once its media finishes (MP5).
+    func resumeMeguriMediaIfNeeded(_ trigger: MeguriMediaResume.Trigger) {
+        meguriMediaResumeObserver?(trigger)
+        // Setup completed but its settings were not read yet: every trigger
+        // tries that read again, after the timed retries are used up too.
+        if meguriReadyAdoptionPending, meguriReady {
+            Task { if await self.adoptMeguriReady() { self.requestMeguriWakeIfReadyPending() } }
+            return
+        }
+        guard meguriStage == .mediaPaused, meguriOperation != nil, meguriMediaResume.admits(trigger) else { return }
+        // A setup action that still runs reads Core again when it ends. A wait
+        // that ends during an attempt is that attempt's: it schedules its own.
+        if meguriBusy { if trigger != .retry { meguriMediaResumePending = trigger }; return }
+        runMeguriMedia(trigger)
+    }
+    private func runMeguriMedia(_ trigger: MeguriMediaResume.Trigger) {
+        guard meguriCanRetryMedia, meguriMediaResume.admits(trigger) else { return }
+        // A refused start (suspended, replaced, another provider action) keeps
+        // the scheduled retry and the counts as they were; an automatic trigger
+        // waits for the next Meguri action's end, or its own trigger.
+        let accepted = issueMeguri { id in
+            self.meguriMediaRetry?.cancel(); self.meguriMediaRetry = nil
+            self.meguriMediaResume.started(trigger)
             do {
-                try await current.refreshMeguriAfterCollection()
-                if let operation = current.meguriOperation,
-                   operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete {
-                    try await current.continueMeguriMedia(operation, id: id)
+                // The launch's own load has just read Core; any later attempt
+                // reads the retained operation again first.
+                if trigger != .launch { try await self.readMeguriConnection() }
+            } catch {
+                self.meguriLastError = error
+                if self.meguriStage == .mediaBlocked || self.meguriStage == .mediaPaused || self.meguriStage == .mediaStopped {
+                    self.recordMeguriMediaAttempt(.unfinished)
                 }
-            } catch { current.meguriLastError = error; current.meguriStage = .failed }
+                return
+            }
+            // The read may find setup already complete (a stop after completion):
+            // setup's last steps then run, with no media attempt.
+            if self.meguriReady {
+                if await self.adoptMeguriReady() { self.recordMeguriMediaAttempt(.ready) }
+                else { self.meguriReadyAdoptionPending = true; self.retryMeguriReadyAdoption() }
+                return
+            }
+            // An edited address reloads nothing until it is signed in to.
+            guard !self.meguriAddressDirty, let current = self.meguriOperation,
+                  [.mediaPaused, .mediaStopped, .mediaBlocked].contains(self.meguriStage) else { return }
+            await self.runMeguriMediaStep(current, id: id)
         }
+        if !accepted, trigger.automatic, trigger != .retry || meguriMediaRetry == nil { meguriMediaResumePending = trigger }
     }
-    public func retryMeguriMedia() {
-        guard meguriCanRetryMedia else { return }
-        issueMeguri { id in
-            do {
-                try await self.readMeguriConnection()
-                guard let current = self.meguriOperation else { return }
-                try await self.continueMeguriMedia(current, id: id)
-            } catch { self.meguriLastError = error; self.meguriStage = .mediaBlocked }
+    /// One run of the media step and its record: whether and when it continues by itself.
+    private func runMeguriMediaStep(_ operation: MeguriBootstrapOperation, id: UUID) async {
+        let outcome: MeguriMediaResume.Outcome
+        do { outcome = try await continueMeguriMedia(operation, id: id) }
+        catch {
+            meguriLastError = error
+            if suspended || closing || replacing || providerHandoffInProgress {
+                // The app or the connection ended the step: it waits, uncounted.
+                outcome = interruptMeguriMedia(operation)
+            } else {
+                // An error is not a refusal: the operation and its media stay for the next attempt.
+                if meguriStage == .media { pauseMeguriMedia(operation) }
+                outcome = .unfinished
+            }
         }
+        recordMeguriMediaAttempt(outcome)
     }
-    private func continueMeguriMedia(_ operation: MeguriBootstrapOperation, id: UUID) async throws {
-        guard let facade = meguriBootstrap, let owner = meguriConnectionOwner, !settings.paused else { return }
+    func recordMeguriMediaAttempt(_ outcome: MeguriMediaResume.Outcome) {
+        // An attempt that ended while this device had no network is not counted:
+        // the network's return starts the next one (MP6.5).
+        let counted: MeguriMediaResume.Outcome = outcome == .unfinished && reachable == false ? .notRun : outcome
+        let wait = meguriMediaResume.finished(counted)
+        // Paused and stopped follow the record: Try Again from stopped that ends
+        // unfinished is paused again, and continues by itself.
+        if meguriStage == .mediaPaused || meguriStage == .mediaStopped, counted == .unfinished || counted == .notRun {
+            meguriStage = meguriMediaResume.stopped ? .mediaStopped : .mediaPaused
+        }
+        meguriMediaRetry?.cancel(); meguriMediaRetry = nil
+        guard let wait = meguriMediaRetryDelay.map({ $0(wait) }) ?? wait else { return }
         let expected = generation, revision = hostRevision
-        guard meguriCurrent(owner, expected, revision),
-              operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete else { return }
-        // MP6.5: a blocked phase starts no media step. The operation keeps its
-        // pending media, and Retry stays offered for after the phase recovers.
-        guard !providerNeedsAttention else { meguriOperation = operation; meguriStage = .mediaBlocked; return }
-        meguriActiveFacade = facade; meguriStage = .media
-        let prepared = try await facade.prepareMedia(operation, progress: progressForMeguri(id))
-        retainMeguri(prepared)
-        guard meguriCurrent(owner, expected, revision) else { return }
-        applyMeguriOutcome(prepared.outcome)
-        guard case .mediaConsent(let consent) = prepared.outcome else { return }
-        guard !providerNeedsAttention else { meguriOperation = operation; meguriStage = .mediaBlocked; return }
-        let result = try await facade.transferMedia(consent, progress: progressForMeguri(id), mediaProgress: { [weak self] value in
-            Task { @MainActor in if self?.meguriAction?.id == id { self?.meguriMediaProgress = value } }
-        })
-        retainMeguri(result)
-        guard meguriCurrent(owner, expected, revision) else { return }
-        applyMeguriOutcome(result.outcome)
-        guard case .operation(let completed) = result.outcome else { return }
-        let outcome = try await facade.complete(completed)
-        applyMeguriOutcome(outcome)
-        guard case .ready = outcome, meguriCurrent(owner, expected, revision) else { return }
-        // Whole-operation Ready is Core's durable automatic-sync consent.
-        let state = try await provider?.refresh()
-        guard meguriCurrent(owner, expected, revision), let state, let committed = state.settings else { return }
+        meguriMediaRetry = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled, let self, self.generation == expected, self.hostRevision == revision,
+                  !self.closing else { return }
+            self.meguriMediaRetry = nil
+            self.resumeMeguriMediaIfNeeded(.retry)
+        }
+    }
+    private func adoptMeguriReadySettings(_ state: SyncProviderState, _ committed: CloudPolicyDeviceSettings) {
         providerState = state; settings = committed
+        // P25.3: a stored off outlives a setup that committed automatic on.
         if committed.automatic, !storedAutomatic {
             setDeviceSettings(paused: committed.paused, automatic: false)
         }
-        try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
-        guard meguriCurrent(owner, expected, revision), meguriReady else { return }
+    }
+    /// Setup completed, but a stop or an error came before its last steps:
+    /// read the settings Ready committed, and ask for the first round.
+    @discardableResult private func adoptMeguriReady() async -> Bool {
+        let expected = generation, revision = hostRevision, settingsRevision = providerSettingsRevision
+        // A service change owns the provider state while it runs: read after it.
+        guard !providerActionInProgress, !providerHandoffInProgress else { meguriReadyAdoptionPending = true; return false }
+        guard let state = try? await provider?.refresh(), let committed = state.settings,
+              generation == expected, hostRevision == revision, !closing, !replacing else { return false }
+        guard !providerActionInProgress, !providerHandoffInProgress else { meguriReadyAdoptionPending = true; return false }
+        // A settings write made meanwhile is newer than this read: read again later.
+        guard settingsRevision == providerSettingsRevision else { meguriReadyAdoptionPending = true; return false }
+        adoptMeguriReadySettings(state, committed)
         meguriOperation = nil
         meguriReadyWakePending = true
+        meguriReadyAdoptionPending = false
+        return true
+    }
+    /// A read of the settings Ready committed that failed is tried again after
+    /// the same waits as the media step, at most as often (MP6.5).
+    private func retryMeguriReadyAdoption(attempt: Int = 0) {
+        guard attempt < MeguriMediaResume.delays.count else { return }
+        let wait = meguriMediaRetryDelay.map { $0(MeguriMediaResume.delays[attempt]) } ?? MeguriMediaResume.delays[attempt]
+        guard let wait else { return }
+        let expected = generation, revision = hostRevision
+        Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard let self, self.generation == expected, self.hostRevision == revision, !self.closing,
+                  self.meguriReady else { return }
+            if await self.adoptMeguriReady() { self.requestMeguriWakeIfReadyPending() }
+            else { self.retryMeguriReadyAdoption(attempt: attempt + 1) }
+        }
+    }
+    /// A provider action (a service change) refused a Meguri start while it ran:
+    /// the trigger kept for it is tried when the action ends.
+    private func replayMeguriMediaResume() {
+        guard meguriMediaResumePending != nil || meguriReadyAdoptionPending, !meguriBusy else { return }
+        let trigger = meguriMediaResumePending ?? .recovered
+        meguriMediaResumePending = nil
+        Task { self.resumeMeguriMediaIfNeeded(trigger) }
+    }
+    private func requestMeguriWakeIfReadyPending() {
+        guard meguriReadyWakePending, !meguriBusy else { return }
+        meguriReadyWakePending = false
+        requestMeguriWake(automatic: true)
+    }
+    /// The step was stopped from outside (the app went to the background, the
+    /// connection was edited or replaced): it is paused, not counted, and the
+    /// return to the foreground continues it.
+    private func interruptMeguriMedia(_ operation: MeguriBootstrapOperation) -> MeguriMediaResume.Outcome {
+        if meguriStage == .media { pauseMeguriMedia(operation) }
+        return .notRun
+    }
+    /// The media step stopped before it finished: its operation and media stay,
+    /// and the step continues (MP5).
+    private func pauseMeguriMedia(_ operation: MeguriBootstrapOperation) {
+        meguriOperation = operation; meguriReceipt = operation.receipt; meguriFailureKey = nil
+        meguriStage = meguriMediaResume.stopped ? .mediaStopped : .mediaPaused
+    }
+    /// A refused media step: paused, stopped for the person, blocked by listed
+    /// files, or setup's failure, as `MeguriMediaResume.outcome` says.
+    private func refuseMeguriMedia(_ outcome: MeguriBootstrapOutcome, _ operation: MeguriBootstrapOperation) -> MeguriMediaResume.Outcome {
+        guard case .refused(let failure, let accounting) = outcome else { return .notRun }
+        let result = MeguriMediaResume.outcome(refused: failure, accounting: accounting)
+        switch result {
+        case .unfinished: pauseMeguriMedia(operation)
+        case .stopped:
+            meguriOperation = operation; meguriReceipt = operation.receipt; meguriFailureKey = nil
+            meguriStage = .mediaStopped
+        case .blocked: meguriOperation = operation; meguriStage = .mediaBlocked
+        case .ready, .failed, .notRun: break
+        }
+        return result
+    }
+    private func continueMeguriMedia(_ operation: MeguriBootstrapOperation, id: UUID) async throws -> MeguriMediaResume.Outcome {
+        guard let facade = meguriBootstrap, let owner = meguriConnectionOwner, !updateHold else { return .notRun }
+        let expected = generation, revision = hostRevision
+        guard meguriCurrent(owner, expected, revision), MeguriMediaResume.continues(operation.receipt) else { return .notRun }
+        // MP6.5: a blocked phase starts no media step. The operation keeps its
+        // pending media, and the step continues once the phase recovers.
+        guard !providerNeedsAttention else { pauseMeguriMedia(operation); return .notRun }
+        meguriActiveFacade = facade; meguriStage = .media
+        var finished = operation
+        // A step that finished before a quit has only its completion left.
+        if operation.receipt.phase != .complete {
+            // Offline: the core reads the media folder again and binds this run to
+            // the same operation, account and activated collection (MP4, MP5).
+            let prepared = try await facade.prepareMedia(operation, progress: progressForMeguri(id))
+            retainMeguri(prepared)
+            guard meguriCurrent(owner, expected, revision) else { return interruptMeguriMedia(operation) }
+            applyMeguriOutcome(prepared.outcome)
+            guard case .mediaConsent(let consent) = prepared.outcome else { return refuseMeguriMedia(prepared.outcome, operation) }
+            guard !providerNeedsAttention else { pauseMeguriMedia(operation); return .notRun }
+            let result = try await facade.transferMedia(consent, progress: progressForMeguri(id), mediaProgress: { [weak self] value in
+                Task { @MainActor in if self?.meguriAction?.id == id { self?.meguriMediaProgress = value } }
+            })
+            retainMeguri(result)
+            guard meguriCurrent(owner, expected, revision) else {
+                if case .operation(let transferred) = result.outcome { return interruptMeguriMedia(transferred) }
+                return interruptMeguriMedia(operation)
+            }
+            applyMeguriOutcome(result.outcome)
+            guard case .operation(let transferred) = result.outcome else { return refuseMeguriMedia(result.outcome, operation) }
+            // Stopped before it finished (a quit, a lost connection, a server
+            // error, a blocked phase): the same operation continues later.
+            guard transferred.receipt.phase == .complete else {
+                pauseMeguriMedia(transferred)
+                return providerNeedsAttention ? .notRun : .unfinished
+            }
+            finished = transferred
+            meguriStage = .media
+        }
+        let outcome = try await facade.complete(finished)
+        guard meguriCurrent(owner, expected, revision) else { return interruptMeguriMedia(finished) }
+        applyMeguriOutcome(outcome)
+        guard case .ready = outcome else { return refuseMeguriMedia(outcome, finished) }
+        // Whole-operation Ready is Core's durable automatic-sync consent.
+        let state = try await provider?.refresh()
+        guard meguriCurrent(owner, expected, revision), let state, let committed = state.settings else { return .notRun }
+        adoptMeguriReadySettings(state, committed)
+        try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+        guard meguriCurrent(owner, expected, revision), meguriReady else { return .notRun }
+        meguriOperation = nil
+        meguriReadyWakePending = true
+        return .ready
     }
     private var meguriCanRun: Bool {
         meguriReady && meguriRound != nil && providerState?.selection == .meguri && settings.enabled
@@ -2030,6 +2271,7 @@ public final class SyncCoordinator {
     }
     private func drainMeguriProduct() async {
         meguriWakePending = false; meguriWakeManual = false; meguriReadyWakePending = false
+        meguriMediaResumePending = nil; meguriMediaRetry?.cancel(); meguriMediaRetry = nil
         let wake = meguriWake, action = meguriAction, facade = meguriActiveFacade, round = meguriRound
         cancelMeguriEditorDecision(action?.id)
         wake?.task.cancel()
@@ -2622,7 +2864,7 @@ public final class SyncCoordinator {
             connectionFailure = .busy; return false
         }
         providerActionInProgress = true
-        defer { providerActionInProgress = false }
+        defer { providerActionInProgress = false; replayMeguriMediaResume() }
         let expected = generation, revision = hostRevision
         func current(_ attachment: UInt64) -> Bool {
             self.provider === provider && expected == generation && attachment == hostRevision
@@ -2701,7 +2943,7 @@ public final class SyncCoordinator {
               providerState?.phase == .handoffRecovery || providerRecoveryDrain != nil,
               !closing || providerRecoveryDrain != nil else { return false }
         providerActionInProgress = true
-        defer { providerActionInProgress = false }
+        defer { providerActionInProgress = false; replayMeguriMediaResume() }
         let token = providerRecoveryDrain ?? UUID()
         providerRecoveryDrain = token
         let expected = generation, revision = hostRevision
@@ -2746,7 +2988,7 @@ public final class SyncCoordinator {
         guard recoveryDrain != nil || desiredProviderSettings != nil || providerState?.phase == .blocked else { return false }
         guard recoveryDrain == nil ? !closing && !drained && !backendRetired : drained && providerChangeAllowed() else { return false }
         providerActionInProgress = true
-        defer { providerActionInProgress = false }
+        defer { providerActionInProgress = false; replayMeguriMediaResume() }
         let expected = generation, revision = hostRevision
         func current() -> Bool {
             self.provider === provider && expected == generation && revision == hostRevision
@@ -3437,7 +3679,10 @@ public final class SyncCoordinator {
         mediaEnabledRevision = nil
         awaitingResumeProof = needsProof
         suspended = false
-        if providerState?.selection == .meguri { requestMeguriWake(automatic: true) }
+        if providerState?.selection == .meguri {
+            requestMeguriWake(automatic: true)
+            resumeMeguriMediaIfNeeded(.foreground)
+        }
         if pendingPreviewCancellation { pendingPreviewCancellation = false; await cancelConnectionPreview() }
         guard !closing, !replacing, expected == generation, revision == hostRevision else { return }
         // Starting the app-owned read is ordered, but waiting for Apple is not
@@ -4092,6 +4337,7 @@ public final class SyncCoordinator {
             if recovered {
                 meguriReachabilityRecoveryRevision &+= 1
                 requestMeguriWake(automatic: true)
+                resumeMeguriMediaIfNeeded(.network)
             }
         }
         if awaitingResumeProof, !suspended {
@@ -4698,6 +4944,8 @@ extension SyncCoordinator {
         /// N23's panel states (round 10).
         case meguriSyncing, meguriSetupMedia, meguriRoundFailed, meguriBlocked, meguriSignInRefused, iCloudSyncing
         case meguriPreparing, iCloudNoAccount, meguriMediaBlocked, meguriAcceptanceUnknown, iCloudSetupNeeded
+        /// MP6.5 (resume fix): setup's media step paused, and stopped after its automatic attempts.
+        case meguriSetupMediaPaused, meguriSetupMediaStopped
     }
     /// Builds synthetic Sync section examples. The coordinator is never
     /// attached: it owns no collection, account, binding or server, and its

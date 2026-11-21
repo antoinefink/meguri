@@ -50,7 +50,11 @@ import Testing
         ("sync.meguri.now.unavailable.stopped.sync", "Meguri Sync is stopped. Open Sync settings to see what to do."),
         // T20.2 (round 10): the status panel's sign-in action.
         ("sync.status.signIn", "Sign In…"), ("sync.status.openSettings", "Sync Settings"),
-        ("sync.status.cancelSetup", "Cancel Setup"), ("sync.button.label.off", "Sync")
+        ("sync.status.cancelSetup", "Cancel Setup"), ("sync.button.label.off", "Sync"),
+        // T19.5 (changed 2026-11-21, resume fix): setup's media step paused.
+        ("sync.meguri.status.downloadPaused.title", "Media Download Paused"),
+        ("sync.meguri.status.transferPaused.title", "Media Transfer Paused"),
+        ("sync.meguri.media.left.unknown", "Syncing starts when the media finishes.")
     ]
     /// Every needs you text of T19.4 and T19.5.
     private static let needsYou: [(String, String)] = [
@@ -77,7 +81,9 @@ import Testing
         ("sync.needsYou.meguri.identityChanged", "The server address or account changed, so you need to sign in again."),
         ("sync.needsYou.meguri.storage", "Meguri couldn’t save to this device, so setup stopped."),
         ("sync.needsYou.meguri.setupFailed", "Setting up Meguri Sync didn’t finish, and nothing was replaced."),
-        ("sync.needsYou.meguri.chooseCollection", "Choose which collection to keep before syncing continues.")
+        ("sync.needsYou.meguri.chooseCollection", "Choose which collection to keep before syncing continues."),
+        ("sync.needsYou.meguri.mediaStopped.download", "Downloading the media didn’t finish, so syncing hasn’t started."),
+        ("sync.needsYou.meguri.mediaStopped", "Transferring the media didn’t finish, so syncing hasn’t started.")
     ]
     /// Needs you rows whose text is an earlier section's key.
     private static let needsYouReused = ["sync.status.unavailable.noAccount", "sync.status.unavailable.restricted",
@@ -212,6 +218,8 @@ import Testing
         for (key, english) in Self.t19 + Self.needsYou { #expect(SyncText.value(key) == english, "\(key)") }
         #expect(SyncText.format("sync.issues.row", Int64(1)) == "1 sync issue")
         #expect(SyncText.format("sync.issues.row", Int64(3)) == "3 sync issues")
+        #expect(SyncText.format("sync.meguri.media.left", Int64(1)) == "1 media file is left. Syncing starts when it finishes.")
+        #expect(SyncText.format("sync.meguri.media.left", Int64(12)) == "12 media files are left. Syncing starts when they finish.")
     }
 
     @Test func everyNeedsYouTextIsOneSentence() {

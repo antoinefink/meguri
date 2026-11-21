@@ -216,8 +216,10 @@ struct SyncStatusActionButton: View {
         case .meguriFinishSetup: return sync.meguriCanFinish
         // The Sync section shows the sign-in fields themselves.
         case .meguriSignIn: return inPanel
+        // A paused or stopped setup media step (resume fix): the status row's own action.
+        case .meguriRetryMedia: return sync.meguriCanRetryMedia
         // These have no entry outside their own lists.
-        case .meguriRetryMedia, .abandon, .checkDatabase: return false
+        case .abandon, .checkDatabase: return false
         }
     }
 
@@ -325,7 +327,11 @@ struct SyncStatusActionButton: View {
             // T20.1: Sign In… opens the Sync section at the sign-in fields.
             Button(SyncText.value("sync.status.signIn")) { showInSettings?(false) }
                 .accessibilityIdentifier(id)
-        case .meguriRetryMedia, .abandon, .checkDatabase:
+        case .meguriRetryMedia:
+            // Runs at once, from the panel too (N23.3): the media step continues.
+            Button(title) { sync.retryMeguriMedia() }
+                .disabled(sync.meguriBusy).accessibilityIdentifier(id)
+        case .abandon, .checkDatabase:
             EmptyView()
         }
     }

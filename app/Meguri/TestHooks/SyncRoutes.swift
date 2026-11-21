@@ -12,6 +12,10 @@ extension TestHooks {
             registry.register("settings/sync/off") { settings(.off, $0) }
             registry.register("settings/sync/meguri-connected") { settings(.meguriConnected, $0) }
             registry.register("settings/sync/meguri-sign-in") { settings(.meguriSignIn, $0) }
+            // MP6.5 (resume fix): setup's media step running, paused, and stopped after its automatic attempts.
+            registry.register("settings/sync/meguri-setup-media") { settings(.meguriSetupMedia, $0) }
+            registry.register("settings/sync/meguri-setup-media-paused") { settings(.meguriSetupMediaPaused, $0) }
+            registry.register("settings/sync/meguri-setup-media-stopped") { settings(.meguriSetupMediaStopped, $0) }
             registry.register("settings/sync/meguri-needs-you") { settings(.meguriNeedsYou, $0) }
             registry.register("settings/sync/icloud-selected") { settings(.iCloudSelected, $0) }
             registry.register("settings/sync/icloud-connected") { settings(.iCloudConnected, $0) }
@@ -43,6 +47,8 @@ extension TestHooks {
             registry.register("settings/sync/panel/meguri-up-to-date") { panel(.meguriConnected, $0) }
             registry.register("settings/sync/panel/meguri-syncing") { panel(.meguriSyncing, $0) }
             registry.register("settings/sync/panel/meguri-setup-media") { panel(.meguriSetupMedia, $0) }
+            registry.register("settings/sync/panel/meguri-setup-media-paused") { panel(.meguriSetupMediaPaused, $0) }
+            registry.register("settings/sync/panel/meguri-setup-media-stopped") { panel(.meguriSetupMediaStopped, $0) }
             registry.register("settings/sync/panel/meguri-preparing") { panel(.meguriPreparing, $0) }
             registry.register("settings/sync/panel/meguri-media-blocked") { panel(.meguriMediaBlocked, $0) }
             registry.register("settings/sync/panel/meguri-acceptance-unknown") { panel(.meguriAcceptanceUnknown, $0) }

@@ -251,10 +251,10 @@ import Testing
         #expect(stopped.needsUser)
         let unconfigured = MeguriSyncStatusPresentation(stopped: false, connection: .unconfigured, stage: nil, routine: nil)
         #expect(!unconfigured.needsUser)
-        for stage in [MeguriSetupStage.required, .preview, .mediaBlocked, .acceptanceUnknown, .acceptedLocalIncomplete, .failed] {
+        for stage in [MeguriSetupStage.required, .preview, .mediaBlocked, .mediaStopped, .acceptanceUnknown, .acceptedLocalIncomplete, .failed] {
             #expect(MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: stage, routine: nil).needsUser, "\(stage)")
         }
-        for stage in [MeguriSetupStage.preparing, .collection, .media] {
+        for stage in [MeguriSetupStage.preparing, .collection, .media, .mediaPaused] {
             #expect(!MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: stage, routine: nil).needsUser, "\(stage)")
         }
     }
@@ -276,7 +276,7 @@ import Testing
             #expect(SyncKinds.meguri(.init(routine: routine)).titleKey != "sync.status.upToDate.title", "\(String(describing: routine))")
         }
         let stages: [MeguriSetupStage] = [.required, .preparing, .preview, .collection, .media,
-            .mediaBlocked, .acceptanceUnknown, .acceptedLocalIncomplete, .failed]
+            .mediaBlocked, .mediaPaused, .mediaStopped, .acceptanceUnknown, .acceptedLocalIncomplete, .failed]
         for stage in stages {
             #expect(SyncKinds.meguri(.init(stage: stage, routine: .idle)).titleKey != "sync.status.upToDate.title", "\(stage)")
         }
