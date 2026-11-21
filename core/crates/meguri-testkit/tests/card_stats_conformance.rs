@@ -78,3 +78,60 @@ fn every_recorded_card_info_scenario_matches_its_golden() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+
+/// C1 (R1252, R1425) through the product entry point on a hosted engine:
+/// reading Card Info and its dump for every card of the schema-18 fixture
+/// leaves the collection file, its WAL and every card row and `col.mod` as
+/// they were after the open.
+#[test]
+fn the_hosted_card_info_read_writes_nothing() {
+    use meguri_model::{ids::CardId, rng::SeededRandom};
+    use meguri_storage::{ReaderRole, raw::SqlValue};
+    use std::sync::Arc;
+    let dir = tempfile::tempdir().unwrap();
+    let collection_dir = dir.path().join("collection");
+    std::fs::create_dir(&collection_dir).unwrap();
+    let file = collection_dir.join("collection.anki2");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance/fixtures/storage/schema-18.anki2"),
+        &file,
+    )
+    .unwrap();
+    let clock = Arc::new(meguri_testkit::exec::clock::ScenarioClock::new("Europe/Paris", "2030-01-15T10:00:00").unwrap());
+    let host = meguri_host::CoreHost::open(meguri_host::HostConfig::new(
+        collection_dir.clone(),
+        dir.path().join("backups"),
+        dir.path().join("widget.snapshot"),
+        clock,
+        Arc::new(SeededRandom::new(5)),
+        Arc::new(meguri_storage::space::StatvfsSpace),
+    ))
+    .unwrap();
+    let collection = host.collection().unwrap();
+    let state = || {
+        let reader = collection.reader(ReaderRole::Query).unwrap();
+        let rows = reader
+            .execute_raw("SELECT (SELECT mod FROM col), id, mod, usn, data FROM cards ORDER BY id", &[])
+            .unwrap()
+            .rows;
+        let wal = std::fs::metadata(collection_dir.join("collection.anki2-wal")).map(|m| m.len()).ok();
+        (rows, std::fs::read(&file).unwrap(), wal)
+    };
+    let before = state();
+    let ids: Vec<i64> = before
+        .0
+        .iter()
+        .map(|row| match row[1] {
+            SqlValue::Integer(id) => id,
+            ref other => panic!("{other:?}"),
+        })
+        .collect();
+    assert!(!ids.is_empty());
+    for id in ids {
+        let _ = meguri_stats::card_info(&collection, CardId(id)).unwrap();
+        let _ = meguri_stats::card_info_debug_json(&collection, CardId(id)).unwrap();
+    }
+    assert_eq!(state(), before);
+    drop(collection);
+    host.close().unwrap();
+}

@@ -130,12 +130,19 @@ impl Points<'_> {
     }
 }
 
+/// The samples a range holds at most: 100,000 days (274 years).
+const MAX_SAMPLE_DAYS: f64 = 100_000.0;
+
 /// C7.5 for one range. `reviews` are the curve reviews, oldest first, with
 /// same-instant reviews already counted as one.
 fn range_points(reviews: &[CurveReview], span: f64, now: i64, decay: f64) -> Vec<CurvePoint> {
     let first = reviews[0].instant as f64;
     let end = first + span * 86_400.0;
-    let step = (span / 1_000.0).min(1.0);
+    // C7.5's step, at most one sample a day. A range longer than
+    // `MAX_SAMPLE_DAYS` (only damaged or far-off review-log ids give one)
+    // keeps that many samples, spread over the span, so the read stays
+    // bounded; every real history is far shorter.
+    let step = (span / 1_000.0).min(1.0).max(span / MAX_SAMPLE_DAYS);
     let inside = reviews.iter().take_while(|review| review.instant as f64 <= end).count();
     let now = now as f64;
     let mut points = Points {
@@ -167,6 +174,10 @@ fn range_points(reviews: &[CurveReview], span: f64, now: i64, decay: f64) -> Vec
             loop {
                 let sample = start + (k as f64 * step) * 86_400.0;
                 if sample >= segment_end {
+                    break;
+                }
+                if sample <= start {
+                    // Far-off instants where the step is below one ulp.
                     break;
                 }
                 k += 1;

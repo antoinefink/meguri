@@ -44,11 +44,13 @@ impl Dependencies {
     }
 
     /// C10's test outside an observer: the added rows' card ids are read by
-    /// id from `rows`.
+    /// id from `rows`. An added row that cannot be read counts as affected,
+    /// since its card is unknown.
     pub fn affected(&self, changes: &ChangeSet, rows: &impl ReadRows) -> Result<bool, StorageError> {
         let mut failure = None;
         let affected = self.affected_with(changes, |id| match rows.revlog_entry(id) {
             Ok(row) => row.map(|row| row.card_id),
+            Err(StorageError::Row(_)) => Some(self.card),
             Err(error) => {
                 failure.get_or_insert(error);
                 None

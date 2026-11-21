@@ -1117,3 +1117,104 @@ fn c8_debug_dump_bytes() {
     let dump = db.info().debug_json();
     assert!(dump.ends_with(&format!("\n  \"rollover\": \"{deep}\"\n}}")), "{dump}");
 }
+
+// C6.3 with an incomplete history: a row before the first kept row has no
+// state, and the first kept row has the SM-2 starting state (I5).
+#[test]
+fn c6_3_incomplete_history_starts_from_the_sm2_state() {
+    let db = Db::new();
+    db.card(2, 2, 105, 20, "{}");
+    db.row((NOW - 40 * 86_400, 0, 3, 0, 2500, 0, 4));
+    db.row((NOW - 30 * 86_400, 3, 10, 3, 2500, 3_000, 1));
+    db.row((NOW - 10 * 86_400, 3, 20, 10, 2500, 3_000, 1));
+    let info = db.info();
+    let ascending: Vec<_> = info.history.iter().rev().map(|e| e.memory_state).collect();
+    assert_eq!(ascending[0], None);
+    let reader = db.db.open_reader(ReaderRole::Query).unwrap();
+    let preset = meguri_sched::model::preset::PresetView::for_config(&reader, DeckConfigId(1)).unwrap();
+    let start = fsrs::FSRS::new(preset.parameters())
+        .unwrap()
+        .memory_state_from_sm2(2.5, 10.0, preset.fields().historical_retention)
+        .unwrap();
+    let first = ascending[1].unwrap();
+    assert_eq!((first.stability, first.difficulty), (start.stability, start.difficulty));
+    assert_ne!(ascending[2], ascending[1]);
+    assert_eq!(info.raw.memory_state, ascending[2]);
+}
+
+#[test]
+fn c4_3_one_rated_row_of_70_seconds_and_a_hidden_retrievability() {
+    let db = Db::new();
+    db.card(2, 2, 105, 10, "{}");
+    db.row((NOW - 20 * 86_400, 3, 10, 0, 2500, 70_000, 1));
+    let info = db.info();
+    assert_eq!(row(&info, StatsKey::AverageTime), Some("1.17 minutes"));
+    assert_eq!(row(&info, StatsKey::TotalTime), Some("1.17 minutes"));
+    // A retrievability of 0 shows no row; stability and difficulty stay.
+    db.card(2, 2, 105, 10, r#"{"s":1e-45,"d":5.0,"lrt":0}"#);
+    let info = db.info();
+    assert_eq!(info.raw.fsrs_retrievability, Some(0.0));
+    assert_eq!(row(&info, StatsKey::Retrievability), None);
+    assert!(row(&info, StatsKey::Stability).is_some() && row(&info, StatsKey::Difficulty).is_some());
+}
+
+#[test]
+fn c7_5_a_review_at_the_range_end_before_now() {
+    // M = 10.5 for one answer 10 days ago with a 1-day interval; First Week
+    // ends at day 7, so a review on day 7 keeps its two points and the range
+    // end adds none; now (day 10) is outside.
+    let reviews = [review(10.0, 1.0, 1.0), review(3.0, 1.0, 2.0)];
+    let built = curve(&reviews, NOW, 0.5, 0.9).unwrap();
+    let week = &built.ranges[0];
+    let end = reviews[0].instant as f64 + 7.0 * 86_400.0;
+    assert_eq!(reviews[1].instant as f64, end);
+    let at_end: Vec<_> = week.points.iter().filter(|p| p.instant == end).collect();
+    assert_eq!(at_end.len(), 2);
+    assert_eq!(at_end[1].retrievability, 100.0);
+    assert_eq!(week.points.last().unwrap().instant, end);
+    assert!(week.points.iter().all(|p| !p.future));
+}
+
+#[test]
+fn c7_5_far_off_review_instants_keep_the_read_bounded() {
+    for instant in [NOW - 2_000_000_000_000, i64::MIN / 1000, 0] {
+        let reviews = [CurveReview {
+            instant,
+            interval_secs: 86_400,
+            stability: 3.0,
+        }];
+        let built = curve(&reviews, NOW, 0.5, 0.9).unwrap();
+        for range in &built.ranges {
+            assert!(range.points.len() <= 100_005, "{instant}: {}", range.points.len());
+            ascending(&range.points);
+        }
+    }
+}
+
+// C8: the deck and preset members parse back to their schema-11 objects
+// without the left-out names.
+#[test]
+fn c8_dump_parses_back_to_the_records() {
+    let db = Db::new();
+    db.card(2, 2, 105, 10, "{}");
+    let dump = db.info().debug_json();
+    let parsed = meguri_testkit::observe::parse_json(&dump).unwrap();
+    let reader = db.db.open_reader(ReaderRole::Query).unwrap();
+    let deck = reader.deck(DeckId(LANG)).unwrap().unwrap();
+    let mut expected = meguri_testkit::observe::parse_json(&meguri_model::schema11::deck_to_json(&deck)).unwrap();
+    for name in ["name", "desc", "usn"] {
+        expected.as_object_mut().unwrap().remove(name);
+    }
+    assert_eq!(parsed["deck"], expected);
+    let preset = reader.deck_config(DeckConfigId(1)).unwrap().unwrap();
+    let mut expected =
+        meguri_testkit::observe::parse_json(&meguri_model::schema11::deck_config_to_json(&preset)).unwrap();
+    expected.as_object_mut().unwrap().remove("name");
+    assert_eq!(parsed["preset"], expected);
+    let members: Vec<&str> = dump
+        .lines()
+        .filter(|line| line.starts_with("  \""))
+        .map(|line| line.trim_start().split('"').nth(1).unwrap())
+        .collect();
+    assert_eq!(members, ["stats", "card", "revlog", "deck", "preset", "rollover"]);
+}

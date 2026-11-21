@@ -226,7 +226,12 @@ impl<T> Read<T> {
 /// C3.5 step 1's row test, on the stored columns: `ease` 1 to 4 and not
 /// both `type` 3 and `factor` 0 (a `type` 259 row counts here).
 fn counts_for_last_review(image: &RowImage, row: &RevlogEntry) -> bool {
-    let stored_type = match image.get(8) {
+    let column = Table::Revlog
+        .columns()
+        .iter()
+        .position(|column| *column == "type")
+        .expect("revlog has a type column");
+    let stored_type = match image.get(column) {
         Some(Cell::Integer(value)) => Some(*value as f64),
         Some(Cell::Real(value)) => Some(*value),
         _ => None,
