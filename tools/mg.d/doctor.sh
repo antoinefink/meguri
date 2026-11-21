@@ -251,7 +251,11 @@ mg__doctor_run_output() {
     mg__doctor_check run-output warn "build/mg is too large to measure in ${MG_DOCTOR_RUN_OUTPUT_SECONDS} s; tools/mg prune reports which old runs could go (tools/AGENTS.md)"
     return 0
   fi
-  wait "$pid" 2>/dev/null
+  if ! wait "$pid" 2>/dev/null; then
+    rm -f "$out"
+    mg__doctor_check run-output warn "du could not read all of build/mg, so its size is unknown; tools/mg prune reports what it holds (tools/AGENTS.md)"
+    return 0
+  fi
   kb="$(awk 'NR == 1 { print $1 }' "$out")"
   rm -f "$out"
   gib=$((${kb:-0} / 1048576))

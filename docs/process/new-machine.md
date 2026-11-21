@@ -62,8 +62,9 @@ them automatically. `tools/mg doctor` warns when a checkout's `build/mg` passes
 `tools/mg prune --cleanroom` does the same for old clean-room runs. Once no job
 runs in the checkout, `tools/mg prune --apply` (or `--cleanroom --apply`)
 deletes it there. Prune never touches Docker volumes, Rust targets, derived
-data or anything else outside `build/mg`, and never deletes a run that a receipt
-or a tracked file names; `tools/AGENTS.md` gives the rule. Pruning before a
+data or anything else outside `build/mg`. It never deletes a run named in a
+tracked or uncommitted file, a branch, a state file or the receipt of a run it
+keeps; `tools/AGENTS.md` gives the full rule. Pruning before a
 move leaves less to copy.
 
 ## Resume prepared work

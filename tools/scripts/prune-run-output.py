@@ -10,6 +10,7 @@ Standard library only, for macOS /usr/bin/python3 (3.9).
 import argparse
 import concurrent.futures
 import datetime
+import fcntl
 import hashlib
 import json
 import os
@@ -55,7 +56,6 @@ TOKEN = re.compile(rb"\d{8}T\d{6}Z-\d+")
 JOB_DIR = re.compile(r"^[a-z][a-z0-9-]*$")
 RECEIPT_SUFFIXES = (".json", ".jsonl")
 MEMBER = re.compile(r"^(\d{8}T\d{6}Z-\d+)/([^/]+)$")
-SCAN_LIMIT = 64 << 20  # larger files are not scanned for run ids (counted)
 STATE_DEPTH = 4
 DU_BATCH = 400
 SMALL = 100 << 20  # build/ entries below this are summed in the printed report
@@ -140,7 +140,6 @@ class Refs:
     def __init__(self):
         self.ids = set()
         self.errors = []
-        self.unscanned = 0
         self.lock = threading.Lock()
 
     def file(self, path, out=None):
@@ -151,10 +150,6 @@ class Refs:
                 out.update(ids_in(os.fsencode(os.readlink(path))))
                 return
             if not stat.S_ISREG(st.st_mode):
-                return
-            if st.st_size > SCAN_LIMIT:
-                with self.lock:
-                    self.unscanned += 1
                 return
             fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
             with os.fdopen(fd, "rb") as f:
@@ -175,7 +170,10 @@ class Refs:
         for e in entries:
             try:
                 st = e.stat(follow_symlinks=False)
-            except OSError:
+            except FileNotFoundError:
+                continue
+            except OSError as err:
+                self.errors.append("cannot read %s: %s" % (e.path, err.strerror or err))
                 continue
             if stat.S_ISDIR(st.st_mode):
                 if depth > 1:
@@ -184,9 +182,23 @@ class Refs:
                 self.file(e.path, out)
 
 
-def git_refs(repo, heads, refs, scratch):
+def scan_exact(f, size, out):
+    """Run ids in the next size bytes of f, read in pieces."""
+    tail = b""
+    left = size
+    while left > 0:
+        chunk = f.read(min(left, 1 << 20))
+        if not chunk:
+            raise OSError("short read")
+        left -= len(chunk)
+        buf = tail + chunk
+        out.update(ids_in(buf))
+        tail = buf[-48:]
+
+
+def git_refs(repo, heads, staged, refs, scratch):
     """Run ids in every object of every local and remote branch tip and worktree HEAD
-    (their commits, trees and files)."""
+    (their commits, trees and files), and in every worktree's staged files."""
     out = git(["for-each-ref", "--format=%(objectname) %(objecttype)", "refs/heads", "refs/remotes"], repo)
     commits = set(h for h in heads if h)
     for line in out.decode().splitlines():
@@ -198,21 +210,10 @@ def git_refs(repo, heads, refs, scratch):
         f.write("".join(c + "\n" for c in sorted(commits)).encode())
     with open(listing, "rb") as f:
         objects = git(["rev-list", "--objects", "--no-walk", "--stdin"], repo, stdin=f)
+    wanted = set(line.split(b" ", 1)[0].decode() for line in objects.splitlines() if line)
+    wanted |= staged
     with open(listing, "wb") as f:
-        f.write(b"".join(line.split(b" ", 1)[0] + b"\n" for line in objects.splitlines() if line))
-    with open(listing, "rb") as f:
-        sizes = git(["cat-file", "--batch-check=%(objectname) %(objectsize)"], repo, stdin=f)
-    small = []
-    for line in sizes.decode().splitlines():
-        sha, _, size = line.partition(" ")
-        if not size.isdigit():
-            raise OSError("git cat-file cannot read object %s" % sha)
-        if int(size) > SCAN_LIMIT:
-            refs.unscanned += 1
-        else:
-            small.append(sha)
-    with open(listing, "wb") as f:
-        f.write("".join(o + "\n" for o in small).encode())
+        f.write("".join(o + "\n" for o in sorted(wanted)).encode())
     with open(listing, "rb") as f, open(listing + ".err", "wb") as err:
         p = subprocess.Popen(["git", "-C", repo, "cat-file", "--batch"], stdin=f,
                              stdout=subprocess.PIPE, stderr=err)
@@ -224,21 +225,26 @@ def git_refs(repo, heads, refs, scratch):
             if len(parts) != 3:
                 p.kill()
                 raise OSError("git cat-file --batch: unexpected %r" % header[:80])
-            data = p.stdout.read(int(parts[2]) + 1)
-            refs.ids.update(ids_in(data))
+            scan_exact(p.stdout, int(parts[2]) + 1, refs.ids)
         if p.wait() != 0:
             raise OSError("git cat-file --batch failed")
     os.unlink(listing)
     os.unlink(listing + ".err")
-    return len(commits), len(small)
+    return len(commits), len(wanted)
 
 
-def worktree_changes(checkout, refs, out_ids):
-    """Run ids in a checkout's modified and untracked (not ignored) files."""
+def worktree_changes(checkout, refs, out_ids, staged):
+    """Run ids in a checkout's modified and untracked (not ignored) files; the
+    blobs of its index (staged files) go to staged, for git_refs."""
     out = git(["ls-files", "-z", "-m", "-o", "--exclude-standard"], checkout)
     for rel in out.split(b"\0"):
         if rel:
             refs.file(os.path.join(checkout, os.fsdecode(rel)), out_ids)
+    for entry in git(["ls-files", "-z", "-s"], checkout).split(b"\0"):
+        meta = entry.split(b"\t", 1)[0].split()
+        if len(meta) == 3 and not meta[0].startswith(b"160"):  # not a submodule
+            with refs.lock:
+                staged.add(meta[1].decode())
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +314,7 @@ class Checkout:
         self.state = set()  # run ids in build/mg state files
         self.skipped = []  # entries prune never follows
         self.job_dirs = []  # (job, folder): scan() lists them, scan_job() reads each
+        self.pending = []  # (job, name) of run folders an --apply renamed and did not finish
 
     def scan(self, refs):
         st = lstat(self.mg)
@@ -337,6 +344,9 @@ class Checkout:
         for c in sorted(os.scandir(path), key=lambda c: c.name):
             cst = c.stat(follow_symlinks=False)
             m = RUN_ID.match(c.name)
+            if c.name.startswith(PENDING) and RUN_ID.match(c.name[len(PENDING):]) and stat.S_ISDIR(cst.st_mode):
+                self.pending.append((job, c.name))
+                continue
             if stat.S_ISLNK(cst.st_mode):
                 target = os.readlink(c.path)
                 self.state.update(ids_in(os.fsencode(target)))
@@ -695,48 +705,56 @@ def under(path, root):
     return os.path.realpath(path).startswith(root + os.sep)
 
 
-def remove_tree(path, dev):
-    """Delete a folder without following symbolic links or leaving its file system."""
-    st = os.lstat(path)
-    if not stat.S_ISDIR(st.st_mode):
-        raise Refusal("%s is not a folder" % path)
-    if st.st_dev != dev:
-        raise Refusal("%s is on another file system" % path)
-    stack = [(path, False)]
-    while stack:
-        d, listed = stack.pop()
-        if listed:
-            os.rmdir(d)
-            continue
-        stack.append((d, True))
+O_DIR = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+PENDING = ".prune-deleting-"  # a checked run folder renamed for deletion; --apply finishes it
+
+
+def remove_at(dfd, name, dev):
+    """Delete entry name of the open folder dfd with all it holds. Every step goes
+    through an open descriptor (O_NOFOLLOW), so a folder swapped for a link while
+    this runs is never followed, and another file system is never entered."""
+    try:
+        fd = os.open(name, O_DIR, dir_fd=dfd)
+    except PermissionError:
         try:
-            entries = list(os.scandir(d))
+            os.chmod(name, stat.S_IRWXU, dir_fd=dfd, follow_symlinks=False)
+        except NotImplementedError:  # Linux has no lchmod
+            raise PermissionError("cannot open folder %s" % name)
+        fd = os.open(name, O_DIR, dir_fd=dfd)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISDIR(st.st_mode):
+            raise Refusal("%s is not a folder" % name)
+        if st.st_dev != dev:
+            raise Refusal("%s is on another file system" % name)
+        try:
+            entries = [(e.name, e.is_dir(follow_symlinks=False)) for e in os.scandir(fd)]
         except PermissionError:
-            os.chmod(d, stat.S_IRWXU)
-            entries = list(os.scandir(d))
-        for e in entries:
-            est = e.stat(follow_symlinks=False)
-            if stat.S_ISDIR(est.st_mode):
-                if est.st_dev != dev:
-                    raise Refusal("%s is on another file system" % e.path)
-                if not os.access(e.path, os.W_OK | os.X_OK | os.R_OK):
-                    os.chmod(e.path, stat.S_IRWXU)
-                stack.append((e.path, False))
-            else:
-                try:
-                    os.unlink(e.path)
-                except PermissionError:
-                    os.chmod(d, stat.S_IRWXU)
-                    os.unlink(e.path)
+            os.fchmod(fd, stat.S_IRWXU)
+            entries = [(e.name, e.is_dir(follow_symlinks=False)) for e in os.scandir(fd)]
+        for n, is_dir in entries:
+            if is_dir:
+                remove_at(fd, n, dev)
+                continue
+            try:
+                os.unlink(n, dir_fd=fd)
+            except FileNotFoundError:
+                pass
+            except PermissionError:
+                os.fchmod(fd, stat.S_IRWXU)
+                os.unlink(n, dir_fd=fd)
+    finally:
+        os.close(fd)
+    os.rmdir(name, dir_fd=dfd)
 
 
 class Deleter:
-    """Deletes only run folders (or their parts) below one checkout's build/mg."""
+    """Deletes only run folders (or a cleanroom run's runtime parts) below one
+    checkout's build/mg, through descriptors opened from a checked build/mg."""
 
-    def __init__(self, ck, ctx, tracked):
+    def __init__(self, ck, ctx):
         self.ck = ck
         self.ctx = ctx
-        self.tracked = tracked
         root = os.path.realpath(ck.path)
         mg_real = os.path.realpath(ck.mg)
         if mg_real != os.path.join(root, "build", "mg"):
@@ -746,7 +764,46 @@ class Deleter:
             if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
                 raise Refusal("%s is not a plain folder; nothing deleted" % p)
         self.mg = mg_real
-        self.dev = os.lstat(self.mg).st_dev
+        self.mg_fd = os.open(self.mg, O_DIR)
+        st = os.fstat(self.mg_fd)
+        lst = os.lstat(self.mg)
+        if (st.st_dev, st.st_ino) != (lst.st_dev, lst.st_ino):
+            raise Refusal("%s changed while it was opened; nothing deleted" % self.mg)
+        self.dev = st.st_dev
+        self.lock_fd = None
+        self.index = os.path.join(ck.path, os.fsdecode(git(["rev-parse", "--git-path", "index"], ck.path).strip()))
+        self.index_seen = None
+        self.tracked = set()
+        self.tracked_now()
+
+    def lock(self):
+        """One --apply per checkout: an flock on build/mg/prune/apply.lock, held until exit."""
+        try:
+            os.mkdir(PRUNE, dir_fd=self.mg_fd)
+        except FileExistsError:
+            pass
+        pfd = os.open(PRUNE, O_DIR, dir_fd=self.mg_fd)
+        try:
+            self.lock_fd = os.open("apply.lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o644, dir_fd=pfd)
+        finally:
+            os.close(pfd)
+        try:
+            fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return False
+        return True
+
+    def tracked_now(self):
+        """(job, id) of run folders holding a tracked file, read again whenever the index changed."""
+        try:
+            st = os.stat(self.index)
+            seen = (st.st_ino, st.st_size, st.st_mtime_ns)
+        except FileNotFoundError:
+            seen = None
+        if seen != self.index_seen or seen is None:
+            self.tracked = self.ck.tracked_runs()
+            self.index_seen = seen
+        return self.tracked
 
     def check(self, run, part=None):
         """Why this path must not be deleted now, or None. Checked again just
@@ -769,7 +826,7 @@ class Deleter:
             return "unfinished"
         if self.ctx.live(run):
             return "its tools/mg process runs"
-        if run.key in self.tracked:
+        if run.key in self.tracked_now():
             return "holds a tracked file"
         if part is not None:
             # Only a cleanroom run's source/ or codex-home/; its folder stays.
@@ -788,13 +845,44 @@ class Deleter:
 
     def remove(self, run, part=None):
         why = self.check(run, part)
-        if why is None:
-            remove_tree(run.path if part is None else os.path.join(run.path, part), self.dev)
-        return why
+        if why is not None:
+            return why
+        jfd = os.open(run.job, O_DIR, dir_fd=self.mg_fd)
+        try:
+            if part is None:
+                # Renamed first, so a deletion cut short is finished by the next
+                # --apply rather than left as an "unfinished" run.
+                os.rename(run.id, PENDING + run.id, src_dir_fd=jfd, dst_dir_fd=jfd)
+                remove_at(jfd, PENDING + run.id, self.dev)
+            else:
+                rfd = os.open(run.id, O_DIR, dir_fd=jfd)
+                try:
+                    remove_at(rfd, part, self.dev)
+                finally:
+                    os.close(rfd)
+        finally:
+            os.close(jfd)
+        return None
+
+    def finish_pending(self, failures):
+        """Delete what an earlier --apply renamed for deletion and could not finish."""
+        done = 0
+        for job, name in self.ck.pending:
+            try:
+                jfd = os.open(job, O_DIR, dir_fd=self.mg_fd)
+                try:
+                    remove_at(jfd, name, self.dev)
+                finally:
+                    os.close(jfd)
+                done += 1
+            except FileNotFoundError:
+                pass
+            except (OSError, Refusal) as e:
+                failures.append({"id": "delete/%s/%s" % (job, name), "message": "could not finish deleting it: %s" % e})
+        return done
 
 
-def apply_runs(ctx, ck, cands, tracked, failures):
-    deleter = Deleter(ck, ctx, tracked)
+def apply_runs(ctx, ck, deleter, cands, failures):
     done = freed = 0
     skipped = []
     for r in sorted((r for r in cands if r.action == "delete"), key=lambda r: (r.started, r.pid)):
@@ -839,50 +927,54 @@ def disk_records(r):
     return {n: sha_file(os.path.join(r.path, n)) for n in records_of(r)}
 
 
-def read_archive(path):
-    """{run id: {record: (size, sha256)}} of a month archive; ArchiveError if it is not one."""
+def open_in(dfd, name, flags=os.O_RDONLY, mode=0o644):
+    return os.open(name, flags | getattr(os, "O_NOFOLLOW", 0), mode, dir_fd=dfd)
+
+
+def read_archive(dfd, name):
+    """{run id: {record: (size, sha256)}} of the month archive name in the open
+    folder dfd; ArchiveError if it is not one."""
     runs = {}
     try:
-        with tarfile.open(path, "r:xz") as tf:
-            for m in tf:
-                mm = MEMBER.match(m.name)
-                if not m.isreg() or not mm or mm.group(2) not in CLEANROOM_RECORDS:
-                    raise ArchiveError("%s holds an unexpected member %s" % (path, m.name))
-                f = tf.extractfile(m)
-                h = hashlib.sha256()
-                size = 0
-                while True:
-                    b = f.read(1 << 20)
-                    if not b:
-                        break
-                    h.update(b)
-                    size += len(b)
-                if size != m.size:
-                    raise ArchiveError("%s: %s is truncated" % (path, m.name))
-                recs = runs.setdefault(mm.group(1), {})
-                if mm.group(2) in recs:
-                    raise ArchiveError("%s holds %s twice" % (path, m.name))
-                recs[mm.group(2)] = (size, h.hexdigest())
+        with os.fdopen(open_in(dfd, name), "rb") as raw:
+            if not stat.S_ISREG(os.fstat(raw.fileno()).st_mode):
+                raise ArchiveError("%s is not a plain file" % name)
+            with tarfile.open(fileobj=raw, mode="r:xz") as tf:
+                for m in tf:
+                    mm = MEMBER.match(m.name)
+                    if not m.isreg() or not mm or mm.group(2) not in CLEANROOM_RECORDS:
+                        raise ArchiveError("%s holds an unexpected member %s" % (name, m.name))
+                    f = tf.extractfile(m)
+                    h = hashlib.sha256()
+                    size = 0
+                    while True:
+                        chunk = f.read(1 << 20)
+                        if not chunk:
+                            break
+                        h.update(chunk)
+                        size += len(chunk)
+                    if size != m.size:
+                        raise ArchiveError("%s: %s is truncated" % (name, m.name))
+                    recs = runs.setdefault(mm.group(1), {})
+                    if mm.group(2) in recs:
+                        raise ArchiveError("%s holds %s twice" % (name, m.name))
+                    recs[mm.group(2)] = (size, h.hexdigest())
     except (tarfile.TarError, EOFError, OSError) as e:
-        raise ArchiveError("cannot read %s: %s" % (path, e))
+        raise ArchiveError("cannot read %s: %s" % (name, e))
     return runs
 
 
-def archive_dir(ck, create):
+def archive_dir(ck):
+    """Path of the archive folder, refused if it is anything but a plain folder."""
     d = os.path.join(ck.mg, ARCHIVE_DIR)
     st = lstat(d)
-    if st is None:
-        if not create:
-            return d
-        os.mkdir(d)
-        st = os.lstat(d)
-    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or not under(d, os.path.realpath(ck.mg)):
-        raise Refusal("%s is not a plain folder in build/mg" % d)
+    if st is not None and (stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode)):
+        raise Refusal("%s is not a plain folder" % d)
     return d
 
 
 def existing_archives(ck):
-    d = archive_dir(ck, False)
+    d = archive_dir(ck)
     out = {}
     if not os.path.isdir(d):
         return out
@@ -893,52 +985,63 @@ def existing_archives(ck):
     return out
 
 
-def write_archive(path, old, add, runs_by_id):
-    """Write old's members plus add's records to path.partial, check it, then move it to path."""
-    tmp = path + ".partial"
-    if os.path.lexists(tmp):
-        os.unlink(tmp)
-    with tarfile.open(tmp, "w:xz", format=tarfile.PAX_FORMAT) as out:
-        if os.path.exists(path):
-            with tarfile.open(path, "r:xz") as src:
-                for m in src:
-                    out.addfile(m, src.extractfile(m))
-        for rid in sorted(add):
-            r = runs_by_id[rid]
-            for name in sorted(add[rid]):
-                src_path = os.path.join(r.path, name)
-                fd = os.open(src_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-                with os.fdopen(fd, "rb") as f:
-                    st = os.fstat(f.fileno())
-                    if not stat.S_ISREG(st.st_mode) or st.st_size != add[rid][name][0]:
-                        raise ArchiveError("%s changed while it was archived" % src_path)
-                    info = tarfile.TarInfo("%s/%s" % (rid, name))
-                    info.size = st.st_size
-                    info.mtime = int(st.st_mtime)
-                    info.mode = 0o644
-                    info.uid = info.gid = 0
-                    info.uname = info.gname = ""
-                    out.addfile(info, f)
-    with open(tmp, "rb") as f:
-        os.fsync(f.fileno())
+def write_archive(dfd, name, old, add, runs_by_id):
+    """Write old's members plus add's records to name.partial (created anew, never
+    through a link), read it back and compare, then move it over name."""
+    tmp = name + ".partial"
+    try:
+        os.unlink(tmp, dir_fd=dfd)
+    except FileNotFoundError:
+        pass
+    with os.fdopen(open_in(dfd, tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL), "wb") as raw:
+        with tarfile.open(fileobj=raw, mode="w:xz", format=tarfile.PAX_FORMAT) as out:
+            if old:
+                with os.fdopen(open_in(dfd, name), "rb") as src_raw:
+                    with tarfile.open(fileobj=src_raw, mode="r:xz") as src:
+                        for m in src:
+                            out.addfile(m, src.extractfile(m))
+            for rid in sorted(add):
+                r = runs_by_id[rid]
+                for rec in sorted(add[rid]):
+                    src_path = os.path.join(r.path, rec)
+                    fd = os.open(src_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                    with os.fdopen(fd, "rb") as f:
+                        st = os.fstat(f.fileno())
+                        if not stat.S_ISREG(st.st_mode) or st.st_size != add[rid][rec][0]:
+                            raise ArchiveError("%s changed while it was archived" % src_path)
+                        info = tarfile.TarInfo("%s/%s" % (rid, rec))
+                        info.size = st.st_size
+                        info.mtime = int(st.st_mtime)
+                        info.mode = 0o644
+                        info.uid = info.gid = 0
+                        info.uname = info.gname = ""
+                        out.addfile(info, f)
+        raw.flush()
+        os.fsync(raw.fileno())
     want = {k: dict(v) for k, v in old.items()}
     for rid, recs in add.items():
         want.setdefault(rid, {}).update(recs)
-    got = read_archive(tmp)
-    if got != want:
-        os.unlink(tmp)
+    if read_archive(dfd, tmp) != want:
+        os.unlink(tmp, dir_fd=dfd)
         raise ArchiveError("%s does not hold what was written; the archive was left as it was" % tmp)
-    os.replace(tmp, path)
-    dfd = os.open(os.path.dirname(path), os.O_RDONLY)
+    os.replace(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+    os.fsync(dfd)
+
+
+def apply_cleanroom(ctx, ck, deleter, cands, failures):
+    adir = archive_dir(ck)
     try:
-        os.fsync(dfd)
+        os.mkdir(ARCHIVE_DIR, dir_fd=deleter.mg_fd)
+    except FileExistsError:
+        pass
+    adfd = os.open(ARCHIVE_DIR, O_DIR, dir_fd=deleter.mg_fd)
+    try:
+        return archive_and_delete(ctx, ck, deleter, adfd, adir, cands, failures)
     finally:
-        os.close(dfd)
+        os.close(adfd)
 
 
-def apply_cleanroom(ctx, ck, cands, tracked, failures):
-    deleter = Deleter(ck, ctx, tracked)
-    adir = archive_dir(ck, True)
+def archive_and_delete(ctx, ck, deleter, adfd, adir, cands, failures):
     work = [r for r in cands if r.action in ("strip", "remove")]
     months = {}
     for r in work:
@@ -947,12 +1050,16 @@ def apply_cleanroom(ctx, ck, cands, tracked, failures):
               "archives": {}, "skipped": []}
     for month in sorted(months):
         runs = months[month]
-        path = os.path.join(adir, month + ".tar.xz")
+        name = month + ".tar.xz"
+        path = os.path.join(adir, name)
         try:
-            pst = lstat(path)
+            try:
+                pst = os.stat(name, dir_fd=adfd, follow_symlinks=False)
+            except FileNotFoundError:
+                pst = None
             if pst is not None and not stat.S_ISREG(pst.st_mode):
                 raise ArchiveError("%s is not a plain file" % path)
-            old = read_archive(path) if pst is not None else {}
+            old = read_archive(adfd, name) if pst is not None else {}
             add, bad = {}, set()
             for r in runs:
                 try:
@@ -971,8 +1078,9 @@ def apply_cleanroom(ctx, ck, cands, tracked, failures):
                 if new:
                     add[r.id] = new
             if add:
-                write_archive(path, old, add, {r.id: r for r in runs})
-            final = read_archive(path) if (add or old) else {}
+                write_archive(adfd, name, old, add, {r.id: r for r in runs})
+            # Read back from the file itself before any run of this month goes.
+            final = read_archive(adfd, name) if (add or old) else {}
         except (OSError, ArchiveError, tarfile.TarError) as e:
             failures.append({"id": "archive/%s" % month, "message": "%s; no run of %s was deleted" % (e, month)})
             continue
@@ -1103,12 +1211,11 @@ def main():
             return finish(out_path, "error", "prune: " + USAGE, failures=[{"id": "usage", "message": "unknown argument %r; %s" % (a, USAGE)}])
         i += 1
     self_root = os.path.realpath(args.self_root)
-    targets = {}
-    with open(fixed.checkouts) as f:
-        for line in f:
-            parts = line.rstrip("\n").split("\t")
-            if len(parts) == 3:
-                targets[os.path.realpath(parts[0])] = {"project": parts[1], "target": parts[2]}
+    targets = {}  # checkout -> its compose project and Docker Rust target, from prune.sh
+    with open(fixed.checkouts, "rb") as f:
+        fields = [os.fsdecode(x) for x in f.read().split(b"\0")[:-1]]
+    for i in range(0, len(fields) - 2, 3):
+        targets[os.path.realpath(fields[i])] = {"project": fields[i + 1], "target": fields[i + 2]}
 
     def fail(msg, fid="usage"):
         return finish(out_path, "error", "prune: " + msg, failures=[{"id": fid, "message": msg}])
@@ -1136,61 +1243,28 @@ def main():
     log("rule: keep the newest %d runs of each job, every run started or finished in the last %d days, "
         "and every latest, referenced, unfinished, live or tracked run (tools/AGENTS.md)" % (KEEP_NEWEST, KEEP_DAYS))
 
-    lock = None
-    if args.apply:
-        lock = take_lock(self_root)
-        if lock is None:
-            return fail("another tools/mg prune --apply runs in this checkout", "locked")
     try:
         return run(args, ctx, wts, root, targets, out_path, mode)
     except Refusal as e:
         return fail(str(e), "refused")
-    finally:
-        if lock:
-            release_lock(lock)
-
-
-def take_lock(root):
-    d = os.path.join(root, "build", "mg", "prune")
-    os.makedirs(d, exist_ok=True)
-    lock = os.path.join(d, "apply.lock")
-    for _ in range(2):
-        try:
-            os.mkdir(lock)
-            with open(os.path.join(lock, "pid"), "w") as f:
-                f.write("%d\n" % os.getpid())
-            return lock
-        except FileExistsError:
-            try:
-                with open(os.path.join(lock, "pid")) as f:
-                    pid = int(f.read().strip() or "0")
-                os.kill(pid, 0)
-                return None
-            except (OSError, ValueError):
-                for n in os.listdir(lock):
-                    os.unlink(os.path.join(lock, n))
-                os.rmdir(lock)
-    return None
-
-
-def release_lock(lock):
-    try:
-        os.unlink(os.path.join(lock, "pid"))
-        os.rmdir(lock)
-    except OSError:
-        pass
 
 
 def run(args, ctx, wts, root, targets, out_path, mode):
     t0 = time.time()
     refs = ctx.refs
     ctx.checkouts = [Checkout(w["path"]) for w in wts]
+    deleter = None
+    if args.apply:
+        # Checked and locked before anything is read: the plan is made under the lock.
+        deleter = Deleter(next(ck for ck in ctx.checkouts if ck.path == root), ctx)
+        if not deleter.lock():
+            raise Refusal("another tools/mg prune --apply runs in this checkout; nothing deleted")
 
-    uncommitted = set()
+    uncommitted, staged = set(), set()
 
     def changes(path):
         try:
-            worktree_changes(path, refs, uncommitted)
+            worktree_changes(path, refs, uncommitted, staged)
         except OSError as e:
             refs.errors.append(str(e))
 
@@ -1205,7 +1279,7 @@ def run(args, ctx, wts, root, targets, out_path, mode):
     for ck in ctx.checkouts:
         ck.runs.sort(key=lambda r: (r.job, r.started, r.pid))
     try:
-        ncommits, nblobs = git_refs(args.self_root, [w.get("head", "") for w in wts], refs, args.run_dir)
+        ncommits, nblobs = git_refs(args.self_root, [w.get("head", "") for w in wts], staged, refs, args.run_dir)
     except OSError as e:
         refs.errors.append(str(e))
         ncommits = nblobs = 0
@@ -1218,17 +1292,19 @@ def run(args, ctx, wts, root, targets, out_path, mode):
             if isinstance(c, str) and re.match(r"^[0-9a-f]{40}$", c):
                 commits.add(c)
     if commits:
-        p = subprocess.run(["git", "-C", args.self_root, "cat-file", "--batch-check"],
-                           input="".join(c + "^{commit}\n" for c in sorted(commits)).encode(),
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        for line in p.stdout.decode().splitlines():
-            parts = line.split()
-            if len(parts) == 3 and parts[1] == "commit":
-                ctx.reachable.add(parts[0])
+        # A source copy goes only when a ref (a branch, tag or worktree HEAD)
+        # still reaches its base, so gc never takes the commit its patch needs.
+        heads = "".join(w["head"] + "\n" for w in wts if w.get("head"))
+        p = subprocess.run(["git", "-C", args.self_root, "rev-list", "--all", "--stdin"],
+                           input=heads.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if p.returncode != 0:
+            refs.errors.append("git rev-list --all failed: %s" % p.stderr.decode(errors="replace").strip())
+        else:
+            ctx.reachable = commits & set(p.stdout.decode().split())
     ctx.ref_stats = {"branch_commits": ncommits, "objects": nblobs, "run_ids": len(refs.ids),
                      "run_ids_in_branches": in_git, "run_ids_uncommitted": len(uncommitted),
                      "run_ids_in_state_files": len(set().union(*[ck.state for ck in ctx.checkouts])),
-                     "unscanned_large_files": refs.unscanned, "errors": refs.errors[:50]}
+                     "errors": refs.errors[:50]}
     log("references: %d run ids from %d branch tips and worktree HEADs, %d checkouts' uncommitted files, build/mg state and receipts (%.0f s)"
         % (len(refs.ids), ncommits, len(wts), time.time() - t0))
     for e in refs.errors[:20]:
@@ -1284,8 +1360,11 @@ def run(args, ctx, wts, root, targets, out_path, mode):
         return finish(out_path, "warn" if refs.errors else "pass", message, counts, [], details)
 
     ck = by_path[root]
-    tracked = ck.tracked_runs()
+    tracked = deleter.tracked if deleter else ck.tracked_runs()
     details["skipped"] = ck.skipped
+    details["pending"] = ["%s/%s" % p for p in ck.pending]
+    if deleter and ck.pending:
+        details["pending_finished"] = deleter.finish_pending(failures)
     if mode == "runs":
         cands = plan_runs(ctx, ck, tracked)
         measure(cands, False)
@@ -1296,7 +1375,7 @@ def run(args, ctx, wts, root, targets, out_path, mode):
                   "bytes_freed": total["bytes_freed"]}
         message = "prune: %d of %d runs would go, freeing %s" % (total["delete"], total["runs"], human(total["bytes_freed"]))
         if args.apply:
-            done = apply_runs(ctx, ck, cands, tracked, failures)
+            done = apply_runs(ctx, ck, deleter, cands, failures)
             details["applied"] = done
             counts.update({"deleted": done["deleted"], "bytes_freed": done["bytes_freed"]})
             message = "prune: deleted %d runs, freed %s" % (done["deleted"], human(done["bytes_freed"]))
@@ -1317,7 +1396,7 @@ def run(args, ctx, wts, root, targets, out_path, mode):
         message = "prune --cleanroom: %d runs; would archive %d and free %s" % (
             s["runs"], s["remove"] + s["strip"], human(s["bytes_freed"]))
         if args.apply:
-            done = apply_cleanroom(ctx, ck, cands, tracked, failures)
+            done = apply_cleanroom(ctx, ck, deleter, cands, failures)
             details["applied"] = done
             counts.update({"archived": done["archived_runs"], "removed": done["removed_runs"],
                            "bytes_freed": done["bytes_freed"]})

@@ -117,7 +117,7 @@ member() { # member <archive> <name>: its content
 
 @test "prune keeps runs named in tracked, uncommitted, other-branch and state files, and in the receipts of kept runs" {
   local ids=() n gate
-  for n in $(seq 1 30); do ids[$n]="$(old_run gamma "$n")"; done
+  for n in $(seq 1 31); do ids[$n]="$(old_run gamma "$n")"; done
   mkdir -p "$SB/docs"
   echo "receipt build/mg/gamma/${ids[1]}/result.json" >"$SB/docs/review.md"
   git -C "$SB" add docs/review.md
@@ -137,12 +137,14 @@ member() { # member <archive> <name>: its content
   printf '{"run":"%s"}\n' "${ids[6]}" >"$MG/catch-up/queue.jsonl"
   printf '{"child":"%s"}\n' "${ids[7]}" >"$MG/gamma/${ids[8]}/receipt.json"
   echo "${ids[10]}" >>"$MG/gamma/${ids[9]}/log.txt"
+  echo "staged ${ids[11]}" >"$SB/docs/staged.md"
+  git -C "$SB" add docs/staged.md
   prune --apply
   [ "$status" -eq 0 ]
   [ "$(jq -r .status "$result")" = pass ]
-  for n in 1 2 3 4 5 6; do [ -d "$MG/gamma/${ids[$n]}" ] || { echo "run $n was deleted"; false; }; done
+  for n in 1 2 3 4 5 6 11; do [ -d "$MG/gamma/${ids[$n]}" ] || { echo "run $n was deleted"; false; }; done
   for n in 7 8 9 10; do [ ! -e "$MG/gamma/${ids[$n]}" ] || { echo "run $n was kept"; false; }; done
-  for n in $(seq 11 30); do [ -d "$MG/gamma/${ids[$n]}" ]; done
+  for n in $(seq 12 31); do [ -d "$MG/gamma/${ids[$n]}" ]; done
   jq -e --arg id "${ids[5]}" '.[] | select(.run == $id and .reasons == ["referenced"])' "$(plan)"
 }
 
@@ -169,6 +171,22 @@ member() { # member <archive> <name>: its content
   [ ! -e "$MG/delta/${ids[4]}" ]
   jq -e --arg id "$live" '.[] | select(.run == $id and .reasons == ["live"])' "$(plan)"
   jq -e --arg id "${ids[2]}" '.[] | select(.run == $id and (.reasons | index("unfinished")))' "$(plan)"
+}
+
+@test "prune --apply finishes a deletion an earlier --apply cut short, and the report leaves it" {
+  local n
+  for n in $(seq 1 21); do old_run alpha "$n" >/dev/null; done
+  mkdir -p "$MG/alpha/.prune-deleting-20250101T000000Z-4190700/sub"
+  echo partial >"$MG/alpha/.prune-deleting-20250101T000000Z-4190700/sub/file"
+  prune
+  [ -d "$MG/alpha/.prune-deleting-20250101T000000Z-4190700" ]
+  jq -e '.details.pending == ["alpha/.prune-deleting-20250101T000000Z-4190700"]' "$result"
+  prune --apply
+  [ "$(jq -r .status "$result")" = pass ]
+  [ ! -e "$MG/alpha/.prune-deleting-20250101T000000Z-4190700" ]
+  [ "$(jq -r .details.pending_finished "$result")" = 1 ]
+  [ -z "$(find "$MG/alpha" -maxdepth 1 -name '.prune-deleting-*')" ]
+  [ "$(find "$MG/alpha" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 20 ]
 }
 
 @test "prune keeps a run folder that holds a tracked file" {
