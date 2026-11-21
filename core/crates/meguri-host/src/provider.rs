@@ -204,6 +204,18 @@ impl CoreHost {
         Authority::migrate_input(root, legacy)
     }
     pub fn provider_authority(&self) -> &Arc<Authority> { &self.provider }
+    /// Whether this device's own Meguri Sync setup transfer (MP4) is what keeps
+    /// network admission closed: Meguri Sync is selected with its connection, no
+    /// handoff is recorded, and the active manual transfer is that connection's
+    /// collection-and-media setup (the same reads as `active_meguri_preparation`).
+    /// Admission stays closed from preparation until the media finishes; this
+    /// changes no admission. A provider phase read from it is setup in progress,
+    /// not MP1's unreadable metadata. Any read failure or mismatch answers false.
+    pub fn meguri_setup_transfer_holds_admission(&self) -> bool {
+        self.provider.network_blocked()
+            && self.provider.snapshot().ok().and_then(|doc| doc.meguri)
+                .is_some_and(|connection| self.active_meguri_preparation(&connection).is_ok_and(|active| active.is_some()))
+    }
     /// Local failures leave the collection available. No manual operation or R6
     /// decision is finished or rewritten by this refresh.
     pub fn refresh_provider_admission(&self) {
