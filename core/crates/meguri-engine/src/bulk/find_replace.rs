@@ -13,17 +13,27 @@
 //! be untouched since the snapshot (`TableUntouched`, `engine/op-model` O7),
 //! so what the commit writes is what the compute phase found. Matching and
 //! rewriting are pure functions ([`Pattern`], [`rewrite_fields`],
-//! [`rewrite_tags`]) that a preview can run without writing (U265).
+//! [`rewrite_tags`]).
+//!
+//! The preview (U265, `browser/workspace` V9, F10) is [`preview`]: the same
+//! read of the target as the compute phase ([`scan`]), on one snapshot,
+//! writing nothing. It counts the notes the write phase would write and
+//! lists the changes of the first [`PREVIEW_NOTES`] of them. The run takes
+//! that count back as its confirmation (`FindReplace::confirmed`, the
+//! pattern of `notetypes/draft-save` D8): the compute phase and the write
+//! transaction count again, and a run that would write more notes than
+//! were confirmed is refused with `CountChanged`, writing nothing.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use meguri_model::ids::{NoteId, NotetypeId};
 use meguri_model::note::Note;
 use meguri_model::notetype::Notetype;
-use meguri_storage::{ReadRows, ReaderRole, Table, WriteScope};
+use meguri_storage::{ReadRows, ReaderRole, StorageError, Table, WriteScope};
 use meguri_text::fold::{compare_folded, folded};
 use regex::{NoExpand, Regex};
 
@@ -37,7 +47,7 @@ use crate::executor::plan_commit::{Plan, PlanContext, plan_and_commit_with};
 use crate::executor::preconditions::Precondition;
 use crate::lifecycle::Engine;
 use crate::progress::ProgressSink;
-use crate::tags::registry::{Spelling, new_row, spelling_of};
+use crate::tags::registry::{Spelling, TagNames, new_row, spelling_of};
 use crate::tags::{join_note_tags, normalize, split_text};
 use crate::undo::names::{FIND_AND_REPLACE, UPDATE_TAG};
 
@@ -67,7 +77,18 @@ pub struct FindReplace {
     pub regex: bool,
     /// F4 step 3.
     pub ignore_case: bool,
+    /// `browser/workspace` V9's Whole Words: only the matches with no word
+    /// character just before or just after them count.
+    pub whole_words: bool,
     pub within: FindIn,
+    /// The count of notes that will change as the preview showed it
+    /// ([`Preview::changed`]), what the user confirmed (the confirmed-count
+    /// precondition, ruled 2026-11-21, the pattern of
+    /// `notetypes/draft-save` D8). The run refuses with `CountChanged` when
+    /// it would write more notes; fewer or as many proceed. A caller with
+    /// no preview passes the count it reads at the call. The preview reads
+    /// no confirmation.
+    pub confirmed: u64,
 }
 
 /// Why Find and Replace refused (F11); nothing was written and both undo
@@ -85,6 +106,11 @@ pub enum Refusal {
     /// F6 step 7 (`NotFound{noteId}`): a target note whose note type does
     /// not exist, the first in F6 step 1's order.
     NotetypeMissing { note: NoteId },
+    /// The confirmed-count precondition (D8's pattern): the run would write
+    /// more notes than `FindReplace::confirmed`. `notes` is the count read
+    /// where the refusal was made (the compute phase's snapshot or the
+    /// write transaction), for the sheet to show again.
+    CountChanged { notes: u64 },
 }
 
 impl fmt::Display for Refusal {
@@ -96,6 +122,9 @@ impl fmt::Display for Refusal {
                 write!(f, "note {} holds a different number of fields than its note type", note.0)
             }
             Refusal::NotetypeMissing { note } => write!(f, "the note type of note {} does not exist", note.0),
+            Refusal::CountChanged { notes } => {
+                write!(f, "{notes} notes would change, more than the confirmed count")
+            }
         }
     }
 }
@@ -125,12 +154,27 @@ pub fn check_request(request: &FindReplace) -> Result<(), EngineError> {
     Ok(())
 }
 
-/// F4's pattern and F5's replacement.
+/// F4's pattern and F5's replacement, with V9's Whole Words.
 #[derive(Clone, Debug)]
 pub struct Pattern {
     regex: Regex,
     replace: String,
     expand: bool,
+    whole_words: bool,
+}
+
+/// One character of the `regex` crate's Unicode `\w` class (V9).
+static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\A\w\z").expect("the word class"));
+
+fn is_word(c: char) -> bool {
+    let mut buffer = [0; 4];
+    WORD.is_match(c.encode_utf8(&mut buffer))
+}
+
+/// V9: a match counts under Whole Words when the character just before it
+/// and the one just after it, where there are any, are not word characters.
+fn whole_word(text: &str, start: usize, end: usize) -> bool {
+    !text[..start].chars().next_back().is_some_and(is_word) && !text[end..].chars().next().is_some_and(is_word)
 }
 
 impl Pattern {
@@ -155,22 +199,60 @@ impl Pattern {
             regex,
             replace: request.replace.clone(),
             expand: request.regex,
+            whole_words: request.whole_words,
         })
     }
 
     /// Whether the pattern has at least one match in `text` (an empty
-    /// pattern matches every text, the empty one included).
+    /// pattern matches every text, the empty one included); under Whole
+    /// Words, one that V9 keeps.
     pub fn is_match(&self, text: &str) -> bool {
-        self.regex.is_match(text)
+        if self.whole_words {
+            self.regex
+                .find_iter(text)
+                .any(|found| whole_word(text, found.start(), found.end()))
+        } else {
+            self.regex.is_match(text)
+        }
     }
 
-    /// F5: every match replaced, left to right, without overlap.
+    /// F5: every match replaced, left to right, without overlap. Under
+    /// Whole Words the matches V9 drops stay as they stand, and the search
+    /// goes on after them as it does after a replaced one.
     pub fn replace<'t>(&self, text: &'t str) -> Cow<'t, str> {
+        if self.whole_words {
+            return self.replace_whole_words(text);
+        }
         if self.expand {
             self.regex.replace_all(text, self.replace.as_str())
         } else {
             self.regex.replace_all(text, NoExpand(&self.replace))
         }
+    }
+
+    fn replace_whole_words<'t>(&self, text: &'t str) -> Cow<'t, str> {
+        let mut out = String::new();
+        let mut last = 0;
+        let mut replaced = false;
+        for captures in self.regex.captures_iter(text) {
+            let Some(found) = captures.get(0) else { continue };
+            if !whole_word(text, found.start(), found.end()) {
+                continue;
+            }
+            replaced = true;
+            out.push_str(&text[last..found.start()]);
+            if self.expand {
+                captures.expand(&self.replace, &mut out);
+            } else {
+                out.push_str(&self.replace);
+            }
+            last = found.end();
+        }
+        if !replaced {
+            return Cow::Borrowed(text);
+        }
+        out.push_str(&text[last..]);
+        Cow::Owned(out)
     }
 }
 
@@ -338,30 +420,55 @@ impl<'r, R: ReadRows + ?Sized> Notetypes<'r, R> {
     }
 }
 
+/// How a read of the target paces itself: the cancel check between pages,
+/// and where its progress goes (none inside the write transaction, K3).
+struct Pace<'p> {
+    check: &'p dyn Fn() -> Result<(), EngineError>,
+    progress: Option<&'p ProgressSink>,
+}
+
+impl Pace<'_> {
+    fn report(&self, read: u64, total: u64) {
+        if let Some(progress) = self.progress {
+            progress.report(read, Some(total));
+        }
+    }
+}
+
 /// The notes of the target, a page at a time: listed ids read one by one
-/// (deleted ones skipped), all notes by id.
+/// (deleted ones skipped), in the list's order or, with `ascending`, in
+/// ascending note id; all notes by id.
 fn each_note(
     reader: &(impl ReadRows + ?Sized),
     target: &ResolvedNotes,
-    context: &PlanContext<'_>,
+    ascending: bool,
+    pace: &Pace<'_>,
     mut each: impl FnMut(Note) -> Result<(), EngineError>,
 ) -> Result<u64, EngineError> {
-    let progress = context.progress();
     match target {
-        ResolvedNotes::Notes(ids) => {
-            let total = ids.len() as u64;
+        ResolvedNotes::Notes(listed) => {
+            let total = listed.len() as u64;
+            let sorted;
+            let ids: &[NoteId] = if ascending {
+                let mut ids = listed.clone();
+                ids.sort_unstable();
+                sorted = ids;
+                &sorted
+            } else {
+                listed
+            };
             for (done, chunk) in ids.chunks(PAGE).enumerate() {
-                context.check_cancel()?;
-                if let Some(progress) = progress {
-                    progress.report((done * PAGE) as u64, Some(total));
+                (pace.check)()?;
+                pace.report((done * PAGE) as u64, total);
+                let mut page = reader.notes_with_ids(chunk)?;
+                if ascending {
+                    page.sort_unstable_by_key(|note| note.id);
                 }
-                for note in reader.notes_with_ids(chunk)? {
+                for note in page {
                     each(note)?;
                 }
             }
-            if let Some(progress) = progress {
-                progress.report(total, Some(total));
-            }
+            pace.report(total, total);
             Ok(total)
         }
         ResolvedNotes::AllNotes => {
@@ -369,10 +476,8 @@ fn each_note(
             let mut read = 0u64;
             let mut after = None;
             loop {
-                context.check_cancel()?;
-                if let Some(progress) = progress {
-                    progress.report(read, Some(total.max(read)));
-                }
+                (pace.check)()?;
+                pace.report(read, total.max(read));
                 let page = reader.notes_after(after, PAGE)?;
                 let Some(last) = page.last() else {
                     break;
@@ -383,52 +488,217 @@ fn each_note(
                     each(note)?;
                 }
             }
-            if let Some(progress) = progress {
-                progress.report(read, Some(read));
-            }
+            pace.report(read, read);
             Ok(read)
         }
     }
 }
 
-/// The compute phase (F6, F7, F8 on the snapshot).
+/// A tag name ordered and compared as the `tags` table's key (`unicase`).
+#[derive(Debug)]
+struct TagKey(String);
+
+impl PartialEq for TagKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for TagKey {}
+
+impl PartialOrd for TagKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TagKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        compare_folded(&self.0, &other.0)
+    }
+}
+
+/// The tag registry as the write phase would leave it so far (F7 step 4,
+/// T3): the stored rows, and in memory the rows the notes before this one
+/// would register. So a read spells every note's tags as the write phase
+/// will, registering nothing.
+struct Registry<'r, R: ?Sized> {
+    rows: &'r R,
+    added: BTreeMap<TagKey, String>,
+}
+
+impl<'r, R: ReadRows + ?Sized> Registry<'r, R> {
+    fn new(rows: &'r R) -> Self {
+        Registry {
+            rows,
+            added: BTreeMap::new(),
+        }
+    }
+
+    /// F7 steps 4 and 5 for one matched note as `commit_tags_note` runs
+    /// them: the tags text the write phase would store, or `None` when it
+    /// is the stored text (nothing written, nothing registered). `replaced`
+    /// is [`rewrite_tags`]'s result.
+    fn stored_after(&mut self, stored: &str, replaced: Vec<String>) -> Result<Option<String>, EngineError> {
+        let mut registered = Vec::new();
+        let mut spelled = Vec::with_capacity(replaced.len());
+        for tag in replaced.iter().filter(|tag| !tag.is_empty()) {
+            let normalized = normalize(tag);
+            let name = match spelling_of(&*self, &normalized)? {
+                Spelling::Registered(name) => name,
+                Spelling::New(name) => {
+                    // A later tag of this note spells from it too (T3).
+                    self.added.insert(TagKey(name.clone()), name.clone());
+                    registered.push(name.clone());
+                    name
+                }
+            };
+            spelled.push(name);
+        }
+        let tags = stored_tags(spelled);
+        if tags == stored {
+            // The write phase rolls those registrations back (step 5).
+            for name in registered {
+                self.added.remove(&TagKey(name));
+            }
+            return Ok(None);
+        }
+        Ok(Some(tags))
+    }
+}
+
+impl<R: ReadRows + ?Sized> TagNames for Registry<'_, R> {
+    fn registered_name(&self, name: &str) -> Result<Option<String>, StorageError> {
+        match self.added.get(&TagKey(name.to_owned())) {
+            Some(added) => Ok(Some(added.clone())),
+            None => self.rows.registered_name(name),
+        }
+    }
+
+    fn first_name_from(&self, from: &str) -> Result<Option<String>, StorageError> {
+        let stored = self.rows.first_name_from(from)?;
+        let added = self.added.range(TagKey(from.to_owned())..).next().map(|(_, name)| name);
+        Ok(match (stored, added) {
+            (Some(stored), Some(added)) if compare_folded(added, &stored) == Ordering::Less => Some(added.clone()),
+            (Some(stored), _) => Some(stored),
+            (None, added) => added.cloned(),
+        })
+    }
+}
+
+/// A note the run changes, as a read of the target finds it, with what the
+/// write phase would store.
+enum Change<'n> {
+    /// F6: the stored note and its note type, and the values to store.
+    Fields {
+        note: &'n Note,
+        notetype: &'n Notetype,
+        fields: &'n [String],
+    },
+    /// F7: the stored note and the tags text to store.
+    Tags { note: &'n Note, tags: &'n str },
+}
+
+/// What a read of the target found.
+struct Scanned {
+    considered: u64,
+    /// The notes the write phase would write (F6 step 6, F7 step 5): the
+    /// preview's count and the confirmed count's measure.
+    changed: u64,
+    /// The notes the write phase visits: for fields those it changes, in F6
+    /// step 1's order; for tags those that match, ascending.
+    notes: Vec<(NotetypeId, NoteId)>,
+}
+
+/// The read of the target the compute phase, the preview and the write
+/// transaction's count share (F6, F7, F8): every note read on `reader`,
+/// F6 step 7's refusals, and each note the run changes handed to `each`
+/// with what the write phase would store. Writes nothing.
+fn scan<R: ReadRows + ?Sized>(
+    reader: &R,
+    target: &ResolvedNotes,
+    request: &FindReplace,
+    pattern: &Pattern,
+    normalize: bool,
+    pace: &Pace<'_>,
+    mut each: impl FnMut(Change<'_>) -> Result<(), EngineError>,
+) -> Result<Scanned, EngineError> {
+    let mut notes = Vec::new();
+    let mut changed = 0u64;
+    if request.within == FindIn::Tags {
+        // F7 step 3: ascending note id, whatever the list's order, so that
+        // each note spells from the rows the notes before it register.
+        let mut registry = Registry::new(reader);
+        let considered = each_note(reader, target, true, pace, |note| {
+            let Some(replaced) = rewrite_tags(&note.tags, pattern) else {
+                return Ok(());
+            };
+            notes.push((note.notetype_id, note.id));
+            if let Some(tags) = registry.stored_after(&note.tags, replaced)? {
+                changed += 1;
+                each(Change::Tags { note: &note, tags: &tags })?;
+            }
+            Ok(())
+        })?;
+        return Ok(Scanned {
+            considered,
+            changed,
+            notes,
+        });
+    }
+    let mut first = FirstRefusal::default();
+    let mut notetypes = Notetypes::new(reader);
+    let considered = each_note(reader, target, false, pace, |note| {
+        let at = (note.notetype_id, note.id);
+        let Some(notetype) = notetypes.get(note.notetype_id)? else {
+            first.note(at, Refusal::NotetypeMissing { note: note.id });
+            return Ok(());
+        };
+        match rewrite_fields(&note, &notetype, &request.within, pattern, normalize) {
+            Ok(FieldsRewrite::Changed(fields)) => {
+                notes.push(at);
+                changed += 1;
+                each(Change::Fields {
+                    note: &note,
+                    notetype: &notetype,
+                    fields: &fields,
+                })?;
+            }
+            Ok(_) => {}
+            Err(refusal) => first.note(at, refusal),
+        }
+        Ok(())
+    })?;
+    first.check()?;
+    // F6 step 1: ascending note type id, then note id.
+    notes.sort_unstable();
+    Ok(Scanned {
+        considered,
+        changed,
+        notes,
+    })
+}
+
+/// The compute phase (F6, F7, F8 on the snapshot), then the confirmed
+/// count's first check: an out-of-date confirmation is refused before the
+/// write transaction is asked for.
 fn plan(context: &PlanContext<'_>, target: &ResolvedNotes, request: &FindReplace) -> Result<Plan<Planned>, EngineError> {
     let reader = &**context.snapshot();
     let normalize = crate::notes::fields::normalize_enabled(reader)?;
     // F4 step 5 before any note is read.
     let pattern = Arc::new(Pattern::build(request, normalize)?);
-    let mut notes = Vec::new();
-    let mut first = FirstRefusal::default();
-    let considered = if request.within == FindIn::Tags {
-        let considered = each_note(reader, target, context, |note| {
-            if rewrite_tags(&note.tags, &pattern).is_some() {
-                notes.push((note.notetype_id, note.id));
-            }
-            Ok(())
-        })?;
-        // F7 step 3: ascending note id, whatever the list's order.
-        notes.sort_unstable_by_key(|(_, id)| *id);
-        considered
-    } else {
-        let mut notetypes = Notetypes::new(reader);
-        let considered = each_note(reader, target, context, |note| {
-            let at = (note.notetype_id, note.id);
-            let Some(notetype) = notetypes.get(note.notetype_id)? else {
-                first.note(at, Refusal::NotetypeMissing { note: note.id });
-                return Ok(());
-            };
-            match rewrite_fields(&note, &notetype, &request.within, &pattern, normalize) {
-                Ok(FieldsRewrite::Changed(_)) => notes.push(at),
-                Ok(_) => {}
-                Err(refusal) => first.note(at, refusal),
-            }
-            Ok(())
-        })?;
-        first.check()?;
-        // F6 step 1: ascending note type id, then note id.
-        notes.sort_unstable();
-        considered
+    let check = || context.check_cancel();
+    let pace = Pace {
+        check: &check,
+        progress: context.progress(),
     };
+    let scanned = scan(reader, target, request, &pattern, normalize, &pace, |_| Ok(()))?;
+    if scanned.changed > request.confirmed {
+        return Err(Refusal::CountChanged {
+            notes: scanned.changed,
+        }
+        .into());
+    }
     let mut tables = vec![Table::Notes];
     if request.within != FindIn::Tags {
         tables.extend([Table::Notetypes, Table::Fields, Table::Templates]);
@@ -444,11 +714,43 @@ fn plan(context: &PlanContext<'_>, target: &ResolvedNotes, request: &FindReplace
         value: Planned {
             pattern,
             normalize,
-            notes,
-            considered,
+            notes: scanned.notes,
+            considered: scanned.considered,
         },
         preconditions,
     })
+}
+
+/// The confirmed count's second check, on the rows of the write transaction
+/// before its first write (the shape of `notetypes/structure` `check_live`;
+/// the preconditions, and so `Stale`, were checked before it).
+///
+/// The write phase writes only planned notes, so it writes at most
+/// `planned.notes.len()`: within the confirmation, nothing can exceed it.
+/// Otherwise the planned notes are read again on the live rows and counted
+/// as the write phase will write them. No other note of the target can
+/// change: the preconditions hold the notes, note types, fields and
+/// templates as the compute phase read them, and a note that does not
+/// match never changes, whatever the tag registry holds. For fields the
+/// planned notes are exactly those counted on the snapshot, so only a Tags
+/// run, whose spelling reads the registry the preconditions do not hold,
+/// counts here.
+fn check_live(scope: &WriteScope<'_>, request: &FindReplace, planned: &Planned) -> Result<(), EngineError> {
+    if planned.notes.len() as u64 <= request.confirmed {
+        return Ok(());
+    }
+    let ids = ResolvedNotes::Notes(planned.notes.iter().map(|(_, id)| *id).collect());
+    // Past the cancel point and inside the transaction: no cancel, no
+    // progress (K3).
+    let pace = Pace {
+        check: &|| Ok(()),
+        progress: None,
+    };
+    let live = scan(scope, &ids, request, &planned.pattern, planned.normalize, &pace, |_| Ok(()))?.changed;
+    if live > request.confirmed {
+        return Err(Refusal::CountChanged { notes: live }.into());
+    }
+    Ok(())
 }
 
 /// A row the compute phase planned on that the write transaction finds
@@ -606,11 +908,9 @@ fn commit(context: &mut OpContext<'_, '_>, request: &FindReplace, planned: &Plan
             key: "normalize_note_text".to_owned(),
         });
     }
-    // The seam for the confirmed count (D8, ruled 2026-11-21, lands with
-    // U265 and its spec line): every planned note is re-derived below from
-    // the current stored row before it is written, so counting again how
-    // many notes would change, against the count the preview showed,
-    // goes here, ahead of the first write.
+    // The confirmed count, counted again ahead of the first write; `Stale`
+    // (the preconditions, the key above) comes first.
+    check_live(scope, request, planned)?;
     let mut affected = 0u64;
     let mut registered = HashMap::new();
     let mut notetypes = HashMap::new();
@@ -706,6 +1006,384 @@ pub fn start(
     })
 }
 
+/// The notes whose changes a preview lists (`browser/workspace` V9, V17).
+pub const PREVIEW_NOTES: usize = 100;
+
+/// What a Find and Replace would do (`browser/workspace` V9, F10), read
+/// without writing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Preview {
+    /// The notes the run would write (F6 step 6, F7 step 5: a match whose
+    /// replacement gives back the stored value does not count): the
+    /// sheet's "c of k notes will change", and what the run takes back as
+    /// `FindReplace::confirmed`.
+    pub changed: u64,
+    /// The run's `considered` (F8): the listed ids, deleted ones included;
+    /// the notes read for the all-notes target.
+    pub considered: u64,
+    /// The changes of the first [`PREVIEW_NOTES`] changed notes in result
+    /// order (the list's order; ascending note id for the all-notes
+    /// target), each note's in field order.
+    pub entries: Vec<PreviewEntry>,
+}
+
+/// One changed (note, field) pair; Tags count as one field (V9).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewEntry {
+    pub note: NoteId,
+    /// The note's Sort Field as Browse shows it (`browser/columns` C7.1),
+    /// before the change; empty when its note type is missing.
+    pub sort_field: String,
+    /// The changed field's name (the sheet shows it only with All Fields);
+    /// `None` for Tags.
+    pub field: Option<String>,
+    /// The old and the new value as one line of text (a field's stored
+    /// value with HTML removed by C7.1's rule; tags as C7.10 shows them),
+    /// marked with the character diff between the two: the shortest edit
+    /// script, each run of changes listing its removed text before its
+    /// inserted text.
+    pub diff: Vec<DiffSpan>,
+}
+
+impl PreviewEntry {
+    /// The old text: what is kept and what is removed.
+    pub fn old_text(&self) -> String {
+        self.text(Edit::Removed)
+    }
+
+    /// The new text: what is kept and what is inserted.
+    pub fn new_text(&self) -> String {
+        self.text(Edit::Inserted)
+    }
+
+    fn text(&self, with: Edit) -> String {
+        self.diff
+            .iter()
+            .filter(|span| span.edit == Edit::Kept || span.edit == with)
+            .map(|span| span.text.as_str())
+            .collect()
+    }
+}
+
+/// What a span of a preview entry's text is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edit {
+    Kept,
+    /// Only in the old text (crossed out in red).
+    Removed,
+    /// Only in the new text (in the accent colour).
+    Inserted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiffSpan {
+    pub edit: Edit,
+    pub text: String,
+}
+
+/// The preview of a Find and Replace on `target` (V9, F10): the same read
+/// of the notes as the run's compute phase, on one snapshot of the
+/// maintenance reader (`browser/bulk-framework` K3), writing nothing.
+/// Refuses as the run would (F11's refusals in its order), so an invalid
+/// pattern is F10's error. `cancel` is checked between pages: the sheet
+/// cancels a preview the next keystroke supersedes. `request.confirmed` is
+/// not read. It reads the notes as they are now, not as a search session's
+/// snapshot saw them: the run's compute phase reads them now too, so the
+/// count it confirms is the one the run counts again (V17's "shares the
+/// session's snapshot" is met by [`preview_in`] where a caller wants it).
+pub fn preview(
+    collection: &Collection,
+    target: &NoteTarget,
+    request: &FindReplace,
+    cancel: &CancelToken,
+    progress: &ProgressSink,
+) -> Result<Preview, EngineError> {
+    cancel.check()?;
+    let target = target.resolve(collection)?;
+    if let ResolvedNotes::Notes(ids) = &target {
+        check_ids(ids, "note")?;
+    }
+    check_request(request)?;
+    let reader = collection.reader(ReaderRole::Maintenance)?;
+    let snapshot = reader.snapshot()?;
+    preview_in(&*snapshot, &target, request, cancel, progress)
+}
+
+/// [`preview`] on a snapshot the caller holds, for a resolved target that
+/// passed `check_ids` and a request that passed [`check_request`].
+pub fn preview_in(
+    reader: &(impl ReadRows + ?Sized),
+    target: &ResolvedNotes,
+    request: &FindReplace,
+    cancel: &CancelToken,
+    progress: &ProgressSink,
+) -> Result<Preview, EngineError> {
+    let normalize = crate::notes::fields::normalize_enabled(reader)?;
+    let pattern = Pattern::build(request, normalize)?;
+    let mut listed = Listed::new(target, reader);
+    let check = || cancel.check();
+    let pace = Pace {
+        check: &check,
+        progress: Some(progress),
+    };
+    let scanned = scan(reader, target, request, &pattern, normalize, &pace, |change| listed.offer(change))?;
+    // A cancel during the last page's reports.
+    cancel.check()?;
+    Ok(Preview {
+        changed: scanned.changed,
+        considered: scanned.considered,
+        entries: listed.finish(cancel)?,
+    })
+}
+
+/// A preview entry before its diff: the texts it compares.
+struct Pending {
+    note: NoteId,
+    sort_field: String,
+    field: Option<String>,
+    old: String,
+    new: String,
+}
+
+/// The preview's list: the entries of the first [`PREVIEW_NOTES`] changed
+/// notes by result position, whatever order the read finds them in. Their
+/// diffs are built once the read has ended, for the notes that stay.
+struct Listed<'r, R: ReadRows + ?Sized> {
+    /// A listed note's position in the list; `None` for the all-notes
+    /// target, whose position is the note id.
+    positions: Option<HashMap<NoteId, usize>>,
+    notetypes: Notetypes<'r, R>,
+    entries: BTreeMap<i64, Vec<Pending>>,
+}
+
+impl<'r, R: ReadRows + ?Sized> Listed<'r, R> {
+    fn new(target: &ResolvedNotes, reader: &'r R) -> Self {
+        let positions = match target {
+            ResolvedNotes::Notes(ids) => Some(ids.iter().enumerate().map(|(at, id)| (*id, at)).collect()),
+            ResolvedNotes::AllNotes => None,
+        };
+        Listed {
+            positions,
+            notetypes: Notetypes::new(reader),
+            entries: BTreeMap::new(),
+        }
+    }
+
+    fn offer(&mut self, change: Change<'_>) -> Result<(), EngineError> {
+        let note = match &change {
+            Change::Fields { note, .. } | Change::Tags { note, .. } => *note,
+        };
+        let at = match &self.positions {
+            Some(positions) => positions.get(&note.id).map_or(i64::MAX, |at| *at as i64),
+            None => note.id.0,
+        };
+        if self.entries.len() >= PREVIEW_NOTES && self.entries.last_key_value().is_some_and(|(last, _)| at >= *last) {
+            return Ok(());
+        }
+        let entries = match change {
+            Change::Fields { note, notetype, fields } => field_entries(note, notetype, fields),
+            Change::Tags { note, tags } => {
+                // Display only: the Tags run reads no note type, so one that
+                // cannot be read leaves the Sort Field empty, not the preview
+                // refused.
+                let notetype = self.notetypes.get(note.notetype_id).ok().flatten();
+                vec![Pending {
+                    note: note.id,
+                    sort_field: notetype.map_or_else(String::new, |notetype| sort_field_text(note, &notetype)),
+                    field: None,
+                    old: tags_line(&note.tags),
+                    new: tags_line(tags),
+                }]
+            }
+        };
+        self.entries.insert(at, entries);
+        if self.entries.len() > PREVIEW_NOTES {
+            self.entries.pop_last();
+        }
+        Ok(())
+    }
+
+    /// The listed entries with their diffs, in result order, then field
+    /// order; `cancel` is checked before each diff.
+    fn finish(self, cancel: &CancelToken) -> Result<Vec<PreviewEntry>, EngineError> {
+        let mut out = Vec::new();
+        for pending in self.entries.into_values().flatten() {
+            cancel.check()?;
+            out.push(PreviewEntry {
+                note: pending.note,
+                sort_field: pending.sort_field,
+                field: pending.field,
+                diff: char_diff(&pending.old, &pending.new),
+            });
+        }
+        Ok(out)
+    }
+}
+
+/// C7.1: the stored value at the note type's sort field, as one line of
+/// text with media names kept; empty when the note has no value there.
+fn sort_field_text(note: &Note, notetype: &Notetype) -> String {
+    let at = notetype.config.sort_field_idx as usize;
+    note.field_values()
+        .nth(at)
+        .map_or_else(String::new, meguri_text::html::text_line_keep_media)
+}
+
+/// C7.10: the tags in stored order, joined by one U+0020.
+fn tags_line(tags: &str) -> String {
+    split_text(tags).collect::<Vec<_>>().join(" ")
+}
+
+/// V9's entries of a note whose fields change: one per field whose stored
+/// value changes (normalization included), in field order.
+fn field_entries(note: &Note, notetype: &Notetype, fields: &[String]) -> Vec<Pending> {
+    let sort_field = sort_field_text(note, notetype);
+    note.field_values()
+        .zip(fields)
+        .enumerate()
+        .filter(|(_, (old, new))| *old != new.as_str())
+        .map(|(ord, (old, new))| Pending {
+            note: note.id,
+            sort_field: sort_field.clone(),
+            field: notetype.fields.get(ord).map(|field| field.name.clone()),
+            old: meguri_text::html::text_line_keep_media(old),
+            new: meguri_text::html::text_line_keep_media(new),
+        })
+        .collect()
+}
+
+/// The search for the shortest edit script gives up above this many
+/// differences, and above [`MAX_STEPS`] steps (the characters compared
+/// times the differences tried). Past either limit, between the common
+/// start and end, the old text is shown removed and the new one inserted.
+const MAX_EDITS: usize = 500;
+const MAX_STEPS: usize = 50_000_000;
+
+/// V9's character diff from `old` to `new`.
+fn char_diff(old: &str, new: &str) -> Vec<DiffSpan> {
+    let old: Vec<char> = old.chars().collect();
+    let new: Vec<char> = new.chars().collect();
+    let head = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+    let tail = old[head..]
+        .iter()
+        .rev()
+        .zip(new[head..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let (a, b) = (&old[head..old.len() - tail], &new[head..new.len() - tail]);
+    let mut edits = vec![(Edit::Kept, &old[..head])];
+    match shortest_edits(a, b) {
+        Some(steps) => edits.extend(steps),
+        None => edits.extend([(Edit::Removed, a), (Edit::Inserted, b)]),
+    }
+    edits.push((Edit::Kept, &old[old.len() - tail..]));
+    spans(edits)
+}
+
+/// Joins runs of one kind, lists each run of changes' removals before its
+/// insertions, and drops empty pieces.
+fn spans(edits: Vec<(Edit, &[char])>) -> Vec<DiffSpan> {
+    let mut out: Vec<DiffSpan> = Vec::new();
+    let mut removed = String::new();
+    let mut inserted = String::new();
+    let flush = |out: &mut Vec<DiffSpan>, removed: &mut String, inserted: &mut String| {
+        for (edit, text) in [(Edit::Removed, removed), (Edit::Inserted, inserted)] {
+            if !text.is_empty() {
+                out.push(DiffSpan {
+                    edit,
+                    text: std::mem::take(text),
+                });
+            }
+        }
+    };
+    for (edit, chars) in edits {
+        if chars.is_empty() {
+            continue;
+        }
+        match edit {
+            Edit::Removed => removed.extend(chars),
+            Edit::Inserted => inserted.extend(chars),
+            Edit::Kept => {
+                flush(&mut out, &mut removed, &mut inserted);
+                match out.last_mut() {
+                    Some(last) if last.edit == Edit::Kept => last.text.extend(chars),
+                    _ => out.push(DiffSpan {
+                        edit: Edit::Kept,
+                        text: chars.iter().collect(),
+                    }),
+                }
+            }
+        }
+    }
+    flush(&mut out, &mut removed, &mut inserted);
+    out
+}
+
+/// The shortest edit script from `a` to `b` (the greedy forward search
+/// round by round, one more difference each round, then a walk back), as
+/// runs of kept, removed and inserted characters in text order; `None` when
+/// it needs more removals and insertions than [`MAX_EDITS`] or, for long
+/// texts, than [`MAX_STEPS`] allows.
+fn shortest_edits<'c>(a: &'c [char], b: &'c [char]) -> Option<Vec<(Edit, &'c [char])>> {
+    let (n, m) = (a.len() as isize, b.len() as isize);
+    let rounds = MAX_STEPS / (a.len() + b.len()).max(1);
+    let limit = (n + m).min(MAX_EDITS.min(rounds) as isize);
+    // `furthest[k + offset]`: the largest x reached where x - y = k.
+    let offset = limit + 1;
+    let mut furthest = vec![0isize; (2 * limit + 3) as usize];
+    // Before round d: the reach for k from -d-1 to d+1 as round d - 1 left it.
+    let mut rounds: Vec<Vec<isize>> = Vec::new();
+    let mut found = None;
+    'search: for d in 0..=limit {
+        rounds.push(furthest[(offset - d - 1) as usize..=(offset + d + 1) as usize].to_vec());
+        for k in (-d..=d).step_by(2) {
+            let at = |k: isize| furthest[(k + offset) as usize];
+            let down = k == -d || (k != d && at(k - 1) < at(k + 1));
+            let mut x = if down { at(k + 1) } else { at(k - 1) + 1 };
+            let mut y = x - k;
+            while x < n && y < m && a[x as usize] == b[y as usize] {
+                x += 1;
+                y += 1;
+            }
+            furthest[(k + offset) as usize] = x;
+            if x >= n && y >= m {
+                found = Some(d);
+                break 'search;
+            }
+        }
+    }
+    let found = found?;
+    let mut steps: Vec<(Edit, &[char])> = Vec::new();
+    let (mut x, mut y) = (n, m);
+    for d in (0..=found).rev() {
+        let before = &rounds[d as usize];
+        let at = |k: isize| before[(k + d + 1) as usize];
+        let k = x - y;
+        let down = k == -d || (k != d && at(k - 1) < at(k + 1));
+        let prev_k = if down { k + 1 } else { k - 1 };
+        let prev_x = at(prev_k);
+        let prev_y = prev_x - prev_k;
+        // The run of equal characters this round ended with: kept.
+        let run = (x - prev_x).min(y - prev_y).max(0);
+        if run > 0 {
+            steps.push((Edit::Kept, &a[(x - run) as usize..x as usize]));
+            x -= run;
+            y -= run;
+        }
+        if d > 0 {
+            if down {
+                steps.push((Edit::Inserted, &b[prev_y as usize..y as usize]));
+            } else {
+                steps.push((Edit::Removed, &a[prev_x as usize..x as usize]));
+            }
+            x = prev_x;
+            y = prev_y;
+        }
+    }
+    steps.reverse();
+    Some(steps)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,7 +1394,9 @@ mod tests {
             replace: replace.to_owned(),
             regex,
             ignore_case,
+            whole_words: false,
             within: FindIn::AllFields,
+            confirmed: 0,
         }
     }
 
@@ -807,5 +1487,101 @@ mod tests {
         assert_eq!(tags("", false, "x", " ab "), Some(vec!["xaxbx".into()]));
         assert_eq!(tags("", false, "x", ""), None);
         assert_eq!(tags("drop", false, "", " drop stay "), Some(vec![String::new(), "stay".into()]));
+    }
+
+    fn whole(find: &str, replace: &str, regex: bool, text: &str) -> (bool, String) {
+        let pattern = Pattern::build(
+            &FindReplace {
+                whole_words: true,
+                ..request(find, replace, regex, true)
+            },
+            true,
+        )
+        .unwrap();
+        (pattern.is_match(text), pattern.replace(text).into_owned())
+    }
+
+    /// V9's Whole Words: a match counts only with no word character (`\w`,
+    /// Unicode) just before and just after it, whatever its own first and
+    /// last characters; dropped matches stay as they stand.
+    #[test]
+    fn v9_whole_words() {
+        assert_eq!(whole("pim", "rok", false, "pim pims spim pim."), (true, "rok pims spim rok.".into()));
+        assert_eq!(whole("C++", "x", false, "C++x"), (false, "C++x".into()), "V9's example");
+        assert_eq!(whole("C++", "x", false, "(C++) C++"), (true, "(x) x".into()));
+        assert_eq!(whole("é", "e", false, "é éa aé"), (true, "e éa aé".into()), "Unicode word characters");
+        assert_eq!(whole("_x", "y", false, "a_x _x"), (true, "a_x y".into()), "`_` is a word character");
+        assert_eq!(whole(r"(\d+)", "<$1>", true, "12 a3 4b 5"), (true, "<12> a3 4b <5>".into()));
+        assert_eq!(whole("a+", "-", true, "baa aa"), (true, "baa -".into()), "a dropped match is not retried");
+        assert_eq!(
+            whole("pim|pims", "-", true, "pims"),
+            (false, "pims".into()),
+            "the first match `pim` is dropped and `pims` is not tried at its start"
+        );
+        assert_eq!(whole("", "|", false, "ab c"), (false, "ab c".into()), "every empty match touches a word");
+        assert_eq!(whole("", "|", false, "- -"), (true, "|-| |-|".into()), "empty matches between non-word characters");
+        assert_eq!(whole("cost", "$5", false, "cost"), (true, "$5".into()), "literal `$` kept");
+    }
+
+    fn diff(old: &str, new: &str) -> Vec<(Edit, String)> {
+        char_diff(old, new).into_iter().map(|span| (span.edit, span.text)).collect()
+    }
+
+    /// V9's character diff: the shortest edit script, removals before
+    /// insertions in each run of changes, adjacent pieces of one kind
+    /// joined.
+    #[test]
+    fn v9_character_diff() {
+        use Edit::{Inserted, Kept, Removed};
+        let s = |text: &str| text.to_owned();
+        assert_eq!(diff("the cost of it", "the $5 of it"), [
+            (Kept, s("the ")),
+            (Removed, s("cost")),
+            (Inserted, s("$5")),
+            (Kept, s(" of it")),
+        ]);
+        assert_eq!(diff("abc", "abc"), [(Kept, s("abc"))]);
+        assert_eq!(diff("", "new"), [(Inserted, s("new"))]);
+        assert_eq!(diff("old", ""), [(Removed, s("old"))]);
+        assert_eq!(diff("", ""), []);
+        assert_eq!(diff("kiwi", "k<i>w<i>"), [
+            (Kept, s("k")),
+            (Inserted, s("<")),
+            (Kept, s("i")),
+            (Inserted, s(">")),
+            (Kept, s("w")),
+            (Inserted, s("<")),
+            (Kept, s("i")),
+            (Inserted, s(">")),
+        ]);
+        assert_eq!(diff("abcabba", "cbabac").iter().filter(|(e, _)| *e != Kept).map(|(_, t)| t.chars().count()).sum::<usize>(), 5, "the shortest script has five edits");
+        // Every diff spells both texts back.
+        for (old, new) in [("abcabba", "cbabac"), ("a😀b", "😀"), ("lobe", "lode"), ("x", "yxy")] {
+            let spans = char_diff(old, new);
+            let entry = PreviewEntry {
+                note: NoteId(1),
+                sort_field: String::new(),
+                field: None,
+                diff: spans,
+            };
+            assert_eq!((entry.old_text(), entry.new_text()), (old.to_owned(), new.to_owned()));
+        }
+        // Too many differences: one removal and one insertion between the
+        // common start and end.
+        let old = "a".repeat(MAX_EDITS);
+        let new = "b".repeat(MAX_EDITS);
+        let long = diff(&format!("<{old}>"), &format!("<{new}>"));
+        assert_eq!(long.len(), 4, "{long:?}");
+        assert_eq!(long[1], (Removed, old.clone()));
+        assert_eq!(long[2], (Inserted, new.clone()));
+        // A long text with few changes keeps what it shares.
+        let middle = "m".repeat(30_000);
+        assert_eq!(diff(&format!("a{middle}b"), &format!("x{middle}y")), [
+            (Removed, s("a")),
+            (Inserted, s("x")),
+            (Kept, middle.clone()),
+            (Removed, s("b")),
+            (Inserted, s("y")),
+        ]);
     }
 }
