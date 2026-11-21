@@ -1,8 +1,8 @@
 //! The plan's mode and row machinery (query-model Q4, Q5, Q9) on in-memory
-//! card and note tables. The terms U81 and U82 own are stubs in U80, so a
-//! test compiler stands in for `is:suspended` (`c.queue = -1`) and for plain
-//! text (`n.flds = ?`); what is tested is how the plan combines them, never
-//! the stand-ins themselves.
+//! card and note tables. The product's term compilers need a schema-18
+//! collection, so a test compiler stands in for `is:suspended`
+//! (`c.queue = -1`) and for plain text (`n.flds = ?`); what is tested is how
+//! the plan combines them, never the stand-ins themselves.
 
 use rusqlite::{Connection, params_from_iter};
 
@@ -26,25 +26,25 @@ fn context() -> SearchContext {
 
 /// The stand-in compiler: suspended state, plain text equal to the note's
 /// only field, the whole collection through the product compiler.
-fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermOutcome, ErrorKind> {
+fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermSql, ErrorKind> {
     Ok(match term {
-        Term::State(CardState::Suspended) => TermOutcome::Sql(TermSql {
+        Term::State(CardState::Suspended) => TermSql {
             sql: "c.queue = -1".to_owned(),
             slow: false,
             reads: ContextReads::NONE,
-        }),
-        Term::Text(text) => TermOutcome::Sql(TermSql {
+        },
+        Term::Text(text) => TermSql {
             sql: format!("n.flds = {}", params.bind(Param::Text(text.clone()))),
             slow: true,
             reads: ContextReads::NONE.with(crate::context::ContextValue::NormalizeNoteText),
-        }),
+        },
         other => return sql::compile_term(other, env, params),
     })
 }
 
 fn plan(text: &str, mode: SearchMode) -> Plan {
     let query = parse(text).unwrap_or_else(|e| panic!("{text}: {e}"));
-    build_with(&query, mode, &context(), &mut stand_in).unwrap_or_else(|e| panic!("{text}: {e:?}"))
+    build_with(&query, mode, &context(), &SearchNotetypes::default(), &mut stand_in).unwrap_or_else(|e| panic!("{text}: {e:?}"))
 }
 
 /// Notes 1 (`dog`, cards 10 and 11, 11 suspended) and 2 (`cat`, card 20);
@@ -151,7 +151,7 @@ fn operators_compile_in_source_order_with_bound_text() {
 #[test]
 fn slow_terms_and_context_reads_are_recorded() {
     let query = parse("is:suspended dog").unwrap();
-    let plan = build_with(&query, SearchMode::Cards, &context(), &mut stand_in).unwrap();
+    let plan = build_with(&query, SearchMode::Cards, &context(), &SearchNotetypes::default(), &mut stand_in).unwrap();
     assert_eq!(plan.slow_terms().len(), 1);
     assert!(matches!(
         query.node(plan.slow_terms()[0]).kind,
@@ -165,17 +165,18 @@ fn slow_terms_and_context_reads_are_recorded() {
         &parse("is:suspended").unwrap(),
         SearchMode::Cards,
         &context(),
+        &SearchNotetypes::default(),
         &mut stand_in,
     )
     .unwrap();
     assert!(!fast.is_slow() && fast.reads().is_empty());
 }
 
-// E3: search_failed comes before any stub, wherever it stands.
+// E3: search_failed for a statement check, wherever it stands.
 #[test]
-fn search_failures_win_over_terms_not_yet_supported() {
+fn statement_checks_fail_wherever_they_stand() {
     let query = parse("a -and b").unwrap();
-    let error = Plan::build(&query, SearchMode::Cards, &context()).unwrap_err();
+    let error = Plan::build(&query, SearchMode::Cards, &context(), &SearchNotetypes::default()).unwrap_err();
     assert_eq!(
         error,
         BuildError::Search(SearchError::new(
@@ -184,7 +185,7 @@ fn search_failures_win_over_terms_not_yet_supported() {
         ))
     );
     let query = parse("a  NID:1,\u{661}").unwrap();
-    let error = Plan::build(&query, SearchMode::Notes, &context()).unwrap_err();
+    let error = Plan::build(&query, SearchMode::Notes, &context(), &SearchNotetypes::default()).unwrap_err();
     let key = "NID:".to_owned();
     assert_eq!(
         error,
@@ -192,13 +193,5 @@ fn search_failures_win_over_terms_not_yet_supported() {
             ErrorKind::SearchFailed(SearchFailure::IdList { context: key }),
             3..10
         ))
-    );
-    let error = Plan::build(&parse("x deck:a").unwrap(), SearchMode::Cards, &context()).unwrap_err();
-    assert_eq!(
-        error,
-        BuildError::NotYetSupported {
-            term: Term::Text("x".into()),
-            range: 0..1
-        }
     );
 }

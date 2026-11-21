@@ -7,6 +7,7 @@ use meguri_model::{
     ids::DeckId,
     rng::SeededRandom,
 };
+use meguri_search::SearchNotetypes;
 use meguri_search::{ContextReads, ContextValue, FoldMode, Param, Plan, SearchContext, SearchMode, parse};
 use meguri_storage::{OpenOptions, OpenedCollection, open_collection, raw::SqlValue};
 
@@ -53,7 +54,7 @@ fn card(db: &OpenedCollection, values: [i64; 8]) {
 }
 
 fn plan(text: &str, mode: SearchMode, ctx: &SearchContext) -> Plan {
-    Plan::build(&parse(text).unwrap(), mode, ctx).unwrap()
+    Plan::build(&parse(text).unwrap(), mode, ctx, &SearchNotetypes::default()).unwrap()
 }
 
 fn ids(db: &OpenedCollection, text: &str, mode: SearchMode, ctx: &SearchContext) -> Vec<i64> {

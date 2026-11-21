@@ -16,6 +16,10 @@ active:
   # `Animal` is stored as `animal` beside `animal::mammal` (tags T3,
   # deviation tags-implicit-parent-spelling), which changes their dumps and
   # one search.
+  # U81: fields, folding, notetypes/glob-escapes, reference/examples, regex,
+  # the needs-text structure scenarios and text, which the same scan
+  # covered and did not flag. matrix/combined and unsorted wait for sorted
+  # search (U84).
   - "decks/*"
   - "dupe/*"
   - "extractors/*"
@@ -25,14 +29,15 @@ active:
   - "errors/kinds"
   - "errors/order"
   - "errors/run"
+  - "fields/*"
+  - "folding/*"
   - "history/added-edited"
   - "ids/lists"
-  - "notetypes/names"
+  - "notetypes/*"
   - "props/*"
-  - "regex/glob-size"
+  - "reference/examples"
+  - "regex/*"
   - "state/*"
   - "lexing/*"
-  - "structure/groups"
-  - "structure/negation"
-  - "structure/operators"
-  - "structure/whole-collection"
+  - "structure/*"
+  - "text/*"

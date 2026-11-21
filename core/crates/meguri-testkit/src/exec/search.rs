@@ -4,7 +4,7 @@
 //! canonical texts and never touches the collection.
 
 use meguri_search::{
-    BuildError, ContextValue, FoldMode, Param, Plan, SearchContext, SearchError, SearchMode, parse,
+    BuildError, ContextValue, FoldMode, Param, Plan, SearchContext, SearchError, SearchMode, SearchNotetypes, parse,
 };
 use meguri_storage::raw::SqlValue;
 use meguri_storage::{ConfigValue, ReadRows};
@@ -185,6 +185,16 @@ fn context(session: &Session<'_>) -> Result<SearchContext, ExecError> {
     Ok(context)
 }
 
+/// T15: the note types, read on the collection the searches run on; no step
+/// runs between this read and the searches of one observation.
+fn notetypes(session: &Session<'_>) -> Result<SearchNotetypes, ExecError> {
+    let collection = session
+        .storage
+        .collection()
+        .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
+    SearchNotetypes::read(&*collection.reader()?).map_err(|e| ExecError::new("core_error", e.to_string()))
+}
+
 /// S1: one output per request.
 fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
     let requests = SearchRequest::from_list(list(request)?).map_err(|e| invalid(e.to_string()))?;
@@ -192,6 +202,7 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
         return Err(ExecError::new("unsupported_observation", "sorted search is pending"));
     }
     let mut context = context(session)?;
+    let notetypes = notetypes(session)?;
     let mut day_supplied = false;
     let mut outputs = Vec::with_capacity(requests.len());
     for request in &requests {
@@ -206,20 +217,11 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
                 continue;
             }
         };
-        let mut plan = match Plan::build(&query, mode, &context) {
+        let mut plan = match Plan::build(&query, mode, &context, &notetypes) {
             Ok(plan) => plan,
             Err(BuildError::Search(error)) => {
                 outputs.push(error_value(&error));
                 continue;
-            }
-            Err(BuildError::NotYetSupported { term, .. }) => {
-                return Err(ExecError::new(
-                    "unsupported_observation",
-                    format!(
-                        "search {:?}: Meguri cannot match the term {term:?} yet (U81, U82)",
-                        request.query
-                    ),
-                ));
             }
         };
         if !day_supplied
@@ -230,7 +232,7 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
             context.next_day_at = day.next_day_at;
             day_supplied = true;
             // Only context changed; the same parsed query must still compile.
-            plan = Plan::build(&query, mode, &context)
+            plan = Plan::build(&query, mode, &context, &notetypes)
                 .map_err(|e| ExecError::new("core_error", format!("search context replan: {e:?}")))?;
         }
         outputs.push(run(session, &plan, mode)?);

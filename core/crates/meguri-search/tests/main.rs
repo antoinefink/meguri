@@ -24,3 +24,5 @@ pub mod parse_props;
 pub mod props_and_history;
 #[path = "state_and_flags.rs"]
 pub mod state_and_flags;
+#[path = "text_matching.rs"]
+pub mod text_matching;

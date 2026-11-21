@@ -8,6 +8,7 @@ use meguri_model::{
     ids::DeckId,
     rng::SeededRandom,
 };
+use meguri_search::SearchNotetypes;
 use meguri_search::{
     BuildError, ContextReads, ContextValue, ErrorKind, FoldMode, Param, Plan, SearchContext, SearchFailure,
     SearchMode, parse,
@@ -98,11 +99,11 @@ fn revlog(db: &OpenedCollection, id: i64, cid: i64, ease: i64) {
 }
 
 fn plan(text: &str, ctx: &SearchContext) -> Plan {
-    Plan::build(&parse(text).unwrap(), SearchMode::Cards, ctx).unwrap_or_else(|e| panic!("{text}: {e:?}"))
+    Plan::build(&parse(text).unwrap(), SearchMode::Cards, ctx, &SearchNotetypes::default()).unwrap_or_else(|e| panic!("{text}: {e:?}"))
 }
 
 fn ids_in(db: &OpenedCollection, text: &str, mode: SearchMode, ctx: &SearchContext) -> Vec<i64> {
-    let plan = Plan::build(&parse(text).unwrap(), mode, ctx).unwrap_or_else(|e| panic!("{text}: {e:?}"));
+    let plan = Plan::build(&parse(text).unwrap(), mode, ctx, &SearchNotetypes::default()).unwrap_or_else(|e| panic!("{text}: {e:?}"));
     let params = plan
         .params()
         .iter()
@@ -388,7 +389,7 @@ fn custom_data_values_are_text_or_numbers() {
 #[test]
 fn non_finite_operands_fail_the_plan_with_the_term_text() {
     let ctx = context(10, B0 + 11 * DAY);
-    let failure = |text: &str| match Plan::build(&parse(text).unwrap(), SearchMode::Cards, &ctx) {
+    let failure = |text: &str| match Plan::build(&parse(text).unwrap(), SearchMode::Cards, &ctx, &SearchNotetypes::default()) {
         Err(BuildError::Search(error)) => (error.kind().clone(), error.range()),
         other => panic!("{text}: {other:?}"),
     };

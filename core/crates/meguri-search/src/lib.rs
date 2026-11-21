@@ -6,7 +6,13 @@
 //! [`SearchError`] with Anki's kind and details and Meguri's own range and
 //! message; [`Query::canonical_text`] writes Anki's canonical text; a
 //! [`Plan`] compiles a query for cards mode or notes mode against a
-//! [`SearchContext`]. Nothing here recurses on the input's nesting depth.
+//! [`SearchContext`] and the collection's [`SearchNotetypes`]. Nothing here
+//! recurses on the input's nesting depth.
+//!
+//! U81 and U82 (`text-matching.md`, `fields.md`, `case-folding.md`,
+//! `names-and-ids.md`, `state-and-flags.md`, `properties.md`,
+//! `history.md`): every term compiles to SQL over the product's functions
+//! ([`sqlfns`]).
 //!
 //! U83 (`specs/browser/config-keys.md`): [`config`] reads the browser and
 //! search config keys and computes what each user action writes.
@@ -19,6 +25,7 @@ pub mod context;
 pub mod custom_data;
 pub mod error;
 mod lexer;
+pub mod notetypes;
 mod parser;
 mod pattern;
 pub mod plan;
@@ -28,5 +35,6 @@ pub use ast::{Node, NodeId, NodeKind, Query, Scope, Term};
 pub use canonical::canonical_text;
 pub use context::{ContextReads, ContextValue, FoldMode, SearchContext};
 pub use error::{ErrorKind, SearchError, SearchFailure};
+pub use notetypes::{FieldShape, NotetypeShape, SearchNotetypes};
 pub use parser::parse;
 pub use plan::{BuildError, Param, Plan, Rows, SearchMode};

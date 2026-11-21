@@ -7,6 +7,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use meguri_model::ids::DeckId;
+use meguri_search::SearchNotetypes;
 use meguri_search::{FoldMode, Plan, SearchContext, SearchMode, parse};
 
 fuzz_target!(|data: &[u8]| {
@@ -27,7 +28,7 @@ fuzz_target!(|data: &[u8]| {
                 fold: FoldMode::Unicode,
             };
             for mode in [SearchMode::Cards, SearchMode::Notes] {
-                let _ = Plan::build(&query, mode, &context);
+                let _ = Plan::build(&query, mode, &context, &SearchNotetypes::default());
             }
         }
         Err(error) => {

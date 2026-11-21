@@ -10,7 +10,7 @@ use meguri_model::ids::DeckId;
 use meguri_search::ast::{NodeId, NodeKind, Property, Query};
 use meguri_search::error::ErrorKind;
 use meguri_search::plan::sql::compile_term;
-use meguri_search::plan::{BuildError, Param, Params, Plan, Rows, SearchMode, TermEnv, TermOutcome, TermSql};
+use meguri_search::plan::{BuildError, Param, Params, Plan, Rows, SearchMode, TermEnv, TermSql};
 use meguri_search::{ContextReads, FoldMode, Scope, SearchContext, Term, canonical_text, parse};
 use rusqlite::{Connection, params_from_iter};
 
@@ -431,12 +431,13 @@ fn context() -> SearchContext {
     }
 }
 
-/// Stands in for U81's and U82's matchers, which are stubs in U80. A term is
+/// Stands in for U81's and U82's matchers, whose SQL needs a schema-18
+/// collection (and U81's the note types). A term is
 /// true on a fixed set of rows that depends on the term alone: it reads only
 /// the ids its scope allows (Q3, Q5) and binds its text as a parameter, so
 /// the ids a search finds depend on the plan's rows, joins, operators and
 /// parameter numbers. The whole collection is the product's own SQL.
-fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermOutcome, ErrorKind> {
+fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermSql, ErrorKind> {
     if *term == Term::WholeCollection {
         return compile_term(term, env, params);
     }
@@ -448,11 +449,11 @@ fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermO
         (Scope::Either, _) => "c.nid",
     };
     let text = params.bind(Param::Text(format!("{term:?}")));
-    Ok(TermOutcome::Sql(TermSql {
+    Ok(TermSql {
         sql: format!("({id} + length({text})) % 3 = 0"),
         slow: false,
         reads: ContextReads::NONE,
-    }))
+    })
 }
 
 /// The fixture collection: notes 1-8 with none to three cards each (note 8
