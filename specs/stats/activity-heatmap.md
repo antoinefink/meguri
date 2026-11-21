@@ -78,28 +78,40 @@ The host derives everything it shows from these values. Its only day arithmetic 
 
 ## AH7. Shading levels
 
-There are five levels. `M` is the largest count among the days the view shows (not among all 371). A day with count `c` has level 0 when `c` is 0. Otherwise its level is ceil(4 × c / M), in integer arithmetic (4c + M − 1) div M. So it is 1 to 4, and the busiest day shown is always level 4.
+Changed 2026-11-21 (round 10; `docs/design/native-interface-contract.md` N24.6; Antoine's answer 4B). In force: approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/round10-today-20261121.md`). It replaces the rule that divided by the busiest day.
 
-| `M` | `c` | Level |
+There are five levels, from the days the view shows (not all 371). Let `D` be the counts above 0 among those days, in ascending order, `n` their number and `D[0]` to `D[n − 1]` its members. The three thresholds are `t1 = D[(n − 1) div 4]`, `t2 = D[(2 × (n − 1)) div 4]` and `t3 = D[(3 × (n − 1)) div 4]`, in integer arithmetic (multiply, then divide); `M = D[n − 1]` is the busiest day. A day with count `c` has:
+
+- level 0 when `c` is 0;
+- level 4 when `c` is `M`;
+- otherwise level 1 when `c ≤ t1`, 2 when `c ≤ t2`, 3 when `c ≤ t3`, and 4 when `c > t3`.
+
+So each level holds about a quarter of the days studied, ties stay together, a day of the same count always has the same level, and the busiest day shown is always level 4. One catch-up day of 1,400 reviews no longer pushes ordinary days into level 1: it only takes level 4 with the heaviest quarter.
+
+| Days studied (`D`) | `t1`, `t2`, `t3` | Day `c` → level |
 |---|---|---|
-| 20 | 0 | 0 |
-| 20 | 1 | 1 |
-| 20 | 5 | 1 |
-| 20 | 6 | 2 |
-| 20 | 10 | 2 |
-| 20 | 11 | 3 |
-| 20 | 15 | 3 |
-| 20 | 16 | 4 |
-| 20 | 20 | 4 |
-| 400 | 1 | 1 |
-| 400 | 100 | 1 |
-| 400 | 101 | 2 |
-| 400 | 399 | 4 |
-| 400 | 400 | 4 |
-| 1 | 1 | 4 |
+| 10, 20, 30, 40, 50, 60, 70, 80 | 20, 40, 60 | 10 → 1, 20 → 1, 30 → 2, 40 → 2, 50 → 3, 60 → 3, 70 → 4, 80 → 4 |
+| 150, 150, 160, 170, 180, 1,400 | 150, 160, 170 | 150 → 1, 160 → 2, 170 → 3, 180 → 4, 1,400 → 4 |
+| 1, 1, 1, 100 | 1, 1, 1 | 1 → 1, 100 → 4 |
+| 7 (one day) | 7, 7, 7 | 7 → 4 |
+| 5, 5, 5 | 5, 5, 5 | 5 → 4 (`M`) |
+| 3, 9 | 3, 3, 3 | 3 → 1, 9 → 4 |
+
+The levels are computed where the view knows which days it shows (Swift, HeatmapKit's `ActivityGrid`), after a width change too, so a rotation or fold can change a day's level; the query (AH5) is unchanged. `ActivityGridTests` checks this table, and the core's unit tests no longer check levels.
 
 ## AH8. Summary numbers
 
 - The total is the sum of the counts of the days shown.
 - The week count is the number of week columns shown.
 - When that total is 0, the view hides the heatmap completely (contract N14.11).
+
+## AH9. Month labels (round 10)
+
+Changed 2026-11-21 (round 10; `docs/design/native-interface-contract.md` N24.6). In force as AH7 says.
+
+- A week column's days are dated `T0 − k` (AH3, AH6). A column's month is the month of its top drawn day (the oldest drawn day of that week).
+- A column is labelled when its drawn days include the first day of a month (a 1st after today, in the current week, is not drawn and labels nothing): that month's short standalone name in the app's locale, leading-aligned with the column. No year.
+- The first column shown is also labelled with its month, even with no 1st in it, but only when at least three columns of that month are shown.
+- Labels are placed from the newest column back; a label that would overlap one already placed is left out.
+- The labels change only with the days shown (a new day, a width change), never with a new query.
+- `ActivityGridTests` checks: a 1st in each of a few columns; a partial current week whose 1st is after today; the first-column rule with two and with three columns of its month; and an overlap.
