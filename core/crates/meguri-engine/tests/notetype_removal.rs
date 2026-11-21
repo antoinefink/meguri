@@ -570,3 +570,229 @@ fn a_restore_that_keeps_the_counts_takes_no_backup() {
     assert_eq!(backups.calls(), 0);
     assert_eq!(counts(&h, id).3, scm);
 }
+
+/// D1, D6: confirmed losses without the digest they were read from are
+/// refused before anything runs.
+#[test]
+fn confirmed_losses_without_their_digest_are_refused() {
+    let (h, backups) = harness();
+    let id = made(&h, "Three", false, &["A", "B", "C"], &["{{A}}"]);
+    add(&h.collection, id, &["a", "b", "c"]);
+    let mut request = confirmed(&h, id, None);
+    request.digest = None;
+    assert!(matches!(run_restore(&h, request).unwrap_err(), EngineError::InvalidArgument { .. }));
+    assert_eq!(backups.calls(), 0);
+    assert_eq!(read(&h, id).unwrap().fields.len(), 3);
+}
+
+/// D6: an unconfirmed restore whose replan finds losses refuses with
+/// `LossesChanged` (its confirmed losses are zero); one whose note type
+/// vanishes during the backup is `Stale`, not `NotFound`.
+#[test]
+fn an_unconfirmed_restore_replan_counts_again() {
+    let (h, backups) = harness();
+    let id = made(&h, "Three", false, &["A", "B", "C"], &["{{A}}"]);
+    let note = add(&h.collection, id, &["a", "", ""]);
+    backups.then(move |c| {
+        notes::update::update(
+            c,
+            notes::update::UpdateNote {
+                id: note,
+                fields: vec!["a".into(), "".into(), "now content".into()],
+                tags: Vec::new(),
+            },
+            OpSource::UserUndoable,
+        )
+        .unwrap();
+        let reader = c.reader(ReaderRole::Query).unwrap();
+        let mut styled = notetypes::Draft::of(reader.notetype(id).unwrap().unwrap());
+        drop(reader);
+        styled.config.css = "changed".into();
+        notetypes::save(c, styled, notetypes::SaveOptions::default()).unwrap();
+    });
+    let fresh = restore_losses(run_restore(&h, restoring(id, None)).unwrap_err());
+    assert!(fresh.summary.changes.iter().any(|c| matches!(c, DraftChange::FieldRemoved { ord: 2, notes_with_content: 1, .. })));
+    assert_eq!(read(&h, id).unwrap().fields.len(), 3);
+
+    let gone = made(&h, "Gone", false, &["A", "B", "C"], &["{{A}}"]);
+    add(&h.collection, gone, &["a", "", ""]);
+    h.clock.step_ms(11 * 60_000);
+    backups.then(move |c| {
+        remove(
+            c,
+            RemoveNotetype {
+                notetype: gone,
+                confirmed_notes: 1,
+                confirmed_cards: 1,
+            },
+            CancelToken::new(),
+            ProgressSink::new(),
+        )
+        .unwrap();
+    });
+    assert!(matches!(run_restore(&h, restoring(gone, None)).unwrap_err(), EngineError::Stale { .. }));
+}
+
+/// Runs `change` on the collection at each planning pass's first progress
+/// report: a commit between a plan's snapshot and its write phase that
+/// needs no backup to interleave.
+struct DuringPlanning {
+    collection: Collection,
+    change: Box<dyn Fn(&Collection, usize) + Send + Sync>,
+    passes: AtomicUsize,
+}
+
+impl meguri_engine::ProgressListener for DuringPlanning {
+    fn on_progress(&self, progress: &meguri_engine::Progress) {
+        // A planning pass starts at completed 0. Never act in the write
+        // phase: it reports on the writer thread, where an op would wait on
+        // itself.
+        if progress.phase == meguri_engine::ProgressPhase::Planning && progress.completed == 0 {
+            let pass = self.passes.fetch_add(1, Ordering::SeqCst);
+            (self.change)(&self.collection, pass);
+        }
+    }
+}
+
+fn during_planning(h: &Harness, change: impl Fn(&Collection, usize) + Send + Sync + 'static) -> (ProgressSink, Arc<DuringPlanning>) {
+    let listener = Arc::new(DuringPlanning {
+        collection: h.collection.clone(),
+        change: Box::new(change),
+        passes: AtomicUsize::new(0),
+    });
+    // Every report a second after the last, so none is held back by the
+    // sink's rate limit.
+    static TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    fn next_second() -> std::time::Duration {
+        std::time::Duration::from_secs(TICK.fetch_add(1, Ordering::SeqCst))
+    }
+    let sink = ProgressSink::with_clock(next_second);
+    sink.set_listener(listener.clone());
+    (sink, listener)
+}
+
+/// Appends a field to `id` through a raw op (writer only, so it can run
+/// while a plan holds the maintenance reader).
+fn append_field(c: &Collection, id: NotetypeId) {
+    c.run(
+        meguri_engine::OpSpec::named("append field", OpSource::UserNonUndoable).skip_undo(),
+        move |ctx| {
+            let before = ctx.scope().notetype(id)?.unwrap();
+            let mut nt = before.clone();
+            let mut field = nt.fields[0].clone();
+            field.ord = nt.fields.len() as u32;
+            field.name = format!("Appended {}", nt.fields.len());
+            field.config.id = None;
+            nt.fields.push(field);
+            let mut report = meguri_storage::journal::StructureReport::default();
+            report.reasons.insert(meguri_storage::journal::StructureReason::FieldsChanged);
+            report.layouts.insert(
+                id.0,
+                meguri_storage::journal::LayoutReport {
+                    before: meguri_storage::journal::LayoutShape::of(&before)?,
+                    after: meguri_storage::journal::LayoutShape::of(&nt)?,
+                    field_map: (0..before.fields.len() as i32).chain([-1]).collect(),
+                    template_map: (0..before.templates.len() as i32).collect(),
+                },
+            );
+            meguri_engine::mark_schema_change(ctx.scope(), &[SchemaReason::FieldsChanged])?;
+            let token = ctx.scope().start_structure_report(report)?;
+            ctx.scope().put_notetype(&nt)?;
+            ctx.scope().complete_structure_report(token)?;
+            Ok(())
+        },
+    )
+    .unwrap();
+}
+
+/// D6: an unconfirmed restore whose first plan was not schema-classified
+/// takes its backup when the replan is (a field added while it planned).
+#[test]
+fn an_unconfirmed_restore_backs_up_when_its_replan_becomes_classified() {
+    let (h, backups) = harness();
+    // Basic's counts (two fields, one template): not classified at first.
+    let id = made(&h, "Pair", false, &["Q", "A"], &["{{Q}}"]);
+    add(&h.collection, id, &["a", "b"]);
+    let (sink, listener) = during_planning(&h, move |c, pass| {
+        if pass == 0 {
+            append_field(c, id);
+        }
+    });
+    let calls = backups.calls();
+    let saved = restore(&h.collection, restoring(id, None), CancelToken::new(), sink).unwrap().value;
+    assert_eq!(saved.reasons, [SchemaReason::NotetypeRestored]);
+    assert_eq!(backups.calls(), calls + 1, "the replan took the backup");
+    assert!(listener.passes.load(Ordering::SeqCst) >= 2, "planned twice");
+    assert_eq!(read(&h, id).unwrap().fields.len(), 2);
+}
+
+/// D6: a change during the replan too returns `Stale`, nothing written.
+#[test]
+fn a_second_change_during_the_replan_is_stale() {
+    let (h, _) = harness();
+    let id = made(&h, "Pair", false, &["Q", "A"], &["{{Q}}"]);
+    add(&h.collection, id, &["a", "b"]);
+    let (sink, _listener) = during_planning(&h, move |c, _| {
+        let reader = c.reader(ReaderRole::Query).unwrap();
+        let mut styled = notetypes::Draft::of(reader.notetype(id).unwrap().unwrap());
+        drop(reader);
+        styled.config.css = format!("{} x", styled.config.css);
+        notetypes::save(c, styled, notetypes::SaveOptions::default()).unwrap();
+    });
+    let before = read(&h, id).unwrap();
+    let error = restore(&h.collection, restoring(id, None), CancelToken::new(), sink).unwrap_err();
+    assert!(matches!(error, EngineError::Stale { .. }), "{error:?}");
+    let after = read(&h, id).unwrap();
+    assert_eq!(after.fields.len(), before.fields.len());
+    assert_eq!(after.templates[0].config.q_format, before.templates[0].config.q_format);
+}
+
+/// S12: a removal refused on the planning snapshot takes no backup; undo
+/// and redo of a removal.
+#[test]
+fn a_removal_refused_at_planning_takes_no_backup_and_redo_removes_again() {
+    let (h, backups) = harness();
+    let id = made(&h, "Pair", false, &["Front", "Back"], &["{{Front}}"]);
+    add(&h.collection, id, &["a", "b"]);
+    let calls = backups.calls();
+    assert!(matches!(
+        run_remove(&h, removal(id, 0, 0)).unwrap_err(),
+        EngineError::NotetypeStructure(StructureRefusal::LossesChanged(_))
+    ));
+    assert_eq!(backups.calls(), calls);
+    h.clock.step_ms(1_000);
+    let before = counts(&h, id);
+    run_remove(&h, removal(id, 1, 1)).unwrap();
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(counts(&h, id), before);
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert!(read(&h, id).is_none());
+    assert_eq!(counts(&h, id).0, 0);
+}
+
+/// D4.1: a cloze note type restored as Basic (and reversed card) keeps its
+/// cloze 1 and 2 cards as Card 1 and Card 2 and removes the rest; undo and
+/// redo give the same rows back.
+#[test]
+fn a_cloze_note_type_restored_as_basic_and_reversed_keeps_two_ordinals() {
+    let (h, _) = harness();
+    let id = made(&h, "Gaps", true, &["Text", "Extra"], &["{{cloze:Text}}"]);
+    let note = add(&h.collection, id, &["{{c1::a}} {{c2::b}} {{c3::c}}", ""]);
+    h.clock.step_ms(1_000);
+    let before = counts(&h, id);
+    let saved = run_restore(&h, confirmed(&h, id, Some(StockKind::BasicAndReversed))).unwrap();
+    assert_eq!(saved.cards_removed, 1);
+    let ords = |h: &Harness| {
+        let r = h.collection.reader(ReaderRole::Query).unwrap();
+        let mut ords: Vec<u16> = r.cards_of_note(note).unwrap().iter().map(|c| c.ord).collect();
+        ords.sort_unstable();
+        ords
+    };
+    assert_eq!(ords(&h), [0, 1]);
+    let after = counts(&h, id);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(counts(&h, id), before);
+    assert_eq!(ords(&h), [0, 1, 2]);
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(counts(&h, id), after);
+}

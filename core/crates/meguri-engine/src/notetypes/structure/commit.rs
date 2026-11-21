@@ -23,6 +23,12 @@ const PAGE: usize = 500;
 pub(crate) fn commit(ctx: &mut OpContext<'_, '_>, planned: &Planned) -> Result<StructureSaved, EngineError> {
     match planned {
         Planned::Rename(plan) => {
+            // A note type deleted since planning is `Stale` (S1.2, round 9
+            // review), as it is at planning.
+            let id = plan.renamed().id;
+            if ctx.scope().notetype(id)?.is_none() {
+                return Err(stale(id));
+            }
             let (saved, cards) = rename::commit_counted(ctx.scope(), plan)?;
             Ok(StructureSaved {
                 id: saved.id,
@@ -52,10 +58,21 @@ pub(crate) fn check_live(scope: &WriteScope<'_>, layout: &Layout) -> Result<(), 
     let quiet = ProgressSink::new();
     let counts = plan::count(scope, layout, &none, &quiet)?;
     if counts.exceed(&layout.confirmed) {
-        let generation = plan::plan_generation(scope, layout, &none, &quiet)?;
-        return Err(plan::losses_changed(layout, &counts, generation.as_ref()));
+        // The read as this transaction sees it, N4 step 7's name included.
+        let mut read = layout.clone();
+        read.saved.name = stored_name(scope, layout)?;
+        let generation = plan::plan_generation(scope, &read, &none, &quiet)?;
+        return Err(plan::losses_changed(&read, &counts, generation.as_ref()));
     }
     Ok(())
+}
+
+/// N4 step 7 re-derived on the live rows (O7) from the requested name:
+/// another note type may have taken it, or freed it, since planning.
+fn stored_name(scope: &WriteScope<'_>, layout: &Layout) -> Result<String, EngineError> {
+    let id = layout.saved.id;
+    let others: Vec<_> = read::names(scope)?.into_iter().filter(|(other, _)| *other != id).collect();
+    Ok(names::unique_among(&layout.requested_name, id, &others))
 }
 
 pub(crate) fn commit_layout(ctx: &mut OpContext<'_, '_>, layout: &Layout) -> Result<StructureSaved, EngineError> {
@@ -89,10 +106,7 @@ pub(crate) fn commit_layout(ctx: &mut OpContext<'_, '_>, layout: &Layout) -> Res
     meguri_model::faultpoint!("notetypes.structure.write_phase")
         .map_err(|error| EngineError::internal(format!("injected write-phase failure: {error}")))?;
     let mut saved = layout.saved.clone();
-    // N4 step 7 re-derived on the live rows (O7) from the requested name:
-    // another note type may have taken it, or freed it, since planning.
-    let others: Vec<_> = read::names(scope)?.into_iter().filter(|(other, _)| *other != saved.id).collect();
-    saved.name = names::unique_among(&layout.requested_name, saved.id, &others);
+    saved.name = stored_name(scope, layout)?;
     result.name.clone_from(&saved.name);
     for (field, fresh) in saved.fields.iter_mut().zip(&layout.fresh_fields) {
         if *fresh {

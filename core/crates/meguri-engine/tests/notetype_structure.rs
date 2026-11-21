@@ -1188,10 +1188,13 @@ fn stale_wins_over_losses_changed() {
         styled.config.css = "changed".into();
         notetypes::save(c, styled, notetypes::SaveOptions::default()).unwrap();
     });
+    let before_scm = state(&h, id).scm;
     assert!(matches!(run(&h, draft).unwrap_err(), EngineError::Stale { .. }));
     assert_eq!(backups.calls(), 1);
-    assert_eq!(read(&h, id).fields.len(), 3);
-    assert_eq!(undo_name(&h).as_deref(), Some("Update Note Type"), "the styling save's step, not ours");
+    let after = state(&h, id);
+    assert_eq!(read(&h, id).fields.len(), 3, "nothing of the draft written");
+    assert_eq!(after.scm, before_scm, "no schema change");
+    assert!(after.notes.iter().all(|n| n.1.split('\u{1f}').count() == 3));
 }
 
 /// S1.2 (round 9 review): a note type removed before the save is `Stale`.

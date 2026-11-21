@@ -197,14 +197,17 @@ fn losses_changed(summary: RestoreSummary) -> EngineError {
 fn plan_restore(
     reader: &impl ReadRows,
     request: &RestoreNotetype,
+    replan: bool,
     cancel: &CancelToken,
     progress: &ProgressSink,
 ) -> Result<Layout, EngineError> {
     cancel.check()?;
     let id = request.notetype;
     let Some(base) = reader.notetype(id)? else {
-        // D6, D7.2: deleted after the summary was read is `Stale`.
-        return Err(if request.confirms() { stale(id) } else { not_found(id) });
+        // D6, D7.2: `NotFound` only for a note type missing at the call;
+        // deleted after the summary was read, or while the first plan
+        // backed up, it is `Stale`.
+        return Err(if request.confirms() || replan { stale(id) } else { not_found(id) });
     };
     if !request.confirmed.is_zero()
         && let Some(digest) = request.digest
@@ -236,6 +239,13 @@ pub fn restore(
         .undo_step(UPDATE_NOTE_TYPE, StepKind::Other)
         .cancel(cancel.clone())
         .progress(progress.clone());
+    // D1, D6: losses are confirmed together with the digest they were read
+    // from; without it a reorder that keeps every count would pass.
+    if !request.confirmed.is_zero() && request.digest.is_none() {
+        return Err(EngineError::InvalidArgument {
+            message: "a restore's confirmed losses need the digest of the restore_summary they come from".into(),
+        });
+    }
     let committed = request.clone();
     crate::plan_and_commit_with(
         collection,
@@ -247,7 +257,7 @@ pub fn restore(
             if context.attempt() > 1 {
                 return Err(stale(request.notetype));
             }
-            let layout = plan_restore(&**context.snapshot(), &request, &cancel, &progress)?;
+            let layout = plan_restore(&**context.snapshot(), &request, context.attempt() > 0, &cancel, &progress)?;
             Ok(Plan {
                 value: layout,
                 preconditions: Vec::new(),

@@ -66,6 +66,9 @@ pub(crate) struct Layout {
     pub report_layout: bool,
     /// S5 runs.
     pub rewrite_notes: bool,
+    /// The field at the final sort position is not the base's sort field
+    /// (S2): reported in D2's summary whatever the schema reasons.
+    pub sort_changed: bool,
     pub cards: CardMap,
     /// S7 runs.
     pub fronts_changed: bool,
@@ -82,6 +85,9 @@ pub(crate) struct Layout {
     pub report_template_map: Option<Vec<i32>>,
     /// Which read `LossesChanged` carries.
     pub purpose: Purpose,
+    /// The note type name after N4 steps 1 and 2, before step 7's `+`:
+    /// the write phase applies step 7 again on the live rows.
+    pub requested_name: String,
 }
 
 /// The op a layout belongs to.
@@ -91,9 +97,6 @@ pub(crate) enum Purpose {
     Draft,
     /// Restore to Default: a `restore_summary` (D7.1).
     Restore,
-    /// The note type name after N4 steps 1 and 2, before step 7's `+`:
-    /// the write phase applies step 7 again on the live rows.
-    pub requested_name: String,
 }
 
 impl Layout {
@@ -565,6 +568,7 @@ pub(crate) fn classify(base: Notetype, saved: Notetype, shape: Shape) -> Layout 
     Layout {
         report_layout: fields_changed || templates_changed || sort_changed || fields_renamed || templates_renamed,
         rewrite_notes: fields_changed || sort_changed,
+        sort_changed,
         cards: CardMap {
             templates_changed,
             moved,

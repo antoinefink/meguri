@@ -1,3 +1,4 @@
+import Foundation
 internal import MeguriCoreBindings
 
 public enum CoreTable: Sendable, Hashable {
@@ -183,9 +184,13 @@ public struct NotetypeDraftSummary: Sendable, Hashable {
 public struct NotetypeRestoreSummary: Sendable, Hashable {
     public let summary: NotetypeDraftSummary
     public let kindChangeCardsRemoved: UInt64
+    /// The digest the summary was read from: a restore confirmed from this
+    /// summary passes it back with the counts (D6, D7.1).
+    public let digest: Data
     init(_ raw: MeguriCoreBindings.NotetypeRestoreSummary) {
         summary = NotetypeDraftSummary(raw.summary)
         kindChangeCardsRemoved = raw.kindChangeCardsRemoved
+        digest = raw.digest
     }
 }
 

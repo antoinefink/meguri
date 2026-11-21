@@ -314,6 +314,9 @@ impl From<RestoreSummary> for NotetypeRestoreSummary {
     }
 }
 
+/// Only the refusal's way back into the engine (`CoreError` to
+/// `EngineError` inside a job): a request takes its digest through
+/// [`digest`], which refuses a wrong length.
 impl From<NotetypeRestoreSummary> for RestoreSummary {
     fn from(s: NotetypeRestoreSummary) -> Self {
         let mut digest = [0u8; 32];
@@ -526,22 +529,51 @@ pub fn start_notetype_restore(request: NotetypeRestore) -> Result<NotetypeStruct
     })
 }
 
-/// D7.1's `restore_summary`, read on one snapshot.
+#[derive(Debug, uniffi::Object)]
+pub struct NotetypeRestoreSummaryJob {
+    result: Arc<Mutex<Option<NotetypeRestoreSummary>>>,
+}
+
 #[uniffi::export]
-pub fn notetype_restore_summary(
+impl NotetypeRestoreSummaryJob {
+    pub fn result(&self) -> Result<Option<NotetypeRestoreSummary>, CoreError> {
+        callback::enter("NotetypeRestoreSummaryJob::result");
+        Ok(self.result.lock().unwrap().clone())
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct NotetypeRestoreSummaryJobStart {
+    pub handle: JobHandle,
+    pub result: Arc<NotetypeRestoreSummaryJob>,
+}
+
+/// D7.1's `restore_summary`, read on one snapshot on the job pool: it scans
+/// every note and card of the type, with progress and cancel.
+#[uniffi::export]
+pub fn start_notetype_restore_summary(
     notetype_id: i64,
     kind: Option<crate::notetypes::StockNotetype>,
-) -> Result<NotetypeRestoreSummary, CoreError> {
-    callback::enter("notetype_restore_summary");
+) -> Result<NotetypeRestoreSummaryJobStart, CoreError> {
+    callback::enter("start_notetype_restore_summary");
     let collection = runtime::host()?.collection()?;
-    let summary = restore::restore_summary(
-        &collection,
-        NotetypeId(notetype_id),
-        kind.map(Into::into),
-        &meguri_engine::CancelToken::new(),
-        &meguri_engine::ProgressSink::new(),
-    )?;
-    Ok(summary.into())
+    let result = Arc::new(Mutex::new(None));
+    let out = result.clone();
+    let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |job| {
+        let summary = restore::restore_summary(
+            &collection,
+            NotetypeId(notetype_id),
+            kind.map(Into::into),
+            &job.cancel,
+            &job.progress,
+        )?;
+        *out.lock().unwrap() = Some(summary.into());
+        Ok(())
+    })?;
+    Ok(NotetypeRestoreSummaryJobStart {
+        handle: crate::jobs::wrap(handle),
+        result: Arc::new(NotetypeRestoreSummaryJob { result }),
+    })
 }
 
 /// S11.

@@ -4,8 +4,6 @@
 //! `draft_summary` read will return from a planning snapshot, and the core
 //! of `restore-to-default` D7.1's `restore_summary`.
 
-use meguri_storage::journal::StructureReason;
-
 use super::plan::{Counts, Layout};
 use crate::SchemaReason;
 use crate::notetypes::AggregateDigest;
@@ -111,7 +109,7 @@ pub(crate) fn of(layout: &Layout, counts: &Counts, generation: Option<&Regenerat
     if reordered(&layout.field_origins) {
         changes.push(DraftChange::FieldsReordered);
     }
-    if layout.structure_reasons.contains(&StructureReason::SortFieldChanged) {
+    if layout.sort_changed {
         let name = saved
             .fields
             .get(saved.config.sort_field_idx as usize)
