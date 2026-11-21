@@ -3,6 +3,10 @@ use meguri_model::{note::Note, notetype::Notetype};
 use meguri_template::{Form, ParsedTemplate};
 use std::collections::BTreeSet;
 
+/// G2's special names that count as non-empty for every note (unless a
+/// field has the name); `Tags` counts when the note has a tag.
+pub(crate) const ALWAYS_NON_EMPTY: [&str; 6] = ["Type", "Deck", "Subdeck", "Card", "CardFlag", "CardID"];
+
 pub fn required(nt: &Notetype, note: &Note) -> BTreeSet<u16> {
     required_by(nt, &fronts(nt), note)
 }
@@ -30,7 +34,7 @@ pub fn required_by(nt: &Notetype, fronts: &[ParsedTemplate], note: &Note) -> BTr
                 .is_some_and(|value| !meguri_text::field_empty::counts_as_empty(value));
         }
         match name {
-            "Type" | "Deck" | "Subdeck" | "Card" | "CardFlag" | "CardID" => true,
+            name if ALWAYS_NON_EMPTY.contains(&name) => true,
             "Tags" => crate::tags::split_text(&note.tags).next().is_some(),
             _ => false,
         }

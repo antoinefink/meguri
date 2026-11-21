@@ -137,8 +137,9 @@ public struct NotetypeStructureDraft: Sendable, Hashable {
         self.skipChecks = skipChecks
         self.confirmed = confirmed
     }
-    /// The unchanged draft of a note type as read.
-    public init(_ record: NotetypeRecord, skipChecks: Bool = true) {
+    /// The unchanged draft of a note type as read. `skipChecks`: true for
+    /// the field editor's saves, false for the template editor's (V1).
+    public init(_ record: NotetypeRecord, skipChecks: Bool) {
         self.init(notetypeId: record.id, base: record.base, name: record.name, css: record.css,
                   fields: record.fields.map(StructureDraftField.init), templates: record.templates.map(StructureDraftTemplate.init),
                   sortField: nil, skipChecks: skipChecks)

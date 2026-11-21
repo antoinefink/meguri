@@ -197,7 +197,8 @@ pub struct BlankFront {
 /// The one field of `saved` that `front` needs alone: its T11.1 references,
 /// leaving out names that are never non-empty for a note (`FrontSide` and
 /// names that are no field or special name, `notes/card-generation` G2),
-/// are exactly that field.
+/// are exactly that field, and the front renders something when that
+/// field alone is non-empty (so filling it would give the card).
 fn sole_field(front: &ParsedTemplate, saved: &Notetype) -> Option<u32> {
     if front.structure_error().is_some() {
         return None;
@@ -209,16 +210,19 @@ fn sole_field(front: &ParsedTemplate, saved: &Notetype) -> Option<u32> {
             Some(at) => {
                 needed.insert(Ok(at));
             }
-            None if matches!(name, "Type" | "Deck" | "Subdeck" | "Card" | "CardFlag" | "CardID" | "Tags") => {
+            None if name == "Tags" || crate::cardgen::normal::ALWAYS_NON_EMPTY.contains(&name) => {
                 needed.insert(Err(name));
             }
             None => {}
         }
     }
-    match needed.into_iter().collect::<Vec<_>>().as_slice() {
-        [Ok(at)] => Some(super::structure::position(*at)),
-        _ => None,
-    }
+    let [Ok(at)] = needed.into_iter().collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    let name = saved.fields[at].name.as_str();
+    front
+        .renders_something(|key| key == name, meguri_template::Form::Strict)
+        .then(|| super::structure::position(at))
 }
 
 /// W8 on `reader`'s rows: for each card type of the draft in its order, the

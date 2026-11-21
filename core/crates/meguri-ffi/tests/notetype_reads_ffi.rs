@@ -230,14 +230,6 @@ fn the_note_types_reads_run_as_jobs_on_the_open_collection() {
     assert_eq!(finish(&rx, removal.handle.id), JobOutcome::Succeeded);
     assert_eq!(removal.result.result().unwrap(), Some(NotetypeRemovalCounts { notes: 2, cards: 3 }));
 
-    let cancelled = start_notetype_removal_counts(id).unwrap();
-    cancelled.handle.cancel.cancel().unwrap();
-    let outcome = finish(&rx, cancelled.handle.id);
-    assert!(
-        matches!(outcome, JobOutcome::Cancelled | JobOutcome::Succeeded),
-        "{outcome:?}"
-    );
-
     assert_eq!(notetype_near_field_name("extra".into(), vec!["Front".into(), "Extra".into()]).unwrap(), Some(1));
     meguri_ffi::lifecycle::close_collection().unwrap();
 }

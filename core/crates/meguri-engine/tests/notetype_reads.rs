@@ -11,7 +11,9 @@
 
 mod common;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use common::Harness;
 use meguri_engine::notetypes::counts::{
@@ -576,4 +578,84 @@ fn removal_counts_are_what_the_removal_counts_again() {
     };
     let removed = remove(&h.collection, request, CancelToken::new(), ProgressSink::new()).unwrap().value;
     assert_eq!((removed.notes_removed, removed.cards_removed), (3, 4));
+}
+
+/// W8 when the draft rewrites notes (a field removed and one moved): the
+/// fronts read the values as the save leaves them, and the deciding field
+/// is a position in the draft's fields. A front that names one field but
+/// never renders gets no reason; a type with no notes lists none.
+#[test]
+fn notes_without_card_read_the_remapped_values() {
+    let h = common::fresh();
+    let id = trio(&h);
+    let n1 = add(&h, id, &["a", "b", ""]);
+    let n2 = add(&h, id, &["c", "", "x"]);
+    let mut d = draft(&h, id);
+    // Fields: Extra, Front (Back removed). S4 deletes Reverse's `{{Back}}`
+    // and appends the first field, now Extra; a front of sections alone
+    // gets it appended too.
+    d.fields.retain(|f| f.name != "Back");
+    let extra = d.fields.pop().unwrap();
+    d.fields.insert(0, extra);
+    d.templates.push(template("Extra Only", "{{Extra}}"));
+    d.templates.push(template("Sections", "{{#Extra}}static{{/Extra}}"));
+    let read = blank(&h, &d).unwrap();
+    let only_n1 = BlankFront { notes: vec![n1], field: Some(0) };
+    assert_eq!(read, vec![BlankFront::default(), only_n1.clone(), only_n1.clone(), only_n1]);
+
+    // Without a rewrite, a front that names one field but renders nothing
+    // whatever it holds names no field.
+    let mut statics = draft(&h, id);
+    statics.templates.push(template("Static", "{{#Extra}}static{{/Extra}}"));
+    assert_eq!(blank(&h, &statics).unwrap()[2], BlankFront { notes: vec![n1, n2], field: None });
+
+    let unused = trio_named(&h, "Unused");
+    assert_eq!(
+        blank(&h, &draft(&h, unused)).unwrap(),
+        vec![BlankFront::default(), BlankFront::default()]
+    );
+}
+
+static TICKS: AtomicU64 = AtomicU64::new(0);
+
+/// Each call is a second later, so every report is delivered.
+fn steady_clock() -> Duration {
+    Duration::from_secs(TICKS.fetch_add(1, Ordering::SeqCst))
+}
+
+/// Cancels its token at the first report of work done.
+struct CancelMidway(Arc<CancelToken>);
+
+impl ProgressListener for CancelMidway {
+    fn on_progress(&self, progress: &Progress) {
+        if progress.completed > 0 {
+            self.0.cancel();
+        }
+    }
+}
+
+/// A token cancelled while a pass runs stops it with `Cancelled`.
+#[test]
+fn a_pass_cancelled_midway_stops() {
+    let h = common::fresh();
+    let id = trio(&h);
+    for n in 0..600 {
+        add(&h, id, &[&format!("f{n}"), &format!("b{n}"), ""]);
+    }
+    let midway = || {
+        let cancel = CancelToken::new();
+        let progress = ProgressSink::with_clock(steady_clock);
+        progress.set_listener(Arc::new(CancelMidway(cancel.clone())));
+        (cancel, progress)
+    };
+    let (cancel, progress) = midway();
+    assert_eq!(field_content_counts(&h.collection, id, &cancel, &progress), Err(EngineError::Cancelled));
+    let (cancel, progress) = midway();
+    assert_eq!(notes_without_card(&h.collection, &draft(&h, id), &cancel, &progress), Err(EngineError::Cancelled));
+    let (cancel, progress) = midway();
+    let mut d = draft(&h, id);
+    d.fields.pop();
+    assert_eq!(structure::draft_summary(&h.collection, &d, &cancel, &progress), Err(EngineError::Cancelled));
+    let (cancel, progress) = midway();
+    assert_eq!(removal_counts(&h.collection, id, &cancel, &progress), Err(EngineError::Cancelled));
 }

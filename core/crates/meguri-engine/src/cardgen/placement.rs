@@ -29,7 +29,9 @@ pub fn deck(
 #[derive(Default)]
 pub(crate) struct Memo {
     usable: RefCell<HashMap<DeckId, bool>>,
-    last_deck: RefCell<Option<Option<i64>>>,
+    /// By note type id: one memo serves one note type, but a key keeps a
+    /// reuse across types right.
+    last_deck: RefCell<HashMap<i64, Option<i64>>>,
 }
 
 impl Memo {
@@ -43,13 +45,13 @@ impl Memo {
     }
 
     fn last_deck(&self, reader: &impl ReadRows, nt: &Notetype) -> Result<Option<i64>, EngineError> {
-        if let Some(known) = *self.last_deck.borrow() {
-            return Ok(known);
+        if let Some(known) = self.last_deck.borrow().get(&nt.id.0) {
+            return Ok(*known);
         }
         let found = reader
             .config_value(&format!("_nt_{}_lastDeck", nt.id.0))?
             .and_then(|v| v.as_i64());
-        *self.last_deck.borrow_mut() = Some(found);
+        self.last_deck.borrow_mut().insert(nt.id.0, found);
         Ok(found)
     }
 }

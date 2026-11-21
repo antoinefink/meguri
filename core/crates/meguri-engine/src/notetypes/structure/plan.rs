@@ -706,7 +706,14 @@ pub(crate) fn summarize_draft(
     let layout = layout_of_draft(reader, base, draft)?;
     check_protected(&layout)?;
     let counts = count(reader, &layout, cancel, progress)?;
-    let generation = plan_generation(reader, &layout, cancel, progress)?;
+    // The generation plan gives D2 only the cards of added card types: a
+    // draft without one gives the same summary without it (S7's pass is
+    // the save's).
+    let generation = if layout.template_origins.iter().any(Option::is_none) {
+        plan_generation(reader, &layout, cancel, progress)?
+    } else {
+        None
+    };
     cancel.check()?;
     Ok(summary::of(&layout, &counts, generation.as_ref()))
 }

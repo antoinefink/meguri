@@ -51,7 +51,7 @@ extension EventTests {
             await #expect(throws: BridgeError.notFound(table: .notetypes, key: "9999")) { try await unknown.value() }
 
             let record = try await types.readNotetype(id: added.id)
-            var draft = NotetypeStructureDraft(record)
+            var draft = NotetypeStructureDraft(record, skipChecks: true)
             draft.fields.removeLast()
             draft.templates.removeLast()
             let summary = try await types.startNotetypeDraftSummary(draft).value()
@@ -60,7 +60,7 @@ extension EventTests {
                                         .templateRemoved(ord: 1, name: "Reverse", cardsRemoved: 1, notesWithoutCards: 0)])
             #expect(NotetypeConfirmedLosses(confirming: summary) == NotetypeConfirmedLosses(fields: [2: 1], templates: [1: 1]))
 
-            let blank = try await types.startNotetypeNotesWithoutCard(NotetypeStructureDraft(record)).value()
+            let blank = try await types.startNotetypeNotesWithoutCard(NotetypeStructureDraft(record, skipChecks: true)).value()
             #expect(blank.count == 2)
             #expect(blank[0] == NotetypeBlankFront(noteIds: [], field: nil))
             #expect(blank[1].noteIds.count == 1 && blank[1].field == 1)

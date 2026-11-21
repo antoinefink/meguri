@@ -1,7 +1,7 @@
 //! U267: the Note Types screens' reads on a working copy of a generated
-//! collection, through the engine's entry points (`browser/workspace` V17:
-//! Note Types counts 300 ms, "no card" 1 s, both for 50,000 notes of the
-//! type; the plan's section 3).
+//! collection, through the engine's entry points (`notetypes/workspace`
+//! W3.1: 300 ms and W8: 1 s, both for 50,000 notes of the type; the Browse
+//! and Note Types plan's section 3).
 //!
 //! - `notetypes.note_counts`: A2's note counts of every note type.
 //! - `notetypes.field_content_counts`: W3.1 on the type with the most notes.
