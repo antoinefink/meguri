@@ -1777,6 +1777,7 @@ dependencies = [
  "meguri-model",
  "meguri-package",
  "meguri-sched",
+ "meguri-stats",
  "meguri-storage",
  "meguri-sync",
  "meguri-template",
@@ -1883,6 +1884,15 @@ version = "0.0.0"
 [[package]]
 name = "meguri-stats"
 version = "0.0.0"
+dependencies = [
+ "fsrs",
+ "meguri-engine",
+ "meguri-model",
+ "meguri-sched",
+ "meguri-storage",
+ "meguri-testkit",
+ "tempfile",
+]
 
 [[package]]
 name = "meguri-storage"
@@ -1967,6 +1977,7 @@ dependencies = [
  "meguri-package",
  "meguri-sched",
  "meguri-search",
+ "meguri-stats",
  "meguri-storage",
  "meguri-sync",
  "meguri-template",

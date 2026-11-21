@@ -5,3 +5,25 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] target below builds (tests/main.rs is stats_it).
+autotests = false
+
+[dependencies]
+fsrs.workspace = true
+meguri-engine.workspace = true
+meguri-model.workspace = true
+meguri-sched.workspace = true
+meguri-storage.workspace = true
+
+[dev-dependencies]
+# test-hooks: raw SQL on a fixture copy and the step clock.
+meguri-model = { workspace = true, features = ["test-hooks"] }
+meguri-storage = { workspace = true, features = ["test-hooks"] }
+meguri-testkit.workspace = true
+tempfile.workspace = true
+
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
+[[test]]
+name = "stats_it"
+path = "tests/main.rs"

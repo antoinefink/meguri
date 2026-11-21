@@ -219,6 +219,12 @@ impl Collection {
         &self.core.exec.path
     }
 
+    /// The clock the collection was opened with (R1875): reads that need the
+    /// instant or the local offset (Card Info's dates) take them from here.
+    pub fn clock(&self) -> &dyn meguri_model::clock::Clock {
+        self.core.exec.clock.as_ref()
+    }
+
     /// Capacity supplied by Swift (important usage), or statvfs in headless runs.
     /// Large-operation callers supply their complete temporary-space budget.
     pub fn require_space(&self, required: u64) -> Result<(), EngineError> {
