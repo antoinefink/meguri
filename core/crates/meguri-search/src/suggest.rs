@@ -397,7 +397,7 @@ pub fn suggest(
                     ("nc:", quoted(&format!("{name}:nc:")), false),
                 ];
                 for (part, insert, completes) in forms {
-                    if part.starts_with(value.as_str()) {
+                    if part.starts_with(v.as_str()) {
                         let label = format!("{stored}:{part}");
                         out.fixed(candidate(CandidateKind::Field, &label, None, range.clone(), insert, completes));
                     }
@@ -695,7 +695,9 @@ fn starts_with_ascii_folded(word: &str, typed: &str) -> bool {
 /// D6.6: a template name's insert text, Q(`card:` + E(s)), when it reads
 /// back as a template-name term holding that name (not a number).
 fn template_text(name: &str) -> Option<String> {
-    if name.is_empty() || name.chars().any(crate::builder::splits_a_term) {
+    // A name not in NFC is normalized by the search and then finds nothing.
+    let nfc = matches!(nfc(name), std::borrow::Cow::Borrowed(_));
+    if name.is_empty() || !nfc || name.chars().any(crate::builder::splits_a_term) {
         return None;
     }
     let escaped = escape_name(name);

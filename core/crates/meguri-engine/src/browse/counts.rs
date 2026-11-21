@@ -218,6 +218,15 @@ impl FilterCounts {
         if let Some(caller) = cancel {
             bridge(caller, &token, registry);
         }
+        // Listed for halts from the start to the last check: a replacement
+        // while the run texts are made, or after the reads, cancels it.
+        let (epoch, stopping) = registry.epoch();
+        if stopping {
+            return Err(BrowseError::Engine(EngineError::unavailable(
+                "the collection is changing generation, suspending or closing",
+            )));
+        }
+        let _listed = registry.run(&token, epoch);
         // The distinct run texts, each with the items that count it.
         let mut texts: Vec<(String, bool)> = Vec::new();
         let mut of_item: Vec<Option<usize>> = Vec::with_capacity(items.len());
@@ -252,13 +261,6 @@ impl FilterCounts {
     ) -> Result<Vec<Option<u64>>, BrowseError> {
         let cancelled = || BrowseError::Engine(EngineError::Cancelled);
         let registry = &engine.inner.searches;
-        let (epoch, stopping) = registry.epoch();
-        if stopping {
-            return Err(BrowseError::Engine(EngineError::unavailable(
-                "the collection is changing generation, suspending or closing",
-            )));
-        }
-        let _listed = registry.run(token, epoch);
         let collection = engine.collection()?;
         let slot = registry.reader(token).ok_or_else(cancelled)?;
         let lease = collection.search_reader(slot.index)?;

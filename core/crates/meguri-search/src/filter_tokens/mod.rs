@@ -206,6 +206,44 @@ pub(crate) fn deck_value(names: &NameIndex, deck: &DeckName) -> Option<DeckValue
     })
 }
 
+/// [`deck_value`] of every deck of `names`, in its order, at once: each
+/// deck's tree is found among the decks sorted by their simply folded names
+/// (the `(?i)` expression's equality), not by testing every deck again.
+pub(crate) fn deck_values(names: &NameIndex) -> Vec<Option<DeckValue>> {
+    let decks = names.decks();
+    let folded: Vec<String> = decks.iter().map(|deck| crate::fold::simple_fold(&deck.native)).collect();
+    let mut sorted: Vec<usize> = (0..decks.len()).collect();
+    sorted.sort_by(|a, b| folded[*a].cmp(&folded[*b]));
+    decks
+        .iter()
+        .enumerate()
+        .map(|(k, deck)| {
+            // A name past this length falls back to the expression itself,
+            // which may not compile (the deck is then not offered).
+            if deck.native.chars().count() > 1000 {
+                return deck_value(names, deck);
+            }
+            let name = &folded[k];
+            let start = sorted.partition_point(|at| folded[*at].as_str() < name.as_str());
+            let mut tree: Vec<usize> = sorted[start..]
+                .iter()
+                .copied()
+                .take_while(|at| folded[*at].starts_with(name.as_str()))
+                .filter(|at| {
+                    let rest = &folded[*at][name.len()..];
+                    rest.is_empty() || rest.starts_with(FIELD_SEPARATOR)
+                })
+                .collect();
+            tree.sort_unstable();
+            Some(DeckValue {
+                id: deck.id,
+                native: deck.native.clone(),
+                tree: tree.into_iter().map(|at| decks[at].id).collect(),
+            })
+        })
+        .collect()
+}
+
 impl NotetypeValue {
     pub fn of(notetype: &NotetypeNames) -> NotetypeValue {
         NotetypeValue {
@@ -503,5 +541,33 @@ fn token_item(k: usize, token: &Token) -> Result<BuiltItem, RunTextError> {
                 item
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use meguri_model::ids::DeckId;
+
+    use super::{deck_value, deck_values};
+    use crate::name_index::{DeckRow, NameIndex};
+
+    // The trees made at once equal the trees made one by one.
+    #[test]
+    fn every_deck_value_at_once_equals_each_alone() {
+        let mut names = NameIndex::default();
+        let decks = ["a", "A\u{1f}b", "a b", "a\u{1f}b\u{1f}c", "ab", "Über", "über\u{1f}x", "\u{212a}", "k\u{1f}y"];
+        names.set_decks(
+            decks
+                .iter()
+                .enumerate()
+                .map(|(k, native)| DeckRow {
+                    id: DeckId(k as i64 + 1),
+                    native: (*native).to_owned(),
+                    filtered: false,
+                })
+                .collect(),
+        );
+        let alone: Vec<_> = names.decks().iter().map(|deck| deck_value(&names, deck)).collect();
+        assert_eq!(deck_values(&names), alone);
     }
 }

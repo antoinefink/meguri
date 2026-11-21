@@ -156,6 +156,8 @@ fn field_keys_come_from_the_scoped_note_types() {
     let completes: Vec<bool> = forms[1..].iter().map(|c| c.completes).collect();
     assert_eq!(completes, [true, true, false, false]);
     // An escaped key names the field `my:field`.
+    // The forms match the value as read: `\_\*` is `_*`.
+    assert_eq!(labels(&at_end(r"note:Kaishi Meaning:\_\*")), [r"Meaning:\_\*", "Meaning:_*"]);
     let escaped = at_end(r"my\:field:");
     assert_eq!(inserted(&escaped[1]), r"my\:field:_*");
     // A key naming no field of the scope gives only `as_typed`.
@@ -183,6 +185,8 @@ fn templates_follow_the_scope() {
     assert_eq!(labels(&or), ["card:Rec", "Recall", "Recognition"]);
     // An enclosing group's run scopes; a negated note: term does not.
     assert_eq!(labels(&at_end("note:Kaishi (card:Rec")), ["card:Rec", "Recall", "Recognition"]);
+    // Basic's scope reaches into the group: none of its templates holds Rec.
+    assert_eq!(labels(&at_end("note:Basic (card:Rec")), ["card:Rec"]);
     assert_eq!(labels(&at_end("-note:Basic card:Rec")), ["card:Rec", "Recall", "Recognition"]);
 }
 

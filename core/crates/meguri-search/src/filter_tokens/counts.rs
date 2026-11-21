@@ -590,7 +590,7 @@ pub struct DeckCounts {
     /// After [`DeckCounts::decks`]: the texts each deck id is in.
     members: HashMap<i64, Vec<usize>>,
     /// Each distinct (`did`, `odid`) pair read, with its cards.
-    pairs: HashMap<(i64, i64), (u32, u64)>,
+    pairs: HashMap<(Option<i64>, Option<i64>), (u32, u64)>,
     /// Notes mode: each card's note (its dense index) and pair.
     cards: Vec<(u32, u32)>,
 }
@@ -659,16 +659,16 @@ impl DeckCounts {
     /// pair's note and decks (Notes). Grouped here, not by SQLite's sorter.
     pub fn sql(&self) -> &'static str {
         match self.mode {
-            // A deck reference that is not an integer names no deck: it
-            // reads as i64::MIN, which no deck item holds.
+            // Each deck reference with whether it is an integer: one that is
+            // not names no deck.
             SearchMode::Cards => {
-                "SELECT CASE WHEN typeof(c.did) = 'integer' THEN c.did ELSE -9223372036854775808 END, \
-                 CASE WHEN typeof(c.odid) = 'integer' THEN c.odid ELSE -9223372036854775808 END FROM cards c"
+                "SELECT CASE WHEN typeof(c.did) = 'integer' THEN c.did ELSE 0 END, typeof(c.did) = 'integer', \
+                 CASE WHEN typeof(c.odid) = 'integer' THEN c.odid ELSE 0 END, typeof(c.odid) = 'integer' FROM cards c"
             }
             // Matched to the notes that exist as it is read.
             SearchMode::Notes => {
-                "SELECT c.nid, CASE WHEN typeof(c.did) = 'integer' THEN c.did ELSE -9223372036854775808 END, \
-                 CASE WHEN typeof(c.odid) = 'integer' THEN c.odid ELSE -9223372036854775808 END \
+                "SELECT c.nid, CASE WHEN typeof(c.did) = 'integer' THEN c.did ELSE 0 END, typeof(c.did) = 'integer', \
+                 CASE WHEN typeof(c.odid) = 'integer' THEN c.odid ELSE 0 END, typeof(c.odid) = 'integer' \
                  FROM cards c WHERE typeof(c.nid) = 'integer'"
             }
         }
@@ -677,10 +677,11 @@ impl DeckCounts {
     /// One row of [`DeckCounts::sql`]; in Notes mode `notes` are the notes
     /// that exist (Q5: a card counts only with its note).
     pub fn row(&mut self, row: &[i64], notes: &NoteIndex) {
+        let reference = |value: i64, integer: i64| (integer == 1).then_some(value);
         let (pair, note) = match self.mode {
-            SearchMode::Cards => ((row[0], row[1]), None),
+            SearchMode::Cards => ((reference(row[0], row[1]), reference(row[2], row[3])), None),
             SearchMode::Notes => match notes.get(row[0]) {
-                Some(note) => ((row[1], row[2]), Some(note)),
+                Some(note) => ((reference(row[1], row[2]), reference(row[3], row[4])), Some(note)),
                 None => return,
             },
         };
@@ -700,7 +701,7 @@ impl DeckCounts {
         let mut cards_of: Vec<u64> = vec![0; self.pairs.len()];
         for ((did, odid), (id, cards)) in &self.pairs {
             let found = &mut texts_of[*id as usize];
-            for deck in [Some(*did), (*odid != 0).then_some(*odid)].into_iter().flatten() {
+            for deck in [*did, odid.filter(|odid| *odid != 0)].into_iter().flatten() {
                 for text in self.members.get(&deck).into_iter().flatten() {
                     if !found.contains(text) {
                         found.push(*text);

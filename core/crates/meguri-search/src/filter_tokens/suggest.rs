@@ -221,10 +221,14 @@ fn row_key(row: &Row) -> Option<String> {
         Row::SavedSearch { name, .. } => format!("saved:{name}"),
         Row::Value(value) | Row::CardType { value, .. } => value_key(value)?,
         Row::Field { name, .. } => format!("field:{}", folded(name)),
-        Row::Syntax(candidate) => candidate.insert.as_ref()?.text.clone(),
+        Row::Syntax(candidate) => format!("{SYNTAX}{}", candidate.insert.as_ref()?.text),
         Row::Contains(_) | Row::FilterBy(_) | Row::ShowAll(_) | Row::SaveSearch => return None,
     })
 }
+
+/// The prefix of a syntax row's key: D6's insert text, kept apart from the
+/// keys of values.
+const SYNTAX: &str = "syntax:";
 
 /// A value's identity: a deck or note type by id, a name with letter case
 /// folded, a fixed value by itself.
@@ -277,7 +281,7 @@ pub fn suggest(names: &NameIndex, labels: &Labels, request: &SuggestRequest<'_>)
         .rposition(|c| is_white_space(*c))
         .map_or(0, |at| at + 1);
     let word: String = chars[start..request.caret].iter().collect();
-    let lists = Lists::new(names, labels, request);
+    let mut lists = Lists::new(names, labels, request);
     if let Some(section) = request.scope {
         return Ok(lists.scoped(section, &word));
     }
@@ -285,7 +289,15 @@ pub fn suggest(names: &NameIndex, labels: &Labels, request: &SuggestRequest<'_>)
     // space (`deck:"New |York"`) still completes.
     let mut rows = if key_at(text, request.caret).is_some() {
         // T12.2: Anki syntax at the caret completes as D6 says.
-        crate::suggest::suggest(text, request.caret, MOST, request.recent, names)?
+        {
+            // D6 ranks by insert texts: only the keys of syntax rows.
+            let recent: Vec<String> = request
+                .recent
+                .iter()
+                .filter_map(|key| key.strip_prefix(SYNTAX).map(str::to_owned))
+                .collect();
+            crate::suggest::suggest(text, request.caret, MOST, &recent, names)?
+        }
             .into_iter()
             .map(|candidate| SuggestionRow {
                 section: None,
@@ -373,6 +385,8 @@ struct Lists<'a> {
     labels: &'a Labels,
     taken: Taken,
     recent: HashMap<&'a str, usize>,
+    /// Every deck's value, made at once for a whole deck list.
+    decks: Option<Vec<Option<DeckValue>>>,
 }
 
 /// T3's fixed values of a section, in its order.
@@ -418,19 +432,19 @@ impl<'a> Lists<'a> {
             labels,
             taken: Taken::of(request.query),
             recent,
+            decks: None,
         }
     }
 
     /// T12.1's first row: Saved Searches (the built-ins, then the user's),
     /// then Filter By; at most 50 rows (R1104).
     fn opening(&self) -> Vec<SuggestionRow> {
-        let mut rows: Vec<SuggestionRow> = self.saved_rows();
         // Every kind stays: the saved searches give way, ending with Show
         // All when they are cut; 50 rows in all, Show All and Save Search
         // aside, as in the word's list.
         let room = MOST - Section::KINDS.len();
-        if rows.len() > room {
-            rows.truncate(room);
+        let mut rows: Vec<SuggestionRow> = self.saved_rows(room);
+        if BuiltIn::ALL.len() + self.names.saved_searches().len() > room {
             rows.push(SuggestionRow {
                 section: Some(Section::SavedSearches),
                 row: Row::ShowAll(Section::SavedSearches),
@@ -443,9 +457,10 @@ impl<'a> Lists<'a> {
         rows
     }
 
-    fn saved_rows(&self) -> Vec<SuggestionRow> {
+    fn saved_rows(&self, most: usize) -> Vec<SuggestionRow> {
         let built_in = BuiltIn::ALL.iter().map(|b| Row::BuiltIn(*b));
-        let user = self.names.saved_searches().iter().map(|saved| Row::SavedSearch {
+        let room = most.saturating_sub(BuiltIn::ALL.len());
+        let user = self.names.saved_searches().iter().take(room).map(|saved| Row::SavedSearch {
             name: saved.name.clone(),
             text: saved.text.clone(),
         });
@@ -508,7 +523,9 @@ impl<'a> Lists<'a> {
                 Section::SavedSearches => {
                     for (k, built_in) in BuiltIn::ALL.iter().enumerate() {
                         if let Some(class) = class_of(matcher.substring(self.labels.built_in(*built_in))) {
-                            let recent = self.rank(|| row_key(&Row::BuiltIn(*built_in)));
+                            // T13: a built-in stays ahead of a user saved
+                            // search, recent or not.
+                            let recent = 0;
                             push(class, section, k, Source::BuiltIn(*built_in), recent);
                         }
                     }
@@ -602,7 +619,10 @@ impl<'a> Lists<'a> {
             }
             Source::Fixed(value) => Row::Value(value.clone()),
             Source::Deck(k) => {
-                let value = Value::Deck(DeckValue::of(self.names, self.names.decks()[*k].id)?);
+                let value = match &self.decks {
+                    Some(decks) => Value::Deck(decks[*k].clone()?),
+                    None => Value::Deck(DeckValue::of(self.names, self.names.decks()[*k].id)?),
+                };
                 value.is_offered().then_some(Row::Value(value))?
             }
             Source::Tag(k) => {
@@ -710,7 +730,7 @@ impl<'a> Lists<'a> {
     /// T12.1's third row: a kind's values, fixed values in T3's order then
     /// names in D6.5 step 3's order; narrowed by `word` when there is one,
     /// then the prefix class first and recently accepted first in a class.
-    fn scoped(&self, section: Section, word: &str) -> Vec<SuggestionRow> {
+    fn scoped(&mut self, section: Section, word: &str) -> Vec<SuggestionRow> {
         if section == Section::FilterBy {
             return Section::KINDS
                 .iter()
@@ -722,6 +742,9 @@ impl<'a> Lists<'a> {
         }
         let mut candidates = self.candidates(&[section], word, true);
         candidates.sort_by_key(|c| (c.class, c.recent, c.order));
+        if section == Section::Decks && candidates.len() > 8 {
+            self.decks = Some(super::deck_values(self.names));
+        }
         candidates
             .iter()
             .filter_map(|candidate| self.row(&candidate.source))
