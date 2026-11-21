@@ -35,6 +35,8 @@ pub mod collection_export_memory;
 pub mod deck_options_ffi;
 #[path = "headless_parity.rs"]
 pub mod headless_parity;
+#[path = "notetype_reads_ffi.rs"]
+pub mod notetype_reads_ffi;
 #[cfg(feature = "test-hooks")]
 #[path = "maintenance_ffi.rs"]
 pub mod maintenance_ffi;
