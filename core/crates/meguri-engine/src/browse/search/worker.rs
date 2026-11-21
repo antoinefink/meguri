@@ -1062,7 +1062,7 @@ fn sort_error(error: SortError) -> Stop {
     }
 }
 
-pub(super) fn cells(params: &[Param]) -> Vec<Cell> {
+pub(crate) fn cells(params: &[Param]) -> Vec<Cell> {
     params
         .iter()
         .map(|param| match param {
@@ -1076,7 +1076,7 @@ pub(super) fn cells(params: &[Param]) -> Vec<Cell> {
 /// H9: the request's context, from the engine's clock and the config the
 /// snapshot holds. The day is the pure day calculation (`sched/day-clock`
 /// D3, D4): a search never runs the day query, which writes.
-pub(super) fn context(collection: &Collection, rows: &impl ReadRows) -> Result<SearchContext, EngineError> {
+pub(crate) fn context(collection: &Collection, rows: &impl ReadRows) -> Result<SearchContext, EngineError> {
     let clock = collection.core.exec.clock.as_ref();
     let at = clock.now_ms();
     let config = SchedConfig::new(rows);

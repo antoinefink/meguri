@@ -30,6 +30,14 @@ APP = "com.antoinefink.meguri.dev"
 TEST = APP + ".uitests"
 RUNNER = TEST + ".xctrunner"
 PREVIEW_PRODUCTS = "build/app/PersonalDevicePreviewDerivedData/Build/Products"
+# The owner-requested real copy (run --real-copy): daily-driver ids, its own
+# products and settings, installed only, never launched.
+DAILY = "com.antoinefink.meguri"
+REAL_PRODUCTS = "build/app/RealCopyDeviceDerivedData/Build/Products"
+MODES = {
+    "preview": {"app": APP, "products": PREVIEW_PRODUCTS, "settings": "personal-preview-settings.json"},
+    "real": {"app": DAILY, "products": REAL_PRODUCTS, "settings": "real-copy-settings.json"},
+}
 DIAGNOSTIC_BYTES = 16 * 1024 * 1024  # Per artifact, matching the guarded reader.
 
 
@@ -254,7 +262,7 @@ def device_query(device, output, arguments):
 
 
 def installation(device, output, identifier, required=True):
-    need(identifier in (APP, RUNNER), "installation-selection")
+    need(identifier in (APP, RUNNER, DAILY), "installation-selection")
     result = device_query(device, output, ["device", "info", "apps", "--filter",
                                           "bundleIdentifier == '" + identifier + "'"])
     apps = result.get("apps")
@@ -331,9 +339,9 @@ def prepare(args):
     })
 
 
-def preview_inputs(args):
+def preview_inputs(args, mode="preview"):
     """Hash only the fixed app (including its widget) at each boundary."""
-    base = args.root / PREVIEW_PRODUCTS
+    base = args.root / MODES[mode]["products"]
     app = base / "Release-iphoneos/Meguri.app"
 
     def allowed(name):
@@ -348,24 +356,25 @@ def preview_inputs(args):
     need(all(entry["type"] != "symlink" and all(allowed(part) for part in name.split("/"))
              for name, entry in inventory.items()), "preview-test-products")
     stamp = read_bytes(args.root / "app/Packages/MeguriCore/Binaries/.stamp", args.root / "app").decode()
-    settings = read_bytes(args.output.parent / "personal-preview-settings.json", args.output.parent)
+    settings = read_bytes(args.output.parent / MODES[mode]["settings"], args.output.parent)
     return {"device": args.device, "source": args.source, "configuration": "Release",
             "inventory": inventory, "core_stamp": stamp, "settings_sha256": products.digest(settings)}
 
 
-def preview_artifacts(args):
+def preview_artifacts(args, mode="preview"):
     """Verify typed metadata, signatures and device binaries only when sealing.
 
     The shell brackets its shared settings/profile/cloud policy with this seal.
     Installation compares the exact sealed inputs without repeating validation.
     """
-    inputs = preview_inputs(args)
-    app = args.root / PREVIEW_PRODUCTS / "Release-iphoneos/Meguri.app"
+    inputs = preview_inputs(args, mode)
+    app_id = MODES[mode]["app"]
+    app = args.root / MODES[mode]["products"] / "Release-iphoneos/Meguri.app"
     widget = app / "PlugIns/MeguriWidget.appex"
     artifacts = {}
     team = None
-    for kind, path, identifier, executable in (("app", app, APP, "Meguri"),
-            ("widget", widget, APP + ".widget", "MeguriWidget")):
+    for kind, path, identifier, executable in (("app", app, app_id, "Meguri"),
+            ("widget", widget, app_id + ".widget", "MeguriWidget")):
         raw = read_bytes(path / "Info.plist", path)
         name = str((path / "Info.plist").relative_to(app))
         need(products.digest(raw) == inputs["inventory"][name]["sha256"], "product-changed")
@@ -425,6 +434,28 @@ def preview(args):
         "version": 1, "configuration": "Release", "personal_preview": True,
         "device": args.device, "source": args.source, "process": process, "normal_launch_verified": True,
         "install_witness_sha256": products.digest(read_bytes(args.output / "preview-install-witness.json", args.output))})
+
+
+def real_seal(args):
+    write_json(args.output / "real-artifacts.json", preview_artifacts(args, "real"))
+
+
+def real_install(args):
+    """Install the sealed real copy and witness it; it is never launched."""
+    artifacts = read_json(args.output / "real-artifacts.json")
+    sealed_inputs = {key: value for key, value in artifacts.items() if key != "products"}
+    need(preview_inputs(args, "real") == sealed_inputs, "real-products-changed")
+    app = artifacts["products"]["app"]
+    need(app["path"] == str(args.root / REAL_PRODUCTS / "Release-iphoneos/Meguri.app") and app["bundle_id"] == DAILY,
+         "real-products-changed")
+    device_query(args.device, args.output, ["device", "install", "app", app["path"]])
+    installed = installation(args.device, args.output, DAILY)
+    need(installed["bundleVersion"] == app["build"], "installed-product-build")
+    need(preview_inputs(args, "real") == sealed_inputs, "real-products-changed")
+    write_json(args.output / "real-install-witness.json", {
+        "version": 1, "success": True, "device": args.device, "source": args.source,
+        "configuration": "Release", "real_copy": True, "launched": False,
+        "artifacts": artifacts, "installed_app": installed})
 
 
 def matching_artifacts(args, prepared):
@@ -513,7 +544,8 @@ def complete(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "admit", "complete", "preview-seal", "preview"))
+    parser.add_argument("action", choices=("prepare", "admit", "complete", "preview-seal", "preview",
+                                           "real-seal", "real-install"))
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--source", required=True)
@@ -530,7 +562,10 @@ def main():
         if args.action in ("preview-seal", "preview"):
             need(args.xctestrun is None and args.output.name == "personal-preview" and
                  args.output.parent.parent == args.root / "build/mg/run", "preview-arguments")
-        if args.action not in ("complete", "preview"):
+        if args.action in ("real-seal", "real-install"):
+            need(args.xctestrun is None and args.output.name == "real-copy" and
+                 args.output.parent.parent == args.root / "build/mg/run", "real-arguments")
+        if args.action not in ("complete", "preview", "real-install"):
             args.output.mkdir(mode=0o700)
         if args.action == "prepare":
             need(args.xctestrun is not None, "prepared-xctestrun-missing")
@@ -539,6 +574,10 @@ def main():
             preview_seal(args)
         elif args.action == "preview":
             preview(args)
+        elif args.action == "real-seal":
+            real_seal(args)
+        elif args.action == "real-install":
+            real_install(args)
         elif args.action == "admit":
             admit(args)
         else:
