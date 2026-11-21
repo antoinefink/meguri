@@ -207,20 +207,6 @@ public struct NotetypeChangeLosses: Sendable, Hashable {
     }
 }
 
-/// Change Note Type's loss preview (`notetypes/change-notetype` M6).
-public struct NotetypeChangePreview: Sendable, Hashable {
-    public let discardedFields: [UInt32]
-    public let droppedTemplates: [UInt32]?
-    public let removedCards: UInt64
-    public let losses: NotetypeChangeLosses
-    init(_ raw: MeguriCoreBindings.NotetypeChangePreview) {
-        discardedFields = raw.discardedFields
-        droppedTemplates = raw.droppedTemplates
-        removedCards = raw.removedCards
-        losses = NotetypeChangeLosses(raw.losses)
-    }
-}
-
 /// Why a note type structure op wrote nothing
 /// (`notetypes/structure-changes` S1.2, S12; `restore-to-default` D7.2).
 public enum NotetypeStructureRefusal: Sendable, Hashable {
@@ -236,8 +222,8 @@ public enum NotetypeStructureRefusal: Sendable, Hashable {
     case noChanges
     case schemaChanged
     case multipleNotetypes
-    /// Change Note Type's losses grew: show the sheet again with this preview.
-    case changeLossesChanged(preview: NotetypeChangePreview)
+    /// Change Note Type's losses grew: show the sheet again with these counts.
+    case changeLossesChanged(losses: NotetypeChangeLosses, removedCards: UInt64)
     init(_ raw: MeguriCoreBindings.NotetypeStructureRefusal) {
         switch raw {
         case .protectedField(let field): self = .protectedField(field: field)
@@ -250,7 +236,8 @@ public enum NotetypeStructureRefusal: Sendable, Hashable {
         case .noChanges: self = .noChanges
         case .schemaChanged: self = .schemaChanged
         case .multipleNotetypes: self = .multipleNotetypes
-        case .changeLossesChanged(let preview): self = .changeLossesChanged(preview: NotetypeChangePreview(preview))
+        case .changeLossesChanged(let losses, let removedCards):
+            self = .changeLossesChanged(losses: NotetypeChangeLosses(losses), removedCards: removedCards)
         }
     }
 }

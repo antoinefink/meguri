@@ -90,19 +90,33 @@ impl From<ChangePreview> for NotetypeChangePreview {
 }
 
 /// Only the refusal's way back into the engine (`CoreError` to
-/// `EngineError` inside a job); repeated ordinals cannot occur there.
-impl From<NotetypeChangePreview> for ChangePreview {
-    fn from(p: NotetypeChangePreview) -> Self {
-        Self {
+/// `EngineError` inside a job): the preview the counts came from, its
+/// discarded fields and dropped templates being their keys.
+pub(crate) fn preview_of_losses(losses: NotetypeChangeLosses, removed_cards: u64) -> ChangePreview {
+    let fields: BTreeMap<u32, u64> = losses.fields.iter().map(|c| (c.ord, c.count)).collect();
+    let templates: BTreeMap<u32, u64> = losses.templates.iter().map(|c| (c.ord, c.count)).collect();
+    ChangePreview {
+        discarded_fields: fields.keys().copied().collect(),
+        dropped_templates: (!templates.is_empty()).then(|| templates.keys().copied().collect()),
+        removed_cards,
+        losses: ChangeLosses {
+            fields,
+            templates,
+            other_cards: losses.other_cards,
+        },
+    }
+}
+
+impl TryFrom<NotetypeChangePreview> for ChangePreview {
+    type Error = CoreError;
+
+    fn try_from(p: NotetypeChangePreview) -> Result<ChangePreview, CoreError> {
+        Ok(ChangePreview {
             discarded_fields: p.discarded_fields,
             dropped_templates: p.dropped_templates,
             removed_cards: p.removed_cards,
-            losses: ChangeLosses {
-                fields: p.losses.fields.iter().map(|c| (c.ord, c.count)).collect(),
-                templates: p.losses.templates.iter().map(|c| (c.ord, c.count)).collect(),
-                other_cards: p.losses.other_cards,
-            },
-        }
+            losses: p.losses.try_into()?,
+        })
     }
 }
 
@@ -196,7 +210,7 @@ impl TryFrom<NotetypeChangeInfo> for ChangeInfo {
             new: i.new.into(),
             fields: i.fields,
             templates: i.templates,
-            preview: i.preview.into(),
+            preview: i.preview.try_into()?,
             field_content: i.field_content,
             card_counts,
             schema: i.schema,

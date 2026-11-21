@@ -383,7 +383,9 @@ fn change_refusal(error: &EngineError) -> Option<&'static str> {
             | StructureRefusal::SchemaChanged
             | StructureRefusal::MultipleNotetypes),
         ) => Some(refusal.kind()),
-        EngineError::NotFound { .. } => Some("not_found"),
+        // H1, H2: `not_found` is a listed note; a missing note type is a
+        // run error (the remembered note types come from the info step).
+        EngineError::NotFound { table: Table::Notes, .. } => Some("not_found"),
         _ => None,
     }
 }

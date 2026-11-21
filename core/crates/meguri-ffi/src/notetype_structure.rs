@@ -351,9 +351,13 @@ pub enum NotetypeStructureRefusal {
     SchemaChanged,
     /// Change Note Type M4, M8 check 4: the notes do not share one note type.
     MultipleNotetypes,
-    /// Change Note Type's losses grew: show the sheet again with this preview.
+    /// Change Note Type's losses grew: show the sheet again with these
+    /// counts (the fresh M6 preview's: the discarded fields and dropped
+    /// templates are their keys) and pass them back once accepted. Kept
+    /// small: `CoreError` carries this refusal inline.
     ChangeLossesChanged {
-        preview: crate::notetype_change::NotetypeChangePreview,
+        losses: crate::notetype_change::NotetypeChangeLosses,
+        removed_cards: u64,
     },
 }
 
@@ -371,7 +375,8 @@ impl From<StructureRefusal> for NotetypeStructureRefusal {
                     summary: summary.into(),
                 },
                 Losses::Change(preview) => Self::ChangeLossesChanged {
-                    preview: preview.into(),
+                    losses: preview.losses.into(),
+                    removed_cards: preview.removed_cards,
                 },
             },
             StructureRefusal::LastNotetype => Self::LastNotetype,
@@ -397,7 +402,9 @@ impl From<NotetypeStructureRefusal> for StructureRefusal {
             R::NoChanges => Self::NoChanges,
             R::SchemaChanged => Self::SchemaChanged,
             R::MultipleNotetypes => Self::MultipleNotetypes,
-            R::ChangeLossesChanged { preview } => Self::LossesChanged(Box::new(Losses::Change(preview.into()))),
+            R::ChangeLossesChanged { losses, removed_cards } => Self::LossesChanged(Box::new(Losses::Change(
+                crate::notetype_change::preview_of_losses(losses, removed_cards),
+            ))),
         }
     }
 }
@@ -662,16 +669,12 @@ mod tests {
             NotetypeStructureRefusal::SchemaChanged,
             NotetypeStructureRefusal::MultipleNotetypes,
             NotetypeStructureRefusal::ChangeLossesChanged {
-                preview: crate::notetype_change::NotetypeChangePreview {
-                    discarded_fields: vec![1],
-                    dropped_templates: Some(vec![0]),
-                    removed_cards: 3,
-                    losses: crate::notetype_change::NotetypeChangeLosses {
-                        fields: vec![OrdinalCount { ord: 1, count: 2 }],
-                        templates: vec![OrdinalCount { ord: 0, count: 2 }],
-                        other_cards: 1,
-                    },
+                losses: crate::notetype_change::NotetypeChangeLosses {
+                    fields: vec![OrdinalCount { ord: 1, count: 2 }],
+                    templates: vec![OrdinalCount { ord: 0, count: 2 }],
+                    other_cards: 1,
                 },
+                removed_cards: 3,
             },
         ] {
             let error = CoreError::NotetypeStructureRefused { refusal };
