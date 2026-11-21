@@ -292,19 +292,7 @@ struct TodaySummaryContent: View {
     }
 
     private func previousRow(decks: String?, value: String) -> some View {
-        rowLayout {
-            VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-                Text("Previous Session", bundle: .module)
-                if let decks {
-                    Text(verbatim: decks).quietText()
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            if !stacks { Spacer(minLength: Spacing.small) }
-            Text(verbatim: value)
-                .quietText()
-                .fixedSize(horizontal: !stacks, vertical: true)
-        }
+        PreviousSessionLine(decks: decks, value: value, stacks: stacks)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("home.today.previous")
         .listRowSeparator(.hidden)
@@ -375,4 +363,46 @@ struct StudiedTodayLine: View {
     private var label: Text { Text("Studied Today", bundle: .module) }
     private var valueText: some View { Text(verbatim: value).quietText() }
     private var bar: some View { ProgressView(value: fraction).progressViewStyle(.linear) }
+}
+
+/// Previous Session's row (N24.2): the label, with the decks under it, and the value beside
+/// them while both fit on one line; otherwise, and always at the accessibility text sizes,
+/// the value goes under them. Every text wraps, never running past the row.
+struct PreviousSessionLine: View {
+    let decks: String?
+    let value: String
+    let stacks: Bool
+
+    var body: some View {
+        if stacks {
+            stacked
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: Spacing.medium) {
+                    label
+                    Spacer(minLength: Spacing.small)
+                    Text(verbatim: value).quietText().lineLimit(1).fixedSize()
+                }
+                stacked
+            }
+        }
+    }
+
+    private var stacked: some View {
+        VStack(alignment: .leading, spacing: Spacing.xSmall) {
+            label
+            Text(verbatim: value).quietText()
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var label: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            Text("Previous Session", bundle: .module)
+            if let decks {
+                Text(verbatim: decks).quietText()
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
 }

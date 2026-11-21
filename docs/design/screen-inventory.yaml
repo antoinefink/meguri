@@ -140,9 +140,9 @@ screens:
       (U228) are not built; and the toolbar's sync button and Add menu (New Note, New Deck…; N20.1).
       The Mac and iPad sidebar has the deck search field at its top (home.goToDeck). New version
       2026-11-21 (round 10; N24): a sidebar row's number counts every card waiting (the Mac's badge),
-      its help tag gives the path and the three counts, a double-click (Mac) or Return or S starts
-      the deck (decks/deck-list H12), the heatmap takes N24.6's levels, colours and month labels, and
-      Today beside the list is home.today.
+      its help tag gives the path and the three counts, a double-click (Mac) or Return (and S on the
+      iPad) starts the deck (decks/deck-list H12), the heatmap takes N24.6's levels, colours and
+      month labels, and Today beside the list is home.today.
   - id: home.today
     title: Today
     units: [U152, U157, U228]
