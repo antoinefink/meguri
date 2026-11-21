@@ -71,7 +71,8 @@ fn outcome(job: &CloudPolicyAssetReadPassJob) -> Result<Option<()>, CoreError> {
 /// cancelled ordinary jobs, so a close can change what such a job's remaining
 /// checks see. Close first drains already-registered Full original-resource
 /// work. This registers one and holds it, keeping a concurrent close before
-/// Host cleanup and Runtime suspension until the returned guard drops.
+/// Host cleanup and Runtime suspension until the returned guard drops (or,
+/// if a test fails first, for at most 10 s).
 fn hold_close_before_runtime_suspension(fixture: &PublishedFixture) -> Release {
     let host = &fixture.workflow.host;
     let collection = host.collection().unwrap();

@@ -805,7 +805,9 @@ fn wait_cancel_requested(job: &CloudAssetReadSubmitJob) -> bool {
 }
 
 /// Close cancels the submit first, and accounting resumes before close suspends
-/// the Runtime. The next test covers the other order.
+/// the Runtime. The fence holds close, so the close-not-returned checks here
+/// prove little; the next test covers the other order, where close waits for
+/// the submit itself.
 #[test]
 fn asset_lifecycle_jobs_actual_close_keeps_pin_and_accepted_result_through_accounting() {
     for first in [false, true] {
@@ -860,8 +862,8 @@ fn asset_lifecycle_jobs_actual_close_keeps_pin_and_accepted_result_through_accou
 /// S1 quiesces participants before it waits for cancelled ordinary jobs, so
 /// close may suspend the Runtime while an accepted submit is still accounting.
 /// J2.1.1 keeps that accounting failure as the submit's actual result and the
-/// accepted read owned, never an unstarted cancellation. Close still waits for
-/// the pin.
+/// accepted read owned, never an unstarted cancellation. Close does not return
+/// while the paused submit still holds the reader pin.
 #[test]
 fn asset_lifecycle_jobs_close_suspending_runtime_during_accounting_keeps_pin_and_accepted_read() {
     for first in [false, true] {
