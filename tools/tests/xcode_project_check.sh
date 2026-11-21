@@ -119,7 +119,9 @@ mkdir -p "$LOGS"
 # signed by this run (a test build into the same DerivedData would have
 # re-signed them with test entitlements). The devices phase uses the Debug
 # app the builds phase left.
-[ "$PHASE" = devices ] || rm -rf "$WORK"/settings-*.txt "$DD/Build/Products" "$WORK/mac-debug-built"
+# --settings-only keeps a previous run's products.
+[ "$PHASE" = devices ] || [ "$SETTINGS_ONLY" = true ] || rm -rf "$WORK"/settings-*.txt "$DD/Build/Products" "$WORK/mac-debug-built"
+[ "$SETTINGS_ONLY" != true ] || rm -f "$WORK"/settings-*.txt
 PROJECT="$REPO/app/Meguri.xcodeproj"
 STAMP="$REPO/app/Packages/MeguriCore/Binaries/.stamp"
 CONFIGS="Debug Profile Release AppStore"
@@ -368,6 +370,13 @@ identity_of() { if [ "$1" = .dev ]; then echo dev; else echo daily; fi; }
 identity_settings() { # identity_settings <showBuildSettings json> <suffix>
   python3 "$REPO/tools/tests/app_identity_check.py" settings "$1" --identity "$(identity_of "$2")"
 }
+# The scheme's settings list only the app: the widget is resolved on its own.
+identity_widget_settings() { # identity_widget_settings <config> <sdk> <suffix> <output>
+  printf 'MEGURI_BUNDLE_ID_SUFFIX = %s\n' "$3" >"$4.xcconfig" || return 1
+  xcodebuild -showBuildSettings -json -project "$PROJECT" -target MeguriWidget -configuration "$1" -sdk "$2" \
+    -xcconfig "$4.xcconfig" >"$4" 2>/dev/null || return 1
+  python3 "$REPO/tools/tests/app_identity_check.py" widget-settings "$4" --identity "$(identity_of "$3")"
+}
 identity_product() { # identity_product <app> <suffix>
   python3 "$REPO/tools/tests/app_identity_check.py" product "$1" --identity "$(identity_of "$2")"
 }
@@ -424,8 +433,12 @@ if builds_phase; then
             cloud_settings Release macosx team .dev "$WORK/cloud-settings-personal-preview.json" personal-preview
           check "personal preview Release.dev: dev identity's app name and icon" \
             identity_settings "$WORK/cloud-settings-personal-preview.json" .dev
+          check "personal preview Release.dev: dev identity's widget name" \
+            identity_widget_settings Release macosx .dev "$WORK/widget-settings-personal-preview.json"
         fi
       done
+      check "$config $sdk: $(identity_of "$suffix") identity's widget name" \
+        identity_widget_settings "$config" "$sdk" "$suffix" "$WORK/widget-settings-$config-$sdk.json"
     done
     for sdk in macosx iphonesimulator; do
       check "$config $sdk: compilation conditions (hooks $hooks, AnkiWeb $ankiweb)" conditions_ok "$config" "$sdk" "$hooks" "$ankiweb"
@@ -1126,7 +1139,6 @@ if devices_phase; then
     check "iphone-Debug entitlements: the .dev App Group" expect_sim_entitlement "$DD/Build/Products/Debug-iphonesimulator/Meguri.app/Meguri" \
       com.apple.security.application-groups '["group.com.antoinefink.meguri.dev"]'
     check "iphone-Debug built dev identity's name and icon" identity_product "$DD/Build/Products/Debug-iphonesimulator/Meguri.app" .dev
-
   fi
   [ -z "$IPAD" ] || build "ipad-Debug" Debug "$(sim_dest "$IPAD")"
 fi

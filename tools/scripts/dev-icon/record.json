@@ -1,10 +1,15 @@
 {
   "generator": "tools/scripts/dev-icon/dev_icon.py",
   "parameters": {
-    "version": 1,
+    "version": 2,
     "red_band": [
       350.0,
       65.0
+    ],
+    "light_end": [
+      45.0,
+      0.62,
+      0.8
     ],
     "fade": 15.0,
     "blue_band": [
@@ -15,9 +20,10 @@
     "chroma_full": 0.06
   },
   "files": {
-    "AppIcon-Dev.icon/Assets/Pomegranate-original.png": "448383ec258966cbd296d74ff14ec43e51cf6910282017e89159b9f0473e7aa8",
+    "AppIcon-Dev.icon/Assets/Pomegranate-original.png": "93470548e6268f772c1e28f77f2d80cc3b781893b4edca1f67ee6559dc2bfb55",
     "AppIcon-Dev.icon/icon.json": "ea8382b8687ed46da88fd86017e8e120358df75b6da4ca79b982a87066dde59f",
     "AppIcon.icon/Assets/Pomegranate-original.png": "194b6b332938255458281a64670803ea86c09e056ffe71bd515c7d056c69a883",
-    "AppIcon.icon/icon.json": "ea8382b8687ed46da88fd86017e8e120358df75b6da4ca79b982a87066dde59f"
+    "AppIcon.icon/icon.json": "ea8382b8687ed46da88fd86017e8e120358df75b6da4ca79b982a87066dde59f",
+    "generator:dev_icon.py": "2ae5feec919e7dcfb98216fc83e812102adad019ffefbed49790e9d3ff34eff9"
   }
 }

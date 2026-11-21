@@ -28,9 +28,9 @@ MEGURI_APP_ICON = $(MEGURI_APP_ICON_$(MEGURI_BUNDLE_ID:c99extidentifier))
 // Mac's app menu and About panel read the localized CFBundleName: each
 // identity's names are in Meguri/Identity/<identity>/en.lproj/InfoPlist.strings
 // (en is the only localization). The other identity's names and icon document
-// stay out of the bundle; only an exact path excludes a file in a subfolder.
-MEGURI_UNUSED_IDENTITY_FILES_com_antoinefink_meguri = AppIcon-Dev.icon $(SRCROOT)/Meguri/Identity/Development/en.lproj/InfoPlist.strings
-MEGURI_UNUSED_IDENTITY_FILES_com_antoinefink_meguri_dev = AppIcon.icon $(SRCROOT)/Meguri/Identity/DailyDriver/en.lproj/InfoPlist.strings
+// stay out of the bundle; only an exact path, quoted for checkouts with spaces, excludes a file in a subfolder.
+MEGURI_UNUSED_IDENTITY_FILES_com_antoinefink_meguri = AppIcon-Dev.icon "$(SRCROOT)/Meguri/Identity/Development/en.lproj/InfoPlist.strings"
+MEGURI_UNUSED_IDENTITY_FILES_com_antoinefink_meguri_dev = AppIcon.icon "$(SRCROOT)/Meguri/Identity/DailyDriver/en.lproj/InfoPlist.strings"
 MEGURI_UNUSED_IDENTITY_FILES = $(MEGURI_UNUSED_IDENTITY_FILES_$(MEGURI_BUNDLE_ID:c99extidentifier))
 // Per-platform App Group ids (swiftui-arch §0.7): `group.` on iOS, the team
 // prefix on macOS. The app reads its own from Info.plist (MeguriAppGroupIdentifier).

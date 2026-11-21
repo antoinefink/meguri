@@ -1,6 +1,7 @@
 """Tests of dev_icon.py (tools/mg image-tools-selftest)."""
 
 import json
+import math
 import os
 import shutil
 import sys
@@ -37,6 +38,22 @@ class ConvertTests(unittest.TestCase):
         for colour in [(255, 255, 255), (0, 0, 0), (128, 128, 128), (236, 232, 230), (40, 160, 60), (0, 136, 255)]:
             self.assertEqual(tuple(self.convert(colour)), colour)
 
+    def test_bright_pixels_keep_their_colour(self):
+        for bright in [(240, 226, 196), (247, 238, 214), (232, 214, 170)]:
+            self.assertEqual(tuple(self.convert(bright)), bright)
+
+    def test_partial_changes_pass_through_grey_not_other_hues(self):
+        # Every colour around the circle at mid lightness: a changed colour is
+        # either at its own hue or in the blue band, never in between.
+        lab = np.array([[0.6, 0.12 * math.cos(math.radians(h)), 0.12 * math.sin(math.radians(h))]
+                        for h in range(0, 360, 2)])
+        out = dev_icon.convert_lab(lab, P)
+        _, c0, h0 = dev_icon.lch(lab)
+        _, c1, h1 = dev_icon.lch(out)
+        for a, b, c in zip(h0, h1, c1):
+            same = abs((float(b) - float(a) + 180) % 360 - 180) < 0.5
+            self.assertTrue(same or float(c) < 1e-9 or 230 <= float(b) <= 270, f"hue {float(a):.0f} -> {float(b):.0f}")
+
     def test_document_colour_strings(self):
         blue = "extended-srgb:0.00000,0.53333,1.00000,1.00000"
         self.assertEqual(dev_icon.convert_colour_string(blue, P), blue)
@@ -44,6 +61,10 @@ class ConvertTests(unittest.TestCase):
         r, g, b, a = (float(x) for x in moved.split(":")[1].split(","))
         self.assertGreater(b, r)
         self.assertEqual(a, 1.0)
+        green = "extended-srgb:-0.10000,1.05000,0.20000,1.00000"
+        self.assertEqual(dev_icon.convert_colour_string(green, P), green)
+        with self.assertRaises(ValueError):
+            dev_icon.convert_colour_string("display-p3:0.90000,0.10000,0.10000,1.00000", P)
 
 
 class DocumentTests(unittest.TestCase):

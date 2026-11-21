@@ -8,10 +8,14 @@ AppIcon (app/Config/Base.xcconfig). Stdlib only: it runs on the host.
 
   app_identity_check.py settings <showBuildSettings.json> --identity dev|daily
       the resolved settings of the Meguri target (and MeguriWidget when listed)
+  app_identity_check.py widget-settings <showBuildSettings.json> --identity dev|daily
+      the resolved settings of the MeguriWidget target
   app_identity_check.py product <Meguri.app> --identity dev|daily
-      the built app: Info.plist and localized names, icon name, the colour of the icon the
-      system shows (sips renders it; the dominant hue must be red or blue),
-      the widget's name, and no other identity's icon in the asset catalog
+      the built app: Info.plist and localized names, on the Mac the name the
+      system shows for the bundle (NSFileManager's display name), icon name,
+      the colour of the icon the system shows (sips renders it; the dominant
+      hue must be red or blue), the widget's name, and no other identity's
+      icon in the bundle or its asset catalog
 
 Exit 0 when everything matches, 1 with one line per difference otherwise.
 """
@@ -21,6 +25,8 @@ import json
 import math
 import os
 import plistlib
+import re
+import shlex
 import struct
 import subprocess
 import sys
@@ -42,16 +48,19 @@ def check_settings(path, identity):
         entries = json.load(f)
     by_target = {e.get("target"): e.get("buildSettings", {}) for e in entries}
     problems = []
-    # The scheme's settings list the app target; the widget's appear only when
-    # it is resolved on its own, and its name is checked in products.
+    # The scheme's settings list the app target; the widget is resolved on
+    # its own (widget-settings).
     app, widget = by_target.get("Meguri"), by_target.get("MeguriWidget")
     if app is None:
         return [f"{path}: no Meguri target"]
+    # The Mac shows the localized name only when Info.plist's display name is
+    # the bundle's file name (Meguri.app).
+    mac = app.get("PLATFORM_NAME") == "macosx"
     expect = [
         (app, "Meguri", "PRODUCT_BUNDLE_IDENTIFIER", want["bundle"]),
         (app, "Meguri", "PRODUCT_NAME", "Meguri"),
         (app, "Meguri", "MEGURI_APP_NAME", want["name"]),
-        (app, "Meguri", "INFOPLIST_KEY_CFBundleDisplayName", want["name"]),
+        (app, "Meguri", "INFOPLIST_KEY_CFBundleDisplayName", "Meguri" if mac else want["name"]),
         (app, "Meguri", "ASSETCATALOG_COMPILER_APPICON_NAME", want["icon"]),
     ]
     if widget is not None:
@@ -59,13 +68,28 @@ def check_settings(path, identity):
     for settings, target, key, value in expect:
         if settings.get(key) != value:
             problems.append(f"{target} {key} is {settings.get(key)!r}, expected {value!r}")
-    excluded = app.get("EXCLUDED_SOURCE_FILE_NAMES", "").split()
+    excluded = shlex.split(app.get("EXCLUDED_SOURCE_FILE_NAMES", ""))
     srcroot = app.get("SRCROOT", "")
     strings = "/Meguri/Identity/{}/en.lproj/InfoPlist.strings"
     unused = {want["other_icon"] + ".icon", srcroot + strings.format(want["other_strings"])}
     used = {want["icon"] + ".icon", srcroot + strings.format(want["strings"])}
     if not unused <= set(excluded) or used & set(excluded):
         problems.append(f"Meguri EXCLUDED_SOURCE_FILE_NAMES {excluded} must hold {sorted(unused)} and not {sorted(used)}")
+    return problems
+
+
+def check_widget_settings(path, identity):
+    want = IDENTITIES[identity]
+    with open(path) as f:
+        entries = json.load(f)
+    widget = {e.get("target"): e.get("buildSettings", {}) for e in entries}.get("MeguriWidget")
+    if widget is None:
+        return [f"{path}: no MeguriWidget target"]
+    problems = []
+    for key, value in [("PRODUCT_BUNDLE_IDENTIFIER", want["bundle"] + ".widget"),
+                       ("INFOPLIST_KEY_CFBundleDisplayName", want["name"])]:
+        if widget.get(key) != value:
+            problems.append(f"MeguriWidget {key} is {widget.get(key)!r}, expected {value!r}")
     return problems
 
 
@@ -79,10 +103,10 @@ def read_bmp(path):
     header, width, height = struct.unpack_from("<Iii", data, 14)
     bpp, compression = struct.unpack_from("<HI", data, 28)
     masks = (0x00FF0000, 0x0000FF00, 0x000000FF)
+    if bpp not in (24, 32) or compression not in (0, 3) or (compression == 3 and bpp != 32):
+        raise ValueError(f"{path}: unsupported BMP ({bpp} bpp, compression {compression})")
     if compression == 3:
         masks = struct.unpack_from("<III", data, 54)
-    elif compression != 0 or bpp not in (24, 32):
-        raise ValueError(f"{path}: unsupported BMP ({bpp} bpp, compression {compression})")
     step = bpp // 8
     row = (width * step + 3) & ~3
     shifts = [(m & -m).bit_length() - 1 for m in masks]
@@ -166,9 +190,10 @@ def check_product(app, identity):
         info = plistlib.load(f)
     problems = []
     expect = [("CFBundleIdentifier", want["bundle"]), ("CFBundleExecutable", "Meguri"),
-              ("CFBundleDisplayName", want["name"])]
+              ("CFBundleDisplayName", "Meguri" if mac else want["name"])]
     if mac:
-        expect += [("CFBundleIconName", want["icon"]), ("CFBundleIconFile", want["icon"])]
+        expect += [("CFBundleIconName", want["icon"]), ("CFBundleIconFile", want["icon"]),
+                   ("LSHasLocalizedDisplayName", True)]
     for key, value in expect:
         if info.get(key) != value:
             problems.append(f"Info.plist {key} is {info.get(key)!r}, expected {value!r}")
@@ -184,6 +209,19 @@ def check_product(app, identity):
                                       check=True, capture_output=True).stdout)
     if names != {"CFBundleName": want["name"], "CFBundleDisplayName": want["name"]}:
         problems.append(f"en.lproj/InfoPlist.strings is {names}, expected both names {want['name']!r}")
+    if mac:
+        # What Finder, the Dock and the app switcher show for this bundle.
+        script = ('ObjC.import("Foundation"); '
+                  f'$.NSFileManager.defaultManager.displayNameAtPath({json.dumps(os.path.abspath(app))}).js')
+        shown = subprocess.run(["osascript", "-l", "JavaScript", "-e", script],
+                               check=True, capture_output=True, text=True).stdout.strip()
+        if shown != want["name"]:
+            problems.append(f"the system shows the bundle as {shown!r}, expected {want['name']!r}")
+    # Loose icon files are <icon name>.icns or <icon name><size>...png.
+    other = re.compile(re.escape(want["other_icon"]) + r"(\.icns$|\d.*\.png$)")
+    stray = [e for e in os.listdir(os.path.join(contents, "Resources") if mac else app) if other.match(e)]
+    if stray:
+        problems.append(f"the other identity's icon files are in the bundle: {stray}")
     widget_info = os.path.join(contents, "PlugIns", "MeguriWidget.appex", *(["Contents"] if mac else []), "Info.plist")
     with open(widget_info, "rb") as f:
         widget = plistlib.load(f)
@@ -212,12 +250,13 @@ def check_product(app, identity):
 
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("kind", choices=["settings", "product"])
+    parser.add_argument("kind", choices=["settings", "widget-settings", "product"])
     parser.add_argument("path")
     parser.add_argument("--identity", choices=sorted(IDENTITIES), required=True)
     args = parser.parse_args(argv)
     try:
-        problems = (check_settings if args.kind == "settings" else check_product)(args.path, args.identity)
+        check = {"settings": check_settings, "widget-settings": check_widget_settings, "product": check_product}
+        problems = check[args.kind](args.path, args.identity)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, plistlib.InvalidFileException) as error:
         problems = [f"{args.path}: {error}"]
     for problem in problems:

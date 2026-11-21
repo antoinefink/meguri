@@ -8,9 +8,11 @@ family. Each colour is converted to OKLCH; a pixel whose hue lies in the red
 band and whose chroma is above the neutral threshold gets the band's hues
 mapped onto the blue band, with lightness L and chroma C unchanged (chroma is
 lowered only when the new colour is outside sRGB, never lightness). Neutral
-and off-band pixels (greys, whites, other hues) keep their colour;
-at the band's edges the change fades in OKLab, through the neutral axis,
-never through purple or teal.
+and off-band pixels (greys, whites, bright pixels, other hues) keep their
+colour. The band's upper limit drops for bright pixels: dark orange-brown
+details change, the bright pith does not. At the band's edges a partial change
+lowers chroma at the original hue, then raises it at the new one: it passes
+through grey, never through an intermediate hue such as purple or teal.
 
   dev_icon.py generate [--source app/Meguri/AppIcon.icon] [--out app/Meguri/AppIcon-Dev.icon]
           [--record tools/scripts/dev-icon/record.json]
@@ -43,12 +45,15 @@ except ImportError:  # `check` needs neither: it runs with the host's python3 to
 
 # The red band of the source image (OKLCH hue, in degrees) and its target.
 # The source's dominant red sits near 25 degrees; system blue (#0088FF, the
-# icon document's own fill) near 252. Hues inside the band map linearly onto
+# icon document's own fill) near 254. Hues inside the band map linearly onto
 # the blue band, compressed so the band's orange end does not reach violet
 # and its other end stays short of green-blue.
 PARAMETERS = {
-    "version": 1,
+    "version": 2,
     "red_band": [350.0, 65.0],  # full change inside (wrapping through 0)
+    # The band's upper limit moves from red_band's to this hue as lightness
+    # goes from light_end[1] to light_end[2]: bright pixels keep their colour.
+    "light_end": [45.0, 0.62, 0.8],
     "fade": 15.0,  # degrees beyond each end over which the change fades out
     "blue_band": [236.0, 264.0],  # where red_band lands
     "chroma_neutral": 0.025,  # at or below: unchanged (whites, greys, pith)
@@ -103,9 +108,17 @@ def band_position(hue, p):
     return offset, width
 
 
-def weights(chroma, hue, p):
-    offset, width = band_position(hue, p)
-    outside = np.maximum(np.maximum(-offset, offset - width), 0.0)
+def band_end(lightness, p):
+    """Degrees past the band's start where the change ends, by lightness."""
+    start, end = p["red_band"]
+    light, l0, l1 = p["light_end"]
+    t = np.clip((lightness - l0) / (l1 - l0), 0.0, 1.0)
+    return ((end - start) % 360.0) + t * (((light - start) % 360.0) - ((end - start) % 360.0))
+
+
+def weights(lightness, chroma, hue, p):
+    offset, _ = band_position(hue, p)
+    outside = np.maximum(np.maximum(-offset, offset - band_end(lightness, p)), 0.0)
     hue_w = np.clip(1.0 - outside / p["fade"], 0.0, 1.0)
     hue_w = 0.5 - 0.5 * np.cos(np.pi * hue_w)
     chroma_w = np.clip((chroma - p["chroma_neutral"]) / (p["chroma_full"] - p["chroma_neutral"]), 0.0, 1.0)
@@ -128,11 +141,13 @@ def in_gamut(lab):
 def convert_lab(lab, p):
     """The converted OKLab colours (any shape ... x 3)."""
     lightness, chroma, hue = lch(lab)
-    w = weights(chroma, hue, p)
-    new_h = np.radians(target_hue(hue, p))
-    moved = np.stack([lightness, chroma * np.cos(new_h), chroma * np.sin(new_h)], axis=-1)
-    # Fade in OKLab: a partial change passes through the neutral axis.
-    out = lab + w[..., None] * (moved - lab)
+    w = weights(lightness, chroma, hue, p)
+    # A partial change (w below 1) lowers chroma at the source hue down to
+    # grey at w = 0.5, then raises it at the target hue: no hue in between.
+    h = np.radians(np.where(w < 0.5, hue, target_hue(hue, p)))
+    c = chroma * np.abs(1.0 - 2.0 * w)
+    out = np.stack([lightness, c * np.cos(h), c * np.sin(h)], axis=-1)
+    out = np.where((w > 0.0)[..., None], out, lab)
     # Out of sRGB: lower chroma (bisection), never lightness.
     bad = ~in_gamut(out)
     if np.any(bad):
@@ -176,13 +191,16 @@ def convert_image(source, dest, p):
 def convert_colour_string(value, p):
     m = COLOUR.match(value)
     if not m:
+        if re.match(r"^[a-z][a-z0-9-]*:[-0-9.]+(,[-0-9.]+)+$", value):
+            raise ValueError(f"unsupported colour space in icon.json: {value}")
         return value
     space = m.group(1)
     r, g, b, a = (float(x) for x in m.groups()[1:])
     lab = linear_to_oklab(srgb_to_linear(np.array([[r, g, b]])))
+    lightness, chroma, hue = lch(lab)
+    if float(weights(lightness, chroma, hue, p)[0]) == 0.0:
+        return value  # unchanged, even outside sRGB (extended values)
     out = linear_to_srgb(oklab_to_linear(convert_lab(lab, p)))[0]
-    if np.allclose(out, [r, g, b], atol=1e-4):
-        return value
     return f"{space}:{out[0]:.5f},{out[1]:.5f},{out[2]:.5f},{a:.5f}"
 
 
@@ -222,6 +240,8 @@ def manifest(source, out):
                 rel = os.path.relpath(full, os.path.dirname(root))
                 if not name.startswith("."):
                     files[rel.replace(os.sep, "/")] = sha256(full)
+    # The generator's own digest: a change to the conversion makes the icon stale.
+    files["generator:dev_icon.py"] = sha256(os.path.abspath(__file__))
     return {"generator": "tools/scripts/dev-icon/dev_icon.py", "parameters": PARAMETERS,
             "files": dict(sorted(files.items()))}
 
