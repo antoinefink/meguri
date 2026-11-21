@@ -1104,28 +1104,179 @@ fn a_change_to_the_same_note_type_reports_reason_six() {
     assert!(report.type_changes.is_empty());
 }
 
-/// M1 allows a field map that names one old field twice (R945). Between two
-/// note types that is not built yet (the structure report refuses a
-/// repeated `type_changes` origin): the change refuses it at planning as
-/// `Unsupported`, before any backup, and writes nothing. To the same note
-/// type it commits, since no `type_changes` entry is reported.
+/// Every row the change may write, compared whole: `rows` plus every grave
+/// row (not only their count) and the note types' rows.
+#[derive(Debug, PartialEq)]
+struct WholeRows {
+    rows: Rows,
+    graves: Vec<Vec<meguri_storage::Cell>>,
+    notetypes: Vec<Vec<meguri_storage::Cell>>,
+}
+
+fn whole(h: &Harness) -> WholeRows {
+    let r = h.collection.reader(ReaderRole::Query).unwrap();
+    // One page holds them all here: these tests make a few graves.
+    let graves = r.row_page(Table::Graves, None).unwrap();
+    assert_eq!(graves.len() as u64, r.row_count(Table::Graves).unwrap());
+    let notetypes = r.row_page(Table::Notetypes, None).unwrap();
+    WholeRows { rows: rows(h), graves, notetypes }
+}
+
+/// The ordinals of a note's cards, ascending.
+fn ords(h: &Harness, note: NoteId) -> Vec<u16> {
+    cards_of(h, note).into_iter().map(|(ord, _, _)| ord).collect()
+}
+
+/// Undo then redo, twice: each undo gives back `before` exactly and each
+/// redo `after`, and each reports what `reports` says (undo, redo).
+fn undo_redo_twice(
+    h: &Harness,
+    capture: &Capture,
+    before: &WholeRows,
+    after: &WholeRows,
+    check: impl Fn(&meguri_storage::journal::StructureReport, bool),
+) {
+    for _ in 0..2 {
+        h.collection.undo(UndoScope::Global).unwrap();
+        assert_eq!(&whole(h), before, "undo restores every row exactly");
+        check(&structure(capture), true);
+        h.collection.redo(UndoScope::Global).unwrap();
+        assert_eq!(&whole(h), after, "redo writes the committed rows again");
+        check(&structure(capture), false);
+    }
+}
+
+/// R945 between two note types (U35a; M1, M9 step 3, M10, K19.2 "Repeated
+/// field origins"): Src (Word, Gloss; `{{Word}}`) to Twin (Word, Hint, Gloss;
+/// `{{Word}}`, `{{Hint}}?`) with the field map 0, 0, 1. Both new fields
+/// get the old Word as M9 step 3 writes it (controls removed, no NFC);
+/// Twin's second template gives a card exactly where Hint is not empty by
+/// E1. Undo restores every row exactly; redo writes the change again; the
+/// reports hold the repeated map and its lowest-copy inverse.
 #[test]
-fn a_repeated_field_map_between_two_note_types_is_refused_before_the_backup() {
-    let (h, backups) = harness();
-    let pair = pair(&h);
-    let duo = duo(&h);
-    let a = add(&h.collection, pair, &["a", "b"]);
-    let read = info(&h, &[a], duo).unwrap();
-    let before = rows(&h);
-    let undo = undo_name(&h);
-    let e = run(&h, mapped(&read, &[a], vec![Some(0), Some(0)], Some(vec![Some(0), None]))).unwrap_err();
-    assert!(matches!(e, EngineError::Unsupported { .. }), "{e:?}");
-    assert_eq!(backups.calls(), 0);
-    assert_eq!(rows(&h), before);
-    assert_eq!(undo_name(&h), undo);
-    let read = info(&h, &[a], pair).unwrap();
-    run(&h, mapped(&read, &[a], vec![Some(0), Some(0)], Some(vec![Some(0)]))).unwrap();
-    assert_eq!(note(&h, a).fields, "a\u{1f}a");
+fn a_repeated_field_map_between_two_note_types_commits_and_undo_restores_every_value() {
+    let (h, backups, capture) = harness_observed();
+    let src = made(&h, "Src", false, &["Word", "Gloss"], &["{{Word}}"]);
+    let twin = made(&h, "Twin", false, &["Word", "Hint", "Gloss"], &["{{Word}}", "{{Hint}}?"]);
+    let n1 = add(&h.collection, src, &["zorvu", "kelpa"]);
+    let n2 = add(&h.collection, src, &["mivax", ""]);
+    let n3 = add(&h.collection, src, &["x", "y"]);
+    raw_fields(&h.collection, n3, "<br>\u{1f}y");
+    let n4 = add(&h.collection, src, &["x", "y"]);
+    raw_fields(&h.collection, n4, "e\u{301}\u{1f}a\u{1}b");
+    let n5 = add(&h.collection, src, &["x", "y"]);
+    raw_fields(&h.collection, n5, "solo");
+    let n6 = add(&h.collection, src, &["x", "y"]);
+    raw_fields(&h.collection, n6, "\u{1f}g");
+    let ids = [n1, n2, n3, n4, n5, n6];
+    h.clock.step_ms(60_000);
+    let read = info(&h, &ids, twin).unwrap();
+    assert_eq!(read.templates, Some(vec![Some(0), None]));
+    let before = whole(&h);
+    let fields = vec![Some(0), Some(0), Some(1)];
+    run(&h, mapped(&read, &ids, fields, read.templates.clone())).unwrap();
+    assert_eq!(backups.calls(), 1);
+    let expected = [
+        (n1, "zorvu\u{1f}zorvu\u{1f}kelpa", vec![0, 1]),
+        (n2, "mivax\u{1f}mivax\u{1f}", vec![0, 1]),
+        (n3, "<br>\u{1f}<br>\u{1f}y", vec![0]),
+        (n4, "e\u{301}\u{1f}e\u{301}\u{1f}ab", vec![0, 1]),
+        (n5, "solo\u{1f}solo\u{1f}", vec![0, 1]),
+        (n6, "\u{1f}\u{1f}g", vec![0]),
+    ];
+    for (id, fields, cards) in &expected {
+        let n = note(&h, *id);
+        assert_eq!((n.notetype_id, n.fields.as_str()), (twin, *fields), "{id:?}");
+        assert_eq!(&ords(&h, *id), cards, "{id:?}");
+    }
+    let after = whole(&h);
+    let check = |report: &meguri_storage::journal::StructureReport, undo: bool| {
+        assert_eq!(report.reasons, [StructureReason::NotesNotetypeChanged].into());
+        assert!(report.layouts.is_empty() && report.removed.is_empty());
+        assert_eq!(report.type_changes.len(), 1);
+        let (key, fields, templates) = if undo {
+            ((twin.0, src.0), &[0, 2][..], &[0][..])
+        } else {
+            ((src.0, twin.0), &[0, 0, 1][..], &[0, -1][..])
+        };
+        let entry = &report.type_changes[&key];
+        assert_eq!((entry.field_map.as_slice(), entry.template_map.as_slice()), (fields, templates));
+    };
+    check(&structure(&capture), false);
+    undo_redo_twice(&h, &capture, &before, &after, check);
+}
+
+/// The same with a cloze note type on one side (K19.2 "No template map"):
+/// to Gaps (Text, Extra) with 0, 0, and from Gaps to Twin with 0, 0, 1.
+/// The reversed entries take the lowest copy, and their template maps
+/// follow the primitive rule (empty back to a cloze note type, the
+/// identity of the standard one's templates back to it).
+#[test]
+fn a_repeated_field_map_with_a_cloze_note_type_undoes_and_redoes_exactly() {
+    let (h, _, capture) = harness_observed();
+    let src = made(&h, "Src", false, &["Word", "Gloss"], &["{{Word}}"]);
+    let gaps = cloze(&h);
+    let twin = made(&h, "Twin", false, &["Word", "Hint", "Gloss"], &["{{Word}}", "{{Hint}}?"]);
+    // Standard to cloze.
+    let a = add(&h.collection, src, &["{{c1::x}}", "g"]);
+    h.clock.step_ms(60_000);
+    let read = info(&h, &[a], gaps).unwrap();
+    let before = whole(&h);
+    run(&h, mapped(&read, &[a], vec![Some(0), Some(0)], None)).unwrap();
+    assert_eq!(note(&h, a).fields, "{{c1::x}}\u{1f}{{c1::x}}");
+    assert_eq!(ords(&h, a), [0]);
+    let after = whole(&h);
+    let check = |report: &meguri_storage::journal::StructureReport, undo: bool| {
+        let (key, fields, templates) = if undo {
+            ((gaps.0, src.0), &[0, -1][..], &[][..])
+        } else {
+            ((src.0, gaps.0), &[0, 0][..], &[0][..])
+        };
+        let entry = &report.type_changes[&key];
+        assert_eq!((entry.field_map.as_slice(), entry.template_map.as_slice()), (fields, templates));
+    };
+    undo_redo_twice(&h, &capture, &before, &after, check);
+    // Cloze to standard.
+    let b = add(&h.collection, gaps, &["{{c1::p}} {{c2::q}}", "e"]);
+    h.clock.step_ms(60_000);
+    let read = info(&h, &[b], twin).unwrap();
+    let before = whole(&h);
+    run(&h, mapped(&read, &[b], vec![Some(0), Some(0), Some(1)], None)).unwrap();
+    assert_eq!(note(&h, b).fields, "{{c1::p}} {{c2::q}}\u{1f}{{c1::p}} {{c2::q}}\u{1f}e");
+    assert_eq!(ords(&h, b), [0, 1]);
+    let after = whole(&h);
+    let check = |report: &meguri_storage::journal::StructureReport, undo: bool| {
+        let (key, fields, templates) = if undo {
+            ((twin.0, gaps.0), &[0, 2][..], &[0, 1][..])
+        } else {
+            ((gaps.0, twin.0), &[0, 0, 1][..], &[][..])
+        };
+        let entry = &report.type_changes[&key];
+        assert_eq!((entry.field_map.as_slice(), entry.template_map.as_slice()), (fields, templates));
+    };
+    undo_redo_twice(&h, &capture, &before, &after, check);
+}
+
+/// A repeated field map to the same note type (built by U35): it commits,
+/// reports reason 6 alone (M10's open point), and undo and redo restore
+/// every row exactly.
+#[test]
+fn a_repeated_field_map_to_the_same_note_type_undoes_and_redoes_exactly() {
+    let (h, _, capture) = harness_observed();
+    let twin = made(&h, "Twin", false, &["Word", "Hint", "Gloss"], &["{{Word}}", "{{Hint}}?"]);
+    let a = add(&h.collection, twin, &["w", "", "g"]);
+    h.clock.step_ms(60_000);
+    let read = info(&h, &[a], twin).unwrap();
+    let before = whole(&h);
+    run(&h, mapped(&read, &[a], vec![Some(0), Some(0), Some(2)], read.templates.clone())).unwrap();
+    assert_eq!(note(&h, a).fields, "w\u{1f}w\u{1f}g");
+    assert_eq!(ords(&h, a), [0, 1]);
+    let after = whole(&h);
+    let check = |report: &meguri_storage::journal::StructureReport, _: bool| {
+        assert_eq!(report.reasons, [StructureReason::NotesNotetypeChanged].into());
+        assert!(report.type_changes.is_empty());
+    };
+    undo_redo_twice(&h, &capture, &before, &after, check);
 }
 
 /// Stores `fields` raw as `note`'s values (a damaged note).
