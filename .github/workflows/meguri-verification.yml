@@ -23,6 +23,9 @@ name: Verify Meguri
 #   design-docs and core-deny, one after another on one runner.
 # - Linux · selftest: `tools/mg selftest` and `image-tools-selftest`, for
 #   changes to tools/ or .github/.
+# - macOS · Swift packages: advisory. `tools/mg swift-test --package
+#   MeguriCore` on the hosted Xcode 27 runner, for changes to the packages or
+#   the core's FFI interface.
 # - Linux · similarity: the similarity scan against the pinned Anki releases
 #   (.github/similarity.sh), for the files this change adds or modifies.
 
@@ -62,6 +65,7 @@ jobs:
       core: ${{ steps.select.outputs.core }}
       linux: ${{ steps.select.outputs.linux }}
       selftest: ${{ steps.select.outputs.selftest }}
+      swift: ${{ steps.select.outputs.swift }}
       core_shards: ${{ steps.select.outputs.core_shards }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,6 +105,7 @@ jobs:
           core=yes
           linux=yes
           selftest=yes
+          swift=yes
           # -z: git would quote a name with non-ASCII or special bytes, and
           # the anchored patterns below would miss it. --no-renames: a moved
           # file counts for both its old and its new directory.
@@ -113,6 +118,15 @@ jobs:
             # The self-tests cover tools/mg and what the workflow runs.
             if ! grep -qE '^(tools|\.github)/' <<<"$changed"; then
               selftest=no
+            fi
+            # The Swift package tests: the packages, the FFI crate whose
+            # interface the bindings are generated from, the toolchain and
+            # lock that build the XCFramework, and the tools that build and
+            # run them. Other core crates reach the packages only through
+            # that interface, and Linux · core tests them.
+            swift_paths='app/Packages/|\.github/swift-timing-sensitive\.txt$|core/crates/meguri-ffi/|core/Cargo\.lock$|core/rust-toolchain\.toml$|tools/scripts/build-core-xcframework\.sh$|tools/scripts/repair-swift-integer-reader\.py$|tools/mg$|tools/mg\.d/(bridge|lint-ui)\.sh$|\.github/mg-step\.sh$|\.github/workflows/meguri-verification\.yml$'
+            if ! grep -qE "^($swift_paths)" <<<"$changed"; then
+              swift=no
             fi
             core_dirs='core|conformance|specs|tools/conformance'
             core_files='\.github/workflows/meguri-verification\.yml|\.github/dev-image\.sh|\.github/rust-cache\.sh|\.github/core-timing-sensitive\.txt|tools/mg|tools/mg\.d/core\.sh|tools/scripts/ankiweb-scan\.py|tools/mg-result\.schema\.json|docker/compose\.yml|docker/dev\.Dockerfile(\.dockerignore)?'
@@ -139,6 +153,7 @@ jobs:
             echo "core=$core"
             echo "linux=$linux"
             echo "selftest=$selftest"
+            echo "swift=$swift"
             # The one list of Core shards: the shard matrix and the check in
             # "Linux · core" both read it.
             echo 'core_shards=[1,2,3,4]'
@@ -149,6 +164,7 @@ jobs:
             echo "- Core (4 shards, lint and the timing-sensitive job): **$core**"
             echo "- server, conformance, package-smoke: **$linux**"
             echo "- selftest: **$selftest** (Linux · checks runs on every change)"
+            echo "- Swift packages (macOS, advisory): **$swift**"
             if [[ -n "$added" ]]; then
               echo
               echo "**This change adds tests to .github/core-timing-sensitive.txt; they no longer block Linux · core:**"
@@ -952,6 +968,102 @@ jobs:
         if: always()
         with:
           name: meguri-linux-selftest-result
+          path: ${{ runner.temp }}/receipts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Advisory until it has passed on ten pull requests (docs/process/tiers.md):
+  # Antoine (2026-11-21) let unsigned Swift package tests run on GitHub's
+  # hosted macOS runner. MeguriCore's tests on the Xcode this project pins,
+  # with the Debug core XCFramework built here. Nothing is signed, no secret
+  # is read, and nothing runs in a simulator, the test VM or the app. lint-ui
+  # needs Docker, which these runners lack, so swift-test leaves it to Linux ·
+  # checks, which lints the same commit.
+  swift:
+    name: macOS · Swift packages
+    needs: suites
+    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.swift == 'yes' }}
+    continue-on-error: true
+    permissions:
+      contents: read
+    runs-on: xcode-27
+    timeout-minutes: 60
+    concurrency:
+      group: meguri-verification-${{ github.ref }}-swift-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+      cancel-in-progress: true
+    env:
+      # The Xcode this Mac and the test VM use (tools/mg doctor needs 27.1 or
+      # newer). The image keeps it at this path.
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      MEGURI_CI_LINT_UI_ELSEWHERE: Linux · checks
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the pinned Xcode
+        shell: bash
+        run: |
+          xcodebuild -version
+          xcodebuild -version | grep -qx 'Xcode 27.2' ||
+            { echo "::error::$DEVELOPER_DIR is not Xcode 27.2"; exit 1; }
+          xcrun --sdk macosx --show-sdk-version
+
+      # The pinned Rust toolchain with its Apple targets, the cargo registry
+      # and the Apple builds of the core. Saved by master pushes and manual
+      # runs, once per key; pull requests read master's. A fresh checkout
+      # gives every source file a new time, so cargo rebuilds the local
+      # crates from this commit's source.
+      - name: Restore the Rust and XCFramework cache
+        id: cache
+        if: github.event_name != 'schedule' && inputs.cold != true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            core/target
+          key: swift-core-v1-${{ hashFiles('core/rust-toolchain.toml') }}-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: swift-core-v1-${{ hashFiles('core/rust-toolchain.toml') }}-
+
+      # The toolchain, components and Apple targets core/rust-toolchain.toml
+      # pins (a no-op when the cache restored them).
+      - name: Install the pinned Rust toolchain
+        shell: bash
+        run: cd core && rustup toolchain install && rustc -V
+
+      - name: swift-test MeguriCore
+        shell: bash
+        env:
+          MG_STEP_SUDO: "no"
+        run: |
+          # The tests of .github/swift-timing-sensitive.txt, skipped by name.
+          skips=()
+          while read -r name _; do
+            [[ -n "$name" && "$name" != \#* ]] || continue
+            [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::bad line in .github/swift-timing-sensitive.txt: $name"; exit 1; }
+            skips+=(--skip "$name")
+          done < .github/swift-timing-sensitive.txt
+          .github/mg-step.sh "swift-test MeguriCore" swift-test --package MeguriCore ${skips[0]+-- "${skips[@]}"}
+
+      - name: Save the Rust and XCFramework cache
+        if: >-
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            core/target
+          key: swift-core-v1-${{ hashFiles('core/rust-toolchain.toml') }}-${{ hashFiles('core/Cargo.lock') }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: meguri-macos-swift-result
           path: ${{ runner.temp }}/receipts/
           if-no-files-found: ignore
           retention-days: 7

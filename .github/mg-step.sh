@@ -6,7 +6,8 @@
 #   mg-step.sh <title> <job> [args...]
 #
 # Runs `tools/mg <job> <args>` as the other hosted jobs do (sudo, the shared
-# dev image from MEGURI_CI_DEV_IMAGE, the checkout as a safe directory),
+# dev image from MEGURI_CI_DEV_IMAGE, the checkout as a safe directory; with
+# MG_STEP_SUDO=no, as the runner user, for macOS runners),
 # copies its receipt to $RUNNER_TEMP/receipts/<job>.json, writes a section
 # named <title> to the step summary with the receipt's message and failures,
 # and fails unless the receipt is a pass of exactly that job and those
@@ -19,9 +20,14 @@ job="${2:?usage: mg-step.sh <title> <job> [args...]}"
 shift 2
 
 rc=0
-receipt="$(sudo -n env MEGURI_CI_DEV_IMAGE="${MEGURI_CI_DEV_IMAGE:-}" \
-  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" \
-  "$GITHUB_WORKSPACE/tools/mg" "$job" "$@")" || rc=$?
+if [[ "${MG_STEP_SUDO:-yes}" == no ]]; then
+  # macOS runners: the job runs as the runner user, which owns the checkout.
+  receipt="$("$GITHUB_WORKSPACE/tools/mg" "$job" "$@")" || rc=$?
+else
+  receipt="$(sudo -n env MEGURI_CI_DEV_IMAGE="${MEGURI_CI_DEV_IMAGE:-}" \
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" \
+    "$GITHUB_WORKSPACE/tools/mg" "$job" "$@")" || rc=$?
+fi
 
 mkdir -p "$RUNNER_TEMP/receipts"
 artifact="$RUNNER_TEMP/receipts/$job.json"
