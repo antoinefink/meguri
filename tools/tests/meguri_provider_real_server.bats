@@ -446,7 +446,8 @@ PYMODE
 }
 @test "meguri-provider-real-server: review round rejects duplicate and incomplete options before resources" {
   local operands
-  for operands in '--review-round --review-round' '--review-round --package-receipt' '--package-receipt --review-round' '--review-round extra'; do
+  for operands in '--review-round --review-round' '--review-round --package-receipt' '--package-receipt --review-round' '--review-round extra' \
+    '--structure-save --structure-save' '--structure-save --package-receipt' '--structure-save extra'; do
     : >"$trace"
     mg_meguri_provider_real_server $operands
     grep -Fxq 'status:error' "$trace"
