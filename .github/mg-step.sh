@@ -33,10 +33,12 @@ mkdir -p "$RUNNER_TEMP/receipts"
 artifact="$RUNNER_TEMP/receipts/$job.json"
 prefix="$GITHUB_WORKSPACE/build/mg/$job/"
 suffix="${receipt#"$prefix"}"
+as_owner=(sudo -n)
+[[ "${MG_STEP_SUDO:-yes}" != no ]] || as_owner=()
 if [[ "$receipt" == "$prefix"* && "$suffix" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+/result\.json$ ]] &&
-   sudo -n test -f "$receipt"; then
-  # shellcheck disable=SC2024 # root reads the receipt; the runner writes the copy
-  sudo -n cat -- "$receipt" >"$artifact.tmp"
+   ${as_owner[0]+"${as_owner[@]}"} test -f "$receipt"; then
+  # shellcheck disable=SC2024 # the receipt's owner reads it; the runner writes the copy
+  ${as_owner[0]+"${as_owner[@]}"} cat -- "$receipt" >"$artifact.tmp"
   mv -- "$artifact.tmp" "$artifact"
 fi
 

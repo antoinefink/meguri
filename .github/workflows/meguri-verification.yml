@@ -119,12 +119,12 @@ jobs:
             if ! grep -qE '^(tools|\.github)/' <<<"$changed"; then
               selftest=no
             fi
-            # The Swift package tests: the packages, the FFI crate whose
-            # interface the bindings are generated from, the toolchain and
-            # lock that build the XCFramework, and the tools that build and
-            # run them. Other core crates reach the packages only through
-            # that interface, and Linux · core tests them.
-            swift_paths='app/Packages/|\.github/swift-timing-sensitive\.txt$|core/crates/meguri-ffi/|core/Cargo\.lock$|core/rust-toolchain\.toml$|tools/scripts/build-core-xcframework\.sh$|tools/scripts/repair-swift-integer-reader\.py$|tools/mg$|tools/mg\.d/(bridge|lint-ui)\.sh$|\.github/mg-step\.sh$|\.github/workflows/meguri-verification\.yml$'
+            # MeguriCore's Swift tests: the package, the FFI crate and the
+            # bindings generator, the workspace manifest, lock, vendored crates
+            # and toolchain that build the XCFramework, and the tools that
+            # build and run them. A trade: the XCFramework holds all of core,
+            # but a change elsewhere in core is left to Linux · core.
+            swift_paths='app/Packages/MeguriCore/|core/tools/uniffi-bindgen-swift/|core/Cargo\.toml$|core/vendor/|\.github/swift-timing-sensitive\.txt$|core/crates/meguri-ffi/|core/Cargo\.lock$|core/rust-toolchain\.toml$|tools/scripts/build-core-xcframework\.sh$|tools/scripts/repair-swift-integer-reader\.py$|tools/mg$|tools/mg\.d/(bridge|lint-ui)\.sh$|\.github/mg-step\.sh$|\.github/workflows/meguri-verification\.yml$'
             if ! grep -qE "^($swift_paths)" <<<"$changed"; then
               swift=no
             fi
@@ -996,6 +996,8 @@ jobs:
       # newer). The image keeps it at this path.
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
       MEGURI_CI_LINT_UI_ELSEWHERE: Linux · checks
+      # Keeps the cached core/target small: no incremental state.
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1024,8 +1026,8 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             core/target
-          key: swift-core-v1-${{ hashFiles('core/rust-toolchain.toml') }}-${{ hashFiles('core/Cargo.lock') }}
-          restore-keys: swift-core-v1-${{ hashFiles('core/rust-toolchain.toml') }}-
+          key: swift-core-v1-${{ runner.os }}-${{ runner.arch }}-xcode27.2-${{ hashFiles('core/rust-toolchain.toml') }}-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: swift-core-v1-${{ runner.os }}-${{ runner.arch }}-xcode27.2-${{ hashFiles('core/rust-toolchain.toml') }}-
 
       # The toolchain, components and Apple targets core/rust-toolchain.toml
       # pins (a no-op when the cache restored them).
@@ -1040,17 +1042,47 @@ jobs:
         run: |
           # The tests of .github/swift-timing-sensitive.txt, skipped by name.
           skips=()
-          while read -r name _; do
+          while read -r name _ || [[ -n "$name" ]]; do
             [[ -n "$name" && "$name" != \#* ]] || continue
             [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::bad line in .github/swift-timing-sensitive.txt: $name"; exit 1; }
             skips+=(--skip "$name")
           done < .github/swift-timing-sensitive.txt
           .github/mg-step.sh "swift-test MeguriCore" swift-test --package MeguriCore ${skips[0]+-- "${skips[@]}"}
 
-      - name: Save the Rust and XCFramework cache
+      # Only third-party crates, as in the Linux caches: local packages'
+      # artifacts and the profile roots' copies are deleted, and an entry over
+      # 3 GB is not saved. Also after a failing test run: the builds are good.
+      - name: Keep only third-party crates in the cache
+        id: prune
         if: >-
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
           && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          pkgs="$(find core -name Cargo.toml -not -path '*/target/*' -print0 |
+            xargs -0 awk 'FNR == 1 { p = 0 } /^\[package\]/ { p = 1; next } /^\[/ { p = 0 }
+              p && /^name[[:space:]]*=/ { gsub(/[" ]/, ""); sub(/^name=/, ""); print }' | sort -u)"
+          [[ -n "$pkgs" ]] || { echo "::error::No local packages found"; exit 1; }
+          for dir in core/target/*/*/; do
+            [[ -d "$dir/deps" ]] || continue
+            rm -rf -- "$dir/incremental"
+            while IFS= read -r p; do
+              u="${p//-/_}"
+              rm -rf -- "$dir"deps/"$u"-* "$dir"deps/lib"$u"-* "$dir".fingerprint/"$p"-* "$dir"build/"$p"-*
+            done <<<"$pkgs"
+            find "$dir" -maxdepth 1 -type f -delete
+          done
+          size="$(du -smc ~/.rustup/toolchains ~/.cargo/registry/index ~/.cargo/registry/cache core/target 2>/dev/null | tail -n 1 | cut -f1)"
+          echo "Swift job cache: $size MB"
+          if ((size > 3072)); then
+            echo "::warning::Swift job cache is $size MB, over its 3072 MB cap; not saving it."
+            echo "save=no" >>"$GITHUB_OUTPUT"
+          else
+            echo "save=yes" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Save the Rust and XCFramework cache
+        if: ${{ !cancelled() && steps.prune.outputs.save == 'yes' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -1058,7 +1090,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             core/target
-          key: swift-core-v1-${{ hashFiles('core/rust-toolchain.toml') }}-${{ hashFiles('core/Cargo.lock') }}
+          key: swift-core-v1-${{ runner.os }}-${{ runner.arch }}-xcode27.2-${{ hashFiles('core/rust-toolchain.toml') }}-${{ hashFiles('core/Cargo.lock') }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
