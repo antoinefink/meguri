@@ -36,10 +36,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/today/day-start-st-johns",
-  "scenario_sha256": "f17851727ae75f81512020958e67ec20dcd3d55a049cd1181f138b95e1730f91",
+  "scenario_sha256": "7e910d0161e9552d6f9d97865d0f827f45b2cad3d848f3c37893d48e602a7c0e",
   "tz": "America/St_Johns"
 }

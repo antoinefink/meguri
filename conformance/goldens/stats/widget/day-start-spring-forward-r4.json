@@ -99,10 +99,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/widget/day-start-spring-forward-r4",
-  "scenario_sha256": "e65508e2e8e8810a8638f3cb0e3e5816d05f73b5c489e42bd8f81cc78b51e30e",
+  "scenario_sha256": "a15e1b468bb5c05fb3049a2f12e6dce63fa36e6d7d8c459f00fd3beeaca2f001",
   "tz": "Europe/Paris"
 }

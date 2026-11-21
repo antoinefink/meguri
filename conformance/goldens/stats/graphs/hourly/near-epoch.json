@@ -129,10 +129,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/graphs/hourly/near-epoch",
-  "scenario_sha256": "08ced25a652e3131ac912bdbe3b8b38eb80d2b48522db1b06a1c92235eae90ba",
+  "scenario_sha256": "de236a0039ca7cd6c1f6cbd6e83bfb8b00a88a07ca78a937ad7eb1eb34749b07",
   "tz": "America/New_York"
 }
