@@ -337,3 +337,207 @@ fn an_unclosed_quote_ends_at_the_cursor_and_buttons_need_days() {
     assert_eq!(after(text, languages).0, "deck:Languages is:new");
     assert_eq!(at_end("rated:nope:").len(), 1);
 }
+
+// --- D7: an accepted candidate, run, finds its object and no look-alike ---
+
+mod accepted {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    use meguri_model::clock::{FixedClock, UtcOffset};
+    use meguri_model::ids::{DeckId, NotetypeId};
+    use meguri_model::rng::SeededRandom;
+    use meguri_search::name_index::{DeckRow, NameIndex, NotetypeNames};
+    use meguri_search::suggest::suggest;
+    use meguri_search::{FieldShape, FoldMode, NotetypeShape, Param, Plan, SearchContext, SearchMode, SearchNotetypes, parse};
+    use meguri_storage::raw::SqlValue;
+    use meguri_storage::{Initializers, OpenOptions, OpenedCollection, open_collection};
+
+    // Decks: look-alikes of `a_b*` and of `a` U+00A0 `b` (written by id).
+    const DECKS: [(i64, &str); 5] = [(10, "a_b*"), (11, "axb"), (12, "a\u{a0}b"), (13, "a\u{a0}b::kid"), (14, "axbx")];
+    const TYPES: [(i64, &str); 3] = [(100, "N_t*"), (101, "Nxtx"), (102, "N\u{a0}t")];
+    // Tags written exactly, with look-alikes: `t_g` beside `txg`.
+    const TAGS: [&str; 3] = ["t_g", "txg", "t_g::kid"];
+
+    struct Fx {
+        _dir: tempfile::TempDir,
+        db: OpenedCollection,
+    }
+
+    fn exec(db: &OpenedCollection, sql: &str, values: Vec<SqlValue>) {
+        db.writer().execute_raw(sql, &values).unwrap_or_else(|e| panic!("{sql}: {e:?}"));
+    }
+
+    fn fixture() -> Fx {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("collection.anki2");
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance/fixtures/storage/schema-18.anki2"),
+            &path,
+        )
+        .unwrap();
+        let clock = FixedClock::new(1_894_701_600_000, UtcOffset::UTC);
+        let random = SeededRandom::new(1);
+        let mut initializers = Initializers::new();
+        initializers.register(meguri_search::sqlfns::register);
+        let db = open_collection(&path, &OpenOptions::new(&clock, &random).initializers(initializers)).unwrap();
+        for table in ["cards", "notes", "decks", "notetypes", "templates", "fields"] {
+            exec(&db, &format!("DELETE FROM {table}"), vec![]);
+        }
+        for (id, name) in DECKS {
+            exec(
+                &db,
+                "INSERT INTO decks (id,name,mtime_secs,usn,common,kind) VALUES (?1,?2,0,0,X'',X'0a020801')",
+                vec![SqlValue::Integer(id), SqlValue::Text(name.replace("::", "\u{1f}"))],
+            );
+        }
+        for (id, name) in TYPES {
+            exec(
+                &db,
+                "INSERT INTO notetypes (id,name,mtime_secs,usn,config) VALUES (?1,?2,0,0,X'')",
+                vec![SqlValue::Integer(id), SqlValue::Text(name.to_owned())],
+            );
+        }
+        // One note per note type and tag, one card per deck.
+        for (k, (mid, _)) in TYPES.iter().enumerate() {
+            let tags = format!(" {} ", TAGS[k]);
+            exec(
+                &db,
+                "INSERT INTO notes (id,guid,mid,mod,usn,tags,flds,sfld,csum,flags,data) VALUES (?1,?1,?2,0,0,?3,'f','f',0,0,'')",
+                vec![SqlValue::Integer(k as i64 + 1), SqlValue::Integer(*mid), SqlValue::Text(tags)],
+            );
+        }
+        for (k, (did, _)) in DECKS.iter().enumerate() {
+            exec(
+                &db,
+                "INSERT INTO cards (id,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data) \
+                 VALUES (?1,?2,?3,0,0,0,0,0,1,0,2500,0,0,0,0,0,0,'')",
+                vec![SqlValue::Integer(k as i64 + 1), SqlValue::Integer(k as i64 % 3 + 1), SqlValue::Integer(*did)],
+            );
+        }
+        Fx { _dir: dir, db }
+    }
+
+    fn names() -> NameIndex {
+        let mut names = NameIndex::default();
+        names.set_decks(
+            DECKS
+                .iter()
+                .map(|(id, name)| DeckRow {
+                    id: DeckId(*id),
+                    native: name.replace("::", "\u{1f}"),
+                    filtered: false,
+                })
+                .collect(),
+        );
+        names.set_tags(TAGS.iter().map(|t| (*t).to_owned()).collect());
+        names.set_notetypes(
+            TYPES
+                .iter()
+                .map(|(id, name)| NotetypeNames {
+                    id: NotetypeId(*id),
+                    name: (*name).to_owned(),
+                    templates: Vec::new(),
+                    fields: Vec::new(),
+                })
+                .collect(),
+        );
+        names
+    }
+
+    impl Fx {
+        fn ids(&self, text: &str, mode: SearchMode) -> BTreeSet<i64> {
+            let ctx = SearchContext {
+                now: 2_000_000_000,
+                today: 12,
+                next_day_at: 2_000_000_100,
+                learn_ahead_secs: 1200,
+                current_deck: DeckId(10),
+                normalize_note_text: true,
+                ignore_accents: false,
+                fold: FoldMode::Unicode,
+            };
+            let notetypes = SearchNotetypes::new(
+                TYPES
+                    .iter()
+                    .map(|(id, name)| NotetypeShape {
+                        id: NotetypeId(*id),
+                        name: (*name).to_owned(),
+                        cloze: false,
+                        sort_field: 0,
+                        fields: vec![FieldShape {
+                            name: "Front".to_owned(),
+                            excluded: false,
+                        }],
+                    })
+                    .collect(),
+            );
+            let plan = Plan::build(&parse(text).unwrap(), mode, &ctx, &notetypes).unwrap();
+            let params = plan
+                .params()
+                .iter()
+                .map(|p| match p {
+                    Param::Integer(v) => SqlValue::Integer(*v),
+                    Param::Real(v) => SqlValue::Real(*v),
+                    Param::Text(v) => SqlValue::Text(v.clone()),
+                })
+                .collect::<Vec<_>>();
+            self.db
+                .writer()
+                .execute_raw(plan.sql(), &params)
+                .unwrap()
+                .rows
+                .into_iter()
+                .map(|row| match row[0] {
+                    SqlValue::Integer(id) => id,
+                    ref other => panic!("{other:?}"),
+                })
+                .collect()
+        }
+    }
+
+    /// The field text after accepting the candidate labelled `label` for
+    /// the text `typed` (the caret at its end).
+    fn accepted(names: &NameIndex, typed: &str, label: &str) -> String {
+        let found = suggest(typed, typed.chars().count(), 50, &[], names).unwrap();
+        let candidate = found
+            .iter()
+            .find(|c| c.label == label)
+            .unwrap_or_else(|| panic!("{label} for {typed}"));
+        let insert = candidate.insert.as_ref().unwrap();
+        let chars: Vec<char> = typed.chars().collect();
+        let mut out: String = chars[..insert.range.start].iter().collect();
+        out.push_str(&insert.text);
+        out.extend(&chars[insert.range.end..]);
+        out
+    }
+
+    #[test]
+    fn accepted_decks_note_types_and_tags_find_only_their_objects() {
+        let fx = fixture();
+        let names = names();
+        // Decks: each finds its own cards (and its subdeck's), no look-alike.
+        let decks: [(&str, &[i64]); 4] = [
+            ("a_b*", &[1]),
+            ("axb", &[2]),
+            ("a\u{a0}b", &[3, 4]),
+            ("a\u{a0}b::kid", &[4]),
+        ];
+        for (deck, cards) in decks {
+            let text = accepted(&names, "deck:a", deck);
+            assert_eq!(fx.ids(&text, SearchMode::Cards), cards.iter().copied().collect(), "{text}");
+        }
+        // Note types, by name or by id.
+        let types: [(&str, &[i64]); 3] = [("N_t*", &[1]), ("Nxtx", &[2]), ("N\u{a0}t", &[3])];
+        for (notetype, notes) in types {
+            let text = accepted(&names, "note:n", notetype);
+            assert_eq!(fx.ids(&text, SearchMode::Notes), notes.iter().copied().collect(), "{text}");
+        }
+        // Tags J3 writes exactly: the tag and its descendants.
+        let tags: [(&str, &[i64]); 2] = [("t_g", &[1, 3]), ("txg", &[2])];
+        for (tag, notes) in tags {
+            let text = accepted(&names, "tag:t", tag);
+            assert_eq!(fx.ids(&text, SearchMode::Notes), notes.iter().copied().collect(), "{text}");
+        }
+    }
+}
