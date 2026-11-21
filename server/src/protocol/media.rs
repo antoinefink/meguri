@@ -15,7 +15,7 @@ pub(crate) const METHODS:&[&str]=&["begin","mediaChanges","uploadChanges","downl
 pub(crate) async fn handle(service:Arc<Service>,authority:NativeAuthority,method:&str,body:&mut Body)->Result<Response> {
     if method=="uploadChanges" {
         let id=authority.account_id().to_owned(); let budget=service.temp.clone();
-        let directory=service.collection_operation(authority.clone(),false,move |root|root.media_directory(&id)).await?;
+        let directory=service.collection_staging(authority.clone(),move |root|root.media_directory(&id)).await?;
         let changes=framing::receive(service.clone(),body,move |reader,limit|archive::receive_in(reader,limit,directory,budget)).await?;
         return response(&media::upload(service,authority,changes).await?);
     }

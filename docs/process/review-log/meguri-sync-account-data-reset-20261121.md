@@ -42,3 +42,14 @@ The code review `cleanroom/20261121T113325Z-70782` checked the exact storage
 fix from `cleanroom/20261121T113202Z-61008`. The real HTTPS Accounts and own
 storage regression passed with the other 31 cases in
 `sync-server-test/20261121T113406Z-72645`.
+
+`sync-web-verify/20261121T113408Z-73237` passed all 44 browser cases and
+all nine frontend tests with the storage fix. The offline preview also
+passed its reset check in `sync-web-browser/20261121T111414Z-57474`.
+
+The first Linux server job received 403 in the existing publication order
+test. The same case failed on its own in
+`sync-server-test/20261121T113626Z-85444`. Upload staging had reached the
+publication test hook before the final commit. The fix in
+`cleanroom/20261121T113728Z-90245` gives staging its own hook and keeps
+the existing assertion and publication order.

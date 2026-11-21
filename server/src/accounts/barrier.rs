@@ -106,9 +106,27 @@ impl Service {
         retire: bool,
         operation: impl FnOnce(&crate::storage::DataRoot) -> Result<T> + Send + 'static,
     ) -> Result<T> {
+        self.collection_operation_at(authority, retire, "collection_with_barrier", operation).await
+    }
+    /// Pre-transfer staging uses the same authority and barrier without retiring
+    /// round state. Its test boundary is separate from final publication.
+    pub(crate) async fn collection_staging<T: Send + 'static>(
+        &self,
+        authority: NativeAuthority,
+        operation: impl FnOnce(&crate::storage::DataRoot) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.collection_operation_at(authority, false, "collection_staging_with_barrier", operation).await
+    }
+    async fn collection_operation_at<T: Send + 'static>(
+        &self,
+        authority: NativeAuthority,
+        retire: bool,
+        phase: &'static str,
+        operation: impl FnOnce(&crate::storage::DataRoot) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
         let gate = self.publication_barrier(&authority).await?;
         let guard = gate.enter().await;
-        self.pause("collection_with_barrier").await;
+        self.pause(phase).await;
         self.metadata.run(move |c| {
             admission(c)?;
             check_native_generation(c, &authority)
