@@ -179,22 +179,37 @@ mg__doctor_mac_input() {
 # own (mg_cargo_target_for in tools/mg), or one checkout's cargo run replays
 # another's build output: they all mount at /work.
 mg__doctor_cargo_targets() {
-  local want="${MG_CARGO_TARGET_REQUESTED:-}" here checkout seen="" shared n note=""
+  local want="${MG_CARGO_TARGET_REQUESTED:-}" here field checkout shared="" n=0 i j count first second note=""
+  local targets=() checkouts=()
   here="$(mg_cargo_target_for "$MG_ROOT" "$want")"
   mg__doctor_env docker_cargo_target "$here"
-  while IFS= read -r checkout; do
-    [ -n "$checkout" ] && [ -d "$checkout" ] || continue
+  # NUL-separated records: a worktree path may hold any character.
+  while IFS= read -r -d '' field; do
+    case "$field" in worktree\ *) checkout="${field#worktree }" ;; *) continue ;; esac
+    [ -d "$checkout" ] || continue
     checkout="$(cd "$checkout" && pwd -P)" || continue
-    seen="$seen$(mg_cargo_target_for "$checkout" "$want")	$checkout
-"
-  done <<EOF
-$(git -C "$MG_ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
-EOF
-  n="$(printf '%s' "$seen" | grep -c . || true)"
+    targets[$n]="$(mg_cargo_target_for "$checkout" "$want")"
+    checkouts[$n]="$checkout"
+    n=$((n + 1))
+  done < <(git -C "$MG_ROOT" worktree list --porcelain -z 2>/dev/null)
   # "<count> checkouts share <target> (<first>, <second>, ...)" per shared target.
-  shared="$(printf '%s' "$seen" | awk -F'\t' '
-    { n[$1]++; if (n[$1] <= 2) who[$1] = who[$1] (n[$1] == 1 ? "" : ", ") $2 }
-    END { for (t in n) if (n[t] > 1) { printf "%s%d checkouts share %s (%s%s)", sep, n[t], substr(t, index(t, ":") + 1), who[t], (n[t] > 2 ? ", ..." : ""); sep = "; " } }')"
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    count=0 first="" second="" j=0
+    while [ "$j" -lt "$n" ]; do
+      if [ "${targets[$j]}" = "${targets[$i]}" ]; then
+        [ "$j" -ge "$i" ] || { count=-1; break; } # reported with its first checkout
+        count=$((count + 1))
+        if [ -z "$first" ]; then first="${checkouts[$j]}"; elif [ -z "$second" ]; then second="${checkouts[$j]}"; fi
+      fi
+      j=$((j + 1))
+    done
+    if [ "$count" -gt 1 ]; then
+      [ -z "$shared" ] || shared="$shared; "
+      shared="$shared$count checkouts share ${targets[$i]#*:} ($first, $second$([ "$count" -le 2 ] || echo ', ...'))"
+    fi
+    i=$((i + 1))
+  done
   if [ -n "$want" ] && [ "${here%%:*}" = volume ]; then
     note="$(mg_cargo_target_owner "$want")"
     [ "$note" = '?' ] && note="is not an absolute path" || note="belongs to $note"

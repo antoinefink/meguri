@@ -187,8 +187,17 @@ mg__resolve_cargo_target() {
   owner="$(mg_cargo_target_owner "$want")"
   if [ -z "$owner" ]; then
     [ "$1" = true ] || return 0
-    { mkdir -p "$want" && printf '%s\n' "$MG_ROOT" >"$want/.meguri-checkout"; } 2>/dev/null && return 0
-    why="cannot be claimed for this checkout (no writable $want/.meguri-checkout)"
+    # noclobber: of two first runs at once, only one creates the marker; the
+    # other reads the winner below.
+    (mkdir -p "$want" && set -C && printf '%s\n' "$MG_ROOT" >"$want/.meguri-checkout") 2>/dev/null
+    owner="$(mg_cargo_target_owner "$want")"
+    if [ "$owner" = "$MG_ROOT" ]; then
+      return 0
+    elif [ -n "$owner" ]; then
+      why="belongs to checkout $owner"
+    else
+      why="cannot be claimed for this checkout (no writable $want/.meguri-checkout)"
+    fi
   elif [ "$owner" = '?' ]; then
     why="is not an absolute path"
   elif [ "$owner" != "$MG_ROOT" ]; then
