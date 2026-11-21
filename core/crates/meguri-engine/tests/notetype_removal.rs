@@ -636,9 +636,11 @@ fn an_unconfirmed_restore_replan_counts_again() {
 /// Runs `change` on the collection at each planning pass's first progress
 /// report: a commit between a plan's snapshot and its write phase that
 /// needs no backup to interleave.
+type Change = Box<dyn Fn(&Collection, usize) + Send + Sync>;
+
 struct DuringPlanning {
     collection: Collection,
-    change: Box<dyn Fn(&Collection, usize) + Send + Sync>,
+    change: Change,
     passes: AtomicUsize,
 }
 
