@@ -66,7 +66,9 @@ STATE_DEPTH = 64  # folder levels read under a state folder; deeper is a read er
 # checkpoints, prompts, saved logs): read for references, all of it.
 # These folders hold only build products, caches and private data copies.
 BUILD_UNREAD = ("mg", "private", "docker-cargo", "app", "xcode-check", "swift-test",
-                "selftest-xcframework", "oracle-macos-venv")
+                "selftest-xcframework", "oracle-macos-venv", "native-durability")
+# Build product folders, at any depth under build/: never read as handoffs.
+BUILD_UNREAD_NAMES = ("DerivedData", "SourcePackages", "node_modules", ".build", "target")
 BUILD_DEPTH = 64
 DU_BATCH = 400
 SMALL = 100 << 20  # build/ entries below this are summed in the printed report
@@ -159,6 +161,7 @@ class Refs:
         self.ids = set()
         self.errors = []
         self.lock = threading.Lock()
+        self.seen = set()  # (dev, ino) of folders read through a link: links may loop
 
     def file(self, path, out=None):
         out = self.ids if out is None else out
@@ -167,6 +170,17 @@ class Refs:
             st = os.lstat(path)
             if stat.S_ISLNK(st.st_mode):
                 out.update(ids_in(os.fsencode(os.readlink(path))))
+                # Reading follows a link to a folder (deletion never does).
+                try:
+                    tst = os.stat(path)
+                except OSError:
+                    return
+                if stat.S_ISDIR(tst.st_mode):
+                    with self.lock:
+                        if (tst.st_dev, tst.st_ino) in self.seen:
+                            return
+                        self.seen.add((tst.st_dev, tst.st_ino))
+                    self.tree(path, STATE_DEPTH, out)
                 return
             if not stat.S_ISREG(st.st_mode):
                 return
@@ -181,12 +195,14 @@ class Refs:
     def tree_or_file(self, path, depth, out):
         st = lstat(path)
         if st is not None and stat.S_ISDIR(st.st_mode):
-            out.update(ids_in(os.fsencode(path)))
-            self.tree(path, depth, out)
+            self.tree(path, depth, out, handoffs=True)
         else:
             self.file(path, out)
 
-    def tree(self, path, depth, out):
+    def tree(self, path, depth, out, handoffs=False):
+        """Run ids in the names and contents below path. handoffs: a build/
+        folder outside build/mg, whose build product folders are skipped."""
+        out.update(ids_in(os.fsencode(path)))  # the folder's own name counts too
         try:
             entries = list(os.scandir(path))
         except FileNotFoundError:
@@ -204,8 +220,10 @@ class Refs:
                 continue
             if stat.S_ISDIR(st.st_mode):
                 out.update(ids_in(os.fsencode(e.path)))  # an id in a folder name counts too
+                if handoffs and e.name in BUILD_UNREAD_NAMES:
+                    continue
                 if depth > 1:
-                    self.tree(e.path, depth - 1, out)
+                    self.tree(e.path, depth - 1, out, handoffs)
                 else:
                     self.errors.append("%s is nested deeper than prune reads" % e.path)
             else:
@@ -415,12 +433,13 @@ class Checkout:
             if stat.S_ISLNK(cst.st_mode):
                 target = os.readlink(c.path)
                 self.state.update(ids_in(os.fsencode(target)))
+                self.state.update(ids_in(os.fsencode(c.path)))  # the link's own name
                 if c.name == "latest" and RUN_ID.match(os.path.basename(target)):
                     self.latest[job] = os.path.basename(target)
                 elif m:
                     self.skipped.append({"path": c.path, "why": "run folder is a symbolic link; never followed"})
                     if os.path.isdir(c.path):
-                        refs.tree(c.path, 2, self.state)
+                        refs.tree(c.path, STATE_DEPTH, self.state)
                 continue
             if m and stat.S_ISDIR(cst.st_mode):
                 run = Run(self, job, c.name, c.path)
@@ -462,14 +481,18 @@ def worktree_list(repo):
             cur["head"] = f[len("HEAD "):]
         elif f == "bare":
             cur["bare"] = True
+        elif f == "prunable" or f.startswith("prunable "):
+            cur["prunable"] = True
     if cur:
         wts.append(cur)
     result, missing = [], []
     for w in wts:
         if w.get("bare"):
             continue
-        if not os.path.isdir(w["path"]):
-            missing.append(w["path"])  # unmounted, or removed without `git worktree prune`
+        if w.get("prunable") or not os.path.isdir(w["path"]):
+            # Unmounted, moved, or removed without `git worktree prune`; a folder
+            # left at the path is not that checkout.
+            missing.append(w["path"])
             continue
         w["path"] = os.path.realpath(w["path"])
         result.append(w)
@@ -789,7 +812,7 @@ PENDING = ".prune-deleting-"  # a checked run folder renamed for deletion; --app
 REFUSED = ".prune-refused-"  # a folder swapped in while it was checked; prune never deletes it
 
 
-def remove_at(dfd, name, dev, inside=False):
+def remove_at(dfd, name, dev, inside=False, ident=None):
     """Delete entry name of the open folder dfd with all it holds. Every step goes
     through an open descriptor (O_NOFOLLOW), so a folder swapped for a link while
     this runs is never followed, and another file system is never entered.
@@ -807,6 +830,8 @@ def remove_at(dfd, name, dev, inside=False):
         st = os.fstat(fd)
         if not stat.S_ISDIR(st.st_mode):
             raise Refusal("%s is not a folder" % name)
+        if ident is not None and (st.st_dev, st.st_ino) != ident:
+            raise Refusal("%s changed while it was checked" % name)
         if st.st_dev != dev:
             raise Refusal("%s is on another file system" % name)
         try:
@@ -1005,9 +1030,10 @@ class Deleter:
                     try:
                         os.rename(PENDING + run.id, run.id, src_dir_fd=jfd, dst_dir_fd=jfd)
                     except OSError:
-                        os.rename(PENDING + run.id, REFUSED + run.id, src_dir_fd=jfd, dst_dir_fd=jfd)
+                        os.rename(PENDING + run.id, "%s%s-%d-%d" % (REFUSED, run.id, os.getpid(), time.time_ns()),
+                                  src_dir_fd=jfd, dst_dir_fd=jfd)
                     return "changed while it was checked"
-                remove_at(jfd, PENDING + run.id, self.dev)
+                remove_at(jfd, PENDING + run.id, self.dev, ident=ident)
             else:
                 rfd = os.open(run.id, O_DIR, dir_fd=jfd)
                 try:
@@ -1254,8 +1280,17 @@ def archive_and_delete(ctx, ck, deleter, adfd, adir, cands, failures):
         name = month + ".tar.xz"
         path = os.path.join(adir, name)
         runs = []
+        try:
+            deleter.same_tree()
+        except Refusal as e:
+            failures.append({"id": "refused", "message": str(e)})
+            return report
         for r in months[month]:
-            why = eligible(deleter, r)
+            try:
+                why = eligible(deleter, r)
+            except Refusal as e:
+                failures.append({"id": "refused", "message": str(e)})
+                return report
             if why is None:
                 runs.append(r)
             elif why != "gone":
@@ -1536,9 +1571,11 @@ def second_scan(args, wts, root, mode, deleter, cands):
     whatever the new plan keeps: a job may have written a checkpoint or a
     receipt naming an old run since the first scan."""
     log("second scan of references before deleting:")
+    deleter.same_tree()
     ctx = collect(args, wts)
+    deleter.same_tree()
     if ctx.refs.errors:
-        raise Refusal("some reference sources could not be read at the second scan; nothing deleted")
+        raise Refusal("some reference sources could not be read at the second scan; nothing deleted. First: %s" % ctx.refs.errors[0])
     ck = next(c for c in ctx.checkouts if c.path == root)
     plan = (plan_runs if mode == "runs" else plan_cleanroom)(ctx, ck, deleter.tracked_now())
     again = {r.key: r for r in plan}
@@ -1564,13 +1601,16 @@ def run(args, wts, root, targets, out_path, mode):
         deleter = Deleter(Checkout(root), None)
         if not deleter.lock():
             raise Refusal("another tools/mg prune --apply runs in this checkout; nothing deleted")
+    if deleter:
+        deleter.same_tree()
     ctx = collect(args, wts)
     refs = ctx.refs
     if deleter:
+        deleter.same_tree()  # the scan read paths: they must still name the opened tree
         deleter.ctx = ctx
         deleter.ck = next(c for c in ctx.checkouts if c.path == root)
     if args.apply and refs.errors:
-        raise Refusal("some reference sources could not be read, so a referenced run could be missed; nothing deleted")
+        raise Refusal("some reference sources could not be read, so a referenced run could be missed; nothing deleted. First: %s" % refs.errors[0])
 
     volumes = docker_volumes(targets, not args.no_docker and mode != "cleanroom")
     by_path = {ck.path: ck for ck in ctx.checkouts}

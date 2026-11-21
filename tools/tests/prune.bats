@@ -224,17 +224,23 @@ PY
 }
 
 @test "prune keeps runs named deep in build/ handoffs or by empty folders, and refuses --apply with a checkout missing" {
-  local ids=() n gone="$BATS_TEST_TMPDIR/gone"
-  for n in $(seq 1 24); do ids[$n]="$(old_run alpha "$n")"; done
+  local ids=() n gone="$SB/build/nested-checkout"
+  for n in $(seq 1 28); do ids[$n]="$(old_run alpha "$n")"; done
   mkdir -p "$SB/build/handoffs/2026-11/unit-a/round-2" "$MG/sim-pool/leases/${ids[2]}" "$SB/build/notes/${ids[3]}"
   echo "build/mg/alpha/${ids[1]}" >"$SB/build/handoffs/2026-11/unit-a/round-2/checkpoint.md"
+  mkdir -p "$MG/Leases-${ids[4]}" "$MG/sim-pool/lease-${ids[5]}"  # empty folders at the first level
+  ln -s /nonexistent "$MG/alpha/pin-${ids[6]}"                     # a link's own name
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere/handoffs"
+  echo "${ids[7]}" >"$BATS_TEST_TMPDIR/elsewhere/handoffs/checkpoint.md"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere/handoffs" "$SB/build/linked-handoffs"  # read through a link
   prune --apply
   [ "$(jq -r .status "$result")" = pass ]
-  for n in 1 2 3; do [ -d "$MG/alpha/${ids[$n]}" ] || { echo "run $n was deleted"; false; }; done
-  [ ! -e "$MG/alpha/${ids[4]}" ]
+  for n in 1 2 3 4 5 6 7; do [ -d "$MG/alpha/${ids[$n]}" ] || { echo "run $n was deleted"; false; }; done
+  [ ! -e "$MG/alpha/${ids[8]}" ]
   git -C "$SB" worktree add -q --detach "$gone"
   echo "${ids[1]}" >"$gone/HANDOFF.md"
-  mv "$gone" "$gone.moved"
+  mv "$gone" "$BATS_TEST_TMPDIR/moved"
+  mkdir "$gone"  # a folder left at its path, inside another checkout, is not that checkout
   prune --apply
   [ "$(jq -r .status "$result")" = error ]
   jq -e '.failures[] | select(.id == "refused")' "$result"
@@ -342,7 +348,7 @@ PY
 
 @test "prune deletes a run folder's own files only: links in it, linked runs and linked job folders stay" {
   local outside="$BATS_TEST_TMPDIR/outside" ids=() n linked="20250101T000000Z-4190500"
-  mkdir -p "$outside/run" "$outside/job/20250101T000000Z-4190600"
+  mkdir -p "$outside/run/a/b/c" "$outside/job/20250101T000000Z-4190600"
   echo keep >"$outside/file"
   echo '{}' >"$outside/run/result.json"
   echo '{}' >"$outside/job/20250101T000000Z-4190600/result.json"
