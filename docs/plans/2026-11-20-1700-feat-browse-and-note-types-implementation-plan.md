@@ -184,4 +184,4 @@ Code changes that the 2026-11-21 spec follow-ups need, for the coordinator to as
   - The other readings of PR #38 are kept as the spec now states them.
 - U85: build the search context's today and next-day-at with the day calculation alone (`sched/day-clock` D8.1); the conformance executor already does. Deck options' preset search and other searches inside an op or read that already took the day from the day clock keep that day (`search/query-model` Q8); no change there.
 
-Tooling follow-up, queued: the copied-test-text check (`tools/mg similarity --search-data`) accepts only the two search roots; it should cover every conformance area.
+Tooling follow-up, done 2026-11-21: the copied-test-text check (`tools/mg similarity --test-data`, formerly `--search-data`) covers every conformance area, and the hosted Linux · similarity check runs it for the areas a pull request touches.

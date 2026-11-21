@@ -38,6 +38,14 @@ def load_config(path):
     count = tags.get("count")
     if not all(isinstance(tags.get(k), str) for k in ("min", "max")) or not isinstance(count, int) or count < 1:
         raise ConfigError(f"{path}: corpus.tags needs min and max (release tags) and count (the pinned number of release tags)")
+    commits = cfg["corpus"].get("commits")
+    if commits is not None:
+        if (not isinstance(commits, dict) or len(commits) != count
+                or not all(isinstance(t, str) and isinstance(c, str) and re.fullmatch(r"[0-9a-f]{40}", c)
+                           for t, c in commits.items())
+                or not {tags["min"], tags["max"]} <= set(commits)):
+            raise ConfigError(f"{path}: corpus.commits must map each of the {count} pinned tags, min and max included, "
+                              "to its 40-hex commit")
     return cfg
 
 

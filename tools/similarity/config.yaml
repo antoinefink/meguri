@@ -11,6 +11,66 @@ corpus:
   # corpus with other tags is an error, not a pass: missing releases would
   # leave changes unchecked against them (R1957).
   tags: {min: "2.1.50", max: "26.09.3", count: 54}
+  # The commit each pinned tag peels to (2026-11-21, the calibration corpus;
+  # the same on github.com/ankitects/anki). A corpus whose tags point
+  # elsewhere is an error. The hosted job fetches exactly these
+  # (.github/similarity.sh reads this list with awk: keep one quoted
+  # "tag": "commit" pair per line).
+  commits:
+    "2.1.50": "26d40c3a8ef066fd4bb3c023bddcc606f8cdfe51"
+    "2.1.51": "a7cb5e210e8733b97d1226cea3c9386593e6677a"
+    "2.1.52": "ab1c23953e830c73436e12f6d8301a662450d2ee"
+    "2.1.53": "96bacf792c844f85b3054fe60a64e72cd933a361"
+    "2.1.54": "b6a7760cb4041cfeb3a2aab757050a989f6a7493"
+    "2.1.55": "01caec2a722c44dbd1992e6f7c1b049ea3a6aed1"
+    "2.1.56": "07fd88ddeaf80bd287b356601ffb44a798db5944"
+    "2.1.57": "6b7d372ca995b728f467d63ab14495f0ce346258"
+    "2.1.58": "ab8b1465d4c1080efa6ff8297e7dcdd56572b583"
+    "2.1.59": "f604575b416a3f9741d6496a15b6a05d3095c49b"
+    "2.1.60": "76d8807315fcc2675e7fa44d9ddf3d4608efc487"
+    "2.1.61": "0c1eaf4ce66c1b90867af9a79b95d9e507262cf8"
+    "2.1.62": "77dd1dc1d78be6351798ba6f4690938cda5b3817"
+    "2.1.63": "f356f177a235d70515ecf1a23280b12ed29b364c"
+    "2.1.64": "581f82c589b2f2994c203a5423b82ba6d09f8e12"
+    "2.1.65": "aa9a734f695d0b0981aa3c0aaa2745ce86832f08"
+    "2.1.66": "70506aeb99d4afbe73321feaf75a2fabaa011d55"
+    "23.10": "51a10f096940dbd9d86b7a434612e3b8b9469cc7"
+    "23.10.1": "fac9e0ee1436ba5ac3366c72dd9394a6e692b1cf"
+    "23.12": "55ef11af84151b397f267a2f37d537aad5f1076d"
+    "23.12.1": "1a1d4d5419c6b57ef3baf99c9d2d9cf85d36ae0a"
+    "24.04": "429bc9e14cefb597646a0e1beac6ef140f226b6f"
+    "24.04.1": "ccd9ca1a8309b80bcb50ddc5d99c7ce63440bce9"
+    "24.06": "9b4dd54312de8798a3f2bee07892bb3a488d1f9b"
+    "24.06.1": "5fd3821152e5c881a2ee3b3553ed7f8723b8e73e"
+    "24.06.2": "33a923797afc9655c3b4f79847e1705a1f998d03"
+    "24.06.3": "d678e39350a2d243242a69f4e22f5192b04398f2"
+    "24.11": "87ccd24efd0ea635558b1679614b6763e4f514eb"
+    "25.02": "038d85b1d9e1896e93a3e4a26f600c79ddc33611"
+    "25.02.1": "fa1d6eae8480e3fd600c99e3a88eb8cd707729d9"
+    "25.02.2": "25d5cc5508d7f379a833d054f7620ed0755d3c9d"
+    "25.02.3": "4e83c9b82d500702ccbe045cf4792c1501ed51b5"
+    "25.02.4": "a5c33ad07de95640994cefd70c5a9a89ed5a0c62"
+    "25.02.5": "29192d156ae60d6ce35e80ccf815a8331c9db724"
+    "25.02.6": "6381f1845ff2e79f4a424e6978c2a3e9bbb91735"
+    "25.02.7": "98253c81cb3c4d203acec48d6eae6b488bf484d0"
+    "25.07": "2594dcb2bbb13840f1b0fdeef248af7aaef79b9b"
+    "25.07.1": "a83a6b5928c6563d12e7b66d4f7b7b2f51b6f22b"
+    "25.07.2": "3adcf05ca6d00b32938f439b3e5fc71786b21c26"
+    "25.07.3": "65b5aefd0705463cb12e72e254f798f90c96e815"
+    "25.07.4": "e511d63b7ef57e7d7e81612a9905172b871d18df"
+    "25.07.5": "7172b2d26684c7ef9d10e249bd43dc5bf73ae00c"
+    "25.09": "539054c34dccf8b89ca7ea9c9c40ecaf172de759"
+    "25.09.1": "6854d13b8842ea1166c58c33a30501b7198a4774"
+    "25.09.2": "3890e12c9e48c028c3f12aa58cb64bd9f8895e30"
+    "25.09.3": "5d89b44bdd3d0d0e97bd50431b9451ee8ed32c10"
+    "25.09.4": "d52ca669f6deac5966b1c5035bc2dc77c78d3260"
+    "26.05": "e64c6b1aee3e8d668fb8bbe084beada8e070d985"
+    "26.08": "666c2c64d4a1772c03948f5b667438da63ddaa76"
+    "26.08.1": "39e4b0b48c5bb22e9c22ad87c64ff14e6a24dc20"
+    "26.09": "e62e773905ed4f7c1439106247f5885ac79d598c"
+    "26.09.1": "06accb59f4bf64bc5618c23a22fe35d733008090"
+    "26.09.2": "bb0dd6d1310afe290dea5e5a440400f851789936"
+    "26.09.3": "29bb700b951e3f0c0cb69b77c0180fc1fe33e6ba"
   # .scss is added to the plan's list so Meguri CSS is also compared with
   # Anki's stylesheet sources.
   extensions: [.rs, .py, .ts, .svelte, .js, .css, .scss, .html, .sql, .proto, .ftl]
