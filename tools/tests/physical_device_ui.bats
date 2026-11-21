@@ -69,6 +69,10 @@ mg_vm_xcodebuild_test() {
   : >"$1.log"
 }
 EOF
+  # The real-copy routes forget their products through LaunchServices and PlugInKit.
+  echo "MG_LSREGISTER=$BIN/lsregister" >>"$SB/tools/mg.d/zz-physical-fakes.sh"
+  stub lsregister 'echo "lsregister $*" >>"$STUB_LOG"; [ "$1" != -dump ] || echo "path: /Applications/Other.app (0x1)"'
+  stub pluginkit 'echo "pluginkit $*" >>"$STUB_LOG"'
   stub xcrun 'echo "xcrun $*" >>"$STUB_LOG"
 case "$*" in
   "xcdevice list --timeout 20") cat "$FX_DEVICES"; exit "${FX_INVENTORY_RC:-0}" ;;
@@ -3810,6 +3814,7 @@ real_copy_device_facts() {
       INFOPLIST_KEY_MeguriCloudContainer:"iCloud.example.daily", INFOPLIST_KEY_MeguriCloudEnvironment:"production",
       PRODUCT_BUNDLE_IDENTIFIER:("com.antoinefink.meguri" + (if $target == "Meguri" then "" else ".widget" end)),
       MEGURI_APP_NAME:"Meguri", ASSETCATALOG_COMPILER_APPICON_NAME:"AppIcon", MEGURI_SIGNING:"team", PLATFORM_NAME:"iphoneos",
+      DEVELOPMENT_TEAM:"TESTTEAM01", MEGURI_TEAM_ID:"TESTTEAM01", CODE_SIGN_IDENTITY:"Apple Development",
       CODE_SIGN_ENTITLEMENTS:(if $target == "Meguri" then "Meguri/Meguri-iOS.entitlements" else "MeguriWidget/MeguriWidget-iOS.entitlements" end),
       CODE_SIGN_STYLE:"Manual",
       PROVISIONING_PROFILE_SPECIFIER:(if $target == "Meguri" then "AAAAAAAA-1111-2222-3333-444444444444" else "BBBBBBBB-1111-2222-3333-444444444444" end)})
@@ -3887,4 +3892,36 @@ PY
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-settings ]
   not_called '^xcodebuild build '
+}
+
+@test "the phone real copy seals, checks and installs the build, never launches it, and leaves no product behind" {
+  real_copy_device_facts
+  real_copy_device_profiles
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'FAKE'
+# physical-drive.py's real-seal/real-install are unit-tested in physical_drive_test.py.
+mg_run__real_copy_drive() { echo "drive $1 $2" >>"$STUB_LOG"; }
+mg_app_real_copy_device_check() { echo "device-check $2" >>"$STUB_LOG"; [ "${FX_DEVICE_CHECK_RC:-0}" -eq 0 ]; }
+FAKE
+  mg run --real-copy --owner-requested --platform iphone --physical-device "$PHONE"
+  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.launched)" = false ]
+  [ "$(field .details.real_copy_profiles.app)" = AAAAAAAA-1111-2222-3333-444444444444 ]
+  [ "$(field .details.real_copy_profiles.widget)" = BBBBBBBB-1111-2222-3333-444444444444 ]
+  [ "$(grep -oE '^(drive real-seal|device-check|drive real-install)' "$STUB_LOG" | tr '\n' ,)" = "drive real-seal,device-check,drive real-install," ]
+  [ "$(grep -n '^drive real-seal' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^drive real-install' "$STUB_LOG" | cut -d: -f1)" ]
+  called "^lsregister -u $SB/build/app/RealCopyDeviceDerivedData/Build/Products/Release-iphoneos/Meguri.app$|^lsregister -dump$"
+  not_called 'allowProvisioning|process launch|devicectl'
+  [ ! -e "$SB/build/app/RealCopyDeviceDerivedData/Build/Products/Release-iphoneos/Meguri.app" ]
+  # A failed check installs nothing.
+  : >"$STUB_LOG"
+  FX_DEVICE_CHECK_RC=1 mg run --real-copy --owner-requested --platform iphone --physical-device "$PHONE"
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-product ]
+  not_called '^drive real-install'
+  # The mode can never come from a trailing word.
+  : >"$STUB_LOG"
+  mg run --personal-preview --platform iphone --physical-device "$PHONE" real-copy
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
 }

@@ -111,6 +111,9 @@ def summary(platform, team, device, bundle=BUNDLE):
         # Development profiles list their devices (the product check requires it).
         if device and device not in profile.get("ProvisionedDevices", []):
             missing.append("this-device")
+        # Manual signing refuses Xcode-managed profiles.
+        if profile.get("IsXcodeManaged") is True:
+            missing.append("manual-profile")
         uuid = profile.get("UUID")
         if not isinstance(uuid, str) or not re.fullmatch(r"[0-9A-Fa-f-]{36}", uuid):
             missing.append("uuid")

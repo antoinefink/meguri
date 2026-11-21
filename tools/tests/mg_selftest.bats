@@ -703,18 +703,26 @@ EOF
 
 # daily_profile <push>: an installed Mac profile for the real copy.
 daily_profile() {
-  python3 - "$MEGURI_PROFILE_DIRS/daily.provisionprofile" "$1" <<'PY'
+  python3 - "$MEGURI_PROFILE_DIRS" "$1" <<'PY'
 import datetime, plistlib, sys
-grants = {"com.apple.application-identifier": "DNQ34W43XX.com.antoinefink.meguri",
-          "keychain-access-groups": ["DNQ34W43XX.*"], "com.apple.security.application-groups": ["DNQ34W43XX.*"],
-          "com.apple.developer.icloud-container-identifiers": ["iCloud.com.antoinefink.meguri"],
-          "com.apple.developer.icloud-services": "*",
-          "com.apple.developer.icloud-container-environment": ["Development", "Production"],
-          "com.apple.developer.aps-environment": sys.argv[2]}
-with open(sys.argv[1], "wb") as stream:
-    plistlib.dump({"Entitlements": grants, "TeamIdentifier": ["DNQ34W43XX"], "Platform": ["OSX"],
-                  "ExpirationDate": datetime.datetime(2099, 1, 1), "ProvisionedDevices": ["X"],
-                  "UUID": "11111111-2222-3333-4444-555555555555"}, stream)
+cloud = {"com.apple.developer.icloud-container-identifiers": ["iCloud.com.antoinefink.meguri"],
+         "com.apple.developer.icloud-services": "*",
+         "com.apple.developer.icloud-container-environment": ["Development", "Production"]}
+profiles = {
+    "daily.provisionprofile": ("OSX", dict(cloud, **{"com.apple.application-identifier": "DNQ34W43XX.com.antoinefink.meguri",
+        "keychain-access-groups": ["DNQ34W43XX.*"], "com.apple.security.application-groups": ["DNQ34W43XX.*"],
+        "com.apple.developer.aps-environment": sys.argv[2]})),
+    "ios-app.mobileprovision": ("iOS", dict(cloud, **{"application-identifier": "DNQ34W43XX.com.antoinefink.meguri",
+        "keychain-access-groups": ["DNQ34W43XX.*"], "com.apple.security.application-groups": ["group.com.antoinefink.meguri"],
+        "aps-environment": sys.argv[2]})),
+    "ios-widget.mobileprovision": ("iOS", {"application-identifier": "DNQ34W43XX.com.antoinefink.meguri.widget",
+        "com.apple.security.application-groups": ["group.com.antoinefink.meguri"]}),
+}
+for number, (name, (platform, grants)) in enumerate(profiles.items()):
+    with open(sys.argv[1] + "/" + name, "wb") as stream:
+        plistlib.dump({"Entitlements": grants, "TeamIdentifier": ["DNQ34W43XX"], "Platform": [platform],
+                      "ExpirationDate": datetime.datetime(2099, 1, 1), "ProvisionedDevices": ["X"],
+                      "UUID": "%08d-2222-3333-4444-555555555555" % number}, stream)
 PY
 }
 
@@ -724,14 +732,14 @@ PY
   [ "$(field .status)" = pass ]
   jq -e '.user_steps[] | select(.id == "daily-driver-account" and .state == "missing" and .required == false and (.title | contains("identifiers")))' "$result"
   [ "$(field .details.daily_driver_profiles.mac.state)" = missing ]
-  [[ "$stderr" == *"info  daily-driver"*"no installed Mac profile authorizes the real copy"* ]]
+  [[ "$stderr" == *"info  daily-driver"*"is not fully set up"* ]]
   [ "$(field '[.details.checks[] | select(.id | startswith("daily"))] | length')" = 0 ]
   # The real copy signs development push: a profile granting production only is incomplete.
   daily_profile production
   mg doctor
   [ "$(field .status)" = pass ]
   [ "$(field .details.daily_driver_profiles.mac.state)" = incomplete ]
-  [[ "$stderr" == *"missing: push-development"* ]]
+  [[ "$stderr" == *"Mac: push-development"* ]]
   jq -e '.user_steps[] | select(.id == "daily-driver-account" and .required == false)' "$result"
   daily_profile development
   mg doctor
@@ -740,6 +748,7 @@ PY
   [ "$(field .details.daily_driver_profiles.mac.state)" = authorized ]
   assert_read_only_calls
   grep -q '^security cms -D -i .*daily\.provisionprofile$' "$STUB_LOG"
+  grep -q '^security cms -D -i .*ios-widget\.mobileprovision$' "$STUB_LOG"
   validate "$result"
   assert_doctor_result "$result" "$status"
 }

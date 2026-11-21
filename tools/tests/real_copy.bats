@@ -116,7 +116,7 @@ case "$1 $2" in
   "-x -k") mkdir -p "$4/Meguri.app/Contents"; cp "$FX/info.json" "$4/Meguri.app/Contents/Info.plist" ;;
   *) exit 97 ;;
 esac'
-  stub pgrep 'echo "pgrep $*" >>"$STUB_LOG"; [ -n "${FX_RUNNING:-}" ]'
+  stub pgrep 'echo "pgrep $*" >>"$STUB_LOG"; [ -z "${FX_PGREP_RC:-}" ] || exit "$FX_PGREP_RC"; [ -n "${FX_RUNNING:-}" ]'
   export PATH="$BIN:$PATH"
 }
 
@@ -400,18 +400,27 @@ EOF
   [ "$status" -eq 0 ] || cat "$STUB_LOG"
   [ "$(field .details.real_copy_installed.launched)" = false ]
   [ "$(jq -r .CFBundleIdentifier "$FX/Applications/Meguri.app/Contents/Info.plist")" = com.antoinefink.meguri ]
-  called "^ditto -x -k $SB/build/app/real-copy/Meguri.zip $FX/Applications/$"
+  called "^ditto -x -k $SB/build/app/real-copy/Meguri.zip $FX/Applications/\.meguri-install\.[^/]+/$"
+  [ -z "$(ls -A "$FX/Applications" | grep '^\.meguri-install')" ]
   not_called '^open '
-  # An earlier real copy goes to the Trash.
+  # An earlier real copy leaves LaunchServices and PlugInKit, then goes to the Trash.
   : >"$STUB_LOG"
   real_copy --install
   [ "$status" -eq 0 ]
   [ "$(ls "$FX/Trash" | grep -c '^Meguri .*\.app$')" -eq 1 ]
-  # Not while it runs.
+  called "^lsregister -u $FX/Applications/Meguri.app$"
+  called "^pluginkit -r $FX/Applications/Meguri.app/Contents/PlugIns/MeguriWidget.appex$"
+  # Not while it runs, nor when that cannot be checked: refused before any build.
   : >"$STUB_LOG"
   FX_RUNNING=1 real_copy --install
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-install ]
+  not_called '^(lint|xcodebuild)'
+  : >"$STUB_LOG"
+  FX_PGREP_RC=2 real_copy --install
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-install ]
+  not_called '^(lint|xcodebuild)'
   # Never over the test copy.
   echo '{"CFBundleIdentifier":"com.antoinefink.meguri.dev"}' >"$FX/Applications/Meguri.app/Contents/Info.plist"
   : >"$STUB_LOG"
@@ -419,7 +428,7 @@ EOF
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-install ]
   [ "$(jq -r .CFBundleIdentifier "$FX/Applications/Meguri.app/Contents/Info.plist")" = com.antoinefink.meguri.dev ]
-  not_called '^ditto -x'
+  not_called '^(ditto -x|xcodebuild)'
   # Without --install nothing touches Applications.
   rm -rf "$FX/Applications"; mkdir -p "$FX/Applications"
   : >"$STUB_LOG"
@@ -427,6 +436,7 @@ EOF
   [ "$status" -eq 0 ]
   [ ! -e "$FX/Applications/Meguri.app" ]
   not_called '^(ditto -x|pgrep)'
+  [ ! -e "$FX/Trash" ] || [ "$(ls "$FX/Trash" | grep -c .)" -eq 1 ]
   mg build-app --platform mac --install
   [ "$status" -eq 2 ]
 }
