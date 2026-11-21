@@ -35,6 +35,8 @@ pub mod card_excerpts;
 pub mod card_extractors;
 #[path = "catalog.rs"]
 pub mod catalog;
+#[path = "change_deck_adapter.rs"]
+pub mod change_deck_adapter;
 #[path = "clock.rs"]
 pub mod clock;
 #[path = "cloud_checks.rs"]

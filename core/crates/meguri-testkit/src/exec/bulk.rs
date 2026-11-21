@@ -1,14 +1,18 @@
-//! The bulk-action adapters (`specs/conformance/bulk-ops.md` X1, X3): the
+//! The bulk-action adapters (`specs/conformance/bulk-ops.md` X1 to X3): the
 //! `find_replace` op runs meguri-engine's Find and Replace (U86,
-//! `browser/find-replace` F11) through the hosted collection, as one
+//! `browser/find-replace` F11) and `change_deck` its Change Deck (U87,
+//! `browser/bulk-actions` B7.2) through the hosted collection, each as one
 //! operation with its undo step; the `find_replace_fields` observation reads
 //! `selection_summary`'s field names (F3).
 
-use meguri_engine::bulk::NoteTarget;
+use meguri_engine::bulk::change_deck::{self, DeckTarget};
 use meguri_engine::bulk::find_replace::{self, FindIn, FindReplace, Refusal};
 use meguri_engine::bulk::summary::selection_summary;
+use meguri_engine::bulk::{CardTarget, NoteTarget};
+use meguri_engine::decks::Refusal as DeckRefusal;
 use meguri_engine::{CancelToken, EngineError, ProgressSink};
-use meguri_model::ids::NoteId;
+use meguri_model::ids::{CardId, NoteId};
+use meguri_storage::ReadRows;
 use serde_json::{Value, json};
 
 use super::{ExecError, OpResult, Registry, Session};
@@ -21,6 +25,7 @@ pub(super) fn register(registry: &mut Registry) {
         &["invalid_regex", "space_in_replacement", "field_count"],
         run_find_replace,
     );
+    registry.op_rejecting("change_deck", &["filtered_deck"], run_change_deck);
     registry.observation("find_replace_fields", find_replace_fields);
 }
 
@@ -40,6 +45,50 @@ fn note_id(session: &Session<'_>, reference: LogicalRef) -> Result<NoteId, ExecE
         .copied()
         .map(NoteId)
         .ok_or_else(|| ExecError::new("unknown_ref", format!("{reference} was not created")))
+}
+
+/// The real id of a card reference; a deleted card keeps its id (X2).
+fn card_id(session: &Session<'_>, reference: LogicalRef) -> Result<CardId, ExecError> {
+    session
+        .cards
+        .get(reference.index())
+        .copied()
+        .map(CardId)
+        .ok_or_else(|| ExecError::new("unknown_ref", format!("{reference} was not created")))
+}
+
+/// X2: the listed cards to the named deck; the output is the cards moved.
+fn run_change_deck(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    let Step::ChangeDeck(args) = step else {
+        return Err(invalid("expected change_deck"));
+    };
+    let cards = args
+        .cards
+        .iter()
+        .map(|card| card_id(session, card.0))
+        .collect::<Result<Vec<_>, _>>()?;
+    let collection = session.engine_collection()?;
+    // X2: the deck by its stored name in human form, whatever kind it is.
+    let deck = collection
+        .reader(meguri_storage::ReaderRole::Query)
+        .map_err(core)?
+        .deck_rows()
+        .map_err(core)?
+        .into_iter()
+        .find(|deck| deck.human_name() == args.deck)
+        .map(|deck| deck.id)
+        .ok_or_else(|| ExecError::new("unknown_ref", format!("no deck {:?}", args.deck)))?;
+    match change_deck::run(
+        &collection,
+        &CardTarget::Cards(cards),
+        &DeckTarget::Deck(deck),
+        CancelToken::new(),
+        ProgressSink::new(),
+    ) {
+        Ok(done) => Ok(OpResult::Output(json!({ "count": done.value.affected }))),
+        Err(EngineError::DeckRefused(DeckRefusal::FilteredDeck)) => Ok(OpResult::Rejected("filtered_deck")),
+        Err(error) => Err(core(error)),
+    }
 }
 
 /// X1: the listed notes or all notes; the output is Meguri's `affected`.

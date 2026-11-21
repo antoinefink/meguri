@@ -1156,11 +1156,14 @@ pub enum Step {
     /// bulk-ops.md X1.
     #[serde(deserialize_with = "op_mapping")]
     FindReplace(FindReplaceArgs),
+    /// bulk-ops.md X2.
+    #[serde(deserialize_with = "op_mapping")]
+    ChangeDeck(ChangeDeckArgs),
 }
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 88] = [
+    pub const NAMES: [&'static str; 89] = [
         "remove_notetype",
         "restore_notetype",
         "change_notetype_info",
@@ -1249,6 +1252,7 @@ impl Step {
         "remove_preset",
         "set_deck_preset",
         "find_replace",
+        "change_deck",
     ];
 
     /// The ops only actor scenarios have (sync-ops.md S1).
@@ -1345,6 +1349,7 @@ impl Step {
             Step::RemovePreset(_) => "remove_preset",
             Step::SetDeckPreset(_) => "set_deck_preset",
             Step::FindReplace(_) => "find_replace",
+            Step::ChangeDeck(_) => "change_deck",
         }
     }
 
@@ -1545,6 +1550,15 @@ pub struct FindReplaceArgs {
     pub ignore_case: Option<bool>,
     #[serde(default, rename = "in", deserialize_with = "present")]
     pub within: Option<FindReplaceIn>,
+}
+
+/// `change_deck: {cards, deck}` (bulk-ops.md X2): the cards, distinct and
+/// at least one, and the target deck by its stored name in human form.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeDeckArgs {
+    pub cards: Vec<CardRef>,
+    pub deck: String,
 }
 
 /// `find_replace`'s `in` (bulk-ops.md X1).
