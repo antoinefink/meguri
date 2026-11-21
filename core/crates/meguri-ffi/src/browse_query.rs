@@ -756,24 +756,51 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The cancel token of the newest filter counts job.
-static NEWEST_COUNTS: Mutex<Option<Arc<meguri_engine::CancelToken>>> = Mutex::new(None);
-
-/// Starts `start` after cancelling the job `slot` holds, and keeps the new
-/// job's token there: a newer call supersedes in call order, whichever job
-/// reaches the engine first.
-fn superseding(
-    slot: &Mutex<Option<Arc<meguri_engine::CancelToken>>>,
-    start: impl FnOnce() -> Result<meguri_engine::JobHandle, CoreError>,
-) -> Result<meguri_engine::JobHandle, CoreError> {
-    let mut newest = lock(slot);
-    if let Some(older) = newest.take() {
-        older.cancel();
-    }
-    let handle = start()?;
-    *newest = Some(Arc::clone(&handle.cancel));
-    Ok(handle)
+/// The newest of a kind of count job: calls take a ticket when they enter,
+/// in call order, and the job of the newest ticket cancels every older one,
+/// whichever reaches the engine first.
+#[derive(Debug, Default)]
+pub struct Newest {
+    issued: std::sync::atomic::AtomicU64,
+    running: Mutex<Option<(u64, Arc<meguri_engine::CancelToken>)>>,
 }
+
+impl Newest {
+    const fn new() -> Newest {
+        Newest {
+            issued: std::sync::atomic::AtomicU64::new(0),
+            running: Mutex::new(None),
+        }
+    }
+
+    /// A call's place in call order; take it before preparing the call.
+    fn ticket(&self) -> u64 {
+        self.issued.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    }
+
+    /// Starts `start` for `ticket` after cancelling an older job; a call
+    /// whose ticket a newer job already holds is refused `Cancelled`, so it
+    /// never cancels that job.
+    fn start(
+        &self,
+        ticket: u64,
+        start: impl FnOnce() -> Result<meguri_engine::JobHandle, CoreError>,
+    ) -> Result<meguri_engine::JobHandle, CoreError> {
+        let mut running = lock(&self.running);
+        if running.as_ref().is_some_and(|(newer, _)| *newer > ticket) {
+            return Err(CoreError::Cancelled);
+        }
+        if let Some((_, older)) = running.take() {
+            older.cancel();
+        }
+        let handle = start()?;
+        *running = Some((ticket, Arc::clone(&handle.cancel)));
+        Ok(handle)
+    }
+}
+
+/// The newest filter counts job.
+static NEWEST_COUNTS: Newest = Newest::new();
 
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct FilterCountsJobStart {
@@ -789,13 +816,14 @@ pub struct FilterCountsJobStart {
 #[uniffi::export]
 pub fn start_filter_counts(mode: BrowseMode, items: Vec<FilterCountItem>) -> Result<FilterCountsJobStart, CoreError> {
     callback::enter("start_filter_counts");
+    let ticket = NEWEST_COUNTS.ticket();
     let host = runtime::host()?;
     let engine = runtime::engine()?;
     let mode = SearchMode::from(mode);
     let items: Vec<CountItem> = items.into_iter().map(Into::into).collect();
     let result: CountsResult = Arc::default();
     let out = Arc::clone(&result);
-    let handle = superseding(&NEWEST_COUNTS, || {
+    let handle = NEWEST_COUNTS.start(ticket, || {
         Ok(engine.start_utility_job(meguri_engine::JobKind::BulkOp, move |job| {
             // The host it was started for: its name index and its counts.
             if !Arc::ptr_eq(&host, &runtime::host()?) {
@@ -928,7 +956,9 @@ pub fn browser_column_set(notetype: Option<i64>) -> Result<ColumnSetShown, CoreE
     callback::enter("browser_column_set");
     let collection = runtime::host()?.collection()?;
     let reader = collection.reader(meguri_storage::ReaderRole::Query)?;
-    let shown = column_sets::shown(&*reader, notetype.map(NotetypeId))?;
+    // The key and the note type are read in one snapshot.
+    let snapshot = reader.snapshot()?;
+    let shown = column_sets::shown(&*snapshot, notetype.map(NotetypeId))?;
     let keys = |mode: SearchMode| shown.columns.columns(mode).iter().map(ColumnKey::key).collect();
     Ok(ColumnSetShown {
         set: shown.set.into(),
@@ -1030,11 +1060,12 @@ pub fn start_browse_selection_counts(
     selection: Arc<BrowseSelection>,
 ) -> Result<BrowseSelectionCountsJobStart, CoreError> {
     callback::enter("start_browse_selection_counts");
+    let slot = Arc::clone(selection.counts_slot());
+    let ticket = slot.ticket();
     let engine = runtime::engine()?;
     let result = Arc::new(Mutex::new(None));
     let out = Arc::clone(&result);
-    let slot = Arc::clone(selection.counts_slot());
-    let handle = superseding(&slot, || {
+    let handle = slot.start(ticket, || {
         Ok(engine.start_utility_job(meguri_engine::JobKind::BulkOp, move |job| {
             let counts = match browse::selection_counts(selection.engine_selection(), &job.cancel) {
                 Ok(counts) => Ok(counts.into()),

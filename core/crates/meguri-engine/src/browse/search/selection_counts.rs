@@ -55,6 +55,8 @@ pub struct SelectionCounts {
 pub fn selection_counts(selection: &HandleSelection, cancel: &CancelToken) -> Result<SelectionCounts, BrowseError> {
     let cancelled = || BrowseError::Engine(EngineError::Cancelled);
     let shared = &selection.shared;
+    // A released handle is unknown, whatever else is unavailable (H6).
+    shared.handle(selection.handle)?;
     let engine = shared.engine()?;
     let registry = &engine.inner.searches;
     let token = CancelToken::new();

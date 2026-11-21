@@ -637,9 +637,9 @@ pub struct BrowseSelection {
     counts: CountsSlot,
 }
 
-/// The cancel token of a session's newest selection counts job: a newer
-/// one cancels it (`browse_query`).
-pub(crate) type CountsSlot = Arc<Mutex<Option<Arc<meguri_engine::CancelToken>>>>;
+/// A session's newest selection counts job: a newer one cancels it
+/// (`browse_query`).
+pub(crate) type CountsSlot = Arc<crate::browse_query::Newest>;
 
 impl BrowseSelection {
     /// The engine's selection, for a bulk action's target (U86, U87).
