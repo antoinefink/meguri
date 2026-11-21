@@ -135,3 +135,16 @@ public enum NotetypeRefusal: Sendable, Hashable {
         }
     }
 }
+
+/// Why a note type structure save wrote nothing
+/// (`notetypes/structure-changes` S1.2).
+public enum NotetypeStructureRefusal: Sendable, Hashable {
+    case protectedField(field: UInt32)
+    case noteFieldCountMismatch(note: Int64)
+    init(_ raw: MeguriCoreBindings.NotetypeStructureRefusal) {
+        switch raw {
+        case .protectedField(let field): self = .protectedField(field: field)
+        case .noteFieldCountMismatch(let note): self = .noteFieldCountMismatch(note: note)
+        }
+    }
+}

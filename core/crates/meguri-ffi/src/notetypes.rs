@@ -1,4 +1,4 @@
-//! Narrow U29 operations. No structural save/draft API crosses FFI.
+//! Narrow U29 operations. Structure saves are `notetype_structure`'s.
 use crate::{CoreError, callback, mutations::MutationSummary, runtime};
 use meguri_engine::notetypes::{self, AggregateDigest, Draft, SaveOptions};
 use meguri_model::ids::NotetypeId;

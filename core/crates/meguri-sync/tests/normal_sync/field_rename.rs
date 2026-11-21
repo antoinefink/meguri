@@ -136,7 +136,9 @@ fn complete_u29_field_rename_upload_reaches_fresh_peer_after_real_baseline() {
     expected["tmpls"][0]["qfmt"] = json!("{{Back}}|{{text:Front}}");
     expected["tmpls"][0]["afmt"] = json!("{{FrontSide}}|{{#Back}}{{hint:Front}}{{/Back}}");
     expected["tmpls"][0]["bqfmt"] = json!("{{text:hint:Back}}|{{^Front}}{{Back}}{{/Front}}");
-    expected["tmpls"][0]["bafmt"] = json!("{{Front}}|{{# Back }}{{text:Back}}{{/ Back }}<!--{{Back}}-->");
+    // structure-changes S4.1: a rewritten tag is written canonically over
+    // its whole span, so the section tags lose their inner spaces.
+    expected["tmpls"][0]["bafmt"] = json!("{{Front}}|{{#Back}}{{text:Back}}{{/Back}}<!--{{Back}}-->");
     expected["req"] = json!([[0, "any", [0, 1]]]);
     expected["mod"] = json!(renamed_at.0);
     expected["usn"] = json!(-1);

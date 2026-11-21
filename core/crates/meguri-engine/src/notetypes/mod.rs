@@ -18,13 +18,15 @@
 //! conformance adapters before U38, a new collection's bootstrap, composite
 //! ops). Structure changes that rewrite notes and cards (fields and
 //! templates added, removed, reordered or renamed, template text, the sort
-//! field) are U34's; [`save_in`] refuses them.
+//! field) are [`structure`]'s draft apply op; [`save_in`] refuses them.
 
 pub mod clone;
 pub mod names;
 pub mod read;
 pub mod rename;
+pub(crate) mod rewrite;
 pub mod stock;
+pub mod structure;
 pub mod template_formats;
 pub mod validate;
 pub mod write;
@@ -257,7 +259,7 @@ pub fn new_template(name: &str, front: &str, back: &str, random: &dyn RandomSour
 }
 
 /// R905: a uniformly random signed 64-bit id.
-fn random_id(random: &dyn RandomSource) -> i64 {
+pub(crate) fn random_id(random: &dyn RandomSource) -> i64 {
     i64::from_ne_bytes(random.next_u64().to_ne_bytes())
 }
 

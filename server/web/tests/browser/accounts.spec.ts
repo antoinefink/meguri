@@ -237,9 +237,36 @@ async function accountShell(page: Page, username: string, admin: boolean) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
+// Collection's identity check and storage read can each show a focused alert
+// in place of the focused <main>. Record the answers that arrive on Collection
+// (bootstrap's earlier /api/me does not count), wait for both after
+// navigating, and name any failed answer or alert.
+async function landOnCollection(page: Page, navigate: () => Promise<unknown>) {
+  const paths = ["/api/me", "/api/me/storage"];
+  const answers: Response[] = [];
+  const record = (response: Response) => {
+    if (paths.includes(new URL(response.url()).pathname) && new URL(page.url()).pathname === "/collection") answers.push(response);
+  };
+  page.on("response", record);
+  try {
+    await navigate();
+    // Wait for the paths still unanswered. A failed answer ends the wait: a
+    // 401 leaves Collection before the other answer arrives.
+    await expect.poll(() => answers.some(response => !response.ok()) ? []
+      : paths.filter(path => !answers.some(response => new URL(response.url()).pathname === path))).toEqual([]);
+    for (const response of answers) {
+      expect(response.ok(), `${response.request().method()} ${new URL(response.url()).pathname} answered ${response.status()}`).toBe(true);
+    }
+    await expect(page.getByRole("main").getByText("Loading storage…", { exact: true })).toHaveCount(0);
+    expect(await page.getByRole("alert").allTextContents()).toEqual([]);
+  } finally {
+    page.off("response", record);
+  }
+}
+
 async function connectionLayout(page: Page, username: string, admin: boolean) {
   const viewport = page.viewportSize()!;
-  await page.goto("/");
+  await landOnCollection(page, () => page.goto("/"));
   await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { name: "Collection", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Collection", exact: true })).toHaveAttribute("aria-current", "page");
@@ -297,8 +324,10 @@ async function connectionLayout(page: Page, username: string, admin: boolean) {
       await expect(page.getByRole("heading", { name: "Connect your devices", exact: true })).toBeVisible();
       const documentTime = await page.evaluate(() => performance.timeOrigin);
       const logo = page.getByRole("link", { name: "Meguri", exact: true });
-      if (width === 1280) await logo.locator("img").click();
-      else { await logo.focus(); await page.keyboard.press("Enter"); }
+      await landOnCollection(page, async () => {
+        if (width === 1280) await logo.locator("img").click();
+        else { await logo.focus(); await page.keyboard.press("Enter"); }
+      });
       await expect(page).toHaveURL(/\/collection$/);
       await expect(page.getByRole("heading", { name: "Collection", exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: "Collection", exact: true })).toHaveAttribute("aria-current", "page");
