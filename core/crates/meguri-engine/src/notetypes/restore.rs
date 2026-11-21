@@ -130,6 +130,12 @@ fn layout_of_restore(base: Notetype, kind: Option<StockKind>, confirmed: Confirm
     let saved_cloze = NotetypeKind::of(&saved) == NotetypeKind::Cloze;
     let saved_templates = saved.templates.len();
     let mut layout = plan::classify(base, saved, shape);
+    // D4: generation runs when a saved front differs from the base front at
+    // its position or a template is added; trailing templates removed alone
+    // do not count.
+    layout.fronts_changed = layout.saved.templates.iter().enumerate().any(|(at, template)| {
+        layout.template_origins[at].is_none() || template.config.q_format != layout.base.templates[at].config.q_format
+    });
     // D5: classified by the counts and a change of kind, not by G3.
     let counts_changed = layout.saved.fields.len() != layout.base.fields.len()
         || layout.saved.templates.len() != layout.base.templates.len();
@@ -247,16 +253,14 @@ pub fn restore(
         });
     }
     let committed = request.clone();
-    crate::plan_and_commit_with(
+    // D6: one replan (a restore with no confirmed losses), then the second
+    // `Stale` is returned without another snapshot.
+    crate::plan_and_commit_with_replans(
         collection,
         ReaderRole::Maintenance,
         spec,
+        1,
         |context| {
-            // D6: one replan (a restore with no confirmed losses), then
-            // `Stale`.
-            if context.attempt() > 1 {
-                return Err(stale(request.notetype));
-            }
             let layout = plan_restore(&**context.snapshot(), &request, context.attempt() > 0, &cancel, &progress)?;
             Ok(Plan {
                 value: layout,

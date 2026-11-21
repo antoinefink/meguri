@@ -646,10 +646,12 @@ struct DuringPlanning {
 
 impl meguri_engine::ProgressListener for DuringPlanning {
     fn on_progress(&self, progress: &meguri_engine::Progress) {
-        // A planning pass starts at completed 0. Never act in the write
-        // phase: it reports on the writer thread, where an op would wait on
-        // itself.
-        if progress.phase == meguri_engine::ProgressPhase::Planning && progress.completed == 0 {
+        // Never act in the write phase: it reports on the writer thread,
+        // where an op would wait on itself.
+        // A pass's first report, made on its snapshot: `completed` 0 with a
+        // known total. The phase change before it carries the previous
+        // pass's counts and comes before the snapshot is taken.
+        if progress.phase == meguri_engine::ProgressPhase::Planning && progress.completed == 0 && progress.total.is_some() {
             let pass = self.passes.fetch_add(1, Ordering::SeqCst);
             (self.change)(&self.collection, pass);
         }
@@ -729,12 +731,17 @@ fn an_unconfirmed_restore_backs_up_when_its_replan_becomes_classified() {
 }
 
 /// D6: a change during the replan too returns `Stale`, nothing written.
+/// Only the first two planning passes see a change: a third attempt
+/// would commit, so the test fails if the restore replans twice.
 #[test]
 fn a_second_change_during_the_replan_is_stale() {
     let (h, _) = harness();
     let id = made(&h, "Pair", false, &["Q", "A"], &["{{Q}}"]);
     add(&h.collection, id, &["a", "b"]);
-    let (sink, _listener) = during_planning(&h, move |c, _| {
+    let (sink, listener) = during_planning(&h, move |c, pass| {
+        if pass >= 2 {
+            return;
+        }
         let reader = c.reader(ReaderRole::Query).unwrap();
         let mut styled = notetypes::Draft::of(reader.notetype(id).unwrap().unwrap());
         drop(reader);
@@ -747,6 +754,53 @@ fn a_second_change_during_the_replan_is_stale() {
     let after = read(&h, id).unwrap();
     assert_eq!(after.fields.len(), before.fields.len());
     assert_eq!(after.templates[0].config.q_format, before.templates[0].config.q_format);
+    assert_eq!(listener.passes.load(Ordering::SeqCst), 2, "exactly one replan");
+}
+
+/// D4: a restore that only removes trailing templates, with every kept
+/// front already the stock front, generates no card.
+#[test]
+fn a_restore_that_only_drops_a_trailing_template_generates_nothing() {
+    let (h, _) = harness();
+    let id = notetypes::add_stock(&h.collection, StockKind::BasicAndReversed, Some("Both".into()))
+        .unwrap()
+        .value
+        .id;
+    let mut draft = meguri_engine::notetypes::structure::StructureDraft::of(&read(&h, id).unwrap());
+    draft.skip_checks = true;
+    draft.templates.push(meguri_engine::notetypes::structure::DraftTemplate {
+        origin: None,
+        name: "Third".into(),
+        front: "{{Front}}{{Back}}".into(),
+        back: String::new(),
+        browser_front: String::new(),
+        browser_back: String::new(),
+        deck: 0,
+        browser_font_name: String::new(),
+        browser_font_size: 0,
+    });
+    meguri_engine::notetypes::structure::apply(&h.collection, draft, CancelToken::new(), ProgressSink::new()).unwrap();
+    let note = add(&h.collection, id, &["a", "b"]);
+    // Keep only the note's ord 0 card.
+    let ord1 = {
+        let r = h.collection.reader(ReaderRole::Query).unwrap();
+        r.cards_of_note(note).unwrap().into_iter().find(|c| c.ord == 1).unwrap().id
+    };
+    h.collection
+        .run(
+            meguri_engine::OpSpec::named("drop a card", OpSource::UserNonUndoable).skip_undo(),
+            move |ctx| {
+                ctx.scope().remove_card(ord1)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let saved = run_restore(&h, confirmed(&h, id, None)).unwrap();
+    assert_eq!(saved.cards_added, 0, "no Card 2 card generated");
+    assert_eq!(saved.cards_removed, 1, "the Third card goes");
+    let r = h.collection.reader(ReaderRole::Query).unwrap();
+    let ords: Vec<u16> = r.cards_of_note(note).unwrap().iter().map(|c| c.ord).collect();
+    assert_eq!(ords, [0]);
 }
 
 /// S12: a removal refused on the planning snapshot takes no backup; undo

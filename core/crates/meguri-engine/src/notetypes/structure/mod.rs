@@ -341,14 +341,13 @@ pub fn apply(
         .undo_step(UPDATE_NOTE_TYPE, StepKind::Other)
         .cancel(cancel.clone())
         .progress(progress.clone());
-    crate::plan_and_commit_with(
+    // S1.2 item 1: `Stale` is returned, never planned again.
+    crate::plan_and_commit_with_replans(
         collection,
         ReaderRole::Maintenance,
         spec,
+        0,
         |context| {
-            if context.attempt() > 0 {
-                return Err(stale(draft.notetype));
-            }
             Ok(Plan {
                 value: plan::plan_draft(&**context.snapshot(), &draft, &cancel, &progress)?,
                 // The base token is checked again on the live rows inside the

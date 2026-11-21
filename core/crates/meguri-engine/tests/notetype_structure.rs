@@ -1226,6 +1226,7 @@ fn a_vanished_note_type_is_stale() {
     )
     .unwrap();
     assert!(matches!(run(&h, draft).unwrap_err(), EngineError::Stale { .. }));
+}
 
 /// I3 and S6/S7: a removed card dated more than a day ahead (a foreign or
 /// damaged collection) keeps its id, and does not push the generated card
@@ -1257,6 +1258,7 @@ fn a_removed_card_far_ahead_does_not_move_the_generated_id() {
     let mut draft = draft(&h, id);
     without_template(&mut draft, "Reverse");
     draft.templates.push(template("Reverse again", "{{Back}}"));
+    confirm(&h, &mut draft);
     let saved = run(&h, draft).unwrap().value;
     assert_eq!((saved.cards_removed, saved.cards_added), (1, 1));
     let new = state(&h, id).cards.iter().find(|c| c.2 == 1).unwrap().0;
