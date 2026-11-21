@@ -163,12 +163,17 @@ def check_product(app, identity):
         info = plistlib.load(f)
     problems = []
     expect = [("CFBundleIdentifier", want["bundle"]), ("CFBundleExecutable", "Meguri"),
-              ("CFBundleDisplayName", want["name"]), ("CFBundleIconName", want["icon"])]
+              ("CFBundleDisplayName", want["name"])]
     if mac:
-        expect += [("CFBundleIconFile", want["icon"])]
+        expect += [("CFBundleIconName", want["icon"]), ("CFBundleIconFile", want["icon"])]
     for key, value in expect:
         if info.get(key) != value:
             problems.append(f"Info.plist {key} is {info.get(key)!r}, expected {value!r}")
+    if not mac:
+        for key in ("CFBundleIcons", "CFBundleIcons~ipad"):
+            name = info.get(key, {}).get("CFBundlePrimaryIcon", {}).get("CFBundleIconName")
+            if name != want["icon"]:
+                problems.append(f"Info.plist {key} primary icon is {name!r}, expected {want['icon']!r}")
     # The localized names: the Mac's app menu and About panel read the
     # localized CFBundleName (Info.plist keeps PRODUCT_NAME there).
     strings = os.path.join(contents, "Resources" if mac else "", "en.lproj", "InfoPlist.strings")
