@@ -112,8 +112,9 @@ cmd_select() {
     local all_areas=""
     while IFS= read -r -d '' p; do
       case "$p" in
-        # A scanner change runs both scans, the test data of every area.
-        tools/similarity/*) code=yes all_areas=yes ;;
+        # A scanner change, or an oracle pin change (it decides which goldens
+        # count as recorded oracle output), runs both scans and every area.
+        tools/similarity/* | conformance/oracle.json) code=yes all_areas=yes ;;
         # The job's other inputs: scan, so a change to it runs it.
         tools/mg | tools/mg.d/similarity.sh | docker/similarity.Dockerfile* | \
           docker/compose.yml | .github/similarity.sh | .github/workflows/meguri-verification.yml) code=yes ;;

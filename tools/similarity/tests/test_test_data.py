@@ -259,8 +259,11 @@ class TestDataTests(unittest.TestCase):
                 golden[key] = value
         return json.dumps(golden)
 
+    CLOCK = 'clock: {tz: UTC, start: "2030-01-15T10:00:00"}\n'
+
     def oracle_pair(self, scenario=OWN, pin=PIN, **header):
         files = self.pair(scenario)
+        files[SCENARIOS + "/one.yaml"] = self.CLOCK + files[SCENARIOS + "/one.yaml"]
         files[GOLDENS + "/one.json"] = self.recorded(files[SCENARIOS + "/one.yaml"], **header)
         if pin is not None:
             files["conformance/oracle.json"] = json.dumps(pin)
@@ -285,7 +288,7 @@ class TestDataTests(unittest.TestCase):
             self.assertTrue(entry["flags"][0]["action"].startswith("none"))
 
     def test_nested_recorded_golden_is_oracle_output(self):
-        scenario = "description: " + json.dumps(OWN) + "\n"
+        scenario = self.CLOCK + "description: " + json.dumps(OWN) + "\n"
         files = {SCENARIOS + "/deep/two.yaml": scenario, "conformance/oracle.json": json.dumps(self.PIN),
                  GOLDENS + "/deep/two.json": self.recorded(scenario, SCENARIOS + "/deep/two.yaml", "search/deep/two")}
         code, summary, _views, error = self.check(files)
@@ -293,7 +296,7 @@ class TestDataTests(unittest.TestCase):
         self.assertEqual(summary["counts"]["oracle_output"], 1)
 
     def test_hand_written_golden_with_corpus_text_still_flags(self):
-        scenario = self.pair(OWN)[SCENARIOS + "/one.yaml"]
+        scenario = self.CLOCK + self.pair(OWN)[SCENARIOS + "/one.yaml"]
         cases = {
             "no header": {"golden": json.dumps({"observations": {"steps": [{"text": STORY}]}})},
             "another pin": {"lock_sha256": "d" * 64},
@@ -307,13 +310,15 @@ class TestDataTests(unittest.TestCase):
             "extra oracle key": {"oracle_extra": "x"},
             "corpus text in tz": {"tz": STORY},
             "corpus text in clock": {"clock": {"mode": STORY}},
+            "words in a zone-shaped tz": {"tz": "the/implementer/view/names/only/meguri/files/regions"},
+            "another start": {"clock": {"mode": "frozen", "start": "2030-01-16T10:00:00"}},
         }
         for name, change in cases.items():
             with self.subTest(name):
                 files = self.oracle_pair(**{k: v for k, v in change.items() if k != "golden"})
                 if "golden" in change:
                     files[GOLDENS + "/one.json"] = change["golden"]
-                if name.startswith("corpus text"):
+                if name.startswith(("corpus text", "words in")):
                     files[GOLDENS + "/one.json"] = self.recorded(scenario, body=OWN, **change)
                 code, summary, _views, _error = self.check(files)
                 self.assertEqual(code, 1)
@@ -349,7 +354,7 @@ class TestDataTests(unittest.TestCase):
         self.assertEqual(summary["counts"]["oracle_output"], 1)
         # A JSON scenario shaped like a recorded golden is still a scenario.
         shutil.rmtree(os.path.join(self.root, "conformance"), ignore_errors=True)
-        golden = self.recorded("{}", SCENARIOS + "/one.json")
+        golden = self.recorded('{"clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"}}', SCENARIOS + "/one.json")
         files = {SCENARIOS + "/one.json": golden, GOLDENS + "/one.json": json.dumps({"x": OWN}),
                  "conformance/oracle.json": json.dumps(self.PIN)}
         code, summary, views, _error = self.check(files)

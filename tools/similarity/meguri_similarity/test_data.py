@@ -250,7 +250,6 @@ ORACLE_OUTPUT = "oracle-output"
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _GOLDEN_KEYS = {"clock", "observations", "oracle", "scenario_id", "scenario_sha256", "tz"}
 _ORACLE_KEYS = {"anki_version", "driver_sha256", "lock_sha256"}
-_TZ = re.compile(r"[A-Za-z0-9_+./-]{1,64}")
 _MAX_SAFE = 1 << 53
 
 
@@ -272,8 +271,10 @@ def oracle_pin(root, rel):
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 65536:
             return None
         with os.fdopen(os.dup(fd), "rb") as stream:
-            pin = json.loads(stream.read(65537).decode("utf-8"), object_pairs_hook=_strict_object,
-                             parse_constant=_nonfinite)
+            raw = stream.read(65537)
+        if len(raw) > 65536:
+            return None
+        pin = json.loads(raw.decode("utf-8"), object_pairs_hook=_strict_object, parse_constant=_nonfinite)
     except (OSError, ValueError, UnicodeError, RecursionError):
         return None
     finally:
@@ -390,6 +391,20 @@ def _jcs(value):
 def scenario_sha256(path, text):
     """The D3 hash of a scenario's text (dsl.md: SHA-256 of the JCS form of the
     YAML 1.2 core value, or of the JSON value for .json), or None."""
+    value = scenario_value(path, text)
+    if value is _NONE:
+        return None
+    try:
+        return hashlib.sha256(_jcs(value).encode("utf-8")).hexdigest()
+    except (ValueError, TypeError, RecursionError, UnicodeError):
+        return None
+
+
+_NONE = object()
+
+
+def scenario_value(path, text):
+    """The scenario's D2 value, or _NONE when it has none."""
     try:
         if path.endswith(".json"):
             value = json.loads(text, object_pairs_hook=_strict_object, parse_constant=_nonfinite)
@@ -397,14 +412,14 @@ def scenario_sha256(path, text):
         else:
             if any(isinstance(token, (yaml.tokens.AliasToken, yaml.tokens.AnchorToken, yaml.tokens.TagToken))
                    for token in yaml.scan(text)):
-                return None
+                return _NONE
             documents = list(yaml.compose_all(text, Loader=yaml.SafeLoader))
             if len(documents) > 1:
-                return None
+                return _NONE
             value = _node_value(documents[0]) if documents and documents[0] is not None else None
-        return hashlib.sha256(_jcs(value).encode("utf-8")).hexdigest()
+        return value
     except (ValueError, TypeError, yaml.YAMLError, RecursionError):
-        return None
+        return _NONE
 
 
 def _check_json_numbers(value):
@@ -413,7 +428,8 @@ def _check_json_numbers(value):
     if isinstance(value, int):
         _safe_int(value)
     elif isinstance(value, float):
-        return
+        if value != value or value in (float("inf"), float("-inf")):
+            raise _NotJson()
     elif isinstance(value, list):
         for item in value:
             _check_json_numbers(item)
@@ -422,13 +438,19 @@ def _check_json_numbers(value):
             _check_json_numbers(item)
 
 
-def oracle_recorded(path, text, pin, scenario_sha):
+def oracle_recorded(path, text, pin, scenario_path, scenario_text):
     """True when the golden at `path` has exactly the shape `tools/mg oracle
-    record` writes, for the pin `pin` and for the paired scenario whose current
-    D3 hash is `scenario_sha`."""
+    record` writes, for the pin `pin` and for the paired scenario as it is now:
+    its D3 hash, its zone and its clock (dsl.md D5)."""
     scope = _scope(path)
-    if pin is None or scenario_sha is None or scope is None or scope[0] != 1 or not path.endswith(".json"):
+    if pin is None or scope is None or scope[0] != 1 or not path.endswith(".json"):
         return False
+    scenario = scenario_value(scenario_path, scenario_text)
+    scenario_sha = scenario_sha256(scenario_path, scenario_text)
+    if scenario_sha is None or not isinstance(scenario, dict) or not isinstance(scenario.get("clock"), dict):
+        return False
+    clock_in = scenario["clock"]
+    expected_clock = {"start": clock_in.get("start"), "mode": clock_in.get("mode", "frozen")}
     try:
         doc = json.loads(text, object_pairs_hook=_strict_object, parse_constant=_nonfinite)
     except (ValueError, RecursionError):
@@ -442,10 +464,7 @@ def oracle_recorded(path, text, pin, scenario_sha):
         return False
     if not isinstance(oracle["driver_sha256"], str) or not _HEX64.fullmatch(oracle["driver_sha256"]):
         return False
-    if not isinstance(clock, dict) or not set(clock) <= {"mode", "start"} or not all(
-            isinstance(v, str) and len(v) <= 64 for v in clock.values()):
-        return False
-    if not isinstance(doc["tz"], str) or not _TZ.fullmatch(doc["tz"]):
+    if clock != expected_clock or doc["tz"] != clock_in.get("tz"):
         return False
     return (doc["scenario_sha256"] == scenario_sha
             and doc["scenario_id"] == path[len(ROOTS[1]) + 1:-len(".json")])

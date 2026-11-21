@@ -188,6 +188,26 @@ EOF
   grep -qF "| \`$golden\` | text | 2 matching runs | yes |" <<<"$output"
 }
 
+@test "recorded oracle output in a changed golden passes and counts as passed" {
+  local golden=conformance/goldens/sched/one.json
+  echo '{"status": "pass", "failures": []}' >"$RUN/result.json"
+  cat >"$RUN/scan/summary.json" <<'EOF'
+{"status": "pass", "counts": {"scanned": 2, "clean": 1, "allowlisted": 0, "oracle_output": 1, "flagged": 0, "errors": 0, "skipped": 0, "missing": 0},
+ "test_data": {"pairs": 1, "limited": []}}
+EOF
+  cat >"$RUN/scan/implementer.json" <<EOF
+{"view": "implementer", "files": [
+  {"path": "conformance/scenarios/sched/one.yaml", "status": "clean", "channels": {}},
+  {"path": "$golden", "status": "oracle-output", "channels": {"text": {"matched": 3, "fingerprints": 40}},
+   "flags": [{"channel": "text", "reasons": ["3 text run(s) of 8+ words match"]}]}]}
+EOF
+  summary data "$(changed "$golden")"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Test data (conformance scenarios and goldens of the touched areas): passed"* ]]
+  [[ "$output" == *"2 files scanned, 2 passed (0 allowlisted, 1 recorded oracle output), 0 flagged"* ]]
+  ! grep -qF "| \`$golden\` |" <<<"$output"
+}
+
 # A small repository with the scanner's config and lexer, for `select`.
 select_repo() {
   local r="$BATS_TEST_TMPDIR/repo"
@@ -243,6 +263,11 @@ out() { sed -n "s/^$1=//p" "$GITHUB_OUTPUT"; }
   select_after "$r" .github/similarity.sh
   [ "$(out code)" = yes ]
   [ "$(out areas)" = "" ]
+  # The oracle pin decides which goldens count as recorded oracle output.
+  select_after "$r" conformance/oracle.json
+  [ "$(out run)" = yes ]
+  [ "$(out code)" = yes ]
+  [ "$(out areas)" = sched ]
   # A scanner change keeps the touched unpaired area beside every paired one.
   select_after "$r" tools/similarity/AGENTS.md conformance/scenarios/lonely/two.yaml
   [ "$(out areas)" = "lonely sched" ]

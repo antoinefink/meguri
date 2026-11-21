@@ -127,8 +127,7 @@ def cmd_scan(args):
             if f.status != "flagged" or pin is None or not f.path.startswith(test_data.ROOTS[1] + "/"):
                 continue
             scenario = scenarios.get(os.path.splitext(f.path[len(test_data.ROOTS[1]) + 1:])[0])
-            sha = test_data.scenario_sha256(scenario["path"], scenario["text"]) if scenario else None
-            if test_data.oracle_recorded(f.path, item["text"], pin, sha):
+            if scenario and test_data.oracle_recorded(f.path, item["text"], pin, scenario["path"], scenario["text"]):
                 f.status = test_data.ORACLE_OUTPUT
                 oracle_output.append(f.path)
     scan_seconds = time.monotonic() - t_scan
