@@ -10,7 +10,7 @@ How the core runs searches for Browse and the local servers, and what it hands b
 
 ## H1. Terms
 
-- **Session.** One per Browse instance (U210), or per other caller that searches repeatedly (U86's Find and Replace preview). Sessions are independent: nothing one does cancels or releases anything of another.
+- **Session.** One per Browse instance (U210), or per other caller that searches repeatedly (U86's Find and Replace preview; changed 2026-11-21, implementation review: the preview reads its own snapshot instead, `browser/workspace` V17). Sessions are independent: nothing one does cancels or releases anything of another.
 - **Request.** One run of a search, a resort (H8) or a toggle (H11) in a session. Each has a **request seq**: a per-session counter, 1 for the first request, then strictly increasing.
 - **Handle.** The result of a request (H6): an ordered list of ids plus what the core needs to page, reverse, map and invalidate it. Swift addresses rows by index into a handle; the handle is the only owner of result order, positions and removals.
 - **Mode.** Cards (ids are card ids) or notes (ids are note ids), as `search/query-model` Q4.

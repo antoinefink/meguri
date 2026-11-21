@@ -233,7 +233,7 @@ extension ReviewCollectionStartupTests {
         try await withDeckNameOwner { owner in
             let service = CoreDeckService(), model = owner.deckActions
             // Make the fixture's Default empty through the public deletion API.
-            let deletion = try await service.startDeleteDecks(ids: [1])
+            let deletion = try await service.startDeleteDecks(ids: [1], confirmed: try await service.deckDeletionSummary(ids: [1]))
             _ = try await deletion.value()
             let other = try await service.addDeck(name: "Other Root")
             await owner.loadCounts()
@@ -468,7 +468,7 @@ extension ReviewCollectionStartupTests {
     private func withHiddenDefaultOwner(_ body: (ReviewCollection) async throws -> Void) async throws {
         try await withDeckNameOwner { owner in
             let service = CoreDeckService(), model = owner.deckActions
-            let deletion = try await service.startDeleteDecks(ids: [1])
+            let deletion = try await service.startDeleteDecks(ids: [1], confirmed: try await service.deckDeletionSummary(ids: [1]))
             _ = try await deletion.value()
             _ = try await service.addDeck(name: "QZ80")
             await owner.loadCounts()

@@ -1,0 +1,271 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-03-04T09:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1898913600,
+          "now": 1898845200,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "change_deck": {
+          "count": 0
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Home",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1898845200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 1,
+            "type": 2,
+            "usn": 0
+          },
+          "#c3": {
+            "data": {},
+            "did": "Alpha",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1898845200,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 1,
+            "type": 2,
+            "usn": 0
+          },
+          "#c4": {
+            "data": {},
+            "did": "Home",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1898845200,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 1,
+            "type": 2,
+            "usn": 0
+          }
+        }
+      },
+      {},
+      {
+        "change_deck": {
+          "count": 2
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.82,
+              "s": 2.3065
+            },
+            "did": "Alpha",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1898852400,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 1,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Alpha",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1898852400,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.82,
+              "s": 2.3065
+            },
+            "did": "Alpha",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1898852400,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 1,
+            "type": 2,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {},
+            "did": "Home",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1898845200,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 1,
+            "type": 2,
+            "usn": 0
+          }
+        }
+      },
+      {},
+      {
+        "change_deck": {
+          "count": 1
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.93,
+              "s": 2.3065
+            },
+            "did": "Beta",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1898856000,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 1,
+            "type": 2,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.82,
+              "s": 2.3065
+            },
+            "did": "Alpha",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1898852400,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 1,
+            "type": 2,
+            "usn": -1
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notes/change-deck/memory-states",
+  "scenario_sha256": "f1ce8bc09ee255413cc2bb4810690929eabcbc48cf3aa277bc54db0c8ddda3b5",
+  "tz": "UTC"
+}

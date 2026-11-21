@@ -8,7 +8,9 @@ pub mod ops;
 pub mod tree;
 
 pub use current::{current, select, select_in};
-pub use delete::{DeletionSummary, delete, delete_controlled, delete_in, deletion_summary};
+#[cfg(feature = "test-hooks")]
+pub use delete::without_table_preconditions_for_testing;
+pub use delete::{ConfirmedLosses, DeletionSummary, delete, delete_controlled, delete_in, deletion_summary};
 pub use ops::{
     CollapseScope, add, add_in, collapse, collapse_controlled, collapse_in, move_decks, move_decks_controlled, move_in,
     rename, rename_controlled, rename_in, save_in,
@@ -62,6 +64,9 @@ pub enum Refusal {
     UnderDescendant,
     FilteredDeck,
     DefaultPreset,
+    /// D8 step 6: a live count of the deletion grew past the confirmed one;
+    /// the fresh counts.
+    LossesChanged { decks: u64, cards: u64 },
 }
 impl Refusal {
     pub const fn kind(self) -> &'static str {
@@ -71,6 +76,7 @@ impl Refusal {
             Self::UnderDescendant => "under_descendant",
             Self::FilteredDeck => "filtered_deck",
             Self::DefaultPreset => "default_preset",
+            Self::LossesChanged { .. } => "losses_changed",
         }
     }
 }

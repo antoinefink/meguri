@@ -1,0 +1,52 @@
+# Change Deck and FSRS memory states (specs/browser/bulk-actions.md B7.2
+# steps 2 to 5; specs/sched/memory-state.md M7.2; R645, R1188).
+# The review cards are stored as a collection from before FSRS has them:
+# one review-log row each and no memory state in their data.
+# Presets: Low (desired retention 0.82) on Alpha, High (0.93) on Beta;
+# Home uses Default (0.9).
+# c1 Home, review: moved to Alpha, then to Beta.
+# c2 Home, new (no review-log row): moved to Alpha with c1.
+# c3 Alpha, review: already in the target, gets a state when c1 moves in.
+# c4 Home, review: never moved, stays without a state.
+id: notes/change-deck/memory-states
+clock: {tz: UTC, start: "2030-03-04T09:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Low, desired_retention: 0.82}
+    - {name: High, desired_retention: 0.93}
+  decks: [Home, {name: Alpha, preset: Low}, {name: Beta, preset: High}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Home, fields: [one, a]}
+    - {notetype: Pair, deck: Home, fields: [two, a]}
+    - {notetype: Pair, deck: Alpha, fields: [three, a]}
+    - {notetype: Pair, deck: Home, fields: [four, a]}
+steps:
+  - observe: [timing]
+  # c1, c3 and c4: review cards, 6 days, due on day 3, graduated by one
+  # Good answer six days ago.
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 3, ivl = 6, factor = 2500, reps = 1, data = '{}' WHERE id IN (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0) OR id IN (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2) OR id IN (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"
+  - db_exec:
+      sql: "INSERT INTO revlog SELECT 1898326800000 + n, id, 0, 3, 6, 0, 2500, 4000, 0 FROM (SELECT id, row_number() OVER (ORDER BY id) AS n FROM cards) WHERE n IN (1, 3, 4)"
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1h
+  # Both cards already sit in Home: count 0, nothing written, no state
+  # computed for Home's cards.
+  - change_deck: {cards: ["#c1", "#c4"], deck: Home}
+  - observe: ["card(#c1, #c3, #c4)"]
+  - advance: 1h
+  # c1 and c2 move to Alpha: c1 and c3 get states with Low's retention,
+  # c1 keeps its due and interval, c2 stays without a state, c4 untouched.
+  - change_deck: {cards: ["#c1", "#c2"], deck: Alpha}
+  - observe: ["card(#c1, #c2, #c3, #c4)"]
+  - advance: 1h
+  # c1 already has a state: the move removes it and the recompute gives it
+  # one again, with High's retention; c3 stays as it was.
+  - change_deck: {cards: ["#c1"], deck: Beta}
+  - observe: ["card(#c1, #c3)"]

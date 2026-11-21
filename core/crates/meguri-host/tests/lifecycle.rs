@@ -644,7 +644,7 @@ fn a_real_backup_capacity_failure_refuses_a_real_deck_deletion_before_mutation()
             reader.execute_raw("SELECT * FROM decks ORDER BY id", &[]).unwrap(),
         )
     };
-    assert!(meguri_engine::decks::delete(&collection, vec![id], host.backup()).is_err());
+    assert!(meguri_engine::decks::delete(&collection, vec![id], meguri_engine::decks::ConfirmedLosses::Any, host.backup()).is_err());
     let reader = collection.reader(ReaderRole::Query).unwrap();
     assert_eq!(
         (

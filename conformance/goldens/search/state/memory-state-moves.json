@@ -1,0 +1,362 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-06-03T07:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1906776000,
+          "now": 1906700400,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1906700400,
+              "pos": 1,
+              "s": 2.3065
+            },
+            "did": "Source",
+            "due": 1906701025,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1906700400,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": 7
+          },
+          "#c2": {
+            "data": {
+              "lrt": 1906700400,
+              "pos": 2,
+              "s": 2.3065
+            },
+            "did": "Target",
+            "due": 1906701085,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1906700400,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": 7
+          },
+          "#c3": {
+            "data": {
+              "d": 2.118,
+              "lrt": 1906700400,
+              "pos": 3
+            },
+            "did": "Target",
+            "due": 1906701124,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1906700400,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": 7
+          },
+          "#c4": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.85,
+              "lrt": 1906700400,
+              "pos": 4,
+              "s": 2.3065
+            },
+            "did": "Target",
+            "due": 1906701063,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1906700400,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": 7
+          },
+          "#c5": {
+            "data": {
+              "lrt": 1906700400,
+              "pos": 5
+            },
+            "did": "Target",
+            "due": 1906701046,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1906700400,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": 7
+          },
+          "#c6": {
+            "data": {},
+            "did": "Target",
+            "due": 6,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1906700400,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 7
+          }
+        }
+      },
+      {
+        "change_deck": {
+          "count": 1
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.85,
+              "lrt": 1906700400,
+              "pos": 1,
+              "s": 2.3065
+            },
+            "did": "Target",
+            "due": 1906701025,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1906704000,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {
+              "lrt": 1906700400,
+              "pos": 2,
+              "s": 2.3065
+            },
+            "did": "Target",
+            "due": 1906701085,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1906700400,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": 7
+          },
+          "#c3": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.85,
+              "lrt": 1906700400,
+              "pos": 3,
+              "s": 2.3065
+            },
+            "did": "Target",
+            "due": 1906701124,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1906704000,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.85,
+              "lrt": 1906700400,
+              "pos": 4,
+              "s": 2.3065
+            },
+            "did": "Target",
+            "due": 1906701063,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1906700400,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": 7
+          },
+          "#c5": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.85,
+              "lrt": 1906700400,
+              "pos": 5,
+              "s": 2.3065
+            },
+            "did": "Target",
+            "due": 1906701046,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1906704000,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c6": {
+            "data": {},
+            "did": "Target",
+            "due": 6,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1906700400,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 7
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/state/memory-state-moves",
+  "scenario_sha256": "b59095f6bf8788f3e27a305edaa424748d6dc73050a94d73c22dcddab0fab252",
+  "tz": "UTC"
+}
