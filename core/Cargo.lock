@@ -1862,6 +1862,8 @@ name = "meguri-search"
 version = "0.0.0"
 dependencies = [
  "fsrs",
+ "icu_casemap",
+ "icu_casemap_data",
  "meguri-model",
  "meguri-storage",
  "meguri-template",
