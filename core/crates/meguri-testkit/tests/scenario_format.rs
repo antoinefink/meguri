@@ -2993,8 +2993,8 @@ fn held_step_vocabulary_is_strict_and_registered_only_where_supported() {
         ("tag_missing_media", json!({})),
     ];
     let capabilities = meguri_testkit::exec::MeguriExecutor::default().capabilities();
-    assert_eq!(Step::NAMES.len(), 87);
-    assert_eq!(Step::NAMES.iter().collect::<std::collections::BTreeSet<_>>().len(), 87);
+    assert_eq!(Step::NAMES.len(), 88);
+    assert_eq!(Step::NAMES.iter().collect::<std::collections::BTreeSet<_>>().len(), 88);
     for (op, args) in examples {
         let prefix = match op {
             "change_notetype" => json!({"change_notetype_info": {"notes": ["#n1"], "notetype": "Pair"}}),
@@ -3195,7 +3195,7 @@ fn held_observation_shapes_and_pure_formatting_are_recognized() {
         json!({"package_db_dump": {"fixture": "package/standard.colpkg", "tables": ["notes", "cards"], "raw": true}}),
     ];
     let capabilities = meguri_testkit::exec::MeguriExecutor::default().capabilities();
-    assert_eq!(K::ALL.len(), 64);
+    assert_eq!(K::ALL.len(), 65);
     for request in &requests {
         let parsed = held_steps(json!([{"observe": [request]}])).unwrap();
         let Step::Observe(observe) = &parsed.steps[0] else {

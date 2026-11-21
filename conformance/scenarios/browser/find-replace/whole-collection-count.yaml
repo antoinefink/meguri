@@ -1,0 +1,46 @@
+# specs/browser/find-replace.md F8, F9 and F6 step 8 (R1200, R1207): with no
+# note list the operation reads every note of the collection and reports
+# the number of notes it wrote. Two note types, five notes: the find text
+# is in #n1 (one field), #n3 (both fields, other letter case: Ignore case is
+# on by default) and #n4 (the other note type); #n2 and #n5 hold none.
+# Count 3, and exactly those three rows get usn -1 and a new mod. A second
+# whole-collection run limited to the field Back finds the replaced text
+# only where it landed in Back: count 1. A third finds nothing: count 0,
+# nothing written, and the collection's mod stays as the second run left it
+# (F9). Each run is observed with db_dump of notes, cards and col after the
+# usn of notes and cards is reset and the clock advanced
+# (specs/conformance/bulk-ops.md X4): no card changes in any run.
+id: browser/find-replace/whole-collection-count
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Note Plus
+      fields: [Head, Body, Extra]
+      templates: [{name: Card, front: "{{Head}}", back: "{{Body}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: ["lime tree", back]}
+    - {notetype: Pair, fields: [orange, peach]}
+    - {notetype: Pair, fields: ["LIME", "a Lime"]}
+    - {notetype: Note Plus, fields: [head, body, "the lime"]}
+    - {notetype: Note Plus, fields: [plum, pear, fig]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - find_replace: {find: lime, replace: seven}
+  - observe: [{db_dump: {tables: [notes, cards, col]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - find_replace: {find: seven, replace: eight, in: {field: Back}}
+  - observe: [{db_dump: {tables: [notes, cards, col]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - find_replace: {find: nine, replace: eight}
+  - observe: [{db_dump: {tables: [notes, cards, col]}}]

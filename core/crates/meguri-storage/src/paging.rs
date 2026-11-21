@@ -355,6 +355,42 @@ pub trait ReadRows: sealed::Connected {
             })? as u64)
     }
 
+    /// The notes among `ids` that exist, in id order, from one statement
+    /// (bulk actions read their listed notes a page at a time).
+    fn notes_with_ids(&self, ids: &[NoteId]) -> Result<Vec<Note>, StorageError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let list = json_ids(ids);
+        let mut statement = self.connection().prepare_cached(
+            "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id")?;
+        let found = statement.query_map([list], |row| rows::row_image(row, Table::Notes))?;
+        found
+            .map(|cells| Note::from_cells(&cells?).map_err(StorageError::from))
+            .collect()
+    }
+
+    /// The cards of the notes among `notes`, by note id then card id, from
+    /// one statement (a bulk rewrite's page of notes).
+    fn cards_of_notes_with_ids(&self, notes: &[NoteId]) -> Result<Vec<Card>, StorageError> {
+        if notes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut statement = self.connection().prepare_cached(&format!(
+            "SELECT {} FROM cards WHERE nid IN (SELECT value FROM json_each(?1)) ORDER BY nid, id",
+            Table::Cards
+                .columns()
+                .iter()
+                .map(|c| format!("\"{c}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))?;
+        let found = statement.query_map([json_ids(notes)], |row| rows::row_image(row, Table::Cards))?;
+        found
+            .map(|cells| Card::from_cells(&cells?).map_err(StorageError::from))
+            .collect()
+    }
+
     /// The number of notes of each `mid` that has notes, by `mid`
     /// (`notetypes/editor-actions` A2's note counts). A `mid` may name no
     /// note type; the caller keeps only those that do.
@@ -706,6 +742,20 @@ impl ReadRows for Reader {}
 impl ReadRows for Writer {}
 impl ReadRows for WriteScope<'_> {}
 impl ReadRows for ReadSnapshot<'_> {}
+
+/// A JSON array of the ids, for `json_each`.
+fn json_ids(ids: &[NoteId]) -> String {
+    let mut list = String::with_capacity(ids.len() * 14 + 2);
+    list.push('[');
+    for (at, id) in ids.iter().enumerate() {
+        if at > 0 {
+            list.push(',');
+        }
+        list.push_str(&id.0.to_string());
+    }
+    list.push(']');
+    list
+}
 
 fn limit_value(limit: usize) -> i64 {
     i64::try_from(limit).unwrap_or(i64::MAX)

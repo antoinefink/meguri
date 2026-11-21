@@ -60,6 +60,8 @@ pub mod executor_ordering;
 pub mod external_change;
 #[path = "filter_counts.rs"]
 pub mod filter_counts;
+#[path = "find_replace.rs"]
+pub mod find_replace;
 #[path = "flags.rs"]
 pub mod flags;
 #[path = "fsrs_policy.rs"]

@@ -76,6 +76,12 @@ harness = false
 name = "tags"
 harness = false
 
+# Criterion wall-clock suite: Find and Replace on 10k notes and on every
+# note (`specs/browser/find-replace.md`; R1831, R1832).
+[[bench]]
+name = "bulk"
+harness = false
+
 [[bench]]
 name = "session"
 harness = false

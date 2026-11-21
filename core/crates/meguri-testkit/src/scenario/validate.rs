@@ -466,6 +466,11 @@ fn sched_op(step: &Step) -> Result<(), FormatError> {
         Step::SetDue(args) => cards(&args.cards),
         Step::Forget(args) => cards(&args.cards),
         Step::GradeNow(args) => cards(&args.cards),
+        // bulk-ops.md X1: a non-empty list of distinct note references.
+        Step::FindReplace(args) => args
+            .notes
+            .as_ref()
+            .map_or(Ok(()), |notes| listed(notes.iter().map(|n| n.0).collect())),
         Step::UnburyDeck(args) => deck(&args.deck),
         Step::EmptyFiltered(args) => deck(&args.deck),
         _ => Ok(()),
@@ -659,6 +664,7 @@ fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), Fo
         ObservationKind::FileQuery,
         ObservationKind::PackageMedia,
         ObservationKind::PackageDbDump,
+        ObservationKind::FindReplaceFields,
     ] {
         if requests.iter().filter(|r| r.kind == kind).count() > 1 {
             return Err(FormatError::new(format!(

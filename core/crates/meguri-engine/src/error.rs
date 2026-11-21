@@ -22,6 +22,9 @@ pub enum EngineError {
     SyncNote(meguri_model::note::SyncNoteFault),
     DeckOptionsInvalid(Vec<meguri_sched::options::Issue>),
     SchedOp(crate::sched::ops::Refusal),
+    /// Find and Replace refused (`browser/find-replace` F11): nothing was
+    /// written.
+    FindReplace(crate::bulk::find_replace::Refusal),
     /// Imported type-in replacement template is malformed (render/type-answer A4.5).
     InvalidTypeAnswerReplacement,
     SessionActive,
@@ -163,6 +166,7 @@ impl fmt::Display for EngineError {
             EngineError::SyncNote(_) => f.write_str("incoming collection contract"),
             EngineError::DeckOptionsInvalid(issues) => write!(f, "invalid deck options: {issues:?}"),
             EngineError::SchedOp(reason) => write!(f, "scheduling operation refused: {reason:?}"),
+            EngineError::FindReplace(refusal) => write!(f, "find and replace refused: {refusal}"),
             EngineError::InvalidTypeAnswerReplacement => f.write_str("invalid_type_answer_replacement"),
             EngineError::SessionActive => f.write_str("review session is active"),
             EngineError::InvalidIgnoreBeforeDate { preset } => {

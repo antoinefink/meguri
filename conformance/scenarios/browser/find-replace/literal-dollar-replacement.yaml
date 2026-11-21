@@ -1,0 +1,49 @@
+# specs/browser/find-replace.md F5 (R1202): with Treat input as regular
+# expression off, the Replace With text is stored exactly as typed. Its "$"
+# references to numbered, braced and named groups and its "$$" are ordinary
+# characters: a capture expansion would turn the first replacement into an
+# empty string and the "$$" into one "$". The second step, regex on, shows
+# the same kinds of reference expanded on #n2: group 1, then "$$" as one
+# "$", then a group the pattern does not have as nothing. #n3 holds no
+# match and stays unwritten. Each run is observed with db_dump of notes,
+# cards and col after the usn of notes and cards is reset and the clock
+# advanced, so written notes show usn -1 and a new mod and no card changes
+# (specs/conformance/bulk-ops.md X4).
+id: browser/find-replace/literal-dollar-replacement
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: ["fee here", "a fee"]}
+    - {notetype: Pair, fields: ["fee there", "plain"]}
+    - {notetype: Pair, fields: [other, words]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - find_replace:
+      notes: ["#n1"]
+      find: fee
+      replace: "$3"
+  - observe: [{db_dump: {tables: [notes, cards, col]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - find_replace:
+      notes: ["#n1"]
+      find: "$3"
+      replace: "${1}$$x$name"
+  - observe: [{db_dump: {tables: [notes, cards, col]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - find_replace:
+      notes: ["#n2", "#n3"]
+      find: "(f)ee"
+      replace: "${1}$$x$9"
+      regex: true
+  - observe: [{db_dump: {tables: [notes, cards, col]}}]

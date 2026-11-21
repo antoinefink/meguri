@@ -61,6 +61,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "ensure_io_notetype",
             "export",
             "export.colpkg",
+            "find_replace",
             "force_backup",
             "forget",
             "grade_now",
@@ -167,6 +168,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "deck_tree",
             "decks",
             "fields_check",
+            "find_replace_fields",
             "fsrs_next",
             "fuzz_table",
             "ids",
@@ -199,7 +201,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         ])
     );
     // Prepared batch3/4 language must not advertise execution support.
-    assert_eq!(json["language"]["observations"].as_array().unwrap().len(), 64);
+    assert_eq!(json["language"]["observations"].as_array().unwrap().len(), 65);
     for kind in [
         "add_defaults",
         "notetype_last_deck",
@@ -241,7 +243,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     }
     // dsl.md D7.2/D8: the current step vocabulary excludes observe and adds
     // the declared answer.filtered part, including parsing-only operations.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 87);
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 88);
     for (op, supported) in [("media_reset", true), ("media_sync", false)] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),

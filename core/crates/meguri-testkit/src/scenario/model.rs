@@ -1153,11 +1153,14 @@ pub enum Step {
     /// deck-ops.md K10.
     #[serde(deserialize_with = "op_mapping")]
     SetDeckPreset(SetDeckPresetArgs),
+    /// bulk-ops.md X1.
+    #[serde(deserialize_with = "op_mapping")]
+    FindReplace(FindReplaceArgs),
 }
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 87] = [
+    pub const NAMES: [&'static str; 88] = [
         "remove_notetype",
         "restore_notetype",
         "change_notetype_info",
@@ -1245,6 +1248,7 @@ impl Step {
         "rename_preset",
         "remove_preset",
         "set_deck_preset",
+        "find_replace",
     ];
 
     /// The ops only actor scenarios have (sync-ops.md S1).
@@ -1340,6 +1344,7 @@ impl Step {
             Step::RenamePreset(_) => "rename_preset",
             Step::RemovePreset(_) => "remove_preset",
             Step::SetDeckPreset(_) => "set_deck_preset",
+            Step::FindReplace(_) => "find_replace",
         }
     }
 
@@ -1522,6 +1527,50 @@ pub struct RemoveConfigArgs {
 pub struct NoteTagsArgs {
     pub notes: Vec<NoteRef>,
     pub tags: String,
+}
+
+/// `find_replace: {notes?, find, replace, regex?, ignore_case?, in?}`
+/// (bulk-ops.md X1): `notes` missing means all notes; `regex` false and
+/// `ignore_case` true when missing, `in` all.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FindReplaceArgs {
+    #[serde(default, deserialize_with = "present")]
+    pub notes: Option<Vec<NoteRef>>,
+    pub find: String,
+    pub replace: String,
+    #[serde(default, deserialize_with = "present")]
+    pub regex: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub ignore_case: Option<bool>,
+    #[serde(default, rename = "in", deserialize_with = "present")]
+    pub within: Option<FindReplaceIn>,
+}
+
+/// `find_replace`'s `in` (bulk-ops.md X1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FindReplaceIn {
+    /// All Fields.
+    All,
+    Tags,
+    /// A field name, matched under `unicase`; never empty.
+    Field(String),
+}
+
+impl<'de> Deserialize<'de> for FindReplaceIn {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<FindReplaceIn, D::Error> {
+        match Value::deserialize(deserializer)? {
+            Value::String(word) if word == "all" => Ok(FindReplaceIn::All),
+            Value::String(word) if word == "tags" => Ok(FindReplaceIn::Tags),
+            Value::Object(map) if map.len() == 1 => match map.get("field") {
+                Some(Value::String(name)) if !name.is_empty() => Ok(FindReplaceIn::Field(name.clone())),
+                _ => Err(de::Error::custom("find_replace in: {field} takes a non-empty field name")),
+            },
+            other => Err(de::Error::custom(format!(
+                "find_replace in takes all, tags or {{field: <name>}}, found {other}"
+            ))),
+        }
+    }
 }
 
 /// `delete_tags: {tags}` (tag-ops.md G3): the tag text of the names to
@@ -2161,6 +2210,8 @@ pub enum ObservationKind {
     BrowserConfig,
     /// notetype-ops.md T8.
     NotetypeStructure,
+    /// bulk-ops.md X3.
+    FindReplaceFields,
 }
 
 /// How a kind takes arguments.
@@ -2181,7 +2232,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 64] = [
+    pub const ALL: [ObservationKind; 65] = [
         ObservationKind::AddDefaults,
         ObservationKind::NotetypeLastDeck,
         ObservationKind::SearchBuild,
@@ -2246,6 +2297,7 @@ impl ObservationKind {
         ObservationKind::TagTree,
         ObservationKind::BrowserConfig,
         ObservationKind::NotetypeStructure,
+        ObservationKind::FindReplaceFields,
     ];
 
     pub fn name(self) -> &'static str {
@@ -2314,6 +2366,7 @@ impl ObservationKind {
             ObservationKind::TagTree => "tag_tree",
             ObservationKind::BrowserConfig => "browser_config",
             ObservationKind::NotetypeStructure => "notetype_structure",
+            ObservationKind::FindReplaceFields => "find_replace_fields",
         }
     }
 
@@ -2381,7 +2434,7 @@ impl ObservationKind {
             | ObservationKind::ImageOcclusion
             | ObservationKind::FsrsNext
             | ObservationKind::IgnoredBeforeCount => ArgShape::Mapping,
-            ObservationKind::CardExtractors => ArgShape::Mapping,
+            ObservationKind::CardExtractors | ObservationKind::FindReplaceFields => ArgShape::Mapping,
             ObservationKind::DbDump | ObservationKind::NotetypeStructure => ArgShape::OptionalMapping,
             ObservationKind::ReviewHtml | ObservationKind::Search | ObservationKind::CanonicalSearch => ArgShape::List,
         }
