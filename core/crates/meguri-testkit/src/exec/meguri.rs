@@ -232,6 +232,9 @@ pub struct Session<'a> {
     /// E2 owns the real engine-held presentation and U44 chooser cache.
     pub held_queue: Option<meguri_engine::session::held::HeldQueue>,
     pub(super) sync: super::sync::State,
+    /// What the latest `change_notetype_info` step kept
+    /// (`change-notetype-ops.md` H1).
+    pub(super) change_notetype: Option<super::notetypes::ChangeScreen>,
 }
 
 impl Session<'_> {
@@ -398,6 +401,7 @@ impl MeguriExecutor {
             held_queue: None,
             sync: Default::default(),
             review_session: None,
+            change_notetype: None,
         };
         self.configure_storage(&mut session);
         Ok(session)
@@ -583,6 +587,7 @@ impl MeguriExecutor {
                 held_queue: None,
                 sync: Default::default(),
                 review_session: None,
+            change_notetype: None,
             };
             self.configure_storage(&mut session);
             self.new_collection(&mut session)?;
