@@ -4,7 +4,7 @@
 # lists what is missing in user_steps (docs/process/one-time-setup.md).
 
 mg_job doctor host mg_doctor \
-  "Check Xcode, the real copy's profiles (read-only), iOS runtime, Docker, Rust targets, disk, the macOS test VM (Mac UI suites and simulators), the host session and the Mac UI input; list missing user steps (tools/mg catch-up runs queued runs once theirs clear)"
+  "Check Xcode, the real copy's profiles (read-only), iOS runtime, Docker, Rust targets, disk, this checkout's run output (build/mg), the macOS test VM (Mac UI suites and simulators), the host session and the Mac UI input; list missing user steps (tools/mg catch-up runs queued runs once theirs clear)"
 
 MG_DOCTOR_TEAM=DNQ34W43XX
 MG_DOCTOR_MIN_XCODE_MAJOR=27
@@ -12,6 +12,8 @@ MG_DOCTOR_MIN_DOCKER_CPUS=12
 MG_DOCTOR_MIN_DOCKER_MEM_GIB=16
 MG_DOCTOR_WARN_DISK_GIB=40
 MG_DOCTOR_FAIL_DISK_GIB=10
+MG_DOCTOR_WARN_RUN_OUTPUT_GIB=20
+MG_DOCTOR_RUN_OUTPUT_SECONDS=10
 
 # mg__doctor_check <id> <pass|warn|fail> <message>
 mg__doctor_check() {
@@ -227,6 +229,44 @@ mg__doctor_cargo_targets() {
   fi
 }
 
+# This checkout's run output (build/mg): one warning above the limit, pointing
+# to tools/mg prune. du runs at most MG_DOCTOR_RUN_OUTPUT_SECONDS; a slower
+# du means a very large tree, so that warns too.
+mg__doctor_run_output() {
+  local dir="$MG_ROOT/build/mg" out="$MG_RUN_DIR/run-output.du" pid n=0 kb gib
+  if [ ! -d "$dir" ]; then
+    mg__doctor_check run-output pass "no run output yet"
+    return 0
+  fi
+  du -skx "$dir" >"$out" 2>/dev/null &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null && [ "$n" -lt $((MG_DOCTOR_RUN_OUTPUT_SECONDS * 10)) ]; do
+    sleep 0.1
+    n=$((n + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    rm -f "$out"
+    mg__doctor_check run-output warn "build/mg is too large to measure in ${MG_DOCTOR_RUN_OUTPUT_SECONDS} s; tools/mg prune reports which old runs could go (tools/AGENTS.md)"
+    return 0
+  fi
+  if ! wait "$pid" 2>/dev/null; then
+    rm -f "$out"
+    mg__doctor_check run-output warn "du could not read all of build/mg, so its size is unknown; tools/mg prune reports what it holds (tools/AGENTS.md)"
+    return 0
+  fi
+  kb="$(awk 'NR == 1 { print $1 }' "$out")"
+  rm -f "$out"
+  gib=$((${kb:-0} / 1048576))
+  mg_detail run_output_gib "$gib"
+  if [ "$gib" -ge "$MG_DOCTOR_WARN_RUN_OUTPUT_GIB" ]; then
+    mg__doctor_check run-output warn "build/mg holds $gib GiB, over $MG_DOCTOR_WARN_RUN_OUTPUT_GIB GiB; tools/mg prune reports which old runs could go (tools/AGENTS.md)"
+  else
+    mg__doctor_check run-output pass "build/mg holds $gib GiB"
+  fi
+}
+
 mg_doctor() {
   : >"$MG_RUN_DIR/checks.jsonl"
   : >"$MG_RUN_DIR/environment.jsonl"
@@ -420,6 +460,7 @@ mg_doctor() {
   else
     mg__doctor_check disk fail "$gib GiB free; need at least $MG_DOCTOR_FAIL_DISK_GIB GiB"
   fi
+  mg__doctor_run_output
 
   # The Mac UI test VM (U8b)
   MG_DOCTOR_VMS='[]'

@@ -280,8 +280,29 @@ class SyntheticCorpus(unittest.TestCase):
         from support import CONFIG
 
         with open(CONFIG) as f:
-            tags = yaml.safe_load(f)["corpus"]["tags"]
-        self.assertEqual(tags, {"min": "2.1.50", "max": "26.09.3", "count": 54})
+            corpus = yaml.safe_load(f)["corpus"]
+        self.assertEqual(corpus["tags"], {"min": "2.1.50", "max": "26.09.3", "count": 54})
+        self.assertEqual(len(corpus["commits"]), 54)
+        self.assertTrue({"2.1.50", "26.09.3"} <= set(corpus["commits"]))
+
+    def test_tags_that_peel_to_other_commits_are_an_error(self):
+        anki = os.path.join(self.refs, "anki")
+        commits = {t: git(anki, "rev-parse", f"{t}^{{commit}}").strip() for t in ("2.1.51", "23.10")}
+        files = {"core/stats.rs": MEGURI_OWN_RS}
+        write_tree(self.root, files)
+
+        def run(pinned):
+            config = synthetic_config(self.root, "2.1.51", "23.10", 2, commits=pinned)
+            return scan(self.refs, os.path.join(self.root, "cache"), self.root, list(files), self.out, config=config)
+
+        code, summary, _v, err = run(commits)
+        self.assertEqual((code, summary["status"]), (0, "pass"), err)
+        moved = dict(commits, **{"23.10": "0" * 40})
+        self.assert_corpus_error(run(moved), "pinned commits", "1 tags: 23.10")
+        renamed = {"2.1.51": commits["2.1.51"], "23.10": commits["23.10"], "9.9": commits["23.10"]}
+        code, summary, _v, err = run(renamed)
+        self.assertEqual((code, summary["status"]), (2, "error"), err)
+        self.assertIn("corpus.commits", summary["error"])
 
     # -- file lists ------------------------------------------------------------
 

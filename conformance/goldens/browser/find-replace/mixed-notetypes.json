@@ -1,0 +1,68 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "find_replace": {
+          "count": 3
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["alpha zz\u001fbeta zz", 1894701660, -1],
+            ["gamma zz\u001f\u001fzz delta", 1894701660, -1],
+            ["epsilon\u001fzeta", 1894701600, 0],
+            ["zz\u001fzz and zz", 1894701660, -1],
+            ["eta\u001ftheta\u001fiota", 1894701600, 0]
+          ]
+        }
+      },
+      {
+        "find_replace_fields": ["Aside", "Extra", "Meaning", "Source", "Text", "Word"]
+      },
+      {
+        "find_replace_fields": ["Meaning", "Word"]
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "find_replace": {
+          "count": 2
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["alpha zz\u001fbeta zz", 1894701660, 0],
+            ["gamma yy\u001f\u001fzz delta", 1894701720, -1],
+            ["epsilon\u001fzeta", 1894701600, 0],
+            ["yy\u001fzz and zz", 1894701720, -1],
+            ["eta\u001ftheta\u001fiota", 1894701600, 0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/find-replace/mixed-notetypes",
+  "scenario_sha256": "e9e00ae60f7059539f479511834dac17255f28582c499b03466634574e157459",
+  "tz": "UTC"
+}

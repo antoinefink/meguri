@@ -5,6 +5,7 @@
 //! scenarios through the parties executor (sync-ops.md S10, `parties`).
 
 mod browser;
+mod bulk;
 mod cards;
 pub mod clock;
 mod deck_options;

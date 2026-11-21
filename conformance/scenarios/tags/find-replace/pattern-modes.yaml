@@ -1,0 +1,62 @@
+# Adding tags, literal and regular-expression modes and letter case in Find
+# and Replace in Tags (specs/browser/find-replace.md F4 steps 1 to 3, F7
+# steps 2 to 4; specs/conformance/bulk-ops.md X1; specs/tags/tags.md T10).
+# #n1 starts with the tag fig; #n2 (pear) is never listed and keeps its tag.
+# 1. Adding lime and cherry writes #n1 (count 1).
+# 2. Adding cherry again writes nothing (count 0).
+# 3. Literal fi+g: the plus stands for itself, no match. Count 0.
+# 4. Regex fi+g: the plus repeats the i, fig becomes plum. Count 1.
+# 5. Literal PLUM with Ignore case off: the stored plum differs in case, no
+#    match, nothing written. Count 0.
+# 6. Regex anchored alternation: plum matches one branch whole and becomes
+#    date. Count 1.
+# 7. Regex anchored class with an empty replacement: cherry and date match
+#    whole and become empty, and empty results are dropped; lime stays.
+#    Count 1.
+# Before each step the usn of notes and tags is reset to 0 and the clock
+# advanced, so each written note shows a new mod and usn -1 and each newly
+# registered tag row usn -1 (X4). Notes and tags are dumped after each step.
+id: tags/find-replace/pattern-modes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - {name: Plain, fields: [Text], templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]}
+  notes:
+    - {notetype: Plain, fields: [one], tags: [fig]}
+    - {notetype: Plain, fields: [two], tags: [pear]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - advance: 1m
+  - add_note_tags: {notes: ["#n1"], tags: "lime cherry"}
+  - observe: [{db_dump: {tables: [notes, tags]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - advance: 1m
+  - add_note_tags: {notes: ["#n1"], tags: cherry}
+  - observe: [{db_dump: {tables: [notes, tags]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1"], find: "fi+g", replace: plum, regex: false, ignore_case: true, in: tags}
+  - observe: [{db_dump: {tables: [notes, tags]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1"], find: "fi+g", replace: plum, regex: true, ignore_case: true, in: tags}
+  - observe: [{db_dump: {tables: [notes, tags]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1"], find: PLUM, replace: kiwi, regex: false, ignore_case: false, in: tags}
+  - observe: [{db_dump: {tables: [notes, tags]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1"], find: "^(plum|pear)$", replace: date, regex: true, ignore_case: true, in: tags}
+  - observe: [{db_dump: {tables: [notes, tags]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1"], find: "^[cd][a-z]*$", replace: "", regex: true, ignore_case: true, in: tags}
+  - observe: [{db_dump: {tables: [notes, tags]}}]

@@ -1,0 +1,29 @@
+# Find and Replace in Tags with no note list (specs/browser/find-replace.md
+# F7 steps 3 and 4, F8 all notes; specs/conformance/bulk-ops.md X1, notes
+# missing). Every note of the collection is read. The upper-case literal
+# find text MAPLE, Ignore case on, matches the stored maple and the first
+# component of maple::leaf: only the matched text is replaced, so the child
+# keeps its later component (cedar::leaf). #n3 (birch) and #n4 (no tags)
+# are untouched. Count 2. Written notes change only tags, mod and usn. The
+# old rows stay registered beside the new ones. usn of notes and tags is
+# reset and the clock advanced before the run (X4).
+id: tags/find-replace/all-notes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - {name: Plain, fields: [Text], templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]}
+  notes:
+    - {notetype: Plain, fields: [one], tags: [maple]}
+    - {notetype: Plain, fields: [two], tags: ["maple::leaf"]}
+    - {notetype: Plain, fields: [three], tags: [birch]}
+    - {notetype: Plain, fields: [four]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - advance: 1m
+  - find_replace:
+      find: MAPLE
+      replace: cedar
+      ignore_case: true
+      in: tags
+  - observe: [{db_dump: {tables: [notes, tags]}}]
