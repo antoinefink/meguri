@@ -1017,6 +1017,7 @@ public final class SyncCoordinator {
     @ObservationIgnored private var meguriMediaResume = MeguriMediaResume()
     @ObservationIgnored private var meguriMediaResumePending: MeguriMediaResume.Trigger?
     @ObservationIgnored private var meguriMediaRetry: Task<Void, Never>?
+    @ObservationIgnored private var meguriReadyAdoptionPending = false
     /// Tests only: replaces the wait before an automatic attempt, and sees each trigger.
     @ObservationIgnored var meguriMediaRetryDelay: ((Duration?) -> Duration?)?
     @ObservationIgnored var meguriMediaResumeObserver: ((MeguriMediaResume.Trigger) -> Void)?
@@ -1882,6 +1883,12 @@ public final class SyncCoordinator {
     /// setup ends only once its media finishes (MP5).
     func resumeMeguriMediaIfNeeded(_ trigger: MeguriMediaResume.Trigger) {
         meguriMediaResumeObserver?(trigger)
+        // Setup completed but its settings were not read yet: every trigger
+        // tries that read again, after the timed retries are used up too.
+        if meguriReadyAdoptionPending, meguriReady {
+            Task { if await self.adoptMeguriReady() { self.requestMeguriWakeIfReadyPending() } }
+            return
+        }
         guard meguriStage == .mediaPaused, meguriOperation != nil, meguriMediaResume.admits(trigger) else { return }
         // A setup action that still runs reads Core again when it ends. A wait
         // that ends during an attempt is that attempt's: it schedules its own.
@@ -1911,7 +1918,7 @@ public final class SyncCoordinator {
             // setup's last steps then run, with no media attempt.
             if self.meguriReady {
                 if await self.adoptMeguriReady() { self.recordMeguriMediaAttempt(.ready) }
-                else { self.retryMeguriReadyAdoption() }
+                else { self.meguriReadyAdoptionPending = true; self.retryMeguriReadyAdoption() }
                 return
             }
             // An edited address reloads nothing until it is signed in to.
@@ -1975,6 +1982,7 @@ public final class SyncCoordinator {
         adoptMeguriReadySettings(state, committed)
         meguriOperation = nil
         meguriReadyWakePending = true
+        meguriReadyAdoptionPending = false
         return true
     }
     /// A read of the settings Ready committed that failed is tried again after
