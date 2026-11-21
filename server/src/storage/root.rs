@@ -44,7 +44,14 @@ pub(super) fn owned(m: &fs::Metadata) -> Result<()> {
     Ok(())
 }
 pub(crate) fn regular(path: &Path, required: bool) -> Result<()> {
-    match fs::symlink_metadata(path) {
+    checked_regular(fs::symlink_metadata(path), required)
+}
+fn checked_regular(found: std::io::Result<fs::Metadata>, required: bool) -> Result<()> {
+    match found {
+        // SQLite unlinks -wal and -shm when the last connection closes. An
+        // unlink between the path lookup and the attribute read reports a
+        // file with no links: it is already gone, as an optional file may be.
+        Ok(m) if m.nlink() == 0 && !required => Ok(()),
         Ok(m) if m.is_file() && m.nlink() == 1 && m.mode() & 0o777 == 0o600 => owned(&m),
         Ok(_) => Err(unavailable()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound && !required => Ok(()),
@@ -715,6 +722,36 @@ impl DataRoot {
             at::unlink(&state, "setup-token")?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod regular_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    // A lookup racing SQLite's unlink of -wal or -shm reads the attributes of
+    // a file with no links left. Metadata read through an open handle after
+    // the unlink is that state, without depending on the race.
+    #[test]
+    fn unlinked_optional_file_counts_as_absent_and_other_checks_stay() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("accounts.sqlite-wal");
+        let file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).unwrap();
+        regular(&path, false).unwrap();
+        let second = temp.path().join("second");
+        fs::hard_link(&path, &second).unwrap();
+        assert!(regular(&path, false).is_err(), "a file with a second link is refused");
+        fs::remove_file(&second).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(regular(&path, false).is_err(), "a file others can read is refused");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::remove_file(&path).unwrap();
+        let unlinked = file.metadata().unwrap();
+        assert_eq!(unlinked.nlink(), 0);
+        checked_regular(Ok(unlinked.clone()), false).unwrap();
+        assert!(checked_regular(Ok(unlinked), true).is_err(), "a required file must still exist");
+        regular(&path, false).unwrap();
+        assert!(regular(&path, true).is_err());
     }
 }
 
