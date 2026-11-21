@@ -4,15 +4,18 @@
 //! cells themselves, reverse and its stale revision, resort, the toggle,
 //! selection resolution and mapping, invalidation by the change sets of a
 //! tag edit and a note deletion, search errors with UTF-16 ranges, the
-//! argument refusals, a cancelled request, and closing.
+//! argument refusals, a cancelled request, and closing; then handles of
+//! another session, a cancelled `qa_cells`, the refetches of a deck change
+//! and of a card change in notes mode, and a session released unclosed.
 use meguri_ffi::{
     CancelToken, CoreError, CoreEvent, CoreEventKind, CoreEventListener, JobOutcome,
     browse_search::*,
     collection::{self, CollectionLocation, DiskCapacity, DiskSpaceProvider, HostClock},
     excerpts::ExcerptQuestion,
+    decks::add_deck,
     notes::{AddNoteRequest, add_note, start_delete_notes},
     notetypes::{AddNotetypeRequest, NewNotetypeTemplate, add_notetype},
-    tags::add_note_tags,
+    tags::{add_note_tags, set_card_flag},
 };
 use std::{
     sync::{Arc, mpsc},
@@ -449,6 +452,93 @@ fn a_search_session_pages_sorts_toggles_and_maps_through_its_exports() {
     );
     assert_eq!(
         session.start_search(String::new(), BrowseMode::Cards, sort("noteFld", BrowseSortDirection::Ascending), None),
+        Err(browse(BrowseFailure::UnknownHandle))
+    );
+    session.close().unwrap();
+}
+
+fn sequenced(summary: meguri_ffi::mutations::MutationSummary) -> SequencedChangeSet {
+    SequencedChangeSet {
+        seq: summary.seq,
+        changes: summary.changes,
+    }
+}
+
+#[test]
+fn sessions_keep_their_own_handles_and_refetch_what_a_change_reaches() {
+    let dir = tempfile::tempdir().unwrap();
+    let _core = open(&dir);
+    let notetype = add_notetype(AddNotetypeRequest {
+        name: "Duo".into(),
+        cloze: false,
+        fields: vec!["Front".into(), "Back".into()],
+        templates: vec![template("Forward", "{{Front}}"), template("Reverse", "{{Back}}")],
+        css: Some(String::new()),
+    })
+    .unwrap()
+    .id;
+    let mut cards = Vec::new();
+    for fields in [["alpha", "one"], ["beta", "two"]] {
+        let added = add_note(AddNoteRequest {
+            notetype_id: notetype,
+            fields: fields.iter().map(|f| (*f).to_owned()).collect(),
+            tags: Vec::new(),
+            deck_id: 1,
+            guid: None,
+            update_add_defaults: false,
+        })
+        .unwrap();
+        let mut own = added.cards;
+        own.sort_unstable();
+        cards.extend(own);
+    }
+    let by_field = || sort("noteFld", BrowseSortDirection::Ascending);
+    let (tx, rx) = mpsc::channel();
+    let session = open_search_session(Arc::new(Searches(tx))).unwrap();
+    let seq = session.start_search(String::new(), BrowseMode::Notes, by_field(), None).unwrap();
+    let (notes, _, count) = completed(&rx, seq);
+    assert_eq!(count, 2);
+
+    // H6, H15: a handle is bound to its session.
+    let (other_tx, other_rx) = mpsc::channel();
+    let other = open_search_session(Arc::new(Searches(other_tx))).unwrap();
+    let other_seq = other.start_search(String::new(), BrowseMode::Cards, by_field(), None).unwrap();
+    let (theirs, _, _) = completed(&other_rx, other_seq);
+    assert_eq!(other.handle_state(notes), Err(browse(BrowseFailure::UnknownHandle)));
+    assert_eq!(session.handle_state(theirs), Err(browse(BrowseFailure::UnknownHandle)));
+
+    // H7: `qa_cells` stops at its token.
+    let cancel = CancelToken::new_arc();
+    cancel.trigger();
+    assert_eq!(
+        other.qa_cells(theirs, 0, range(0, 4), BrowseQaWhich::Both, Some(cancel)),
+        Err(CoreError::Cancelled)
+    );
+
+    // H10: a card change reaches its note's row in notes mode; a deck
+    // change reaches every row.
+    let flagged = sequenced(set_card_flag(vec![cards[3]], 2).unwrap().summary);
+    assert_eq!(
+        session.invalidated_rows(notes, 0, vec![flagged]).unwrap(),
+        BrowseInvalidation {
+            removed: Vec::new(),
+            refetch_all: false,
+            refetch: vec![1],
+            revision: 0,
+            complete: true,
+            count: 2,
+        }
+    );
+    let deck = sequenced(add_deck("Elsewhere".into()).unwrap().summary);
+    let every = session.invalidated_rows(notes, 0, vec![deck]).unwrap();
+    assert!(every.refetch_all && every.removed.is_empty() && every.refetch.is_empty(), "{every:?}");
+
+    // H2: releasing a session object without `close` closes it too.
+    let selection = other.selection(theirs, 0, vec![range(0, 4)]).unwrap();
+    assert_eq!(selection.resolve(BrowseMode::Cards).unwrap(), cards);
+    drop(other);
+    assert_eq!(
+        selection.resolve(BrowseMode::Cards),
         Err(browse(BrowseFailure::UnknownHandle))
     );
     session.close().unwrap();

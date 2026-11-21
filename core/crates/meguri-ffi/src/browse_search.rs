@@ -167,7 +167,7 @@ impl From<BrowseError> for CoreError {
                     message: error.message(),
                 };
             }
-                BrowseError::UnsortableColumn => BrowseFailure::UnsortableColumn,
+            BrowseError::UnsortableColumn => BrowseFailure::UnsortableColumn,
             BrowseError::StaleRevision { current } => BrowseFailure::StaleRevision { current },
             BrowseError::UnknownHandle => BrowseFailure::UnknownHandle,
             BrowseError::OutOfRange => BrowseFailure::OutOfRange,
@@ -893,8 +893,11 @@ impl BrowseSearchSession {
     /// calls fail with `UnknownHandle`. Idempotent.
     pub fn close(&self) -> Result<(), CoreError> {
         callback::enter("BrowseSearchSession::close");
-        let session = lock(&self.session).take();
-        drop(session);
+        // Shut down now, not when the last call in flight lets go of its
+        // clone: a request one of them makes meanwhile ends `Cancelled`.
+        if let Some(session) = lock(&self.session).take() {
+            session.shutdown();
+        }
         Ok(())
     }
 }

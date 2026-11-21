@@ -256,7 +256,10 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
     } else {
         match job.job {
             Job::Search { text, mode, sort } => (request.search(&text, mode, &sort), Some(text)),
-            Job::Resort { source, sort } => (request.resort(source, &sort), None),
+            Job::Resort { source, sort } => {
+                let text = source.text.clone();
+                (request.resort(source, &sort), Some(text))
+            }
             Job::Toggle { source, sort } => {
                 let text = source.text.clone();
                 (request.toggle(source, &sort), Some(text))

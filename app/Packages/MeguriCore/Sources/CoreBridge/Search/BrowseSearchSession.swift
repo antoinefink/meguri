@@ -4,9 +4,9 @@ import Synchronization
 
 // Browse search sessions (U264, `browser/result-sets` H2 to H12): one
 // session per Browse instance, its events on a stream of its own, and the
-// calls through its handles. Every call runs on the query lane except
-// `close`, which cancels and runs on the control lane. A search never
-// writes.
+// calls through its handles. Starting a request (which cancels the one
+// running) and `close` run on the control lane, so they never wait behind a
+// page of rows; every read runs on the query lane. A search never writes.
 
 /// A search mode (`search/query-model` Q4): ids are card ids or note ids.
 public enum BrowseMode: Sendable, Hashable {
@@ -14,9 +14,17 @@ public enum BrowseMode: Sendable, Hashable {
     case notes
 
     init(_ mode: MeguriCoreBindings.BrowseMode) {
-        self = mode == .cards ? .cards : .notes
+        switch mode {
+        case .cards: self = .cards
+        case .notes: self = .notes
+        }
     }
-    var raw: MeguriCoreBindings.BrowseMode { self == .cards ? .cards : .notes }
+    var raw: MeguriCoreBindings.BrowseMode {
+        switch self {
+        case .cards: .cards
+        case .notes: .notes
+        }
+    }
 }
 
 public enum BrowseSortDirection: Sendable, Hashable {
@@ -35,10 +43,18 @@ public struct BrowseSort: Sendable, Hashable {
         self.direction = direction
     }
     init(_ raw: MeguriCoreBindings.BrowseSort) {
-        self.init(key: raw.key, direction: raw.direction == .ascending ? .ascending : .descending)
+        let direction: BrowseSortDirection = switch raw.direction {
+        case .ascending: .ascending
+        case .descending: .descending
+        }
+        self.init(key: raw.key, direction: direction)
     }
     var raw: MeguriCoreBindings.BrowseSort {
-        .init(key: key, direction: direction == .ascending ? .ascending : .descending)
+        let direction: MeguriCoreBindings.BrowseSortDirection = switch direction {
+        case .ascending: .ascending
+        case .descending: .descending
+        }
+        return .init(key: key, direction: direction)
     }
 }
 
@@ -435,7 +451,11 @@ final class NewestRequest: Sendable {
 /// started are dropped (R1084). Releasing the object, or `close()`,
 /// cancels its in-flight request and releases its handles.
 public final class BrowseSearchSession: Sendable {
-    /// Single consumer. Finishes when the session closes.
+    /// Single consumer. A request's events can arrive before the call that
+    /// started it returns its seq (a parse error fails at once): keep an
+    /// event whose seq is newer than any returned so far, never drop it.
+    /// Finishes when the session closes, without the terminal event of a
+    /// request still running then.
     public let events: AsyncStream<BrowseSearchEvent>
 
     private let raw: MeguriCoreBindings.BrowseSearchSession
@@ -464,14 +484,24 @@ public final class BrowseSearchSession: Sendable {
                       to output: AsyncStream<BrowseSearchEvent>.Continuation) async {
         for await raw in stream {
             let event = BrowseSearchEvent(raw)
-            guard event.seq >= newest.seq.withLock({ $0 }) else { continue }
-            output.yield(event)
+            // Compared and yielded under one lock, so once `started(_:)`
+            // records a seq no older event goes out (yield never blocks).
+            newest.seq.withLock { current in
+                if event.seq >= current { output.yield(event) }
+            }
         }
         output.finish()
     }
 
     deinit {
         rawEvents.finish()
+        // The last release of the core's session closes it (it takes locks
+        // and cancels its request): never on the thread that let this go,
+        // which may be the main thread.
+        let raw = raw
+        Task.detached {
+            try? await ControlLane.shared.call(.browseClose) { try raw.close() }
+        }
     }
 
     /// H2: a new session. It needs no open collection; its requests fail
@@ -495,7 +525,7 @@ public final class BrowseSearchSession: Sendable {
     public func startSearch(_ text: String, mode: BrowseMode, sort: BrowseSort,
                             cancel: CancelToken? = nil) async throws(BridgeError) -> UInt64 {
         let raw = raw
-        let seq = try await QueryLane.shared.call(.browseStartSearch) {
+        let seq = try await ControlLane.shared.call(.browseStartSearch) {
             try raw.startSearch(text: text, mode: mode.raw, sort: sort.raw, cancel: cancel?.raw)
         }
         return started(seq)
@@ -507,7 +537,7 @@ public final class BrowseSearchSession: Sendable {
     public func resort(_ handle: BrowseHandle, sort: BrowseSort,
                        cancel: CancelToken? = nil) async throws(BridgeError) -> UInt64 {
         let raw = raw
-        let seq = try await QueryLane.shared.call(.browseResort) {
+        let seq = try await ControlLane.shared.call(.browseResort) {
             try raw.resort(handle: handle.rawValue, sort: sort.raw, cancel: cancel?.raw)
         }
         return started(seq)
@@ -519,7 +549,7 @@ public final class BrowseSearchSession: Sendable {
     public func toggle(_ handle: BrowseHandle, sort: BrowseSort,
                        cancel: CancelToken? = nil) async throws(BridgeError) -> UInt64 {
         let raw = raw
-        let seq = try await QueryLane.shared.call(.browseToggle) {
+        let seq = try await ControlLane.shared.call(.browseToggle) {
             try raw.toggle(handle: handle.rawValue, sort: sort.raw, cancel: cancel?.raw)
         }
         return started(seq)
@@ -623,7 +653,8 @@ public final class BrowseSearchSession: Sendable {
     }
 
     /// H2: cancels the in-flight request, releases every handle and ends
-    /// `events`. Later calls fail with `BrowseFailure.unknownHandle`.
+    /// `events` (without that request's terminal event). Later calls fail
+    /// with `BrowseFailure.unknownHandle`.
     public func close() async throws(BridgeError) {
         let raw = raw
         try await ControlLane.shared.call(.browseClose) { try raw.close() }
