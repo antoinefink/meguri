@@ -49,6 +49,9 @@ setup() {
 MG_SIM_RUNNER=vm
 mg_lint_ui_first() { echo lint >>"$STUB_LOG"; }
 mg__xcframework() { echo "xcframework $*" >>"$STUB_LOG"; }
+# The identity checks run on real products (app_identity_check.py, xcode-check).
+mg_app_personal_identity() { echo "identity $1" >>"$STUB_LOG"; }
+mg_app_real_copy_identity() { echo "identity $1" >>"$STUB_LOG"; }
 # Generated dispatcher evidence only. cloud_agent_injection_test.py exercises
 # the real preparation helper with generated descriptors/command doubles.
 mg_app_cloud_agent_build() {
@@ -618,6 +621,7 @@ PY
     called '^xcframework .* --configuration Release$'
     [ "$(grep -n '^xcframework ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^xcodebuild -showBuildSettings ' "$STUB_LOG" | cut -d: -f1)" ]
     called '^xcodebuild build .* -configuration Release .* -derivedDataPath build/app/PersonalPreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development$'
+    called "^identity $candidate$"
     not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-test|host-lease|open|lsregister)|xcrun (simctl|devicectl)'
     [ "$(field .details.build.personal_preview)" = true ]
     [ "$(field .details.build.test_plan)" = UI ]
@@ -669,6 +673,18 @@ PY
     called '^xcframework .* --configuration Release$'
     not_called '^xcodebuild build '
   done
+}
+
+@test "personal preview fails when the checked product does not show the dev identity" {
+  personal_facts
+  # The last definition wins: this product shows another name or icon.
+  echo 'mg_app_personal_identity() { echo "identity $1" >>"$STUB_LOG"; return 1; }' >>"$SB/tools/mg.d/zz-physical-fakes.sh"
+  mg build-app --platform mac --personal-preview
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field -c '[.failures[].id]')" = '["personal-preview-identity"]' ]
+  called "^identity $SB/build/app/PersonalPreviewDerivedData/Build/Products/Release/Meguri.app$"
+  [ "$(field .details.input)" = null ]
 }
 
 # Mutate only the generated profile; signed product claims stay independent.

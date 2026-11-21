@@ -732,6 +732,11 @@ PY_CLOUD
      core: {hash: $core_hash, configuration: "Release", profile: "release", features: "ankiweb", slices: $slices}}')"
 }
 
+# The personal preview shows the dev identity: "Meguri Dev" and the blue icon.
+mg_app_personal_identity() {
+  python3 "$MG_TOOLS/tests/app_identity_check.py" product "$1" --identity dev >&2
+}
+
 # The name and icon the system shows: "Meguri" and the red AppIcon.
 mg_app_real_copy_identity() {
   python3 "$MG_TOOLS/tests/app_identity_check.py" product "$1" --identity daily >&2
@@ -1482,7 +1487,7 @@ mg_build_app() {
       return 0
     fi
     # The test copy must never look like the daily driver: "Meguri Dev", blue icon.
-    if ! python3 tools/tests/app_identity_check.py product "$app" --identity dev >&2; then
+    if ! mg_app_personal_identity "$app"; then
       mg_failure personal-preview-identity "personal preview does not show the dev identity (Meguri Dev, blue icon); see log.txt"
       mg_status fail
       return 0
