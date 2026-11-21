@@ -604,6 +604,11 @@ fn commit(context: &mut OpContext<'_, '_>, request: &FindReplace, planned: &Plan
             key: "normalize_note_text".to_owned(),
         });
     }
+    // The seam for the confirmed count (D8, ruled 2026-11-21, lands with
+    // U265 and its spec line): every planned note is re-derived below from
+    // the current stored row before it is written, so counting again how
+    // many notes would change, against the count the preview showed,
+    // goes here, ahead of the first write.
     let mut affected = 0u64;
     let mut registered = HashMap::new();
     let mut notetypes = HashMap::new();

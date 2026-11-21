@@ -76,6 +76,9 @@ pub struct BulkOutcome {
     pub changes: Arc<ChangeSet>,
     /// The undo step, `None` when the action wrote nothing.
     pub undo: Option<UndoMeta>,
+    /// A cancel came after the write phase started; the action completed
+    /// anyway (O5).
+    pub past_cancel_point: bool,
 }
 
 impl BulkOutcome {
@@ -85,6 +88,7 @@ impl BulkOutcome {
             seq: result.seq,
             changes: result.changes,
             undo: result.undo,
+            past_cancel_point: result.past_cancel_point,
         }
     }
 }
