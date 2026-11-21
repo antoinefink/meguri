@@ -5,7 +5,7 @@ use crate::{callback, error::CoreError, runtime};
 use meguri_model::{card_data::MemoryState, ids::CardId, revlog::RevlogKind};
 use meguri_stats::{
     CardInfoOutcome,
-    card_info::{self, CardInfo, ErrorKind, RangeKind},
+    card_info::{CardInfo, ErrorKind, RangeKind},
 };
 
 /// C11's kinds; the view shows its unavailable state for each (C12).
@@ -219,6 +219,9 @@ pub struct CardInfoSnapshot {
     pub dependencies: CardInfoDependencies,
 }
 
+// Lowered into a buffer for Swift by value, once per read; a UniFFI enum
+// variant cannot hold a Box.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum CardInfoResult {
     Found { snapshot: CardInfoSnapshot },
@@ -390,7 +393,7 @@ mod tests {
         assert_eq!(CardInfoUnavailable::from(ErrorKind::FsrsFailed), CardInfoUnavailable::FsrsFailed);
         assert_eq!(CardInfoReviewKind::from(RevlogKind::Relearning), CardInfoReviewKind::Relearn);
         assert_eq!(
-            CardInfoCurveRangeKind::from(card_info::RangeKind::AllTime),
+            CardInfoCurveRangeKind::from(RangeKind::AllTime),
             CardInfoCurveRangeKind::AllTime
         );
     }

@@ -164,7 +164,7 @@ impl Reader<'_> {
             _ => {
                 let rest = &self.text[self.at..];
                 let length = rest
-                    .find(|c: char| matches!(c, ',' | ']' | '}' | ' ' | '\t' | '\n' | '\r'))
+                    .find([',', ']', '}', ' ', '\t', '\n', '\r'])
                     .unwrap_or(rest.len());
                 if length == 0 {
                     return None;

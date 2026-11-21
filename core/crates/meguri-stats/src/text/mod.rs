@@ -252,7 +252,7 @@ pub fn two_decimal_percent(x: f64) -> String {
     // round up here, where the formatter would round them to even.
     let eighths = magnitude * 8.0;
     let body = if eighths.fract() == 0.0 && (eighths as u128) % 2 == 1 {
-        let hundredths = ((eighths as u128) * 25 + 1) / 2;
+        let hundredths = ((eighths as u128) * 25).div_ceil(2);
         format!("{}.{:02}", hundredths / 100, hundredths % 100)
     } else {
         format!("{magnitude:.2}")

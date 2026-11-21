@@ -448,7 +448,7 @@ pub fn build(rows: &impl ReadRows, clock: &dyn Clock, input: &Input) -> Result<C
         desired_retention: data.desired_retention,
         fsrs_params: preset.parameters().to_vec(),
         first_review: rated().next().map(instant),
-        latest_review: rated().last().map(instant),
+        latest_review: rated().next_back().map(instant),
         due_date,
         due_position,
         memory_state,
