@@ -1,3 +1,4 @@
+import Foundation
 internal import MeguriCoreBindings
 
 public enum CoreTable: Sendable, Hashable {
@@ -136,15 +137,83 @@ public enum NotetypeRefusal: Sendable, Hashable {
     }
 }
 
-/// Why a note type structure save wrote nothing
-/// (`notetypes/structure-changes` S1.2).
+/// One change of a note type save's summary (`notetypes/draft-save` D2).
+public enum NotetypeDraftChange: Sendable, Hashable {
+    case fieldAdded(name: String)
+    case fieldRemoved(ord: UInt32, name: String, notesWithContent: UInt64)
+    case fieldRenamed(from: String, to: String)
+    case fieldsReordered
+    case sortFieldChanged(name: String)
+    case templateAdded(name: String, cardsCreated: UInt64)
+    case templateRemoved(ord: UInt32, name: String, cardsRemoved: UInt64, notesWithoutCards: UInt64)
+    case templateRenamed(from: String, to: String)
+    case templatesReordered
+    case notetypeRenamed(from: String, to: String)
+    case textOrStylingChanged
+    init(_ raw: MeguriCoreBindings.NotetypeDraftChange) {
+        switch raw {
+        case .fieldAdded(let name): self = .fieldAdded(name: name)
+        case .fieldRemoved(let ord, let name, let notes): self = .fieldRemoved(ord: ord, name: name, notesWithContent: notes)
+        case .fieldRenamed(let from, let to): self = .fieldRenamed(from: from, to: to)
+        case .fieldsReordered: self = .fieldsReordered
+        case .sortFieldChanged(let name): self = .sortFieldChanged(name: name)
+        case .templateAdded(let name, let cards): self = .templateAdded(name: name, cardsCreated: cards)
+        case .templateRemoved(let ord, let name, let cards, let notes):
+            self = .templateRemoved(ord: ord, name: name, cardsRemoved: cards, notesWithoutCards: notes)
+        case .templateRenamed(let from, let to): self = .templateRenamed(from: from, to: to)
+        case .templatesReordered: self = .templatesReordered
+        case .notetypeRenamed(let from, let to): self = .notetypeRenamed(from: from, to: to)
+        case .textOrStylingChanged: self = .textOrStylingChanged
+        }
+    }
+}
+
+/// A note type save's summary (`notetypes/draft-save` D2).
+public struct NotetypeDraftSummary: Sendable, Hashable {
+    public let reasons: [SchemaChangeReason]
+    public let changes: [NotetypeDraftChange]
+    public let losesContent: Bool
+    init(_ raw: MeguriCoreBindings.NotetypeDraftSummary) {
+        reasons = raw.reasons.map(SchemaChangeReason.init)
+        changes = raw.changes.map(NotetypeDraftChange.init)
+        losesContent = raw.losesContent
+    }
+}
+
+/// Restore to Default's summary (`notetypes/restore-to-default` D7.1).
+public struct NotetypeRestoreSummary: Sendable, Hashable {
+    public let summary: NotetypeDraftSummary
+    public let kindChangeCardsRemoved: UInt64
+    /// The digest the summary was read from: a restore confirmed from this
+    /// summary passes it back with the counts (D6, D7.1).
+    public let digest: Data
+    init(_ raw: MeguriCoreBindings.NotetypeRestoreSummary) {
+        summary = NotetypeDraftSummary(raw.summary)
+        kindChangeCardsRemoved = raw.kindChangeCardsRemoved
+        digest = raw.digest
+    }
+}
+
+/// Why a note type structure op wrote nothing
+/// (`notetypes/structure-changes` S1.2, S12; `restore-to-default` D7.2).
 public enum NotetypeStructureRefusal: Sendable, Hashable {
     case protectedField(field: UInt32)
     case noteFieldCountMismatch(note: Int64)
+    /// The losses grew past the confirmed ones: ask again with these.
+    case lossesChanged(summary: NotetypeDraftSummary)
+    case removalLossesChanged(notes: UInt64, cards: UInt64)
+    case restoreLossesChanged(summary: NotetypeRestoreSummary)
+    case lastNotetype
+    case needsStockKind
     init(_ raw: MeguriCoreBindings.NotetypeStructureRefusal) {
         switch raw {
         case .protectedField(let field): self = .protectedField(field: field)
         case .noteFieldCountMismatch(let note): self = .noteFieldCountMismatch(note: note)
+        case .lossesChanged(let summary): self = .lossesChanged(summary: NotetypeDraftSummary(summary))
+        case .removalLossesChanged(let notes, let cards): self = .removalLossesChanged(notes: notes, cards: cards)
+        case .restoreLossesChanged(let summary): self = .restoreLossesChanged(summary: NotetypeRestoreSummary(summary))
+        case .lastNotetype: self = .lastNotetype
+        case .needsStockKind: self = .needsStockKind
         }
     }
 }

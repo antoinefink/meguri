@@ -23,7 +23,9 @@
 pub mod clone;
 pub mod names;
 pub mod read;
+pub mod remove;
 pub mod rename;
+pub mod restore;
 pub(crate) mod rewrite;
 pub mod stock;
 pub mod structure;

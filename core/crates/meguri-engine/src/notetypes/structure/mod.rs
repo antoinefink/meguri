@@ -8,15 +8,24 @@
 //! The op plans on a reader snapshot (`plan.rs`: the diff, the rewritten
 //! templates, the card map and the generation plan, the refusals of S1.2)
 //! and writes in one short phase (`commit.rs`) whose checks on the live rows
-//! of its own transaction (the base token, S1.2 item 4) all come before its
-//! first write. The safety backup of a schema-classified save is taken
-//! between the two (`package/backup-triggers` T6.1, T6.2), so a failed
-//! backup stops the op before anything is written.
+//! of its own transaction all come before its first write. The safety
+//! backup of a schema-classified save is taken between the two
+//! (`package/backup-triggers` T6.1, T6.2), so a failed backup stops the op
+//! before anything is written.
+//!
+//! The losses the user confirmed (S1.2 as changed 2026-11-20,
+//! `notetypes/draft-save` D8) are counted again twice: on the planning
+//! snapshot, so an out-of-date confirmation costs no backup, and inside the
+//! write transaction right after the staleness checks. A live count larger
+//! than its confirmed count, compared per category, refuses with
+//! `LossesChanged`, the op's own read as payload, and writes nothing.
 
-mod commit;
-mod plan;
+pub(crate) mod commit;
+pub(crate) mod plan;
 pub mod preview;
+mod summary;
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,6 +37,7 @@ use meguri_model::proto::notetype::FieldConfig;
 use meguri_storage::{ReaderRole, Table};
 
 pub use preview::{RemovalPreview, preview_removal, removal_preview};
+pub use summary::{DraftChange, DraftSummary, RestoreSummary};
 
 
 use super::AggregateDigest;
@@ -120,6 +130,30 @@ pub struct DraftTemplate {
     pub browser_font_size: u32,
 }
 
+/// What the user confirmed would be lost (`notetypes/draft-save` D8): one
+/// count per loss category, each compared on its own with its live count.
+/// A category absent here was confirmed as 0. A precondition, not a
+/// confirmation input (`notetypes/schema-changes` G4).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConfirmedLosses {
+    /// Per removed base field ordinal: the notes with content (E1).
+    pub fields: BTreeMap<u32, u64>,
+    /// Per removed base template ordinal: its cards.
+    pub templates: BTreeMap<u32, u64>,
+    /// `restore-to-default` D4.1 and D7.1: the cards a cloze note type
+    /// restored as a standard kind loses past the stock template count.
+    pub kind_change_cards: u64,
+}
+
+impl ConfirmedLosses {
+    /// Whether every count is 0 (`restore-to-default` D6).
+    pub fn is_zero(&self) -> bool {
+        self.kind_change_cards == 0
+            && self.fields.values().all(|n| *n == 0)
+            && self.templates.values().all(|n| *n == 0)
+    }
+}
+
 /// A whole draft of one note type (S1.1).
 #[derive(Clone, Debug)]
 pub struct StructureDraft {
@@ -135,6 +169,9 @@ pub struct StructureDraft {
     pub sort_field: Option<u32>,
     /// `notetypes/validation` V1: true for the field editor's saves.
     pub skip_checks: bool,
+    /// The losses the save sheet showed (S1.2; zero for each when none was
+    /// shown). Callers with no question pass the counts they read.
+    pub confirmed: ConfirmedLosses,
 }
 
 impl StructureDraft {
@@ -177,6 +214,7 @@ impl StructureDraft {
                 .collect(),
             sort_field: None,
             skip_checks: false,
+            confirmed: ConfirmedLosses::default(),
         }
     }
 }
@@ -209,6 +247,25 @@ pub enum StructureRefusal {
     /// S1.2 item 4: a note of the type stores more values than the base
     /// has fields.
     NoteFieldCountMismatch { note: NoteId },
+    /// `notetypes/draft-save` D8: a live loss count is larger than the
+    /// confirmed one; nothing was written.
+    LossesChanged(Box<Losses>),
+    /// S12: the collection's only note type.
+    LastNotetype,
+    /// `restore-to-default` D2: no usable stock kind.
+    NeedsStockKind,
+}
+
+/// `LossesChanged`'s payload: the op's own read, taken in the refusing
+/// transaction (D8).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Losses {
+    /// The draft save: D2's summary.
+    Draft(DraftSummary),
+    /// A note type removal (S12): the live counts.
+    Removal { notes: u64, cards: u64 },
+    /// Restore to Default: a new `restore_summary` (D7.1).
+    Restore(RestoreSummary),
 }
 
 impl StructureRefusal {
@@ -217,6 +274,9 @@ impl StructureRefusal {
         match self {
             StructureRefusal::ProtectedField { .. } => "protected_field",
             StructureRefusal::NoteFieldCountMismatch { .. } => "note_field_count_mismatch",
+            StructureRefusal::LossesChanged(_) => "losses_changed",
+            StructureRefusal::LastNotetype => "last_notetype",
+            StructureRefusal::NeedsStockKind => "needs_stock_kind",
         }
     }
 }
@@ -226,6 +286,8 @@ impl fmt::Display for StructureRefusal {
         match self {
             StructureRefusal::ProtectedField { field } => write!(f, "protected_field (base field {field})"),
             StructureRefusal::NoteFieldCountMismatch { note } => write!(f, "note_field_count_mismatch (note {note})"),
+            StructureRefusal::LossesChanged(losses) => write!(f, "losses_changed ({losses:?})"),
+            other => f.write_str(other.kind()),
         }
     }
 }
@@ -279,14 +341,13 @@ pub fn apply(
         .undo_step(UPDATE_NOTE_TYPE, StepKind::Other)
         .cancel(cancel.clone())
         .progress(progress.clone());
-    crate::plan_and_commit_with(
+    // S1.2 item 1: `Stale` is returned, never planned again.
+    crate::plan_and_commit_with_replans(
         collection,
         ReaderRole::Maintenance,
         spec,
+        0,
         |context| {
-            if context.attempt() > 0 {
-                return Err(stale(draft.notetype));
-            }
             Ok(Plan {
                 value: plan::plan_draft(&**context.snapshot(), &draft, &cancel, &progress)?,
                 // The base token is checked again on the live rows inside the

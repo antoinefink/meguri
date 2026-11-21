@@ -2976,7 +2976,7 @@ fn held_export() -> Value {
 }
 
 #[test]
-fn held_step_vocabulary_is_strict_and_remains_unregistered() {
+fn held_step_vocabulary_is_strict_and_registered_only_where_supported() {
     let examples = [
         ("remove_notetype", json!({"notetype": "Pair"})),
         ("restore_notetype", json!({"notetype": "Pair", "kind": "basic"})),
@@ -3005,7 +3005,13 @@ fn held_step_vocabulary_is_strict_and_remains_unregistered() {
         let parsed = held_steps(json!([prefix, {op: args.clone()}])).unwrap();
         assert_eq!(parsed.steps[1].name(), op);
         assert!(parsed.needs().ops.contains(op));
-        assert!(!capabilities.ops.contains(op), "{op} is recognition only");
+        // U34's notetypes adapter runs remove_notetype and restore_notetype
+        // (notetype-structure-ops M1, M2); the others are recognition only.
+        assert_eq!(
+            capabilities.ops.contains(op),
+            matches!(op, "remove_notetype" | "restore_notetype"),
+            "{op}"
+        );
         assert!(held_steps(json!([prefix, {op: null}])).is_err(), "{op} null");
         assert!(held_steps(json!([prefix, {op: []}])).is_err(), "{op} list");
         let mut extra = args.clone();
