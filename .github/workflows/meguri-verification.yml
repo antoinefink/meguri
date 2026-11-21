@@ -124,7 +124,7 @@ jobs:
             # lock that build the XCFramework, and the tools that build and
             # run them. Other core crates reach the packages only through
             # that interface, and Linux · core tests them.
-            swift_paths='app/Packages/|core/crates/meguri-ffi/|core/Cargo\.lock$|core/rust-toolchain\.toml$|tools/scripts/build-core-xcframework\.sh$|tools/scripts/repair-swift-integer-reader\.py$|tools/mg$|tools/mg\.d/(bridge|lint-ui)\.sh$|\.github/mg-step\.sh$|\.github/workflows/meguri-verification\.yml$'
+            swift_paths='app/Packages/|\.github/swift-timing-sensitive\.txt$|core/crates/meguri-ffi/|core/Cargo\.lock$|core/rust-toolchain\.toml$|tools/scripts/build-core-xcframework\.sh$|tools/scripts/repair-swift-integer-reader\.py$|tools/mg$|tools/mg\.d/(bridge|lint-ui)\.sh$|\.github/mg-step\.sh$|\.github/workflows/meguri-verification\.yml$'
             if ! grep -qE "^($swift_paths)" <<<"$changed"; then
               swift=no
             fi
@@ -1037,7 +1037,15 @@ jobs:
         shell: bash
         env:
           MG_STEP_SUDO: "no"
-        run: .github/mg-step.sh "swift-test MeguriCore" swift-test --package MeguriCore
+        run: |
+          # The tests of .github/swift-timing-sensitive.txt, skipped by name.
+          skips=()
+          while read -r name _; do
+            [[ -n "$name" && "$name" != \#* ]] || continue
+            [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::bad line in .github/swift-timing-sensitive.txt: $name"; exit 1; }
+            skips+=(--skip "$name")
+          done < .github/swift-timing-sensitive.txt
+          .github/mg-step.sh "swift-test MeguriCore" swift-test --package MeguriCore ${skips[0]+-- "${skips[@]}"}
 
       - name: Save the Rust and XCFramework cache
         if: >-
