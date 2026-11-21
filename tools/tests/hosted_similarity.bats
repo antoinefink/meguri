@@ -198,9 +198,14 @@ out() { sed -n "s/^$1=//p" "$GITHUB_OUTPUT"; }
   select_after "$r" conformance/goldens/sched/one.json conformance/scenarios/lonely/one.yaml
   [ "$(out run)" = yes ]
   [ "$(out code)" = no ]
-  [ "$(out areas)" = sched ]
+  # An area without its other side is kept, so its scan fails.
+  [ "$(out areas)" = "lonely sched" ]
   select_after "$r" tools/similarity/config.yaml
   [ "$(out code)" = yes ]
+  [ "$(out areas)" = sched ]
+  select_after "$r" .github/similarity.sh
+  [ "$(out code)" = yes ]
+  [ "$(out areas)" = "" ]
 }
 
 @test "select without a base scans the whole tree and every paired area" {

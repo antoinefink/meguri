@@ -73,8 +73,15 @@ scanned_extensions() {
 
 # Areas with both a scenario and a golden directory at HEAD, one per line.
 paired_areas() {
-  comm -12 <(git ls-tree -d --name-only HEAD conformance/scenarios/ | sed 's|.*/||' | sort) \
-    <(git ls-tree -d --name-only HEAD conformance/goldens/ | sed 's|.*/||' | sort)
+  comm -12 <(git ls-tree -d -z --name-only HEAD conformance/scenarios/ | tr '\0' '\n' | sed 's|.*/||' | sort) \
+    <(git ls-tree -d -z --name-only HEAD conformance/goldens/ | tr '\0' '\n' | sed 's|.*/||' | sort) |
+    grep -E '^[A-Za-z0-9][A-Za-z0-9_.-]*$' || true
+}
+
+# The thresholds, channels and scope of the config (its `channels:` and
+# `scan:` sections) at a commit.
+scan_settings() {
+  git show "$1:$CONFIG" 2>/dev/null | awk '/^[^ #]/ { keep = ($0 ~ /^(channels|scan):/) } keep'
 }
 
 cmd_select() {
@@ -100,17 +107,21 @@ cmd_select() {
     mapfile -t areas < <(paired_areas)
   else
     local -A touched=()
-    local -A paired=()
-    while IFS= read -r area; do paired[$area]=1; done < <(paired_areas)
+    local all_areas=""
     while IFS= read -r -d '' p; do
       case "$p" in
-        # The job's own inputs: scan, so a change to it runs it.
-        tools/similarity/* | tools/mg | tools/mg.d/similarity.sh | docker/similarity.Dockerfile* | \
+        # A scanner change runs both scans, the test data of every area.
+        tools/similarity/*) code=yes all_areas=yes ;;
+        # The job's other inputs: scan, so a change to it runs it.
+        tools/mg | tools/mg.d/similarity.sh | docker/similarity.Dockerfile* | \
           docker/compose.yml | .github/similarity.sh | .github/workflows/meguri-verification.yml) code=yes ;;
       esac
+      # A touched area without its other side is kept: the scan then fails
+      # on the unpaired files instead of skipping them.
       if [[ "$p" =~ ^conformance/(scenarios|goldens)/([^/]+)/ ]]; then
         area="${BASH_REMATCH[2]}"
-        [[ -z "${paired[$area]:-}" ]] || touched[$area]=1
+        [[ "$area" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "::error::Unexpected conformance area name"; exit 1; }
+        touched[$area]=1
       fi
       skip=""
       for d in "${excluded[@]}"; do
@@ -123,7 +134,9 @@ cmd_select() {
         [[ "$ext" != "$d" ]] || { code=yes; break; }
       done
     done < <(git diff -z --no-renames --name-only --diff-filter=d "$base" HEAD)
-    if ((${#touched[@]} > 0)); then
+    if [[ -n "$all_areas" ]]; then
+      mapfile -t areas < <(paired_areas)
+    elif ((${#touched[@]} > 0)); then
       mapfile -t areas < <(printf '%s\n' "${!touched[@]}" | sort)
     fi
   fi
@@ -251,7 +264,7 @@ cmd_summary() {
       "| File | Channel | Score | Changed here |",
       "| --- | --- | --- | --- |",
       ($flagged[] as $f | ($f.flags // [])[] | (.channel | channel) as $ch | select($ch != null) |
-        "| \($f.path | shown) | \($ch) | \(score(($f.channels // {})[$ch] // {})) | \(if ($mine[$f.path] // false) then "yes" else "no" end) |")
+        "| \($f.path | shown) | \($ch) | \(score(($f.channels // {})[$ch] // {})) | \(if ($f.path | type == "string" and ($mine[.] // false)) then "yes" else "no" end) |")
      else empty end),
     (if $kind == "data" and ($flagged | length) > ($here | length) then
       "",
@@ -286,13 +299,17 @@ run_mg() {
 }
 
 cmd_scan() {
-  local rc=0 area
-  local -a allow=() paths=()
+  local rc=0 area settings=""
+  local -a allow=() paths=() areas=()
   git ls-files -z >"$RUNNER_TEMP/similarity-tracked"
   if [[ -n "${BASE:-}" ]]; then
     git diff -z --no-renames --name-only --diff-filter=d "$BASE" HEAD >"$RUNNER_TEMP/similarity-changed"
-    # The base's allowlist: an entry exempts nothing until it is on master.
-    allow=(--allowlist-rev "$BASE")
+    # A pull request is scanned with its base's allowlist: an entry exempts
+    # nothing until it is on master. A master push uses master's own.
+    [[ "${EVENT:-}" != pull_request ]] || allow=(--allowlist-rev "$BASE")
+    # Nor may a change loosen the scan it is checked with: thresholds,
+    # channels and exclusions changed against the base fail the check.
+    [[ "$(scan_settings "$BASE")" == "$(scan_settings HEAD)" ]] || settings=changed
   else
     cp "$RUNNER_TEMP/similarity-tracked" "$RUNNER_TEMP/similarity-changed"
   fi
@@ -310,12 +327,23 @@ cmd_scan() {
       fi
       echo
     fi
-    if [[ -n "${AREAS:-}" ]]; then
-      for area in $AREAS; do
-        paths+=("conformance/scenarios/$area" "conformance/goldens/$area")
+    if [[ -n "$settings" ]]; then
+      # shellcheck disable=SC2016 # the backticks are Markdown
+      printf '#### Scanner settings: **changed**\n\nThis change edits the `channels:` or `scan:` section of %s (thresholds, channels or exclusions), so it would be scanned with settings it chose. A human reviews the change and merges over this check.\n\n' "$CONFIG"
+      rc=1
+    fi
+    read -r -a areas <<<"${AREAS:-}"
+    if ((${#areas[@]} > 0)); then
+      for area in "${areas[@]}"; do
+        [[ "$area" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "Unexpected area name."; rc=1; continue; }
+        # Only the sides that exist: an unpaired area fails the scan.
+        [[ ! -d "conformance/scenarios/$area" ]] || paths+=("conformance/scenarios/$area")
+        [[ ! -d "conformance/goldens/$area" ]] || paths+=("conformance/goldens/$area")
       done
-      echo "Test data: areas $AREAS, \`tools/mg similarity --test-data\`. Only flags in files this change adds or modifies fail the check."
-      run_mg data --test-data "${allow[@]}" -- "${paths[@]}" || rc=1
+      echo "Test data: areas ${areas[*]}, \`tools/mg similarity --test-data\`. Only flags in files this change adds or modifies fail the check."
+      if ((${#paths[@]} > 0)); then
+        run_mg data --test-data "${allow[@]}" -- "${paths[@]}" || rc=1
+      fi
       echo
     fi
     echo "Only file names, scores and counts are shown here; the reviewer view stays local (\`tools/mg similarity\` in the main checkout)."

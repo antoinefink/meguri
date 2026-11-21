@@ -368,6 +368,9 @@ def build_index(plan: Plan, cache_root: str, mask, stopwords, workers=None, log=
 
     os.makedirs(cache_root, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix=f".tmp-{plan.key}-", dir=cache_root)
+    # mkdtemp makes it 0700; a published index must be readable by the host
+    # user too (in CI the scanner runs as root and actions/cache saves it).
+    os.chmod(tmp, 0o755)
     try:
         counts = {}
         for c, (hs, ls, bs) in acc.items():

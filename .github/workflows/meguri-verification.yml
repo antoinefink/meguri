@@ -721,10 +721,12 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    # A pull request's newer run replaces its older one. Every other run has
+    # a group of its own: a master push scans only what it pushed, and a
+    # cancelled or dropped one would leave that unscanned.
     concurrency:
-      group: meguri-verification-${{ github.ref }}-similarity
-      # A master push scans only what it pushed: never cancel one.
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+      group: meguri-verification-${{ github.ref }}-similarity-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -768,15 +770,17 @@ jobs:
         if: steps.select.outputs.run == 'yes'
         shell: bash
         env:
+          EVENT: ${{ github.event_name }}
           REFS: ${{ runner.temp }}/similarity-refs
           BASE: ${{ steps.select.outputs.base }}
           CODE: ${{ steps.select.outputs.code }}
           AREAS: ${{ steps.select.outputs.areas }}
         run: .github/similarity.sh scan
 
+      # Also after a scan that flagged something: the index is still good.
       - name: Save the similarity index
         if: >-
-          steps.select.outputs.run == 'yes' && steps.index.outputs.cache-hit != 'true'
+          !cancelled() && steps.select.outputs.run == 'yes' && steps.index.outputs.cache-hit != 'true'
           && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
           && hashFiles('build/similarity-index/*/meta.json') != ''
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
