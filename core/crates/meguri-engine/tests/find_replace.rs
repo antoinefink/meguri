@@ -1226,6 +1226,30 @@ fn v9_the_tags_preview_spells_as_the_run_does() {
     assert_eq!(note(&h, second).tags, " Fresh::One ");
 }
 
+/// F7 step 3 in the preview: the notes are spelled in ascending note id
+/// whatever the list's order: when two notes give one name in two
+/// letter cases, both store the lower note's.
+#[test]
+fn v9_the_tags_preview_spells_in_ascending_note_id() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let lower = add(&h, vocab, &["one", "x"], &["src::Fresh::One"]);
+    let higher = add(&h, vocab, &["two", "x"], &[]);
+    raw_note(&h, higher, |n| n.tags = " src::fresh::one ".into());
+    let target = NoteTarget::Notes(vec![higher, lower]);
+    let request = FindReplace {
+        regex: true,
+        ..request("^src::", "", FindIn::Tags)
+    };
+    let shown = preview_of(&h.collection, &target, &request).unwrap();
+    assert_eq!(shown.changed, 2);
+    let listed: Vec<_> = shown.entries.iter().map(|entry| (entry.note, entry.new_text())).collect();
+    assert_eq!(listed, [(higher, "Fresh::One".to_owned()), (lower, "Fresh::One".to_owned())]);
+    assert_eq!(run(&h, &[higher, lower], &request).unwrap(), counts(2, 2));
+    assert_eq!(note(&h, lower).tags, " Fresh::One ");
+    assert_eq!(note(&h, higher).tags, " Fresh::One ");
+}
+
 /// V9, V17: the list holds the first 100 changed notes in result order
 /// while the count goes on; the all-notes target lists by note id.
 #[test]

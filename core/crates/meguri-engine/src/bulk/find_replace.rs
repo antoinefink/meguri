@@ -1124,6 +1124,8 @@ pub fn preview_in(
         progress: Some(progress),
     };
     let scanned = scan(reader, target, request, &pattern, normalize, &pace, |change| listed.offer(change))?;
+    // A cancel during the last page's reports.
+    cancel.check()?;
     Ok(Preview {
         changed: scanned.changed,
         considered: scanned.considered,
@@ -1178,7 +1180,10 @@ impl<'r, R: ReadRows + ?Sized> Listed<'r, R> {
         let entries = match change {
             Change::Fields { note, notetype, fields } => field_entries(note, notetype, fields),
             Change::Tags { note, tags } => {
-                let notetype = self.notetypes.get(note.notetype_id)?;
+                // Display only: the Tags run reads no note type, so one that
+                // cannot be read leaves the Sort Field empty, not the preview
+                // refused.
+                let notetype = self.notetypes.get(note.notetype_id).ok().flatten();
                 vec![Pending {
                     note: note.id,
                     sort_field: notetype.map_or_else(String::new, |notetype| sort_field_text(note, &notetype)),
@@ -1244,12 +1249,12 @@ fn field_entries(note: &Note, notetype: &Notetype, fields: &[String]) -> Vec<Pen
         .collect()
 }
 
-/// Above this many differences between two texts, or this many
-/// characters between their common start and end, the diff stops looking
-/// for the shortest edit script: between the common start and end, the old
-/// text is shown removed and the new one inserted.
+/// The search for the shortest edit script gives up above this many
+/// differences, and above [`MAX_STEPS`] steps (the characters compared
+/// times the differences tried). Past either limit, between the common
+/// start and end, the old text is shown removed and the new one inserted.
 const MAX_EDITS: usize = 500;
-const MAX_MIDDLE: usize = 20_000;
+const MAX_STEPS: usize = 50_000_000;
 
 /// V9's character diff from `old` to `new`.
 fn char_diff(old: &str, new: &str) -> Vec<DiffSpan> {
@@ -1314,14 +1319,12 @@ fn spans(edits: Vec<(Edit, &[char])>) -> Vec<DiffSpan> {
 /// The shortest edit script from `a` to `b` (the greedy forward search
 /// round by round, one more difference each round, then a walk back), as
 /// runs of kept, removed and inserted characters in text order; `None` when
-/// it needs more than [`MAX_EDITS`] removals and insertions or the texts
-/// are longer than [`MAX_MIDDLE`] together.
+/// it needs more removals and insertions than [`MAX_EDITS`] or, for long
+/// texts, than [`MAX_STEPS`] allows.
 fn shortest_edits<'c>(a: &'c [char], b: &'c [char]) -> Option<Vec<(Edit, &'c [char])>> {
-    if a.len() + b.len() > MAX_MIDDLE {
-        return None;
-    }
     let (n, m) = (a.len() as isize, b.len() as isize);
-    let limit = (n + m).min(MAX_EDITS as isize);
+    let rounds = MAX_STEPS / (a.len() + b.len()).max(1);
+    let limit = (n + m).min(MAX_EDITS.min(rounds) as isize);
     // `furthest[k + offset]`: the largest x reached where x - y = k.
     let offset = limit + 1;
     let mut furthest = vec![0isize; (2 * limit + 3) as usize];
@@ -1568,5 +1571,14 @@ mod tests {
         assert_eq!(long.len(), 4, "{long:?}");
         assert_eq!(long[1], (Removed, old.clone()));
         assert_eq!(long[2], (Inserted, new.clone()));
+        // A long text with few changes keeps what it shares.
+        let middle = "m".repeat(30_000);
+        assert_eq!(diff(&format!("a{middle}b"), &format!("x{middle}y")), [
+            (Removed, s("a")),
+            (Inserted, s("x")),
+            (Kept, middle.clone()),
+            (Removed, s("b")),
+            (Inserted, s("y")),
+        ]);
     }
 }

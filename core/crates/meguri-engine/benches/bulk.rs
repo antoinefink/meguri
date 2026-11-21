@@ -279,7 +279,8 @@ fn main() -> ExitCode {
             .map_or(0, |(_, count)| *count);
         let budget = match record.name.as_str() {
             BULK => Some(BULK_BUDGET),
-            PREVIEW => Some(PREVIEW_BUDGET),
+            // V17's row is 10,000 notes: a smaller fixture is recorded, not gated.
+            PREVIEW if notes >= NOTES => Some(PREVIEW_BUDGET),
             ALL | LISTED if notes >= ALL_BUDGET_NOTES => Some(ALL_BUDGET),
             _ => None,
         };
