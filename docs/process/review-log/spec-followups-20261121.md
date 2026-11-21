@@ -86,7 +86,7 @@ Kept:
 - T7.1: a Field Contains text holding other white space stays offered and comes back advanced; so does a field name holding such a character; Leech beside a Card State token.
 
 Changed:
-- T5: `-10:45` stays text, as the negation of its literal. The implementer made it an advanced token, which finds nothing.
+- T5: `-10:45` stays text, as the negation of its literal. The implementer made it an advanced token, which finds every note (`fields.md` F3).
 - New T3.2 and T4: the written-text item keeps F7's shapes unchanged in the run text, in brackets unless it is a single term. A negated operator word runs and fails with E3's error. The implementer had no run text for it, and wrote `preset:` values in their broken canonical form.
 - T6: whether a token keeps its written text depends on the item read back (`has\-cd:x`).
 
@@ -104,4 +104,6 @@ Independent review: a separate Claude subagent (Opus), given the commit, the que
   - The plan now lists tests.
 - P3, noted:
   - `my_var:3` with no such field becomes an advanced token that finds nothing.
+
+Re-review of 8a6cec468: the P1 fix holds and every query now has a run text. One P2: T3.2's brackets grew at each reading back; it now brackets only what is not one item. Six P3 points, fixed: T3.2's refusal kinds and J3.6; pointers in J3 and J8; the stored-spelling order (lowest note type id); the scope of T5's quote rule; this log's "finds every note"; one sentence split.
   - Refused card types get no filter.

@@ -28,7 +28,7 @@ Text taken from the search field (typed, pasted, picked from history) has every 
 
 ## J3. Built items
 
-Changed 2026-11-20 (round 8): two more items, "field contains" and "field empty", are added for Browse's Field tokens; their rows are `search/filter-tokens` T3.1.
+Changed 2026-11-20 (round 8): two more items, "field contains" and "field empty", are added for Browse's Field tokens; their rows are `search/filter-tokens` T3.1. Changed 2026-11-21 (implementation review): one more, the written-text item, which J4 writes unchanged, is `search/filter-tokens` T3.2.
 
 Each built item makes one query item (`query-model.md` Q1, Q3). "E(s)" below is the name escape:
 
@@ -105,7 +105,7 @@ These callers are the sidebar (`browser/sidebar` S3.4, S3.5; a dragged id list s
 
 ### J3.6 Refusal reasons
 
-Changed 2026-11-21 (U88a review): new section. Every refusal of J3 and `search/filter-tokens` T3.1 is `invalid_item` with one of these reasons. The names are an interface: errors, the FFI and tests carry them exactly as written.
+Changed 2026-11-21 (U88a review): new section. Every refusal of J3 and `search/filter-tokens` T3.1 (and T3.2; changed 2026-11-21, implementation review) is `invalid_item` with one of these reasons. The names are an interface: errors, the FFI and tests carry them exactly as written.
 
 | Reason | Items | Refused when |
 |---|---|---|
@@ -187,6 +187,7 @@ Negated operator words are not terms and are never replaced. Consequences, all A
 
 ## J8. Round trips
 
+- Changed 2026-11-21 (implementation review): **The written-text item** (`search/filter-tokens` T3.2) can hold F7's first three shapes and is written unchanged, so it is an exception to the next bullet; the property tests exclude it.
 - **Built items other than parsed text** hold none of F7's four shapes (`canonical-form.md` F7): J3 makes no negated operator word, no `preset:` or `prop:cds:` item, no field term for a field named `has-cd` (J3.3), and a group of one item is no group. Every output made only of such items, and of an `existing` free of those shapes, is canonical text: writing its canonical text again gives it back.
 - **Parsed text** (J3), wherever it stands in an item, and `existing` in `join` and `replace`, can hold any of F7's shapes. The output keeps the first three shapes' text as F7 writes them, and reading it again gives what F7's table says: `a -and b` joined with `c` gives `(a -  b) c`; `replace` with a parsed-text item `has\-cd:x` puts `has-cd:x` in place of every field term.
 - **The fourth shape.** When the item `build` writes, or the query `replace` writes, is one group whose only item is again a group, the output loses one level of brackets (F2.2) and its canonical text loses the next one, as F7's fourth row says: `build` of parsed text `((a b))` and `replace(((a b)), deck X)` both give `(a b)`, whose canonical text is `a b`. `join` never gives this shape: its result has three items (J6 step 4).
