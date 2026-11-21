@@ -39,13 +39,20 @@ extension ReviewCollectionStartupTests {
     }
 
     @Test func aSlowStartShowsTheReviewAfterTheDelayThenItsCard() async throws {
-        try await withOwner(revealDelay: .milliseconds(50)) { owner, client, _ in
-            let gate = ReviewCoordinatorTests.CancellableGate()
+        try await withOwner { owner, client, _ in
+            let gate = ReviewCoordinatorTests.CancellableGate(), wait = ReviewCoordinatorTests.CancellableGate()
+            var asked: Duration?
+            owner.reviewRevealWait = { delay in asked = delay; try? await wait.wait() }
             client.onStartResult = { try await gate.wait() }
             let study = Task { await owner.startStudy(deckID: 1) }
             await gate.requested()
+            await wait.requested()
+            // The wait counts from the click: what is left of the 60 s set here.
             #expect(owner.navigation.review == nil && owner.studyStarting)
+            let waited = try #require(asked)
+            #expect(waited <= .seconds(60) && waited > .zero)
             // Past the delay the review shows, still loading: the progress indicator.
+            wait.release()
             let deadline = ContinuousClock.now + .seconds(5)
             while owner.navigation.review == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
             #expect(owner.navigation.review != nil && owner.review?.phase == .loading)

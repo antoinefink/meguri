@@ -89,6 +89,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// How long Study's screen stays before a start that is not ready shows
     /// the review with its progress indicator (N16.8). Zero shows it at once.
     @ObservationIgnored var reviewRevealDelay: Duration = .milliseconds(500)
+    /// Waits out what is left of `reviewRevealDelay` (tests hold it).
+    @ObservationIgnored var reviewRevealWait: @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     /// Study was clicked and its review has not appeared yet: the Study
     /// button keeps its look meanwhile, and a second click does nothing (N16.8).
     public var studyStarting: Bool { (starting || pendingReview != nil) && navigation.review == nil }
@@ -1580,7 +1582,10 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func startStudy(deckID: Int64, entry: StudyPreparation.Entry, walk: StudyWalk? = nil) async -> Bool {
         var entry = entry
         var retry = false
+        let intent = navigation.intentRevision
         while true {
+            // A Study the person left while it waited is not started again (R22).
+            if retry, walk == nil, navigation.intentRevision != intent { return false }
             switch await attemptStudy(deckID: deckID, entry: entry, walk: walk, retry: retry) {
             case .started: return true
             case .stopped: return false
@@ -1748,8 +1753,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         // The wait counts from the click: the selection and the media binding are part of it.
         let delay = reviewRevealDelay - (ContinuousClock.now - clicked)
         guard deferred, !shown, delay > .zero else { return showReview(model, walk: walk) }
+        let wait = reviewRevealWait
         let deadline = Task { [weak self, weak model] in
-            try? await Task.sleep(for: delay)
+            await wait(delay)
             guard !Task.isCancelled, let self, let model else { return }
             self.revealReview(model)
         }
@@ -1766,10 +1772,18 @@ public final class ReviewCollection: ChangeFanoutSink {
         pendingReview = nil
         model.onFirstPresentation = nil
         guard review === model, !closed, !closing, model.phase != .ended else { return }
+        // A start the core refused, or that failed before its session opened,
+        // never shows: `attemptStudy` ends it (N16.8).
+        guard model.sessionID != nil || model.phase != .error else { return }
         // The person went elsewhere while Study waited: as a row change ends an
-        // open review (R22), the session ends without showing.
+        // open review (R22), the session ends without showing. One that cannot
+        // end shows with its error, so Back to Decks can try again.
         guard navigation.intentRevision == pending.intent else {
-            Task { await finishReview() }
+            let walk = pending.walk
+            Task {
+                await finishReview()
+                if review === model, model.phase != .ended { showReview(model, walk: walk) }
+            }
             return
         }
         showReview(model, walk: pending.walk)
