@@ -34,6 +34,8 @@ pub mod normal;
 pub mod provision;
 #[path = "races.rs"]
 pub mod races;
+#[path = "reset_data.rs"]
+pub mod reset_data;
 #[path = "recovery.rs"]
 pub mod recovery;
 #[path = "session.rs"]

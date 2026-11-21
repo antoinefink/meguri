@@ -1,0 +1,1 @@
+{"session":"s-20261121T080208Z-1eaecc40","role":"infra","kind":"worktree","name":"ci-core-lint","base_commit":"d503f7a0c08f3f6a5723c9e9f41231fbbe8e537d","role_doc":null,"role_doc_blob":null,"created_at":"2026-11-21T08:02:08Z","branch":"unit/ci-core-lint","worktree":"/Users/antoine/.herdr/worktrees/meguri/ci-core-lint","sparse":[],"excluded_paths":[],"deny_profile":null}
