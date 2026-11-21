@@ -2,4 +2,5 @@
 //! computes from decoded records, shared by Browse rows and card excerpts.
 pub mod cells;
 pub mod deck_cell;
+pub mod fields;
 pub mod qa;

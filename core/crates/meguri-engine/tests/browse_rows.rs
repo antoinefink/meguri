@@ -14,7 +14,7 @@ use meguri_model::{
     ids::{CardId, DeckId, NoteId, NotetypeId},
 };
 use meguri_search::SearchMode;
-use meguri_search::config::Column;
+use meguri_search::config::{Column, ColumnKey};
 use meguri_storage::{ReadRows, ReaderRole};
 use meguri_template::{ErrorKind, av_tags::AvSide, card::BlankKind};
 
@@ -105,16 +105,33 @@ impl Fixture {
     }
 
     fn rows(&self, mode: SearchMode, ids: &[i64], columns: &[Column]) -> Vec<Result<Row, RowFailure>> {
+        let columns: Vec<ColumnKey> = columns.iter().copied().map(ColumnKey::Column).collect();
         browse::rows(
             &self.h.collection,
             &RowRequest {
                 mode,
                 ids,
+                columns: &columns,
+                time: TIME,
+            },
+        )
+        .unwrap()
+    }
+
+    fn key_cells(&self, mode: SearchMode, id: i64, columns: &[ColumnKey]) -> Vec<Cell> {
+        browse::rows(
+            &self.h.collection,
+            &RowRequest {
+                mode,
+                ids: &[id],
                 columns,
                 time: TIME,
             },
         )
         .unwrap()
+        .remove(0)
+        .unwrap()
+        .cells
     }
 
     fn cells(&self, mode: SearchMode, id: i64, columns: &[Column]) -> Vec<Cell> {
@@ -396,4 +413,45 @@ fn a_browser_answer_format_is_used_for_the_answer_cell_c10() {
             Cell::Answer(Answer::Text("🔉a.mp3🔉tree".into())),
         ]
     );
+}
+
+/// `browser/workspace` V3: a field column's cells by exact field name, in
+/// request order among the other cells; each card of a note repeats them.
+#[test]
+fn field_columns_show_the_value_a_dash_nothing_or_the_media() {
+    let f = fixture(false, "{{Front}}", "{{Back}}", "");
+    let field = |name: &str| ColumnKey::Field(name.to_owned());
+    let columns = [
+        field("Back"),
+        ColumnKey::Column(Column::SortField),
+        field("Missing"),
+        field("back"),
+        field("Front"),
+    ];
+    let (word, word_cards) = f.note(&["x", "<i>tree</i>  <br>top"], &[]);
+    let expected = vec![
+        text("tree   top"),
+        text("x"),
+        Cell::NoField,
+        Cell::NoField,
+        text("x"),
+    ];
+    for card in &word_cards {
+        assert_eq!(f.key_cells(SearchMode::Cards, card.0, &columns), expected, "{card:?}");
+    }
+    assert_eq!(f.key_cells(SearchMode::Notes, word.0, &columns), expected);
+
+    let (sound, _) = f.note(&["s", "say [sound:a&amp;b.mp3] then [sound:c.mp3]"], &[]);
+    let (image, _) = f.note(&["i", r#"<img src="cat.png"><img src="dog.png">"#], &[]);
+    let (both, _) = f.note(&["b", r#"[sound:z.ogg] <img src='y.jpg'>"#], &[]);
+    let (empty, _) = f.note(&["e", "<br> "], &[]);
+    let back = [field("Back")];
+    let media = |sound: Option<&str>, image: Option<&str>| Cell::Media {
+        sound: sound.map(str::to_owned),
+        image: image.map(str::to_owned),
+    };
+    assert_eq!(f.key_cells(SearchMode::Notes, sound.0, &back), [media(Some("a&b.mp3"), None)]);
+    assert_eq!(f.key_cells(SearchMode::Notes, image.0, &back), [media(None, Some("cat.png"))]);
+    assert_eq!(f.key_cells(SearchMode::Notes, both.0, &back), [media(Some("z.ogg"), Some("y.jpg"))]);
+    assert_eq!(f.key_cells(SearchMode::Notes, empty.0, &back), [Cell::Empty]);
 }
