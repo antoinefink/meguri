@@ -599,6 +599,47 @@ EOF
   validate "$result"
 }
 
+# --- Docker Rust target per checkout ---------------------------------------
+
+@test "a Docker Rust target owned by another checkout is ignored, and the first real run claims an unowned one" {
+  local other="$BATS_TEST_TMPDIR/other" outside="$BATS_TEST_TMPDIR/outside" root
+  root="$(cd "$SB" && pwd -P)"
+  mkdir -p "$other/.git" "$other/build/target" "$outside"
+  MEGURI_DOCKER_CARGO_TARGET="$other/build/target" MG_CONTAINER='' mg no-such-job
+  [[ "$stderr" == *"belongs to checkout $(cd "$other" && pwd -P); this checkout uses its own volume meguri-repo-"*_cargo-target* ]]
+  grep -q 'belongs to checkout' "$(dirname "$result")/log.txt"
+  [ ! -e "$other/build/target/.meguri-checkout" ]
+  MEGURI_DOCKER_CARGO_TARGET="$other/build/not-made-yet" MG_CONTAINER='' mg no-such-job
+  [[ "$stderr" == *"belongs to checkout $(cd "$other" && pwd -P);"* ]]
+  [ ! -e "$other/build/not-made-yet" ]
+  MEGURI_DOCKER_CARGO_TARGET=relative/target MG_CONTAINER='' mg no-such-job
+  [[ "$stderr" == *"relative/target is not an absolute path; this checkout uses its own volume"* ]]
+  MEGURI_DOCKER_CARGO_TARGET="$outside/new" MG_CONTAINER='' mg no-such-job
+  [ "$(cat "$outside/new/.meguri-checkout")" = "$root" ]
+  MEGURI_DOCKER_CARGO_TARGET="$outside" MG_CONTAINER='' mg no-such-job --dry-run
+  [ ! -e "$outside/.meguri-checkout" ]
+  MEGURI_DOCKER_CARGO_TARGET="$outside" MG_CONTAINER='' mg no-such-job
+  [[ "$stderr" != *"belongs to checkout"* ]]
+  [ "$(cat "$outside/.meguri-checkout")" = "$root" ]
+  cp -R "$SB" "$BATS_TEST_TMPDIR/repo2"
+  run --separate-stderr env MEGURI_DOCKER_CARGO_TARGET="$outside" MG_CONTAINER='' "$BATS_TEST_TMPDIR/repo2/tools/mg" no-such-job
+  [[ "$stderr" == *"belongs to checkout $root; this checkout uses its own volume meguri-repo2-"* ]]
+}
+
+@test "doctor reports the Docker Rust target and warns when two checkouts resolve to the same one, without claiming it" {
+  make_stubs
+  local other="$BATS_TEST_TMPDIR/other" outside="$BATS_TEST_TMPDIR/outside"
+  mkdir -p "$other/.git" "$other/target" "$outside"
+  MEGURI_DOCKER_CARGO_TARGET="$other/target" mg doctor
+  jq -e '.details.checks[] | select(.id == "cargo-target" and .status == "pass"
+    and (.message | test("meguri-repo-[0-9]+_cargo-target [(].*; ignored here[)]; 1 checkouts, 1 separate targets")))' "$result"
+  git -C "$SB" worktree add -q -b second "$BATS_TEST_TMPDIR/second"
+  MEGURI_DOCKER_CARGO_TARGET="$outside" mg doctor
+  jq -e '.details.checks[] | select(.id == "cargo-target" and .status == "warn" and (.message | startswith("2 checkouts share ")))' "$result"
+  [ ! -e "$outside/.meguri-checkout" ]
+  assert_read_only_calls
+}
+
 # --- doctor (host commands stubbed) ----------------------------------------
 
 @test "doctor with absent legacy team metadata warns, leaves the account unverified and only reads host state" {
