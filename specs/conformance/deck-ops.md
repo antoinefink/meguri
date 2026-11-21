@@ -40,7 +40,7 @@ The scenario ops (`dsl.md` D7.2) and observation kinds (`observations.md` O4) th
 ## K5. `delete_decks`
 
 - **Argument** `{decks: [<name>, ...]}`: at least one deck, in order.
-- **Effect** `decks/decks#D8` (the backup of R2008 is not part of the op on either side).
+- **Effect** `decks/decks#D8` (the backup of R2008 is not part of the op on either side). Changed 2026-11-21 (confirmed losses; decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review, `docs/process/review-log/delete-deck-losses-20261121.md`): Meguri's executor passes as confirmed losses the D8.5 summary it reads at the step itself, right before submitting (D8 step 6), as `notetype-ops` T9 does for the note type ops; with nothing written in between, a scenario observes no refusal for losses.
 - **Output** `{delete_decks: {count}}`: the number of cards removed.
 - Logical ids of removed cards and notes stay valid: `card` reports `null` for a removed card (`record-ops.md` W3).
 
