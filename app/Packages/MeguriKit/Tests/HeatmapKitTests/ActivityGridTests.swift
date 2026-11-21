@@ -34,14 +34,11 @@ import Testing
         #expect(ActivityGrid(counts: [UInt32](repeating: 0, count: 371), weeks: 53, todayWeekday: 1, firstWeekday: 1).maximum == 0)
     }
 
-    /// N24.6: the accent's opacity per level, with and without Increase Contrast; level 0 keeps the fill.
+    /// N24.6: the system green's opacity per level, one table for light, dark and Increase
+    /// Contrast; level 0 keeps the fill.
     @Test func levelOpacitiesAreFixed() {
-        #expect((0...4).map { ActivityGrid.opacity(level: $0, increasedContrast: false) } == [nil, 0.35, 0.55, 0.8, 1])
-        #expect((0...4).map { ActivityGrid.opacity(level: $0, increasedContrast: true) } == [nil, 0.4, 0.6, 0.8, 1])
-        // Dark: stronger steps, so level 1 stands clear of the empty day's fill.
-        for increased in [false, true] {
-            #expect((0...4).map { ActivityGrid.opacity(level: $0, increasedContrast: increased, dark: true) } == [nil, 0.5, 0.68, 0.84, 1])
-        }
+        #expect((0...4).map { ActivityGrid.opacity(level: $0) } == [nil, 0.3, 0.5, 0.75, 1])
+        #expect(ActivityGrid.opacity(level: 5) == nil)
     }
 
     // MARK: Month labels (AH9)
@@ -108,28 +105,42 @@ import Testing
         #expect(labels(grid, (2026, 11, 21), labelWidth: 29, rightToLeft: true) == [[2, 10, 49], [7, 11, 0]])
     }
 
-    @Test func wholeWeeksFillTheWidthEdgeToEdge() {
-        // An iPhone row (about 322 pt) at the touch pitch: 16 weeks.
-        let phone = ActivityGrid.Geometry(width: 322, minimumPitch: 20)
-        #expect(phone.weeks == 16)
-        // The Mac's pitch packs 53 weeks into 700 pt and never more.
-        #expect(ActivityGrid.Geometry(width: 700, minimumPitch: 13).weeks == 53)
-        #expect(ActivityGrid.Geometry(width: 2_000, minimumPitch: 13).weeks == 53)
-        for width in stride(from: CGFloat(40), through: 1_400, by: 37) {
-            for pitch in [CGFloat(13), 20] {
-                let geometry = ActivityGrid.Geometry(width: width, minimumPitch: pitch)
-                let used = CGFloat(geometry.weeks) * geometry.side + CGFloat(geometry.weeks - 1) * geometry.gap
-                #expect(abs(used - width) < 0.001, "\(width) \(pitch)")
-                #expect(geometry.side + geometry.gap >= pitch - 0.001 || geometry.weeks == 1)
+    /// N14.11: the square is fixed (round 10's sketches), so the grid never stretches.
+    @Test func squaresKeepTheirSize() {
+        #expect(ActivityGrid.Square.mac == ActivityGrid.Square(side: 10, gap: 2))
+        #expect(ActivityGrid.Square.mac.cornerRadius == 2)
+        #expect(ActivityGrid.Square.touch == ActivityGrid.Square(side: 16, gap: 3))
+        // A full year on the Mac is 634 pt wide, whatever the window.
+        for available in [CGFloat(634), 1_000, 2_000] {
+            let geometry = ActivityGrid.Geometry(width: available, square: .mac)
+            #expect(geometry.weeks == 53 && geometry.width == 634 && geometry.side == 10, "\(available)")
+            #expect(geometry.height == 82)
+        }
+    }
+
+    /// A narrower width shows the most recent whole weeks that fit: ⌊(width + gap) / pitch⌋.
+    @Test func aNarrowWidthShowsTheWeeksThatFit() {
+        // One point short of a year on the Mac drops the oldest week.
+        #expect(ActivityGrid.Geometry(width: 633, square: .mac).weeks == 52)
+        // An iPhone row (about 322 pt): 17 weeks of 16 pt squares, 320 pt wide.
+        let phone = ActivityGrid.Geometry(width: 322, square: .touch)
+        #expect(phone.weeks == 17 && phone.width == 320)
+        for square in [ActivityGrid.Square.mac, .touch] {
+            for available in stride(from: CGFloat(20), through: 2_000, by: 7) {
+                let geometry = ActivityGrid.Geometry(width: available, square: square)
+                #expect(geometry.side == square.side && geometry.gap == square.gap)
+                #expect(geometry.width <= available || geometry.weeks == 1, "\(available)")
                 if geometry.weeks < ActivityGrid.maximumWeeks {
-                    // One more week would not fit at the minimum pitch.
-                    let tighter = width / (CGFloat(geometry.weeks + 1) * 1.2 - 0.2)
-                    #expect(tighter * 1.2 < pitch)
+                    // One more week would not fit.
+                    #expect(geometry.width + geometry.pitch > available, "\(available)")
                 }
-                #expect(abs(geometry.height - (7 * geometry.side + 6 * geometry.gap)) < 0.001)
+                #expect(geometry.height == 7 * square.side + 6 * square.gap)
             }
         }
-        #expect(ActivityGrid.Geometry(width: 0, minimumPitch: 20).height == 0)
+        // Narrower than one square: still the current week.
+        #expect(ActivityGrid.Geometry(width: 5, square: .touch).weeks == 1)
+        #expect(ActivityGrid.Geometry(width: 0, square: .touch).height == 0)
+        #expect(ActivityGrid.Geometry(width: 0, square: .touch).width == 0)
     }
 
     @Test func daysSitByWeekdayWithTheNewestWeekTrailing() {

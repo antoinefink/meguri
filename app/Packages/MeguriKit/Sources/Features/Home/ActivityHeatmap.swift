@@ -3,10 +3,6 @@ import CoreBridge
 import DesignSystem
 import HeatmapKit
 import SwiftUI
-#if os(macOS)
-import AppKit
-import Combine
-#endif
 
 /// The heatmap rows' content widths, kept above the views (`AppNavigation.featureState`):
 /// a page drawn again (a pushed deck page, a layout switch, a row the list made again)
@@ -59,11 +55,11 @@ struct ActivityHeatmapSection: View {
     /// not resize the one that stays.
     @State private var measured: CGFloat?
 
-    /// The narrowest column (a square and its gap) the grid packs before it drops a week.
+    /// N14.11's fixed square: it never grows with the width or the text size.
     #if os(macOS)
-    static let minimumPitch: CGFloat = 13
+    static let square = ActivityGrid.Square.mac
     #else
-    static let minimumPitch: CGFloat = 20
+    static let square = ActivityGrid.Square.touch
     #endif
 
     var body: some View {
@@ -71,7 +67,7 @@ struct ActivityHeatmapSection: View {
         // this row's too: it shows again to measure, rather than judge by an old width.
         let shared = widths.row(page)
         let width = shared == 0 ? 0 : measured ?? shared
-        let geometry = ActivityGrid.Geometry(width: width, minimumPitch: Self.minimumPitch)
+        let geometry = ActivityGrid.Geometry(width: width, square: Self.square)
         let days = store.days(scope)
         let grid = days.map {
             ActivityGrid(counts: $0.counts, weeks: geometry.weeks, todayWeekday: $0.today.weekday,
@@ -97,14 +93,17 @@ struct ActivityHeatmapSection: View {
                         .font(.caption)
                         .hidden()
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay {
+                        .overlay(alignment: .leading) {
                             if let grid, let days, geometry.weeks > 0 {
+                                // The labels run over the grid's own width, not the row's.
                                 MonthLabelsView(grid: grid, geometry: geometry, today: days.today)
+                                    .frame(width: geometry.width)
                             }
                         }
                     // Only this clear view sizes the row, and it reports the width offered.
-                    // The squares sit in its overlay, so an old width (taken before a fold
-                    // or in another column) can never feed itself.
+                    // The squares sit in its overlay at their natural width, leading-aligned,
+                    // so an old width (taken before a fold or in another column) can never
+                    // feed itself.
                     Color.clear
                         .frame(maxWidth: .infinity)
                         .frame(height: geometry.height)
@@ -156,9 +155,6 @@ private struct ActivityGridView: View {
     let geometry: ActivityGrid.Geometry
     let today: ActivityDays.Day
     @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.colorScheme) private var colorScheme
-    /// The Mac's accent, read again when the system's colours change (System Settings).
-    @State private var graphite = Self.currentGraphite
     #if os(macOS)
     @Environment(\.locale) private var locale
     #endif
@@ -185,19 +181,14 @@ private struct ActivityGridView: View {
                 }
             }
         }
-        #if os(macOS)
-        .onReceive(NotificationCenter.default.publisher(for: NSColor.systemColorsDidChangeNotification)) { _ in
-            graphite = Self.currentGraphite
-        }
-        #endif
     }
 
     private func square(_ daysAgo: Int) -> some View {
-        let shape = RoundedRectangle(cornerRadius: geometry.side * ActivityGrid.gapRatio)
+        let shape = RoundedRectangle(cornerRadius: geometry.square.cornerRadius)
         let level = grid.level(daysAgo: daysAgo)
         let increased = contrast == .increased
         return shape
-            .fill(Self.style(level: level, increasedContrast: increased, dark: colorScheme == .dark, graphite: graphite))
+            .fill(Self.style(level: level))
             // N24.6: with Increase Contrast the steps lie over the empty day's own fill.
             .background { if increased && level > 0 { shape.fill(.fill.secondary) } }
             .overlay {
@@ -206,22 +197,13 @@ private struct ActivityGridView: View {
             .frame(width: geometry.side, height: geometry.side)
     }
 
-    /// The secondary fill for no reviews; the accent at N24.6's fixed opacities for the
-    /// levels (`ActivityGrid.opacity`). The Mac's Graphite accent would make grey steps
-    /// that do not tell a light day from an empty one, so they use the system blue.
-    static func style(level: Int, increasedContrast: Bool, dark: Bool, graphite: Bool) -> AnyShapeStyle {
-        guard let opacity = ActivityGrid.opacity(level: level, increasedContrast: increasedContrast, dark: dark) else {
-            return AnyShapeStyle(.fill.secondary)
-        }
-        return graphite ? AnyShapeStyle(Color.blue.opacity(opacity)) : AnyShapeStyle(TintShapeStyle().opacity(opacity))
-    }
-
-    private static var currentGraphite: Bool {
-        #if os(macOS)
-        NSColor.currentControlTint == .graphiteControlTint
-        #else
-        false
-        #endif
+    /// The secondary fill for no reviews; the system green at N24.6's fixed opacities for
+    /// the levels (`ActivityGrid.opacity`). Green is a decided colour (Antoine, 2026-11-21),
+    /// not the accent: it stays green whatever accent the person picks. The system colour
+    /// adapts to dark mode and Increase Contrast by itself.
+    static func style(level: Int) -> AnyShapeStyle {
+        guard let opacity = ActivityGrid.opacity(level: level) else { return AnyShapeStyle(.fill.secondary) }
+        return AnyShapeStyle(Color.green.opacity(opacity))
     }
 }
 

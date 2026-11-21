@@ -2,31 +2,50 @@ import CoreGraphics
 import Foundation
 
 /// The activity heatmap's grid (contract N14.11, N24.6, `stats/activity-heatmap` AH7 to AH9):
-/// how many whole weeks fit a width, where each day sits, its level and the month labels.
+/// how many whole weeks of fixed squares fit a width, where each day sits, its level and the month labels.
 /// Pure values, so a width change only re-runs this, never the query.
 public nonisolated struct ActivityGrid: Sendable, Equatable {
     /// 52 full weeks and the current one: the 371 days the query returns.
     public static let maximumWeeks = 53
-    /// The gap between squares as a fraction of a square's side.
-    public static let gapRatio: CGFloat = 0.2
 
-    /// Square size and spacing for a width: as many whole weeks as fit at the
-    /// minimum column pitch, then stretched so the columns span the width exactly.
+    /// N14.11's square, in points, fixed whatever the width and the text size (it is not text).
+    public nonisolated struct Square: Sendable, Equatable {
+        public let side: CGFloat
+        /// The space between two squares, across and down.
+        public let gap: CGFloat
+        /// A fifth of the side, as round 10 draws it (2 pt on its 10 pt square).
+        public var cornerRadius: CGFloat { side / 5 }
+
+        public init(side: CGFloat, gap: CGFloat) { self.side = side; self.gap = gap }
+
+        /// Round 10's Mac sketch, drawn at its real size: 53 weeks are 634 pt wide.
+        public static let mac = Square(side: 10, gap: 2)
+        /// Round 10's iPhone sketch in points (drawn at about 0.63 of an iPhone's width).
+        public static let touch = Square(side: 16, gap: 3)
+    }
+
+    /// How many weeks a width shows at a fixed square, and the grid's own size. The grid
+    /// never stretches: it keeps its natural width, leading-aligned, and a narrower
+    /// width drops the oldest weeks.
     public nonisolated struct Geometry: Sendable, Equatable {
         public let weeks: Int
-        public let side: CGFloat
-        public var gap: CGFloat { side * ActivityGrid.gapRatio }
+        public let square: Square
+        public var side: CGFloat { square.side }
+        public var gap: CGFloat { square.gap }
         /// A column and the gap after it: column `n` starts at `n × pitch`.
         public var pitch: CGFloat { side + gap }
+        /// The grid's natural width: `weeks` columns and the gaps between them.
+        public var width: CGFloat { weeks == 0 ? 0 : CGFloat(weeks) * pitch - gap }
         public var height: CGFloat { weeks == 0 ? 0 : 7 * side + 6 * gap }
 
-        public init(width: CGFloat, minimumPitch: CGFloat) {
-            guard width > 0, minimumPitch > 0 else { weeks = 0; side = 0; return }
-            // n columns need n·s + (n−1)·r·s of width, with s ≥ pitch / (1 + r).
-            let minimumSide = minimumPitch / (1 + ActivityGrid.gapRatio)
-            let fitting = Int(((width + ActivityGrid.gapRatio * minimumSide) / minimumPitch).rounded(.down))
+        /// The most recent whole weeks that fit `available`, at most 53: ⌊(available + gap) / pitch⌋,
+        /// and at least one once a width is known.
+        public init(width available: CGFloat, square: Square) {
+            self.square = square
+            guard available > 0, square.side > 0 else { weeks = 0; return }
+            // n columns need n·pitch − gap; the small allowance absorbs layout rounding.
+            let fitting = Int(((available + square.gap) / (square.side + square.gap) + 1e-6).rounded(.down))
             weeks = min(ActivityGrid.maximumWeeks, max(1, fitting))
-            side = width / (CGFloat(weeks) * (1 + ActivityGrid.gapRatio) - ActivityGrid.gapRatio)
         }
     }
 
@@ -60,15 +79,15 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
         }
     }
 
-    /// N24.6: a level's opacity of the accent colour; nil for level 0, which keeps the
-    /// system's secondary fill. With Increase Contrast the light steps sit further apart. On
-    /// a dark background the accent's faint steps sink towards the empty day's fill, so the
-    /// dark table is stronger (with or without Increase Contrast).
-    public static func opacity(level: Int, increasedContrast: Bool, dark: Bool = false) -> Double? {
+    /// N24.6: a level's opacity of the system green; nil for level 0, which keeps the
+    /// system's secondary fill. One table for light, dark and Increase Contrast: green is
+    /// light enough on a dark background that its first step stands clear of the empty
+    /// day's fill without the stronger dark steps the accent needed.
+    public static func opacity(level: Int) -> Double? {
         switch level {
-        case 1: dark ? 0.5 : increasedContrast ? 0.4 : 0.35
-        case 2: dark ? 0.68 : increasedContrast ? 0.6 : 0.55
-        case 3: dark ? 0.84 : 0.8
+        case 1: 0.3
+        case 2: 0.5
+        case 3: 0.75
         case 4: 1
         default: nil
         }
