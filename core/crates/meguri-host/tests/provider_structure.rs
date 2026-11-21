@@ -253,7 +253,7 @@ fn each_of_the_four_ops_is_refused_after_the_round_when_its_loss_was_not_confirm
                 let mut fields = vec![None; info.new.fields.len()];
                 fields[0] = Some(0);
                 let request = change::ChangeNotetype { notes: note_ids.clone(), old_notetype: notetype, new_notetype: other,
-                    fields, templates: info.templates.clone(), schema: info.schema, layout: info.layout.clone(),
+                    fields, templates: info.templates.clone(), schema: info.schema, layout: info.layout,
                     confirmed: change::ChangeLosses { fields: Default::default(), templates: Default::default(), other_cards: 0 } };
                 Box::new(move |collection, job| {
                     change::change(collection, request, job.cancel.clone(), job.progress.clone()).map(|_| ())

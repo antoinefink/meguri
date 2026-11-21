@@ -122,21 +122,30 @@ impl ProviderRoundResult {
     }
 
 }
+/// The access of one phase for these credentials, checked against the
+/// retained connection each time it is made.
+pub(super) fn access_for(owner: &ProviderOwner, inner: &meguri_sync::provider::MeguriConnection,
+    credentials: ProviderCredentials) -> Result<MeguriAccess, ProviderRoundRefusal> {
+    if owner.validate().is_err() { return Err(ProviderRoundRefusal::Interrupted); }
+    let c = &credentials.connection;
+    if c.reference != inner.reference || c.revision != inner.revision || c.endpoint != inner.endpoint {
+        return Err(ProviderRoundRefusal::ConnectionChanged);
+    }
+    #[cfg(feature = "test-hooks")]
+    let access = owner.host.meguri_access_for_testing(inner.clone(), &credentials.username, HostKey::new(credentials.hostkey));
+    #[cfg(not(feature = "test-hooks"))]
+    let access = MeguriAccess::new(inner.clone(), &credentials.username, HostKey::new(credentials.hostkey));
+    access.map_err(|error| match error {
+        meguri_host::MeguriBootstrapError::Username => ProviderRoundRefusal::AccountChanged,
+        _ => ProviderRoundRefusal::ConnectionChanged,
+    })
+}
+pub(super) fn round_result(owner: Arc<ProviderOwner>, task: Arc<MeguriRoundTask>) -> Arc<ProviderRoundResult> {
+    Arc::new(ProviderRoundResult { owner, task })
+}
 impl ProviderConnection {
     fn round_access(&self, credentials: ProviderCredentials) -> Result<MeguriAccess, ProviderRoundRefusal> {
-        if self.owner.validate().is_err() { return Err(ProviderRoundRefusal::Interrupted); }
-        let c = &credentials.connection;
-        if c.reference != self.inner.reference || c.revision != self.inner.revision || c.endpoint != self.inner.endpoint {
-            return Err(ProviderRoundRefusal::ConnectionChanged);
-        }
-        #[cfg(feature = "test-hooks")]
-        let access = self.owner.host.meguri_access_for_testing(self.inner.clone(), &credentials.username, HostKey::new(credentials.hostkey));
-        #[cfg(not(feature = "test-hooks"))]
-        let access = MeguriAccess::new(self.inner.clone(), &credentials.username, HostKey::new(credentials.hostkey));
-        access.map_err(|error| match error {
-                meguri_host::MeguriBootstrapError::Username => ProviderRoundRefusal::AccountChanged,
-                _ => ProviderRoundRefusal::ConnectionChanged,
-            })
+        access_for(&self.owner, &self.inner, credentials)
     }
     fn round_start(&self, start: MeguriRoundStart) -> ProviderRoundStart {
         match start {

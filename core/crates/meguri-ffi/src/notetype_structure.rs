@@ -43,7 +43,7 @@ fn to_map(counts: Vec<OrdinalCount>) -> Result<BTreeMap<u32, u64>, CoreError> {
     Ok(map)
 }
 
-fn digest(bytes: Vec<u8>) -> Result<AggregateDigest, CoreError> {
+pub(crate) fn digest(bytes: Vec<u8>) -> Result<AggregateDigest, CoreError> {
     let bytes: [u8; 32] = bytes.try_into().map_err(|_| CoreError::InvalidArgument {
         message: "aggregate digest must be 32 bytes".into(),
     })?;

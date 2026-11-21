@@ -7,6 +7,7 @@ use meguri_sync::provider as p;
 mod tests;
 #[path = "provider_bootstrap.rs"] mod bootstrap;
 #[path = "provider_normal.rs"] mod normal;
+#[path = "provider_structure.rs"] mod structure;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum ProviderSelection { LocalOnly, ICloud, Meguri }
@@ -180,6 +181,14 @@ impl ProviderOwner {
     pub fn snapshot(&self) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.snapshot"); self.validate()?;
         Ok(owner_snapshot(&self.host))
+    }
+    /// `sync/meguri-provider` MP7 step 5: a note type structure save is
+    /// committed on this device and its upload has not run. While true the
+    /// status shows `sync.needsYou.meguri.structureUpload` with Upload…, in
+    /// place of the collection choice, and no round starts.
+    pub fn structure_upload_pending(&self) -> Result<bool, CoreError> {
+        callback::enter("ProviderOwner.structure_upload_pending"); self.validate()?;
+        Ok(self.host.meguri_structure_upload_pending()?)
     }
     pub fn refresh(&self) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.refresh"); self.validate()?;
