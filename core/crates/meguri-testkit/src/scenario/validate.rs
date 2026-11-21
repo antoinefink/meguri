@@ -466,6 +466,8 @@ fn sched_op(step: &Step) -> Result<(), FormatError> {
         Step::SetDue(args) => cards(&args.cards),
         Step::Forget(args) => cards(&args.cards),
         Step::GradeNow(args) => cards(&args.cards),
+        // bulk-ops.md X2: distinct cards, at least one; a deck name.
+        Step::ChangeDeck(args) => cards(&args.cards).and_then(|()| deck(&args.deck)),
         // bulk-ops.md X1: a non-empty list of distinct note references.
         Step::FindReplace(args) => args
             .notes
