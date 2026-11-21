@@ -137,6 +137,11 @@ harness = false
 name = "notetype_reads"
 harness = false
 
+# U92's Card Info read: the card with the most rows and 500 rows.
+[[bench]]
+name = "card_info"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]
