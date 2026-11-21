@@ -134,9 +134,18 @@ cmd_select() {
         [[ "$ext" != "$d" ]] || { code=yes; break; }
       done
     done < <(git diff -z --no-renames --name-only --diff-filter=d "$base" HEAD)
+    # Deletions count for the areas: removing a golden unpairs its scenario.
+    while IFS= read -r -d '' p; do
+      if [[ "$p" =~ ^conformance/(scenarios|goldens)/([^/]+)/ ]]; then
+        area="${BASH_REMATCH[2]}"
+        [[ "$area" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "::error::Unexpected conformance area name"; exit 1; }
+        touched[$area]=1
+      fi
+    done < <(git diff -z --no-renames --name-only --diff-filter=D "$base" HEAD)
     if [[ -n "$all_areas" ]]; then
-      mapfile -t areas < <(paired_areas)
-    elif ((${#touched[@]} > 0)); then
+      while IFS= read -r area; do touched[$area]=1; done < <(paired_areas)
+    fi
+    if ((${#touched[@]} > 0)); then
       mapfile -t areas < <(printf '%s\n' "${!touched[@]}" | sort)
     fi
   fi
@@ -193,18 +202,21 @@ cmd_summary() {
   local kind="$1" result="$2" tracked="$3" changed="$4" dir
   dir="$(dirname "$result")"
   local summary="$dir/scan/summary.json" implementer="$dir/scan/implementer.json"
-  local empty='{}' files='{"files": []}' out
+  local out
   out="$(mktemp)"
   jq -n -r \
     --arg kind "$kind" \
-    --slurpfile result <(jq -c . "$result" 2>/dev/null || echo "$empty") \
-    --slurpfile summary <(jq -c . "$summary" 2>/dev/null || echo "$empty") \
-    --slurpfile view <(jq -c . "$implementer" 2>/dev/null || echo "$files") \
+    --slurpfile result <(jq -c . "$result" 2>/dev/null || echo null) \
+    --slurpfile summary <(jq -c . "$summary" 2>/dev/null || echo null) \
+    --slurpfile view <(jq -c . "$implementer" 2>/dev/null || echo null) \
     --rawfile tracked "$tracked" --rawfile changed "$changed" '
     def set: split("\u0000") | map(select(length > 0)) | map({key: ., value: true}) | from_entries;
     ($tracked | set) as $known | ($changed | set) as $mine |
     def obj: if type == "object" then . else {} end;
     ($result[0] | obj) as $r | ($summary[0] | obj) as $s | ($view[0] | obj) as $v |
+    # A verdict needs every report, readable: never a fallback.
+    (($summary[0] | type) == "object" and ($s.counts | type) == "object"
+      and ($v.files | type) == "array") as $complete |
     def num: if type == "number" then . else null end;
     def count($k): ($s.counts // {})[$k] | num // 0;
     def plain: type == "string" and test("^[A-Za-z0-9._@+-]+(/[A-Za-z0-9._@+-]+)*$") and ($known[.] // false);
@@ -243,7 +255,7 @@ cmd_summary() {
     (if $kind == "data" then ($here | length) else ($flagged | length) end) as $blocking |
     ($status == "error" or ($s | has("error")) or count("errors") > 0 or count("missing") > 0
       or $blocking > 0 or ($status == "fail" and ($flagged | length) == 0)
-      or ($status | IN("pass", "warn", "fail") | not)) as $failed |
+      or ($status | IN("pass", "warn", "fail") | not) or ($complete | not)) as $failed |
     (if $kind == "data" then "Test data (conformance scenarios and goldens of the touched areas)" else "Code" end) as $title |
     "#### \($title): \(if $failed then "**failed**" else "passed" end)",
     "",
@@ -254,7 +266,8 @@ cmd_summary() {
     (($s.corpus // {}) as $c | if ($c.tags | num) then
       "Corpus: \($c.tags) Anki release tags \($c.first_tag | tag)..\($c.last_tag | tag), index \(if ($c.key | type) == "string" and ($c.key | test("^[0-9a-f]{20}$")) then $c.key else "?" end) (\(if $c.built == true then "built in \($c.build_seconds | num // 0) s" else "restored" end))."
      else empty end),
-    (if ($s | has("error")) then "Scanner error: \($s.error | classify)." else empty end),
+    (if ($s | has("error")) then "Scanner error: \($s.error | classify)."
+     elif ($complete | not) then "A scanner report is missing or unreadable." else empty end),
     (if count("errors") > 0 then "\(count("errors")) files could not be scanned; run the scan locally for the reasons." else empty end),
     (if count("missing") > 0 then "Listed but not checked: " + ([($s.missing // [])[] | shown] | join(", ")) + "." else empty end),
     ([($r.failures // [])[] | .id | select(type == "string" and test("^([a-z-]+|similarity:(error|missing))$"))] | unique) as $ids |

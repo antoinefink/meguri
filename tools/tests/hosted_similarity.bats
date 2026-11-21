@@ -118,6 +118,34 @@ changed() {
   [[ "$output" == *"failed"* ]]
 }
 
+clean_reports() {
+  echo '{"status": "pass", "failures": []}' >"$RUN/result.json"
+  echo '{"status": "pass", "counts": {"scanned": 1, "clean": 1, "allowlisted": 0, "flagged": 0, "errors": 0, "skipped": 0, "missing": 0}}' \
+    >"$RUN/scan/summary.json"
+  echo '{"files": [{"path": "core/a.rs", "status": "clean"}]}' >"$RUN/scan/implementer.json"
+}
+
+@test "a passing receipt without readable reports fails" {
+  local report
+  clean_reports
+  summary code "$(changed core/a.rs)"
+  [ "$status" -eq 0 ]
+  for report in implementer summary; do
+    clean_reports
+    printf 'not json\n' >"$RUN/scan/$report.json"
+    summary code "$(changed core/a.rs)"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"A scanner report is missing or unreadable."* ]]
+    rm "$RUN/scan/$report.json"
+    summary code "$(changed core/a.rs)"
+    [ "$status" -eq 1 ]
+  done
+  clean_reports
+  echo '{"files": {}}' >"$RUN/scan/implementer.json"
+  summary code "$(changed core/a.rs)"
+  [ "$status" -eq 1 ]
+}
+
 @test "a clean scan passes and a missing file fails" {
   cat >"$RUN/result.json" <<'EOF'
 {"status": "pass", "failures": []}
@@ -206,6 +234,16 @@ out() { sed -n "s/^$1=//p" "$GITHUB_OUTPUT"; }
   select_after "$r" .github/similarity.sh
   [ "$(out code)" = yes ]
   [ "$(out areas)" = "" ]
+  # A scanner change keeps the touched unpaired area beside every paired one.
+  select_after "$r" tools/similarity/AGENTS.md conformance/scenarios/lonely/two.yaml
+  [ "$(out areas)" = "lonely sched" ]
+  # Deleting an area's last golden selects it: its scenario is now unpaired.
+  git -C "$r" rm -q conformance/goldens/sched/one.json
+  git -C "$r" -c user.name=t -c user.email=t@t commit -qm unpair
+  : >"$GITHUB_OUTPUT"
+  (cd "$r" && EVENT=push BEFORE="$(git rev-parse HEAD~1)" bash "$SCRIPT" select >/dev/null)
+  [ "$(out run)" = yes ]
+  [ "$(out areas)" = sched ]
 }
 
 @test "select without a base scans the whole tree and every paired area" {
