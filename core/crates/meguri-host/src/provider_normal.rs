@@ -362,16 +362,23 @@ impl CoreHost {
         }
         result
     }
-    pub(crate) fn close_meguri_round_admission(&self) {
+    /// Refused, with nothing closed, while the structure save job holds the lane.
+    pub(crate) fn close_meguri_round_admission(&self) -> Result<(), EngineError> {
+        {
+            let mut state = self.meguri_rounds.state.lock().unwrap_or_else(PoisonError::into_inner);
+            if state.structure.strong_count() != 0 {
+                return Err(EngineError::Busy { running_op: "Meguri note type structure save".into() });
+            }
+            state.handoff = true;
+            if let Some(Active::Task(task)) = &state.active { task.cancel(true); }
+        }
         // Native iCloud handoff keeps its own special closure provenance.
         // Only the Meguri owner is revoked here; begin_handoff closes both
         // services through the existing durable transition immediately after.
         if self.provider.snapshot().is_ok_and(|doc| doc.selection == meguri_sync::provider::Selection::Meguri) {
             self.provider.close_admission();
         }
-        let mut state = self.meguri_rounds.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.handoff = true;
-        if let Some(Active::Task(task)) = &state.active { task.cancel(true); }
+        Ok(())
     }
     pub(crate) fn require_meguri_round_join(&self) -> Result<(), EngineError> {
         let state = self.meguri_rounds.state.lock().unwrap_or_else(PoisonError::into_inner);

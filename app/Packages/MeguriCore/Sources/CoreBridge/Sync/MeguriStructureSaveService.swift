@@ -33,10 +33,13 @@ public enum MeguriStructureRefusal: Sendable {
 }
 public enum MeguriUploadPendingReason: Sendable, Hashable {
     case unreachable, busy, failed, cancelled, localChanged, storage
+    /// The server refused the sign-in: it is asked for again.
+    case signIn
     init(_ raw: MeguriCoreBindings.ProviderUploadPending) {
         self = switch raw {
         case .unreachable: .unreachable; case .busy: .busy; case .failed: .failed
         case .cancelled: .cancelled; case .localChanged: .localChanged; case .storage: .storage
+        case .signIn: .signIn
         }
     }
 }
@@ -97,12 +100,24 @@ extension CoreMeguriRoundService {
         onStage: @escaping @Sendable (MeguriStructureStage, CoreJob) -> Void = { _, _ in }
     ) async throws -> MeguriStructureOutcome {
         let (connection, credentials) = try await admittedInputs()
-        try await CoreEventStream.shared.start()
         let op = MeguriCoreBindings.ProviderStructureOp.save(draft: draft.raw)
-        let started = try await MaintenanceLane.shared.call(.providerStartStructureSave) {
-            try connection.startStructureSave(credentials: credentials, op: op, reachable: reachable)
+        return try await owned {
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.providerStartStructureSave) {
+                try connection.startStructureSave(credentials: credentials, op: op, reachable: reachable)
+            }
+            return try await Self.drive(started, onStage: onStage)
         }
-        return try await Self.drive(started, onStage: onStage)
+    }
+    /// One structure job at a time on this facade, registered so that
+    /// `cancelAndDrain` and retirement stop and join it.
+    private func owned(_ work: @escaping @Sendable () async throws -> MeguriStructureOutcome) async throws -> MeguriStructureOutcome {
+        guard structureWork == nil else { return .refused(.busy) }
+        let task = Task { try await work() }
+        structureWork = task
+        let result = await withTaskCancellationHandler { await task.result } onCancel: { task.cancel() }
+        structureWork = nil
+        return try result.get()
     }
     /// MP7 step 5's Upload…: the server's facts and the upload, with no
     /// round and no further question.
@@ -110,11 +125,13 @@ extension CoreMeguriRoundService {
         onStage: @escaping @Sendable (MeguriStructureStage, CoreJob) -> Void = { _, _ in }
     ) async throws -> MeguriStructureOutcome {
         let (connection, credentials) = try await admittedInputs()
-        try await CoreEventStream.shared.start()
-        let started = try await MaintenanceLane.shared.call(.providerStartStructureUpload) {
-            try connection.startStructureUpload(credentials: credentials)
+        return try await owned {
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.providerStartStructureUpload) {
+                try connection.startStructureUpload(credentials: credentials)
+            }
+            return try await Self.drive(started, onStage: onStage)
         }
-        return try await Self.drive(started, onStage: onStage)
     }
     /// Advances the job until its outcome. It is never left half way: the
     /// core holds the provider's lane until the outcome is read.
@@ -127,7 +144,13 @@ extension CoreMeguriRoundService {
         case .refused(let refusal): return .refused(MeguriStructureRefusal(refusal))
         case .started(let value): job = value
         }
+        var forwarded = false
         while true {
+            // A cancellation reaches the core before the next phase can start.
+            if Task.isCancelled, !forwarded {
+                forwarded = true
+                try? await MaintenanceLane.shared.call(.providerStructureCancel) { try job.cancel() }
+            }
             let step = try await MaintenanceLane.shared.call(.providerStructureAdvance) { try job.advance() }
             switch step {
             case .finished(let outcome):

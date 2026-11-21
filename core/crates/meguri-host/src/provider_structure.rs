@@ -5,11 +5,12 @@
 //! scheduler lives here.
 //!
 //! What is durable, and what a kill leaves:
-//! - Before the save: nothing, or the armed record with `scm <= ls`, which
-//!   the next open, round or job withdraws. Nothing was saved.
-//! - After the save: the record with `scm > ls`. The upload is pending, shown
-//!   as needs you, until a completed upload or collection choice clears it,
-//!   or until the save is undone.
+//! - Before the save: nothing, or the armed record with the collection's
+//!   `scm` unchanged, which the next open, round or job withdraws. Nothing
+//!   was saved.
+//! - After the save: the record, and a collection that carries the save's
+//!   `scm`. The upload is pending, shown as needs you, until a completed
+//!   upload or collection choice clears it, or until the save is undone.
 //! - The job's exclusive admission is process state held by its task: it ends
 //!   with the task or the process.
 use crate::{CoreHost, ManualTransferTask, MeguriAccess, MeguriBootstrapDirection, MeguriBootstrapError,
@@ -72,6 +73,8 @@ pub enum MeguriUploadPending {
     LocalChanged,
     /// Provider metadata could not be written.
     Storage,
+    /// The server refused the sign-in: it is asked for again (MP5).
+    SignIn,
 }
 /// The save is committed. What became of its upload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,6 +136,8 @@ struct TaskState {
     work: Option<MeguriStructureWork>,
     /// The server's `usn` as read before this job's server copy.
     read_usn: Option<i32>,
+    /// `col.scm` when the record was written, before the op.
+    schema_before: Option<i64>,
     finished: Option<Arc<MeguriStructureOutcome>>,
 }
 pub struct MeguriStructureTask {
@@ -160,6 +165,14 @@ impl MeguriStructureTask {
     }
     fn is_cancelled(&self) -> bool { self.cancelled.load(Ordering::SeqCst) }
 }
+impl Drop for MeguriStructureTask {
+    /// A job let go before its outcome stops its round. The round's own
+    /// result stays with the round's registry entry, as for any round.
+    fn drop(&mut self) {
+        let state = self.state.get_mut().unwrap_or_else(PoisonError::into_inner);
+        if let Some(Stage::Round(round)) = &state.stage { round.cancel(true); }
+    }
+}
 
 use MeguriStructureOutcome as O;
 use MeguriStructureUploadOutcome as U;
@@ -171,6 +184,7 @@ fn transfer_pending(error: &TransferError) -> MeguriUploadPending {
         TransferError::Stale(meguri_sync::policy::Boundary::LocalChanged) => MeguriUploadPending::LocalChanged,
         TransferError::Server(error) if matches!(error.kind, meguri_sync::ErrorKind::Offline
             | meguri_sync::ErrorKind::Network { .. }) => MeguriUploadPending::Unreachable,
+        TransferError::Server(error) if error.kind == meguri_sync::ErrorKind::AuthFailed => MeguriUploadPending::SignIn,
         _ => MeguriUploadPending::Failed,
     }
 }
@@ -193,13 +207,15 @@ impl CoreHost {
         Ok(self.provider.snapshot()?.meguri_structure)
     }
     /// Whether `record` is pending: the open collection is the one it names
-    /// and still reads `scm > ls` (MP7 steps 5 and 6).
+    /// and still carries the save's own `scm` (MP7 steps 5 and 6). An undo
+    /// restores the earlier stamp; another structural change sets a new one,
+    /// which is an ordinary full-sync requirement and not this record's.
     fn structure_pending(&self, record: &MeguriStructureUpload) -> Result<bool, EngineError> {
         let Ok(collection) = self.collection() else { return Ok(false) };
         let settled = DeviceState::for_collection(collection.path()).settled_publication()?;
         if settled.map(|publication| publication.identity) != Some(record.publication()) { return Ok(false); }
         let col = collection.reader(ReaderRole::Query)?.col()?;
-        Ok(schema_gate::is_modified(&col))
+        Ok(record.covers(col.schema_modified.0))
     }
     /// MP7 step 5's state, read only: a structure upload is pending for the
     /// open collection. The needs-you line shows while this holds.
@@ -239,7 +255,8 @@ impl CoreHost {
         let finished = finished.map(Arc::new);
         Arc::new(MeguriStructureTask { owner: self.meguri_rounds_owner(), access, generation: collection.generation(), collection,
             reachable, cancelled: AtomicBool::new(false),
-            state: Mutex::new(TaskState { stage, admission: finished.is_none().then_some(admission), work, read_usn: None, finished }) })
+            state: Mutex::new(TaskState { stage, admission: finished.is_none().then_some(admission), work, read_usn: None,
+                schema_before: None, finished }) })
     }
 
     /// MP7 steps 1 to 4 for one confirmed op. `reachable` false is D4's
@@ -326,7 +343,7 @@ impl CoreHost {
             Stage::Round(round) => self.after_round(task, state, round),
             Stage::Save { result, .. } => {
                 let result = result.lock().unwrap_or_else(PoisonError::into_inner).take();
-                self.after_save(task, result)
+                self.after_save(task, state, result)
             }
             Stage::Facts(facts) => self.after_facts(task, state, facts.take_result()),
             Stage::ServerCopy(copy) => self.after_server_copy(task, state, copy.take_result()),
@@ -375,16 +392,20 @@ impl CoreHost {
     fn arm_and_save(&self, task: &MeguriStructureTask, state: &mut TaskState, binding: &meguri_sync::provider::MeguriBinding) -> Next {
         let stop = |stop| Next::Done(O::NotSaved(stop));
         let Some(work) = state.work.take() else { return stop(MeguriStructureStop::Unavailable) };
-        let baseline = match task.collection.reader(ReaderRole::Query).and_then(|reader| Ok(reader.col()?)) {
+        let (baseline, schema_before) = match task.collection.reader(ReaderRole::Query).and_then(|reader| Ok(reader.col()?)) {
             // Proved only by a collection that synced and holds no earlier
             // structure change: its `ls` and `scm` are the server's.
-            Ok(col) => (col.last_sync.0 != 0 && !schema_gate::is_modified(&col)).then_some(StructureBaseline {
-                modified: col.last_sync.0, schema_modified: col.schema_modified.0 }),
+            Ok(col) => ((col.last_sync.0 != 0 && !schema_gate::is_modified(&col)).then_some(StructureBaseline {
+                modified: col.last_sync.0, schema_modified: col.schema_modified.0 }), col.schema_modified.0),
             Err(error) => return stop(MeguriStructureStop::Refused(error)),
         };
         let generation = task.generation;
         let armed = self.publish_provider_metadata(generation, |publication|
-            Ok(self.provider.arm_meguri_structure_upload(binding, baseline, generation.0, publication)));
+            Ok(self.provider.arm_meguri_structure_upload(binding, baseline, schema_before, generation.0, publication)));
+        state.schema_before = Some(schema_before);
+        // The op keeps the lane while it runs, even when its caller drops
+        // the job: no round may clear the record during the save.
+        let lane = state.admission.clone();
         let record = match armed {
             Ok(Ok(record)) => record,
             _ => return stop(MeguriStructureStop::Unavailable),
@@ -395,6 +416,7 @@ impl CoreHost {
         match self.engine().start_job(JobKind::BulkOp, move |job| {
             let outcome = work(&collection, job);
             *output.lock().unwrap_or_else(PoisonError::into_inner) = Some(outcome.clone());
+            drop(lane);
             outcome
         }) {
             Ok(job) => Next::Stage(Stage::Save { job, result }),
@@ -405,28 +427,43 @@ impl CoreHost {
             }
         }
     }
-    /// Step 3's result. A refusal ends the job with nothing saved and
-    /// nothing pending; a save goes on to its upload.
-    fn after_save(&self, task: &MeguriStructureTask, result: Option<Result<(), EngineError>>) -> Next {
-        match result {
-            Some(Ok(())) => {}
-            refused => {
-                // Nothing was written, so the record is removed. When that
-                // write fails, the next settle removes it (`scm <= ls`).
-                if let Ok(Some(record)) = self.structure_record() { let _ = self.clear_structure_record(&record); }
-                return Next::Done(O::NotSaved(match refused {
-                    Some(Err(error)) => MeguriStructureStop::Refused(error),
-                    _ => MeguriStructureStop::Cancelled,
-                }));
-            }
+    /// Step 3's result. Whether the save committed is read from the
+    /// collection, not from the op's answer: the stamp it set is recorded,
+    /// and the upload follows. With the stamp unchanged nothing was saved,
+    /// and the job ends with nothing pending.
+    fn after_save(&self, task: &MeguriStructureTask, state: &mut TaskState, result: Option<Result<(), EngineError>>) -> Next {
+        let schema = task.collection.reader(ReaderRole::Query).and_then(|reader| Ok(reader.col()?.schema_modified.0));
+        let changed = match (&schema, state.schema_before) {
+            (Ok(now), Some(before)) => *now != before,
+            // Unreadable: the record stays, and the next settle decides.
+            _ => return pending(MeguriUploadPending::Storage),
+        };
+        let record = self.structure_record().ok().flatten();
+        if !changed {
+            // Nothing structural was written. The record goes now; when that
+            // write fails, the next settle removes it.
+            if let Some(record) = &record { let _ = self.clear_structure_record(record); }
+            return Next::Done(match result {
+                Some(Ok(())) => O::Saved(U::NotNeeded),
+                Some(Err(error)) => O::NotSaved(MeguriStructureStop::Refused(error)),
+                None => O::NotSaved(MeguriStructureStop::Cancelled),
+            });
         }
-        match self.settle_meguri_structure_upload() {
-            // The op committed no structure change: nothing to upload.
-            Ok(false) => Next::Done(O::Saved(U::NotNeeded)),
-            Ok(true) if !task.reachable => pending(MeguriUploadPending::Unreachable),
-            Ok(true) if task.is_cancelled() => pending(MeguriUploadPending::Cancelled),
-            Ok(true) => self.begin_upload(task),
-            Err(_) => pending(MeguriUploadPending::Storage),
+        // The record went while the op ran (the connection changed): the
+        // structural change is an ordinary full-sync requirement.
+        let Some(record) = record else { return Next::Done(O::Saved(U::ChooseCollection)) };
+        let generation = task.generation;
+        let schema = schema.unwrap_or_default();
+        let marked = self.publish_provider_metadata(generation, |publication|
+            Ok(self.provider.mark_meguri_structure_saved(&record, schema, generation.0, publication)));
+        // Unmarked, the record still covers the save (any stamp but the earlier one).
+        if !matches!(marked, Ok(Ok(_))) { return pending(MeguriUploadPending::Storage); }
+        match result {
+            Some(Ok(())) if !task.reachable => pending(MeguriUploadPending::Unreachable),
+            Some(Ok(())) if task.is_cancelled() => pending(MeguriUploadPending::Cancelled),
+            Some(Ok(())) => self.begin_upload(task),
+            // The op reported a failure after its commit: the save stays pending.
+            _ => pending(MeguriUploadPending::Failed),
         }
     }
     /// Step 4, and step 5's Upload…: settles what an earlier attempt left,
@@ -437,7 +474,7 @@ impl CoreHost {
             Ok(None) => {}
             Ok(Some(op)) if op.acceptance == Acceptance::PossiblyAccepted => return Next::Done(O::Saved(U::AcceptanceUnknown)),
             Ok(Some(op)) if unsent(&op) => {
-                if self.discard_meguri_bootstrap_preparation(access.connection(), &op).is_err() {
+                if self.discard_meguri_bootstrap_preparation_admitted(access.connection(), &op).is_err() {
                     return Next::Done(O::Saved(U::SetupInProgress));
                 }
             }
@@ -453,10 +490,24 @@ impl CoreHost {
                 Err(reason) => pending(reason),
             };
         }
+        // The facts are read with the account the record's binding names.
+        if !Self::same_account(&access, &record) { return pending(MeguriUploadPending::Failed); }
         match self.read_server_facts(access) {
             Ok(facts) => Next::Stage(Stage::Facts(facts)),
             Err(error) => pending(bootstrap_pending(&error)),
         }
+    }
+    /// Every phase of the upload uses the connection and account of the
+    /// binding the save ran under, checked on each access.
+    fn same_account(access: &MeguriAccess, record: &MeguriStructureUpload) -> bool {
+        access.connection() == record.binding().connection()
+            && meguri_sync::provider::native_endpoint(&access.connection().endpoint).ok()
+                .and_then(|endpoint| meguri_sync::policy::AccountRef::derive(&endpoint, access.username()))
+                .is_some_and(|account| &account == record.binding().account())
+    }
+    fn structure_access(&self, task: &MeguriStructureTask, record: &MeguriStructureUpload) -> Result<MeguriAccess, MeguriBootstrapError> {
+        let access = (task.access)()?;
+        if Self::same_account(&access, record) { Ok(access) } else { Err(MeguriBootstrapError::ConnectionChanged) }
     }
     /// One `meta` read; it changes nothing on either side.
     fn read_server_facts(&self, access: MeguriAccess) -> Result<ManualTransferTask<RemoteFacts>, MeguriBootstrapError> {
@@ -480,16 +531,11 @@ impl CoreHost {
     /// The binding the record names stops being ready, so that the retained
     /// bootstrap path can run. Already held by an earlier attempt: nothing to do.
     fn hold_structure_binding(&self, record: &MeguriStructureUpload) -> Result<(), MeguriUploadPending> {
-        let doc = self.provider.snapshot().map_err(|_| MeguriUploadPending::Storage)?;
-        let Some(binding) = doc.meguri_binding else { return Ok(()) };
-        if binding.connection() != record.binding().connection() || binding.account() != record.binding().account()
-            || binding.operation() != record.binding().operation() {
-            return Err(MeguriUploadPending::Failed);
-        }
         let generation = self.cloud_connection_generation().map_err(|_| MeguriUploadPending::Storage)?;
         match self.publish_provider_metadata(generation, |publication|
-            Ok(self.provider.hold_meguri_binding_for_full_sync(&binding, generation.0, publication))) {
-            Ok(Ok(())) => Ok(()),
+            Ok(self.provider.hold_meguri_binding_for_structure_upload(record, generation.0, publication))) {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(MeguriReadyRefusal::BindingChanged)) => Err(MeguriUploadPending::Failed),
             Err(EngineError::Busy { .. }) => Err(MeguriUploadPending::Busy),
             _ => Err(MeguriUploadPending::Storage),
         }
@@ -499,20 +545,26 @@ impl CoreHost {
     fn after_facts(&self, task: &MeguriStructureTask, state: &mut TaskState, facts: Option<Result<RemoteFacts, TransferError>>) -> Next {
         let facts = match facts {
             Some(Ok(facts)) => facts,
-            Some(Err(error)) => return pending(match transfer_pending(&error) {
-                // A read that failed sent nothing; the server was not reached.
-                MeguriUploadPending::Failed => MeguriUploadPending::Unreachable,
-                other => other,
-            }),
+            Some(Err(error)) => return pending(transfer_pending(&error)),
             None => return pending(MeguriUploadPending::Cancelled),
         };
         let Ok(Some(record)) = self.structure_record() else { return pending(MeguriUploadPending::Storage) };
+        // The save was undone while the facts were read: nothing to upload.
+        match self.settle_meguri_structure_upload() {
+            Ok(true) => {}
+            Ok(false) => return Next::Done(O::Saved(U::NotNeeded)),
+            Err(_) => return pending(MeguriUploadPending::Storage),
+        }
         let same = record.baseline().is_some_and(|baseline|
             baseline.modified == facts.modified && baseline.schema_modified == facts.schema_modified);
+        // Nothing is held for an upload that will not be attempted now: a
+        // cancelled job, or a review in progress (no replacement runs during
+        // a review, MP5), leaves the binding ready and the upload pending.
+        if same && task.is_cancelled() { return pending(MeguriUploadPending::Cancelled); }
+        if same && self.review().active_session().is_some() { return pending(MeguriUploadPending::Busy); }
         if let Err(reason) = self.hold_structure_binding(&record) { return pending(reason); }
         if !same { return Next::Done(O::Saved(U::ChooseCollection)); }
-        if task.is_cancelled() { return pending(MeguriUploadPending::Cancelled); }
-        let Ok(access) = (task.access)() else { return pending(MeguriUploadPending::Failed) };
+        let Ok(access) = self.structure_access(task, &record) else { return pending(MeguriUploadPending::Failed) };
         state.read_usn = Some(facts.usn);
         match self.prepare_meguri_bootstrap_admitted(access, MeguriBootstrapDirection::UseDeviceCollection) {
             Ok(copy) => Next::Stage(Stage::ServerCopy(copy)),
@@ -545,9 +597,9 @@ impl CoreHost {
         let advanced = self.publish_provider_metadata(generation, |publication|
             Ok(self.provider.advance_meguri_structure_baseline(&record, baseline, generation.0, publication)));
         if !matches!(advanced, Ok(Ok(_))) { self.discard_unsent(task); return pending(MeguriUploadPending::Storage); }
+        let Ok(access) = self.structure_access(task, &record) else { self.discard_unsent(task); return pending(MeguriUploadPending::Failed) };
         if task.is_cancelled() { self.discard_unsent(task); return pending(MeguriUploadPending::Cancelled); }
-        let Ok(access) = (task.access)() else { self.discard_unsent(task); return pending(MeguriUploadPending::Failed) };
-        match self.confirm_meguri_bootstrap(access, preview) {
+        match self.confirm_meguri_bootstrap_retesting(access, preview, None) {
             Ok(upload) => Next::Stage(Stage::Upload(upload)),
             Err(error) => { self.discard_unsent(task); pending(bootstrap_pending(&error)) }
         }
@@ -574,7 +626,7 @@ impl CoreHost {
     /// Upload… starts clean. One that may have been sent is never touched.
     fn discard_unsent(&self, task: &MeguriStructureTask) {
         if let (Ok(Some(op)), Ok(access)) = (self.manual_transfer_history().active(), (task.access)()) {
-            if unsent(&op) { let _ = self.discard_meguri_bootstrap_preparation(access.connection(), &op); }
+            if unsent(&op) { let _ = self.discard_meguri_bootstrap_preparation_admitted(access.connection(), &op); }
         }
     }
 }

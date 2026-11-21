@@ -139,6 +139,15 @@ impl CoreHost {
     }
     pub fn discard_meguri_bootstrap_preparation_for_generation(&self, generation: Generation,
         connection: &MeguriConnection, operation: &Operation) -> Result<Operation> {
+        // MP7 step 1: the structure save job's own preparation is its own to end.
+        if self.meguri_structure_job_active() { return Err(MeguriBootstrapError::Busy); }
+        self.discard_admitted(generation, connection, operation)
+    }
+    pub(crate) fn discard_meguri_bootstrap_preparation_admitted(&self, connection: &MeguriConnection, operation: &Operation) -> Result<Operation> {
+        self.discard_admitted(self.cloud_connection_generation()?, connection, operation)
+    }
+    fn discard_admitted(&self, generation: Generation,
+        connection: &MeguriConnection, operation: &Operation) -> Result<Operation> {
         let result = self.publish_provider_metadata(generation, |_| Ok((|| {
             self.check_pending_meguri_preparation(connection, operation)?;
             self.cancel_prepared_manual_transfer(&operation.id, false).map_err(Into::into)
@@ -196,6 +205,7 @@ impl CoreHost {
         Ok(self.prepare_manual_transfer(access.into_transfer_access()?, direction, Scope::CollectionAndMedia)?)
     }
     pub fn confirm_meguri_bootstrap(&self, access: MeguriAccess, preview: Preview) -> Result<ManualTransferTask<Operation>> {
+        if self.meguri_structure_job_active() { return Err(MeguriBootstrapError::Busy); }
         self.confirm_meguri_bootstrap_retesting(access, preview, None)
     }
     /// `retest` arms MP6.3 row 2's test inside the replacement's exclusive

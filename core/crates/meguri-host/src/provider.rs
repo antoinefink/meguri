@@ -346,11 +346,9 @@ impl CoreHost {
             return Err(EngineError::Busy { running_op: "provider recovery or review".into() });
         }
         // MP7 step 1: the structure save job holds the lane for its whole
-        // length; a switch or Off waits for it (MP3 step 1).
-        if self.meguri_structure_job_active() {
-            return Err(EngineError::Busy { running_op: "Meguri note type structure save".into() });
-        }
-        self.close_meguri_round_admission();
+        // length; a switch or Off waits for it (MP3 step 1). One step with
+        // the closure, so that no job is admitted in between.
+        self.close_meguri_round_admission()?;
         let _exclusive = self.engine().reserve_collection_export_handoff()?;
         if let Some(runtime) = self.cloud_runtime() {
             runtime.provider_transition_available().map_err(|_| EngineError::Busy { running_op: "iCloud recovery".into() })?;
@@ -451,6 +449,10 @@ impl CoreHost {
         self.configure_meguri_connection_for_generation(self.cloud_connection_generation()?, endpoint)
     }
     pub fn configure_meguri_connection_for_generation(&self, generation: meguri_engine::Generation, endpoint: &str) -> Result<meguri_sync::provider::MeguriConnection, EngineError> {
+        // A new connection drops the binding and the record of a structure save: never under a running job.
+        if self.meguri_structure_job_active() {
+            return Err(EngineError::Busy { running_op: "Meguri note type structure save".into() });
+        }
         // RandomSource is a Host input, so sample before any ownership locks.
         let random = self.provider_random();
         let reference = format!("{:016x}{:016x}", random.next_u64(), random.next_u64());

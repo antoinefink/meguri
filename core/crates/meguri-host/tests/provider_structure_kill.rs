@@ -69,7 +69,8 @@ fn kill(test: &str) -> Killed {
         .env("MEGURI_STRUCTURE_KILL_REVISION", rig.connection.revision.to_string())
         .env("MEGURI_STRUCTURE_KILL_NOTETYPE", rig.notetype.0.to_string())
         .status().unwrap();
-    assert!(!status.success());
+    // The child died by its own abort at the named point, not by a failed setup.
+    assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(6), "SIGABRT");
     let host = CoreHost::open(config).unwrap();
     b::settle(&host);
     Killed { path: root.path().to_owned(), _root: root, host, connection: rig.connection, notetype: rig.notetype,

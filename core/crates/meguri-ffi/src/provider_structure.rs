@@ -51,7 +51,7 @@ pub enum ProviderStructureRefusal {
     Unavailable,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum ProviderUploadPending { Unreachable, Busy, Failed, Cancelled, LocalChanged, Storage }
+pub enum ProviderUploadPending { Unreachable, Busy, Failed, Cancelled, LocalChanged, Storage, SignIn }
 /// The save is committed; what became of its upload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum ProviderStructureUpload {
@@ -122,6 +122,7 @@ fn upload(value: MeguriStructureUploadOutcome) -> ProviderStructureUpload {
             MeguriUploadPending::Cancelled => ProviderUploadPending::Cancelled,
             MeguriUploadPending::LocalChanged => ProviderUploadPending::LocalChanged,
             MeguriUploadPending::Storage => ProviderUploadPending::Storage,
+            MeguriUploadPending::SignIn => ProviderUploadPending::SignIn,
         } },
         U::ChooseCollection => ProviderStructureUpload::ChooseCollection,
         U::AcceptanceUnknown => ProviderStructureUpload::AcceptanceUnknown,

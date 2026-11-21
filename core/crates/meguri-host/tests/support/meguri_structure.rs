@@ -22,6 +22,7 @@ pub struct Rig {
     pub config: HostConfig,
     pub connection: MeguriConnection,
     pub notetype: NotetypeId,
+    pub clock: Arc<StepClock>,
 }
 pub fn config(root: &Path, now: i64) -> HostConfig {
     b::config(root, Arc::new(StepClock::new(now, UtcOffset::UTC, "UTC")))
@@ -57,7 +58,7 @@ pub fn rig(root: &Path, notes: usize) -> Rig {
     let op = b::finish_empty_media(&host, &connection, &op);
     assert!(host.complete_meguri_bootstrap(&connection, b::USER, &op.id).unwrap().is_complete());
     clock.set_now_ms(LATER);
-    Rig { host: Arc::new(host), config, connection, notetype }
+    Rig { host: Arc::new(host), config, connection, notetype, clock }
 }
 pub fn col(host: &CoreHost) -> Col {
     host.collection().unwrap().reader(ReaderRole::Query).unwrap().col().unwrap()
@@ -76,6 +77,15 @@ pub fn draft_without_back(host: &CoreHost, notetype: NotetypeId, confirmed: u64)
     draft.fields.remove(1);
     draft.skip_checks = true;
     draft.confirmed.fields.insert(1, confirmed);
+    draft
+}
+/// A draft that only makes the second field the sort field: a schema
+/// change that deletes nothing and keeps every count.
+pub fn draft_sorting_by_back(host: &CoreHost, notetype: NotetypeId) -> StructureDraft {
+    let collection = host.collection().unwrap();
+    let stored = collection.reader(ReaderRole::Query).unwrap().notetype(notetype).unwrap().unwrap();
+    let mut draft = StructureDraft::of(&stored);
+    draft.sort_field = Some(1);
     draft
 }
 pub type Saved = Arc<Mutex<Option<StructureSaved>>>;
