@@ -246,7 +246,7 @@ pub(crate) async fn snapshot(service:Arc<Service>,authority:NativeAuthority,capa
     // are reserved from the pinned committed view, not a remote length hint.
     let metadata_reservation=service.temp.reserve(4096)?;
     let staged_id=id.clone();
-    let stage=service.metadata.files(move |r|r.stage_collection(&staged_id)).await?;
+    let stage=service.collection_staging(authority.clone(),move |r|r.stage_collection(&staged_id)).await?;
     let (connection,pin)=service.collection_operation(authority,true,move |root| {
         let path=root.collection_path(&id)?;
         let mut c=schema::open(&path,true)?;

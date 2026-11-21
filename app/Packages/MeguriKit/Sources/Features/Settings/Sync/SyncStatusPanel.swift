@@ -140,7 +140,7 @@ struct SyncStatusPanel: View {
         }
     }
     private func issuesLine(_ status: SyncMainStatus) -> String? {
-        guard status.hasIssues else { return nil }
+        guard SyncStatusCopy.showsIssues(sync) else { return nil }
         // As the Sync section's issues row reads (N15.4).
         if let key = status.issuesRowKey, let count = MeguriAffectedCount.value(sync) {
             return SyncText.format(key, Int64(clamping: count))
@@ -172,13 +172,7 @@ private struct PanelDefault: ViewModifier {
 
 /// The files that did not transfer, for Meguri Sync's media-blocked row (T19.5).
 enum MeguriAffectedCount {
-    @MainActor static func value(_ sync: SyncCoordinator) -> UInt64? {
-        if let accounting = sync.meguriAccounting {
-            return UInt64(accounting.files.filter { $0.state != .transferred }.count)
-        }
-        if let result = sync.meguriRoundReport?.media, case .media(let media) = result.outcome { return UInt64(media.affected.count) }
-        return nil
-    }
+    @MainActor static func value(_ sync: SyncCoordinator) -> UInt64? { sync.meguriAffectedFileCount }
 }
 
 /// The status's one action (T19.4, T19.5), in the Sync section's status row
@@ -216,8 +210,10 @@ struct SyncStatusActionButton: View {
         case .meguriFinishSetup: return sync.meguriCanFinish
         // The Sync section shows the sign-in fields themselves.
         case .meguriSignIn: return inPanel
+        // A paused or stopped setup media step (resume fix): the status row's own action.
+        case .meguriRetryMedia: return sync.meguriCanRetryMedia || (sync.meguriRoutine == .mediaBlocked && !sync.meguriBusy)
         // These have no entry outside their own lists.
-        case .meguriRetryMedia, .abandon, .checkDatabase: return false
+        case .abandon, .checkDatabase: return false
         }
     }
 
@@ -325,7 +321,13 @@ struct SyncStatusActionButton: View {
             // T20.1: Sign In… opens the Sync section at the sign-in fields.
             Button(SyncText.value("sync.status.signIn")) { showInSettings?(false) }
                 .accessibilityIdentifier(id)
-        case .meguriRetryMedia, .abandon, .checkDatabase:
+        case .meguriRetryMedia:
+            // Runs at once, from the panel too (N23.3): the media step continues.
+            Button(title) {
+                if sync.meguriRoutine == .mediaBlocked { sync.retryMeguriRoundMedia() } else { sync.retryMeguriMedia() }
+            }
+            .disabled(sync.meguriBusy).accessibilityIdentifier(id)
+        case .abandon, .checkDatabase:
             EmptyView()
         }
     }

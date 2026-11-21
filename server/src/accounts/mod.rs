@@ -3,6 +3,7 @@ mod administration;
 mod barrier;
 mod credentials;
 mod deletion;
+mod reset;
 mod provision;
 pub(crate) mod oauth;
 use crate::{
@@ -65,6 +66,7 @@ impl BrowserAuthority {
 pub struct NativeAuthority {
     pub(crate) id: String,
     pub(crate) generation: i64,
+    pub(crate) data_epoch: i64,
 }
 impl NativeAuthority {
     pub fn account_id(&self) -> &str {
@@ -115,6 +117,7 @@ impl Service {
             #[cfg(feature = "test-hooks")]
             hooks: crate::test_hooks::Hooks::default(),
         });
+        service.recover_resets().await?;
         if service.admission_open().await? {
             service.resume_startup().await?;
         }
@@ -125,6 +128,7 @@ impl Service {
             r.upgrade_media()?;
             r.upgrade_deletions()?;
             r.upgrade_oauth()?;
+            r.upgrade_resets()?;
             Ok(())
         }).await?;
         service.recover_deletions().await?;

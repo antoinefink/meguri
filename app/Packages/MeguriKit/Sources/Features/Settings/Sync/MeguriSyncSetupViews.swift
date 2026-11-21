@@ -53,7 +53,7 @@ struct SyncServiceSwitchSheet: View {
                     if destination != "localOnly" { Text(SyncText.value("sync.switch.otherDevices")) }
                     if source == .meguri && !failed { Text(SyncText.value("sync.switch.signOut")) }
                     Text(SyncText.value(nextKey))
-                    if !changing && !sync.serviceChangeAvailable { Text(SyncText.value("sync.switch.busy")) }
+                    if !changing && !sync.serviceChangeAvailable { Text(SyncText.value(sync.serviceChangeBusyKey)) }
                     if changing { ProgressView(SyncText.value("sync.service.changing")) }
                     if failed { Text(SyncText.value("sync.service.changeFailed")) }
                 }
@@ -132,33 +132,24 @@ struct MeguriSetupPreviewSheet: View {
     }
 }
 
-/// Actual media facts shared by Settings and the status popover; contains no actions.
+/// The one media fact the status row does not say, for media blocked: files
+/// on the server that have not reached this device (T18.6). The status row
+/// already gives the state, its sentence and its action; the issues row the
+/// files not transferred (resume fix: one explanation, not three).
 struct MeguriMediaFactRows: View {
     let collection: ReviewCollection
-    /// The Sync section's issues row already gives the count (T19.5).
-    var showsNotTransferred = true
-    private var sync: SyncCoordinator { collection.sync }
-    static func isVisible(_ sync: SyncCoordinator) -> Bool {
-        if sync.meguriStage == .mediaBlocked || sync.meguriRoutine == .mediaBlocked { return true }
-        if sync.meguriAccounting?.files.contains(where: { $0.state != .transferred }) == true { return true }
-        if let result = sync.meguriRoundReport?.media, case .media(let media) = result.outcome { return !media.affected.isEmpty }
-        return false
+    static func remotePending(_ sync: SyncCoordinator) -> UInt64? {
+        guard sync.meguriStage == .mediaBlocked || sync.meguriRoutine == .mediaBlocked else { return nil }
+        if let accounting = sync.meguriAccounting { return accounting.remotePending > 0 ? accounting.remotePending : nil }
+        if let result = sync.meguriRoundReport?.media, case .media(let media) = result.outcome,
+           let awaiting = media.awaiting, awaiting > 0 { return awaiting }
+        return nil
     }
+    static func isVisible(_ sync: SyncCoordinator) -> Bool { remotePending(sync) != nil }
     var body: some View {
-        if let accounting = sync.meguriAccounting {
-            let affected = accounting.files.filter { $0.state != .transferred }
-            if showsNotTransferred, !affected.isEmpty { Text(SyncText.format("sync.meguri.media.notTransferred", Int64(affected.count))) }
-            if accounting.remotePending > 0 { Text(SyncText.format("sync.meguri.media.remotePending", Int64(clamping: accounting.remotePending))) }
-        } else if let result = sync.meguriRoundReport?.media, case .media(let media) = result.outcome {
-            if showsNotTransferred, let pending = media.pending, let excluded = media.excluded,
-               let count = SyncStatusCopy.sum(pending, excluded), count > 0 {
-                Text(SyncText.format("sync.meguri.media.notTransferred", Int64(clamping: count)))
-            }
-            if let awaiting = media.awaiting, awaiting > 0 { Text(SyncText.format("sync.meguri.media.remotePending", Int64(clamping: awaiting))) }
-            if media.accountingFailure != nil { Text(SyncText.value("sync.meguri.media.unverified")) }
-        } else { Text(SyncText.value("sync.meguri.media.unverified")) }
-        if sync.meguriStage != nil { Text(SyncText.value("sync.meguri.media.setupWaits")) }
-        Text(SyncText.value("sync.meguri.media.study"))
+        if let pending = Self.remotePending(collection.sync) {
+            Text(SyncText.format("sync.meguri.media.remotePending", Int64(clamping: pending)))
+        }
     }
 }
 
@@ -183,6 +174,18 @@ struct MeguriAffectedFilesPage: View {
             } footer: {
                 Text(SyncText.value("sync.meguri.media.list.footer"))
                 if hasExcluded { Text(SyncText.value("sync.meguri.media.list.excluded")) }
+            }
+            // T19.5: an issues row's action is in its list (T18.6: checks the
+            // media folder again and recomputes the list).
+            if collection.sync.meguriRoutine == .mediaBlocked || collection.sync.meguriCanRetryMedia {
+                Section {
+                    Button(SyncText.value("sync.meguri.media.retry")) {
+                        if collection.sync.meguriRoutine == .mediaBlocked { collection.sync.retryMeguriRoundMedia() }
+                        else { collection.sync.retryMeguriMedia() }
+                    }
+                    .disabled(collection.sync.meguriBusy)
+                    .accessibilityIdentifier("settings.sync.meguri.affectedList.retry")
+                }
             }
         }
         .navigationTitle(SyncText.value("sync.meguri.media.list.title"))
