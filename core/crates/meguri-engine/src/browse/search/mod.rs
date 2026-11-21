@@ -305,23 +305,11 @@ impl SessionShared {
                 state.queue.drain(..).collect()
             };
             for job in jobs {
-                let seq = RequestSeq(job.seq);
-                let listener = &self.listener;
                 // A panicking listener loses that event, not the others,
                 // and the worker flag still clears.
-                let deliver = |event| {
-                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener.event(event)));
-                };
-                deliver(if job.token.is_cancelled() {
-                    SearchEvent::Cancelled { seq }
-                } else {
-                    SearchEvent::Failed {
-                        seq,
-                        error: BrowseError::Engine(EngineError::internal(format!(
-                            "cannot start a search worker: {error}"
-                        ))),
-                    }
-                });
+                let event = worker::unstarted(&job, &format!("cannot start a search worker: {error}"));
+                let listener = &self.listener;
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener.event(event)));
             }
         }
     }
