@@ -928,6 +928,7 @@ utilities:
   - {job: cleanroom, why: "restricted Codex implementation runner; boundary probes run before every invocation"}
   - {job: cleanroom-image, why: "builds the restricted Codex runtime; cleanroom verifies it before use"}
   - {job: core-format, why: "optional Rust source formatting on demand"}
+  - {job: dev-icon, why: "explicit regeneration of the development app icon from AppIcon.icon; xcode-check checks it is current and checks both identities' products"}
   - {job: sync-server-package, why: "Explicit clean image build; exact-image runtime smoke builds and verifies it in gates"}
   - {job: sync-server-local, why: "Explicit persistent operator service and existing recovery commands; automated packaging uses an isolated synthetic volume"}
   - {job: sync-server-format, why: "explicit optional server source formatting on demand"}
