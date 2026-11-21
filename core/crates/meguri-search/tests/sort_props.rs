@@ -13,7 +13,7 @@ use meguri_model::{
 };
 use meguri_search::config::{Column, Refusal, SortDirection};
 use meguri_search::{
-    ContextValue, FoldMode, Param, Plan, SearchContext, SearchMode, SearchNotetypes, Sort, SortColumn, SortError,
+    ContextValue, FoldMode, Param, Plan, SearchContext, SearchMode, SearchNotetypes, Sort, SortColumn,
     SortedQuery, parse,
 };
 use meguri_storage::{Initializers, OpenOptions, OpenedCollection, Reader, ReaderRole, open_collection, raw::SqlValue};
@@ -533,10 +533,7 @@ fn unsortable_columns_and_unknown_keys_are_refused_but_field_columns_are_not_s1(
                 sort.column(),
                 &SortColumn::Field(key.strip_prefix("fld:").unwrap().to_owned())
             );
-            assert!(matches!(
-                SortedQuery::for_ids(&[1], &sort, &context()),
-                Err(SortError::FieldColumnNotYetSupported { .. })
-            ));
+            assert!(SortedQuery::for_ids(&[1], &sort, &context()).is_ok(), "{key}");
         }
     }
     for key in ["stability", "difficulty", "retrievability"] {

@@ -34,6 +34,8 @@ pub mod change_notetype;
 pub mod changeset;
 #[path = "cloud_op_sources.rs"]
 pub mod cloud_op_sources;
+#[path = "column_sets.rs"]
+pub mod column_sets;
 #[path = "controlled_services.rs"]
 pub mod controlled_services;
 #[path = "day_conformance.rs"]

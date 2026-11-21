@@ -170,7 +170,7 @@ fn card_excerpts(session: &mut Session<'_>, request: &ObservationRequest) -> Res
 fn browser_rows(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
     use crate::scenario::{LogicalRef, ObservationArgs, RefKind};
     use meguri_engine::browse::{self, RowRequest, RowTime};
-    use meguri_search::config::Column;
+    use meguri_search::config::{Column, ColumnKey};
     let ObservationArgs::Mapping(map) = &request.args else {
         return Err(invalid("browser_rows takes a mapping"));
     };
@@ -236,12 +236,13 @@ fn browser_rows(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
         now: session.clock.now_secs(),
         today: super::sched::day_without_writes(session)?.today,
     };
+    let keys: Vec<ColumnKey> = columns.iter().copied().map(ColumnKey::Column).collect();
     let rows = browse::rows(
         &engine,
         &RowRequest {
             mode,
             ids: &ids,
-            columns: &columns,
+            columns: &keys,
             time,
         },
     )
@@ -333,6 +334,13 @@ fn cell_value(cell: &meguri_engine::browse::Cell, clock: &super::clock::Scenario
             return Err(ExecError::new(
                 "unsupported_observation",
                 format!("an Answer outcome with no B4 form: {other:?}"),
+            ));
+        }
+        // B3 takes only the 19 columns of C2: no field column reaches here.
+        Cell::NoField | Cell::Media { .. } => {
+            return Err(ExecError::new(
+                "unsupported_observation",
+                format!("a field column cell with no B4 form: {cell:?}"),
             ));
         }
     })
