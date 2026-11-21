@@ -66,6 +66,27 @@ pub(crate) fn glob_to_regex(text: &str, wildcards: Wildcards) -> String {
     out
 }
 
+/// The text [`glob_to_regex`]'s expression matches exactly, when the glob
+/// holds no wildcard (`None` otherwise): every unit as the expression reads
+/// it, so an escaped character other than `\`, `*` and `_` keeps its
+/// backslash (T13.1).
+pub(crate) fn glob_literal(text: &str) -> Option<String> {
+    let mut out = String::with_capacity(text.len());
+    for unit in units(text) {
+        match unit {
+            Unit::Escaped(Some('\\')) | Unit::Escaped(None) => out.push('\\'),
+            Unit::Escaped(Some(c @ ('*' | '_'))) => out.push(c),
+            Unit::Escaped(Some(other)) => {
+                out.push('\\');
+                out.push(other);
+            }
+            Unit::Plain('*' | '_') => return None,
+            Unit::Plain(other) => out.push(other),
+        }
+    }
+    Some(out)
+}
+
 /// T13.2: a lone `*` or `_` (after an even number of backslashes).
 pub(crate) fn has_wildcards(text: &str) -> bool {
     units(text).any(|unit| matches!(unit, Unit::Plain('*' | '_')))
@@ -333,6 +354,26 @@ mod tests {
             ("", false),
         ] {
             assert_eq!(has_wildcards(text), wild, "{text:?}");
+        }
+    }
+
+    // A glob without wildcards is the text its expression matches.
+    #[test]
+    fn a_glob_without_wildcards_reads_as_its_literal() {
+        for (text, literal) in [
+            ("abc", Some("abc")),
+            (r"a\_b\*c", Some("a_b*c")),
+            (r"a\\b", Some(r"a\b")),
+            (r"a\:b", Some(r"a\:b")),
+            ("a\\", Some("a\\")),
+            ("a*", None),
+            (r"a\\_", None),
+        ] {
+            assert_eq!(glob_literal(text).as_deref(), literal, "{text:?}");
+            if let Some(literal) = literal {
+                let expression = regex::Regex::new(&format!("^{}$", glob_to_regex(text, Wildcards::TEXT))).unwrap();
+                assert!(expression.is_match(literal), "{text:?}");
+            }
         }
     }
 

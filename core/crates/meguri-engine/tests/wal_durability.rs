@@ -405,7 +405,8 @@ fn production_receipt_initial_no_write_and_event_seqs_do_not_wait_or_sync() {
         .stream()
         .publish(h.collection.generation(), None, EventKind::Available);
     covered(&h.collection, identity, event, Duration::ZERO);
-    assert!(h.collection.durability_events().syncs.is_empty());
+    let events = h.collection.durability_events();
+    assert!(events.syncs.is_empty(), "{events:?}");
 }
 
 fn paused_wal_baseline(h: &Harness) -> meguri_engine::WalIdentity {

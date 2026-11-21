@@ -26,6 +26,7 @@ pub struct ProcessCore {
     queues: Arc<meguri_engine::sched::queue::QueueProvider>,
     review: Arc<meguri_engine::session::ReviewService>,
     names: Arc<meguri_engine::browse::NameIndexProvider>,
+    counts: Arc<meguri_engine::browse::FilterCounts>,
     job_workers: usize,
     opened: Arc<Mutex<bool>>,
 }
@@ -62,6 +63,7 @@ impl ProcessCore {
             queues,
             review,
             names: Arc::new(meguri_engine::browse::NameIndexProvider::new()),
+            counts: Arc::new(meguri_engine::browse::FilterCounts::new()),
             job_workers,
             opened: Arc::new(Mutex::new(false)),
         })
@@ -284,6 +286,7 @@ pub struct CoreHost {
     queues: Arc<meguri_engine::sched::queue::QueueProvider>,
     review: Arc<meguri_engine::session::ReviewService>,
     names: Arc<meguri_engine::browse::NameIndexProvider>,
+    counts: Arc<meguri_engine::browse::FilterCounts>,
 }
 
 impl CoreHost {
@@ -554,6 +557,7 @@ impl CoreHost {
         let queues = process.queues.clone();
         let review = process.review.clone();
         let names = process.names.clone();
+        let counts = process.counts.clone();
         if let Some(cloud) = &cloud {
             cloud.attach_provider_authority(provider.clone());
             cloud.attach_sources(config.random.clone(), Arc::downgrade(&review));
@@ -574,7 +578,10 @@ impl CoreHost {
             .suspend_participant(review.clone())
             .open_step(names.clone())
             .observer(names.clone())
-            .generation_listener(names.clone());
+            .generation_listener(names.clone())
+            .open_step(counts.clone())
+            .observer(counts.clone())
+            .generation_listener(counts.clone());
         if let Some(cloud) = &cloud {
             ports = ports
                 .cloud_publication_authority(cloud.clone())
@@ -694,6 +701,7 @@ impl CoreHost {
             queues,
             review,
             names,
+            counts,
         };
         Ok((host, paths, options))
     }
@@ -772,6 +780,12 @@ impl CoreHost {
     /// The name index suggestions read (`search/editing-services` D6.7).
     pub fn names(&self) -> &meguri_engine::browse::NameIndexProvider {
         &self.names
+    }
+
+    /// Browse's filter counts and their cache (`search/filter-tokens`
+    /// T12.4).
+    pub fn filter_counts(&self) -> &meguri_engine::browse::FilterCounts {
+        &self.counts
     }
 
     pub fn review(&self) -> &meguri_engine::session::ReviewService {

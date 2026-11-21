@@ -30,6 +30,12 @@
 //! U260 (`specs/search/filter-tokens.md` T1-T7): [`filter_tokens`] holds
 //! Browse's query of tokens and text, writes its run text and reads Anki
 //! search text back into it.
+//!
+//! U263 (`specs/search/filter-tokens.md` T12): [`filter_tokens::suggest`]
+//! lists the suggestions under Browse's search field from the name index,
+//! [`suggest`] the candidates for Anki syntax typed at the caret
+//! (`editing-services` D6), and [`filter_tokens::counts`] the grouped
+//! statements of the filter counts.
 
 pub mod ast;
 pub mod browser;
@@ -40,6 +46,7 @@ pub mod context;
 pub mod custom_data;
 pub mod error;
 pub mod filter_tokens;
+mod fold;
 mod lexer;
 pub mod name_index;
 pub mod notetypes;
@@ -47,6 +54,7 @@ mod parser;
 mod pattern;
 pub mod plan;
 pub mod sqlfns;
+pub mod suggest;
 pub mod tail;
 
 pub use ast::{Node, NodeId, NodeKind, Query, Scope, Term};

@@ -31,6 +31,11 @@ rusqlite.workspace = true
 serde_json.workspace = true
 # The combining-free transform of `nc:` tag terms (text-matching T8.1).
 unicode-normalization.workspace = true
+# Suggestions and the tag counts compare names by Unicode 16.0 simple case
+# folding (`search/editing-services` D6.4, `tags/complete` C3, the `regex`
+# crate's case-insensitive mode), with the pinned compiled data.
+icu_casemap.workspace = true
+icu_casemap_data.workspace = true
 
 [dev-dependencies]
 # Turns test-hooks on for the tests (testkit depends on this crate with it):

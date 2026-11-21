@@ -535,6 +535,82 @@ class PhysicalDriveEvidenceTests(unittest.TestCase):
                 self.assertFalse(any("launch" in call for call in calls))
 
 
+class RealCopyDeviceTests(unittest.TestCase):
+    """run --real-copy: daily-driver products sealed and installed, never launched."""
+
+    def fixture(self, root):
+        root = Path(root)
+        output = root / "build/mg/run/synthetic/real-copy"
+        output.mkdir(parents=True)
+        (output.parent / "real-copy-settings.json").write_text("[]")
+        app = root / drive.REAL_PRODUCTS / "Release-iphoneos/Meguri.app"
+        widget = app / "PlugIns/MeguriWidget.appex"
+        for path, identifier, executable in ((app, drive.DAILY, "Meguri"), (widget, drive.DAILY + ".widget", "MeguriWidget")):
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "Info.plist").write_bytes(plistlib.dumps({
+                "CFBundleIdentifier": identifier, "CFBundleExecutable": executable,
+                "CFBundleSupportedPlatforms": ["iPhoneOS"], "CFBundleVersion": "17",
+                "CFBundleShortVersionString": "1.0", "MeguriCardInspectionBuild": "personalRelease"}))
+            (path / executable).write_bytes(b"synthetic executable")
+        stamp = root / "app/Packages/MeguriCore/Binaries/.stamp"
+        stamp.parent.mkdir(parents=True)
+        stamp.write_text("hash=" + "a" * 32 + "\nconfiguration=Release\nprofile=release\nfeatures=ankiweb\nslices=device\n")
+        return SimpleNamespace(root=root, output=output, source="a" * 64, device="selected", xctestrun=None), app
+
+    def binary_command(self, argv, category):
+        return subprocess.CompletedProcess(argv, 0, b"arm64\n" if "-archs" in argv else b"platform IOS\n", b"")
+
+    def test_real_copy_seals_daily_ids_installs_and_never_launches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args, app = self.fixture(directory)
+            installed = {"bundleVersion": "17", "url": "file:///private/synthetic/Meguri.app/"}
+            calls = []
+            def query(device, output, arguments):
+                calls.append(arguments)
+                return {}
+            with patch.object(drive, "signature", return_value={"team": "TESTTEAM01"}) as signed, \
+                 patch.object(drive, "command", side_effect=self.binary_command), \
+                 patch.object(drive, "installation", return_value=installed) as installation, \
+                 patch.object(drive, "device_query", side_effect=query):
+                drive.real_seal(args)
+                self.assertEqual([call.args[1] for call in signed.call_args_list], [drive.DAILY, drive.DAILY + ".widget"])
+                drive.real_install(args)
+                installation.assert_called_once_with(args.device, args.output, drive.DAILY)
+            self.assertEqual(calls, [["device", "install", "app", str(app)]])
+            witness = drive.read_json(args.output / "real-install-witness.json")
+            self.assertIs(witness["real_copy"], True)
+            self.assertIs(witness["launched"], False)
+            self.assertFalse((args.output / "preview-launch.json").exists())
+
+    def test_real_copy_refuses_dev_products_and_changes_before_install(self):
+        for case in ("dev-id", "changed"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                args, app = self.fixture(directory)
+                if case == "dev-id":
+                    metadata = plistlib.loads((app / "Info.plist").read_bytes())
+                    metadata["CFBundleIdentifier"] = drive.APP
+                    (app / "Info.plist").write_bytes(plistlib.dumps(metadata))
+                with patch.object(drive, "signature", return_value={"team": "TESTTEAM01"}), \
+                     patch.object(drive, "command", side_effect=self.binary_command), \
+                     patch.object(drive, "device_query") as query:
+                    if case == "dev-id":
+                        with self.assertRaises(drive.Refused):
+                            drive.real_seal(args)
+                    else:
+                        drive.real_seal(args)
+                        (app / "Meguri").write_bytes(b"changed executable")
+                        with self.assertRaises(drive.Refused):
+                            drive.real_install(args)
+                    query.assert_not_called()
+                self.assertFalse((args.output / "real-install-witness.json").exists())
+
+    def test_real_copy_installation_query_accepts_the_daily_id(self):
+        result = {"apps": [{"bundleIdentifier": drive.DAILY, "bundleVersion": "17", "builtByDeveloper": True,
+                            "url": "file:///private/synthetic/Meguri.app/"}]}
+        with patch.object(drive, "device_query", return_value=result):
+            self.assertEqual(drive.installation("selected", Path("/tmp"), drive.DAILY)["bundleIdentifier"], drive.DAILY)
+
+
 class PersonalPreviewTests(unittest.TestCase):
     def fixture(self, root):
         root = Path(root)

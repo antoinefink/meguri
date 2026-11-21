@@ -33,8 +33,8 @@ pub use handle::{Invalidation, Refetch};
 pub use one_shot::search_ids;
 pub use page::{QaCells, QaWhich};
 pub use selection::{MapFrom, Mapped, Selection};
-pub(crate) use registry::SearchRegistry;
-pub(crate) use worker::OWNER;
+pub(crate) use registry::{SearchRegistry, bridge};
+pub(crate) use worker::{OWNER, cells, context};
 
 use handle::Handle;
 use worker::{Job, QueuedJob};
@@ -490,6 +490,18 @@ impl SearchSession {
         selection::resolve(&self.shared, handle, revision, ranges, target)
     }
 
+    /// H12: a selection of index ranges of `handle` at `revision`, kept as
+    /// ranges until a bulk action resolves it inside its job (U86), so a
+    /// large selection never crosses the FFI as ids.
+    pub fn selection(&self, handle: HandleId, revision: u64, ranges: Vec<Range<u64>>) -> HandleSelection {
+        HandleSelection {
+            shared: Arc::clone(&self.shared),
+            handle,
+            revision,
+            ranges,
+        }
+    }
+
     /// H12: the index of `id` in the handle (`kind` says whether it is a
     /// card id or a note id), or none.
     pub fn index_of(&self, handle: HandleId, revision: u64, kind: SearchMode, id: i64) -> Result<Option<u64>, BrowseError> {
@@ -587,6 +599,51 @@ impl SearchSession {
     /// H16: how many predicate runs the session's requests made.
     pub fn predicate_runs_for_testing(&self) -> u64 {
         self.shared.testing.runs.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// A selection of a handle's indexes (H12), resolved to ids only when a
+/// command runs. It refers to the session without keeping it open: once the
+/// session is closed or the handle released, resolving it fails with
+/// `UnknownHandle`.
+#[derive(Clone)]
+pub struct HandleSelection {
+    shared: Arc<SessionShared>,
+    handle: HandleId,
+    revision: u64,
+    ranges: Vec<Range<u64>>,
+}
+
+impl std::fmt::Debug for HandleSelection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HandleSelection")
+            .field("handle", &self.handle)
+            .field("revision", &self.revision)
+            .field("ranges", &self.ranges)
+            .finish()
+    }
+}
+
+impl HandleSelection {
+    /// H12's `resolve_selection` for `target`, in one read transaction on
+    /// the query reader.
+    pub fn resolve(&self, target: SearchMode) -> Result<Vec<i64>, BrowseError> {
+        selection::resolve(&self.shared, self.handle, self.revision, &self.ranges, target)
+    }
+
+    /// [`HandleSelection::resolve`] for an action on `collection`: the ids
+    /// only when the handle belongs to that collection and its generation
+    /// (H6), so a selection made on another collection never names rows of
+    /// this one. `UnknownHandle` otherwise.
+    pub fn resolve_for(&self, collection: &crate::Collection, target: SearchMode) -> Result<Vec<i64>, BrowseError> {
+        let ids = self.resolve(target)?;
+        // The handle was checked against its session's collection while it
+        // was read; that collection must be the action's.
+        let own = self.shared.engine()?.collection()?;
+        if own.generation() != collection.generation() || !Arc::ptr_eq(&own.core, &collection.core) {
+            return Err(BrowseError::UnknownHandle);
+        }
+        Ok(ids)
     }
 }
 
