@@ -22,6 +22,8 @@ pub mod column_sets;
 pub mod config_keys;
 #[path = "edit_services.rs"]
 pub mod edit_services;
+#[path = "field_columns.rs"]
+pub mod field_columns;
 #[path = "filter_tokens.rs"]
 pub mod filter_tokens;
 #[path = "name_index.rs"]
