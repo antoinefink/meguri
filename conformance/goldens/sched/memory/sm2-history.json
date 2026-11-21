@@ -1261,10 +1261,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "d242c316ccc15adbecf1514c8b7cc469057e11fb38054dc00fb496b302f2b634",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "sched/memory/sm2-history",
-  "scenario_sha256": "42aedf8f7c29ff09582cece9c4e04c66923176454724bf09f657d28c5eed9bcc",
+  "scenario_sha256": "4a481b15c77af11f9faa9aa217f9c8a5d0d24ee530d7211959e5293a10958513",
   "tz": "UTC"
 }

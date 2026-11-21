@@ -38,7 +38,7 @@ steps:
   - db_exec:
       sql: "UPDATE cards SET type = 2, queue = 2, ivl = 4, due = 0, factor = 2500, reps = 3, data = '{\"s\":4.5,\"d\":5.0,\"lrt\":1894356000}' WHERE nid IN (SELECT id FROM notes WHERE sfld IN ('lapse', 'tough'))"
   - advance: 1h
-  - observe: [timing, "next_states(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9)"]
+  - observe: [timing, "next_states(#c1, #c3, #c5, #c7, #c9, #c2, #c4, #c6, #c8)"]
   - answer: {card: "#c1", rating: again, time_ms: 1000}
   - answer: {card: "#c2", rating: hard, time_ms: 1000}
   - answer: {card: "#c3", rating: good, time_ms: 1000}
@@ -49,8 +49,8 @@ steps:
   - answer: {card: "#c8", rating: again, time_ms: 1000}
   - answer: {card: "#c9", rating: hard, time_ms: 1000}
   - observe:
-      - "card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9)"
-      - "revlog(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9)"
+      - "card(#c1, #c3, #c5, #c7, #c9, #c2, #c4, #c6, #c8)"
+      - "revlog(#c1, #c3, #c5, #c7, #c9, #c2, #c4, #c6, #c8)"
   # The learning card's last step (10m) is done: Good graduates it.
   - advance: 10m
   - observe: [timing, "next_states(#c7)"]

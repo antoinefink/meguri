@@ -225,7 +225,7 @@ steps:
       (76, 2, 2, 31, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}'), (77, 2, 2, 31, 9, 2500, 2, '{"s":9.0,"d":5.0,"lrt":1894356000}')
       ) AS v ON v.column1 = c.n WHERE cards.id = c.cid
 - db_exec:
-    sql: INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id
+    sql: INSERT INTO revlog SELECT v.column1, (SELECT id
       FROM cards ORDER BY id LIMIT 1), -1, v.column2, v.column3, v.column4, v.column5, v.column6, v.column7 FROM
       (VALUES (1893750000000, 3, -600, 0, 0, 5000, 0), (1893750600000, 3, 3, -600, 0, 4000, 0), (1893924000000,
       3, 10, 3, 2500, 3000, 1) ) AS v

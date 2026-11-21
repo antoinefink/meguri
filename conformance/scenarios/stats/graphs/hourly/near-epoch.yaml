@@ -7,5 +7,5 @@ clock: {tz: America/New_York, start: "2026-10-12T12:00:00"}
 setup:
   config: {"rollover": 4}
 steps:
-  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (12600000, 1000, -1, 3, 1, 30, 2500, 0, 1)"}}
+  - {"db_exec": {"sql": "INSERT INTO revlog VALUES (12600000, 1000, -1, 3, 1, 30, 2500, 0, 1)"}}
   - {"observe": [{"stats": [{"scope": "collection", "history": "all", "parts": ["hours"]}]}]}
