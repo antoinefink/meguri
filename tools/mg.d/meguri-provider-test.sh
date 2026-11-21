@@ -280,8 +280,10 @@ mg_meguri_provider_real_server() {
       *) bad=1; break ;;
     esac
   done
+  # The structure phase checks the fixture as the upload left it: it does not follow a review round.
+  [ "$provider_review_round" != 1 ] || [ "$provider_structure_save" != 1 ] || bad=1
   if [ "$bad" = 1 ]; then
-    mg_failure usage "meguri-provider-real-server [--review-round] [--structure-save] [--package-receipt <result.json>]"; mg_status error; return
+    mg_failure usage "meguri-provider-real-server [--review-round | --structure-save] [--package-receipt <result.json>]"; mg_status error; return
   fi
   mg_sync_server__clean || { mg_status fail; return; }
   provider_commit="$(mg_meguri_provider__commit)" || { mg_status fail; return; }
