@@ -5,15 +5,17 @@ name: Verify Meguri
 # request and master push starts this workflow; "Select suites" decides what
 # runs, and a suite the change does not affect still reports, as a quick pass
 # that says it was not selected, so no check waits forever. Linux · selftest
-# is the exception: it skips (a skipped check counts as passing), so a change
-# outside tools/ and .github/ takes no runner for it.
+# is the exception: it skips (a skipped check counts as passing), so a pull
+# request outside tools/, .github/ and docker/ takes no runner for it.
 #
 # - Linux · core: one result for the Core suite. It passes only when every
 #   shard ran and passed `tools/mg core-test --quick` and the lint job passed
 #   `tools/mg core-lint`, on this commit; a job that failed, was cancelled or
 #   never started fails it.
+# - Linux · core · build: the canaries, then quick's test binaries built
+#   once into a nextest archive (`core-test --build-archive`).
 # - Linux · core · shard M/N: nextest partition M of N of the quick tests,
-#   without the tests in .github/core-timing-sensitive.txt.
+#   from that archive, without the tests in .github/core-timing-sensitive.txt.
 # - Linux · core · lint: `tools/mg core-lint` (clippy, layering-check, the
 #   AnkiWeb scan).
 # - Linux · core (timing-sensitive): advisory. Runs the listed tests alone,
@@ -22,7 +24,8 @@ name: Verify Meguri
 # - Linux · checks: every run. static-checks against the base, lint-ui,
 #   design-docs and core-deny, one after another on one runner.
 # - Linux · selftest: `tools/mg selftest` and `image-tools-selftest`, for
-#   changes to tools/ or .github/.
+#   pull requests that change tools/, .github/ or docker/, every master push
+#   and manual and scheduled runs.
 # - Linux · similarity: the similarity scan against the pinned Anki releases
 #   (.github/similarity.sh), for the files this change adds or modifies.
 
@@ -230,7 +233,7 @@ jobs:
       contents: read
       packages: read
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 60
+    timeout-minutes: 90
     concurrency:
       group: meguri-verification-${{ github.ref }}-core-build-${{ needs.suites.outputs.core == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
       cancel-in-progress: true
@@ -263,31 +266,39 @@ jobs:
           key: core-deps-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
           restore-keys: core-deps-v1-${{ needs.image.outputs.hash }}-
 
-      - name: Build the Core test archive
+      # The canaries first, building only their packages (AE82): a pin drift
+      # that also breaks the build of other crates is still reported. Then
+      # the archive. Each leaves its receipt for Linux · core.
+      - name: Run the canaries, then build the Core test archive
         shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/cargo-target"
-          args=(core-test --build-archive build/ci/core-tests.tar.zst)
-          rc=0
-          receipt="$(sudo -n env MEGURI_CI_DEV_IMAGE="${MEGURI_CI_DEV_IMAGE:-}" \
-            MEGURI_DOCKER_CARGO_HOME="$RUNNER_TEMP/cargo-home" MEGURI_DOCKER_CARGO_TARGET="$RUNNER_TEMP/cargo-target" \
-            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
-            GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" "${args[@]}")" || rc=$?
-          artifact="$RUNNER_TEMP/meguri-result.json"
-          receipt_prefix="$GITHUB_WORKSPACE/build/mg/core-test/"
-          receipt_suffix="${receipt#"$receipt_prefix"}"
-          if [[ "$receipt" == "$receipt_prefix"* &&
-                "$receipt_suffix" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+/result\.json$ ]] &&
-             sudo -n test -f "$receipt"; then
-            sudo -n cat -- "$receipt" > "$artifact.tmp"
-            mv -- "$artifact.tmp" "$artifact"
-            jq -r '"Build: \(.status). \(.message)"' "$artifact" >>"$GITHUB_STEP_SUMMARY"
-          fi
-          ((rc == 0))
-          jq -e --arg sha "$GITHUB_SHA" '
-            .status == "pass" and .commit.sha == $sha and .commit.dirty == false
-            and .job == "core-test" and .args == ["--build-archive", "build/ci/core-tests.tar.zst"]
-            and .details.archive.file == "build/ci/core-tests.tar.zst"' "$artifact"
+          mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/cargo-target" "$RUNNER_TEMP/receipts"
+          # step <name> <tools/mg args...>: run, keep the receipt as <name>.json, check it.
+          step() {
+            local name="$1" rc=0 receipt artifact="$RUNNER_TEMP/receipts/$1.json" want
+            shift
+            receipt="$(sudo -n env MEGURI_CI_DEV_IMAGE="${MEGURI_CI_DEV_IMAGE:-}" \
+              MEGURI_DOCKER_CARGO_HOME="$RUNNER_TEMP/cargo-home" MEGURI_DOCKER_CARGO_TARGET="$RUNNER_TEMP/cargo-target" \
+              GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
+              GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" "$@")" || rc=$?
+            local prefix="$GITHUB_WORKSPACE/build/mg/core-test/"
+            local suffix="${receipt#"$prefix"}"
+            if [[ "$receipt" == "$prefix"* && "$suffix" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+/result\.json$ ]] &&
+               sudo -n test -f "$receipt"; then
+              sudo -n cat -- "$receipt" > "$artifact.tmp"
+              mv -- "$artifact.tmp" "$artifact"
+              jq -r --arg n "$name" '"\($n): \(.status). \(.message)"' "$artifact" >>"$GITHUB_STEP_SUMMARY"
+              jq -r '.failures[]? | "- `\(.id)`"' "$artifact" >>"$GITHUB_STEP_SUMMARY"
+            fi
+            ((rc == 0)) || return 1
+            want="$(printf '%s\n' "${@:2}" | jq -Rnc '[inputs]')"
+            jq -e --arg sha "$GITHUB_SHA" --argjson want "$want" '
+              .status == "pass" and .commit.sha == $sha and .commit.dirty == false
+              and .job == "core-test" and .args == $want' "$artifact" >/dev/null
+          }
+          step canaries core-test --canaries
+          step build core-test --build-archive build/ci/core-tests.tar.zst
+          jq -e '.details.archive.file == "build/ci/core-tests.tar.zst"' "$RUNNER_TEMP/receipts/build.json"
 
       # Already compressed (zstd), so the upload stores it as it is.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -296,7 +307,7 @@ jobs:
           path: build/ci/core-tests.tar.zst
           if-no-files-found: error
           compression-level: 0
-          retention-days: 1
+          retention-days: 3
 
       # Only a master push or manual run saves, and only a new key, once the
       # archive built: pull requests read master's cache but never add
@@ -325,7 +336,7 @@ jobs:
         if: always()
         with:
           name: meguri-linux-core-build-result
-          path: ${{ runner.temp }}/meguri-result.json
+          path: ${{ runner.temp }}/receipts/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -666,8 +677,11 @@ jobs:
           fi
           printf 'Lint: %s\n\n' "${lint_error:-$(jq -r '.message' "$lint")}" >>"$GITHUB_STEP_SUMMARY"
           [[ "$BUILD_JOB" == success ]] || fail "Linux · core · build ended $BUILD_JOB (failed, cancelled or not started), so no shard ran."
-          build="$RUNNER_TEMP/build/meguri-result.json"
-          [[ -f "$build" ]] || fail "Linux · core · build left no receipt."
+          build="$RUNNER_TEMP/build/build.json"
+          [[ -f "$build" ]] || fail "Linux · core · build left no build receipt."
+          jq -e --arg sha "$GITHUB_SHA" '.status == "pass" and .commit.sha == $sha and .commit.dirty == false
+            and .job == "core-test" and .args == ["--canaries"] and .summary.passed > 0' "$RUNNER_TEMP/build/canaries.json" >/dev/null 2>&1 ||
+            fail "Linux · core · build left no passing canary receipt on $GITHUB_SHA."
           archive_sha="$(jq -r --arg sha "$GITHUB_SHA" '
             select(.status == "pass" and .commit.sha == $sha and .commit.dirty == false and .job == "core-test"
               and .args == ["--build-archive", "build/ci/core-tests.tar.zst"]) | .details.archive.sha256 // empty' "$build")"
