@@ -215,7 +215,8 @@ def check_product(app, identity):
                   f'$.NSFileManager.defaultManager.displayNameAtPath({json.dumps(os.path.abspath(app))}).js')
         shown = subprocess.run(["osascript", "-l", "JavaScript", "-e", script],
                                check=True, capture_output=True, text=True).stdout.strip()
-        if shown != want["name"]:
+        # With Finder's "Show all filename extensions" the name keeps ".app".
+        if shown.removesuffix(".app") != want["name"]:
             problems.append(f"the system shows the bundle as {shown!r}, expected {want['name']!r}")
     # Loose icon files are <icon name>.icns or <icon name><size>...png.
     other = re.compile(re.escape(want["other_icon"]) + r"(\.icns$|\d.*\.png$)")
