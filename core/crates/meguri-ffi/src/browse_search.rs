@@ -670,6 +670,8 @@ pub struct BrowseSearchSession {
     /// `None` once closed. Calls clone it and release the lock before they
     /// reach the engine.
     session: Mutex<Option<Arc<SearchSession>>>,
+    /// Held by `close` while it shuts the session down.
+    closing: Mutex<()>,
     counts: CountsSlot,
 }
 
@@ -687,6 +689,7 @@ pub fn open_search_session(listener: Arc<dyn BrowseSearchListener>) -> Result<Ar
     let session = runtime::engine()?.open_search_session(Arc::new(Relay(listener)));
     Ok(Arc::new(BrowseSearchSession {
         session: Mutex::new(Some(Arc::new(session))),
+        closing: Mutex::new(()),
         counts: CountsSlot::default(),
     }))
 }
@@ -906,9 +909,14 @@ impl BrowseSearchSession {
     /// calls fail with `UnknownHandle`. Idempotent.
     pub fn close(&self) -> Result<(), CoreError> {
         callback::enter("BrowseSearchSession::close");
+        // Concurrent closes wait for the one shutting down; other calls
+        // never take this lock.
+        let _closing = lock(&self.closing);
+        // The session lock is released before the engine work.
+        let session = lock(&self.session).take();
         // Shut down now, not when the last call in flight lets go of its
         // clone: a request one of them makes meanwhile ends `Cancelled`.
-        if let Some(session) = lock(&self.session).take() {
+        if let Some(session) = session {
             session.shutdown();
         }
         Ok(())
