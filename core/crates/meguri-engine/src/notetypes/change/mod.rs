@@ -142,7 +142,17 @@ impl ChangeInfo {
             field_content: self.field_content.clone(),
             card_counts: self.card_counts.clone(),
         };
-        preview(&shape, &census, fields, templates)
+        // Keep only the entries the new note type has, naming parts the old
+        // one has: the preview of any other mapping is that of its valid part.
+        let within = |map: &[Option<u32>], len: usize, old: usize| -> Vec<Option<u32>> {
+            map.iter()
+                .take(len)
+                .map(|o| o.filter(|o| (*o as usize) < old))
+                .collect()
+        };
+        let fields = within(fields, shape.new_fields, shape.old_fields);
+        let templates = templates.map(|map| within(map, shape.new_templates, shape.old_templates));
+        preview(&shape, &census, &fields, templates.as_deref())
     }
 }
 
@@ -531,6 +541,36 @@ pub(crate) fn losses_changed(preview: ChangePreview) -> EngineError {
 pub(crate) struct Planned {
     pub request: Arc<ChangeNotetype>,
     pub shape: Shape,
+    /// The two note types' part layouts as planned: the write phase refuses
+    /// with `schema_changed` when either differs, also when a schema change
+    /// in the same millisecond left `col.scm` equal.
+    pub layouts: (PartLayout, PartLayout),
+}
+
+/// A note type's parts by position: each field's and template's id (its
+/// name for a legacy part without one). Plain saves (CSS, options) leave it
+/// alone; a reorder, add or remove changes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PartLayout {
+    fields: Vec<Result<i64, String>>,
+    templates: Vec<Result<i64, String>>,
+}
+
+impl PartLayout {
+    pub(crate) fn of(notetype: &Notetype) -> PartLayout {
+        PartLayout {
+            fields: notetype
+                .fields
+                .iter()
+                .map(|f| f.config.id.ok_or_else(|| f.name.clone()))
+                .collect(),
+            templates: notetype
+                .templates
+                .iter()
+                .map(|t| t.config.id.ok_or_else(|| t.name.clone()))
+                .collect(),
+        }
+    }
 }
 
 /// M8 checks 1 to 4 and the first count of the confirmed losses, on the
@@ -540,7 +580,7 @@ fn plan(
     request: &ChangeNotetype,
     cancel: &CancelToken,
     progress: &ProgressSink,
-) -> Result<Shape, EngineError> {
+) -> Result<(Shape, (PartLayout, PartLayout)), EngineError> {
     cancel.check()?;
     // Check 1.
     let old = reader
@@ -566,7 +606,7 @@ fn plan(
     if preview.losses.exceeds(&request.confirmed) {
         return Err(losses_changed(preview));
     }
-    Ok(shape)
+    Ok((shape, (PartLayout::of(&old), PartLayout::of(&new))))
 }
 
 /// The change (M8, M9): plans on a maintenance snapshot, takes the safety
@@ -596,11 +636,12 @@ pub fn change(
         spec,
         0,
         |context| {
-            let shape = plan(&**context.snapshot(), &request, &cancel, &progress)?;
+            let (shape, layouts) = plan(&**context.snapshot(), &request, &cancel, &progress)?;
             Ok(Plan {
                 value: Planned {
                     request: request.clone(),
                     shape,
+                    layouts,
                 },
                 // Checks 3 and 4 run again on the live rows inside the write
                 // transaction, and only that run decides.

@@ -1125,3 +1125,53 @@ fn a_repeated_field_map_between_two_note_types_writes_nothing() {
     run(&h, mapped(&read, &[a], vec![Some(0), Some(0)], Some(vec![Some(0)]))).unwrap();
     assert_eq!(note(&h, a).fields, "a\u{1f}a");
 }
+
+/// A reorder of the new note type's fields committed while the backup ran,
+/// in the same millisecond as the info query's stamp so `col.scm` reads as
+/// before: the write phase compares the parts as planned and refuses with
+/// `schema_changed`; nothing is written.
+#[test]
+fn a_layout_change_that_leaves_the_stamp_equal_is_schema_changed() {
+    let (h, backups) = harness();
+    let pair = pair(&h);
+    let duo = duo(&h);
+    let a = add(&h.collection, pair, &["a", "b"]);
+    let read = info(&h, &[a], duo).unwrap();
+    backups.then(move |c| {
+        c.run(
+            OpSpec::named("incoming_reorder", OpSource::CloudIncoming).stamp(meguri_storage::StampMode::Raw),
+            move |ctx| {
+                let mut nt = ctx.scope().notetype(duo)?.unwrap();
+                nt.fields.swap(0, 1);
+                for (ord, field) in nt.fields.iter_mut().enumerate() {
+                    field.ord = ord as u32;
+                }
+                ctx.scope().put_notetype(&nt)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    });
+    let before_scm = scm(&h);
+    let e = run(&h, request(&read, &[a])).unwrap_err();
+    assert_eq!(scm(&h), before_scm, "the stamp the screen holds still matches");
+    assert_eq!(refusal(&e), Some(&StructureRefusal::SchemaChanged));
+    assert_eq!(note(&h, a).notetype_id, pair);
+}
+
+/// `ChangeInfo::preview` ignores entries the new note type does not have
+/// and origins the old one does not have (the change refuses such maps).
+#[test]
+fn the_preview_ignores_entries_outside_both_note_types() {
+    let (h, _) = harness();
+    let duo = duo(&h);
+    let single = made(&h, "Single", false, &["Front"], &["{{Front}}"]);
+    let a = add(&h.collection, duo, &["a", "b"]);
+    let read = info(&h, &[a], single).unwrap();
+    let p = read.preview(&[Some(0), Some(1)], Some(&[Some(0), Some(1)]));
+    assert_eq!(p.discarded_fields, [1], "the second entry is past the new fields");
+    assert_eq!(p.dropped_templates, Some(vec![1]));
+    let p = read.preview(&[Some(5)], Some(&[Some(9)]));
+    assert_eq!(p.discarded_fields, [0, 1]);
+    assert_eq!(p.dropped_templates, Some(vec![0, 1]));
+}
