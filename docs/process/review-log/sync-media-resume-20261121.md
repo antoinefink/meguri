@@ -25,7 +25,9 @@ Opus reviewer, PR #50: no P0. P1 media blocked with no known count had no Retry 
 
 ## CodeRabbit
 
-PR #49: five comments, all fixed (stopped-to-paused after a failed Try Again read; only excluded files block; Ready read queues the first round; refused starts keep an automatic trigger; Ready adoption retried on failure).
+PR #49: five comments, all fixed (stopped-to-paused after a failed Try Again read; only excluded files block; Ready read queues the first round; refused starts keep an automatic trigger; Ready adoption retried on failure). Round 2: a failed Ready settings read stays pending for every later trigger, sign-in included; a settings write made during that read wins; a trigger refused during a service change is replayed when it ends. No unit test drives these paths (no fake provider refresh or handoff exists).
+
+PR #50: four comments: the window preview opens at Sync; transferring media has its own T19.5 row; the media-blocked dead end (fixed with the review's P1); Ready adoption (fixed on #49).
 
 ## Load note
 
