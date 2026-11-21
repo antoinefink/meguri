@@ -19,9 +19,10 @@ struct SyncNowButton: View {
     }
     var body: some View {
         Button(SyncText.value("sync.now.command")) { collection.requestSyncNow() }
-            .disabled(!available || collection.navigation.sheet != nil
-                || (disabledWhileMoving && collection.sync.panelProgress != nil))
-            .help(reason ?? SyncText.value("sync.now.command"))
+            .disabled(!SyncPanel.syncNowEnabled(available: available && collection.navigation.sheet == nil,
+                moving: disabledWhileMoving && collection.sync.panelProgress != nil))
+            // N23.3: in the panel only a reason makes a help tag.
+            .help(reason ?? (disabledWhileMoving ? "" : SyncText.value("sync.now.command")))
             .accessibilityIdentifier(identifier)
             #if DEBUG
             // Observe the actual coordinator; never query a transport from a view.
@@ -42,7 +43,7 @@ enum SyncStatusCopy {
         let status = sync.mainStatus
         if let key = status.detailKey {
             // N23.1: a detail that repeats the title is not shown ("Setting Up…").
-            if key == status.titleKey { return nil }
+            guard status.shownDetailKey != nil else { return nil }
             if let count = status.detailCount { return SyncText.format(key, Int64(clamping: count)) }
             return SyncText.value(key)
         }

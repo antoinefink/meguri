@@ -1215,8 +1215,8 @@ screens:
       sync.status.syncNow, sync.status.action. Routes: settings/sync/panel/<state> (the panel drawn
       in the window: off, meguri-up-to-date, meguri-syncing, meguri-setup-media, meguri-preparing,
       meguri-round-failed, meguri-sign-in-refused, meguri-choose-collection, meguri-blocked,
-      icloud-up-to-date, icloud-syncing, icloud-needs-you, icloud-no-account, icloud-issues,
-      icloud-not-set-up) and settings/sync/status/<state> (the popover from the toolbar: off,
+      meguri-media-blocked, meguri-acceptance-unknown, icloud-up-to-date, icloud-syncing,
+      icloud-needs-you, icloud-no-account, icloud-setup-needed, icloud-issues, icloud-not-set-up) and settings/sync/status/<state> (the popover from the toolbar: off,
       meguri-up-to-date, meguri-setup-media).
   - id: sync.connect
     title: Connect to iCloud

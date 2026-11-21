@@ -18,7 +18,7 @@ public struct CloudShapeSymbol: View {
     /// The cloud's body: the inner badge's centre, as fractions of the symbol's
     /// frame, and its size against the cloud's (the `icloud` shapes' layout).
     private static let bodyCentre = UnitPoint(x: 0.5, y: 0.6)
-    private static let badgeScale: CGFloat = 0.5
+    private static let badgeScale: CGFloat = 0.42
 
     public var body: some View {
         switch badge {
@@ -57,15 +57,15 @@ public struct CloudShapeSymbol: View {
                 .position(x: frame.size.width / 2, y: frame.size.height / 2)
         }
     }
-    private static let slashLength: CGFloat = 0.95
-    private static let slashWidth: CGFloat = 0.09
+    private static let slashLength: CGFloat = 0.82
+    private static let slashWidth: CGFloat = 0.08
 
     @ViewBuilder private var inner: some View {
         switch badge {
-        case .checkmark: Image(systemName: "checkmark").fontWeight(.bold)
-        case .exclamationmark: Image(systemName: "exclamationmark").fontWeight(.bold)
+        case .checkmark: Image(systemName: "checkmark").fontWeight(.semibold)
+        case .exclamationmark: Image(systemName: "exclamationmark").fontWeight(.semibold)
         case .arrows:
-            Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90").fontWeight(.bold)
+            Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90").fontWeight(.semibold)
                 .symbolEffect(.rotate, options: .repeating, isActive: turning)
         case .none, .slash: EmptyView()
         }

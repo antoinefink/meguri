@@ -20,28 +20,30 @@ final class SyncStatusPanelKeyTests: XCTestCase {
         return (app, bundle)
     }
 
+    /// The Settings scene's window, by SwiftUI's identifier for it.
+    private func settingsWindow(_ app: XCUIApplication) -> XCUIElement {
+        app.windows.matching(NSPredicate(format: "identifier CONTAINS[c] %@", "Settings")).firstMatch
+    }
+
     /// Sync Off: Sync Settings is the default, so Return opens the Settings window.
     func testReturnRunsTheDefaultButton() throws {
         let (app, bundle) = try launch("settings/sync/status/off")
         defer { app.terminate() }
-        let windows = app.windows.count
+        XCTAssertFalse(settingsWindow(app).exists)
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(.return, modifierFlags: [])
-        let panel = app.descendants(matching: .any)["sync.status.popover"]
-        XCTAssertTrue(panel.waitForNonExistence(timeout: 5), "Return closes the panel through Sync Settings")
-        let opened = expectation(for: NSPredicate(format: "count > %d", windows), evaluatedWith: app.windows)
-        wait(for: [opened], timeout: 5)
+        XCTAssertTrue(settingsWindow(app).waitForExistence(timeout: 5), "Return runs Sync Settings")
+        XCTAssertTrue(app.descendants(matching: .any)["sync.status.popover"].waitForNonExistence(timeout: 5))
     }
 
     /// Up to date: Esc closes the panel and opens nothing.
     func testEscapeOnlyClosesThePanel() throws {
         let (app, bundle) = try launch("settings/sync/status/meguri-up-to-date")
         defer { app.terminate() }
-        let windows = app.windows.count
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(app.descendants(matching: .any)["sync.status.popover"].waitForNonExistence(timeout: 5))
-        XCTAssertEqual(app.windows.count, windows, "Esc opens no window")
+        XCTAssertFalse(settingsWindow(app).exists, "Esc opens no window")
     }
     #endif
 }

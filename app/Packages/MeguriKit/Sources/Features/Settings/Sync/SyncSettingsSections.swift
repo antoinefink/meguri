@@ -581,7 +581,7 @@ struct SyncMainStatusRows: View {
                 }
             }
         } icon: {
-            SyncStatusSymbol(status: status, iCloud: sync.symbolsAreICloud)
+            SyncStatusSymbol(status: status, iCloud: sync.symbolsAreICloud, secondary: true)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("settings.sync.status")

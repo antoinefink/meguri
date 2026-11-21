@@ -83,8 +83,15 @@ extension ComponentGallery {
 
             // N23.4: the cloud shapes beside the system's `icloud` ones, for comparison only.
             GalleryEntry("cloudShapeSymbol", "typical") {
-                HStack(spacing: Spacing.small) {
-                    ForEach(CloudShapeSymbol.Badge.allCases, id: \.self) { CloudShapeSymbol($0) }
+                VStack(alignment: .leading, spacing: Spacing.small) {
+                    HStack(spacing: Spacing.small) {
+                        ForEach(CloudShapeSymbol.Badge.allCases, id: \.self) { CloudShapeSymbol($0) }
+                    }
+                    // The system's iCloud shapes they match, for comparison only.
+                    HStack(spacing: Spacing.small) {
+                        ForEach(["icloud", "checkmark.icloud", "arrow.trianglehead.2.clockwise.rotate.90.icloud",
+                                 "exclamationmark.icloud", "icloud.slash"], id: \.self) { Image(systemName: $0) }
+                    }
                 }
                 .font(.title2)
             },

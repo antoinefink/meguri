@@ -36,6 +36,10 @@ public enum SyncPanel {
         return serviceSelected ? .syncNow : .none
     }
 
+    /// N23.3: the panel's Sync Now is disabled while the status moves, even
+    /// where a press would join the running exchange (P12.1).
+    public static func syncNowEnabled(available: Bool, moving: Bool) -> Bool { available && !moving }
+
     /// The button Return runs on Mac (N23.3): Sync Settings when it is alone;
     /// otherwise the slot's button, unless it has the cancel role.
     public static func settingsIsDefault(_ slot: Slot) -> Bool { slot == .none }
@@ -50,14 +54,16 @@ public enum SyncPanel {
     /// N23.1: Meguri Sync's setup work uses the Account row's value (MP6.5);
     /// a round's exchange and iCloud's collection or media transfer are
     /// indeterminate. A status that needs the person has no bar.
+    /// `meguriMoving`: Meguri Sync signs in or a round exchanges, which the
+    /// Account row shows no value for.
     public static func progress(_ status: SyncMainStatus, meguri: Bool, setupValue: MeguriProgressValue?,
-                                meguriBusy: Bool, cloudState: CloudPolicyStatusState?) -> Progress? {
+                                meguriMoving: Bool, cloudState: CloudPolicyStatusState?) -> Progress? {
         guard !status.needsYou else { return nil }
         if meguri {
             switch setupValue {
             case .fraction(let value)?: return .fraction(value)
             case .indeterminate?: return .indeterminate
-            case nil: return meguriBusy ? .indeterminate : nil
+            case nil: return meguriMoving ? .indeterminate : nil
             }
         }
         // The bar shows with the moving symbol only: a transfer under an
@@ -67,6 +73,12 @@ public enum SyncPanel {
         default: return nil
         }
     }
+}
+
+extension SyncMainStatus {
+    /// N23.1: the detail key shown under the title; a detail that repeats the
+    /// title ("Setting Up…") is not shown, in the panel or the Sync section.
+    public var shownDetailKey: String? { detailKey == titleKey ? nil : detailKey }
 }
 
 extension SyncStatusAction {

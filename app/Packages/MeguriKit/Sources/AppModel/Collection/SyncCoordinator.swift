@@ -549,12 +549,19 @@ public final class SyncCoordinator {
             settings = .init(enabled: true, paused: false, automatic: true, media: true)
             status = .renderFixture(state: .syncingCollection,
                 controls: .init(bindingUsable: true, bindingActive: true, automaticEligible: true))
-        case .meguriSyncing, .meguriRoundFailed, .meguriSignInRefused:
+        case .iCloudSetupNeeded:
+            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
+            settings = .init(enabled: true, paused: false, automatic: true, media: true)
+            status = .renderFixture(state: .iCloudUnavailable(.setupNeeded), accountStatus: .configuration,
+                syncNow: .unavailable(.iCloudUnavailable))
+        case .meguriSyncing, .meguriRoundFailed, .meguriSignInRefused, .meguriMediaBlocked, .meguriAcceptanceUnknown:
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
             meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
             meguriRoutine = switch state {
             case .meguriSyncing: .exchanging
             case .meguriRoundFailed: .network
+            case .meguriMediaBlocked: .mediaBlocked
+            case .meguriAcceptanceUnknown: .acceptanceUnknown
             default: .authentication
             }
             meguriLastExchange = recent
@@ -791,7 +798,8 @@ public final class SyncCoordinator {
         let status = self.status
         let shown = status?.state == .needsAttention ? status?.stateWithoutAttention : status?.state
         return SyncPanel.progress(mainStatus, meguri: providerState?.selection == .meguri || providerNeedsAttention,
-            setupValue: meguriProgressValue, meguriBusy: meguriStatus.isBusy, cloudState: shown)
+            setupValue: meguriProgressValue,
+            meguriMoving: meguriAuthenticating || (meguriStage == nil && meguriRoutine == .exchanging), cloudState: shown)
     }
     /// N23.1: the files line under the bar, while media transfers and a count is known.
     public var panelFilesLeft: UInt64? {
@@ -4689,7 +4697,7 @@ extension SyncCoordinator {
         case off, meguriConnected, meguriSignIn, meguriNeedsYou, iCloudSelected, iCloudConnected, iCloudNeedsYou, iCloudIssues
         /// N23's panel states (round 10).
         case meguriSyncing, meguriSetupMedia, meguriRoundFailed, meguriBlocked, meguriSignInRefused, iCloudSyncing
-        case meguriPreparing, iCloudNoAccount
+        case meguriPreparing, iCloudNoAccount, meguriMediaBlocked, meguriAcceptanceUnknown, iCloudSetupNeeded
     }
     /// Builds synthetic Sync section examples. The coordinator is never
     /// attached: it owns no collection, account, binding or server, and its

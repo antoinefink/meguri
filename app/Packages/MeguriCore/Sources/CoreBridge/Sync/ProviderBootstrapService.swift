@@ -110,7 +110,7 @@ public struct MeguriBootstrapMediaProgress: Sendable {
         bytesUploaded = raw.bytesUploaded; bytesDownloaded = raw.bytesDownloaded; awaiting = raw.awaiting
     }
     private init(downloadedFiles: UInt64, awaiting: UInt64) {
-        phase = .downloading; checked = downloadedFiles + awaiting; uploadedFiles = 0
+        phase = .downloading; checked = downloadedFiles &+ awaiting; uploadedFiles = 0
         self.downloadedFiles = downloadedFiles; bytesUploaded = 0; bytesDownloaded = 0; self.awaiting = awaiting
     }
     /// Rendering fixtures only (`SyncCoordinator.renderFixture`): no transfer stands behind it.

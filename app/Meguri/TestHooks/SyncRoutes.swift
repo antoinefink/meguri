@@ -44,6 +44,9 @@ extension TestHooks {
             registry.register("settings/sync/panel/meguri-syncing") { panel(.meguriSyncing, $0) }
             registry.register("settings/sync/panel/meguri-setup-media") { panel(.meguriSetupMedia, $0) }
             registry.register("settings/sync/panel/meguri-preparing") { panel(.meguriPreparing, $0) }
+            registry.register("settings/sync/panel/meguri-media-blocked") { panel(.meguriMediaBlocked, $0) }
+            registry.register("settings/sync/panel/meguri-acceptance-unknown") { panel(.meguriAcceptanceUnknown, $0) }
+            registry.register("settings/sync/panel/icloud-setup-needed") { panel(.iCloudSetupNeeded, $0) }
             registry.register("settings/sync/panel/icloud-no-account") { panel(.iCloudNoAccount, $0) }
             registry.register("settings/sync/panel/meguri-round-failed") { panel(.meguriRoundFailed, $0) }
             registry.register("settings/sync/panel/meguri-sign-in-refused") { panel(.meguriSignInRefused, $0) }

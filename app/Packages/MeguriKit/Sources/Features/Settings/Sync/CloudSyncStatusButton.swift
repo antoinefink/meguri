@@ -66,7 +66,9 @@ public struct CloudSyncStatusButton: View {
                     .padding()
                     .frame(width: ContentWidth.primaryAction)
                     .presentationCompactAdaptation(.sheet)
-                    .presentationDetents([.medium])
+                    // When the popover adapts to a sheet, it is the compact sheet's (N23.1).
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
             #if os(iOS)
             // Keep status and connection separate; native dismissal, rather

@@ -11,8 +11,17 @@ struct SyncStatusSymbol: View {
     let iCloud: Bool
     /// Only the toolbar button's symbol turns (N23.1).
     var turning = false
+    /// The panel and the Sync section draw it in the secondary colour, the
+    /// toolbar in its own; needs you is orange everywhere (N23.2).
+    var secondary = false
     var body: some View {
-        if status.needsYou { glyph.foregroundStyle(.orange) } else { glyph }
+        Group {
+            if status.needsYou { glyph.foregroundStyle(.orange) }
+            else if secondary { glyph.foregroundStyle(.secondary) }
+            else { glyph }
+        }
+        // The title beside it, or the button's own label, says the state.
+        .accessibilityHidden(true)
     }
     @ViewBuilder private var glyph: some View {
         switch SyncSymbol.glyph(status.symbol, iCloud: iCloud) {
@@ -32,6 +41,9 @@ struct SyncStatusPanel: View {
     let openEntry: (CloudSyncEntry, AppNavigation.SheetHost) -> Void
     let showSettings: (_ keepCollection: Bool) -> Void
     @Environment(\.appClock) private var clock
+    #if !os(macOS)
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    #endif
     private var sync: SyncCoordinator { collection.sync }
     private var slot: SyncPanel.Slot {
         let status = sync.mainStatus
@@ -44,9 +56,8 @@ struct SyncStatusPanel: View {
         let status = sync.mainStatus
         VStack(alignment: .leading, spacing: Spacing.medium) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
-                SyncStatusSymbol(status: status, iCloud: sync.symbolsAreICloud)
+                SyncStatusSymbol(status: status, iCloud: sync.symbolsAreICloud, secondary: true)
                     .font(.title2)
-                    .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: Spacing.xSmall) {
                     Text(SyncText.value(status.titleKey)).font(.headline)
                     if let detail = SyncStatusCopy.detail(sync, now: clock.now()) {
@@ -83,21 +94,31 @@ struct SyncStatusPanel: View {
             buttons
         }
     }
+    /// N23.1: one trailing row; stacked, trailing, the action first, at the
+    /// accessibility text sizes. One copy of each button, whatever the layout.
     private var buttons: some View {
-        // N23.1: one trailing row; stacked, trailing, the action first, when it does not fit.
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Spacing.small) {
+        let stacked = stacks
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .trailing, spacing: Spacing.xSmall))
+            : AnyLayout(HStackLayout(spacing: Spacing.small))
+        return layout {
+            if stacked {
+                slotButton
+                settingsButton
+            } else {
                 Spacer(minLength: 0)
                 settingsButton
                 slotButton
             }
-            VStack(alignment: .trailing, spacing: Spacing.xSmall) {
-                slotButton
-                settingsButton
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
         }
+        .frame(maxWidth: .infinity, alignment: .trailing)
         .controlSize(.regular)
+    }
+    private var stacks: Bool {
+        #if os(macOS)
+        false
+        #else
+        dynamicTypeSize.isAccessibilitySize
+        #endif
     }
     private var settingsButton: some View {
         Button(SyncText.value("sync.status.openSettings")) { showSettings(false) }
@@ -210,8 +231,14 @@ struct SyncStatusActionButton: View {
         #if os(macOS)
         // N23.3: on Mac a transient popover can close when its alert takes the
         // keys, so an action with a confirmation opens the Sync section, whose row asks.
-        if inPanel, action == .cancelOp || action == .serviceRecovery {
-            Button(title) { showInSettings?(false) }.accessibilityIdentifier(id)
+        if inPanel, action == .cancelOp {
+            Button(title) { showInSettings?(false) }
+                .disabled(sync.recovery.map { !($0.adoptionCancellable || $0.publicationCancellable) } ?? true)
+                .accessibilityIdentifier(id)
+        } else if inPanel, action == .serviceRecovery {
+            Button(title) { showInSettings?(false) }
+                .disabled(collection.syncPresentation.serviceChanging)
+                .accessibilityIdentifier(id)
         } else { actionButton(title: title, id: id) }
         #else
         actionButton(title: title, id: id)
@@ -223,6 +250,7 @@ struct SyncStatusActionButton: View {
         case .chooseCollection:
             if meguri {
                 Button(title) { askKeepCollection() }
+                    .accessibilityLabel(SyncText.value("sync.decision.action.label"))
                     .accessibilityIdentifier(id)
             } else {
                 Button(title) {
