@@ -28,6 +28,8 @@ pub mod card_excerpts;
 pub mod card_extractors;
 #[path = "cardgen.rs"]
 pub mod cardgen;
+#[path = "change_notetype.rs"]
+pub mod change_notetype;
 #[path = "changeset.rs"]
 pub mod changeset;
 #[path = "cloud_op_sources.rs"]
