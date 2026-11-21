@@ -350,8 +350,8 @@ pub(crate) fn sync_wal(shared: &ExecShared, writer: &Writer, retire_review: bool
     #[cfg(feature = "test-hooks")]
     if !matches!(result, Ok(false)) {
         let completed = monotonic::now();
-        shared.record_durability(|events| {
-            events.syncs.push(super::durability_events::WalSync {
+        shared.record_durability(|recording| {
+            recording.sync(super::durability_events::WalSync {
                 started,
                 completed,
                 through,
@@ -732,8 +732,8 @@ fn run_op<T>(
 
     let write = monotonic::now().saturating_sub(started);
     #[cfg(feature = "test-hooks")]
-    shared.record_durability(|events| {
-        events.writes.push(super::durability_events::WritePhase {
+    shared.record_durability(|recording| {
+        recording.write(super::durability_events::WritePhase {
             started,
             completed: monotonic::now(),
         });
