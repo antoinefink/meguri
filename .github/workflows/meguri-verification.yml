@@ -781,7 +781,7 @@ jobs:
       - name: Save the similarity index
         if: >-
           !cancelled() && steps.select.outputs.run == 'yes' && steps.index.outputs.cache-hit != 'true'
-          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')
           && hashFiles('build/similarity-index/*/meta.json') != ''
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
