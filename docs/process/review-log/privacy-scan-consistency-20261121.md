@@ -38,3 +38,9 @@ Reviewer: an independent Claude subagent, non-author, reading commit `2ccb50391`
 - `tools/mg selftest tools/tests/mg_selftest.bats --filter "doctor|hooks"`: 21 pass.
 - `tools/mg doctor` on this Mac: `private-hooks` pass; `private-scan` warn (82726 tokens, baseline unknown until the next refresh).
 - Not run locally: the remaining Linux suites (left to GitHub Actions), `selftest-host`.
+
+## CodeRabbit
+
+- **An empty `core.hooksPath` was read as unset.** Fixed: `mg_hooks_check` uses the exit status of `git config --get`.
+- **A set of blank lines was counted as tokens.** Fixed: the count is of non-empty lines, as the scanner reads them, so doctor fails on such a set.
+- **`private status` in a linked worktree.** Already fixed in `927ac7ab1`.

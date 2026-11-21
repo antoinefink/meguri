@@ -275,7 +275,7 @@ mg__private_baseline_write() {
   [ -f "$set" ] || return 1
   tmp="$(mktemp "$dir/baseline.tmp.XXXXXX")" || return 1
   if jq -n --arg head "$2" --arg by "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --arg sha "$(mg__private_sha256 "$set")" --argjson tokens "$(grep -c '' "$set")" \
+    --arg sha "$(mg__private_sha256 "$set")" --argjson tokens "$(grep -c . "$set")" \
     '{head: $head, by: $by, at: $at, sha256: $sha, tokens: $tokens}' >"$tmp" && mv -f "$tmp" "$1/$MG_PRIVATE_BASELINE"; then
     return 0
   fi
@@ -284,7 +284,8 @@ mg__private_baseline_write() {
 }
 
 # mg__private_set_facts <checkout>: one JSON object about that checkout's
-# token set, from stat, a line count and a hash (never its text): path,
+# token set, from stat, a count of its non-empty lines (what the scanner
+# reads as tokens) and a hash (never its text): path,
 # present, readable, tokens, sha256, modified, baseline (baseline.json, or
 # null) and baseline_current (whether it describes these bytes).
 mg__private_set_facts() {
@@ -293,7 +294,7 @@ mg__private_set_facts() {
     present=true
     if [ -f "$set" ] && [ ! -L "$set" ] && [ -r "$set" ]; then
       readable=true
-      tokens="$(grep -c '' "$set")"
+      tokens="$(grep -c . "$set")"
       sha="$(mg__private_sha256 "$set")"
       modified="$(date -u -r "$set" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
     fi

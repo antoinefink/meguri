@@ -709,6 +709,9 @@ EOF
   git -C "$SB" config core.hooksPath .githooks
   mg doctor
   [[ "$(check private-hooks)" == "fail core.hooksPath is set"* ]]
+  git -C "$SB" config core.hooksPath ""
+  mg doctor
+  [[ "$(check private-hooks)" == "fail core.hooksPath is set"* ]]
   git -C "$SB" config --unset core.hooksPath
   # Expected but missing: the hooks refuse commits, so doctor fails.
   git -C "$SB" config meguri.privateTokenSet required
@@ -733,9 +736,12 @@ EOF
   printf 'thirdmadeupword\n' >>"$SB/build/private/tokens/tokens.txt"
   mg doctor
   [[ "$(check private-scan)" == "warn 3 tokens"* ]]
-  : >"$SB/build/private/tokens/tokens.txt"
-  mg doctor
-  [[ "$(check private-scan)" == "fail the private token set "*"not a readable, non-empty regular file"* ]]
+  # Blank lines are no tokens: the scanner refuses such a set, so doctor fails.
+  for blank in '' '\n\n'; do
+    printf "$blank" >"$SB/build/private/tokens/tokens.txt"
+    mg doctor
+    [[ "$(check private-scan)" == "fail the private token set "*"not a readable, non-empty regular file"* ]]
+  done
 }
 
 @test "doctor on a fully set-up Mac passes and still lists the steps it cannot verify" {

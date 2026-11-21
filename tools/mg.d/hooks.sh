@@ -101,8 +101,8 @@ mg_hooks_install() {
 mg_hooks_check() {
   MG_HOOKS_MESSAGE="" MG_HOOKS_DIR=""
   local hooks_path common name wrong=""
-  hooks_path="$(git -C "$MG_ROOT" config --get core.hooksPath || true)"
-  if [ -n "$hooks_path" ]; then
+  # Set to an empty value still overrides the hooks directory.
+  if hooks_path="$(git -C "$MG_ROOT" config --get core.hooksPath)"; then
     MG_HOOKS_MESSAGE="core.hooksPath is set ($hooks_path), so git does not run the installed shims"
     return 1
   fi
