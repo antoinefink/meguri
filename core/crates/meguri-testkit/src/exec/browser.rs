@@ -209,6 +209,9 @@ fn browser_rows(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
     {
         return Err(invalid("browser_rows takes non-empty lists of distinct columns and rows"));
     }
+    // Rebind the session's handles first: after a hosted sync the stored
+    // reader may name the previous generation.
+    let engine = session.engine_collection()?;
     let notes_mode = BrowserConfig::read(&*collection(session)?.reader()?)
         .map_err(core)?
         .notes_mode();
@@ -233,9 +236,8 @@ fn browser_rows(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
         now: session.clock.now_secs(),
         today: super::sched::day_without_writes(session)?.today,
     };
-    let collection = session.engine_collection()?;
     let rows = browse::rows(
-        &collection,
+        &engine,
         &RowRequest {
             mode,
             ids: &ids,
