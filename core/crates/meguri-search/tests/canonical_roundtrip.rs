@@ -449,8 +449,10 @@ fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermS
         (Scope::Either, _) => "c.nid",
     };
     let text = params.bind(Param::Text(format!("{term:?}")));
+    // A term that takes the `-` before it (T9.4) still tells it apart.
+    let negated = if env.negated { "NOT " } else { "" };
     Ok(TermSql {
-        sql: format!("({id} + length({text})) % 3 = 0"),
+        sql: format!("{negated}(({id} + length({text})) % 3 = 0)"),
         slow: false,
         reads: ContextReads::NONE,
     })

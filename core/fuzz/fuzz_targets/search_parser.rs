@@ -6,9 +6,31 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use meguri_model::ids::DeckId;
-use meguri_search::SearchNotetypes;
-use meguri_search::{FoldMode, Plan, SearchContext, SearchMode, parse};
+use meguri_model::ids::{DeckId, NotetypeId};
+use meguri_search::{FieldShape, FoldMode, NotetypeShape, Plan, SearchContext, SearchMode, SearchNotetypes, parse};
+
+/// Note types that reach every text-term path: name resolution, runs,
+/// excluded fields, an excluded sort field and a cloze kind.
+fn notetypes() -> SearchNotetypes {
+    let shape = |id: i64, name: &str, cloze: bool, sort_field: u32, fields: &[(&str, bool)]| NotetypeShape {
+        id: NotetypeId(id),
+        name: name.to_owned(),
+        cloze,
+        sort_field,
+        fields: fields
+            .iter()
+            .map(|&(name, excluded)| FieldShape {
+                name: name.to_owned(),
+                excluded,
+            })
+            .collect(),
+    };
+    SearchNotetypes::new(vec![
+        shape(1, "Basic", false, 0, &[("Front", false), ("Back", false)]),
+        shape(2, "Memo", false, 2, &[("Front", false), ("Back", false), ("Notes", true)]),
+        shape(3, "Cloze", true, 0, &[("Text", false), ("Back Extra", true)]),
+    ])
+}
 
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
@@ -27,8 +49,10 @@ fuzz_target!(|data: &[u8]| {
                 ignore_accents: false,
                 fold: FoldMode::Unicode,
             };
+            let notetypes = notetypes();
             for mode in [SearchMode::Cards, SearchMode::Notes] {
                 let _ = Plan::build(&query, mode, &context, &SearchNotetypes::default());
+                let _ = Plan::build(&query, mode, &context, &notetypes);
             }
         }
         Err(error) => {

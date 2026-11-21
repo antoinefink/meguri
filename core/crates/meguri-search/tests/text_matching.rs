@@ -318,9 +318,9 @@ fn patterns_over_fifty_thousand_bytes_fail_at_plan_time() {
     let a = |n: usize| "a".repeat(n);
     assert!(f.build(&a(49_998), SearchMode::Notes, UNICODE).is_ok());
     assert_eq!(f.failure(&a(49_999)), failed(SearchFailure::PatternTooLong));
-    assert!(
-        f.build(&format!("front:{}", a(49_999)), SearchMode::Notes, UNICODE)
-            .is_err()
+    assert_eq!(
+        f.failure(&format!("front:{}", a(49_999))),
+        failed(SearchFailure::PatternTooLong)
     );
     assert!(
         f.build(&format!("front:{}", a(49_998)), SearchMode::Notes, UNICODE)
