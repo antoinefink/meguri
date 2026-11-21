@@ -116,8 +116,20 @@ def cmd_scan(args):
             missing.append(path)
             continue
         files.append(scanner.scan_file(path, read_text(args.root, path)))
+    oracle_output = []
     if data_inputs is not None:
         files = [scanner.scan_test_data(item["path"], item["text"]) for item in data_inputs]
+        rule = cfg["scan"].get("oracle_goldens")
+        pin = test_data.oracle_pin(args.root, rule.get("pin")) if isinstance(rule, dict) else None
+        scenarios = {os.path.splitext(item["path"][len(test_data.ROOTS[0]) + 1:])[0]: item
+                     for item in data_inputs if item["path"].startswith(test_data.ROOTS[0] + "/")}
+        for f, item in zip(files, data_inputs):
+            if f.status != "flagged" or pin is None or not f.path.startswith(test_data.ROOTS[1] + "/"):
+                continue
+            scenario = scenarios.get(os.path.splitext(f.path[len(test_data.ROOTS[1]) + 1:])[0])
+            if scenario and test_data.oracle_recorded(f.path, item["text"], pin, scenario["path"], scenario["text"]):
+                f.status = test_data.ORACLE_OUTPUT
+                oracle_output.append(f.path)
     scan_seconds = time.monotonic() - t_scan
     flagged = [f for f in files if f.status == "flagged"]
     errors = [f for f in files if f.status == "error"]
@@ -128,6 +140,7 @@ def cmd_scan(args):
             "scanned": len(files),
             "flagged": len(flagged),
             "allowlisted": sum(1 for f in files if f.status == "allowlisted"),
+            "oracle_output": len(oracle_output),
             "clean": sum(1 for f in files if f.status == "clean"),
             "errors": len(errors),
             "skipped": skipped,
@@ -151,6 +164,8 @@ def cmd_scan(args):
             "manifest": [{"path": item["path"], "sha256": item["sha256"]} for item in data_inputs],
             "coverage": coverage,
             "limited": [item["path"] for item in coverage if not item["meaningful"]],
+            # Goldens whose matches are recorded oracle output: reported, not failing.
+            "oracle_output": oracle_output,
             "limits": "Similarity does not establish provenance or exclude copying below the configured fingerprint limits.",
         }
         if summary["test_data"]["limited"] and status == "pass":

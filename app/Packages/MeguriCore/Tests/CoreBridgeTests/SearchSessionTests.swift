@@ -86,7 +86,7 @@ extension EventTests {
 
             let rows = try await session.rows(first, revision: 0, range: 0..<6, columns: ["noteFld", "question"])
             #expect(rows.map(sortField) == ["alpha", "alpha", "beta", "beta", "gamma", "gamma"])
-            guard case .row(let third) = rows[2] else { Issue.record("\(rows[2])"); return }
+            guard case .row(let third) = rows[2] else { throw BridgeError.internal("not a row: \(rows[2])") }
             #expect(third.id == cards[2] && third.noteID == noteIDs[1] && third.cells[1] == .deferred)
             #expect(try await session.qaCells(first, revision: 0, range: 0..<2, which: .question)
                 == [.cells(question: .text("alpha"), answer: nil), .cells(question: .text("one"), answer: nil)])
@@ -126,8 +126,7 @@ extension EventTests {
             let failed = try await session.startSearch("\u{1D11E} is:bogus", mode: .cards, sort: byField)
             let failure = try await request(failed, &events)
             guard case .failed(_, .browse(.search(let error))) = failure.first else {
-                Issue.record("not a search error: \(failure)")
-                return
+                throw BridgeError.internal("not a search error: \(failure)")
             }
             #expect(error.kind == "invalid_state" && error.provided == "bogus" && error.utf16Range == 3..<11)
             let unsortable = try await session.startSearch("", mode: .cards, sort: BrowseSort(key: "question", direction: .ascending))

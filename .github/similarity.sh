@@ -82,6 +82,8 @@ paired_areas() {
 # `scan:` sections) at a commit.
 scan_settings() {
   git show "$1:$CONFIG" 2>/dev/null | awk '/^[^ #]/ { keep = ($0 ~ /^(channels|scan):/) } keep'
+  # The oracle pin decides which goldens count as recorded oracle output.
+  git show "$1:conformance/oracle.json" 2>/dev/null
 }
 
 cmd_select() {
@@ -110,8 +112,9 @@ cmd_select() {
     local all_areas=""
     while IFS= read -r -d '' p; do
       case "$p" in
-        # A scanner change runs both scans, the test data of every area.
-        tools/similarity/*) code=yes all_areas=yes ;;
+        # A scanner change, or an oracle pin change (it decides which goldens
+        # count as recorded oracle output), runs both scans and every area.
+        tools/similarity/* | conformance/oracle.json) code=yes all_areas=yes ;;
         # The job's other inputs: scan, so a change to it runs it.
         tools/mg | tools/mg.d/similarity.sh | docker/similarity.Dockerfile* | \
           docker/compose.yml | .github/similarity.sh | .github/workflows/meguri-verification.yml) code=yes ;;
@@ -135,7 +138,9 @@ cmd_select() {
       done
     done < <(git diff -z --no-renames --name-only --diff-filter=d "$base" HEAD)
     # Deletions count for the areas: removing a golden unpairs its scenario.
+    # Removing the oracle pin changes which goldens are oracle output.
     while IFS= read -r -d '' p; do
+      [[ "$p" != conformance/oracle.json ]] || { code=yes all_areas=yes; }
       if [[ "$p" =~ ^conformance/(scenarios|goldens)/([^/]+)/ ]]; then
         area="${BASH_REMATCH[2]}"
         [[ "$area" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "::error::Unexpected conformance area name"; exit 1; }
@@ -278,7 +283,7 @@ cmd_summary() {
     (if $kind == "data" then "Test data (conformance scenarios and goldens of the touched areas)" else "Code" end) as $title |
     "#### \($title): \(if $failed then "**failed**" else "passed" end)",
     "",
-    "\(count("scanned")) files scanned, \(count("clean") + count("allowlisted")) passed (\(count("allowlisted")) allowlisted), \(count("flagged")) flagged, \(count("skipped")) skipped (outside the scanner'"'"'s scope), \(count("errors")) errors, \(count("missing")) listed but missing.",
+    "\(count("scanned")) files scanned, \(count("clean") + count("allowlisted") + count("oracle_output")) passed (\(count("allowlisted")) allowlisted, \(count("oracle_output")) recorded oracle output), \(count("flagged")) flagged, \(count("skipped")) skipped (outside the scanner'"'"'s scope), \(count("errors")) errors, \(count("missing")) listed but missing.",
     (if $kind == "data" and ($s.test_data | type) == "object" then
       "\($s.test_data.pairs | num // 0) scenario and golden pairs; \(($s.test_data.limited // []) | length) files are below the fingerprint limits and were not meaningfully checked."
      else empty end),
@@ -361,7 +366,7 @@ cmd_scan() {
     fi
     if [[ -n "$settings" ]]; then
       # shellcheck disable=SC2016 # the backticks are Markdown
-      printf '#### Scanner settings: **changed**\n\nThis change edits the `channels:` or `scan:` section of %s (thresholds, channels or exclusions), so it would be scanned with settings it chose. A human reviews the change and merges over this check.\n\n' "$CONFIG"
+      printf '#### Scanner settings: **changed**\n\nThis change edits the `channels:` or `scan:` section of %s (thresholds, channels, exclusions, the oracle-output rule) or the oracle pin `conformance/oracle.json`, so it would be scanned with settings it chose. A human reviews the change and merges over this check.\n\n' "$CONFIG"
       rc=1
     fi
     read -r -a areas <<<"${AREAS:-}"

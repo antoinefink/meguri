@@ -12,6 +12,7 @@ import json
 import os
 
 REWRITE = "rewrite this region from the spec"
+ORACLE = "none: recorded oracle output (never edit a golden); check the paired scenario's inputs"
 
 
 def _channel_dict(c):
@@ -52,7 +53,7 @@ def _file_entry(f, reviewer):
                     "channel": name,
                     "reasons": c.reasons,
                     "regions": [_region(r, reviewer) for r in c.regions[:20]],
-                    "action": REWRITE,
+                    "action": ORACLE if f.status == "oracle-output" else REWRITE,
                 }
             )
     if flags:
@@ -84,14 +85,15 @@ def _markdown(view):
     out = [f"# Similarity scan: {view['status']} ({view['view']} view)", ""]
     out.append(
         f"{view['counts']['scanned']} files scanned, {view['counts']['flagged']} flagged, "
-        f"{view['counts']['allowlisted']} allowlisted, {view['counts']['skipped']} out of scope."
+        f"{view['counts']['allowlisted']} allowlisted, {view['counts'].get('oracle_output', 0)} oracle output, "
+        f"{view['counts']['skipped']} out of scope."
     )
     if reviewer and view.get("corpus"):
         c = view["corpus"]
         out.append(f"Corpus: {c.get('tags')} tags {c.get('first_tag')}..{c.get('last_tag')}, index {c.get('key')}.")
     out.append("")
     for f in view["files"]:
-        if f["status"] not in ("flagged", "allowlisted", "error"):
+        if f["status"] not in ("flagged", "allowlisted", "oracle-output", "error"):
             continue
         out.append(f"## {f['path']} ({f['status']})")
         if f.get("error"):
