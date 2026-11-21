@@ -1545,3 +1545,6 @@ screens:
   browse.findDuplicates:
     status: sketch
     fix_rounds: 0
+  home.today:
+    status: sketch
+    fix_rounds: 0

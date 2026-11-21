@@ -12,7 +12,7 @@ use regex::Regex;
 use crate::ast::{NodeId, NodeKind, Query, TemplateRef, Term, TextMode};
 use crate::builder::{BuiltItem, build_query, search_field_text, splits_a_term, tag_expression};
 use crate::lexer::is_white_space;
-use crate::name_index::NameIndex;
+use crate::name_index::{NameIndex, NotetypeNames};
 use crate::parser::parse;
 use crate::pattern;
 use crate::plan::names::deck_levels;
@@ -46,10 +46,15 @@ pub fn classify_text(text: &str, names: &NameIndex) -> TextReading {
                 text: query.canonical_text_of(id),
                 field_text: false,
             }),
-            Some(TextItem::Literal) => {
-                let span = query.node(id).span.clone();
+            Some(TextItem::Literal { term, negated }) => {
+                let span = query.node(term).span.clone();
                 let written: String = chars.get(span).unwrap_or_default().iter().collect();
-                items.push(BuiltItem::Literal(unquoted(&written)));
+                let literal = BuiltItem::Literal(unquoted(&written));
+                items.push(if negated {
+                    BuiltItem::Negated(Box::new(literal))
+                } else {
+                    literal
+                });
             }
             Some(TextItem::Nothing) => {}
             None => return TextReading::Syntax,
@@ -90,8 +95,9 @@ fn run_items(query: &Query) -> Vec<NodeId> {
 enum TextItem {
     /// A plain-text term, or the negation of one, as read.
     Plain,
-    /// A field term naming no field: the literal item of its written text.
-    Literal,
+    /// A field term naming no field: the literal item of its written text,
+    /// or the negation of that item for the term's negation.
+    Literal { term: NodeId, negated: bool },
     /// The whole-collection term of an empty text.
     Nothing,
 }
@@ -278,7 +284,7 @@ impl<'n> Reader<'n> {
             _ => {}
         }
         match self.text_item(query, id) {
-            Some(TextItem::Plain | TextItem::Literal) => Class::Text,
+            Some(TextItem::Plain | TextItem::Literal { .. }) => Class::Text,
             _ => Class::Advanced,
         }
     }
@@ -455,55 +461,74 @@ impl<'n> Reader<'n> {
             .then(|| Value::Notetype(NotetypeValue::of(notetype)))
     }
 
-    /// The stored spelling of a template named `name` (unicase equality),
-    /// the first in the index's note type order.
+    /// The stored spelling of a template named `name` (unicase equality):
+    /// when note types spell it differently, the spelling in the note type
+    /// with the lowest id (T7).
     fn template_named(&self, name: &str) -> Option<String> {
-        self.names
-            .notetypes()
-            .iter()
-            .flat_map(|notetype| notetype.templates.iter())
-            .find(|template| compare_folded(template, name).is_eq())
-            .cloned()
+        self.lowest_id_spelling(|notetype| notetype.templates.as_slice(), name)
     }
 
     /// The stored spelling of the field a field term's name names, when it
     /// has no wildcard and names a field of some note type (F2 steps 1, 2
-    /// and 4).
+    /// and 4); when note types spell it differently, the spelling in the
+    /// note type with the lowest id (T7).
     fn field_named(&self, name: &str) -> Option<String> {
         let name = nfc(name);
         if matches!(name.as_ref(), "*" | "_*" | "*_") || pattern::has_wildcards(&name) {
             return None;
         }
         let exact = pattern::exact_text(&name);
+        self.lowest_id_spelling(|notetype| notetype.fields.as_slice(), &exact)
+    }
+
+    /// The first name of `names_of` equal to `name` with letter case folded,
+    /// in the note type with the lowest id that has one. The index orders
+    /// note types by name, so the id decides here.
+    fn lowest_id_spelling(&self, names_of: impl Fn(&NotetypeNames) -> &[String], name: &str) -> Option<String> {
         self.names
             .notetypes()
             .iter()
-            .flat_map(|notetype| notetype.fields.iter())
-            .find(|field| compare_folded(field, &exact).is_eq())
-            .cloned()
+            .filter_map(|notetype| {
+                let found = names_of(notetype)
+                    .iter()
+                    .find(|stored| compare_folded(stored, name).is_eq())?;
+                Some((notetype.id, found))
+            })
+            .min_by_key(|(id, _)| *id)
+            .map(|(_, found)| found.clone())
     }
 
-    /// T5 (and step 3's text row): a plain-text term, the negation of one,
-    /// or a field term naming no field of any note type.
+    /// T5 (and step 3's text row): a plain-text term, a field term naming
+    /// no field of any note type, or the negation of either.
     fn text_item(&self, query: &Query, id: NodeId) -> Option<TextItem> {
         match &query.node(id).kind {
             NodeKind::Term(Term::WholeCollection) => Some(TextItem::Nothing),
             NodeKind::Term(Term::Text(_)) => Some(TextItem::Plain),
-            NodeKind::Not(child) => {
-                matches!(query.node(*child).kind, NodeKind::Term(Term::Text(_))).then_some(TextItem::Plain)
-            }
-            NodeKind::Term(Term::Field { name, .. }) => {
-                let nfc_name = nfc(name);
-                if matches!(nfc_name.as_ref(), "*" | "_*" | "*_") || pattern::has_wildcards(&nfc_name) {
-                    return None;
+            NodeKind::Term(Term::Field { name, .. }) => self.names_no_field(name).then_some(TextItem::Literal {
+                term: id,
+                negated: false,
+            }),
+            NodeKind::Not(child) => match &query.node(*child).kind {
+                NodeKind::Term(Term::Text(_)) => Some(TextItem::Plain),
+                NodeKind::Term(Term::Field { name, .. }) => {
+                    self.names_no_field(name).then_some(TextItem::Literal {
+                        term: *child,
+                        negated: true,
+                    })
                 }
-                if self.field_named(name).is_some() {
-                    return None;
-                }
-                Some(TextItem::Literal)
-            }
+                _ => None,
+            },
             _ => None,
         }
+    }
+
+    /// T5: a field term's name names no field when it has no wildcard and
+    /// no note type has a field of that name (letter case folded), in any
+    /// mode.
+    fn names_no_field(&self, name: &str) -> bool {
+        let nfc_name = nfc(name);
+        let wildcard = matches!(nfc_name.as_ref(), "*" | "_*" | "*_") || pattern::has_wildcards(&nfc_name);
+        !wildcard && self.field_named(name).is_none()
     }
 }
 
@@ -612,9 +637,11 @@ fn shapes(query: &Query, ids: &[NodeId]) -> Vec<String> {
     out
 }
 
-/// Whether the builder writes the parsed text `text` as the same query:
-/// its canonical text reads back as the same items, and it holds no
-/// negated operator word (`canonical-form` F7's shapes fail this).
+/// Whether the builder writes the parsed text `text` as the same query
+/// (T6): its canonical text reads back as the same items, compared item by
+/// item, and it holds no negated operator word. `canonical-form` F7's first
+/// three shapes fail this: `has\-cd:x` parses again, but as a custom-data
+/// term. `Err` when `text` does not parse.
 pub(crate) fn writes_unchanged(text: &str) -> Result<bool, ()> {
     let query = parse(text).map_err(|_| ())?;
     let root = match query.node(query.root()).kind {
@@ -623,15 +650,6 @@ pub(crate) fn writes_unchanged(text: &str) -> Result<bool, ()> {
     };
     let canonical = query.canonical_text();
     Ok(advanced_text(&query, &[root], canonical.clone()) == canonical)
-}
-
-pub(crate) fn holds_negated_operator(text: &str) -> bool {
-    parse(text).is_ok_and(|query| {
-        query
-            .nodes()
-            .iter()
-            .any(|node| matches!(node.kind, NodeKind::NegatedOperator(_)))
-    })
 }
 
 /// The nodes below and at `id` in pre-order, children left to right, with
