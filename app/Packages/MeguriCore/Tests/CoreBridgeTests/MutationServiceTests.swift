@@ -137,6 +137,25 @@ extension EventTests {
             #expect(try await notes.checkNoteFields(notetypeId: nt.id, fields: ["front", "back"], ownNote: nil).duplicates == [note.id])
             let saved = try await notes.updateNote(.init(id: note.id, fields: ["persisted", "back"], tags: ["Parent::Child"]))
             #expect(saved.written)
+            // editor/field-html S2: the patch writes only its fields and refuses a deleted note.
+            let loaded = try await types.readNotetype(id: nt.id)
+            let patched = try await notes.patchNote(.init(id: note.id, notetype: loaded, fields: [1: "patched"]))
+            #expect(patched.written && patched.summary.undoName == "Update Note")
+            #expect(try await notes.readNote(id: note.id).fields == ["persisted", "patched"])
+            #expect(try await notes.patchNote(.init(id: note.id, notetype: loaded, fields: [1: "patched"])).written == false)
+            await #expect(throws: BridgeError.noteNotFound(id: -5)) {
+                try await notes.patchNote(.init(id: -5, notetype: loaded, fields: [0: "x"]))
+            }
+            // A patch loaded in another generation, or with an ordinal no field can
+            // have, is refused before anything is written.
+            await #expect(throws: BridgeError.staleGeneration(planned: generation &+ 1, current: generation)) {
+                try await notes.patchNote(.init(id: note.id, notetype: loaded, fields: [1: "other"], generation: generation &+ 1))
+            }
+            await #expect(throws: BridgeError.invalidArgument("field ordinal out of range")) {
+                try await notes.patchNote(.init(id: note.id, notetype: loaded, fields: [-1: "other"]))
+            }
+            #expect(try await notes.readNote(id: note.id).fields == ["persisted", "patched"])
+            #expect(try await notes.cardDeck(cardId: note.cards[0]) == deck.id)
             #expect(try await tags.markNotes(notes: [note.id]).count == 1)
             #expect(try await notes.readNote(id: note.id).tags.contains("marked"))
             #expect(try await tags.toggleNoteMark(current: note.id, notes: [note.id]).count == 1)
@@ -276,7 +295,7 @@ extension EventTests {
             #expect(!resumed.externalChange)
             try await collectionService.close()
             try await collectionService.open(location, randomSeed: 37)
-            #expect(try await notes.readNote(id: note.id).fields == ["persisted", "back"])
+            #expect(try await notes.readNote(id: note.id).fields == ["persisted", "patched"])
             #expect(try await types.readNotetype(id: nt.id).css == ".card { color: green; }")
             #expect(try await media.addMedia(name: "Attachment.PNG", bytes: [1,2,3]) == safe)
             let deletion = try await notes.startDeleteNotes(ids: [note.id])
