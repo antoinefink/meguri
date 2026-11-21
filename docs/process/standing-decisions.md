@@ -6,9 +6,9 @@ Dated decisions and exceptions from Antoine that still apply. `AGENTS.md` states
 
 - Antoine (2026-10-22): implement working reviews next. Follow `docs/process/review-first-delivery.md` for execution order. Keep all milestone gates and complete the full plan.
 
-- Antoine (2026-11-17): prioritize usable daily reviews with our own Meguri Sync server for integration. Independent work may proceed in an isolated worktree and reach draft PR review while repairs continue.
+- Antoine (2026-11-17): prioritize usable daily reviews with our own Meguri Sync server for integration. Independent work may proceed in an isolated worktree and reach draft PR review while repairs continue. Superseded in part 2026-11-20: pull requests open ready for review, not draft (the 2026-11-20 entry below); the priority stands.
 
-- Verification (updated goal, 2026-10-25): keep focused checks, independent review, separate commits and provenance/privacy/similarity checks per unit. Group 3–5 related units in dependency order, including Swift/FFI, with one full gate at the coherent batch boundary. Pure Rust internals may cover at most 20 units per full gate. Always gate milestone boundaries; record the original batch base and resolve technical failures before the next batch. See `docs/process/tiers.md`.
+- Superseded 2026-11-20 for when full gates run, by `AGENTS.md` "How to work" (run locally the smallest checks that cover the change; the broad Linux suites run on GitHub Actions; full gates at batch and milestone boundaries, `docs/process/tiers.md`). The per-unit review, commit, provenance, privacy and similarity rules stand. Verification (updated goal, 2026-10-25): keep focused checks, independent review, separate commits and provenance/privacy/similarity checks per unit. Group 3–5 related units in dependency order, including Swift/FFI, with one full gate at the coherent batch boundary. Pure Rust internals may cover at most 20 units per full gate. Always gate milestone boundaries; record the original batch base and resolve technical failures before the next batch. See `docs/process/tiers.md`.
 
 - Antoine (2026-11-14): continue as many repair/review rounds as needed for this goal; do not ask for round-count extensions. Keep independent review, failure evidence and all required checks. See `docs/process/review-log/repair-rounds-authorization-20261114.md`.
 
@@ -20,7 +20,7 @@ Dated decisions and exceptions from Antoine that still apply. `AGENTS.md` states
 
 - Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
-- Temporary macOS-first pass (Antoine, 2026-10-25): use Xcode MCP on this Mac for Meguri build/run/debug and UI feedback. Defer VM and mobile iteration checks during this pass; retain their required integration and final evidence. This explicitly overrides the VM-only and MG-only rules for that local feedback loop, not clean-room or privacy rules.
+- Superseded, no longer in force: `AGENTS.md` now says nothing drives this Mac's cursor or keyboard and Mac UI runs only in the macOS test VM; the pass this entry allowed has ended. Kept as history. Temporary macOS-first pass (Antoine, 2026-10-25): use Xcode MCP on this Mac for Meguri build/run/debug and UI feedback. Defer VM and mobile iteration checks during this pass; retain their required integration and final evidence. This explicitly overrides the VM-only and MG-only rules for that local feedback loop, not clean-room or privacy rules.
 
 - Antoine (2026-11-16): if the VM slows local work, iOS simulators may run on this Mac through MG. Keep the required VM and signed acceptance checks.
 
@@ -34,3 +34,8 @@ Dated decisions and exceptions from Antoine that still apply. `AGENTS.md` states
 
 - Antoine (2026-11-20): open pull requests early and ready for review, so GitHub Actions and the AI reviewer run while local work continues; keep local runs to what covers the change. The orchestrating session may merge a pull request once its checks pass and the review is addressed.
 - Antoine (2026-11-20): he is the only user, so keep things plain; instructions for agents stay brief and leave out what they can work out.
+
+## Added 2026-11-21
+
+- Antoine (2026-11-21): the three entries above marked superseded were marked at his word ("Go with your recommendation"); the R554 audio exception was left as it is until U69's state is checked.
+- Antoine (2026-11-20): Claude (coordinator) may approve and update specs without asking first; each change still gets an independent review and is recorded with that attribution (`docs/design/decisions.md`, rows of 2026-11-20).
