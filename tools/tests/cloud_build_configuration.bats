@@ -213,7 +213,7 @@ for name, sdk in (("Info-iOS.plist", "iphone*"), ("Info-macOS.plist", "macosx*")
 PY_INPUT
 }
 
-@test "only the team Mac Release real copy may sign development push over production CloudKit" {
+@test "only the team-signed Release real copy may sign development push over production CloudKit" {
   python3 - "$REPO_ROOT" <<'PY'
 import importlib.util
 import sys
@@ -260,7 +260,11 @@ module.check(settings("production"), "Release", "mac", "team", info, entitlement
 rejected(settings("development"), "Release", "mac", "team")
 rejected(settings("development"), "Release", "mac", "team", info, entitlements("development"), {})
 # Only the team-signed Mac Release can be the real copy.
-for args in (("AppStore", "mac", "team"), ("Release", "ios", "team"), ("Release", "mac", "adhoc")):
+# The iPhone real copy signs development aps-environment too.
+ios_ent = dict(entitlements("development"))
+ios_ent["aps-environment"] = ios_ent.pop("com.apple.developer.aps-environment")
+module.check(settings("development"), "Release", "ios", "team", info, ios_ent, {}, real_copy=True)
+for args in (("AppStore", "mac", "team"), ("Release", "mac", "adhoc"), ("Release", "ios", "adhoc")):
     rejected(settings("development"), *args, real_copy=True)
 rejected(settings("development"), "Release", "mac", "team", real_copy=True, personal_preview=True)
 PY

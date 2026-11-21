@@ -713,7 +713,8 @@ grants = {"com.apple.application-identifier": "DNQ34W43XX.com.antoinefink.meguri
           "com.apple.developer.aps-environment": sys.argv[2]}
 with open(sys.argv[1], "wb") as stream:
     plistlib.dump({"Entitlements": grants, "TeamIdentifier": ["DNQ34W43XX"], "Platform": ["OSX"],
-                  "ExpirationDate": datetime.datetime(2099, 1, 1), "ProvisionedDevices": ["X"]}, stream)
+                  "ExpirationDate": datetime.datetime(2099, 1, 1), "ProvisionedDevices": ["X"],
+                  "UUID": "11111111-2222-3333-4444-555555555555"}, stream)
 PY
 }
 

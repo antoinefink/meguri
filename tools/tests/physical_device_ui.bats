@@ -49,6 +49,9 @@ setup() {
 MG_SIM_RUNNER=vm
 mg_lint_ui_first() { echo lint >>"$STUB_LOG"; }
 mg__xcframework() { echo "xcframework $*" >>"$STUB_LOG"; }
+# The identity checks run on real products (app_identity_check.py, xcode-check).
+mg_app_personal_identity() { echo "identity $1" >>"$STUB_LOG"; }
+mg_app_real_copy_identity() { echo "identity $1" >>"$STUB_LOG"; }
 # Generated dispatcher evidence only. cloud_agent_injection_test.py exercises
 # the real preparation helper with generated descriptors/command doubles.
 mg_app_cloud_agent_build() {
@@ -3794,4 +3797,94 @@ PY
   mg fx-device-profile
   [ "$status" -ne 0 ]
   not_called '^system_profiler|xcrun (simctl|devicectl)|xcodebuild '
+}
+
+# The owner-requested real copy on a phone (run --real-copy --owner-requested).
+real_copy_device_facts() {
+  personal_facts
+  export MEGURI_PROFILE_DIRS="$BATS_TEST_TMPDIR/profiles"
+  mkdir -p "$MEGURI_PROFILE_DIRS"
+  jq 'map(.target as $target | .buildSettings |= (. + {
+      MEGURI_BUNDLE_ID_SUFFIX:"", MEGURI_CLOUD_CONFIGURATION:"production", MEGURI_CLOUD_CONTAINER:"iCloud.example.daily",
+      MEGURI_CLOUD_ENVIRONMENT:"production", MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT:"Production", MEGURI_CLOUD_PUSH_ENVIRONMENT:"development",
+      INFOPLIST_KEY_MeguriCloudContainer:"iCloud.example.daily", INFOPLIST_KEY_MeguriCloudEnvironment:"production",
+      PRODUCT_BUNDLE_IDENTIFIER:("com.antoinefink.meguri" + (if $target == "Meguri" then "" else ".widget" end)),
+      MEGURI_APP_NAME:"Meguri", ASSETCATALOG_COMPILER_APPICON_NAME:"AppIcon", MEGURI_SIGNING:"team", PLATFORM_NAME:"iphoneos",
+      CODE_SIGN_ENTITLEMENTS:(if $target == "Meguri" then "Meguri/Meguri-iOS.entitlements" else "MeguriWidget/MeguriWidget-iOS.entitlements" end),
+      CODE_SIGN_STYLE:"Manual",
+      PROVISIONING_PROFILE_SPECIFIER:(if $target == "Meguri" then "AAAAAAAA-1111-2222-3333-444444444444" else "BBBBBBBB-1111-2222-3333-444444444444" end)})
+    | del(.buildSettings.ENABLE_HARDENED_RUNTIME))' "$FX_PERSONAL_SETTINGS" >"$BATS_TEST_TMPDIR/real-settings.json"
+  mv "$BATS_TEST_TMPDIR/real-settings.json" "$FX_PERSONAL_SETTINGS"
+}
+
+# real_copy_device_profiles: installed iOS development profiles for the
+# daily app and widget covering $PHONE (synthetic team DNQ34W43XX).
+real_copy_device_profiles() {
+  python3 - "$MEGURI_PROFILE_DIRS" "$PHONE" <<'PY'
+import datetime, plistlib, sys
+for name, ident, grants in (
+    ("app", "DNQ34W43XX.com.antoinefink.meguri", {
+        "keychain-access-groups": ["DNQ34W43XX.*"], "com.apple.security.application-groups": ["group.com.antoinefink.meguri"],
+        "com.apple.developer.icloud-container-identifiers": ["iCloud.com.antoinefink.meguri"], "com.apple.developer.icloud-services": "*",
+        "com.apple.developer.icloud-container-environment": ["Development", "Production"], "aps-environment": "development"}),
+    ("widget", "DNQ34W43XX.com.antoinefink.meguri.widget", {"com.apple.security.application-groups": ["group.com.antoinefink.meguri"]})):
+    grants.update({"application-identifier": ident, "get-task-allow": True})
+    with open(sys.argv[1] + "/" + name + ".mobileprovision", "wb") as stream:
+        plistlib.dump({"Entitlements": grants, "TeamIdentifier": ["DNQ34W43XX"], "Platform": ["iOS"],
+                      "ExpirationDate": datetime.datetime(2099, 1, 1),
+                      "UUID": ("A" if name == "app" else "B") * 8 + "-1111-2222-3333-444444444444",
+                      "ProvisionedDevices": [sys.argv[2]]}, stream)
+PY
+}
+
+@test "the phone real copy refuses before discovery without acknowledgement or with launch options" {
+  local args
+  for args in '--real-copy --platform iphone' '--owner-requested --platform iphone' \
+      '--real-copy --owner-requested --personal-preview --platform iphone' '--real-copy --owner-requested --seconds 5 --platform iphone' \
+      '--real-copy --owner-requested --platform iphone --route sample/sheet' '--real-copy --owner-requested --platform iphone --config Debug' \
+      '--real-copy --owner-requested --platform mac'; do
+    mg run $args --physical-device "$PHONE"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+    [ ! -s "$STUB_LOG" ]
+  done
+}
+
+@test "the phone real copy stops at its profile check when the app or widget profile for the device is missing" {
+  real_copy_device_facts
+  mg run --real-copy --owner-requested --platform iphone --physical-device "$PHONE"
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-profile ]
+  not_called '^(xcframework|xcodebuild)|devicectl'
+  real_copy_device_profiles
+  rm "$MEGURI_PROFILE_DIRS/widget.mobileprovision"
+  : >"$STUB_LOG"
+  mg run --real-copy --owner-requested --platform iphone --physical-device "$PHONE"
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-profile ]
+  [ "$(field '.details.daily_driver_profiles.ios_widget.state')" = missing ]
+  not_called '^(xcframework|xcodebuild)|devicectl'
+}
+
+@test "the phone real copy builds Release with development push from the pinned device profiles and never registers or launches" {
+  real_copy_device_facts
+  real_copy_device_profiles
+  FX_BUILD_RC=1 mg run --real-copy --owner-requested --platform iphone --physical-device "$PHONE"
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = build ]
+  called '^host-lease --no-session$'
+  called '^xcframework .* --configuration Release --slices device$'
+  called '^xcodebuild -showBuildSettings .* -sdk iphoneos -arch arm64 MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_DEVICE_PROFILE_STYLE=Manual MEGURI_DEVICE_PROFILE_SPECIFIER=AAAAAAAA-1111-2222-3333-444444444444 MEGURI_WIDGET_DEVICE_PROFILE_STYLE=Manual MEGURI_WIDGET_DEVICE_PROFILE_SPECIFIER=BBBBBBBB-1111-2222-3333-444444444444$'
+  called "^xcodebuild build .* -configuration Release -destination platform=iOS,id=$PHONE -derivedDataPath build/app/RealCopyDeviceDerivedData .* MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_DEVICE_PROFILE_STYLE=Manual MEGURI_DEVICE_PROFILE_SPECIFIER=AAAAAAAA-1111-2222-3333-444444444444 MEGURI_WIDGET_DEVICE_PROFILE_STYLE=Manual MEGURI_WIDGET_DEVICE_PROFILE_SPECIFIER=BBBBBBBB-1111-2222-3333-444444444444$"
+  not_called 'allowProvisioning|MEGURI_BUNDLE_ID_SUFFIX|build-for-testing|-testPlan|devicectl|process launch'
+  [ "$(field .details.build.real_copy)" = true ]
+  [ "$(field .details.build.messages)" = null ]
+  # Wrong resolved settings stop before the build.
+  jq '.[0].buildSettings.MEGURI_CLOUD_PUSH_ENVIRONMENT = "production"' "$FX_PERSONAL_SETTINGS" >"$BATS_TEST_TMPDIR/bad.json"
+  cp "$BATS_TEST_TMPDIR/bad.json" "$FX_PERSONAL_SETTINGS"
+  : >"$STUB_LOG"
+  mg run --real-copy --owner-requested --platform iphone --physical-device "$PHONE"
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-settings ]
+  not_called '^xcodebuild build '
 }

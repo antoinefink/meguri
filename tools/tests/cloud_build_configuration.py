@@ -34,11 +34,11 @@ def check(settings, configuration, platform, signing, info=None, entitlements=No
     require(platform in ("mac", "ios") and signing in ("adhoc", "team"), "unknown platform/signing")
     require(not personal_preview or (configuration == "Release" and signing == "team"),
             "personal preview requires Release with team signing")
-    # The owner-requested Mac real copy (build-app --real-copy) keeps production
+    # The owner-requested real copy (build-app/run --real-copy) keeps production
     # CloudKit but signs development push, so an ordinary macOS development
     # profile authorizes it (standing decision 2026-11-21, exception to KTD22).
-    require(not real_copy or (configuration == "Release" and signing == "team" and platform == "mac"
-                              and not personal_preview), "the real copy is the team-signed Mac Release")
+    require(not real_copy or (configuration == "Release" and signing == "team" and not personal_preview),
+            "the real copy is the team-signed Release")
     development = configuration in ("Debug", "Profile") or personal_preview
     environment = "development" if development else "production"
     push = "development" if real_copy else environment
@@ -67,6 +67,9 @@ def check(settings, configuration, platform, signing, info=None, entitlements=No
         require(settings.get("MEGURI_CLOUD_SCHEMA_CONFIGURED_" + name) in ("NO", "YES"),
                 f"{name} readiness must be explicit NO or YES")
     ready = signing == "team" and settings["MEGURI_CLOUD_SCHEMA_CONFIGURED_" + environment] == "YES"
+    # Development push serves only while iCloud Sync stays off in the real copy:
+    # revisit the 2026-11-21 exception before production readiness turns YES.
+    require(not real_copy or not ready, "the real copy's development push requires iCloud Sync off (readiness NO)")
     require(settings.get("MEGURI_CLOUD_SCHEMA_CONFIGURED") == ("YES" if ready else "NO"),
             "effective schema readiness differs from the selected signing/environment policy")
     require(settings.get("MEGURI_CLOUD_SCHEMA_BOOLEAN") == ("1" if ready else "0"),
