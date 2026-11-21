@@ -50,6 +50,9 @@ pub mod provider_normal;
 #[cfg(feature = "test-hooks")]
 #[path = "provider_setup.rs"]
 pub mod provider_setup;
+#[cfg(feature = "test-hooks")]
+#[path = "provider_structure.rs"]
+pub mod provider_structure;
 #[path = "review_close_suspend.rs"]
 pub mod review_close_suspend;
 #[path = "review_media_fixture.rs"]

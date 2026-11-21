@@ -178,6 +178,11 @@ impl CoreHost {
         Ok(())
     }
     pub fn prepare_meguri_bootstrap(&self, access: MeguriAccess, direction: MeguriBootstrapDirection) -> Result<ManualTransferTask<Preview>> {
+        // MP7 step 1: only the structure save job prepares while it holds the lane.
+        if self.meguri_structure_job_active() { return Err(MeguriBootstrapError::Busy); }
+        self.prepare_meguri_bootstrap_admitted(access, direction)
+    }
+    pub(crate) fn prepare_meguri_bootstrap_admitted(&self, access: MeguriAccess, direction: MeguriBootstrapDirection) -> Result<ManualTransferTask<Preview>> {
         self.check_meguri_bootstrap(access.connection())?;
         if self.provider_authority().network_blocked()
             || self.manual_transfer_history().active().map_err(|_| MeguriBootstrapError::Busy)?.is_some() {

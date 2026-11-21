@@ -345,6 +345,11 @@ impl CoreHost {
             || !self.manual_transfer_history().active().is_ok_and(|active| active.is_none()) {
             return Err(EngineError::Busy { running_op: "provider recovery or review".into() });
         }
+        // MP7 step 1: the structure save job holds the lane for its whole
+        // length; a switch or Off waits for it (MP3 step 1).
+        if self.meguri_structure_job_active() {
+            return Err(EngineError::Busy { running_op: "Meguri note type structure save".into() });
+        }
         self.close_meguri_round_admission();
         let _exclusive = self.engine().reserve_collection_export_handoff()?;
         if let Some(runtime) = self.cloud_runtime() {
