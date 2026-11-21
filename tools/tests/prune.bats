@@ -268,6 +268,69 @@ PY
   [ -d "$MG/cleanroom/$id/source" ]
 }
 
+@test "prune skips a run-id folder with an impossible date, reads it, and keeps runs holding a repository" {
+  local ids=() n bad
+  for n in $(seq 1 23); do ids[$n]="$(old_run alpha "$n")"; done
+  bad="$MG/alpha/$(printf '%sZ-%d' 20251399T000000 4190900)"
+  mkdir -p "$bad"
+  echo "{\"child\":\"${ids[1]}\"}" >"$bad/receipt.json"
+  mkdir -p "$MG/alpha/${ids[2]}/clone/.git"
+  prune --apply
+  [ "$(jq -r .status "$result")" = pass ]
+  [ -d "$bad" ]
+  jq -e --arg p "$bad" '.details.skipped[] | select(.path == $p)' "$result"
+  [ -d "$MG/alpha/${ids[1]}" ]
+  [ -d "$MG/alpha/${ids[2]}/clone/.git" ]
+  [ ! -e "$MG/alpha/${ids[3]}" ]
+  prune --root ""
+  [ "$(jq -r .status "$result")" = error ]
+  prune --root "" --apply
+  [ "$(jq -r .status "$result")" = error ]
+}
+
+@test "the second scan lists worktrees again and keeps what any kept receipt names" {
+  local ids=() n late="$BATS_TEST_TMPDIR/late"
+  for n in $(seq 1 22); do ids[$n]="$(old_run alpha "$n")"; done
+  python3 - "$SB/tools/scripts/prune-run-output.py" "$(cd "$SB" && pwd -P)" "$late" "${ids[1]}" "$BATS_TEST_TMPDIR" <<'PY'
+import argparse, importlib.util, os, subprocess, sys
+spec = importlib.util.spec_from_file_location("prune", sys.argv[1])
+p = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(p)
+root, late, rid, tmp = sys.argv[2:6]
+args = argparse.Namespace(self_root=root, run_dir=tmp, missing=[], no_docker=True)
+wts, args.missing = p.worktree_list(root)
+d = p.Deleter(p.Checkout(root), None)
+ctx = p.collect(args, wts)
+ck = next(c for c in ctx.checkouts if c.path == root)
+d.ctx, d.ck = ctx, ck
+cands = p.plan_runs(ctx, ck, d.tracked_now())
+assert next(r for r in cands if r.id == rid).action == "delete"
+# A checkout added after the first scan names the run.
+subprocess.run(["git", "-C", root, "worktree", "add", "-q", "--detach", late], check=True)
+open(os.path.join(late, "HANDOFF.md"), "w").write(rid + "\n")
+p.second_scan(args, wts, root, "runs", d, cands)
+assert next(r for r in cands if r.id == rid).action == "keep", "a run named by a new checkout would go"
+PY
+}
+
+@test "a Deleter refuses a checkout path swapped for a link after it was resolved" {
+  local link="$BATS_TEST_TMPDIR/link"
+  ln -s "$(cd "$SB" && pwd -P)" "$link"
+  python3 - "$SB/tools/scripts/prune-run-output.py" "$link" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("prune", sys.argv[1])
+p = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(p)
+p.os.path.realpath = lambda x: x  # as if the link appeared just after realpath
+try:
+    p.Deleter(p.Checkout(sys.argv[2]), None)
+except p.Refusal as e:
+    print("refused:", e)
+else:
+    raise SystemExit("a checkout reached through a link was opened")
+PY
+}
+
 @test "prune keeps unfinished runs and runs whose tools/mg process still runs" {
   local ids=() n live
   for n in $(seq 1 24); do ids[$n]="$(old_run delta "$n")"; done

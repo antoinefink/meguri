@@ -442,7 +442,12 @@ class Checkout:
                         refs.tree(c.path, STATE_DEPTH, self.state)
                 continue
             if m and stat.S_ISDIR(cst.st_mode):
-                run = Run(self, job, c.name, c.path)
+                try:
+                    run = Run(self, job, c.name, c.path)
+                except ValueError:  # a run-id shape with an impossible date
+                    self.skipped.append({"path": c.path, "why": "not a valid run id; never deleted"})
+                    refs.tree(c.path, STATE_DEPTH, self.state)
+                    continue
                 try:
                     run.load(refs)
                 except OSError as err:
@@ -489,7 +494,11 @@ def worktree_list(repo):
     for w in wts:
         if w.get("bare"):
             continue
-        if w.get("prunable") or not os.path.isdir(w["path"]):
+        try:
+            ok = stat.S_ISDIR(os.stat(w["path"]).st_mode)
+        except OSError:  # gone, or unreadable: either way its files cannot be read
+            ok = False
+        if w.get("prunable") or not ok:
             # Unmounted, moved, or removed without `git worktree prune`; a folder
             # left at the path is not that checkout.
             missing.append(w["path"])
@@ -605,6 +614,9 @@ def protect(ctx, ck, cands, others, tracked, whole=None):
             r.reasons.append("recent")
         if whole is not None:
             r.reasons.extend(whole(r))
+        # Walked only for runs nothing else keeps: the walk reads the whole folder.
+        if not r.reasons and holds_checkout(ctx, r.path, r.job != CLEANROOM):
+            r.reasons.append("holds a checkout")
     for r in cands:
         if r.reasons:
             refs |= r.receipts
@@ -619,6 +631,18 @@ def protect(ctx, ck, cands, others, tracked, whole=None):
     for r in cands:
         if r.id in refs and "referenced" not in r.reasons:
             r.reasons.append("referenced")
+
+
+def holds_checkout(ctx, path, any_repo):
+    """A registered checkout lies in path, or (any_repo) a .git at any depth:
+    a standalone clone's local commits exist nowhere else."""
+    if any(c.path == path or c.path.startswith(path + os.sep) for c in ctx.checkouts):
+        return True
+    if any_repo:
+        for _dirs, names, files in os.walk(path):
+            if ".git" in names or ".git" in files:
+                return True
+    return False
 
 
 def plan_runs(ctx, ck, tracked):
@@ -861,6 +885,21 @@ def remove_at(dfd, name, dev, inside=False, ident=None):
         os.rmdir(name, dir_fd=dfd)
 
 
+def open_nofollow(path):
+    """Open an absolute folder path one component at a time without following
+    links, so a component swapped for a link after realpath is refused."""
+    fd = os.open("/", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        for part in [x for x in path.split(os.sep) if x]:
+            nxt = open_dir_at(fd, part, path)
+            os.close(fd)
+            fd = nxt
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
 def open_dir_at(dfd, name, what):
     try:
         return os.open(name, O_DIR, dir_fd=dfd)
@@ -883,7 +922,7 @@ class Deleter:
         root = os.path.realpath(ck.path)
         if root != ck.path:
             raise Refusal("%s is not a resolved checkout path; nothing deleted" % ck.path)
-        root_fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        root_fd = open_nofollow(root)
         try:
             build_fd = open_dir_at(root_fd, "build", os.path.join(root, "build"))
             try:
@@ -967,7 +1006,7 @@ class Deleter:
                 return "its tools/mg process runs", ident
             if run.key in self.tracked_now():
                 return "holds a tracked file", ident
-            if any(c.path == run.path or c.path.startswith(run.path + os.sep) for c in self.ctx.checkouts):
+            if holds_checkout(self.ctx, run.path, run.job != CLEANROOM):
                 return "holds a checkout", ident
             # A detached writer (a VM's console log, a container's output) can
             # outlive its job: a file written in that time keeps the folder.
@@ -1033,6 +1072,9 @@ class Deleter:
                         os.rename(PENDING + run.id, "%s%s-%d-%d" % (REFUSED, run.id, os.getpid(), time.time_ns()),
                                   src_dir_fd=jfd, dst_dir_fd=jfd)
                     return "changed while it was checked"
+                if expect is not None and not set(os.listdir(os.path.join(self.mg, run.job, PENDING + run.id))) <= set(expect):
+                    os.rename(PENDING + run.id, run.id, src_dir_fd=jfd, dst_dir_fd=jfd)
+                    return "its folder changed since the plan"
                 remove_at(jfd, PENDING + run.id, self.dev, ident=ident)
             else:
                 rfd = os.open(run.id, O_DIR, dir_fd=jfd)
@@ -1469,7 +1511,9 @@ def main():
 
     if args.apply and args.all_worktrees:
         return fail("--all-worktrees only reports; --apply works on one checkout, the one the job runs in")
-    if args.apply and args.root:
+    if args.root == "":
+        return fail("--root needs a checkout path")
+    if args.apply and args.root is not None:
         return fail("--root only reports; run tools/mg prune --apply from the checkout you prune")
     root = os.path.realpath(args.root) if args.root else self_root
     wts, missing = worktree_list(self_root)
@@ -1572,6 +1616,8 @@ def second_scan(args, wts, root, mode, deleter, cands):
     receipt naming an old run since the first scan."""
     log("second scan of references before deleting:")
     deleter.same_tree()
+    # Worktrees and their HEADs are listed again: one may have been added or moved.
+    wts, args.missing = worktree_list(args.self_root)
     ctx = collect(args, wts)
     deleter.same_tree()
     if ctx.refs.errors:
@@ -1589,6 +1635,28 @@ def second_scan(args, wts, root, mode, deleter, cands):
             r.action, r.reasons, held = r2.action, r2.reasons + ["second scan"], held + 1
         if mode != "runs" and r2 is not None:
             r.source_ok = r.source_ok and r2.source_ok
+    # The merged keep set has its own receipt closure: a run only the first
+    # scan kept still protects what its receipts name.
+    gone = ("delete", "remove")
+    refs = ctx.external(ck)
+    current = {r.key: r for r in ck.runs}
+    planned = {r.key for r in cands}
+    for r in ck.runs:
+        if r.key not in planned:  # runs outside this mode are kept
+            refs |= r.receipts
+    for r in cands:
+        if r.action not in gone:
+            refs |= r.receipts | (current[r.key].receipts if r.key in current else set())
+    changed = True
+    while changed:
+        changed = False
+        for r in cands:
+            if r.action in gone and r.id in refs:
+                r.action = "keep" if mode == "runs" else "strip"
+                r.reasons.append("referenced by a run kept at either scan")
+                refs |= r.receipts | (current[r.key].receipts if r.key in current else set())
+                held += 1
+                changed = True
     deleter.ctx, deleter.ck = ctx, ck
     log("  %d runs kept that the first scan would have let go" % held)
     return held
@@ -1665,8 +1733,6 @@ def run(args, wts, root, targets, out_path, mode):
     tracked = deleter.tracked if deleter else ck.tracked_runs()
     details["skipped"] = ck.skipped
     details["pending"] = ["%s/%s" % p for p in ck.pending]
-    if deleter and ck.pending:
-        details["pending_finished"] = deleter.finish_pending(failures)
     if mode == "runs":
         cands = plan_runs(ctx, ck, tracked)
         measure(cands, False)
@@ -1678,6 +1744,7 @@ def run(args, wts, root, targets, out_path, mode):
         message = "prune: %d of %d runs would go, freeing %s" % (total["delete"], total["runs"], human(total["bytes_freed"]))
         if args.apply:
             details["second_scan_kept"] = second_scan(args, wts, root, mode, deleter, cands)
+            details["pending_finished"] = deleter.finish_pending(failures)
             done = apply_runs(ctx, ck, deleter, cands, failures)
             details["applied"] = done
             counts.update({"deleted": done["deleted"], "bytes_freed": done["bytes_freed"]})
@@ -1700,6 +1767,7 @@ def run(args, wts, root, targets, out_path, mode):
             s["runs"], s["remove"] + s["strip"], human(s["bytes_freed"]))
         if args.apply:
             details["second_scan_kept"] = second_scan(args, wts, root, mode, deleter, cands)
+            details["pending_finished"] = deleter.finish_pending(failures)
             done = apply_cleanroom(ctx, ck, deleter, cands, failures)
             details["applied"] = done
             counts.update({"archived": done["archived_runs"], "removed": done["removed_runs"],
