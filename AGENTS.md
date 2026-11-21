@@ -39,3 +39,4 @@ This Mac is also Antoine's workstation. Anything that would disturb it runs in t
 - A run that reports queued (`mac-vm`, `host-session`, `mac-input`) is recorded as queued and never blocks a merge; `tools/mg catch-up` runs it again later.
 - The orchestrator may restart `meguri-mac` when it stops answering: stop only that VM once its jobs have ended, start it headless, then check `tools/mg doctor`.
 - On a migrated Mac, source `.local/activate` before running jobs (`docs/process/new-machine.md`).
+- "Meguri" (daily-driver ids, red icon) is Antoine's real copy; "Meguri Dev" (`.dev` ids, blue icon) is the test copy. Agents never launch, install over, read or modify the real copy or any installed copy's data, and build the real copy only on his explicit request (`app/AGENTS.md`). All automated runs stay in the test VM.

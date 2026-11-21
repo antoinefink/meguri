@@ -11,16 +11,18 @@
 
 ## Configurations
 
-| | Hooks | AnkiWeb | Ids |
-|---|---|---|---|
-| Debug | yes | yes | `.dev` |
-| Profile | yes | yes | `.dev` |
-| Release | no | yes | daily driver |
-| AppStore | no | no | daily driver |
+| | Hooks | AnkiWeb | Ids | Shown as |
+|---|---|---|---|---|
+| Debug | yes | yes | `.dev` | Meguri Dev, blue icon |
+| Profile | yes | yes | `.dev` | Meguri Dev, blue icon |
+| Release | no | yes | daily driver | Meguri, red icon |
+| AppStore | no | no | daily driver | Meguri, red icon |
+
+- The bundle id picks the system-visible name and icon (`MEGURI_APP_NAME`, `MEGURI_APP_ICON` in `Config/Base.xcconfig`, plus `Meguri/Identity/<identity>/en.lproj/InfoPlist.strings`: the generated Info.plist forces `CFBundleName` to `PRODUCT_NAME`, and the Mac's app menu reads the localized one), so the personal preview (Release with `.dev`) is Meguri Dev too. `PRODUCT_NAME`, the executable and `Meguri.app` stay `Meguri`; in-app titles are literals and stay "Meguri". `Meguri/AppIcon-Dev.icon` is generated from `AppIcon.icon` (`tools/mg dev-icon`); regenerate it whenever the main icon changes (`xcode-check` fails while it is stale).
 
 - Profile is Release plus `MEGURI_TEST_HOOKS` (so performance tests can load fixtures) and therefore the `.dev` ids. R1866's "Release configuration" for performance tests means Profile. Never archive or distribute it.
-- Never launch a Release or AppStore build on the Mac: it would replace the daily-driver app. Run their UI tests on simulators only (`TestHooksTests` skips them on the Mac).
-- Building Release or AppStore for the Mac is enough to harm it: Xcode registers the product (daily-driver ids, widget included) with LaunchServices and PlugInKit. Unregister and delete it once done (`lsregister -u`, `pluginkit -r`, as `tools/mg xcode-check` does).
+- The daily-driver ids are Antoine's real copy, installed in `/Applications` (root `AGENTS.md`). Never launch a Release or AppStore build on the Mac. Run their UI tests on simulators only (`TestHooksTests` skips them on the Mac).
+- Build Release or AppStore for the Mac only when Antoine asks, or inside `tools/mg xcode-check`. Xcode registers the product (daily-driver ids, widget included) with LaunchServices and PlugInKit beside the installed copy, where it can take the widget, `meguri://` links or Open With. Unregister and delete it once done (`lsregister -u`, `pluginkit -r`, as `xcode-check` does). `xcode-check --settings-only` resolves every configuration's settings without building.
 - Packages never test app compilation conditions: SwiftPM sees only debug/release. `MEGURI_TEST_HOOKS` code lives only in `Meguri/TestHooks/`, `ANKIWEB_ENABLED` code only in `Meguri/AnkiWeb/` (KTD21). `App/MeguriApp.swift` is the one other file that names the hooks.
 - Packages expose seams instead (`AppModel`: `LaunchConfiguration`, `AppClock`, `CollectionLocation`, `InitialPresentation`). Views read time through `@Environment(\.appClock)`, never `Date()`.
 - On the Mac a sheet takes `\.locale` from its own window, not from its presenter: presented content gets the launch environment again (`RootView`).
