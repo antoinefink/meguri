@@ -405,8 +405,11 @@ public struct HomeView: View {
             .buttonStyle(.borderedProminent)
             .frame(minHeight: ControlMetrics.minimumTarget)
             .contentShape(Rectangle())
-            .disabled(!collection.canStudy || collection.navigation.sheet != nil || collection.addNotePresentation.opening)
+            // While Study starts, the button keeps its look until the card shows (N16.8).
+            .disabled(!(collection.canStudy || collection.studyStarting) || collection.navigation.sheet != nil
+                || collection.addNotePresentation.opening)
             .accessibilityIdentifier("home.deck.study")
+            .modifier(StudyActionTarget(collection: collection, deckID: deck.id))
         }
     }
     #if os(macOS)

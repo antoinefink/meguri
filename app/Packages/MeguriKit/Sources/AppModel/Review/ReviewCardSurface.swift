@@ -19,9 +19,25 @@ public protocol ReviewCardSurface: AnyObject {
     func suspend() async
     func resume() async
     func close()
+    /// Called just before a card is swapped in: Study's review appears with
+    /// its first card (N16.8).
+    var onWillPresent: (() -> Void)? { get set }
+    /// Whether these pages can still serve a session (warm pages, R1813).
+    var reusable: Bool { get }
+    /// Prepares, before any session, the card a session of this deck would
+    /// show first (`sched/review-session` C3), in the idle page: nothing is
+    /// presented, no audio plays. `present` uses it only for the same card.
+    func prepareFirst(item: ReviewHeadItem, payload: CardPayload) async throws
+    /// Drops what `prepareFirst` left.
+    func discardFirst()
 }
 
 extension ReviewCardSurface {
+    public var onWillPresent: (() -> Void)? { get { nil } set {} }
+    public var reusable: Bool { true }
+    public func prepareFirst(item: ReviewHeadItem, payload: CardPayload) async throws {}
+    public func discardFirst() {}
+
     public func admitNativeInput(_ input: NativeReviewInput, coordinator: UUID, session: UInt64, generation: UInt64,
                                  deck: Int64, item: ReviewHeadItem, rating: ReviewRating, instant: Int64,
                                  eligible: Bool) throws -> NativeReviewInput.AnswerUse {
@@ -83,6 +99,12 @@ public final class ReviewPages: ReviewCardSurface {
     /// The Study click's way to the first card (R1813): this surface marks the
     /// first card ready and its presentation's commit.
     var startTrace: StudyStartTrace?
+    public var onWillPresent: (() -> Void)?
+    /// The card `prepareFirst` put in the idle page before the session, with
+    /// the head item it was read for and the exact payload it holds.
+    private var first: (item: ReviewHeadItem, payload: CardPayload, update: CardUpdate)?
+    private var documentsLoaded = false
+    public var reusable: Bool { !closed && pair?.documentsAlive == true }
     public convenience init(resolver: MediaPathResolver) {
         self.init(pair: CardPagePair(resolver: resolver))
     }
@@ -110,6 +132,10 @@ public final class ReviewPages: ReviewCardSurface {
     }
     public func load() async throws {
         guard !closed, let pair else { throw CancellationError() }
+        // Warm pages (R1813) are loaded already; loading again would only
+        // reinstall the host script beneath a card prepared in the idle page.
+        if documentsLoaded, pair.documentsReady { return }
+        documentsLoaded = false
         try await pair.load()
         try Task.checkCancellation()
         guard !closed else { throw CancellationError() }
@@ -119,6 +145,7 @@ public final class ReviewPages: ReviewCardSurface {
         }
         try Task.checkCancellation()
         guard !closed else { throw CancellationError() }
+        documentsLoaded = true
     }
     /// Issuance is synchronous and never waits for a result. Native retains
     /// only matching slot facts and owns cancellation/deadline/revision guards.
@@ -175,10 +202,18 @@ public final class ReviewPages: ReviewCardSurface {
     public func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws {
         guard let pair else { throw BridgeError.internal("Missing review pages") }
         guard let rendered = cards[item.renderKey] else { throw BridgeError.internal("Missing rendered card") }
+        let card = payload(rendered, item: item)
+        let early = first
+        first = nil
         let update: CardUpdate
         if let prepared, prepared.0 == item.renderKey { update = prepared.1 }
-        else {
-            update = try await pair.prepare(payload(rendered, item: item))
+        else if let early, Self.serves(early, item: item, payload: card, idle: pair.idle) {
+            // The card prepared before the session (R1813) is this session's
+            // own first card, with this session's own render: present it.
+            update = early.update
+            startTrace?.cardWasPreloaded()
+        } else {
+            update = try await pair.prepare(card)
             observeHost(pair.idle, update: update, purpose: .warmup)
         }
         try Task.checkCancellation()
@@ -186,6 +221,7 @@ public final class ReviewPages: ReviewCardSurface {
         startTrace?.mark(.card)
         prepared = nil; editing = false; domEditable = false; composing = false
         pair.ownsKeyboardFocus = inputActive && ReviewInputOwnership.cardFocused(in: pair.current.webView)
+        onWillPresent?()
         CATransaction.begin()
         defer { CATransaction.commit() }
         _ = try pair.present(update, inputTime: inputTime)
@@ -193,6 +229,27 @@ public final class ReviewPages: ReviewCardSurface {
         updateVisibleMedia()
         if !inputActive { pair.pauseAudio() }
     }
+    /// A preparation made before the session serves its first card only when
+    /// the head item has the same card, state token and render key
+    /// (`sched/review-session` C3), the session's render gave the same payload
+    /// (C6), and the idle page still holds that settled update.
+    static func serves(_ early: (item: ReviewHeadItem, payload: CardPayload, update: CardUpdate),
+                       item: ReviewHeadItem, payload: CardPayload, idle: CardPage) -> Bool {
+        StudyWarmup.sameCard(early.item, item) && early.payload == payload
+            && idle.update == early.update && idle.settled && !idle.closed
+    }
+    public func prepareFirst(item: ReviewHeadItem, payload rendered: CardPayload) async throws {
+        guard !closed, let pair else { throw CancellationError() }
+        first = nil
+        let card = payload(rendered, item: item)
+        let revision = mediaRevision
+        let update = try await pair.prepare(card)
+        try Task.checkCancellation()
+        guard !closed, revision == mediaRevision, pair.idle.update == update else { throw CancellationError() }
+        observeHost(pair.idle, update: update, purpose: .preload)
+        first = (item, card, update)
+    }
+    public func discardFirst() { first = nil }
     public func preload(item: ReviewHeadItem) async throws {
         guard let pair else { return }
         guard let rendered = cards[item.renderKey] else { throw BridgeError.internal("Missing preloaded card") }
@@ -221,7 +278,7 @@ public final class ReviewPages: ReviewCardSurface {
         // predates this arrival, including resources absent from the visible side.
         // The next present re-prepares idle; the current DOM stays untouched.
         mediaRevision &+= 1
-        prepared = nil
+        prepared = nil; first = nil
         try await pair.mediaArrived(names)
         return true
     }
@@ -240,6 +297,6 @@ public final class ReviewPages: ReviewCardSurface {
     }
     public func close() {
         closed = true; clearVisibleMedia()
-        mediaRevision &+= 1; prepared = nil; committedMediaUpdate = nil; pair?.close()
+        mediaRevision &+= 1; prepared = nil; first = nil; startTrace = nil; committedMediaUpdate = nil; pair?.close()
     }
 }

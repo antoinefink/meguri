@@ -91,16 +91,6 @@
         }
       }
     },
-    "Preparing review…": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Preparing review…"
-          }
-        }
-      }
-    },
     "Redo": {
       "comment": "The redo button when no step name is known (S5).",
       "localizations": {

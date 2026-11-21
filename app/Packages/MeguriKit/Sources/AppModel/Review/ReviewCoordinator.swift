@@ -39,7 +39,11 @@ public final class ReviewCoordinator {
     public var onVisibleMediaChanged: (([String]) -> Void)?
     public private(set) var visibleMediaNames: [String] = []
     /// The Study click's way to the first card (R1813); the collection sets it.
-    var startTrace: StudyStartTrace?
+    @ObservationIgnored var startTrace: StudyStartTrace?
+    /// Called once: just before the session's first card is swapped in, or as
+    /// its first state other than loading shows with a session open. Study's
+    /// review appears then, with its card (N16.8).
+    @ObservationIgnored var onFirstPresentation: (() -> Void)?
     private let client: any ReviewSessionClient
     private let store: ReviewRecordStore
     private let clock: AppClock
@@ -101,6 +105,7 @@ public final class ReviewCoordinator {
             }
         }
         surface.onRecovery = { [weak self] in self?.requestRefresh(question: true) }
+        surface.onWillPresent = { [weak self] in self?.firstPresentation() }
         (surface as? ReviewPages)?.onMediaReady = { [weak self] in self?.mediaPresentationReady() }
         if nativeInput != nil, let pair = surface.pair {
             let previous = pair.onPlaybackObservation
@@ -652,6 +657,7 @@ public final class ReviewCoordinator {
                 waitingUntil = Date(timeIntervalSince1970: Double(instant)); phase = .waiting
             } else { waitingUntil = nil; phase = .finished }
             terminalPresentation = phase
+            firstPresentation()
             if entering { onTerminal?() }
             // An empty head settles the restoration it belongs to.
             // Later work still requires a new explicit action.
@@ -758,6 +764,7 @@ public final class ReviewCoordinator {
         try Task.checkCancellation()
         terminalPresentation = nil
         phase = sideIsAnswer ? .answer : .question
+        firstPresentation()
         finishRestoration(intent)
         if !paused { activeTime.resume(at: uptime()) }
         if let next = head.items.dropFirst().first {
@@ -1007,6 +1014,13 @@ public final class ReviewCoordinator {
         guard phase != .ended else { return }
         startTrace?.cancel()
         notice = String(describing: error); phase = .error
+        // A start that failed before its session opened never shows (N16.8).
+        if sessionID != nil { firstPresentation() }
+    }
+    private func firstPresentation() {
+        guard let hook = onFirstPresentation else { return }
+        onFirstPresentation = nil
+        hook()
     }
     public static func name(_ rating: ReviewRating) -> String {
         switch rating { case .again: "again"; case .hard: "hard"; case .good: "good"; case .easy: "easy" }
