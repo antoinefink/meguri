@@ -4,6 +4,7 @@
 //! handed (D6.7) and its arguments only; offsets are characters of the text
 //! as the caller gave it (D1).
 
+use std::collections::HashSet;
 use std::ops::Range;
 
 use meguri_text::fold::{compare_folded, folded};
@@ -347,7 +348,9 @@ pub fn suggest(
         "added" | "edited" | "introduced" | "resched" => days(&mut out, &reserved, &value, range),
         "rated" => match value.split_once(':') {
             None => days(&mut out, "rated", &value, range),
-            Some((typed_days, button)) => {
+            // G8: the days must read as an unsigned 32-bit number before a
+            // button can follow them.
+            Some((typed_days, button)) if typed_days.parse::<u32>().is_ok() => {
                 for b in 1..=4u8 {
                     let digit = b.to_string();
                     if digit.starts_with(button) {
@@ -362,6 +365,7 @@ pub fn suggest(
                     }
                 }
             }
+            Some(_) => {}
         },
         "preset" => {
             for preset in names.presets() {
@@ -445,17 +449,30 @@ struct Ranked<'n> {
     names: Vec<(Class, u8, Lazy<'n>)>,
 }
 
-/// A name candidate, or what makes it (a deck gives its `Name::*` too).
+/// A name candidate, or what makes it (a deck gives its `Name::*` too),
+/// with the names it would show, folded.
 enum Lazy<'n> {
     Ready(Candidate),
-    Make(Box<dyn FnOnce() -> Vec<Candidate> + 'n>),
+    Make {
+        names: Vec<String>,
+        make: Box<dyn FnOnce() -> Vec<Candidate> + 'n>,
+    },
 }
 
 impl Lazy<'_> {
     fn make(self) -> Vec<Candidate> {
         match self {
             Lazy::Ready(candidate) => vec![candidate],
-            Lazy::Make(make) => make(),
+            Lazy::Make { make, .. } => make(),
+        }
+    }
+
+    /// Whether a recent text can be one of its insert texts: a ready one
+    /// always may, a deck or tag only when it names it.
+    fn may_be_recent(&self, recent: &HashSet<String>) -> bool {
+        match self {
+            Lazy::Ready(_) => true,
+            Lazy::Make { names, .. } => names.iter().any(|name| recent.contains(name)),
         }
     }
 }
@@ -469,14 +486,22 @@ impl<'n> Ranked<'n> {
         self.names.push((class, source, Lazy::Ready(candidate)));
     }
 
-    fn lazy(&mut self, class: Class, source: u8, make: impl FnOnce() -> Vec<Candidate> + 'n) {
-        self.names.push((class, source, Lazy::Make(Box::new(make))));
+    fn lazy(&mut self, class: Class, source: u8, names: Vec<String>, make: impl FnOnce() -> Vec<Candidate> + 'n) {
+        self.names.push((
+            class,
+            source,
+            Lazy::Make {
+                names,
+                make: Box::new(make),
+            },
+        ));
     }
 
     /// D6.5: `as_typed`, the fixed candidates, the prefix class, the inner
-    /// class; recent ones first inside each group; cut at `limit`. Without
-    /// recent texts, a group is made only up to the limit.
+    /// class; recent ones first inside each group; cut at `limit`. A deck or
+    /// tag past the limit is made only when a recent text names it.
     fn finish(self, recent: &[String], limit: usize) -> Vec<Candidate> {
+        let recent_names = recent_names(recent);
         let rank = |candidate: &Candidate| {
             candidate
                 .insert
@@ -495,7 +520,7 @@ impl<'n> Ranked<'n> {
         for class in [Class::Prefix, Class::Inner] {
             let mut group: Vec<Candidate> = Vec::new();
             while let Some((_, _, lazy)) = names.next_if(|(c, _, _)| *c == class) {
-                if recent.is_empty() && out.len() + group.len() >= limit {
+                if out.len() + group.len() >= limit && !lazy.may_be_recent(&recent_names) {
                     continue;
                 }
                 group.extend(lazy.make());
@@ -506,6 +531,35 @@ impl<'n> Ranked<'n> {
         out.truncate(limit);
         out
     }
+}
+
+/// The deck and tag names recent insert texts name, folded: a recent text
+/// that reads as one `deck:` or `tag:` term in normal mode gives its exact
+/// text; a `did:` list gives [`BY_IDS`], which every deck answers to.
+const BY_IDS: &str = "\u{0}did";
+
+fn recent_names(recent: &[String]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for text in recent {
+        let Ok(query) = parse(text) else { continue };
+        let value = match &query.node(query.root()).kind {
+            NodeKind::Term(Term::Ids {
+                kind: crate::ast::IdKind::Decks,
+                ..
+            }) => {
+                names.insert(BY_IDS.to_owned());
+                continue;
+            }
+            NodeKind::Term(Term::Deck(value)) => value,
+            NodeKind::Term(Term::Tag {
+                mode: crate::ast::TextMode::Normal,
+                text,
+            }) => text,
+            _ => continue,
+        };
+        names.insert(simple_fold(&pattern::exact_text(value)));
+    }
+    names
 }
 
 /// A word's matcher (D6.4; `search/filter-tokens` T12.2): names by
@@ -708,7 +762,12 @@ fn decks<'n>(out: &mut Ranked<'n>, names: &'n NameIndex, value: &str, matcher: &
             continue;
         };
         let range = range.clone();
-        out.lazy(class, 0, move || {
+        let shown = vec![
+            simple_fold(&deck.name),
+            simple_fold(&format!("{}::*", deck.name)),
+            BY_IDS.to_owned(),
+        ];
+        out.lazy(class, 0, shown, move || {
             let Some(value) = DeckValue::of(names, deck.id) else { return Vec::new() };
             let Some(item) = Value::Deck(value).item() else { return Vec::new() };
             let Ok(insert) = build(&item) else { return Vec::new() };
@@ -734,7 +793,7 @@ fn tags<'n>(out: &mut Ranked<'n>, names: &'n NameIndex, value: &str, matcher: &M
             continue;
         };
         let range = range.clone();
-        out.lazy(class, 0, move || match build(&BuiltItem::Tag(tag.clone())) {
+        out.lazy(class, 0, vec![simple_fold(tag)], move || match build(&BuiltItem::Tag(tag.clone())) {
             Ok(insert) => vec![candidate(CandidateKind::Tag, tag, None, range, insert, true)],
             Err(_) => Vec::new(),
         });
@@ -900,6 +959,7 @@ fn scan(text: &str, cursor: usize, names: Option<&NameIndex>) -> Scanned {
                 }
             }
         }
+        let unclosed = matches!(lexer.term(start), Err(ref error) if matches!(error.kind(), crate::error::ErrorKind::UnclosedQuote));
         let (end, form, readable) = match lexer.term(start) {
             Ok(raw) => (raw.span.end, Some(raw.form), true),
             Err(error) => match error.kind() {
@@ -909,8 +969,12 @@ fn scan(text: &str, cursor: usize, names: Option<&NameIndex>) -> Scanned {
                 _ => (len, None, false),
             },
         };
-        let range = lexer.input_range(start..end);
+        let mut range = lexer.input_range(start..end);
         let holds = range.start < cursor && cursor <= range.end;
+        // D6.2: a term with an unclosed quote ends at the cursor.
+        if holds && form.is_none() && unclosed {
+            range.end = cursor;
+        }
         let word = lexer.string(start..end);
         let operator = matches!(form, Some(Form::Unquoted)) && (word.eq_ignore_ascii_case("and") || word.eq_ignore_ascii_case("or"));
         if holds && current.is_none() {

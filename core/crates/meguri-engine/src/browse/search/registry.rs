@@ -52,7 +52,7 @@ impl SearchRegistry {
     }
 
     /// Wakes every request waiting for a reader, so it sees its token.
-    pub(super) fn wake(&self) {
+    pub(crate) fn wake(&self) {
         let _state = self.lock();
         self.changed.notify_all();
     }

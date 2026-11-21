@@ -280,9 +280,9 @@ pub fn suggest(names: &NameIndex, labels: &Labels, request: &SuggestRequest<'_>)
     if let Some(section) = request.scope {
         return Ok(lists.scoped(section, &word));
     }
-    let mut rows = if word.is_empty() {
-        lists.opening()
-    } else if key_at(text, request.caret).is_some() {
+    // T12.2: Anki syntax at the caret first, so a quoted value holding a
+    // space (`deck:"New |York"`) still completes.
+    let mut rows = if key_at(text, request.caret).is_some() {
         // T12.2: Anki syntax at the caret completes as D6 says.
         crate::suggest::suggest(text, request.caret, MOST, request.recent, names)?
             .into_iter()
@@ -291,6 +291,8 @@ pub fn suggest(names: &NameIndex, labels: &Labels, request: &SuggestRequest<'_>)
                 row: Row::Syntax(candidate),
             })
             .collect()
+    } else if word.is_empty() {
+        lists.opening()
     } else {
         lists.word(&word)
     };
@@ -423,10 +425,11 @@ impl<'a> Lists<'a> {
     fn opening(&self) -> Vec<SuggestionRow> {
         let mut rows: Vec<SuggestionRow> = self.saved_rows();
         // Every kind stays: the saved searches give way, ending with Show
-        // All when they are cut, 50 rows in all.
+        // All when they are cut; 50 rows in all, Show All and Save Search
+        // aside, as in the word's list.
         let room = MOST - Section::KINDS.len();
         if rows.len() > room {
-            rows.truncate(room - 1);
+            rows.truncate(room);
             rows.push(SuggestionRow {
                 section: Some(Section::SavedSearches),
                 row: Row::ShowAll(Section::SavedSearches),

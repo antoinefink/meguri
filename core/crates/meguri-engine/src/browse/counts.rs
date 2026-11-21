@@ -27,11 +27,11 @@
 //! The provider caches only for the collection it was opened with (its open
 //! step); without it every call reads afresh.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use meguri_model::changes::ChangeSet;
-use meguri_search::filter_tokens::counts::{CountItem, CountJob, CountPlan, CountReads, CountText, Tables};
+use meguri_search::filter_tokens::counts::{CountItem, CountJob, CountPlan, CountReads, CountText, NoteIndex, Tables};
 use meguri_search::name_index::NameIndex;
 use meguri_search::{ContextValue, SearchContext, SearchMode, SearchNotetypes};
 use meguri_storage::ReadRows;
@@ -75,6 +75,9 @@ struct State {
     attached: Option<Generation>,
     /// Per table of [`TABLES`]: the seq of the last commit that touched it.
     changed: [Seq; 6],
+    /// One more at every reset: a call that read before a reset keeps
+    /// nothing it reads after it (the reset forgot the commits between).
+    epoch: u64,
     entries: HashMap<(SearchMode, String), Entry>,
 }
 
@@ -92,6 +95,7 @@ impl State {
         self.attached = generation;
         self.changed = [Seq::default(); 6];
         self.entries.clear();
+        self.epoch += 1;
     }
 
     /// A count still holds on a snapshot of `generation` at `seq` with
@@ -202,6 +206,8 @@ impl FilterCounts {
             let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some(older) = running.replace(Arc::clone(&token)) {
                 older.cancel();
+                // An older call waiting for a reader sees its token now.
+                engine.inner.searches.wake();
             }
         }
         let _running = Running {
@@ -262,9 +268,10 @@ impl FilterCounts {
         let (generation, seq) = (snapshot.generation(), snapshot.seq());
         let mut out: Vec<Option<u64>> = vec![None; texts.len()];
         let mut missing: Vec<usize> = Vec::new();
-        {
+        let epoch = {
             let mut state = self.lock();
-            if state.attached != Some(generation) {
+            // The cache is bounded: past 65,536 counts it starts again.
+            if state.attached != Some(generation) || state.entries.len() > 1 << 16 {
                 state.entries.clear();
             }
             for (k, (text, _)) in texts.iter().enumerate() {
@@ -273,7 +280,8 @@ impl FilterCounts {
                     _ => missing.push(k),
                 }
             }
-        }
+            state.epoch
+        };
         if missing.is_empty() {
             return Ok(out);
         }
@@ -289,7 +297,7 @@ impl FilterCounts {
         let stop = || token.is_cancelled();
         // Notes mode: the notes that exist, from the note read when there is
         // one (it comes first), or read for the jobs that need them.
-        let mut notes: Option<HashSet<i64>> = None;
+        let mut notes: Option<NoteIndex> = None;
         for job in plan.jobs {
             if stop() {
                 return Err(cancelled());
@@ -306,7 +314,7 @@ impl FilterCounts {
             };
             let reads: HashMap<usize, CountReads> = reads.into_iter().collect();
             let mut state = self.lock();
-            let keep = state.attached == Some(generation);
+            let keep = state.attached == Some(generation) && state.epoch == epoch;
             for (local, count) in found {
                 let k = missing[local];
                 out[k] = Some(count);
@@ -332,12 +340,12 @@ impl FilterCounts {
         &self,
         snapshot: &impl ReadRows,
         job: CountJob,
-        notes: &mut Option<HashSet<i64>>,
+        notes: &mut Option<NoteIndex>,
         stop: &dyn Fn() -> bool,
     ) -> Result<Vec<(usize, u64)>, meguri_storage::StorageError> {
         let count = |value: i64| u64::try_from(value).unwrap_or(0);
         if job.needs_notes() && notes.is_none() {
-            let mut read = HashSet::new();
+            let mut read = NoteIndex::default();
             self.ran_statement();
             snapshot.visit_count_rows("SELECT n.id FROM notes n", &[], stop, &mut |row| {
                 read.insert(row[0]);
@@ -345,18 +353,19 @@ impl FilterCounts {
             })?;
             *notes = Some(read);
         }
-        let existing = || notes.as_ref().expect("the notes are read first");
+        let none = NoteIndex::default();
         match job {
             CountJob::Decks(mut decks) => {
                 let names = snapshot.deck_names()?;
                 decks.decks(names.iter().map(|(id, name)| (*id, name.as_deref())));
                 self.ran_statement();
                 let sql = decks.sql();
+                let existing = notes.as_ref().unwrap_or(&none);
                 snapshot.visit_count_rows(sql, &[], stop, &mut |row| {
-                    decks.row(row);
+                    decks.row(row, existing);
                     true
                 })?;
-                Ok(decks.finish(notes.as_ref().unwrap_or(&HashSet::new())))
+                Ok(decks.finish())
             }
             CountJob::Notes(mut job) => {
                 let notetypes = snapshot.notetype_names()?;
@@ -380,11 +389,12 @@ impl FilterCounts {
                 self.ran_statement();
                 let params = cells(&columns.params);
                 let sql = columns.sql.clone();
+                let existing = notes.as_ref().unwrap_or(&none);
                 snapshot.visit_count_rows(&sql, &params, stop, &mut |row| {
-                    columns.row(row);
+                    columns.row(row, existing);
                     true
                 })?;
-                Ok(columns.finish(existing()))
+                Ok(columns.finish())
             }
             CountJob::Columns { sql, params, texts, .. } => {
                 self.ran_statement();

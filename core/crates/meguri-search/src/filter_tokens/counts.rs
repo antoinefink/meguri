@@ -25,6 +25,7 @@
 //! rows, or the same expression over the same names.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasherDefault, Hasher};
 
 use meguri_text::normalize::{nfc, remove_ascii_controls};
 
@@ -41,6 +42,12 @@ use super::{FilterQuery, Token, Value, ValueToken, read_text};
 
 /// The most value columns one count statement holds.
 const COLUMNS: usize = 200;
+
+/// The longest deck or tag literal counted by name: a longer one could make
+/// its term's case-insensitive expression too large to compile (the search
+/// then fails, `errors.md` E3), so it is counted by its own predicate, which
+/// fails the same way.
+const LONGEST_LITERAL: usize = 1000;
 
 /// One thing a sidebar or suggestion row counts (T12.3 step 4).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -209,6 +216,9 @@ impl CountPlan {
         let mut notes = NoteCounts::new(mode);
         let mut shared: Vec<(usize, Query)> = Vec::new();
         let mut jobs = Vec::new();
+        // Count-only searches can be slow (text over every note): they come
+        // last, so a newer call cancelling one keeps the grouped counts.
+        let mut searches = Vec::new();
         let mut uncounted = Vec::new();
         for (index, item) in texts.iter().enumerate() {
             let Ok(query) = parse(item.text) else {
@@ -223,7 +233,7 @@ impl CountPlan {
                 notes.add_notetype(index, key);
             } else if item.alone {
                 match search_job(index, &query, mode, ctx, notetypes) {
-                    Some(job) => jobs.push(job),
+                    Some(job) => searches.push(job),
                     None => uncounted.push(index),
                 }
             } else {
@@ -236,7 +246,15 @@ impl CountPlan {
             let scope = crate::plan::query_scope(&query);
             // Notes mode with card terms only: the cards are read alone and
             // matched to the notes read for the other items.
-            let key = (Rows::for_query(mode, scope), mode == SearchMode::Notes && scope == crate::ast::Scope::Card);
+            // A `nid:` term reads the note's id from the note in those rows.
+            let reads_note_ids = query
+                .nodes()
+                .iter()
+                .any(|node| matches!(node.kind, NodeKind::Term(Term::Ids { kind: IdKind::Notes, .. })));
+            let key = (
+                Rows::for_query(mode, scope),
+                mode == SearchMode::Notes && scope == crate::ast::Scope::Card && !reads_note_ids,
+            );
             match by_rows.iter_mut().find(|(kept, _)| *kept == key) {
                 Some((_, list)) => list.push((index, query)),
                 None => by_rows.push((key, vec![(index, query)])),
@@ -255,6 +273,7 @@ impl CountPlan {
         if !notes.is_empty() {
             jobs.insert(0, CountJob::Notes(notes));
         }
+        jobs.extend(searches);
         CountPlan { mode, jobs, uncounted }
     }
 }
@@ -322,7 +341,7 @@ fn columns_job(
                 params: params.into_vec(),
                 texts,
                 reads,
-                notes: HashMap::new(),
+                bits: Vec::new(),
             })),
             failed,
         );
@@ -395,7 +414,8 @@ fn deck_key(query: &Query) -> Option<DeckKey> {
             if matches!(value.as_ref(), "*" | "filtered" | "current") {
                 return None;
             }
-            Some(DeckKey::Name(simple_fold(&deck_levels_literal(&value)?)))
+            let levels = deck_levels_literal(&value)?;
+            (levels.chars().count() <= LONGEST_LITERAL).then(|| DeckKey::Name(simple_fold(&levels)))
         }
         // A digit other than ASCII fails the search's plan (E3): counted as
         // the search is, by its own job.
@@ -444,7 +464,7 @@ fn tag_literal(query: &Query) -> Option<String> {
         return None;
     }
     let literal = glob_literal(&value)?;
-    (!literal.is_empty()).then(|| simple_fold(&literal))
+    (!literal.is_empty() && literal.chars().count() <= LONGEST_LITERAL).then(|| simple_fold(&literal))
 }
 
 /// Which note types a note type item names.
@@ -472,6 +492,52 @@ fn notetype_key(query: &Query) -> Option<NotetypeKey> {
     }
 }
 
+/// A hasher for row ids: one multiply, as ids are already spread out.
+#[derive(Default)]
+pub struct IdHasher(u64);
+
+impl Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 = (self.0.rotate_left(8) ^ u64::from(*byte)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        }
+    }
+    fn write_i64(&mut self, value: i64) {
+        self.0 = (value as u64 ^ self.0).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    }
+}
+
+type IdMap<V> = HashMap<i64, V, BuildHasherDefault<IdHasher>>;
+
+/// The notes that exist (Q5: Notes mode reads a card only with its note),
+/// each with a dense index for per-note arrays.
+#[derive(Debug, Default)]
+pub struct NoteIndex {
+    ids: IdMap<u32>,
+}
+
+impl NoteIndex {
+    pub fn insert(&mut self, nid: i64) {
+        let next = u32::try_from(self.ids.len()).unwrap_or(u32::MAX);
+        self.ids.entry(nid).or_insert(next);
+    }
+
+    pub fn get(&self, nid: i64) -> Option<u32> {
+        self.ids.get(&nid).copied()
+    }
+
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+}
+
 /// The deck items of a plan: the cards grouped by `did` and `odid` (Cards),
 /// or every card-and-note pair's note and decks (Notes).
 #[derive(Debug)]
@@ -484,8 +550,8 @@ pub struct DeckCounts {
     members: HashMap<i64, Vec<usize>>,
     /// Each distinct (`did`, `odid`) pair read, with its cards.
     pairs: HashMap<(i64, i64), (u32, u64)>,
-    /// Notes mode: the pairs of each note's cards.
-    notes: HashMap<i64, Vec<u32>>,
+    /// Notes mode: each card's note (its dense index) and pair.
+    cards: Vec<(u32, u32)>,
 }
 
 impl DeckCounts {
@@ -497,7 +563,7 @@ impl DeckCounts {
             texts: Vec::new(),
             members: HashMap::new(),
             pairs: HashMap::new(),
-            notes: HashMap::new(),
+            cards: Vec::new(),
         }
     }
 
@@ -553,32 +619,31 @@ impl DeckCounts {
     pub fn sql(&self) -> &'static str {
         match self.mode {
             SearchMode::Cards => "SELECT c.did, c.odid FROM cards c",
-            // Matched to the notes that exist in `finish`.
+            // Matched to the notes that exist as it is read.
             SearchMode::Notes => "SELECT c.nid, c.did, c.odid FROM cards c",
         }
     }
 
-    /// One row of [`DeckCounts::sql`].
-    pub fn row(&mut self, row: &[i64]) {
+    /// One row of [`DeckCounts::sql`]; in Notes mode `notes` are the notes
+    /// that exist (Q5: a card counts only with its note).
+    pub fn row(&mut self, row: &[i64], notes: &NoteIndex) {
         let (pair, note) = match self.mode {
             SearchMode::Cards => ((row[0], row[1]), None),
-            SearchMode::Notes => ((row[1], row[2]), Some(row[0])),
+            SearchMode::Notes => match notes.get(row[0]) {
+                Some(note) => ((row[1], row[2]), Some(note)),
+                None => return,
+            },
         };
         let next = u32::try_from(self.pairs.len()).unwrap_or(u32::MAX);
         let entry = self.pairs.entry(pair).or_insert((next, 0));
         entry.1 += 1;
-        let id = entry.0;
         if let Some(note) = note {
-            let pairs = self.notes.entry(note).or_default();
-            if !pairs.contains(&id) {
-                pairs.push(id);
-            }
+            self.cards.push((note, entry.0));
         }
     }
 
-    /// Every item's count; in Notes mode `notes` are the notes that exist
-    /// (Q5: a card counts only with its note).
-    pub fn finish(self, notes: &HashSet<i64>) -> Vec<(usize, u64)> {
+    /// Every item's count.
+    pub fn finish(mut self) -> Vec<(usize, u64)> {
         // N3.3: a card is in an item's decks through `did`, or through
         // `odid` when it is in a filtered deck.
         let mut texts_of: Vec<Vec<usize>> = vec![Vec::new(); self.pairs.len()];
@@ -604,17 +669,15 @@ impl DeckCounts {
                 }
             }
             SearchMode::Notes => {
-                // A note counts once per item, whichever of its cards is in it.
-                let mut stamp: HashMap<usize, usize> = HashMap::new();
-                for (k, (nid, pairs)) in self.notes.iter().enumerate() {
-                    if !notes.contains(nid) {
-                        continue;
-                    }
-                    for pair in pairs {
-                        for text in &texts_of[*pair as usize] {
-                            if stamp.insert(*text, k) != Some(k) {
-                                *counts.entry(*text).or_default() += 1;
-                            }
+                // A note counts once per item, whichever of its cards is in
+                // it: the cards by note, then each item once per note.
+                self.cards.sort_unstable();
+                self.cards.dedup();
+                let mut stamp: HashMap<usize, u32> = HashMap::new();
+                for (note, pair) in &self.cards {
+                    for text in &texts_of[*pair as usize] {
+                        if stamp.insert(*text, *note) != Some(*note) {
+                            *counts.entry(*text).or_default() += 1;
                         }
                     }
                 }
@@ -641,7 +704,7 @@ pub struct NoteCounts {
     /// After [`NoteCounts::notetypes`]: the items each note type id is in.
     members: HashMap<i64, Vec<usize>>,
     /// Cards: each note's cards.
-    cards: HashMap<i64, u64>,
+    cards: IdMap<u64>,
     /// Reused for each tag's folding.
     buffer: String,
     found: Vec<usize>,
@@ -650,7 +713,7 @@ pub struct NoteCounts {
     pieces: HashMap<String, usize>,
     matched: Vec<[Vec<usize>; 2]>,
     /// Every note read.
-    read: HashSet<i64>,
+    read: NoteIndex,
 }
 
 impl NoteCounts {
@@ -663,12 +726,12 @@ impl NoteCounts {
             texts: Vec::new(),
             counts: HashMap::new(),
             members: HashMap::new(),
-            cards: HashMap::new(),
+            cards: IdMap::default(),
             buffer: String::new(),
             found: Vec::new(),
             pieces: HashMap::new(),
             matched: Vec::new(),
-            read: HashSet::new(),
+            read: NoteIndex::default(),
         }
     }
 
@@ -786,7 +849,7 @@ impl NoteCounts {
     }
 
     /// The notes read so far: every note, once the read is done.
-    pub fn take_notes(&mut self) -> HashSet<i64> {
+    pub fn take_notes(&mut self) -> NoteIndex {
         std::mem::take(&mut self.read)
     }
 
@@ -829,8 +892,9 @@ pub struct NoteColumns {
     pub params: Vec<Param>,
     texts: Vec<usize>,
     reads: Vec<CountReads>,
-    /// Per note: the columns any of its cards set, as bits.
-    notes: HashMap<i64, Vec<u64>>,
+    /// Per note (its dense index): the columns any of its cards set, as
+    /// bits, `words` a note.
+    bits: Vec<u64>,
 }
 
 impl NoteColumns {
@@ -838,10 +902,15 @@ impl NoteColumns {
         &self.texts
     }
 
-    /// One row of [`NoteColumns::sql`]: the card's note, then the columns.
-    pub fn row(&mut self, row: &[i64]) {
+    /// One row of [`NoteColumns::sql`]: the card's note, then the columns;
+    /// a card whose note is not in `notes` counts for nothing.
+    pub fn row(&mut self, row: &[i64], notes: &NoteIndex) {
         let words = self.texts.len().div_ceil(64);
-        let bits = self.notes.entry(row[0]).or_insert_with(|| vec![0; words]);
+        if self.bits.is_empty() {
+            self.bits = vec![0; notes.len() * words];
+        }
+        let Some(note) = notes.get(row[0]) else { return };
+        let bits = &mut self.bits[note as usize * words..(note as usize + 1) * words];
         for (k, value) in row[1..].iter().enumerate() {
             if *value == 1 {
                 bits[k / 64] |= 1 << (k % 64);
@@ -849,13 +918,11 @@ impl NoteColumns {
         }
     }
 
-    /// Every item's count over the notes that exist.
-    pub fn finish(self, notes: &HashSet<i64>) -> Vec<(usize, u64)> {
+    /// Every item's count.
+    pub fn finish(self) -> Vec<(usize, u64)> {
+        let words = self.texts.len().div_ceil(64);
         let mut counts = vec![0u64; self.texts.len()];
-        for (nid, bits) in &self.notes {
-            if !notes.contains(nid) {
-                continue;
-            }
+        for bits in self.bits.chunks(words.max(1)) {
             for (k, count) in counts.iter_mut().enumerate() {
                 if bits[k / 64] & (1 << (k % 64)) != 0 {
                     *count += 1;
@@ -905,7 +972,7 @@ impl CountJob {
                     SearchMode::Notes => Rows::Notes,
                 });
                 // A note type by name reads the note types' names too.
-                let by_name: std::collections::HashSet<usize> = notes.names.iter().map(|(_, text)| *text).collect();
+                let by_name: HashSet<usize> = notes.names.iter().map(|(_, text)| *text).collect();
                 notes
                     .texts
                     .iter()

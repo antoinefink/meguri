@@ -290,6 +290,9 @@ fn recent_texts_and_the_limit() {
     let ranked = suggest("deck:la", 7, 50, &recent, &names()).unwrap();
     assert_eq!(labels(&ranked)[1], "Languages::French");
     assert_eq!(suggest("deck:", 5, 3, &[], &names()).unwrap().len(), 3);
+    // A recent deck past the limit still comes first in its class.
+    let recent = vec!["deck:a-b".to_owned()];
+    assert_eq!(labels(&suggest("deck:a", 6, 3, &recent, &names()).unwrap()), ["deck:a", "a-b", "a"]);
     assert!(suggest("deck:", 5, 0, &[], &names()).unwrap().is_empty());
     assert_eq!(suggest("ab", 3, 50, &[], &names()), Err(InvalidOffset));
 }
@@ -314,4 +317,17 @@ fn the_current_term_and_its_key() {
     assert_eq!(empty[0].kind, CandidateKind::Keyword);
     // A backslash before a space in the term: nothing.
     assert!(at_end("a\\ b").is_empty());
+}
+
+// D6.2: a term with an unclosed quote ends at the cursor, so accepting a
+// candidate keeps what follows; `rated:` offers buttons only after a day
+// count that reads.
+#[test]
+fn an_unclosed_quote_ends_at_the_cursor_and_buttons_need_days() {
+    let text = "deck:\"Lang is:new";
+    let found = suggest(text, 10, 50, &[], &names()).unwrap();
+    let languages = find(&found, "Languages");
+    assert_eq!(languages.insert.as_ref().unwrap().range, 0..10);
+    assert_eq!(after(text, languages).0, "deck:Languages is:new");
+    assert_eq!(at_end("rated:nope:").len(), 1);
 }

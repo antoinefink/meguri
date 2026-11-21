@@ -273,7 +273,7 @@ pub trait ReadRows: sealed::Connected {
     fn visit_note_tags(
         &self,
         cancel: &dyn Fn() -> bool,
-        visit: &mut dyn FnMut(i64, Option<i64>, Option<&str>) -> bool,
+        visit: &mut crate::search_rows::NoteVisit<'_>,
     ) -> Result<(), StorageError> {
         crate::search_rows::visit_note_tags(self.connection(), cancel, visit)
     }

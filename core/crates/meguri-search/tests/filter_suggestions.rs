@@ -389,8 +389,20 @@ fn the_kinds_stay_when_saved_searches_overflow() {
     let saved: Vec<String> = (0..60).map(|k| format!("\"s{k:02}\":\"is:new\"")).collect();
     let names = index(&[], &[], &[], &format!("{{{}}}", saved.join(",")));
     let rows = at_end(&names, "");
-    assert_eq!(rows.len(), 50);
-    assert_eq!(show(&rows[38]), "SavedSearches: show all SavedSearches");
-    assert_eq!(show(&rows[39]), "FilterBy: Decks");
+    // 39 saved searches and 11 kinds: 50 rows, and Show All.
+    assert_eq!(rows.len(), 51);
+    assert_eq!(show(&rows[39]), "SavedSearches: show all SavedSearches");
+    assert_eq!(show(&rows[40]), "FilterBy: Decks");
     assert_eq!(show(rows.last().unwrap()), "FilterBy: Fields");
+}
+
+// T12.2: a key before the caret wins over an empty word, so a quoted value
+// holding a space still completes.
+#[test]
+fn a_quoted_value_with_a_space_still_completes() {
+    let names = index(&[(1, "New York"), (2, "Default")], &[], &[], "{}");
+    let rows = ask(&names, &text("deck:\"New Y"), 10, None, &[]);
+    assert!(matches!(&rows[0].row, Row::Syntax(c) if c.kind == CandidateKind::AsTyped), "{:?}", shown(&rows));
+    let rows = ask(&names, &text("deck:\"New "), 10, None, &[]);
+    assert!(shown(&rows).iter().any(|row| row == "Deck New York"), "{:?}", shown(&rows));
 }

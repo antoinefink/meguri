@@ -65,6 +65,10 @@ pub(crate) fn visit_counts(
     visit_integers(conn, sql, params, COUNT_COLUMNS, cancel, visit)
 }
 
+/// What [`visit_note_tags`] hands each note: its id, `mid` and `tags`;
+/// false stops the read.
+pub type NoteVisit<'v> = dyn FnMut(i64, Option<i64>, Option<&str>) -> bool + 'v;
+
 /// Every note's id, `mid` (none when not an integer) and `tags` as text
 /// (`search/filter-tokens` T12.4's tag and note type counts): TEXT read as
 /// `meguri_regex` reads it (invalid UTF-8 replaced), INTEGER and REAL as
@@ -73,7 +77,7 @@ pub(crate) fn visit_counts(
 pub(crate) fn visit_note_tags(
     conn: &Connection,
     cancel: &dyn Fn() -> bool,
-    visit: &mut dyn FnMut(i64, Option<i64>, Option<&str>) -> bool,
+    visit: &mut NoteVisit<'_>,
 ) -> Result<(), StorageError> {
     with_cancel(conn, cancel, || {
         let mut statement = conn.prepare(
