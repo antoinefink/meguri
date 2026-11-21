@@ -68,3 +68,8 @@ CodeRabbit (PR #37) found four Minor points, all answered on their threads and f
 - U81 follow-up, in `core/crates/meguri-search/src/plan/text.rs`: when an excluded field exists, the plain and `-sc:` clauses and the `re:`/`w:` clause must not match a note whose `mid` names no note type. Today they use `n.mid NOT IN (...)`.
 - U85: the search context's day comes from the day calculation alone.
 - U260: PR #32's builder changes.
+
+CodeRabbit, second pass (three Minor points, all answered on their threads):
+- `conformance/search-ops` S1 now separates the two sides: Meguri writes nothing, and the oracle may write the two timing keys.
+- Q8 says why its two differences have no `deviations.yaml` entry: no scenario observes them. This is not changed.
+- T7.1 puts the query-wide `search_failed` refusals of T7.2 and T7.3 first.
