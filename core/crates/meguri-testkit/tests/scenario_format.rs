@@ -3193,10 +3193,11 @@ fn held_observation_shapes_and_pure_formatting_are_recognized() {
         };
         let kind = observe[0].kind;
         assert_eq!(K::from_name(kind.name()), Some(kind));
-        // U84 runs `browser_rows`; the other held kinds are language only.
+        // U84 runs `browser_rows` and U34's notetypes adapter reads
+        // notetype_templates (M3); the other held kinds are language only.
         assert_eq!(
             capabilities.observations.contains(kind.name()),
-            kind == K::BrowserRows,
+            matches!(kind, K::BrowserRows | K::NotetypeTemplates),
             "{}",
             kind.name()
         );

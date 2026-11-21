@@ -51,6 +51,24 @@ pub fn plan(
     cancel: &CancelToken,
     progress: &ProgressSink,
 ) -> Result<RegenerationPlan, EngineError> {
+    plan_mapped(reader, nt, cancel, progress, |note, cards| Ok((note, cards)))
+}
+
+/// G9's plan for the notes as a structure change leaves them before it
+/// generates (`notetypes/structure-changes` S5, S6, S7): `map` turns each
+/// stored note and its cards into the rows the commit will have written by
+/// then, so a note unchanged since planning passes `commit_in`'s content
+/// check there. The mapped rows are never written.
+pub fn plan_mapped<F>(
+    reader: &impl ReadRows,
+    nt: &Notetype,
+    cancel: &CancelToken,
+    progress: &ProgressSink,
+    mut map: F,
+) -> Result<RegenerationPlan, EngineError>
+where
+    F: FnMut(meguri_model::note::Note, Vec<meguri_model::card::Card>) -> Result<(meguri_model::note::Note, Vec<meguri_model::card::Card>), EngineError>,
+{
     let mut notes = Vec::new();
     let mut after = None;
     let mut done = 0;
@@ -65,7 +83,8 @@ pub fn plan(
         after = page.last().map(|note| note.id);
         for note in page {
             cancel.check()?;
-            let siblings = reader.cards_of_note(note.id)?;
+            let cards = reader.cards_of_note(note.id)?;
+            let (note, siblings) = map(note, cards)?;
             if !siblings.is_empty() && (nt.config.kind == 1 || siblings.len() != nt.templates.len()) {
                 notes.push(NotePlan {
                     note: note.id,

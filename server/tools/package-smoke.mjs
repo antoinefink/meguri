@@ -160,6 +160,7 @@ const request = (path, body, cookie = '', extra = {}) => new Promise((resolve, r
   req.on('error', reject); req.end(body === undefined ? undefined : JSON.stringify(body));
 });
 let proxy;
+let browserStep = 'launch';
 try {
   await mkdir('/tmp/tls');
   if (providerFixture) {
@@ -233,33 +234,47 @@ try {
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', error => errors.push(error.name));
+      // Each step waits for the API answer its next screen depends on, so a
+      // failure names the step and the answer's status (never its body).
+      const answered = async (step, path, act) => {
+        browserStep = step;
+        const response = page.waitForResponse(r => new URL(r.url()).pathname === path);
+        response.catch(() => {}); // Awaited below; a failed act() must not leave it unhandled.
+        await act();
+        const status = (await response).status();
+        if (status < 200 || status > 299) { browserStep = `${step}: ${path} answered ${status}`; throw new Error(browserStep); }
+      };
       if (phase === 'seed') {
+        browserStep = 'setup form';
         const token = (await readFile('/data/owner/state/setup-token', 'utf8')).trim();
         await page.goto(`/setup#token=${encodeURIComponent(token)}`);
         await expect(page.getByRole('heading', { name: 'Set up Meguri', exact: true })).toBeVisible();
         await page.getByLabel('Username', { exact: true }).fill(credentials.username);
         await page.getByLabel('New password', { exact: true }).fill(credentials.password);
         await page.getByLabel('Confirm new password', { exact: true }).fill(credentials.password);
-        await page.getByRole('button', { name: 'Set up Meguri', exact: true }).click();
+        await answered('setup', '/api/setup', () => page.getByRole('button', { name: 'Set up Meguri', exact: true }).click());
         await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
       }
+      browserStep = 'login form';
       await page.goto('/login');
       await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
       await page.getByLabel('Username', { exact: true }).fill(credentials.username);
       await page.getByLabel('Password', { exact: true }).fill(credentials.password);
-      await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await answered('login', '/api/login', () => page.getByRole('button', { name: 'Sign in', exact: true }).click());
+      browserStep = 'collection';
       await expect(page).toHaveURL(/\/collection$/);
       await expect(page.getByRole('heading', { name: 'Collection', exact: true })).toBeVisible();
-      await page.getByRole('link', { name: 'Connection', exact: true }).click();
+      await answered('connection', '/api/me/mcp-grants', () => page.getByRole('link', { name: 'Connection', exact: true }).click());
       await expect(page.getByRole('heading', { name: 'Connect your devices', exact: true })).toBeVisible();
       await expect(page.getByLabel('Server URL', { exact: true })).toHaveValue(`${origin}/`);
       await expect(page.getByLabel('Username', { exact: true })).toHaveValue(credentials.username);
       const cookie = (await context.cookies()).find(item => item.name === '__Host-meguri-session');
       assert(cookie?.secure && cookie.httpOnly && cookie.sameSite === 'Strict');
-      await page.getByRole('link', { name: 'Accounts', exact: true }).click();
+      await answered('accounts', '/api/admin/accounts', () => page.getByRole('link', { name: 'Accounts', exact: true }).click());
       await expect(page.getByRole('heading', { name: `${credentials.username} (you)`, exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Create invitation', exact: true })).toBeVisible();
       await page.screenshot({ path: `/out/browser-${phase}.png`, fullPage: true });
+      browserStep = 'sign out';
       await page.getByRole('button', { name: 'Sign out', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
       assert.deepEqual(errors, []);
@@ -292,7 +307,7 @@ try {
   }
 } catch {
   // No API bodies, secrets or capability URLs in ordinary logs.
-  console.error(`Packaged service smoke failed: ${browserMode ? 'browser-' : ''}${phase}`); process.exitCode = 1;
+  console.error(`Packaged service smoke failed: ${browserMode ? `browser-${phase} at ${browserStep}` : phase}`); process.exitCode = 1;
 } finally {
   if (proxy) { proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); }
 }

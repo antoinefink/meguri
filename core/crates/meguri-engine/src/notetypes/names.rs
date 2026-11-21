@@ -89,6 +89,11 @@ fn position(ord: usize) -> u32 {
     u32::try_from(ord).unwrap_or(u32::MAX)
 }
 
+/// N4 steps 1 and 2 on a note type name: what step 7 makes unique.
+pub(crate) fn requested_name(name: &str) -> Result<String, InvalidNotetype> {
+    notetype_name(name)
+}
+
 /// Steps 1 and 2: every `"` removed, no trimming, then NFC.
 fn notetype_name(name: &str) -> Result<String, InvalidNotetype> {
     let name: String = name.chars().filter(|&c| c != '"').collect();
@@ -164,7 +169,7 @@ fn sort_field(notetype: &Notetype) -> u32 {
 
 /// Step 7: `+` appended until no other note type has a name equal under
 /// unicase. A note type never collides with itself.
-fn unique_among(name: &str, id: NotetypeId, others: &[(NotetypeId, String)]) -> String {
+pub(crate) fn unique_among(name: &str, id: NotetypeId, others: &[(NotetypeId, String)]) -> String {
     let taken: HashSet<String> = others
         .iter()
         .filter(|(other, _)| *other != id)

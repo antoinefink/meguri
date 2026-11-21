@@ -112,6 +112,10 @@ fn package_media(root: &Path, media: &[(&str, &[u8])]) -> PathBuf {
     seed(&options);
     let host = CoreHost::open(options.clone()).unwrap();
     add_card(&host);
+    // The derived writer creates `meguri-derived.db` beside the collection
+    // after open returns. The export authority below stamps that directory,
+    // so a late creation reads as ExportSourceChanged: wait until it is bound.
+    assert!(host.derived().wait_idle(Duration::from_secs(20)));
     let destination = root.join("input.colpkg");
     let c = host.collection().unwrap();
     let lease = c.reader(ReaderRole::Maintenance).unwrap();

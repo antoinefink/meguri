@@ -32,7 +32,9 @@ Use `tools/mg vm-xcode-stage` for supported Xcode staging, under its VM lease.
 Docker development runs in OrbStack. Its machine and volumes may contain other
 projects: never copy or reset the whole OrbStack store for Meguri. Meguri's
 Docker build cache is disposable and can rebuild on the new Mac. An existing
-dedicated cache can instead be selected with `MEGURI_DOCKER_CARGO_TARGET`.
+dedicated cache can instead be selected with `MEGURI_DOCKER_CARGO_TARGET`. It
+applies only to the checkout that owns that directory; every other worktree
+keeps its own cache volume (`tools/AGENTS.md`).
 
 Install the Rust version, components and Apple targets in
 `core/rust-toolchain.toml`. Native Apple builds need this host toolchain; Docker

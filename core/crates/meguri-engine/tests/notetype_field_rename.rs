@@ -232,9 +232,12 @@ fn all_four_texts_use_original_exact_keys_spans_filters_sections_and_delimiters(
     let t = &nt.templates[0].config;
     assert_eq!(
         t.q_format,
-        "{{ Back }}|{{text:hint:Front}}|{{# Back }}{{^Front}}s{{/Front}}{{/ Back }}|{{front}}|{{text: Front}}<!--{{Front}}-->"
+        "{{Back}}|{{text:hint:Front}}|{{#Back}}{{^Front}}s{{/Front}}{{/Back}}|{{front}}|{{text: Front}}<!--{{Front}}-->"
     );
-    assert_eq!(t.a_format, "{{Front}} / {{{Back}}} / {{::Back}}");
+    // S4.1: a rewritten tag is written in canonical form over its whole
+    // span, so its spaces and the extra opening brace go; `}` after the
+    // tag's closer is text.
+    assert_eq!(t.a_format, "{{Front}} / {{Back}}} / {{::Back}}");
     assert_eq!(
         t.q_format_browser,
         " \n{{=<% %>=}}{{=<% %>=}}<%text:Back%> {{Back}}<!--<%Front%>-->"

@@ -16,6 +16,8 @@ import Testing
          .notetypeRefused(.template(kind: .unknownField, template: 3, side: .back, name: "Missing", earlier: nil))),
         (.NotetypeRefused(refusal: .invalid(reason: .emptyFieldName(ord: 7))), .notetypeRefused(.invalid(reason: .emptyFieldName(ord: 7)))),
         (.DeckRefused(refusal: .underDescendant), .deckRefused(.underDescendant)),
+        (.NotetypeStructureRefused(refusal: .noteFieldCountMismatch(note: -9)),
+         .notetypeStructureRefused(.noteFieldCountMismatch(note: -9))),
         (.NoteNotFound(id: -37), .noteNotFound(id: -37)),
         (.NotFound(table: .decks, key: "-41"), .notFound(table: .decks, key: "-41")),
         (.InsufficientSpace(required: 100, available: 99), .insufficientSpace(required: 100, available: 99)),
