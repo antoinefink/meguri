@@ -349,3 +349,34 @@ fn a_refusal_leaves_the_undo_and_redo_history() {
     assert_eq!(Some(after.clone()), seen.lock().unwrap().clone());
     assert_eq!(after.1, before.1);
 }
+
+/// A damaged collection: deck 1 nested as `Outer::Default`, an orphan
+/// `Default::X` with a card, no deck named `Default`. Deleting `[Outer, 1]`
+/// renames deck 1 to `Default` while processing `Outer`, so the listed `1`
+/// would then take `Default::X`, which no count saw: the delete rolls back.
+#[test]
+fn cards_no_count_saw_roll_the_delete_back() {
+    let h = common::fresh();
+    let outer = deck(&h, "Outer");
+    decks::rename(&h.collection, DeckId(1), "Outer::Default".into()).unwrap();
+    let orphan = h
+        .collection
+        .run(OpSpec::named("damage", OpSource::UserUndoable), |ctx| {
+            Ok(ctx.scope().add_deck(&decks::new_deck("Default\u{1f}X".into()))?)
+        })
+        .unwrap()
+        .value;
+    add_card(&h.collection, orphan);
+    let ids = [outer, DeckId(1)];
+    let summary = decks::deletion_summary(&*h.collection.reader(ReaderRole::Query).unwrap(), &ids).unwrap();
+    assert_eq!(summary, DeletionSummary { decks: 2, cards: 0 });
+    let backups = Arc::new(Backups::default());
+    for confirmed in [ConfirmedLosses::Counts(summary), ConfirmedLosses::Any] {
+        let error = run(&h, &ids, confirmed, &backups, ProgressSink::new()).unwrap_err();
+        assert!(matches!(error, EngineError::Internal { .. }), "{error:?}");
+        assert!(exists(&h, outer) && exists(&h, orphan));
+        assert_eq!(query_int(&h.collection, "SELECT count(*) FROM cards"), 1);
+        assert_eq!(query_int(&h.collection, "SELECT count(*) FROM graves"), 0);
+    }
+    assert_eq!(backups.calls(), 0);
+}

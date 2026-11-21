@@ -210,22 +210,16 @@ pub fn delete_controlled(
                 let removed = delete_in(ctx.scope(), &apply)?;
                 // `delete_in` finds each listed deck's descendants when it
                 // reaches it, so in a damaged collection the default deck's
-                // rename can bring in an orphan subtree the count missed. Roll
-                // back rather than remove more than was confirmed or backed up.
+                // rename can bring in an orphan subtree no count sees. Roll
+                // back: no read would ever confirm those cards, so neither a
+                // replan nor `LossesChanged` could end the delete.
                 if removed.cards > live.cards {
-                    if !backed_up {
-                        return Err(EngineError::Stale {
-                            table: Table::Cards,
-                            key: "deck deletion".into(),
-                        });
-                    }
-                    check(
-                        confirmed,
-                        DeletionSummary {
-                            decks: live.decks.max(removed.decks),
-                            cards: removed.cards,
-                        },
-                    )?;
+                    return Err(EngineError::Internal {
+                        message: format!(
+                            "deck deletion would remove {} cards, {} counted",
+                            removed.cards, live.cards
+                        ),
+                    });
                 }
                 Ok(removed)
             },
