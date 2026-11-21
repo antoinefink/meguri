@@ -49,7 +49,7 @@ steps:
             - front: "{{cloze:Shapes}}"
               back: "{{cloze:Shapes}}"
               ord: 1
-              fields: ["{{c1,2::image-occlusion:rect:left=.1:top=.1:width=.2:height=.2:oi=1}}<br>{{c3::image-occlusion:rect:left=.5:top=.5:width=.2:height=.2:oi=1}}<br>"]
+              fields: ["{{c1,2::image-occlusion:rect:left=.15:top=.12:width=.2:height=.2:oi=1}}<br>{{c3::image-occlusion:rect:left=.5:top=.5:width=.2:height=.2:oi=1}}<br>"]
             # IO8 a polygon without points, card 2
             - front: "{{cloze:Shapes}}"
               back: "{{cloze:Shapes}}"
@@ -60,7 +60,7 @@ steps:
             - front: "{{cloze:Shapes}}"
               back: "{{cloze:Shapes}}"
               ord: 0
-              fields: ["{{c1::image-occlusion:star:left=.1:top=.1:width=.2:height=.2}}<br>{{c1::image-occlusion:rect:left=.4:top=.1:width=0:height=.2}}<br>{{c1::image-occlusion:ellipse:left=.1:top=.5:rx=.1}}<br>{{c1::image-occlusion:rect:left=.6:top=.6:width=.2:height=.2}}<br>"]
+              fields: ["{{c1::image-occlusion:star:left=.15:top=.12:width=.2:height=.2}}<br>{{c1::image-occlusion:rect:left=.4:top=.1:width=0:height=.2}}<br>{{c1::image-occlusion:ellipse:left=.1:top=.5:rx=.1}}<br>{{c1::image-occlusion:rect:left=.6:top=.6:width=.2:height=.2}}<br>"]
   - observe:
       - template:
           notetype: {name: Mask Audio Probe, kind: cloze, fields: [Shapes, S1, S2]}
@@ -70,4 +70,4 @@ steps:
             - front: "{{cloze:Shapes}}<div style=\"display:none\">{{cloze:S1}}{{cloze:S2}}</div>"
               back: "{{cloze:Shapes}}<div style=\"display:none\">{{cloze:S1}}{{cloze:S2}}</div>"
               ord: 0
-              fields: ["{{c1::image-occlusion:rect:left=.1:top=.1:width=.3:height=.3:oi=1}}<br>{{c2::image-occlusion:rect:left=.5:top=.5:width=.3:height=.3:oi=1}}<br>", "{{c1::[sound:_s1.mp3]}}", "{{c2::[sound:_s2.mp3]}}"]
+              fields: ["{{c1::image-occlusion:rect:left=.15:top=.12:width=.3:height=.3:oi=1}}<br>{{c2::image-occlusion:rect:left=.5:top=.5:width=.3:height=.3:oi=1}}<br>", "{{c1::[sound:_s1.mp3]}}", "{{c2::[sound:_s2.mp3]}}"]
