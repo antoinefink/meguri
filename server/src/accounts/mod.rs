@@ -220,15 +220,24 @@ pub(crate) fn check_browser(
     a: &BrowserAuthority,
     failure: &'static str,
 ) -> Result<Account> {
+    Ok(check_browser_expiry(c, a, failure, now())?.0)
+}
+pub(crate) fn check_browser_expiry(
+    c: &Connection,
+    a: &BrowserAuthority,
+    failure: &'static str,
+    checked_at: i64,
+) -> Result<(Account, i64)> {
     let current = read_account(c, &a.account.identity.id)?
         .filter(|r| r.usable() && r.generation == a.account.generation)
         .ok_or(Error::new(failure))?;
-    let stored:Option<Vec<u8>>=c.query_row("SELECT hash FROM credentials WHERE hash=?1 AND account_id=?2 AND kind='session' AND revoked=0 AND generation=?3 AND expires_at>?4",
-        params![a.hash.as_slice(),current.identity.id,current.generation,now()],|r|r.get(0)).optional()?;
-    if !stored.is_some_and(|h| crypto::same_digest(&h, &a.hash)) {
+    let stored:Option<(Vec<u8>,i64)>=c.query_row("SELECT hash,expires_at FROM credentials WHERE hash=?1 AND account_id=?2 AND kind='session' AND revoked=0 AND generation=?3 AND expires_at>?4",
+        params![a.hash.as_slice(),current.identity.id,current.generation,checked_at],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+    let (hash, expires_at) = stored.ok_or(Error::new(failure))?;
+    if !crypto::same_digest(&hash, &a.hash) {
         return Err(Error::new(failure));
     }
-    Ok(current)
+    Ok((current, expires_at))
 }
 pub(crate) fn check_admin(
     c: &Connection,

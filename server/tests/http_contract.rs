@@ -38,11 +38,18 @@ fn session_cookie(r: &Response, clear: bool) -> String {
         "HttpOnly",
         "SameSite=Strict",
         "Path=/",
-        if clear { "Max-Age=0" } else { "Max-Age=86400" },
     ] {
         assert!(attributes.contains(&a));
     }
     assert!(!c.to_ascii_lowercase().contains("domain="));
+    let age: i64 = attributes.iter().find_map(|a| a.strip_prefix("Max-Age="))
+        .unwrap().parse().unwrap();
+    if clear {
+        assert_eq!(age, 0);
+    } else {
+        // Login's response may cross a UTC second after issuance.
+        assert!((31_535_999..=31_536_000).contains(&age));
+    }
     c.split(';').next().unwrap().into()
 }
 async fn failure(r: Response, status: u16, code: &str) {
