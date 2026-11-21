@@ -9,10 +9,12 @@
 #                         (workspace and patched path crates) are rebuilt from
 #                         source, so their artifacts never enter a cache.
 #                         Writes save=yes, or save=no over the cap, to
-#                         $GITHUB_OUTPUT. The caps keep two versions of every
-#                         cache (old and new key, after a Cargo.lock or image
-#                         change) under GitHub's 10 GB, so one cache cannot
-#                         evict another's current entry.
+#                         $GITHUB_OUTPUT. The caps are chosen so that an old
+#                         and a new entry of every cache (after a Cargo.lock or
+#                         image change) fit in GitHub's 10 GB. They bound each
+#                         entry only: when the budget is full, GitHub evicts
+#                         the least recently used entries, which are then
+#                         normally the replaced ones.
 
 set -euo pipefail
 
@@ -33,6 +35,10 @@ prune() {
     done
     # Test and other executables of local packages.
     sudo find "$dir/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' -delete
+    # The profile root holds only the final outputs cargo copies out of deps/
+    # for the packages it was asked to build (layering-check, meguri-sync),
+    # all local, and its lock file.
+    sudo find "$dir" -maxdepth 1 -type f -delete
   done
   sudo rm -rf -- "$target/nextest" "$target/tmp"
   sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/cargo-home" "$target"
