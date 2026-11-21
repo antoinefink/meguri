@@ -91,6 +91,9 @@ pub(crate) enum Purpose {
     Draft,
     /// Restore to Default: a `restore_summary` (D7.1).
     Restore,
+    /// The note type name after N4 steps 1 and 2, before step 7's `+`:
+    /// the write phase applies step 7 again on the live rows.
+    pub requested_name: String,
 }
 
 impl Layout {
@@ -482,6 +485,7 @@ pub(crate) struct Shape {
     pub confirmed: ConfirmedLosses,
     pub text_or_styling_changed: bool,
     pub purpose: Purpose,
+    pub requested_name: String,
 }
 
 /// S2: what the draft changes, the card map and the requirements, given
@@ -520,7 +524,7 @@ pub(crate) fn classify(base: Notetype, saved: Notetype, shape: Shape) -> Layout 
         .collect();
     // S2: a template added, even at the same count with an equal front, or
     // the fronts by position differ.
-    let fronts_changed = shape.fresh_templates.iter().any(|fresh| *fresh)
+    let fronts_changed = shape.template_origins.iter().any(Option::is_none)
         || saved.templates.len() != base.templates.len()
         || saved
             .templates
@@ -583,6 +587,7 @@ pub(crate) fn classify(base: Notetype, saved: Notetype, shape: Shape) -> Layout 
         text_or_styling_changed: shape.text_or_styling_changed,
         report_template_map: None,
         purpose: shape.purpose,
+        requested_name: shape.requested_name,
     }
 }
 
@@ -722,8 +727,10 @@ fn layout_of_draft(reader: &impl ReadRows, base: Notetype, draft: &StructureDraf
         .into_iter()
         .filter(|(other, _)| *other != base.id)
         .collect();
-    // S3 step 1 and S1.2 item 2 (V2's counts and the names N4 refuses).
+    // S3 step 1 and S1.2 item 2 (V2's counts and the names N4 refuses);
+    // the name before step 7's `+` is kept for the write phase.
     names::normalize(&mut saved, &others)?;
+    let requested_name = names::requested_name(&draft.name)?;
     // S3 step 4: a sort field the draft names, at its final position.
     if let Some(sort) = draft.sort_field {
         saved.config.sort_field_idx = sort;
@@ -766,8 +773,16 @@ fn layout_of_draft(reader: &impl ReadRows, base: Notetype, draft: &StructureDraf
             c.a_format_browser = rewrite::rewrite(&c.a_format_browser, &map, &first, cloze, Side::BrowserBack);
         }
     }
-    // S3 step 3 (S8): requirements from the templates as S4 left them.
-    if write::requirements_stale(&base, &saved) {
+    // S3 step 3 (S8): requirements from the templates as S4 left them, also
+    // when a field or template was replaced by one of the same name (the
+    // origins changed while names and fronts read the same).
+    let origins_changed = |origins: &[Option<u32>], len: usize| {
+        origins.len() != len || origins.iter().enumerate().any(|(at, o)| *o != Some(position(at)))
+    };
+    if write::requirements_stale(&base, &saved)
+        || origins_changed(&field_origins, base.fields.len())
+        || origins_changed(&template_origins, base.templates.len())
+    {
         saved.config.reqs = requirements(&base, &saved, &template_origins);
     }
     let text_or_styling_changed = draft.css != base.config.css
@@ -784,6 +799,7 @@ fn layout_of_draft(reader: &impl ReadRows, base: Notetype, draft: &StructureDraf
         confirmed: draft.confirmed.clone(),
         text_or_styling_changed,
         purpose: Purpose::Draft,
+        requested_name,
         fresh_fields: field_origins.iter().map(Option::is_none).collect(),
         fresh_templates: template_origins.iter().map(Option::is_none).collect(),
         field_origins,

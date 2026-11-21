@@ -116,6 +116,8 @@ fn layout_of_restore(base: Notetype, kind: Option<StockKind>, confirmed: Confirm
                 || a.config.a_format_browser != b.config.a_format_browser
         });
     let shape = Shape {
+        // D3: the name stays; the write phase checks it is still unique.
+        requested_name: base.name.clone(),
         fresh_fields: vec![true; field_origins.len()],
         fresh_templates: vec![true; template_origins.len()],
         field_origins,

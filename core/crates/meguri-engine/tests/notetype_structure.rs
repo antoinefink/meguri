@@ -903,9 +903,8 @@ fn checked_drafts_run_the_template_checks_on_every_path() {
     assert!(!run(&h, unchecked).unwrap().value.written);
 }
 
-/// A removed card with the largest possible id leaves no id above it: a
-/// card the same save would generate is refused (the whole save rolls
-/// back) rather than given the removed card's id.
+/// A removed card with the largest possible id keeps it: the card the same
+/// save generates gets a free id inside I3's window instead.
 #[test]
 fn no_generated_card_takes_the_largest_removed_id() {
     let (h, _) = harness();
@@ -928,17 +927,69 @@ fn no_generated_card_takes_the_largest_removed_id() {
             },
         )
         .unwrap();
-    let before = state(&h, id);
     let mut draft = draft(&h, id);
     without_template(&mut draft, "Reverse");
     draft.templates.push(template("Reverse again", "{{Back}}"));
     confirm(&h, &mut draft);
-    let error = run(&h, draft).unwrap_err();
-    assert!(
-        matches!(error, EngineError::Storage(meguri_storage::StorageError::IdsExhausted { .. })),
-        "{error:?}"
-    );
-    assert_eq!(state(&h, id), before);
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!((saved.cards_removed, saved.cards_added), (1, 1));
+    let after = state(&h, id);
+    assert!(after.cards.iter().all(|c| c.0 != i64::MAX), "{:?}", after.cards);
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    assert!(reader.grave(i64::MAX, GraveKind::Card).unwrap().is_some());
+}
+
+/// N4 step 7 from the requested name: a name another note type frees while
+/// the save backs up is stored without the `+` planning gave it.
+#[test]
+fn a_name_freed_during_the_backup_is_stored_as_requested() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    let mut draft = draft(&h, id);
+    draft.name = "Basic".into();
+    draft.fields.swap(0, 1);
+    backups.then(|c| {
+        let reader = c.reader(ReaderRole::Query).unwrap();
+        let mut other = notetypes::Draft::of(notetypes::read::by_name(&*reader, "Basic").unwrap().unwrap());
+        drop(reader);
+        other.name = "Elsewhere".into();
+        notetypes::save(c, other, notetypes::SaveOptions::default()).unwrap();
+    });
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!(saved.name, "Basic");
+}
+
+/// N6: a field replaced by a new one of the same name recomputes the
+/// requirements, though names and fronts read the same.
+#[test]
+fn a_field_replaced_under_the_same_name_recomputes_requirements() {
+    let (h, _) = harness();
+    let id = trio(&h);
+    let mut seeded = read(&h, id);
+    seeded.config.reqs[0].kind = 0;
+    seeded.config.reqs[0].field_ords.clear();
+    h.collection
+        .run(
+            OpSpec::named("stale reqs", OpSource::UserNonUndoable)
+                .skip_undo()
+                .stamp(StampMode::CallerSupplied),
+            move |ctx| {
+                ctx.scope().put_notetype(&seeded)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let mut draft = draft(&h, id);
+    let extra = draft.fields.remove(2);
+    draft.fields.push(DraftField {
+        origin: None,
+        name: extra.name,
+        options: FieldOptions::new_field(),
+    });
+    run(&h, draft).unwrap();
+    let nt = read(&h, id);
+    assert_eq!((nt.config.reqs[0].kind, nt.config.reqs[0].field_ords.clone()), (1, vec![0]));
 }
 
 fn edit(c: &Collection, nid: NoteId, fields: &[&str]) {
