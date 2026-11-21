@@ -7,7 +7,9 @@
 //! run text and reads text into it. Everything here reads only the name
 //! index it is handed (D6.7), never the collection, config or clock.
 
+pub mod counts;
 mod read;
+pub mod suggest;
 
 use meguri_model::deck::human_name;
 use meguri_model::ids::{CardId, DeckId, NoteId, NotetypeId};

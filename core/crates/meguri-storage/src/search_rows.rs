@@ -45,6 +45,61 @@ pub(crate) fn visit(
     cancel: &dyn Fn() -> bool,
     visit: &mut dyn FnMut(&[i64]) -> bool,
 ) -> Result<(), StorageError> {
+    visit_integers(conn, sql, params, 2, cancel, visit)
+}
+
+/// The most integer columns one count statement may select
+/// ([`visit_counts`]).
+pub const COUNT_COLUMNS: usize = 1000;
+
+/// A read-only statement of Browse's filter counts (`search/filter-tokens`
+/// T12.4) whose columns, at most [`COUNT_COLUMNS`], are integers: grouped
+/// keys and their counts, or one count per value. Cancelled as [`visit`] is.
+pub(crate) fn visit_counts(
+    conn: &Connection,
+    sql: &str,
+    params: &[Cell],
+    cancel: &dyn Fn() -> bool,
+    visit: &mut dyn FnMut(&[i64]) -> bool,
+) -> Result<(), StorageError> {
+    visit_integers(conn, sql, params, COUNT_COLUMNS, cancel, visit)
+}
+
+/// Every note's id and `tags` as text, by id (`search/filter-tokens`
+/// T12.4's tag counts): TEXT read as `meguri_regex` reads it (invalid UTF-8
+/// replaced), INTEGER and REAL as SQLite's text for them, NULL and BLOB as
+/// none, which no tag term matches. Cancelled as [`visit`] is.
+pub(crate) fn visit_note_tags(
+    conn: &Connection,
+    cancel: &dyn Fn() -> bool,
+    visit: &mut dyn FnMut(i64, Option<&str>) -> bool,
+) -> Result<(), StorageError> {
+    with_cancel(conn, cancel, || {
+        let mut statement = conn.prepare(
+            "SELECT id, CASE WHEN typeof(tags) IN ('integer', 'real') THEN CAST(tags AS TEXT) ELSE tags END FROM notes",
+        )?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            let id = row.get::<_, i64>(0)?;
+            let keep = match row.get_ref(1)? {
+                rusqlite::types::ValueRef::Text(bytes) => visit(id, Some(&String::from_utf8_lossy(bytes))),
+                _ => visit(id, None),
+            };
+            if !keep {
+                break;
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Runs `work` under the progress handler that stops SQLite once `cancel`
+/// says so; a cancel seen before it starts is the interrupt too.
+fn with_cancel<T>(
+    conn: &Connection,
+    cancel: &dyn Fn() -> bool,
+    work: impl FnOnce() -> Result<T, StorageError>,
+) -> Result<T, StorageError> {
     if cancel() {
         return Err(interrupted());
     }
@@ -60,22 +115,35 @@ pub(crate) fn visit(
         );
     }
     let _handler = Handler(conn);
-    let mut statement = conn.prepare(sql)?;
-    let columns = statement.column_count();
-    if !statement.readonly() || !(1..=2).contains(&columns) {
-        return Err(StorageError::Mode {
-            detail: "a search must be a read-only id query of one or two columns".into(),
-        });
-    }
-    let mut rows = statement.query(params_from_iter(params))?;
-    let mut values = [0i64; 2];
-    while let Some(row) = rows.next()? {
-        for (index, value) in values.iter_mut().enumerate().take(columns) {
-            *value = row.get::<_, i64>(index)?;
+    work()
+}
+
+fn visit_integers(
+    conn: &Connection,
+    sql: &str,
+    params: &[Cell],
+    most: usize,
+    cancel: &dyn Fn() -> bool,
+    visit: &mut dyn FnMut(&[i64]) -> bool,
+) -> Result<(), StorageError> {
+    with_cancel(conn, cancel, || {
+        let mut statement = conn.prepare(sql)?;
+        let columns = statement.column_count();
+        if !statement.readonly() || !(1..=most).contains(&columns) {
+            return Err(StorageError::Mode {
+                detail: format!("a search must be a read-only integer query of one to {most} columns"),
+            });
         }
-        if !visit(&values[..columns]) {
-            break;
+        let mut rows = statement.query(params_from_iter(params))?;
+        let mut values = vec![0i64; columns];
+        while let Some(row) = rows.next()? {
+            for (index, value) in values.iter_mut().enumerate() {
+                *value = row.get::<_, i64>(index)?;
+            }
+            if !visit(&values) {
+                break;
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
