@@ -53,3 +53,5 @@
 - Recorded-corrupt owners keep the writer executor but no SQLite writer. Diagnostic readers use `ReaderFactory::recovery`; failed probing never discards ownership. A refused preactivation replacement must retain that state without a managed reopen.
 
 - `ReaderLease` is thread-bound; call `wait_wal_covered` after the snapshot.
+
+- Browse search sessions (`browse/search/`, `browser/result-sets`): a busy session has one worker thread (owner `search`); `SearchRegistry::halt` cancels running requests for replace, suspend and close. Events go through a per-request delivery thread joined before the next request, so the listener never runs under a lock or a reader. Lock order: session state, then a handle. A search's day is `worker::context` (pure `sched_day` on the snapshot), never a day query.

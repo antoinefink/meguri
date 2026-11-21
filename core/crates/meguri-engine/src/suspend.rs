@@ -105,6 +105,8 @@ impl Engine {
         let deadline = monotonic::now() + timeout_budget;
         let _lane = self.control_lane_until(deadline)?;
         self.collection()?;
+        // `browser/result-sets` H3: searches stop so their readers return.
+        let _searches = self.inner.searches.halt();
         self.jobs().pause(true);
         let jobs = self.jobs().running();
         for job in &jobs {
@@ -196,6 +198,8 @@ impl Engine {
                 owner == "writer"
                     || owner == "jobs"
                     || owner == "events"
+                    // Search threads: `suspend` stops their requests first.
+                    || owner == crate::browse::search::OWNER
                     || participants.iter().any(|p| p.name() == owner)
             });
             if !owned {
