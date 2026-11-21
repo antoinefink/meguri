@@ -176,6 +176,14 @@ public final class CardPagePair {
 
     isolated deinit { close() }
 
+    /// Both pages can still serve a session: not closed, and no web content
+    /// process lost (a lost idle page is rebuilt by `prepare`, the current one is not).
+    public var documentsAlive: Bool {
+        !closed && pages.allSatisfy { !$0.closed && !$0.contentProcessTerminated && !$0.needsReconstruction }
+    }
+    /// Both pages hold their loaded reviewer documents (`load()` has nothing to do).
+    public var documentsReady: Bool { !closed && pages.allSatisfy(\.documentReady) }
+
     public func load() async throws {
         for page in pages {
             let reconstruct = page === idle && page.needsReconstruction

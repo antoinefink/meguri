@@ -35,7 +35,7 @@ public nonisolated struct CardUpdate: Sendable, Hashable {
 }
 
 /// Render output plus session policy; no second renderer or AV extraction.
-public nonisolated struct CardPayload: Sendable {
+public nonisolated struct CardPayload: Sendable, Equatable {
     public let cardID: Int64
     public let ordinal: Int
     /// Native template label for the future Template Errors view.

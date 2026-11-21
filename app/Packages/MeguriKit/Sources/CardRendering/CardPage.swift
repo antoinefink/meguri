@@ -49,6 +49,11 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     private(set) var documentID = UUID()
     var needsReconstruction: Bool { reconstructionRequired }
     var contentProcessTerminated: Bool { processTerminated }
+    /// The reviewer document loaded, its process alive and nothing to rebuild.
+    var documentReady: Bool {
+        guard !closed, !processTerminated, !reconstructionRequired, case .success = loadResult else { return false }
+        return true
+    }
     var livenessEvaluation: ((@escaping @MainActor (Result<Bool, any Error>) -> Void) -> Void)?
     var livenessCancellations: [UUID: () -> Void] = [:]
     var behaviorAvailable: Bool { presented && !webView.idle && !closed && !reconstructionRequired && !processTerminated && !hostSuspended && !readyPhases.contains("failed") }

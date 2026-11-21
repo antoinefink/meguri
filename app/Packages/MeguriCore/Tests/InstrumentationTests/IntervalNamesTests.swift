@@ -48,6 +48,11 @@ import Testing
         ] {
             #expect(IntervalNames.named(name) != nil, "\(name)")
         }
+        // The parts of the start of a review (R1813), in its category.
+        for name in ["review.startPagesReady", "review.startCardReady"] {
+            #expect(IntervalNames.named(name)?.category == .review, "\(name)")
+            #expect(IntervalNames.named(name)?.fieldReported == false, "\(name)")
+        }
         // The rendering spike's baseline swap (U65), a test probe.
         #expect(IntervalNames.named("probe.nativeSwap")?.category == .probe)
     }

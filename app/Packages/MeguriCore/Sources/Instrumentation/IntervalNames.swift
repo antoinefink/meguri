@@ -48,6 +48,13 @@ public enum IntervalNames {
 
     /// Starting a review → the first card visible (R1813).
     public static let reviewStartToFirstCard = IntervalName("review.startToFirstCard", .review)
+    /// Starting a review → both card pages loaded for its session: next to
+    /// nothing when warm pages were waiting (a part of `startToFirstCard`).
+    public static let reviewStartPagesReady = IntervalName("review.startPagesReady", .review)
+    /// The session's first head → its first card ready in the idle page:
+    /// render and page update, or a check of the preloaded card (a part of
+    /// `startToFirstCard`).
+    public static let reviewStartCardReady = IntervalName("review.startCardReady", .review)
     /// Card N presented → card N+1 settled in the idle page (U176, U241).
     public static let reviewPresentToNextSettled = IntervalName("review.presentToNextSettled", .review)
     /// A card rendered on demand because nothing was prepared (U176).
@@ -88,7 +95,8 @@ public enum IntervalNames {
     public static let all: [IntervalName] = [
         answerToNextVisible, revealToAnswerVisible, launchToDeckListInteractive, keystrokeToResultsVisible,
         browserOpenToFirstPage, statsFirstGraphs, editorOpenToEditable, syncStartToEnd,
-        reviewStartToFirstCard, reviewPresentToNextSettled, reviewOnDemandRender, reviewAnswerMainThread,
+        reviewStartToFirstCard, reviewStartPagesReady, reviewStartCardReady,
+        reviewPresentToNextSettled, reviewOnDemandRender, reviewAnswerMainThread,
         reviewUndoToCardVisible, reviewActionToNextVisible, reviewTouchDownToTint, searchFirstPage,
         statsAllGraphs, statsScopeChange, heatmapRender, cardInfoOpen,
         probeSyntheticDelay, probeNativeSwap,

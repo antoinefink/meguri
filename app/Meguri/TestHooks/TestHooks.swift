@@ -130,6 +130,7 @@ enum TestHooks {
         let session: Session
         let configuration: LaunchConfiguration
         let navigation: AppNavigation
+        var collection: ReviewCollection? = nil
         @ViewBuilder let content: () -> Content
         @State private var collectionSheetPresented = true
 
@@ -176,6 +177,9 @@ enum TestHooks {
                     if session.shell?.probe == true {
                         ShellStateProbe(navigation: navigation)
                     }
+                    if session.options.studyTimings {
+                        StudyTimingsProbe(collection: collection)
+                    }
                 }
                 #if os(iOS)
                 .background(SizeClassOverride(sizeClass: session.options.sizeClass))
@@ -183,6 +187,26 @@ enum TestHooks {
                 #endif
                 .modifier(AppearanceOverrides(options: session.options))
             }
+        }
+    }
+
+    /// `-MeguriStudyTimings on`: the last Study's way to its first card, as
+    /// `StudyStartTrace` measured it (R1813), for drive scripts to read.
+    struct StudyTimingsProbe: View {
+        let collection: ReviewCollection?
+
+        var body: some View {
+            Text(verbatim: collection?.lastStudyStart?.summary ?? "none")
+                .font(.caption2)
+                .dynamicTypeSize(...DynamicTypeSize.large)
+                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(.token(.textSecondary))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Spacing.medium)
+                .padding(.vertical, Spacing.xxSmall)
+                .background(.token(.backgroundSecondary))
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("testhooks.studyStart.timings")
         }
     }
 

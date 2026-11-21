@@ -1339,8 +1339,12 @@ extension ReviewCollectionStartupTests {
         func load() async throws { calls.append("load"); try await onLoad?() }
         func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws { calls.append("render"); try await onRender?() }
         func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws {
+            onWillPresent?()
             presented.append(item.cardId); calls.append("present"); try await onPresent?()
         }
+        var onWillPresent: (() -> Void)?
+        func prepareFirst(item: ReviewHeadItem, payload: CardPayload) async throws { calls.append("prepareFirst") }
+        func discardFirst() { calls.append("discardFirst") }
         func preload(item: ReviewHeadItem) async throws {}
         func reveal(inputTime: TimeInterval) async throws { reveals += 1; try await onReveal?() }
         func admitNativeInput(_ input: NativeReviewInput, coordinator: UUID, session: UInt64, generation: UInt64,
