@@ -13,7 +13,7 @@
 # daily driver's ids (app/AGENTS.md).
 
 mg_job build-app host mg_build_app \
-  "Build the app and its tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] [--test-plan UI|CloudAgent] [--standalone|--personal-preview] (lint-ui first, core XCFramework; default build-for-testing with UI plan; CloudAgent: Debug only, no previews; --standalone: Mac Debug automation preview; --personal-preview: Mac Release with development identities and team signing in PersonalPreviewDerivedData; previews never launch)"
+  "Build the app and its tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] [--test-plan UI|CloudAgent] [--standalone|--personal-preview|--real-copy --owner-requested] (lint-ui first, core XCFramework; default build-for-testing with UI plan; CloudAgent: Debug only, no previews; --standalone: Mac Debug automation preview; --personal-preview: Mac Release with development identities and team signing in PersonalPreviewDerivedData; --real-copy --owner-requested: only on Antoine's request, the daily-driver Mac Release with team signing and installed profiles only (never provisioning updates) in RealCopyDerivedData, verified, packed as build/app/real-copy/Meguri.zip, then the built app unregistered and deleted; nothing launches)"
 mg_job run host mg_run \
   "Install and launch: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile]; physical requires Debug, or --personal-preview for manual team Release without test hooks; physical launches have no overrides; simulator/Mac also accept --route, --window-size, --seconds and -- launch args"
 
@@ -34,7 +34,7 @@ mg_app_products() {
 mg_app_remove_embedded_widget() {
   local platform="$1" config="$2" widget path
   case "$platform/$MG_APP_DD" in
-    mac/build/app/DerivedData|mac/build/app/StandaloneDerivedData|mac/build/app/PersonalPreviewDerivedData|mac/build/app/CloudAgentMacDerivedData)
+    mac/build/app/DerivedData|mac/build/app/StandaloneDerivedData|mac/build/app/PersonalPreviewDerivedData|mac/build/app/CloudAgentMacDerivedData|mac/build/app/RealCopyDerivedData)
       widget="$(mg_app_products mac "$config")/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
       ;;
     ios-sim/build/app/CloudAgentSimDerivedData)
@@ -124,7 +124,7 @@ mg_app_build_action() {
   # private signing/log handling for a later, out-of-scope build.
   MG_CLOUD_AGENT_MAC_PROFILE_BINDING=""
   MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE=""
-  local action="$1" standalone_arg="" plan_arg="" personal=false test_args=()
+  local action="$1" standalone_arg="" plan_arg="" personal=false real=false test_args=()
   shift
   local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=() build_command=(xcodebuild)
   case "$action" in
@@ -149,6 +149,19 @@ mg_app_build_action() {
       action=build
       personal=true
       standalone_arg=" --personal-preview"
+      ;;
+    real-copy)
+      # The daily-driver Mac app (Antoine's real copy), only from build-app's
+      # owner-requested route: its signing and checks are mg_app_real_copy_*.
+      if [ "$platform/$config/$plan/$scheme" != mac/Release/UI/Meguri ] || [ "$signing" != team ] ||
+          [ "$MG_APP_DD" != build/app/RealCopyDerivedData ] || [ "${MG_APP_REAL_COPY_ALLOWED:-false}" != true ]; then
+        mg_failure usage "--real-copy requires build-app's owner-requested route: Mac Release, the normal Meguri scheme and team signing"
+        mg_status error
+        return 1
+      fi
+      action=build
+      real=true
+      standalone_arg=" --real-copy --owner-requested"
       ;;
     build-for-testing) test_args=(-testPlan "$plan") ;;
     *) mg_failure usage "unsupported app build action: $action"; mg_status error; return 1 ;;
@@ -179,12 +192,16 @@ mg_app_build_action() {
     [ "$personal" != true ] || core_args=(--slices device)
     signing=team
   fi
-  if [ "$platform" = mac ] && [ "$personal" != true ] && ! mg_word_in "$config" "Debug Profile"; then
+  if [ "$platform" = mac ] && [ "$personal" != true ] && [ "$real" != true ] && ! mg_word_in "$config" "Debug Profile"; then
     mg_failure usage "the Mac builds only Debug and Profile here: $config carries the daily-driver ids (tools/mg xcode-check builds and unregisters it)"
     mg_status error
     return 1
   fi
-  if [ "$signing" = team ]; then
+  if [ "$signing/$real" = team/true ]; then
+    # Installed profiles only: never register identifiers, capabilities or
+    # devices on Antoine's account (one-time step daily-driver-account).
+    settings=(${settings[0]+"${settings[@]}"} MEGURI_SIGNING=team)
+  elif [ "$signing" = team ]; then
     settings=(${settings[0]+"${settings[@]}"} MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration)
     if [ "$action/$platform/$config/$plan/$scheme" = build-for-testing/ios-sim/Debug/CloudAgent/Meguri ]; then
       # Xcode otherwise selects simulator ad-hoc signing despite team settings.
@@ -224,6 +241,11 @@ mg_app_build_action() {
     mg_status fail
     return 1
   fi
+  if [ "$real" = true ] && ! mg_app_real_copy_settings ${settings[0]+"${settings[@]}"}; then
+    mg_failure real-copy-settings "the real copy requires Release settings with the daily-driver app/widget identities, production cloud settings, team signing, normal sandbox entitlements, no debug or test hooks, and the name Meguri with AppIcon; see log.txt"
+    mg_status fail
+    return 1
+  fi
   case "$platform" in
     mac) dest="platform=macOS,arch=arm64" ;;
     ios-device) dest="platform=iOS,id=$MG_UI_PHYSICAL_DEVICE" ;;
@@ -256,13 +278,15 @@ mg_app_build_action() {
     counts="$(jq -c 'del(.messages)' <<<"${counts:-null}")"
   fi
   mg_detail build "$(jq -nc --arg p "$platform" --arg c "$config" --arg app "$(mg_app_products "$platform" "$config")/Meguri.app" \
-    --arg action "$action" --arg plan "$plan" --arg dd "$MG_APP_DD" --argjson personal "$personal" --argjson counts "${counts:-null}" \
-    '{platform: $p, config: $c, app: $app, action: $action, test_plan: $plan, standalone: ($action == "build" and ($personal | not)), personal_preview: $personal, derived_data: $dd} + ($counts // {})')"
+    --arg action "$action" --arg plan "$plan" --arg dd "$MG_APP_DD" --argjson personal "$personal" --argjson real "$real" --argjson counts "${counts:-null}" \
+    '{platform: $p, config: $c, app: $app, action: $action, test_plan: $plan, standalone: ($action == "build" and ($personal | not) and ($real | not)), personal_preview: $personal, real_copy: $real, derived_data: $dd} + ($counts // {})')"
   if [ "$rc" -ne 0 ]; then
     [ "$plan" != CloudAgent ] || plan_arg=" --test-plan $plan"
     if [ "$platform" = ios-device ] || [ -n "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ]; then
       # Signing diagnostics can include selected-device identities and paths.
       mg_failure build "physical development build failed; diagnostics remain in the private build log"
+    elif [ "$real" = true ] && grep -Eqi 'provisioning profile|No profiles for|requires a development team|No signing certificate' "$log"; then
+      mg_failure real-copy-profile "$MG_APP_REAL_COPY_PROFILE_HELP" "tools/mg doctor"
     else
       mg_failure build "xcodebuild $action failed ($platform, $config): $(grep -E 'error:' "$log" | head -n 3 | tr '\n' ' ')" \
         "tools/mg build-app --platform $platform --config $config$standalone_arg$plan_arg"
@@ -275,7 +299,7 @@ mg_app_build_action() {
     mg_status fail
     return 1
   fi
-  if [ "$action/$personal" = build/false ]; then
+  if [ "$action/$personal/$real" = build/false/false ]; then
     # Resolve the preview with its build's destination, products and overrides.
     if ! xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -scheme "$scheme" -configuration "$config" \
         -destination "$dest" -derivedDataPath "$MG_APP_DD" ${settings[0]+"${settings[@]}"} >"$MG_RUN_DIR/standalone-settings.json"; then
@@ -372,7 +396,7 @@ mg_app_personal_settings() {
 # Profiles are checked in memory and never published. Validate the signed
 # identity/grants against an unexpired development profile, including the selected device (this Mac by default).
 mg_app_personal_profile() {
-  local bundle="$1" ent="$2" hardware="$3" platform="${4:-mac}" cert_dir rc profile="$1/Contents/embedded.provisionprofile"
+  local bundle="$1" ent="$2" hardware="$3" platform="${4:-mac}" environment="${5:-Development}" cert_dir rc profile="$1/Contents/embedded.provisionprofile"
   [ "$platform" != ios ] || profile="$bundle/embedded.mobileprovision"
   [ -f "$profile" ] || return 1
   cert_dir="$(mktemp -d "$MG_RUN_DIR/personal-signer.XXXXXX")" || return 1
@@ -391,11 +415,12 @@ def profile_authorizes(key, grant, claim):
             return True
         choices, required = ("CloudKit", "CloudDocuments"), "CloudKit"
     elif key == "com.apple.developer.icloud-container-environment":
-        if claim != "Development":
+        # Development for previews; Production for the real copy (argv[5]).
+        if claim != sys.argv[5]:
             return False
-        if grant == "Development":
+        if grant == sys.argv[5]:
             return True
-        choices, required = ("Development", "Production"), "Development"
+        choices, required = ("Development", "Production"), sys.argv[5]
     else:
         return grant == claim
     return (isinstance(grant, list) and bool(grant) and
@@ -439,7 +464,7 @@ except AssertionError as error:
 except (KeyError, TypeError, ValueError, OSError, plistlib.InvalidFileException) as error:
     print("personal preview provisioning parse: " + type(error).__name__, file=sys.stderr)
     sys.exit(1)
-' "$ent" "$hardware" "$cert_dir/cert0" "$platform"
+' "$ent" "$hardware" "$cert_dir/cert0" "$platform" "$environment"
   rc=$?
   rm -rf "$cert_dir"
   return "$rc"
@@ -569,6 +594,170 @@ PY_CLOUD
      bundle_id: "com.antoinefink.meguri.dev", widget_bundle_id: "com.antoinefink.meguri.dev.widget",
      cloud_environment: "development", card_inspection_build: "personalRelease", native_visible_application: true, fixture_read_scope: false, test_hooks: false,
      core: {hash: $core_hash, configuration: "Release", profile: "release", features: "ankiweb", slices: $slices}}')"
+}
+
+# --- The real copy (build-app --real-copy --owner-requested) ---------------
+# Antoine's daily-driver Mac app, built only at his request. Unlike every other
+# team build it never passes -allowProvisioningUpdates or
+# -allowProvisioningDeviceRegistration: a missing or incomplete profile fails
+# the run instead of registering anything on his account. The checked product
+# is packed as a zip, then unregistered and deleted, so the only registered
+# daily-driver app stays the one he installs (app/AGENTS.md).
+MG_APP_REAL_COPY_ZIP=build/app/real-copy/Meguri.zip
+MG_LSREGISTER="${MG_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
+MG_APP_REAL_COPY_PROFILE_HELP="no installed Mac development profile authorizes the real copy (com.antoinefink.meguri: App Group, Keychain group, CloudKit container iCloud.com.antoinefink.meguri in Production, production push); this route never requests provisioning updates. Antoine's one-time step daily-driver-account (docs/process/one-time-setup.md); tools/mg doctor shows what is missing"
+
+# Resolved settings of both targets before any app build: daily ids,
+# production cloud, team signing, no hooks, the daily name and icon.
+mg_app_real_copy_settings() {
+  local settings="$MG_RUN_DIR/real-copy-settings.json"
+  xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -target Meguri -target MeguriWidget \
+    -configuration Release -sdk macosx -arch arm64 "$@" >"$settings" || return 1
+  jq -e '
+    type == "array" and
+    ([.[] | select(.target == "Meguri" or .target == "MeguriWidget")] | length == 2) and
+    all(.[] | select(.target == "Meguri" or .target == "MeguriWidget");
+      .target as $target | .buildSettings |
+      .CONFIGURATION == "Release" and (.MEGURI_BUNDLE_ID_SUFFIX // "") == "" and
+      .MEGURI_CLOUD_CONFIGURATION == "production" and .MEGURI_CLOUD_ENVIRONMENT == "production" and
+      .MEGURI_CLOUD_CONTAINER == .MEGURI_CLOUD_CONTAINER_production and
+      .PRODUCT_BUNDLE_IDENTIFIER == (if $target == "Meguri" then "com.antoinefink.meguri" else "com.antoinefink.meguri.widget" end) and
+      .MEGURI_APP_NAME == "Meguri" and .MEGURI_SIGNING == "team" and
+      .MEGURI_CORE_FEATURES == "ankiweb" and .MEGURI_SWIFT_CONDITIONS == "ANKIWEB_ENABLED" and
+      ((.SWIFT_ACTIVE_COMPILATION_CONDITIONS // "" | test("(^|[ ,])DEBUG|MEGURI_TEST_HOOKS")) | not) and
+      .MEGURI_CARD_INSPECTION_BUILD == "personalRelease" and .MEGURI_MAC_UI_ELEMENT == "NO" and
+      (.MEGURI_ENTITLEMENTS_HOOKS_SUFFIX // "") == "" and (.MEGURI_ENTITLEMENTS_SIGNING_SUFFIX // "") == "" and
+      .CODE_SIGN_ENTITLEMENTS == (if $target == "Meguri" then "Meguri/Meguri-macOS.entitlements" else "MeguriWidget/MeguriWidget-macOS.entitlements" end) and
+      .ENABLE_TESTABILITY == "NO" and .ENABLE_DEBUG_DYLIB == "NO" and .ENABLE_HARDENED_RUNTIME == "YES" and
+      (if $target == "Meguri" then .ASSETCATALOG_COMPILER_APPICON_NAME == "AppIcon" else true end))
+  ' "$settings" >/dev/null || return 1
+  python3 "$MG_TOOLS/tests/cloud_build_configuration.py" --settings "$settings" \
+    --configuration Release --platform mac --signing team
+}
+
+# The signed daily-driver product: identities, team, profile, entitlements,
+# Info, core, architecture, then the name and icon it shows.
+mg_app_real_copy_check() {
+  local app="$1" widget="$1/Contents/PlugIns/MeguriWidget.appex" bundle xml ent info team="" identity hardware signed_info
+  local app_ent="" widget_ent="" app_info="" stamp hash slices cert_dir widget_provision=not_embedded
+  codesign --verify --deep --strict "$app" && codesign --verify --strict "$widget" || return 1
+  hardware="$(system_profiler SPHardwareDataType -json | jq -er '.SPHardwareDataType[0] |
+    (.provisioning_UDID // .platform_UUID) | select(type == "string" and length > 0)')" || return 1
+  for bundle in "$app" "$widget"; do
+    xml="$(codesign -d --entitlements - --xml "$bundle")" || return 1
+    ent="$(plutil -convert json -o - - <<<"$xml")" || return 1
+    [ -n "$team" ] || team="$(jq -er '.["com.apple.developer.team-identifier"] | select(type == "string" and test("^[A-Z0-9]{10}$"))' <<<"$ent")" || return 1
+    identity=com.antoinefink.meguri
+    [ "$bundle" = "$app" ] || identity="$identity.widget"
+    signed_info="$(codesign -d --verbose=4 "$bundle" 2>&1)" || return 1
+    [ "$(sed -n 's/^Identifier=//p' <<<"$signed_info")" = "$identity" ] &&
+      [ "$(sed -n 's/^TeamIdentifier=//p' <<<"$signed_info")" = "$team" ] || return 1
+    jq -e --arg team "$team" '
+      type == "object" and .["com.apple.security.app-sandbox"] == true and
+      ((.["com.apple.security.get-task-allow"] // false) == false) and ((.["get-task-allow"] // false) == false) and
+      .["com.apple.security.application-groups"] == [$team + ".com.antoinefink.meguri"] and
+      ([keys[] | select(startswith("com.apple.security.temporary-exception."))] == []) and
+      ([keys[] | select(startswith("com.apple.security.cs."))] == [])
+    ' <<<"$ent" >/dev/null || return 1
+    if [ "$bundle" = "$app" ]; then
+      jq -e --arg team "$team" '
+        .["com.apple.developer.team-identifier"] == $team and
+        (.["com.apple.application-identifier"] // .["application-identifier"]) == ($team + ".com.antoinefink.meguri") and
+        .["keychain-access-groups"] == [$team + ".com.antoinefink.meguri"] and
+        .["com.apple.security.network.client"] == true and .["com.apple.security.network.server"] == true and
+        .["com.apple.security.files.user-selected.read-write"] == true and .["com.apple.security.files.bookmarks.app-scope"] == true
+      ' <<<"$ent" >/dev/null || return 1
+      mg_app_personal_profile "$bundle" "$ent" "$hardware" mac Production || return 1
+      app_ent="$ent"
+    else
+      jq -e --arg team "$team" '
+        (.["keychain-access-groups"] // []) == [] and
+        (.["com.apple.developer.team-identifier"] // $team) == $team and
+        (.["com.apple.application-identifier"] // .["application-identifier"] // ($team + ".com.antoinefink.meguri.widget")) == ($team + ".com.antoinefink.meguri.widget")
+      ' <<<"$ent" >/dev/null || return 1
+      widget_ent="$ent"
+      if [ -f "$bundle/Contents/embedded.provisionprofile" ]; then
+        mg_app_personal_profile "$bundle" "$ent" "$hardware" mac Production || return 1
+        widget_provision=verified
+      fi
+    fi
+    info="$(plutil -convert json -o - "$bundle/Contents/Info.plist")" || return 1
+    jq -e --arg identity "$identity" '.CFBundleIdentifier == $identity' <<<"$info" >/dev/null || return 1
+    if [ "$bundle" = "$app" ]; then
+      app_info="$info"
+      jq -e '.CFBundleExecutable == "Meguri" and .MeguriCardInspectionBuild == "personalRelease" and .LSUIElement == false' \
+        <<<"$info" >/dev/null || return 1
+    else
+      jq -e '.CFBundleExecutable == "MeguriWidget"' <<<"$info" >/dev/null || return 1
+    fi
+  done
+  python3 -B - "$MG_TOOLS/tests" "$MG_RUN_DIR/real-copy-settings.json" "$app_info" "$app_ent" "$widget_ent" <<'PY_CLOUD' || return 1
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from cloud_build_configuration import check
+settings = json.loads(Path(sys.argv[2]).read_text())
+app = next(target["buildSettings"] for target in settings if target["target"] == "Meguri")
+check(app, "Release", "mac", "team", *(json.loads(value) for value in sys.argv[3:6]))
+PY_CLOUD
+  cert_dir="$(mktemp -d "$MG_RUN_DIR/real-copy-signer.XXXXXX")" || return 1
+  if ! codesign -d --extract-certificates="$cert_dir/app" "$app" >/dev/null ||
+      ! codesign -d --extract-certificates="$cert_dir/widget" "$widget" >/dev/null ||
+      ! cmp -s "$cert_dir/app0" "$cert_dir/widget0"; then
+    rm -rf "$cert_dir"
+    return 1
+  fi
+  rm -rf "$cert_dir"
+  [ "$(lipo -archs "$app/Contents/MacOS/Meguri")" = arm64 ] &&
+    [ "$(lipo -archs "$widget/Contents/MacOS/MeguriWidget")" = arm64 ] || return 1
+  stamp="$(cat "$MG_ROOT/app/Packages/MeguriCore/Binaries/.stamp")" || return 1
+  grep -qx 'configuration=Release' <<<"$stamp" && grep -qx 'profile=release' <<<"$stamp" &&
+    grep -qx 'features=ankiweb' <<<"$stamp" || return 1
+  hash="$(sed -n 's/^hash=//p' <<<"$stamp")"
+  printf '%s\n' "$hash" | grep -Eq '^[0-9a-f]{32}$' || return 1
+  slices="$(sed -n 's/^slices=//p' <<<"$stamp")"
+  printf '%s\n' "$slices" | tr ',' '\n' | grep -qx mac || return 1
+  mg_app_real_copy_identity "$app" || return 1
+  mg_detail real_copy_product "$(jq -nc --arg hash "$(shasum -a 256 "$app/Contents/MacOS/Meguri" | cut -c1-64)" \
+    --arg widget_provision "$widget_provision" --arg core_hash "$hash" --arg slices "$slices" '
+    {signature_verified: true, provisioning_verified: true, architecture: {app: "arm64", widget: "arm64"},
+     executable_sha256: $hash, provisioning: {app: "verified", widget: $widget_provision}, widget_signer_matches_app: true,
+     bundle_id: "com.antoinefink.meguri", widget_bundle_id: "com.antoinefink.meguri.widget",
+     cloud_environment: "production", card_inspection_build: "personalRelease", test_hooks: false,
+     name: "Meguri", icon: "AppIcon",
+     core: {hash: $core_hash, configuration: "Release", profile: "release", features: "ankiweb", slices: $slices}}')"
+}
+
+# The name and icon the system shows: "Meguri" and the red AppIcon.
+mg_app_real_copy_identity() {
+  python3 "$MG_TOOLS/tests/app_identity_check.py" product "$1" --identity daily >&2
+}
+
+# Unregister and delete the built app (and the widget inside), then check
+# LaunchServices and PlugInKit no longer know it. Runs on every exit path.
+mg_app_real_copy_forget() {
+  local app="$1" records
+  [ -n "$app" ] || return 0
+  if [ -e "$app" ]; then
+    pluginkit -r "$app/Contents/PlugIns/MeguriWidget.appex" >/dev/null 2>&1
+    "$MG_LSREGISTER" -u "$app" >/dev/null 2>&1
+    rm -rf "$app" || return 1
+  fi
+  records="$("$MG_LSREGISTER" -dump 2>/dev/null | sed -n 's/^path: *\(.*\) (0x[0-9a-fA-F]*)$/\1/p'
+    pluginkit -mADvvv -i com.antoinefink.meguri.widget 2>/dev/null | sed -n 's/^[[:space:]]*Path = //p')"
+  ! awk -v p="$app" '$0 == p || index($0, p "/") == 1 { found = 1 } END { exit !found }' <<<"$records"
+}
+
+# What Antoine runs, read-only, once he has installed the zip.
+mg_app_real_copy_cleanup_checks() {
+  jq -nc --arg zip "$MG_APP_REAL_COPY_ZIP" --arg dd "$MG_APP_DD" --arg ls "$MG_LSREGISTER" '[
+    {step: "install (Antoine)", command: ("ditto -x -k " + $zip + " /Applications/")},
+    {step: "only the installed copies are registered", command: ($ls + " -dump | grep -E \"^path: .*Meguri.*\\.app\""),
+     expect: "only /Applications/Meguri.app (daily driver) and /Applications/Meguri Dev.app, besides dev build products under build/"},
+    {step: "only the installed widget is registered", command: "pluginkit -mAvvv -i com.antoinefink.meguri.widget",
+     expect: "one path, inside /Applications/Meguri.app"},
+    {step: "no daily-driver product left in derived data", command: ("ls " + $dd + "/Build/Products/Release"),
+     expect: "no Meguri.app"}]'
 }
 
 # Read signed facts, never repair or re-sign a product. These are the normal
@@ -1188,7 +1377,7 @@ mg_app_agent_freeze() {
 }
 
 mg_build_app() {
-  local platform="" config=Debug config_given=false plan=UI standalone=false personal=false input="" app agent_source="" agent_tree=""
+  local platform="" config=Debug config_given=false plan=UI standalone=false personal=false real=false owner=false input="" app agent_source="" agent_tree=""
   # Bash dynamic scope constrains this override to this CLI build and its
   # product lookup; later/nested test jobs retain the default DerivedData.
   local MG_APP_DD="$MG_APP_DD"
@@ -1209,10 +1398,34 @@ mg_build_app() {
         ;;
       --standalone) standalone=true; shift ;;
       --personal-preview) personal=true; shift ;;
-      *) mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C] [--test-plan UI|CloudAgent] [--standalone|--personal-preview]"; return 0 ;;
+      --real-copy) real=true; shift ;;
+      --owner-requested) owner=true; shift ;;
+      *) mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C] [--test-plan UI|CloudAgent] [--standalone|--personal-preview|--real-copy --owner-requested]"; return 0 ;;
     esac
   done
-  [ -n "$platform" ] || { mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C] [--test-plan UI|CloudAgent] [--standalone|--personal-preview]"; return 0; }
+  [ -n "$platform" ] || { mg_drive__usage "usage: tools/mg build-app --platform ios-sim|mac [--config C] [--test-plan UI|CloudAgent] [--standalone|--personal-preview|--real-copy --owner-requested]"; return 0; }
+  if [ "$owner" = true ] && [ "$real" != true ]; then
+    mg_drive__usage "--owner-requested acknowledges only --real-copy"
+    return 0
+  fi
+  if [ "$real" = true ]; then
+    # Antoine's real copy: refuse before any work unless he asked for it.
+    if [ "$platform" != mac ] || [ "$standalone" = true ] || [ "$personal" = true ] || [ "$plan" != UI ] ||
+        { [ "$config_given" = true ] && [ "$config" != Release ]; }; then
+      mg_drive__usage "--real-copy requires --platform mac, Release (explicit or derived), and no --standalone, --personal-preview or --test-plan"
+      return 0
+    fi
+    if [ "$owner" != true ]; then
+      mg_drive__usage "--real-copy builds Antoine's daily-driver app: run it only at his request, with --owner-requested"
+      return 0
+    fi
+    if [ "${MEGURI_APP_SIGNING-adhoc}" != team ]; then
+      mg_drive__usage "--real-copy requires MEGURI_APP_SIGNING=team: ad-hoc signing drops the Keychain group, so the Meguri Sync sign-in could not be stored"
+      return 0
+    fi
+    mg_build_app__real_copy
+    return 0
+  fi
   if [ "$plan" = CloudAgent ] && { [ "$config" != Debug ] || [ "$standalone" = true ] || [ "$personal" = true ]; }; then
     mg_drive__usage "--test-plan CloudAgent requires Debug on mac or ios-sim, without --standalone or --personal-preview"
     return 0
@@ -1277,6 +1490,63 @@ mg_build_app() {
     mg_app_agent_freeze "$platform" "$agent_source" || return 0
   fi
   mg_message "build-app: $platform $config built: $app"
+  mg_status pass
+}
+
+# build-app --real-copy --owner-requested (checked by mg_build_app): profile
+# preflight, the build, its checks, the zip, then the built app forgotten.
+mg_build_app__real_copy() {
+  local MG_APP_DD=build/app/RealCopyDerivedData MG_APP_REAL_COPY_ALLOWED=true app input profiles hardware zip
+  app="$(mg_app_products mac Release)/Meguri.app"
+  mg_detail real_copy_cleanup_checks "$(mg_app_real_copy_cleanup_checks)"
+  # Fail before building when no installed profile authorizes the app: the
+  # route never asks Xcode to create, download or register one.
+  hardware="$(system_profiler SPHardwareDataType -json 2>/dev/null | jq -r '.SPHardwareDataType[0] |
+    (.provisioning_UDID // .platform_UUID) // empty')"
+  if ! profiles="$(python3 "$MG_TOOLS/scripts/daily-driver-profiles.py" --require mac --device "$hardware")"; then
+    local missing="the profile list could not be read"
+    if [ -n "$profiles" ]; then
+      mg_detail daily_driver_profiles "$profiles"
+      missing="$(jq -r '.mac.missing | join(", ")' <<<"$profiles")"
+    fi
+    mg_failure real-copy-profile "$MG_APP_REAL_COPY_PROFILE_HELP; missing: $missing" "tools/mg doctor"
+    mg_message "build-app: the real copy was not built: no authorizing profile is installed (nothing was registered)"
+    mg_status fail
+    return 0
+  fi
+  mg_detail daily_driver_profiles "$profiles"
+  # Whatever happens next, no built daily-driver app stays on disk or registered.
+  mg_on_exit "mg_app_real_copy_forget $(mvl_q "$app")"
+  input="$(mg_app_input_digest)"
+  mg_app_build_action real-copy mac Release || return 0
+  if ! printf '%s\n' "$input" | grep -Eq '^[0-9a-f]{64}$' ||
+      [ "$input" != "$(mg_app_input_digest)" ] || ! mg_app_real_copy_check "$app"; then
+    mg_failure real-copy-product "real copy validation failed: require stable source digest, valid arm64 daily-driver app/widget signatures and installed provisioning, normal sandbox entitlements with production CloudKit and push, Release core without hooks, and Meguri with the red icon; see log.txt"
+    mg_status fail
+    return 0
+  fi
+  zip="$MG_ROOT/$MG_APP_REAL_COPY_ZIP"
+  mkdir -p "$(dirname "$zip")" && rm -f "$zip" || { mg_failure real-copy-zip "could not prepare $MG_APP_REAL_COPY_ZIP"; mg_status error; return 0; }
+  if ! ditto -c -k --keepParent "$app" "$zip"; then
+    mg_failure real-copy-zip "ditto could not pack the real copy"
+    mg_status fail
+    return 0
+  fi
+  if ! mg_app_real_copy_forget "$app"; then
+    mg_failure real-copy-forget "the built daily-driver app is still on disk or registered with LaunchServices or PlugInKit: $app"
+    mg_status fail
+    return 0
+  fi
+  mg_detail input "$(jq -nc --arg input "$input" '$input')"
+  mg_detail real_copy "$(jq -nc --arg zip "$MG_APP_REAL_COPY_ZIP" --arg sha "$(shasum -a 256 "$zip" | cut -c1-64)" \
+    '{zip: $zip, zip_sha256: $sha, built_app_forgotten: true}')"
+  mg_artifact zip "$zip" "the real copy, for Antoine to install"
+  {
+    echo "build-app: the real copy is $MG_APP_REAL_COPY_ZIP; the built app was unregistered and deleted."
+    echo "build-app: after Antoine installs it, these read-only checks confirm only the installed copies are registered:"
+    mg_app_real_copy_cleanup_checks | jq -r '.[] | "  \(.step): \(.command)" + (if .expect then "\n      expect: \(.expect)" else "" end)'
+  } >&2
+  mg_message "build-app: real copy packed: $MG_APP_REAL_COPY_ZIP (built app forgotten; see the clean-up checks in details.real_copy_cleanup_checks)"
   mg_status pass
 }
 
