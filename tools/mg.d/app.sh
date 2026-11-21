@@ -873,7 +873,9 @@ mg_app_real_copy_forget() {
     path="${path%/*}"
   done
   if [ -e "$app" ]; then
+    # The widget sits under Contents/PlugIns on the Mac, PlugIns on iOS.
     pluginkit -r "$app/Contents/PlugIns/MeguriWidget.appex" >/dev/null 2>&1
+    pluginkit -r "$app/PlugIns/MeguriWidget.appex" >/dev/null 2>&1
     "$MG_LSREGISTER" -u "$app" >/dev/null 2>&1
     rm -rf "$app" || return 1
   fi
@@ -1943,6 +1945,8 @@ mg_run__physical() {
     return 0
   fi
   if [ "$mode" = real-copy ]; then
+    # Also on SIGTERM: the job shell forgets the signed phone products.
+    mg_on_exit "mg_app_real_copy_forget $(mvl_q "$MG_ROOT/build/app/RealCopyDeviceDerivedData/Build/Products/Release-iphoneos/Meguri.app")"
     mg_run__physical_real_copy "$device"
     return 0
   fi

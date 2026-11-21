@@ -119,6 +119,8 @@ fi
 mkdir -p "$result"
 if [ "$action" = build ]; then
   p="$dd/Build/Products/$config/Meguri.app"
+  # The real-copy device build lands where the route checks it.
+  [ "$dd" != build/app/RealCopyDeviceDerivedData ] || p="$dd/Build/Products/$config-iphoneos/Meguri.app"
   w="$p/Contents/PlugIns/MeguriWidget.appex"
   mkdir -p "$p/Contents/MacOS" "$w/Contents/MacOS"
   echo "synthetic app" >"$p/Contents/MacOS/Meguri"
@@ -3910,7 +3912,8 @@ FAKE
   [ "$(field .details.real_copy_profiles.widget)" = BBBBBBBB-1111-2222-3333-444444444444 ]
   [ "$(grep -oE '^(drive real-seal|device-check|drive real-install)' "$STUB_LOG" | tr '\n' ,)" = "drive real-seal,device-check,drive real-install," ]
   [ "$(grep -n '^drive real-seal' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^drive real-install' "$STUB_LOG" | cut -d: -f1)" ]
-  called "^lsregister -u $SB/build/app/RealCopyDeviceDerivedData/Build/Products/Release-iphoneos/Meguri.app$|^lsregister -dump$"
+  called "^lsregister -u $SB/build/app/RealCopyDeviceDerivedData/Build/Products/Release-iphoneos/Meguri.app$"
+  called "^pluginkit -r $SB/build/app/RealCopyDeviceDerivedData/Build/Products/Release-iphoneos/Meguri.app/PlugIns/MeguriWidget.appex$"
   not_called 'allowProvisioning|process launch|devicectl'
   [ ! -e "$SB/build/app/RealCopyDeviceDerivedData/Build/Products/Release-iphoneos/Meguri.app" ]
   # A failed check installs nothing.
