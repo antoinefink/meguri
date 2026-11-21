@@ -401,3 +401,30 @@ fn families_that_would_read_otherwise_are_quoted() {
         assert_eq!(ltr(&out).unwrap().font, Some(Font::Family(name.into())), "{name}");
     }
 }
+
+/// CodeRabbit on #67: a custom property's `{}` value is part of that
+/// declaration; comments inside a replaced value stay; a family named like
+/// a System alias stays a family; U+0000 reads as U+FFFD.
+#[test]
+fn custom_properties_comments_aliases_and_nul() {
+    assert_eq!(
+        inserted(".card { --theme: { x: y } }", CardTextEdit::Size(20.0)),
+        ".card { --theme: { x: y };  font-size: 20px; }"
+    );
+    assert_eq!(
+        ltr(".card { --theme: { x: y }; color: red }").unwrap().text_colour,
+        Some(rgb(255, 0, 0))
+    );
+
+    let css = ".card { font-family: Noto /* keep */ Sans /* too */ , serif; }";
+    let out = edit(css, &CardTextEdit::Font(Font::Family("Optima".into())), false).unwrap();
+    assert_eq!(out.css, ".card { font-family: Optima /* keep */ /* too */; }");
+    assert_eq!(&out.css[out.value], "Optima");
+
+    let quoted = inserted(".card {}", CardTextEdit::Font(Font::Family("system-ui".into())));
+    assert_eq!(quoted, ".card { font-family: \"system-ui\"; }");
+    assert_eq!(ltr(&quoted).unwrap().font, Some(Font::Family("system-ui".into())));
+
+    let nul = ".card { font-family: A\u{0}B }";
+    assert_eq!(ltr(nul).unwrap().font, Some(Font::Family("A\u{fffd}B".into())));
+}

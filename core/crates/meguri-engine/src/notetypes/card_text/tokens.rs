@@ -62,7 +62,12 @@ pub(crate) struct Tokens {
 
 pub(crate) fn tokenize(source: &str) -> Tokens {
     let mut lexer = Lexer {
-        chars: source.char_indices().collect(),
+        // CSS Syntax's preprocessing: U+0000 reads as U+FFFD; the offsets
+        // stay the source's.
+        chars: source
+            .char_indices()
+            .map(|(at, c)| (at, if c == '\0' { '\u{fffd}' } else { c }))
+            .collect(),
         at: 0,
         len: source.len(),
         unclosed: false,

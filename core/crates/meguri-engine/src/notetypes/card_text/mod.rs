@@ -133,7 +133,7 @@ fn match_blocks(tokens: &[Token]) -> Option<Vec<Option<usize>>> {
     let mut closes = vec![None; tokens.len()];
     let mut open: Vec<usize> = Vec::new();
     for (at, token) in tokens.iter().enumerate() {
-        let opener = |i: &usize| tokens[*i].kind.clone();
+        let opener = |i: &usize| &tokens[*i].kind;
         match token.kind {
             Kind::OpenCurly | Kind::OpenParen | Kind::OpenSquare | Kind::Function(_) => open.push(at),
             Kind::CloseCurly => match open.last().map(opener) {
@@ -236,6 +236,12 @@ fn declarations(
         }
         let start = at;
         let mut nested = matches!(tokens[at].kind, Kind::AtKeyword(_));
+        // A custom property's value may hold a `{}` block (CSS Syntax): it
+        // runs to its `;` like any declaration, never as a nested rule.
+        let custom = matches!(&tokens[start].kind, Kind::Ident(name) if name.starts_with("--"))
+            && (start + 1..close)
+                .find(|i| !tokens[*i].is_trivia())
+                .is_some_and(|i| tokens[i].kind == Kind::Colon);
         let mut terminated = false;
         let mut block = false;
         while at < close {
@@ -244,7 +250,7 @@ fn declarations(
                     terminated = true;
                     break;
                 }
-                Kind::OpenCurly => {
+                Kind::OpenCurly if !custom => {
                     nested = true;
                     block = true;
                     at = after_component(at, closes);
@@ -355,7 +361,7 @@ fn read_font(tokens: &[Token], declaration: &Declaration) -> Option<Font> {
         [Token {
             kind: Kind::Ident(name),
             ..
-        }] if ["system-ui", "-apple-system", "blinkmacsystemfont"].contains(&name.to_ascii_lowercase().as_str()) => {
+        }] if is_system_alias(name) => {
             Some(Font::System)
         }
         idents if !idents.is_empty() => {
@@ -439,6 +445,11 @@ fn hex(colour: Colour, alpha: bool) -> String {
     }
 }
 
+/// W10.2's names that the Font control shows as "System".
+fn is_system_alias(name: &str) -> bool {
+    ["system-ui", "-apple-system", "blinkmacsystemfont"].contains(&name.to_ascii_lowercase().as_str())
+}
+
 /// A family name as W10.2 writes it: quoted when it holds a space. It is
 /// also quoted when it holds a character an unquoted name cannot (one
 /// outside letters, digits, `-`, `_` and non-ASCII), so the written value
@@ -455,9 +466,11 @@ fn family(name: &str) -> Result<String, CardTextRefusal> {
         (Some(first), _) => first.is_ascii_alphabetic() || first == '_' || !first.is_ascii(),
         (None, _) => false,
     };
+    // A family named like a System alias stays a family only when quoted.
     let keyword = ["inherit", "initial", "unset", "revert", "revert-layer", "default"]
         .iter()
-        .any(|k| name.eq_ignore_ascii_case(k));
+        .any(|k| name.eq_ignore_ascii_case(k))
+        || is_system_alias(name);
     let plain = starts
         && !keyword
         && name
@@ -568,6 +581,12 @@ fn write(css: &str, change: &CardTextEdit, rtl: bool) -> Result<CardTextEdited, 
         let mut out = String::with_capacity(css.len() + value.len());
         out.push_str(&css[..range.start]);
         out.push_str(&value);
+        // Comments between the old value's tokens stay, each after a space,
+        // in their order.
+        for comment in tokens[declaration.value.clone()].iter().filter(|t| t.kind == Kind::Comment) {
+            out.push(' ');
+            out.push_str(&css[comment.span.clone()]);
+        }
         out.push_str(&css[range.end..]);
         return Ok(CardTextEdited {
             css: out,
