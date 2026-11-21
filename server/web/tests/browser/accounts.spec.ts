@@ -237,9 +237,22 @@ async function accountShell(page: Page, username: string, admin: boolean) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
+// Collection's identity check and storage read can each show a focused alert
+// in place of the focused <main>. Wait for both answers and name any failure.
+async function landOnCollection(page: Page, navigate: () => Promise<unknown>) {
+  const answers = ["/api/me", "/api/me/storage"].map(path =>
+    page.waitForResponse(response => new URL(response.url()).pathname === path, { timeout: 8_000 }));
+  await navigate();
+  for (const response of await Promise.all(answers)) {
+    expect(response.ok(), `${response.request().method()} ${new URL(response.url()).pathname} answered ${response.status()}`).toBe(true);
+  }
+  await expect(page.getByRole("main").getByText("Loading storage…", { exact: true })).toHaveCount(0);
+  expect(await page.getByRole("alert").allTextContents()).toEqual([]);
+}
+
 async function connectionLayout(page: Page, username: string, admin: boolean) {
   const viewport = page.viewportSize()!;
-  await page.goto("/");
+  await landOnCollection(page, () => page.goto("/"));
   await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { name: "Collection", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Collection", exact: true })).toHaveAttribute("aria-current", "page");
@@ -297,8 +310,10 @@ async function connectionLayout(page: Page, username: string, admin: boolean) {
       await expect(page.getByRole("heading", { name: "Connect your devices", exact: true })).toBeVisible();
       const documentTime = await page.evaluate(() => performance.timeOrigin);
       const logo = page.getByRole("link", { name: "Meguri", exact: true });
-      if (width === 1280) await logo.locator("img").click();
-      else { await logo.focus(); await page.keyboard.press("Enter"); }
+      await landOnCollection(page, async () => {
+        if (width === 1280) await logo.locator("img").click();
+        else { await logo.focus(); await page.keyboard.press("Enter"); }
+      });
       await expect(page).toHaveURL(/\/collection$/);
       await expect(page.getByRole("heading", { name: "Collection", exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: "Collection", exact: true })).toHaveAttribute("aria-current", "page");
