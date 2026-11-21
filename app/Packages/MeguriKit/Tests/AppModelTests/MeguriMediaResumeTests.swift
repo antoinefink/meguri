@@ -84,7 +84,7 @@ import Testing
         // Nothing ran (a blocked phase, the update hold): no attempt is used.
         #expect(resume.finished(.notRun) == nil && resume.failures == 0 && !resume.stopped)
         // What only the person can clear stops the automatic attempts at once.
-        for outcome in [MeguriMediaResume.Outcome.stopped, .blocked, .failed] {
+        for outcome in [MeguriMediaResume.Outcome.stopped, .blocked] {
             var other = MeguriMediaResume()
             #expect(other.finished(outcome) == nil && other.stopped && !other.admits(.launch), "\(outcome)")
         }
@@ -92,17 +92,40 @@ import Testing
 
     @Test func aRefusalSaysWhetherTheStepCanRunAgain() {
         typealias R = MeguriMediaResume
-        // A quit, a busy core, a lost connection or a server error: it continues by itself.
-        for failure in [MeguriBootstrapFailure.busy, .cancelled, .unavailable, .notComplete, .mediaEpochMissing, .mediaIncomplete] {
+        // A quit, a busy core or a lost answer: it continues by itself.
+        for failure in [MeguriBootstrapFailure.busy, .cancelled, .unavailable, .mediaIncomplete] {
             #expect(R.outcome(refused: failure, accounting: nil) == .unfinished, "\(failure)")
         }
-        // A full device needs the person first.
-        #expect(R.outcome(refused: .diskFull, accounting: nil) == .stopped)
-        #expect(R.outcome(refused: .storage, accounting: nil) == .stopped)
-        // A changed collection, account or binding is setup's own failure; no media attempt clears it.
-        for failure in [MeguriBootstrapFailure.accountChanged, .publicationChanged, .documentChanged, .bindingChanged,
-                        .connectionChanged, .operationMismatch, .notSelected] {
+        // A changed account or connection is setup's sign-in row; a new sign-in lets the step continue.
+        for failure in [MeguriBootstrapFailure.accountChanged, .connectionChanged, .username, .notSelected] {
             #expect(R.outcome(refused: failure, accounting: nil) == .failed, "\(failure)")
+            var resume = R()
+            #expect(resume.finished(.failed) == nil && !resume.stopped)
         }
+        // Anything else waits for Try Again rather than showing a setup failure with no action.
+        for failure in [MeguriBootstrapFailure.diskFull, .storage, .notComplete, .mediaEpochMissing, .mediaEpochChanged,
+                        .publicationChanged, .documentChanged, .bindingChanged, .operationMismatch] {
+            #expect(R.outcome(refused: failure, accounting: nil) == .stopped, "\(failure)")
+        }
+    }
+
+    // The coordinator's record of an attempt: its waits, its stop, and the trigger a wait fires.
+
+    @Test func theCoordinatorSchedulesTheNextAttemptAndStopsAfterTheThird() async throws {
+        let sync = SyncCoordinator.renderFixture(.meguriSetupMediaPaused)
+        var fired: [MeguriMediaResume.Trigger] = []
+        var waits: [Duration?] = []
+        sync.meguriMediaResumeObserver = { fired.append($0) }
+        sync.meguriMediaRetryDelay = { wait in waits.append(wait); return wait.map { _ in .milliseconds(20) } }
+        sync.recordMeguriMediaAttempt(.unfinished)
+        #expect(waits == [.seconds(30)] && sync.meguriStage == .mediaPaused)
+        for _ in 0..<100 where fired.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(fired == [.retry])
+        sync.recordMeguriMediaAttempt(.unfinished)
+        #expect(waits.last == .seconds(120) && sync.meguriStage == .mediaPaused)
+        sync.recordMeguriMediaAttempt(.unfinished)
+        // The third ends the automatic attempts: the status needs the person.
+        #expect(waits.last == .some(nil) && sync.meguriStage == .mediaStopped && sync.mainStatus.needsYou)
+        #expect(sync.mainStatus.action == .meguriRetryMedia)
     }
 }
