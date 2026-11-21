@@ -30,11 +30,11 @@ A possible problem the reviewer flagged: the window routes now enter `xcode-chec
 
 Accepted as a note: while the route runs, the built copy is briefly a registered app with the real identity. The setup doc says not to use Meguri during the build.
 
-CodeRabbit raised four comments. The symlink guard and doctor's device coverage were fixed in `2b250b953`; the other two were already fixed in `07ed2833a`.
+CodeRabbit raised four comments. The symlink guard and doctor's device coverage were fixed in `2b250b953`; the other two were already fixed in `07ed2833a`. Its follow-ups were fixed in `1c1b5373d`: the PlugInKit query status is checked, and a failed exit cleanup sets the status to fail. The `platform_UUID` fallback is kept, as in the personal preview: it can only make coverage fail.
 
 ## Verification
 
-- `selftest tools/tests/real_copy.bats`: 10/10.
+- `selftest tools/tests/real_copy.bats`: 11/11.
 - `selftest --filter doctor tools/tests/mg_selftest.bats`: 18/18.
 - Real route: `--dry-run` passes. Refusals were checked on this Mac. The settings predicate passes against the real resolved settings. The profile preflight reports no Mac profile here, so the route was not run for real and no daily-driver product was built.
 - `xcode-check --settings-only`: 106/106. The literal-route check lists the four window routes.
