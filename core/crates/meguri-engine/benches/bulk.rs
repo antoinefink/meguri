@@ -14,6 +14,10 @@
 //!   as Browse's All Found passes the result's ids (`browser/workspace` V9).
 //! - `engine.find_replace_scan_all_notes`: the all-notes target with a
 //!   find text no note holds: the compute phase alone (nothing written).
+//! - `engine.find_replace_preview_10k`: the preview (U265,
+//!   `browser/workspace` V9, V17) of the marking run on the 10,000 listed
+//!   notes, every one of which would change: the count and the list of the
+//!   first 100, nothing written (V17: within 1 s for 10,000 notes).
 //! - U87's actions on the same 10,000 notes (R1831), each sample one
 //!   undoable op: `engine.bulk_change_deck_10k` moves their cards between
 //!   two decks (step 4's memory states included when the collection has
@@ -29,8 +33,8 @@
 //! `10k,150k`); sizes count cards. The result goes to
 //! `$MEGURI_BENCH_RESULTS/bulk.json`. On Apple hosts (`tools/mg bench-mac`)
 //! the bench exits with status 1 after writing its result when a 10k
-//! p95 is 2 s or more, or the all-notes p95 is 5 s or more on a collection
-//! of at least 150,000 notes.
+//! p95 is 2 s or more, the preview's p95 is 1 s or more, or the all-notes
+//! p95 is 5 s or more on a collection of at least 150,000 notes.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -60,12 +64,14 @@ const BULK: &str = "engine.bulk_find_replace_10k";
 const ALL: &str = "engine.find_replace_all_notes";
 const SCAN: &str = "engine.find_replace_scan_all_notes";
 const LISTED: &str = "engine.find_replace_listed_all";
+const PREVIEW: &str = "engine.find_replace_preview_10k";
 const CHANGE_DECK: &str = "engine.bulk_change_deck_10k";
 const SUSPEND: &str = "engine.bulk_suspend_10k";
 const FLAG: &str = "engine.bulk_set_flag_10k";
 const TAGS: &str = "engine.bulk_add_tags_10k";
 const NOTES: usize = 10_000;
 const BULK_BUDGET: Duration = Duration::from_secs(2);
+const PREVIEW_BUDGET: Duration = Duration::from_secs(1);
 const ALL_BUDGET: Duration = Duration::from_secs(5);
 const ALL_BUDGET_NOTES: usize = 150_000;
 /// A marker no generated field holds. `^` also matches an empty field, so
@@ -94,7 +100,11 @@ fn regex(find: &str, replace: &str) -> FindReplace {
         replace: replace.to_owned(),
         regex: true,
         ignore_case: false,
+        whole_words: false,
         within: FindIn::AllFields,
+        // The run alone is timed: its confirmation admits every count (each
+        // sample asserts the count it writes).
+        confirmed: u64::MAX,
     }
 }
 
@@ -276,6 +286,20 @@ fn main() -> ExitCode {
             toggle(&collection, &listed, true);
         }
 
+        let mut preview = Measurement::start(PREVIEW, Some(&size));
+        let marking = regex("^", MARK);
+        group.bench_function(format!("find_replace_preview_10k/{size}"), |b| {
+            b.iter_custom(|iters| {
+                preview.run(iters, |_| {
+                    let shown =
+                        find_replace::preview(&collection, &listed, &marking, &CancelToken::new(), &ProgressSink::new())
+                            .expect("the preview reads");
+                    assert_eq!(shown.changed, notes.len() as u64);
+                })
+            })
+        });
+        suite.push(preview.finish());
+
         let mut every = Measurement::start(ALL, Some(&size));
         let mut marked = false;
         group.bench_function(format!("find_replace_all_notes/{size}"), |b| {
@@ -359,6 +383,8 @@ fn main() -> ExitCode {
             .map_or(0, |(_, count)| *count);
         let budget = match record.name.as_str() {
             BULK | CHANGE_DECK | SUSPEND | FLAG | TAGS => Some(BULK_BUDGET),
+            // V17's row is 10,000 notes: a smaller fixture is recorded, not gated.
+            PREVIEW if notes >= NOTES => Some(PREVIEW_BUDGET),
             ALL | LISTED if notes >= ALL_BUDGET_NOTES => Some(ALL_BUDGET),
             _ => None,
         };

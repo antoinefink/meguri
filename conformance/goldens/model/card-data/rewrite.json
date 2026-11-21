@@ -89,7 +89,7 @@
       {
         "db_exec": {
           "rows": [
-            ["{\"s\":123.4568,\"d\":1.235,\"dr\":0.99,\"decay\":0.123}"],
+            ["{\"s\":87.6544,\"d\":4.568,\"dr\":0.91,\"decay\":0.346}"],
             ["{\"s\":2.5,\"d\":0.002,\"dr\":0.13,\"decay\":0.001}"],
             ["{\"s\":0.0002,\"d\":0.003,\"dr\":0.01,\"decay\":1.0}"],
             ["{\"s\":0.0001,\"d\":0.001}"],
@@ -112,10 +112,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "22b1e6c16931ecc95eea8014e9f8b07a90cb20dd39fe38cd0dc75bca28da4e61",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "model/card-data/rewrite",
-  "scenario_sha256": "045e70314e989233b81ed60aece0624a838bd6942e3c49f4772e048acbeeb02f",
+  "scenario_sha256": "c1afbb82ea6c61fdbdf79b0d9a87bcd023d548f835d28346977b30ab735df0ed",
   "tz": "UTC"
 }
