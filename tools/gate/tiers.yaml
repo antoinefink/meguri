@@ -928,6 +928,7 @@ utilities:
   - {job: cleanroom, why: "restricted Codex implementation runner; boundary probes run before every invocation"}
   - {job: cleanroom-image, why: "builds the restricted Codex runtime; cleanroom verifies it before use"}
   - {job: core-format, why: "optional Rust source formatting on demand"}
+  - {job: prune, why: "on-demand run-output cleanup; reports by default, deletes only with --apply, which Antoine runs"}
   - {job: sync-server-package, why: "Explicit clean image build; exact-image runtime smoke builds and verifies it in gates"}
   - {job: sync-server-local, why: "Explicit persistent operator service and existing recovery commands; automated packaging uses an isolated synthetic volume"}
   - {job: sync-server-format, why: "explicit optional server source formatting on demand"}
