@@ -230,7 +230,7 @@ steps:
   # due change and a reschedule entry, flags, a suspended card, marked and
   # leech tags, a collapsed tag, custom scheduling data.
   - set_clock: "2030-01-10T09:00:00"
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894266000000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 12), -1, 0, 7, 3, 2500, 0, 4), (1894266000001, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 15), -1, 0, 5, 4, 2500, 0, 5)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894266000000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 12), -1, 0, 7, 3, 2500, 0, 4), (1894266000001, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 15), -1, 0, 5, 4, 2500, 0, 5)"}
   - db_exec: {sql: "UPDATE cards SET flags = 1, mod = 1894266000, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
   - db_exec: {sql: "UPDATE cards SET flags = 7, mod = 1894266000, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}
   - suspend: {cards: ["#c18"]}
