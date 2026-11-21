@@ -299,10 +299,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "d2e5e3ff3b8f852a87e08c141a6515df0f37cbf4ba8fcd9e5da560e4c640c892",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "maintenance/check-db/all-records",
-  "scenario_sha256": "035bdb168036382324c38ca1d2360b41cbb0947e63bc88639ea04a684fb0d450",
+  "scenario_sha256": "b95d3b1a49926021b2cf76bcdd2a6471a199357ebd07b6299eef59acba386fe6",
   "tz": "UTC"
 }

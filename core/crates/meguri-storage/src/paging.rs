@@ -252,6 +252,43 @@ pub trait ReadRows: sealed::Connected {
     ) -> Result<(), StorageError> {
         crate::search_rows::visit(self.connection(), sql, params, cancel, visit)
     }
+
+    /// Runs one read-only statement of Browse's filter counts compiled by
+    /// the search crate (`search/filter-tokens` T12.4), whose columns are
+    /// integers (at most [`crate::search_rows::COUNT_COLUMNS`]), each row
+    /// handed to `visit`; cancelled as [`ReadRows::visit_id_rows`] is.
+    fn visit_count_rows(
+        &self,
+        sql: &str,
+        params: &[Cell],
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[i64]) -> bool,
+    ) -> Result<(), StorageError> {
+        crate::search_rows::visit_counts(self.connection(), sql, params, cancel, visit)
+    }
+
+    /// Every note's id, its `mid`, and its `tags` read as a tag term reads
+    /// it (T12.4's tag and note type counts): text, or none for NULL and
+    /// BLOB; cancelled as [`ReadRows::visit_id_rows`] is.
+    fn visit_note_tags(
+        &self,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut crate::search_rows::NoteVisit<'_>,
+    ) -> Result<(), StorageError> {
+        crate::search_rows::visit_note_tags(self.connection(), cancel, visit)
+    }
+
+    /// Every deck's id and its `name` read as a deck term reads it (T12.4's
+    /// deck counts): text, or none for NULL and BLOB.
+    fn deck_names(&self) -> Result<Vec<(i64, Option<String>)>, StorageError> {
+        crate::search_rows::deck_names(self.connection())
+    }
+
+    /// Every note type's id and its `name` as text (T12.4's note type
+    /// counts).
+    fn notetype_names(&self) -> Result<Vec<(i64, Option<String>)>, StorageError> {
+        crate::search_rows::notetype_names(self.connection())
+    }
     /// M3's indexed fallback; Reset does not truncate this lookup.
     fn fsrs_last_review_time(&self, card: CardId) -> Result<Option<i64>, StorageError> {
         crate::queries::revlog_fsrs::last_review_time(self.connection(), card)
@@ -318,6 +355,71 @@ pub trait ReadRows: sealed::Connected {
             })? as u64)
     }
 
+    /// The notes among `ids` that exist, in id order, from one statement
+    /// (bulk actions read their listed notes a page at a time).
+    fn notes_with_ids(&self, ids: &[NoteId]) -> Result<Vec<Note>, StorageError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let list = json_ids(ids);
+        let mut statement = self.connection().prepare_cached(
+            "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id")?;
+        let found = statement.query_map([list], |row| rows::row_image(row, Table::Notes))?;
+        found
+            .map(|cells| Note::from_cells(&cells?).map_err(StorageError::from))
+            .collect()
+    }
+
+    /// The cards of the notes among `notes`, by note id then card id, from
+    /// one statement (a bulk rewrite's page of notes).
+    fn cards_of_notes_with_ids(&self, notes: &[NoteId]) -> Result<Vec<Card>, StorageError> {
+        if notes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut statement = self.connection().prepare_cached(&format!(
+            "SELECT {} FROM cards WHERE nid IN (SELECT value FROM json_each(?1)) ORDER BY nid, id",
+            Table::Cards
+                .columns()
+                .iter()
+                .map(|c| format!("\"{c}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))?;
+        let found = statement.query_map([json_ids(notes)], |row| rows::row_image(row, Table::Cards))?;
+        found
+            .map(|cells| Card::from_cells(&cells?).map_err(StorageError::from))
+            .collect()
+    }
+
+    /// The number of notes of each `mid` that has notes, by `mid`
+    /// (`notetypes/editor-actions` A2's note counts). A `mid` may name no
+    /// note type; the caller keeps only those that do.
+    fn note_counts_by_notetype(&self) -> Result<Vec<(NotetypeId, u64)>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT mid, count(*) FROM notes GROUP BY mid ORDER BY mid")?;
+        let rows = statement.query_map([], |row| Ok((NotetypeId(row.get(0)?), row.get::<_, i64>(1)?)))?;
+        rows.map(|row| {
+            let (id, count) = row?;
+            let count = u64::try_from(count).map_err(|_| StorageError::Io {
+                detail: "invalid note count".into(),
+            })?;
+            Ok((id, count))
+        })
+        .collect()
+    }
+
+    /// Every note type's id and stored name, by name under the `unicase`
+    /// collation of the `notetypes.name` column, ties by ascending id
+    /// (`notetypes/editor-actions` A2's ordered list).
+    fn notetype_names_by_name(&self) -> Result<Vec<(NotetypeId, String)>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT id, name FROM notetypes ORDER BY name COLLATE unicase, id")?;
+        let rows = statement.query_map([], |row| Ok((NotetypeId(row.get(0)?), row.get::<_, String>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Notes of one type, in id order, for cancellable regeneration.
     fn notetype_notes_after(
         &self,
@@ -325,14 +427,29 @@ pub trait ReadRows: sealed::Connected {
         after: Option<NoteId>,
         limit: usize,
     ) -> Result<Vec<Note>, StorageError> {
-        let mut statement = self.connection().prepare_cached(
-            "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes WHERE mid = ?1 AND id > ?2 ORDER BY id LIMIT ?3")?;
-        let found = statement.query_map(
-            (notetype.0, after.map_or(i64::MIN, |id| id.0), limit_value(limit)),
-            |row| rows::row_image(row, Table::Notes),
-        )?;
-        found
-            .map(|cells| Note::from_cells(&cells?).map_err(StorageError::from))
+        // The first page has no id bound, so a note whose id is i64::MIN is
+        // read like any other.
+        let images: Vec<RowImage> = match after {
+            None => self
+                .connection()
+                .prepare_cached(
+                    "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes \
+                     WHERE mid = ?1 ORDER BY id LIMIT ?2",
+                )?
+                .query_map((notetype.0, limit_value(limit)), |row| rows::row_image(row, Table::Notes))?
+                .collect::<rusqlite::Result<_>>()?,
+            Some(after) => self
+                .connection()
+                .prepare_cached(
+                    "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes \
+                     WHERE mid = ?1 AND id > ?2 ORDER BY id LIMIT ?3",
+                )?
+                .query_map((notetype.0, after.0, limit_value(limit)), |row| rows::row_image(row, Table::Notes))?
+                .collect::<rusqlite::Result<_>>()?,
+        };
+        images
+            .iter()
+            .map(|cells| Note::from_cells(cells).map_err(StorageError::from))
             .collect()
     }
 
@@ -527,14 +644,31 @@ pub trait ReadRows: sealed::Connected {
         notetype: NotetypeId,
         after: Option<CardId>,
     ) -> Result<Vec<(CardId, u16)>, StorageError> {
-        let mut statement = self.connection().prepare_cached(
-            "SELECT cards.id, cards.ord FROM notes JOIN cards ON cards.nid=notes.id \
-             WHERE notes.mid=?1 AND (?2 IS NULL OR cards.id>?2) ORDER BY cards.id LIMIT 1000",
-        )?;
-        let rows = statement.query_map((notetype.0, after.map(|id| id.0)), |row| {
-            Ok((CardId(row.get(0)?), row.get::<_, u16>(1)?))
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        // Cards in id order, each joined to its note: a page reads from the
+        // cursor on (an `id > ?` range), so a whole pass reads each card
+        // once rather than from the start on every page. A pass reads the
+        // whole cards table once even for a small type (about 30 ms at
+        // 150k), never more.
+        let read = |row: &rusqlite::Row<'_>| Ok((CardId(row.get(0)?), row.get::<_, u16>(1)?));
+        let rows = match after {
+            None => self
+                .connection()
+                .prepare_cached(
+                    "SELECT cards.id, cards.ord FROM cards CROSS JOIN notes ON cards.nid=notes.id \
+                     WHERE notes.mid=?1 ORDER BY cards.id LIMIT 1000",
+                )?
+                .query_map((notetype.0,), read)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            Some(after) => self
+                .connection()
+                .prepare_cached(
+                    "SELECT cards.id, cards.ord FROM cards CROSS JOIN notes ON cards.nid=notes.id \
+                     WHERE notes.mid=?1 AND cards.id>?2 ORDER BY cards.id LIMIT 1000",
+                )?
+                .query_map((notetype.0, after.0), read)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+        };
+        Ok(rows)
     }
 
     /// A config row as stored.
@@ -608,6 +742,20 @@ impl ReadRows for Reader {}
 impl ReadRows for Writer {}
 impl ReadRows for WriteScope<'_> {}
 impl ReadRows for ReadSnapshot<'_> {}
+
+/// A JSON array of the ids, for `json_each`.
+fn json_ids(ids: &[NoteId]) -> String {
+    let mut list = String::with_capacity(ids.len() * 14 + 2);
+    list.push('[');
+    for (at, id) in ids.iter().enumerate() {
+        if at > 0 {
+            list.push(',');
+        }
+        list.push_str(&id.0.to_string());
+    }
+    list.push(']');
+    list
+}
 
 fn limit_value(limit: usize) -> i64 {
     i64::try_from(limit).unwrap_or(i64::MAX)

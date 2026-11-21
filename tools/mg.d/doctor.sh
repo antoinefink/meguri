@@ -4,7 +4,7 @@
 # lists what is missing in user_steps (docs/process/one-time-setup.md).
 
 mg_job doctor host mg_doctor \
-  "Check Xcode, iOS runtime, Docker, Rust targets, disk, the macOS test VM (Mac UI suites and simulators), the host session and the Mac UI input; list missing user steps (tools/mg catch-up runs queued runs once theirs clear)"
+  "Check Xcode, the real copy's profiles (read-only), iOS runtime, Docker, Rust targets, disk, this checkout's run output (build/mg), the macOS test VM (Mac UI suites and simulators), the host session and the Mac UI input; list missing user steps (tools/mg catch-up runs queued runs once theirs clear)"
 
 MG_DOCTOR_TEAM=DNQ34W43XX
 MG_DOCTOR_MIN_XCODE_MAJOR=27
@@ -12,6 +12,8 @@ MG_DOCTOR_MIN_DOCKER_CPUS=12
 MG_DOCTOR_MIN_DOCKER_MEM_GIB=16
 MG_DOCTOR_WARN_DISK_GIB=40
 MG_DOCTOR_FAIL_DISK_GIB=10
+MG_DOCTOR_WARN_RUN_OUTPUT_GIB=20
+MG_DOCTOR_RUN_OUTPUT_SECONDS=10
 
 # mg__doctor_check <id> <pass|warn|fail> <message>
 mg__doctor_check() {
@@ -227,6 +229,44 @@ mg__doctor_cargo_targets() {
   fi
 }
 
+# This checkout's run output (build/mg): one warning above the limit, pointing
+# to tools/mg prune. du runs at most MG_DOCTOR_RUN_OUTPUT_SECONDS; a slower
+# du means a very large tree, so that warns too.
+mg__doctor_run_output() {
+  local dir="$MG_ROOT/build/mg" out="$MG_RUN_DIR/run-output.du" pid n=0 kb gib
+  if [ ! -d "$dir" ]; then
+    mg__doctor_check run-output pass "no run output yet"
+    return 0
+  fi
+  du -skx "$dir" >"$out" 2>/dev/null &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null && [ "$n" -lt $((MG_DOCTOR_RUN_OUTPUT_SECONDS * 10)) ]; do
+    sleep 0.1
+    n=$((n + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    rm -f "$out"
+    mg__doctor_check run-output warn "build/mg is too large to measure in ${MG_DOCTOR_RUN_OUTPUT_SECONDS} s; tools/mg prune reports which old runs could go (tools/AGENTS.md)"
+    return 0
+  fi
+  if ! wait "$pid" 2>/dev/null; then
+    rm -f "$out"
+    mg__doctor_check run-output warn "du could not read all of build/mg, so its size is unknown; tools/mg prune reports what it holds (tools/AGENTS.md)"
+    return 0
+  fi
+  kb="$(awk 'NR == 1 { print $1 }' "$out")"
+  rm -f "$out"
+  gib=$((${kb:-0} / 1048576))
+  mg_detail run_output_gib "$gib"
+  if [ "$gib" -ge "$MG_DOCTOR_WARN_RUN_OUTPUT_GIB" ]; then
+    mg__doctor_check run-output warn "build/mg holds $gib GiB, over $MG_DOCTOR_WARN_RUN_OUTPUT_GIB GiB; tools/mg prune reports which old runs could go (tools/AGENTS.md)"
+  else
+    mg__doctor_check run-output pass "build/mg holds $gib GiB"
+  fi
+}
+
 mg_doctor() {
   : >"$MG_RUN_DIR/checks.jsonl"
   : >"$MG_RUN_DIR/environment.jsonl"
@@ -318,6 +358,29 @@ mg_doctor() {
       "Check Xcode > Settings > Accounts for team $MG_DOCTOR_TEAM. A team-signed build verifies current development signing; these preferences may omit a configured account."
   fi
 
+  # The real copy (daily-driver ids): do the installed profiles authorize it?
+  # Read-only (security cms decodes profiles and modifies no keychain); doctor
+  # cannot see the developer portal, only what Xcode installed. Informational:
+  # the real copy is optional, so this never changes doctor's status; the
+  # line, details.daily_driver_profiles and the optional step say it.
+  local daily="" daily_missing="the installed profiles could not be read" daily_ios=unknown daily_udid
+  # Coverage of this Mac, by its provisioning UDID (read-only).
+  daily_udid="$(system_profiler SPHardwareDataType -json 2>/dev/null | jq -r '.SPHardwareDataType[0] |
+    (.provisioning_UDID // .platform_UUID) // empty' 2>/dev/null)"
+  daily="$(python3 "$MG_TOOLS/scripts/daily-driver-profiles.py" --device "$daily_udid" 2>/dev/null)" || daily=""
+  if [ -n "$daily" ]; then
+    daily_missing="$(jq -r '.mac.missing | if length == 0 then "set up" else join(", ") end' <<<"$daily")"
+    daily_ios="$(jq -r '"app " + .ios.state + ", widget " + .ios_widget.state' <<<"$daily")"
+  fi
+  if [ -n "$daily" ] && jq -e '.mac.state == "authorized" and .ios.state == "authorized" and .ios_widget.state == "authorized"' >/dev/null 2>&1 <<<"$daily"; then
+    printf '  %-4s  %-16s %s\n' info daily-driver "installed profiles authorize the real copy (com.antoinefink.meguri) on this Mac$([ -n "$daily_udid" ] || echo ", whose UDID could not be read, so its coverage is unchecked") and on iOS; the iPhone's coverage is checked when the route runs"
+  else
+    printf '  %-4s  %-16s %s\n' info daily-driver "optional: the real copy (com.antoinefink.meguri) is not fully set up; Mac: $daily_missing; iOS: $daily_ios"
+    mg_user_step daily-driver-account missing false "Set up the real copy's identifiers and profiles (daily driver)" \
+      "In Certificates, Identifiers & Profiles: register com.antoinefink.meguri and com.antoinefink.meguri.widget, the App Group group.com.antoinefink.meguri on both, iCloud (iCloud.com.antoinefink.meguri) and Push Notifications on the app, then development profiles with this Mac's certificate: macOS for the app with this Mac, iOS for the app and the widget with the iPhone (docs/process/one-time-setup.md#daily-driver-account)."
+  fi
+  [ -z "$daily" ] || mg_detail daily_driver_profiles "$daily"
+
   # Docker
   # With the daemon unreachable, `docker info` still prints the client-side
   # JSON (ServerVersion "", NCPU 0) and exits 1, so check both.
@@ -392,6 +455,7 @@ mg_doctor() {
   else
     mg__doctor_check disk fail "$gib GiB free; need at least $MG_DOCTOR_FAIL_DISK_GIB GiB"
   fi
+  mg__doctor_run_output
 
   # The Mac UI test VM (U8b)
   MG_DOCTOR_VMS='[]'

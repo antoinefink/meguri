@@ -11,6 +11,13 @@ GENERATE_INFOPLIST_FILE = YES
 INFOPLIST_FILE = MeguriWidget/Info.plist
 INFOPLIST_KEY_CFBundleDisplayName = $(MEGURI_APP_NAME)
 
+// The phone real copy (run --real-copy) pins the widget's installed profile
+// by UUID; defaults keep every other build unchanged.
+MEGURI_WIDGET_DEVICE_PROFILE_STYLE = $(MEGURI_CODE_SIGN_STYLE_$(MEGURI_SIGNING))
+MEGURI_WIDGET_DEVICE_PROFILE_SPECIFIER =
+CODE_SIGN_STYLE[sdk=iphoneos*] = $(MEGURI_WIDGET_DEVICE_PROFILE_STYLE)
+PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*] = $(MEGURI_WIDGET_DEVICE_PROFILE_SPECIFIER)
+
 CODE_SIGN_ENTITLEMENTS[sdk=iphone*] = MeguriWidget/MeguriWidget-iOS.entitlements
 CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = MeguriWidget/MeguriWidget-macOS$(MEGURI_ENTITLEMENTS_SIGNING_SUFFIX).entitlements
 

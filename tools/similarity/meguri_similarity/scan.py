@@ -42,7 +42,7 @@ class ChannelResult:
 class FileResult:
     path: str
     language: str
-    status: str = "clean"  # clean | flagged | allowlisted | error
+    status: str = "clean"  # clean | flagged | allowlisted | oracle-output (test data) | error
     channels: dict = field(default_factory=dict)  # effective results (allowlist applied)
     allowlisted: list = field(default_factory=list)  # [(channel, [entry indexes])]
     error: str | None = None
@@ -187,20 +187,20 @@ class Scanner:
         channels = self.cfg["scan"]["channels_by_language"][lang]
         return self._scan(path, text, lang, channels)
 
-    def scan_search_data(self, path, text):
-        from . import search_data
+    def scan_test_data(self, path, text):
+        from . import test_data
 
-        if search_data._scope(path) is None:
-            raise search_data.SearchDataError("search-data input is outside the two search roots")
-        return self._scan(path, text, "search-data", search_data.CHANNELS)
+        if test_data._scope(path) is None:
+            raise test_data.TestDataError("test-data input is outside the conformance scenario and golden areas")
+        return self._scan(path, text, "test-data", test_data.CHANNELS)
 
     def _scan(self, path, text, lang, channels):
         result = FileResult(path, lang)
         try:
-            if lang == "search-data":
-                from . import search_data
+            if lang == "test-data":
+                from . import test_data
 
-                lexed = search_data.lex(text, path, self.lexer)
+                lexed = test_data.lex(text, path, self.lexer)
             else:
                 lexed = self.lexer.lex(text, lang, want_struct="struct" in channels)
         except ValueError as e:

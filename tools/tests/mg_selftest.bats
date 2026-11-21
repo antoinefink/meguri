@@ -136,6 +136,8 @@ case "$name $*" in
       exit 1
     fi ;;
   "docker compose version --short") echo 5.5.0 ;;
+  "security cms -D -i "*) cat "$4" ;;
+  "system_profiler SPHardwareDataType -json") echo '{"SPHardwareDataType":[{"provisioning_UDID":"X"}]}' ;;
   "tart list --format json")
     echo "[{\"Source\": \"local\", \"Name\": \"meguri-mac\", \"Running\": true, \"State\": \"${STUB_VM_STATE:-running}\"}]" ;;
   "vm-ssh xcodebuild -version")
@@ -181,6 +183,9 @@ EOF
     ln -s _stub "$STUBS/$c"
   done
   export PATH="$STUBS:$PATH"
+  # Installed provisioning profiles: a fixture directory, never this Mac's.
+  export MEGURI_PROFILE_DIRS="$BATS_TEST_TMPDIR/profiles"
+  mkdir -p "$MEGURI_PROFILE_DIRS"
   # The Mac UI test VM (U8b): its drive's tart and SSH wrappers, and the
   # host's config naming them.
   mkdir -p "$BATS_TEST_TMPDIR/T9/bin"
@@ -198,11 +203,12 @@ assert_read_only_calls() {
     -e '^uname -[a-z]+$' \
     -e '^sw_vers -(productVersion|buildVersion)$' \
     -e '^ioreg -n Root -d1$' \
-    -e '^system_profiler SPDisplaysDataType -json$' \
+    -e '^system_profiler SP(Displays|Hardware)DataType -json$' \
     -e '^xcode-select -p$' \
     -e '^xcodebuild -(version|license check)$' \
     -e '^xcrun simctl list runtimes --json$' \
     -e '^defaults read com\.apple\.dt\.Xcode [A-Za-z]+$' \
+    -e '^security cms -D -i ([^ ]| [^-])*\.(provisionprofile|mobileprovision)$' \
     -e '^docker info --format \{\{json \.\}\}$' \
     -e '^docker compose version --short$' \
     -e '^rustup (toolchain list|\+[0-9.]+ (target|component) list --installed)$' \
@@ -640,6 +646,27 @@ EOF
   assert_read_only_calls
 }
 
+@test "doctor warns once when this checkout's run output passes its limit, and points to prune" {
+  make_stubs
+  mg doctor
+  jq -e '.details.checks[] | select(.id == "run-output" and .status == "pass")' "$result"
+  sed -i 's/^MG_DOCTOR_WARN_RUN_OUTPUT_GIB=.*/MG_DOCTOR_WARN_RUN_OUTPUT_GIB=0/' "$SB/tools/mg.d/doctor.sh"
+  mg doctor
+  [ "$(field '[.details.checks[] | select(.id == "run-output")] | length')" = 1 ]
+  jq -e '.details.checks[] | select(.id == "run-output" and .status == "warn"
+    and (.message | contains("over 0 GiB; tools/mg prune")))' "$result"
+  assert_read_only_calls
+  assert_doctor_result "$result" "$status"
+  # A du that outlasts the time limit is stopped, and the tree counts as too large.
+  printf '#!/bin/sh\necho $$ >"%s"\nexec sleep 30\n' "$BATS_TEST_TMPDIR/du.pid" >"$STUBS/du"
+  chmod +x "$STUBS/du"
+  sed -i 's/^MG_DOCTOR_RUN_OUTPUT_SECONDS=.*/MG_DOCTOR_RUN_OUTPUT_SECONDS=1/' "$SB/tools/mg.d/doctor.sh"
+  mg doctor
+  jq -e '.details.checks[] | select(.id == "run-output" and .status == "warn"
+    and (.message | startswith("build/mg is too large to measure in 1 s")))' "$result"
+  ! kill -0 "$(cat "$BATS_TEST_TMPDIR/du.pid")" 2>/dev/null
+}
+
 # --- doctor (host commands stubbed) ----------------------------------------
 
 @test "doctor with absent legacy team metadata warns, leaves the account unverified and only reads host state" {
@@ -670,6 +697,58 @@ EOF
   jq -e '.user_steps[] | select(.id == "xcode-27-1" and .state == "missing" and .required == false)' "$result"
   [ "$(field .summary.total)" = "$(field '.details.checks | length')" ]
   assert_read_only_calls
+  validate "$result"
+  assert_doctor_result "$result" "$status"
+}
+
+# daily_profile <push>: an installed Mac profile for the real copy.
+daily_profile() {
+  python3 - "$MEGURI_PROFILE_DIRS" "$1" <<'PY'
+import datetime, plistlib, sys
+cloud = {"com.apple.developer.icloud-container-identifiers": ["iCloud.com.antoinefink.meguri"],
+         "com.apple.developer.icloud-services": "*",
+         "com.apple.developer.icloud-container-environment": ["Development", "Production"]}
+profiles = {
+    "daily.provisionprofile": ("OSX", dict(cloud, **{"com.apple.application-identifier": "DNQ34W43XX.com.antoinefink.meguri",
+        "keychain-access-groups": ["DNQ34W43XX.*"], "com.apple.security.application-groups": ["DNQ34W43XX.*"],
+        "com.apple.developer.aps-environment": sys.argv[2]})),
+    "ios-app.mobileprovision": ("iOS", dict(cloud, **{"application-identifier": "DNQ34W43XX.com.antoinefink.meguri",
+        "keychain-access-groups": ["DNQ34W43XX.*"], "com.apple.security.application-groups": ["group.com.antoinefink.meguri"],
+        "aps-environment": sys.argv[2]})),
+    "ios-widget.mobileprovision": ("iOS", {"application-identifier": "DNQ34W43XX.com.antoinefink.meguri.widget",
+        "com.apple.security.application-groups": ["group.com.antoinefink.meguri"]}),
+}
+for number, (name, (platform, grants)) in enumerate(profiles.items()):
+    with open(sys.argv[1] + "/" + name, "wb") as stream:
+        plistlib.dump({"Entitlements": grants, "TeamIdentifier": ["DNQ34W43XX"], "Platform": [platform],
+                      "ExpirationDate": datetime.datetime(2099, 1, 1), "ProvisionedDevices": ["X"],
+                      "UUID": "%08d-2222-3333-4444-555555555555" % number}, stream)
+PY
+}
+
+@test "doctor's real-copy profile line is informational: missing, incomplete and authorized never change its status" {
+  make_stubs
+  mg doctor
+  [ "$(field .status)" = pass ]
+  jq -e '.user_steps[] | select(.id == "daily-driver-account" and .state == "missing" and .required == false and (.title | contains("identifiers")))' "$result"
+  [ "$(field .details.daily_driver_profiles.mac.state)" = missing ]
+  [[ "$stderr" == *"info  daily-driver"*"is not fully set up"* ]]
+  [ "$(field '[.details.checks[] | select(.id | startswith("daily"))] | length')" = 0 ]
+  # The real copy signs development push: a profile granting production only is incomplete.
+  daily_profile production
+  mg doctor
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.daily_driver_profiles.mac.state)" = incomplete ]
+  [[ "$stderr" == *"Mac: push-development"* ]]
+  jq -e '.user_steps[] | select(.id == "daily-driver-account" and .required == false)' "$result"
+  daily_profile development
+  mg doctor
+  [ "$(field .status)" = pass ]
+  [ "$(field '[.user_steps[] | select(.id == "daily-driver-account")] | length')" = 0 ]
+  [ "$(field .details.daily_driver_profiles.mac.state)" = authorized ]
+  assert_read_only_calls
+  grep -q '^security cms -D -i .*daily\.provisionprofile$' "$STUB_LOG"
+  grep -q '^security cms -D -i .*ios-widget\.mobileprovision$' "$STUB_LOG"
   validate "$result"
   assert_doctor_result "$result" "$status"
 }

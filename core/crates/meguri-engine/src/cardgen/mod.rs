@@ -31,10 +31,28 @@ pub fn plan_note(
     chosen: Option<DeckId>,
     allow_fallback: bool,
 ) -> Result<Vec<MissingCard>, EngineError> {
+    let fronts = normal::fronts(nt);
+    plan_note_with(reader, &placement::Memo::default(), nt, &fronts, note, siblings, chosen, allow_fallback)
+}
+
+/// [`plan_note`] with the note type's fronts parsed once
+/// ([`normal::fronts`]) and placement's reads remembered, for a pass over
+/// many notes on one snapshot.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn plan_note_with(
+    reader: &impl ReadRows,
+    memo: &placement::Memo,
+    nt: &Notetype,
+    fronts: &[meguri_template::ParsedTemplate],
+    note: &Note,
+    siblings: &[Card],
+    chosen: Option<DeckId>,
+    allow_fallback: bool,
+) -> Result<Vec<MissingCard>, EngineError> {
     let mut required = if nt.config.kind == 1 {
         cloze::required(note)
     } else {
-        normal::required(nt, note)
+        normal::required_by(nt, fronts, note)
     };
     let fallback = allow_fallback && siblings.is_empty() && required.is_empty();
     if fallback {
@@ -46,7 +64,7 @@ pub fn plan_note(
         .map(|ord| {
             Ok(MissingCard {
                 ord,
-                deck: placement::deck(reader, nt, ord, fallback, siblings, chosen)?,
+                deck: placement::deck_with(reader, memo, nt, ord, fallback, siblings, chosen)?,
             })
         })
         .collect()

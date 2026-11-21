@@ -10,6 +10,67 @@ use std::sync::{
 use support::*;
 
 #[tokio::test]
+async fn browser_session_renewal_revalidates_after_logout() {
+    let h = Harness::new().await;
+    h.setup().await;
+    let cookie = h.login("root.admin", PASSWORD).await;
+    let hash = meguri_sync_server::crypto::bearer(secret(&cookie)).unwrap();
+    let db = rusqlite::Connection::open(h.database()).unwrap();
+    // Still valid, and already past the daily renewal boundary.
+    let old_expiry = time::OffsetDateTime::now_utc().unix_timestamp() + 86400;
+    assert_eq!(
+        db.execute(
+            "UPDATE credentials SET expires_at=?2 WHERE hash=?1 AND kind='session'",
+            rusqlite::params![hash.as_slice(), old_expiry],
+        )
+        .unwrap(),
+        1
+    );
+    let pause = h.service.hooks.arm("browser_session_before_renewal");
+    let client = h.client.clone();
+    let base = h.base.clone();
+    let original_cookie = cookie.clone();
+    let identity = tokio::spawn(async move {
+        client
+            .get(format!("{base}/api/me"))
+            .header("cookie", original_cookie)
+            .send()
+            .await
+    });
+    let arrival = tokio::time::timeout(std::time::Duration::from_secs(15), pause.arrived()).await;
+    if arrival.is_err() {
+        pause.resume();
+    }
+    arrival.expect("bounded fixture progress");
+    // Logout must complete while the renewal worker is outside its writer.
+    // Keep transport errors and timeouts as values until the pause is released.
+    let logout = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        h.client
+            .post(format!("{}/api/logout", h.base))
+            .header("origin", ORIGIN)
+            .header("cookie", &cookie)
+            .json(&json!({}))
+            .send(),
+    )
+    .await;
+    pause.resume();
+    assert_eq!(logout.unwrap().unwrap().status(), 200);
+    let response = within(identity).await.unwrap().unwrap();
+    assert!(!response.headers().contains_key("set-cookie"));
+    error(response, 401, "authentication_failed").await;
+    let row: (i64, i64) = db
+        .query_row(
+            "SELECT revoked,expires_at FROM credentials WHERE hash=?1 AND kind='session'",
+            [hash.as_slice()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(row, (1, old_expiry));
+    h.stop().await;
+}
+
+#[tokio::test]
 async fn old_browser_password_proof_cannot_issue_after_reset() {
     let h = Harness::new().await;
     h.setup().await;

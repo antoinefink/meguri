@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MIT
 use super::*;
+
+const BROWSER_SESSION_SECONDS: i64 = 365 * 86400;
+const BROWSER_RENEW_INTERVAL_SECONDS: i64 = 86400;
+
 impl Service {
     pub async fn browser_authority(&self, token: &str) -> Result<BrowserAuthority> {
         let hash = crypto::bearer(token).map_err(|_| Error::new("authentication_failed"))?;
@@ -38,7 +42,17 @@ impl Service {
         name: &str,
         password: String,
     ) -> Result<(Identity, String)> {
-        self.login(ip, name, password, "session").await
+        let (identity, token, _) = self.browser_login_session(ip, name, password).await?;
+        Ok((identity, token))
+    }
+    pub(crate) async fn browser_login_session(
+        &self,
+        ip: IpAddr,
+        name: &str,
+        password: String,
+    ) -> Result<(Identity, String, i64)> {
+        let (identity, token, expiry) = self.login(ip, name, password, "session").await?;
+        Ok((identity, token, expiry.expect("browser session expiry")))
     }
     /// Separate from browser cookies; U5 maps generic auth failure to native 403.
     pub async fn native_login(
@@ -47,7 +61,8 @@ impl Service {
         name: &str,
         password: String,
     ) -> Result<(Identity, String)> {
-        self.login(ip, name, password, "hostkey").await
+        let (identity, token, _) = self.login(ip, name, password, "hostkey").await?;
+        Ok((identity, token))
     }
     async fn login(
         &self,
@@ -55,7 +70,7 @@ impl Service {
         name: &str,
         password: String,
         kind: &'static str,
-    ) -> Result<(Identity, String)> {
+    ) -> Result<(Identity, String, Option<i64>)> {
         let name = self.name_attempt(ip, name).map_err(|e| {
             if e.code == "validation_failed" {
                 Error::new("authentication_failed")
@@ -101,15 +116,51 @@ impl Service {
         self.pause("login_with_barrier").await;
         let token = crypto::random_token()?;
         let hash = crypto::bearer(&token)?;
-        let identity=self.metadata.run(move |c| {
+        let (identity,expiry)=self.metadata.run(move |c| {
             let _publication=(gate,guard);
             let tx=c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?; admission(&tx)?;
             let current=read_account(&tx,&original.identity.id)?.filter(|a|a.usable() && a.revision==original.revision && a.generation==original.generation && a.phc==original.phc).ok_or(Error::new("authentication_failed"))?;
-            let expiry=if kind=="session" {Some(now()+86400)} else {None};
+            let expiry=if kind=="session" {Some(now()+BROWSER_SESSION_SECONDS)} else {None};
             tx.execute("INSERT INTO credentials(hash,kind,account_id,generation,expires_at) VALUES(?1,?2,?3,?4,?5)",params![hash.as_slice(),kind,current.identity.id,current.generation,expiry])?;
-            tx.commit()?; Ok(current.identity)
+            tx.commit()?; Ok((current.identity,expiry))
         }).await?;
-        Ok((identity, token))
+        Ok((identity, token, expiry))
+    }
+    /// Only the browser identity endpoint rolls sessions. Ordinary identity and
+    /// authority reads stay read-only, including before the daily boundary.
+    pub(crate) async fn browser_me(&self, authority: BrowserAuthority) -> Result<(Identity, i64)> {
+        #[cfg(feature = "test-hooks")]
+        let hooks = self.hooks.clone();
+        self.metadata.run(move |c| {
+            admission(c)?;
+            let checked_at = now();
+            let (account, expires_at) =
+                check_browser_expiry(c, &authority, "authentication_failed", checked_at)?;
+            let renewal_threshold = BROWSER_SESSION_SECONDS - BROWSER_RENEW_INTERVAL_SECONDS;
+            if expires_at - checked_at > renewal_threshold {
+                return Ok((account.identity, expires_at));
+            }
+
+            // A competing renewal or revocation may have won while acquiring
+            // the writer. Recheck original authority and expiry at a fresh time.
+            #[cfg(feature = "test-hooks")]
+            tokio::runtime::Handle::current()
+                .block_on(hooks.hit("browser_session_before_renewal"));
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            admission(&tx)?;
+            let checked_at = now();
+            let (account, mut expires_at) =
+                check_browser_expiry(&tx, &authority, "authentication_failed", checked_at)?;
+            if expires_at - checked_at <= renewal_threshold {
+                expires_at = checked_at + BROWSER_SESSION_SECONDS;
+                tx.execute(
+                    "UPDATE credentials SET expires_at=?2 WHERE hash=?1 AND kind='session'",
+                    params![authority.hash.as_slice(), expires_at],
+                )?;
+            }
+            tx.commit()?;
+            Ok((account.identity, expires_at))
+        }).await
     }
     pub async fn logout(&self, token: &str) -> Result<()> {
         let hash = crypto::bearer(token).map_err(|_| Error::new("authentication_failed"))?;

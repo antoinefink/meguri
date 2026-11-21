@@ -58,6 +58,10 @@ pub mod exclusive;
 pub mod executor_ordering;
 #[path = "external_change.rs"]
 pub mod external_change;
+#[path = "filter_counts.rs"]
+pub mod filter_counts;
+#[path = "find_replace.rs"]
+pub mod find_replace;
 #[path = "flags.rs"]
 pub mod flags;
 #[path = "fsrs_policy.rs"]
@@ -80,8 +84,12 @@ pub mod memory_recompute;
 pub mod name_index;
 #[path = "note_patch.rs"]
 pub mod note_patch;
+#[path = "notetype_card_text.rs"]
+pub mod notetype_card_text;
 #[path = "notetype_field_rename.rs"]
 pub mod notetype_field_rename;
+#[path = "notetype_reads.rs"]
+pub mod notetype_reads;
 #[path = "notetype_records.rs"]
 pub mod notetype_records;
 #[path = "notetype_removal.rs"]

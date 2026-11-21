@@ -1,0 +1,41 @@
+# Find and Replace modes and their counts (R1200, R1202, R1204;
+# specs/browser/find-replace.md F4, F6; specs/conformance/bulk-ops.md X1).
+# Two notes of one note type, the find text in a different field of each.
+# A text found in no note writes nothing: count 0. The same text in All
+# Fields rewrites the field holding it in each note: count 2. Limited to the
+# field Upper, only the note holding it there changes: count 1, and the other
+# note keeps the text in Lower. A pattern with a dot, regex off, is a literal
+# and matches nothing: count 0; the same pattern with regex on matches one
+# field (case ignored, the default): count 1. Rows read with db_exec after
+# usn is reset and the clock advanced, so written rows show usn -1 and a new
+# mod (bulk-ops.md X4).
+id: browser/find-replace/mode-counts
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Twin
+      fields: [Upper, Lower]
+      templates: [{name: Card, front: "{{Upper}}", back: "{{Lower}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Twin, fields: [lime, kiwi]}
+    - {notetype: Twin, fields: [plum, lime]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1", "#n2"], find: cherry, replace: "77"}
+  - db_exec: {sql: "SELECT flds, mod, usn FROM notes ORDER BY id"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1", "#n2"], find: lime, replace: pear}
+  - db_exec: {sql: "SELECT flds, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1", "#n2"], find: pear, replace: lime, in: {field: Upper}}
+  - db_exec: {sql: "SELECT flds, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1", "#n2"], find: "K.wi", replace: fig}
+  - db_exec: {sql: "SELECT flds, mod, usn FROM notes ORDER BY id"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1", "#n2"], find: "K.wi", replace: fig, regex: true}
+  - db_exec: {sql: "SELECT flds, mod, usn FROM notes ORDER BY id"}
