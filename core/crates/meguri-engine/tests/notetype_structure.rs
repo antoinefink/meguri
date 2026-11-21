@@ -941,6 +941,7 @@ fn a_name_freed_during_the_backup_is_stored_as_requested() {
     });
     let saved = run(&h, draft).unwrap().value;
     assert_eq!(saved.name, "Basic");
+    assert_eq!(read(&h, id).name, "Basic");
 }
 
 /// N6: a field replaced by a new one of the same name recomputes the
