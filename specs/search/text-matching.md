@@ -117,7 +117,7 @@ Changed 2026-11-21 (implementation review): **A note without its note type.** A 
 When at least one note type of the collection has an excluded field, these terms test each note type separately:
 
 - The note type's included (not excluded) field positions, ascending, form runs: maximal sequences of consecutive positions.
-- A note of a type with N fields matches when, for some run from position s to position e (0-based, inclusive), its field string (transformed as the term requires) matches the pattern made of s times `%` U+001F, then the term's pattern, then N − 1 − e times U+001F `%`; or when the sort field is not excluded and the term's pattern matches the sort text. Changed 2026-11-21 (implementation review): a sort field index at or past N names no field, so it is not excluded and the sort text is tested, as in Anki.
+- A note of a type with N fields matches when, for some run from position s to position e (0-based, inclusive), its field string (transformed as the term requires) matches the pattern made of s times `%` U+001F, then the term's pattern, then N − 1 − e times U+001F `%`; or when the sort field is not excluded and the term's pattern matches the sort text. Changed 2026-11-21 (implementation review): a sort field index at or past N names no field, so it is not excluded and the sort text is tested, as in Anki, for a note type that has an included field; a note type with no included field matches none of its notes whatever its sort index (next bullet, as in Anki).
 - A note type with no included field matches none of its notes.
 - When no note type of the collection has an included field, these terms fail with `search_failed`, negated or not (`search/text/no-searchable-field`).
 
