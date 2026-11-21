@@ -199,6 +199,13 @@ final class StudyWarmup {
         }
         do {
             try await surface.load()
+        } catch {
+            // Pages whose document failed to load keep that failure: drop them, so
+            // Study makes new ones as without a warm-up.
+            if !Task.isCancelled, revision == self.revision, surface === self.surface { release() }
+            return
+        }
+        do {
             guard current(), surface === self.surface, let deck = target else { return }
             let head = try await peek(deck)
             guard current(), surface === self.surface, target == deck else { return }

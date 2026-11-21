@@ -1612,6 +1612,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             // A start that did not keep a session leaves the warm pages to be made again.
             if review == nil { studyWarmup.warm() }
         }
+        let clicked = ContinuousClock.now
         let trace = StudyStartTrace(deckID: deckID)
         trace.finished = { [weak self] timings in self?.lastStudyStart = timings }
         let expected = generation, intent = navigation.intentRevision
@@ -1669,7 +1670,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             // review appears with it, or after `reviewRevealDelay` with its
             // progress indicator while the collection is prepared or the
             // session starts. No session is open yet, so the step may run.
-            presentReview(model, walk: walk, retry: retry, deferred: true)
+            presentReview(model, walk: walk, retry: retry, deferred: true, since: clicked)
             let prepared = await studyPreparation.prepare(for: entry)
             trace.mark(.prepared)
             guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return .stopped }
@@ -1727,7 +1728,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         logger.debug("\(stage, privacy: .public) currentOwner=\(currentOwner, privacy: .public) reviewIsActive=\(self.reviewIsActive, privacy: .public) paused=\(model.paused, privacy: .public) foreground=\(self.foreground, privacy: .public) sceneActive=\(self.sceneActive, privacy: .public) applicationActive=\(self.applicationActive, privacy: .public) windowVisible=\(self.windowVisible, privacy: .public) reviewWindowActive=\(self.reviewWindowActive, privacy: .public) reviewVisible=\(self.reviewVisible, privacy: .public) hostCountZero=\(self.visibleReviewHosts == 0, privacy: .public) presentationAllowsInput=\(self.reviewPresentationAllowsInput, privacy: .public)")
     }
     #endif
-    func presentReview(_ model: ReviewCoordinator, walk: StudyWalk? = nil, retry: Bool = false, deferred: Bool = false) {
+    func presentReview(_ model: ReviewCoordinator, walk: StudyWalk? = nil, retry: Bool = false, deferred: Bool = false,
+                       since clicked: ContinuousClock.Instant = .now) {
         reviewVisible = true
         review = model
         let expected = generation
@@ -1743,8 +1745,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         // The walk is the presentation: its next deck keeps the same review on screen.
         walk?.present(model, retry: retry)
         let shown = walk.map { navigation.review?.session === $0 } ?? false
-        guard deferred, !shown, reviewRevealDelay > .zero else { return showReview(model, walk: walk) }
-        let delay = reviewRevealDelay
+        // The wait counts from the click: the selection and the media binding are part of it.
+        let delay = reviewRevealDelay - (ContinuousClock.now - clicked)
+        guard deferred, !shown, delay > .zero else { return showReview(model, walk: walk) }
         let deadline = Task { [weak self, weak model] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self, let model else { return }

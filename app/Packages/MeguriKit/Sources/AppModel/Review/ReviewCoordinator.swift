@@ -231,9 +231,11 @@ public final class ReviewCoordinator {
             #endif
             switch result {
             case .refused(.fsrsPolicyPending):
+                startTrace?.cancel()
                 recordDiagnostic(.init(component: .review, operation: .start, stage: .admission, outcome: .refused))
                 onPolicyRefusal?(); phase = .error; notice = "Meguri couldn’t prepare this collection for study."
             case .refused(.presetUnsupported):
+                startTrace?.cancel()
                 recordDiagnostic(.init(component: .review, operation: .start, stage: .admission, outcome: .refused))
                 phase = .error; notice = "This preset needs a newer Meguri"
             case .started(let id, let generation, let head, _):
