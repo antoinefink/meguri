@@ -623,23 +623,24 @@ pub(crate) fn plan_draft(
     progress: &ProgressSink,
 ) -> Result<Planned, EngineError> {
     cancel.check()?;
+    // S1.2's whole order, step 1: what the draft alone shows (S1.1).
     check_unique(draft.fields.iter().map(|f| f.origin), "a field")?;
     check_unique(draft.templates.iter().map(|t| t.origin), "a template")?;
-    let id = draft.notetype;
-    // A note type that no longer exists is `Stale` (S1.2, changed
-    // 2026-11-20, round 9 review).
-    let base = reader.notetype(id)?.ok_or_else(|| stale(id))?;
-    // S1.1: origins outside the base are refused before every refusal,
-    // `Stale` included (against the note type as stored).
-    check_range(draft.fields.iter().map(|f| f.origin), base.fields.len(), "a field")?;
-    check_range(draft.templates.iter().map(|t| t.origin), base.templates.len(), "a template")?;
     if draft.sort_field.is_some_and(|sort| sort as usize >= draft.fields.len()) {
         return Err(invalid("the sort field is not a field of the draft"));
     }
-    // S1.2 item 1, on the planning snapshot.
+    let id = draft.notetype;
+    // Step 2, S1.2 item 1 on the planning snapshot: a note type that no
+    // longer exists is `Stale` too (changed 2026-11-20, round 9 review).
+    let base = reader.notetype(id)?.ok_or_else(|| stale(id))?;
     if AggregateDigest::of(&base) != draft.base {
         return Err(stale(id));
     }
+    // Step 3: origins outside the base (S1.1). Only now is the base the
+    // stored note type, so a draft loaded before another write removed a
+    // field is `Stale` above, never `InvalidArgument`.
+    check_range(draft.fields.iter().map(|f| f.origin), base.fields.len(), "a field")?;
+    check_range(draft.templates.iter().map(|t| t.origin), base.templates.len(), "a template")?;
     if let Some(request) = rename_only(&base, draft) {
         let plan = rename::plan(reader, request, cancel, progress)?;
         // The field rename op skips V3 (the field editor's mode); a checked
