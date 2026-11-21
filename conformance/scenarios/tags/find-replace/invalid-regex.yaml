@@ -1,0 +1,23 @@
+# A find text that does not compile as a regular expression refuses Find and
+# Replace in Tags (specs/browser/find-replace.md F7 step 2, which brings in
+# F4 step 5; specs/conformance/bulk-ops.md X1 rejection invalid_regex):
+# nothing is written, the note keeps its tag, mod and usn 0, and no tag is
+# registered. The same text in literal mode is valid: an unclosed bracket
+# stands for itself, matches nothing here, and the run writes nothing
+# (count 0). Undo history is not observed (X1: Anki empties it on this
+# refusal).
+id: tags/find-replace/invalid-regex
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - {name: Plain, fields: [Text], templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]}
+  notes:
+    - {notetype: Plain, fields: [one], tags: [hold]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - advance: 1m
+  - find_replace: {notes: ["#n1"], find: "ho[", replace: swap, regex: true, in: tags}
+  - observe: [{db_dump: {tables: [notes, tags]}}]
+  - find_replace: {notes: ["#n1"], find: "ho[", replace: swap, regex: false, in: tags}
+  - observe: [{db_dump: {tables: [notes, tags]}}]

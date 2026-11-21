@@ -1,0 +1,636 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "find_replace": {
+          "count": 3
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600003": {
+              "data": "{}",
+              "did": 1,
+              "due": 4,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600003,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600004": {
+              "data": "{}",
+              "did": 1,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600004,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600004,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701660000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 1374391077,
+              "data": "",
+              "flags": 0,
+              "flds": "seven tree\u001fback",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "seven tree",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 4010720183,
+              "data": "",
+              "flags": 0,
+              "flds": "orange\u001fpeach",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "orange",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600002": {
+              "csum": 2685124182,
+              "data": "",
+              "flags": 0,
+              "flds": "seven\u001fa seven",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "seven",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600003": {
+              "csum": 445990440,
+              "data": "",
+              "flags": 0,
+              "flds": "head\u001fbody\u001fthe seven",
+              "guid": "#random",
+              "id": 1894701600003,
+              "mid": 1894701600007,
+              "mod": 1894701660,
+              "sfld": "head",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600004": {
+              "csum": 3600861747,
+              "data": "",
+              "flags": 0,
+              "flds": "plum\u001fpear\u001ffig",
+              "guid": "#random",
+              "id": 1894701600004,
+              "mid": 1894701600007,
+              "mod": 1894701600,
+              "sfld": "plum",
+              "tags": "",
+              "usn": 0
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "find_replace": {
+          "count": 1
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600003": {
+              "data": "{}",
+              "did": 1,
+              "due": 4,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600003,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600004": {
+              "data": "{}",
+              "did": 1,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600004,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600004,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701720000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 1374391077,
+              "data": "",
+              "flags": 0,
+              "flds": "seven tree\u001fback",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "seven tree",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600001": {
+              "csum": 4010720183,
+              "data": "",
+              "flags": 0,
+              "flds": "orange\u001fpeach",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "orange",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600002": {
+              "csum": 2685124182,
+              "data": "",
+              "flags": 0,
+              "flds": "seven\u001fa eight",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701720,
+              "sfld": "seven",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600003": {
+              "csum": 445990440,
+              "data": "",
+              "flags": 0,
+              "flds": "head\u001fbody\u001fthe seven",
+              "guid": "#random",
+              "id": 1894701600003,
+              "mid": 1894701600007,
+              "mod": 1894701660,
+              "sfld": "head",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600004": {
+              "csum": 3600861747,
+              "data": "",
+              "flags": 0,
+              "flds": "plum\u001fpear\u001ffig",
+              "guid": "#random",
+              "id": 1894701600004,
+              "mid": 1894701600007,
+              "mod": 1894701600,
+              "sfld": "plum",
+              "tags": "",
+              "usn": 0
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "find_replace": {
+          "count": 0
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600003": {
+              "data": "{}",
+              "did": 1,
+              "due": 4,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600003,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600004": {
+              "data": "{}",
+              "did": 1,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600004,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600004,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701720000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 1374391077,
+              "data": "",
+              "flags": 0,
+              "flds": "seven tree\u001fback",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "seven tree",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600001": {
+              "csum": 4010720183,
+              "data": "",
+              "flags": 0,
+              "flds": "orange\u001fpeach",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "orange",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600002": {
+              "csum": 2685124182,
+              "data": "",
+              "flags": 0,
+              "flds": "seven\u001fa eight",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701720,
+              "sfld": "seven",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600003": {
+              "csum": 445990440,
+              "data": "",
+              "flags": 0,
+              "flds": "head\u001fbody\u001fthe seven",
+              "guid": "#random",
+              "id": 1894701600003,
+              "mid": 1894701600007,
+              "mod": 1894701660,
+              "sfld": "head",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600004": {
+              "csum": 3600861747,
+              "data": "",
+              "flags": 0,
+              "flds": "plum\u001fpear\u001ffig",
+              "guid": "#random",
+              "id": 1894701600004,
+              "mid": 1894701600007,
+              "mod": 1894701600,
+              "sfld": "plum",
+              "tags": "",
+              "usn": 0
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/find-replace/whole-collection-count",
+  "scenario_sha256": "55cef0b1efb028b2fec941789de678ec77a1209fc530de5dec272b14d61e8251",
+  "tz": "UTC"
+}

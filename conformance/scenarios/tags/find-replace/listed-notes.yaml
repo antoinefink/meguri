@@ -1,0 +1,29 @@
+# Find and Replace in Tags on listed notes (specs/browser/find-replace.md
+# F7 steps 2 to 4 and 6, F8; specs/conformance/bulk-ops.md X1 with in: tags).
+# Two notes hold the same tag stone; only #n1 is listed. A literal find text
+# in mixed case with Ignore case left at its default (on) matches the stored
+# lower-case stone and the whole tag becomes quartz; #n1's other tag stays.
+# #n2 is not listed and keeps stone with its old mod and usn 0; #n3 is
+# listed but holds no match and is not written. Count 1. Only tags, mod and
+# usn of #n1 change (fields, sfld, csum kept). The registry gains quartz and
+# keeps stone, which #n2 still uses. usn of notes and tags is reset and the
+# clock advanced before the run (X4).
+id: tags/find-replace/listed-notes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - {name: Plain, fields: [Text], templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]}
+  notes:
+    - {notetype: Plain, fields: [one], tags: [stone, extra]}
+    - {notetype: Plain, fields: [two], tags: [stone]}
+    - {notetype: Plain, fields: [three], tags: [omega]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - advance: 1m
+  - find_replace:
+      notes: ["#n1", "#n3"]
+      find: StOnE
+      replace: quartz
+      in: tags
+  - observe: [{db_dump: {tables: [notes, tags]}}]

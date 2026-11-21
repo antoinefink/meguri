@@ -21,6 +21,8 @@ pub(super) fn register(registry: &mut Registry) {
     registry.observation("browser_config", browser_config);
     registry.observation("card_excerpts", card_excerpts);
     registry.observation("browser_rows", browser_rows);
+    // bulk-ops.md X1, X3 (U86).
+    super::bulk::register(registry);
 }
 
 fn core(error: impl std::fmt::Display) -> ExecError {

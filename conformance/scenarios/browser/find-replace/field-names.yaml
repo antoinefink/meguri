@@ -1,0 +1,41 @@
+# The field names offered for a selection of notes (specs/browser/find-
+# replace.md F3, R1200; conformance/bulk-ops.md X3). Three note types:
+#   Ordered  fields Zeta, alpha, Mid (stored order is not name order)
+#   Second   fields Mid, Echelle spelled with U+00C9 (E with accent), beta
+#   Unused   fields Omega, Other; it has a note that is never selected
+# One note's names come in unicase order, not in field order; two notes of
+# one note type give each name once; notes of two note types give the
+# union, Mid once, whatever the selection order. The accented name sorts
+# after Zeta: unicase folds case only, so it compares as a lower-case e
+# with accent (U+00E9), above every ASCII letter; a collation that ignores
+# accents would put it between beta and Mid. The note type of a note outside the
+# selection adds nothing. A deleted note adds nothing: alone it gives no
+# name, and next to a Second note it leaves Second's names only.
+id: browser/find-replace/field-names
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Ordered
+      fields: [Zeta, alpha, Mid]
+      templates: [{name: Card, front: "{{Zeta}}", back: "{{alpha}}{{Mid}}"}]
+    - name: Second
+      fields: [Mid, "Échelle", beta]
+      templates: [{name: Card, front: "{{Mid}}", back: "{{beta}}"}]
+    - name: Unused
+      fields: [Omega, Other]
+      templates: [{name: Card, front: "{{Omega}}", back: "{{Other}}"}]
+  notes:
+    - {notetype: Ordered, fields: [a1, a2, a3]}
+    - {notetype: Ordered, fields: [b1, b2, b3]}
+    - {notetype: Second, fields: [c1, c2, c3]}
+    - {notetype: Unused, fields: [d1, d2]}
+    - {notetype: Second, fields: [e1, e2, e3]}
+steps:
+  - observe: [{find_replace_fields: {notes: ["#n1"]}}]
+  - observe: [{find_replace_fields: {notes: ["#n1", "#n2"]}}]
+  - observe: [{find_replace_fields: {notes: ["#n3", "#n1"]}}]
+  - observe: [{find_replace_fields: {notes: ["#n1", "#n3", "#n2"]}}]
+  - observe: [{find_replace_fields: {notes: ["#n3"]}}]
+  - delete_notes: {notes: ["#n5"]}
+  - observe: [{find_replace_fields: {notes: ["#n5"]}}]
+  - observe: [{find_replace_fields: {notes: ["#n5", "#n3"]}}]

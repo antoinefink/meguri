@@ -160,6 +160,7 @@ impl RuntimeError {
                     EngineError::SyncNote(_) => "SyncNote",
                     EngineError::DeckOptionsInvalid(_) => "DeckOptionsInvalid",
                     EngineError::SchedOp(_) => "SchedOp",
+                    EngineError::FindReplace(_) => "FindReplace",
                     EngineError::InvalidTypeAnswerReplacement => "InvalidTypeAnswerReplacement",
                     EngineError::SessionActive => "SessionActive",
                     EngineError::CollectionCorrupt => "CollectionCorrupt",

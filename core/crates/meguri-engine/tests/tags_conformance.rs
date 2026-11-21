@@ -601,7 +601,9 @@ fn tree_structure() {
     play("tree/structure");
 }
 
-/// Every tags scenario has a play test above or explicit prepared pending coverage.
+/// Every tags scenario has a play test above, explicit prepared pending
+/// coverage, or runs active in T0 on Meguri's executor (the Find and Replace
+/// scenarios, U86: this player has no `find_replace`).
 /// Pending completion cases are not parity passes or U84 acceptance.
 #[test]
 fn every_tags_scenario_has_play_or_explicit_pending_coverage() {
@@ -635,16 +637,28 @@ fn every_tags_scenario_has_play_or_explicit_pending_coverage() {
         "complete/registry",
         "complete/separators",
     ];
+    // Active in T0 (`conformance/scenarios/tags/area.yaml`), not played here.
+    let t0: [&str; 4] = [
+        "find-replace/all-notes",
+        "find-replace/invalid-regex",
+        "find-replace/listed-notes",
+        "find-replace/pattern-modes",
+    ];
+    let area = std::fs::read_to_string(conformance().join("scenarios/tags/area.yaml")).unwrap();
+    for name in t0 {
+        assert!(area.contains(&format!("  - \"{name}\"\n")), "tags/{name} is not active in T0");
+    }
     let suite = Suite::open(&conformance()).unwrap();
     let files = suite.discover(&["tags".to_owned()]).unwrap();
     let mut expected: Vec<String> = played
         .iter()
         .chain(&pending)
+        .chain(&t0)
         .map(|name| format!("tags/{name}"))
         .collect();
     expected.sort();
     let names: Vec<&str> = files.iter().map(|file| file.rel.as_str()).collect();
-    assert_eq!(names, expected, "the exact 25 tags scenario IDs");
+    assert_eq!(names, expected, "the exact 29 tags scenario IDs");
 
     let this =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tags_conformance.rs")).unwrap();
