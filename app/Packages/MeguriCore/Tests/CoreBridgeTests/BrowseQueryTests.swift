@@ -51,11 +51,28 @@ extension EventTests {
 
             // The caret counts UTF-16 units: the tag starts with a character
             // outside the BMP.
-            let typed = "\u{1D11E}cl"
+            let typed = "\u{1D11E}zo"
             let rows = try await CoreBrowseQuery.suggestions(for: FilterQuery(text: typed), caret: typed.utf16.count,
                                                              labels: .english)
             #expect(rows.first?.row == .contains(typed))
             #expect(rows.contains { $0.row == .value(.tag("\u{1D11E}zorb")) && $0.section == .tags && $0.key != nil })
+
+            // A D6 syntax row after a character outside the BMP: its range
+            // and caret are UTF-16 offsets of the field's text.
+            let syntax = "\u{1D11E} tag:pl"
+            let candidates = try await CoreBrowseQuery.suggestions(for: FilterQuery(text: syntax), caret: syntax.utf16.count,
+                                                                   labels: .english)
+            let insert = try #require(candidates.lazy.compactMap { row -> (Range<Int>, String, Int)? in
+                guard case .syntax(let candidate) = row.row, candidate.label == "plain", let insert = candidate.insert else {
+                    return nil
+                }
+                return (insert.range, insert.text, insert.caretAfter)
+            }.first)
+            #expect(insert.0.lowerBound >= 3 && insert.0.upperBound == syntax.utf16.count)
+            var applied = syntax.utf16.map { $0 }
+            applied.replaceSubrange(insert.0, with: insert.1.utf16)
+            let written = String(decoding: applied, as: UTF16.self)
+            #expect(written.contains("plain") && insert.2 <= written.utf16.count)
 
             let counts = try await CoreBrowseQuery.startFilterCounts(.notes, items: [.value(.tag("plain")), .saved("tag:*")])
             #expect(try await counts.value() == [1, 2])

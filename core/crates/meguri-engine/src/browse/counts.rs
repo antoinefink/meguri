@@ -204,6 +204,11 @@ impl FilterCounts {
         let token = CancelToken::new();
         {
             let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+            // A call already cancelled (a newer one superseded it before it
+            // got here) never cancels the call that is running.
+            if cancel.is_some_and(CancelToken::is_cancelled) {
+                return Err(BrowseError::Engine(EngineError::Cancelled));
+            }
             if let Some(older) = running.replace(Arc::clone(&token)) {
                 older.cancel();
                 // An older call waiting for a reader sees its token now.

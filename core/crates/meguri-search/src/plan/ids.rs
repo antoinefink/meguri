@@ -35,5 +35,10 @@ pub const ANY_LONE_NOTE: &str =
 pub const HOME_DECKS_AND_QUEUES: &str = "SELECT c.id, CASE WHEN c.odid != 0 THEN c.odid ELSE c.did END, c.queue FROM cards c \
      WHERE c.id IN (SELECT value FROM json_each(?1))";
 
+/// [`HOME_DECKS_AND_QUEUES`] for every card of the notes in `?1` (notes
+/// mode's target cards, `browser/bulk-actions` B1).
+pub const HOME_DECKS_AND_QUEUES_OF_NOTES: &str = "SELECT c.id, CASE WHEN c.odid != 0 THEN c.odid ELSE c.did END, c.queue \
+     FROM cards c WHERE c.nid IN (SELECT value FROM json_each(?1))";
+
 /// The notes of `?1` that exist, each with its note type (V8.1).
 pub const NOTETYPES_OF_NOTES: &str = "SELECT n.id, n.mid FROM notes n WHERE n.id IN (SELECT value FROM json_each(?1))";

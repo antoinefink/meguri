@@ -374,6 +374,15 @@ public struct SyntaxCandidate: Sendable, Hashable {
     /// Accepting it commits the search (D6.6).
     public let completes: Bool
 
+    public init(kind: SyntaxCandidateKind, label: String, detail: SyntaxDetail?,
+                insert: (range: Range<Int>, text: String, caretAfter: Int)?, completes: Bool) {
+        self.kind = kind
+        self.label = label
+        self.detail = detail
+        self.insert = insert
+        self.completes = completes
+    }
+
     public static func == (a: SyntaxCandidate, b: SyntaxCandidate) -> Bool {
         a.kind == b.kind && a.label == b.label && a.detail == b.detail && a.completes == b.completes
             && a.insert?.range == b.insert?.range && a.insert?.text == b.insert?.text
@@ -461,6 +470,11 @@ public struct FilterSuggestion: Sendable, Hashable {
     public let section: FilterSection?
     public let row: FilterSuggestionRow
     public let key: String?
+    public init(section: FilterSection?, row: FilterSuggestionRow, key: String?) {
+        self.section = section
+        self.row = row
+        self.key = key
+    }
 }
 
 // MARK: Counts, column sets and selection counts
@@ -514,6 +528,14 @@ public struct ColumnSetShown: Sendable, Hashable {
     public let notes: [String]
     public let cardsSort: BrowseSort
     public let notesSort: BrowseSort
+    public init(set: ColumnSetID, own: Bool, cards: [String], notes: [String], cardsSort: BrowseSort, notesSort: BrowseSort) {
+        self.set = set
+        self.own = own
+        self.cards = cards
+        self.notes = notes
+        self.cardsSort = cardsSort
+        self.notesSort = notesSort
+    }
 
     public func columns(_ mode: BrowseMode) -> [String] { mode == .cards ? cards : notes }
     public func sort(_ mode: BrowseMode) -> BrowseSort { mode == .cards ? cardsSort : notesSort }
@@ -554,6 +576,15 @@ public struct BrowseSelectionCounts: Sendable, Hashable {
     public let deck: Int64?
     /// The target notes' note types, ascending.
     public let notetypes: [Int64]
+    public init(cards: UInt64, notes: UInt64, suspended: UInt64, buried: UInt64, decks: UInt64, deck: Int64?, notetypes: [Int64]) {
+        self.cards = cards
+        self.notes = notes
+        self.suspended = suspended
+        self.buried = buried
+        self.decks = decks
+        self.deck = deck
+        self.notetypes = notetypes
+    }
 }
 
 /// A started Browse read: its progress and cancel, and its value once it
@@ -671,7 +702,8 @@ public enum CoreBrowseQuery {
     }
 
     /// V7, V8.1: the counts of a selection's target cards and notes, as a
-    /// job. When the selection itself is refused, `value()` throws that
+    /// job. A newer call for a selection of the same session cancels this
+    /// one. When the selection itself is refused, `value()` throws that
     /// `BridgeError.browse` failure.
     public static func startSelectionCounts(_ selection: BrowseSelection) async throws(BridgeError)
         -> CoreBrowseReadJob<BrowseSelectionCounts> {

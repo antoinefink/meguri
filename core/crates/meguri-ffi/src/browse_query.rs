@@ -735,19 +735,44 @@ impl From<FilterCountItem> for CountItem {
     }
 }
 
+type CountsResult = Arc<Mutex<Option<Result<Vec<Option<u64>>, CoreError>>>>;
+
 #[derive(Debug, uniffi::Object)]
 pub struct FilterCountsJob {
-    result: Arc<Mutex<Option<Vec<Option<u64>>>>>,
+    result: CountsResult,
 }
 
 #[uniffi::export]
 impl FilterCountsJob {
     /// One entry per item, in order: its rows of the mode, or none when it
-    /// cannot be counted. `None` until the job succeeds.
+    /// cannot be counted. `None` until the job ends.
     pub fn result(&self) -> Result<Option<Vec<Option<u64>>>, CoreError> {
         callback::enter("FilterCountsJob::result");
-        Ok(self.result.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone())
+        lock(&self.result).clone().transpose()
     }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The cancel token of the newest filter counts job.
+static NEWEST_COUNTS: Mutex<Option<Arc<meguri_engine::CancelToken>>> = Mutex::new(None);
+
+/// Starts `start` after cancelling the job `slot` holds, and keeps the new
+/// job's token there: a newer call supersedes in call order, whichever job
+/// reaches the engine first.
+fn superseding(
+    slot: &Mutex<Option<Arc<meguri_engine::CancelToken>>>,
+    start: impl FnOnce() -> Result<meguri_engine::JobHandle, CoreError>,
+) -> Result<meguri_engine::JobHandle, CoreError> {
+    let mut newest = lock(slot);
+    if let Some(older) = newest.take() {
+        older.cancel();
+    }
+    let handle = start()?;
+    *newest = Some(Arc::clone(&handle.cancel));
+    Ok(handle)
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -756,38 +781,40 @@ pub struct FilterCountsJobStart {
     pub result: Arc<FilterCountsJob>,
 }
 
-/// Engine work fails with its engine error; a Browse refusal would not
-/// survive that conversion, so it is the job's internal failure.
-fn job_error(error: BrowseError) -> meguri_engine::EngineError {
-    match error {
-        BrowseError::Engine(error) => error,
-        other => meguri_engine::EngineError::Internal {
-            message: format!("{other:?}"),
-        },
-    }
-}
-
 /// T12.4: for each item, the rows of `mode` it finds in the whole
 /// collection, as a job of the engine's pool at utility QoS, so searches go
 /// first. Cached by change seq; a newer call cancels this one (its outcome
-/// is then `Cancelled`), as does its token.
+/// is then `Cancelled`), as does its token. A collection replaced before it
+/// runs fails it with `Unavailable`.
 #[uniffi::export]
 pub fn start_filter_counts(mode: BrowseMode, items: Vec<FilterCountItem>) -> Result<FilterCountsJobStart, CoreError> {
     callback::enter("start_filter_counts");
     let host = runtime::host()?;
+    let engine = runtime::engine()?;
     let mode = SearchMode::from(mode);
     let items: Vec<CountItem> = items.into_iter().map(Into::into).collect();
-    let result = Arc::new(Mutex::new(None));
+    let result: CountsResult = Arc::default();
     let out = Arc::clone(&result);
-    let engine = runtime::engine()?;
-    let handle = engine.start_utility_job(meguri_engine::JobKind::BulkOp, move |job| {
-        let names = host.names().index();
-        let counts = host
-            .filter_counts()
-            .filter_counts(runtime::engine()?, &names, mode, &items, Some(&*job.cancel))
-            .map_err(job_error)?;
-        *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(counts);
-        Ok(())
+    let handle = superseding(&NEWEST_COUNTS, || {
+        Ok(engine.start_utility_job(meguri_engine::JobKind::BulkOp, move |job| {
+            // The host it was started for: its name index and its counts.
+            if !Arc::ptr_eq(&host, &runtime::host()?) {
+                return Err(meguri_engine::EngineError::CollectionUnavailable {
+                    reason: "the collection was replaced".into(),
+                });
+            }
+            let names = host.names().index();
+            let counts = match host
+                .filter_counts()
+                .filter_counts(engine, &names, mode, &items, Some(&*job.cancel))
+            {
+                Ok(counts) => Ok(counts),
+                Err(BrowseError::Engine(error)) => return Err(error),
+                Err(refusal) => Err(CoreError::from(refusal)),
+            };
+            *lock(&out) = Some(counts);
+            Ok(())
+        })?)
     })?;
     Ok(FilterCountsJobStart {
         handle: crate::jobs::wrap(handle),
@@ -982,11 +1009,7 @@ impl BrowseSelectionCountsJob {
     /// refusal (`UnknownHandle`, `StaleRevision`, `OutOfRange`).
     pub fn result(&self) -> Result<Option<BrowseSelectionCounts>, CoreError> {
         callback::enter("BrowseSelectionCountsJob::result");
-        self.result
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-            .transpose()
+        lock(&self.result).clone().transpose()
     }
 }
 
@@ -997,24 +1020,30 @@ pub struct BrowseSelectionCountsJobStart {
 }
 
 /// V7 and V8.1: the counts of `selection`'s target cards and notes, as a
-/// job on one snapshot (it scales with the selection). A refusal of the
-/// selection itself ends the job successfully and `result` returns it.
+/// job at utility QoS reading one snapshot of a search worker's reader (it scales with
+/// the selection, and must not hold the query reader row pages use). A
+/// newer call for a selection of the same session cancels this one. A
+/// refusal of the selection itself ends the job successfully and `result`
+/// returns it.
 #[uniffi::export]
 pub fn start_browse_selection_counts(
     selection: Arc<BrowseSelection>,
 ) -> Result<BrowseSelectionCountsJobStart, CoreError> {
     callback::enter("start_browse_selection_counts");
-    let collection = runtime::host()?.collection()?;
+    let engine = runtime::engine()?;
     let result = Arc::new(Mutex::new(None));
     let out = Arc::clone(&result);
-    let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |job| {
-        let counts = match browse::selection_counts(&collection, selection.engine_selection(), &job.cancel) {
-            Ok(counts) => Ok(counts.into()),
-            Err(BrowseError::Engine(error)) => return Err(error),
-            Err(refusal) => Err(CoreError::from(refusal)),
-        };
-        *out.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(counts);
-        Ok(())
+    let slot = Arc::clone(selection.counts_slot());
+    let handle = superseding(&slot, || {
+        Ok(engine.start_utility_job(meguri_engine::JobKind::BulkOp, move |job| {
+            let counts = match browse::selection_counts(selection.engine_selection(), &job.cancel) {
+                Ok(counts) => Ok(counts.into()),
+                Err(BrowseError::Engine(error)) => return Err(error),
+                Err(refusal) => Err(CoreError::from(refusal)),
+            };
+            *lock(&out) = Some(counts);
+            Ok(())
+        })?)
     })?;
     Ok(BrowseSelectionCountsJobStart {
         handle: crate::jobs::wrap(handle),

@@ -257,13 +257,12 @@ fn main() -> ExitCode {
             let state = session.handle_state(handle).expect("the handle");
             let all: std::ops::Range<u64> = 0..state.count;
             let every = session.selection(handle, state.revision, std::iter::once(all).collect());
-            let collection = host.collection().expect("the open collection");
             let token = CancelToken::new();
-            black_box(selection_counts(&collection, &every, &token).expect("the counts"));
+            black_box(selection_counts(&every, &token).expect("the counts"));
             let mut measurement = Measurement::start(&name, Some(&size));
             criterion.bench_function(&format!("{name}/{size}"), |b| {
                 b.iter_custom(|n| {
-                    measurement.run(n, |_| selection_counts(&collection, &every, &token).expect("the counts").cards)
+                    measurement.run(n, |_| selection_counts(&every, &token).expect("the counts").cards)
                 })
             });
             push(&mut suite, measurement);
