@@ -58,36 +58,46 @@ pub struct TypeChangeReport {
 
 fn identity(n: u32) -> Vec<i32> { (0..n).map(|i| i as i32).collect() }
 fn is_identity(map: &[i32]) -> bool { map.iter().enumerate().all(|(i, n)| usize::try_from(*n) == Ok(i)) }
-fn check_map(map: &[i32], old: u32, new: u32, prefix: bool) -> Result<(), StorageError> {
+/// Whether a map may name one origin at several entries. Only a type
+/// change's field map may: Change Note Type copies one old field into
+/// several new ones (K19.2 "Repeated field origins"). Layout field maps and
+/// every template map stay injective.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Origins { Unique, MayRepeat }
+
+fn check_map(map: &[i32], old: u32, new: u32, prefix: bool, origins: Origins) -> Result<(), StorageError> {
     if !prefix && map.len() != new as usize { return Err(invalid("map has the wrong destination arity")); }
     let mut seen = BTreeSet::new();
     for n in map {
         // Cloze ordinals are not template positions. An explicit prefix may
         // refer beyond the number of stored cloze templates (K19.2).
-        if *n < -1 || (!prefix && *n >= old as i32) || (*n >= 0 && !seen.insert(*n)) {
+        let repeated = origins == Origins::Unique && *n >= 0 && !seen.insert(*n);
+        if *n < -1 || (!prefix && *n >= old as i32) || repeated {
             return Err(invalid("map has an invalid or repeated origin"));
         }
     }
     Ok(())
 }
+fn field_origins(pair: bool) -> Origins { if pair { Origins::MayRepeat } else { Origins::Unique } }
 fn validate(before: LayoutShape, after: LayoutShape, fields: &[i32], templates: &[i32], pair: bool) -> Result<(), StorageError> {
-    check_map(fields, before.fields, after.fields, false)?;
+    check_map(fields, before.fields, after.fields, false, field_origins(pair))?;
     if pair && (before.cloze || after.cloze) {
         let expected = if before.cloze { Vec::new() } else { identity(before.templates) };
         if templates != expected { return Err(invalid("cloze type change must preserve card ordinals")); }
     } else {
-        check_map(templates, before.templates, after.templates, before.cloze)?;
+        check_map(templates, before.templates, after.templates, before.cloze, Origins::Unique)?;
         if before.cloze && after.cloze && templates.iter().any(|n| *n >= 0 && *n as usize >= templates.len()) {
             return Err(invalid("cloze prefix duplicates an implicit tail origin"));
         }
     }
     Ok(())
 }
-// Retained compositions are partial injections on endpoint domains. A cloze
+// Retained compositions are partial injections on endpoint domains, except
+// a type change's field map, which may repeat an origin (K19.2). A cloze
 // source supplies an identity tail; a standard destination truncates that tail.
-fn validate_retained(before: LayoutShape, after: LayoutShape, fields: &[i32], templates: &[i32]) -> Result<(), StorageError> {
-    check_map(fields, before.fields, after.fields, false)?;
-    check_map(templates, before.templates, after.templates, before.cloze || after.cloze)?;
+fn validate_retained(before: LayoutShape, after: LayoutShape, fields: &[i32], templates: &[i32], pair: bool) -> Result<(), StorageError> {
+    check_map(fields, before.fields, after.fields, false, field_origins(pair))?;
+    check_map(templates, before.templates, after.templates, before.cloze || after.cloze, Origins::Unique)?;
     if !before.cloze && templates.iter().any(|n| *n >= before.templates as i32) {
         return Err(invalid("map refers to an absent source ordinal"));
     }
@@ -103,9 +113,14 @@ fn validate_retained(before: LayoutShape, after: LayoutShape, fields: &[i32], te
     }
     Ok(())
 }
+/// One entry per old ordinal: the lowest new ordinal whose entry names it,
+/// or -1. A repeated origin (a copied field) reads back from its first copy,
+/// so the inverse never repeats (K19.2 "Repeated field origins", Inverse).
 fn invert(map: &[i32], old: u32) -> Vec<i32> {
     let mut out = vec![-1; old as usize];
-    for (new, old) in map.iter().enumerate() { if *old >= 0 { out[*old as usize] = new as i32; } }
+    for (new, old) in map.iter().enumerate() {
+        if *old >= 0 && out[*old as usize] < 0 { out[*old as usize] = new as i32; }
+    }
     out
 }
 fn at(map: &[i32], ord: i32, cloze: bool) -> i32 {
@@ -174,7 +189,7 @@ impl LayoutReport {
         let out = Self { before: self.before, after: later.after,
             field_map: compose(&self.field_map, &later.field_map, false, false),
             template_map: compose_templates(&self.template_map, &later.template_map, self.before, self.after, later.after)? };
-        validate_retained(out.before, out.after, &out.field_map, &out.template_map)?;
+        validate_retained(out.before, out.after, &out.field_map, &out.template_map, false)?;
         Ok(out)
     }
     fn inverse(&self) -> Self {
@@ -218,11 +233,11 @@ impl StructureReport {
     }
     pub(crate) fn validate_retained(&self) -> Result<(), StorageError> {
         for layout in self.layouts.values() {
-            validate_retained(layout.before, layout.after, &layout.field_map, &layout.template_map)?;
+            validate_retained(layout.before, layout.after, &layout.field_map, &layout.template_map, false)?;
         }
         for ((old, new), pair) in &self.type_changes {
             if old == new { return Err(invalid("a type change must name different note types")); }
-            validate_retained(pair.before, pair.after, &pair.field_map, &pair.template_map)?;
+            validate_retained(pair.before, pair.after, &pair.field_map, &pair.template_map, true)?;
         }
         Ok(())
     }
@@ -281,3 +296,120 @@ fn insert_pair(pairs: &mut BTreeMap<(i64, i64), TypeChangeReport>, key: (i64, i6
 }
 pub(crate) fn invalid(detail: &str) -> StorageError { StorageError::Mode { detail: format!("invalid structure report: {detail}") } }
 pub(crate) fn missing(id: i64) -> StorageError { StorageError::StructureNotReported { notetype_id: NotetypeId(id) } }
+
+/// K19.2 "Repeated field origins": which maps may repeat an origin, and the
+/// lowest-copy inverse.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn standard(fields: u32) -> LayoutShape {
+        LayoutShape { fields, templates: 1, cloze: false, sort_field: 0 }
+    }
+
+    fn pair(before: LayoutShape, after: LayoutShape, fields: &[i32]) -> TypeChangeReport {
+        TypeChangeReport { before, after, field_map: fields.to_vec(), template_map: vec![0] }
+    }
+
+    fn layout(shape: LayoutShape, fields: &[i32]) -> LayoutReport {
+        LayoutReport { before: shape, after: shape, field_map: fields.to_vec(), template_map: vec![0] }
+    }
+
+    fn report_with_pair(old: i64, new: i64, change: TypeChangeReport) -> StructureReport {
+        let mut report = StructureReport::default();
+        report.reasons.insert(StructureReason::NotesNotetypeChanged);
+        report.type_changes.insert((old, new), change);
+        report
+    }
+
+    #[test]
+    fn a_type_change_field_map_may_repeat_an_origin_authored_and_retained() {
+        let report = report_with_pair(1, 2, pair(standard(2), standard(3), &[0, 0, 1]));
+        report.validate().unwrap();
+        report.validate_retained().unwrap();
+    }
+
+    fn refused_as_repeated(result: Result<(), StorageError>) {
+        match result {
+            Err(StorageError::Mode { detail }) => assert!(detail.ends_with("map has an invalid or repeated origin"), "{detail}"),
+            other => panic!("not refused as a repeated origin: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn layout_field_maps_and_template_maps_still_refuse_a_repeat() {
+        let mut layouts = StructureReport::default();
+        layouts.layouts.insert(1, layout(standard(2), &[0, 0]));
+        refused_as_repeated(layouts.validate());
+        refused_as_repeated(layouts.validate_retained());
+        let two = LayoutShape { fields: 1, templates: 2, cloze: false, sort_field: 0 };
+        let mut templates = report_with_pair(1, 2, TypeChangeReport {
+            before: two, after: two, field_map: vec![0], template_map: vec![1, 1] });
+        refused_as_repeated(templates.validate());
+        refused_as_repeated(templates.validate_retained());
+        templates.type_changes.clear();
+        templates.layouts.insert(1, LayoutReport { before: two, after: two, field_map: vec![0], template_map: vec![0, 0] });
+        refused_as_repeated(templates.validate());
+        refused_as_repeated(templates.validate_retained());
+        // A cloze layout's prefix template map takes the prefix path.
+        let cloze = LayoutShape { fields: 1, templates: 1, cloze: true, sort_field: 0 };
+        let mut prefix = StructureReport::default();
+        prefix.layouts.insert(1, LayoutReport { before: cloze, after: cloze, field_map: vec![0], template_map: vec![0, 0] });
+        refused_as_repeated(prefix.validate());
+        refused_as_repeated(prefix.validate_retained());
+    }
+
+    #[test]
+    fn a_repeated_origin_inverts_to_its_lowest_copy() {
+        // (forward map, old field count, inverse): a highest-copy inverse
+        // would give 1, 2 / -1, 1 / 2.
+        for (map, old, inverse) in [
+            (&[0, 0, 1][..], 2, &[0, 2][..]),
+            (&[1, 1, -1][..], 2, &[-1, 0][..]),
+            (&[-1, 0, 0][..], 1, &[1][..]),
+        ] {
+            assert_eq!(invert(map, old), inverse, "{map:?}");
+            let new = map.len() as u32;
+            let reversed = pair(standard(old), standard(new), map).inverse();
+            assert_eq!(reversed.field_map, inverse);
+            assert_eq!((reversed.before, reversed.after), (standard(new), standard(old)));
+            report_with_pair(2, 1, reversed).validate_retained().unwrap();
+        }
+    }
+
+    #[test]
+    fn the_reports_inverse_reverses_the_pair_with_the_lowest_copy() {
+        let report = report_with_pair(1, 2, pair(standard(2), standard(3), &[0, 0, 1]));
+        let undo = report.inverse();
+        assert_eq!(undo.reasons, report.reasons);
+        assert_eq!(undo.type_changes.keys().copied().collect::<Vec<_>>(), [(2, 1)]);
+        assert_eq!(undo.type_changes[&(2, 1)].field_map, [0, 2]);
+        undo.validate_retained().unwrap();
+    }
+
+    /// A's fields reordered, its notes moved to B with 0, 0, 1, then B's
+    /// fields reversed: the pair composes to 1, 1, 0 and then 0, 1, 1, and
+    /// inverts to 0, 1; the two layouts stay as reported.
+    #[test]
+    fn a_composed_report_keeps_the_repeat_and_inverts_its_final_map() {
+        let (a, b) = (standard(2), standard(3));
+        let mut first = StructureReport::default();
+        first.reasons.insert(StructureReason::FieldsChanged);
+        first.layouts.insert(1, layout(a, &[1, 0]));
+        let second = report_with_pair(1, 2, pair(a, b, &[0, 0, 1]));
+        let mut third = StructureReport::default();
+        third.reasons.insert(StructureReason::FieldsChanged);
+        third.layouts.insert(2, layout(b, &[2, 1, 0]));
+        let moved = first.then(&second).unwrap();
+        assert_eq!(moved.type_changes[&(1, 2)].field_map, [1, 1, 0]);
+        let composed = moved.then(&third).unwrap();
+        let change = &composed.type_changes[&(1, 2)];
+        assert_eq!((change.field_map.as_slice(), change.before, change.after), (&[0, 1, 1][..], a, b));
+        assert_eq!(composed.layouts[&1].field_map, [1, 0]);
+        assert_eq!(composed.layouts[&2].field_map, [2, 1, 0]);
+        composed.validate_retained().unwrap();
+        let undo = composed.inverse();
+        assert_eq!(undo.type_changes[&(2, 1)].field_map, [0, 1]);
+        undo.validate_retained().unwrap();
+    }
+}
