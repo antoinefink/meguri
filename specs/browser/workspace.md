@@ -43,15 +43,15 @@ The behaviour of Browse as round 8 decided it: columns and column sets, field co
 
 Example: `{"std":{"cards":["noteFld","template","deck","cardDue","cardMod"],"sort":{"cards":["noteFld",false]}},"1700000000001":{"notes":["fld:Front","fld:Back","fld:Extra","deck","cardDue"]}}`.
 
+Changed 2026-11-21 (implementation review): a list reads as its known column keys in order, each at its first occurrence: an entry that names no column of V2.3 (for example one a newer Meguri wrote) is skipped, and a list with no known key, or a member that is not an array, reads as missing. A write to a set stores each of that set's lists as it reads, so their unknown and repeated keys are dropped then and only then; other sets keep theirs.
+
 ### V2.5 The state column
 
 The first, narrow column of every row shows, in this order of precedence, one symbol: suspended `pause.circle`, buried `moon`, flagged (the flag's `flag.fill` in its colour, `tags/flags-and-marked` F1), else nothing. A suspended or buried row's text is secondary (grey). No row is tinted (R1147's tints are superseded; R1149's glyphs stand, without the marked glyph: marking is not offered, V8). The symbol's accessibility label is the state ("Suspended", "Buried", "Red Flag").
 
-Changed 2026-11-21 (implementation review): a list reads as its known column keys in order, each at its first occurrence: an entry that names no column of V2.3 (for example one a newer Meguri wrote) is skipped, and a list with no known key, or a member that is not an array, reads as missing. A write to a set stores each of that set's lists as it reads, so their unknown and repeated keys are dropped then and only then; other sets keep theirs.
-
 ## V3. Field columns
 
-- A field column `fld:f` shows, for a row whose note's note type has a field named f (exact name), that field's value as one line: HTML removed and white space collapsed as the Sort Field cell does (`browser/columns` C7.1), except media: a field whose value holds a `[sound:…]` reference shows a speaker symbol and the first sound's length (from the media file; blank until read), a click plays it; a field holding an image shows the first image as a thumbnail the row's height; never the reference text or HTML.
+- A field column `fld:f` shows, for a row whose note's note type has a field named f (exact name), that field's value as one line: HTML removed as the Sort Field cell does (`browser/columns` C7.1; changed 2026-11-21, implementation review: that rule keeps inner runs of white space, it does not collapse them), except media: a field whose value holds a `[sound:…]` reference shows a speaker symbol and the first sound's length (from the media file; blank until read), a click plays it; a field holding an image shows the first image as a thumbnail the row's height; never the reference text or HTML.
 - A row whose note type has no field f shows an en dash in the secondary colour; an empty field shows nothing.
 - In Cards mode a note's cards repeat its values.
 - Cells are computed by the core with the other row cells (`browser/result-sets` H7): H7's column set is extended to accept `fld:` keys (Changed 2026-11-20 note in H7). A field name holding `:` can occur only in a damaged collection (`notetypes/records` N4 removes it); its key is still `fld:` + the stored name.
