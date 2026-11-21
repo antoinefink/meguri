@@ -323,8 +323,6 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
     let requests = SearchRequest::from_list(list(request)?).map_err(|e| invalid(e.to_string()))?;
     let mut context = context(session)?;
     let notetypes = notetypes(session)?;
-    // The day computed so far: none, without writes, or by the day query.
-    let mut day_queried = false;
     let mut day_supplied = false;
     let mut outputs = Vec::with_capacity(requests.len());
     for request in &requests {
@@ -381,17 +379,10 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
                 continue;
             }
         };
-        let term_reads_day = reads_day(built.plan.reads());
-        if (!day_supplied && built.reads_day()) || (!day_queried && term_reads_day) {
-            // A term that reads the day runs the day query, as unsorted
-            // searches do; a sort key alone reads it without writes (B1:
-            // nothing in the collection changes).
-            let day = if term_reads_day {
-                day_queried = true;
-                super::sched::day_query_now(session)?.day
-            } else {
-                super::sched::day_without_writes(session)?
-            };
+        if !day_supplied && built.reads_day() {
+            // A search never writes, sorted or not: the day is read without
+            // the day query's unbury and timing-key writes (browser-ops B1).
+            let day = super::sched::day_without_writes(session)?;
             context.today = day.today;
             context.next_day_at = day.next_day_at;
             day_supplied = true;
