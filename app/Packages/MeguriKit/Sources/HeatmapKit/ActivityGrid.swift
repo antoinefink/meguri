@@ -36,13 +36,14 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
         public var pitch: CGFloat { side + gap }
         /// The grid's natural width: `weeks` columns and the gaps between them.
         public var width: CGFloat { weeks == 0 ? 0 : CGFloat(weeks) * pitch - gap }
-        public var height: CGFloat { weeks == 0 ? 0 : 7 * side + 6 * gap }
+        /// Seven rows, known before the width is: the row keeps it from its first frame.
+        public var height: CGFloat { 7 * side + 6 * gap }
 
         /// The most recent whole weeks that fit `available`, at most 53: ⌊(available + gap) / pitch⌋,
         /// and at least one once a width is known.
         public init(width available: CGFloat, square: Square) {
             self.square = square
-            guard available > 0, square.side > 0 else { weeks = 0; return }
+            guard available > 0, available.isFinite, square.side > 0 else { weeks = 0; return }
             // n columns need n·pitch − gap; the small allowance absorbs layout rounding.
             let fitting = Int(((available + square.gap) / (square.side + square.gap) + 1e-6).rounded(.down))
             weeks = min(ActivityGrid.maximumWeeks, max(1, fitting))

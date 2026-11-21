@@ -230,7 +230,10 @@ private struct MonthLabelsView: View {
             #endif
             let labels = grid.monthLabels(year: today.year, month: today.month, day: today.day,
                                           pitch: geometry.pitch, width: size.width,
-                                          rightToLeft: layoutDirection == .rightToLeft) { resolved[$0 - 1].measure(in: size).width }
+                                          rightToLeft: layoutDirection == .rightToLeft) {
+                // Unbounded, so a label wider than the grid measures as drawn and is left out.
+                resolved[$0 - 1].measure(in: CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)).width
+            }
             // The canvas does not mirror itself; the label positions already are.
             for label in labels {
                 context.draw(resolved[label.month - 1], at: CGPoint(x: label.x, y: 0), anchor: .topLeading)

@@ -125,6 +125,8 @@ import Testing
         // An iPhone row (about 322 pt): 17 weeks of 16 pt squares, 320 pt wide.
         let phone = ActivityGrid.Geometry(width: 322, square: .touch)
         #expect(phone.weeks == 17 && phone.width == 320)
+        #expect(ActivityGrid.Geometry(width: 320, square: .touch).weeks == 17)
+        #expect(ActivityGrid.Geometry(width: 319, square: .touch).weeks == 16)
         for square in [ActivityGrid.Square.mac, .touch] {
             for available in stride(from: CGFloat(20), through: 2_000, by: 7) {
                 let geometry = ActivityGrid.Geometry(width: available, square: square)
@@ -139,8 +141,10 @@ import Testing
         }
         // Narrower than one square: still the current week.
         #expect(ActivityGrid.Geometry(width: 5, square: .touch).weeks == 1)
-        #expect(ActivityGrid.Geometry(width: 0, square: .touch).height == 0)
-        #expect(ActivityGrid.Geometry(width: 0, square: .touch).width == 0)
+        // Before the width is known: no week, but the seven rows' height is already reserved.
+        let unknown = ActivityGrid.Geometry(width: 0, square: .touch)
+        #expect(unknown.weeks == 0 && unknown.width == 0 && unknown.height == 130)
+        #expect(ActivityGrid.Geometry(width: .infinity, square: .mac).weeks == 0)
     }
 
     @Test func daysSitByWeekdayWithTheNewestWeekTrailing() {
