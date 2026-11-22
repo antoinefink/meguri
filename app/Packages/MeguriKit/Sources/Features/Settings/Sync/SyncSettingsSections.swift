@@ -138,6 +138,8 @@ struct SyncServiceRows: View {
         // MP6.5: the control stays enabled while the provider is blocked.
         .disabled(changing || sync.providerState?.phase == .handoffRecovery || collection.meguriSignInPreparing || sync.meguriBusy)
         .accessibilityIdentifier("settings.sync.service")
+        // Synthetic examples only: open the confirmation the example names.
+        .task { if let request = sync.renderServiceSwitch { choose(request.destination) } }
         .sheet(isPresented: Binding(get: { destination != nil }, set: { if !$0 && !changing { destination = nil } })) {
             if let destination, let switchSource {
                 SyncServiceSwitchSheet(collection: collection, source: switchSource, destination: destination, changing: changing,

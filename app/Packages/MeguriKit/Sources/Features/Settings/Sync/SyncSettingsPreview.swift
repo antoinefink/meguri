@@ -16,9 +16,34 @@ public enum SyncSettingsPreview {
     }
 
     @MainActor public static func screen(_ state: SyncCoordinator.RenderState, page: Page = .settings,
+                                         serviceSwitch: SyncCoordinator.RenderServiceSwitch? = nil,
                                          configuration: LaunchConfiguration = .init()) -> some View {
         SyncSettingsPreviewScreen(collection: ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            sync: .renderFixture(state, clock: configuration.clock)), page: page)
+            sync: .renderFixture(state, clock: configuration.clock, serviceSwitch: serviceSwitch)), page: page)
+    }
+
+    /// The service change confirmation's examples (T19.2): the old service's
+    /// state, the new value, and invented facts about unsent work.
+    public enum ServiceSwitchExample: String, CaseIterable, Sendable {
+        case meguriOffUnknown, meguriOffKnown, meguriICloudUnknown
+        case iCloudOffNone, iCloudOffKnown, iCloudOffUnknown, iCloudMeguriKnown
+        public var state: SyncCoordinator.RenderState {
+            switch self {
+            case .meguriOffUnknown, .meguriOffKnown, .meguriICloudUnknown: .meguriConnected
+            default: .iCloudConnected
+            }
+        }
+        public var request: SyncCoordinator.RenderServiceSwitch {
+            switch self {
+            case .meguriOffUnknown: .init(destination: "localOnly", facts: .init(changes: .unknown))
+            case .meguriOffKnown: .init(destination: "localOnly", facts: .init(changes: .some, media: 3))
+            case .meguriICloudUnknown: .init(destination: "iCloud", facts: .init(changes: .unknown))
+            case .iCloudOffNone: .init(destination: "localOnly", facts: .init(changes: .count(0), heldBack: 0, media: 0))
+            case .iCloudOffKnown: .init(destination: "localOnly", facts: .init(changes: .count(12), heldBack: 3, media: 2))
+            case .iCloudOffUnknown: .init(destination: "localOnly", facts: .init(changes: .count(0), heldBack: 0, media: nil))
+            case .iCloudMeguriKnown: .init(destination: "meguri", facts: .init(changes: .count(12), heldBack: 0, media: 2))
+            }
+        }
     }
 }
 

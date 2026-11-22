@@ -15,6 +15,7 @@ extension TestHooks {
             registry.register("settings/sync/off") { settings(.off, $0) }
             registry.register("settings/sync/meguri-connected") { settings(.meguriConnected, $0) }
             registry.register("settings/sync/meguri-sign-in") { settings(.meguriSignIn, $0) }
+            registry.register("settings/sync/meguri-never-signed-in") { settings(.meguriNeverSignedIn, $0) }
             // MP6.5 (resume fix): setup's media step running, paused, and stopped after its automatic attempts.
             registry.register("settings/sync/meguri-setup-media") { settings(.meguriSetupMedia, $0) }
             registry.register("settings/sync/meguri-setup-media-paused") { settings(.meguriSetupMediaPaused, $0) }
@@ -64,6 +65,7 @@ extension TestHooks {
             registry.register("settings/sync/panel/meguri-choose-collection") { panel(.meguriNeedsYou, $0) }
             registry.register("settings/sync/panel/meguri-structure-upload") { panel(.meguriStructureUploadPending, $0) }
             registry.register("settings/sync/panel/meguri-blocked") { panel(.meguriBlocked, $0) }
+            registry.register("settings/sync/panel/meguri-never-signed-in") { panel(.meguriNeverSignedIn, $0) }
             registry.register("settings/sync/panel/icloud-up-to-date") { panel(.iCloudConnected, $0) }
             registry.register("settings/sync/panel/icloud-syncing") { panel(.iCloudSyncing, $0) }
             registry.register("settings/sync/panel/icloud-needs-you") { panel(.iCloudNeedsYou, $0) }
@@ -86,7 +88,18 @@ extension TestHooks {
             registry.register("settings/sync/window/meguri-setup-media") { window(.meguriSetupMedia, $0) }
             registry.register("settings/sync/window/meguri-setup-media-paused") { window(.meguriSetupMediaPaused, $0) }
             registry.register("settings/sync/window/meguri-connected") { window(.meguriConnected, $0) }
+            registry.register("settings/sync/window/meguri-never-signed-in") { window(.meguriNeverSignedIn, $0) }
+            registry.register("settings/sync/window/meguri-sign-in") { window(.meguriSignIn, $0) }
             registry.register("settings/sync/window/icloud-connected") { window(.iCloudConnected, $0) }
+            // T19.2: the service change confirmation, opened by the Service control
+            // over the Settings window (Mac) or the Settings page (touch).
+            registry.register("settings/sync/window/switch-meguri-off-unknown") { window(.meguriOffUnknown, $0) }
+            registry.register("settings/sync/window/switch-meguri-off-known") { window(.meguriOffKnown, $0) }
+            registry.register("settings/sync/window/switch-meguri-icloud-unknown") { window(.meguriICloudUnknown, $0) }
+            registry.register("settings/sync/window/switch-icloud-off-none") { window(.iCloudOffNone, $0) }
+            registry.register("settings/sync/window/switch-icloud-off-known") { window(.iCloudOffKnown, $0) }
+            registry.register("settings/sync/window/switch-icloud-off-unknown") { window(.iCloudOffUnknown, $0) }
+            registry.register("settings/sync/window/switch-icloud-meguri-known") { window(.iCloudMeguriKnown, $0) }
         }
         #if os(macOS)
         /// The Settings scene shows this collection in place of the app's while a
@@ -96,6 +109,7 @@ extension TestHooks {
             var collection: ReviewCollection?
             struct Opener: View {
                 let state: SyncCoordinator.RenderState
+                var serviceSwitch: SyncCoordinator.RenderServiceSwitch? = nil
                 let configuration: LaunchConfiguration
                 @Environment(\.openSettings) private var openSettings
                 var body: some View {
@@ -107,7 +121,8 @@ extension TestHooks {
                             // checks the route launches and stays up, without the window.
                             guard NSApp.activationPolicy() == .regular else { return }
                             let preview = ReviewCollection(configuration: configuration,
-                                navigation: AppNavigation(), sync: .renderFixture(state, clock: configuration.clock))
+                                navigation: AppNavigation(), sync: .renderFixture(state, clock: configuration.clock,
+                                    serviceSwitch: serviceSwitch))
                             // Whatever section was last chosen, the window opens at Sync.
                             preview.syncPresentation.settingsRequest = UUID()
                             SettingsWindowPreview.shared.collection = preview
@@ -122,6 +137,16 @@ extension TestHooks {
             .screen { SettingsWindowPreview.Opener(state: state, configuration: context.configuration) }
             #else
             settings(state, context)
+            #endif
+        }
+        private static func window(_ example: SyncSettingsPreview.ServiceSwitchExample,
+                                   _ context: RouteContext) -> InitialPresentation {
+            #if os(macOS)
+            .screen { SettingsWindowPreview.Opener(state: example.state, serviceSwitch: example.request,
+                                                   configuration: context.configuration) }
+            #else
+            .screen { SyncSettingsPreview.screen(example.state, serviceSwitch: example.request,
+                                                 configuration: context.configuration) }
             #endif
         }
         private static func panel(_ state: SyncCoordinator.RenderState, _ context: RouteContext) -> InitialPresentation {

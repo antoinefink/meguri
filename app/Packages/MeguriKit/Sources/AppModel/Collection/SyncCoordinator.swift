@@ -537,6 +537,8 @@ public final class SyncCoordinator {
     private static let round2Key = "meguri.sync.round2Migrated"
     /// Rendering fixtures only: no binding stands behind this value.
     private var renderConnected: Bool?
+    /// Synthetic examples only: the confirmation to open, and its facts.
+    public internal(set) var renderServiceSwitch: RenderServiceSwitch?
     private var renderChoice = false
     private var renderRetryMedia = false
     /// P25.3: on with no stored value. Written only when the person changes
@@ -561,6 +563,10 @@ public final class SyncCoordinator {
         case .meguriSignIn:
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
             meguriPhase = .signedOut; meguriEndpoint = "https://sync.example.test/"
+            renderConnected = false
+        case .meguriNeverSignedIn:
+            providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+            meguriPhase = .unconfigured; meguriEndpoint = ""
             renderConnected = false
         case .iCloudSelected:
             providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
@@ -5072,15 +5078,26 @@ extension SyncCoordinator {
         case meguriSetupMediaPaused, meguriSetupMediaStopped
         /// MP7 step 5: a note type structure save waits for Upload….
         case meguriStructureUploadPending
+        /// Meguri Sync chosen and never signed in on this device: no address, no account.
+        case meguriNeverSignedIn
     }
     /// Builds synthetic Sync section examples. The coordinator is never
     /// attached: it owns no collection, account, binding or server, and its
     /// actions find nothing to act on.
-    public static func renderFixture(_ state: RenderState, clock: AppClock = .system) -> SyncCoordinator {
+    public static func renderFixture(_ state: RenderState, clock: AppClock = .system,
+                                     serviceSwitch: RenderServiceSwitch? = nil) -> SyncCoordinator {
         let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in throw SyncOwnerFailure.configurationUnavailable },
             defaults: nil, clock: clock)
         sync.applyRenderFixture(state)
+        sync.renderServiceSwitch = serviceSwitch
         return sync
+    }
+    /// A synthetic example asks the Service control to open its confirmation
+    /// for `destination` ("localOnly", "meguri", "iCloud"), with invented facts.
+    public struct RenderServiceSwitch: Sendable, Equatable {
+        public let destination: String
+        public let facts: ServiceSwitchFacts
+        public init(destination: String, facts: ServiceSwitchFacts) { self.destination = destination; self.facts = facts }
     }
 }
 

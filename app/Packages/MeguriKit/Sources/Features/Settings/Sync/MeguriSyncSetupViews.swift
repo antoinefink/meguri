@@ -26,27 +26,20 @@ struct SyncServiceSwitchSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    if source == .iCloud, sync.providerState?.selection == .iCloud, let status = sync.status {
-                        if status.pending > 0 { Text(SyncText.format("sync.switch.pending", Int64(clamping: status.pending), oldService)) }
-                        if status.heldBack > 0 { Text(SyncText.format("sync.switch.heldBack", Int64(clamping: status.heldBack), oldService)) }
-                        if status.pending == 0 && status.heldBack == 0 { Text(SyncText.format("sync.switch.pending.none", oldService)) }
-                        if let files = SyncStatusCopy.sum(status.media.uploadFiles, status.media.downloadFiles) {
-                            if files > 0 { Text(SyncText.format("sync.switch.media", Int64(clamping: files), oldService)) }
-                        } else { Text(SyncText.format("sync.switch.media.unknown", oldService)) }
-                    } else {
-                        Text(SyncText.format(source == .meguri && sync.meguriRoutine == .pending ? "sync.switch.pending.some" : "sync.switch.pending.unknown", oldService))
-                        if let media = sync.meguriRoundReport?.media, case .media(let facts) = media.outcome,
-                           let excluded = facts.excluded, let pending = facts.pending, let awaiting = facts.awaiting,
-                           let local = SyncStatusCopy.sum(excluded, pending), let count = SyncStatusCopy.sum(local, awaiting) {
-                            if count > 0 { Text(SyncText.format("sync.switch.media", Int64(clamping: count), oldService)) }
-                        } else if let accounting = sync.meguriAccounting {
-                            let local = UInt64(accounting.files.filter { $0.state != .transferred }.count)
-                            if let count = SyncStatusCopy.sum(local, accounting.remotePending), count > 0 {
-                                Text(SyncText.format("sync.switch.media", Int64(clamping: count), oldService))
-                            }
-                        } else { Text(SyncText.format("sync.switch.media.unknown", oldService)) }
+                    let facts = sync.serviceSwitchFacts(source: source)
+                    switch facts.changes {
+                    case .count(let pending):
+                        if pending > 0 { Text(SyncText.format("sync.switch.pending", Int64(clamping: pending), oldService)) }
+                        if let held = facts.heldBack, held > 0 { Text(SyncText.format("sync.switch.heldBack", Int64(clamping: held), oldService)) }
+                        if pending == 0, facts.heldBack == 0 { Text(SyncText.format("sync.switch.pending.none", oldService)) }
+                        else if pending == 0, facts.heldBack == nil { Text(SyncText.format("sync.switch.pending.unknown", oldService)) }
+                    case .some: Text(SyncText.format("sync.switch.pending.some", oldService))
+                    case .unknown: Text(SyncText.format("sync.switch.pending.unknown", oldService))
                     }
-                    if sync.meguriStage == .acceptanceUnknown || sync.meguriRoutine == .acceptanceUnknown {
+                    if let files = facts.media {
+                        if files > 0 { Text(SyncText.format("sync.switch.media", Int64(clamping: files), oldService)) }
+                    } else { Text(SyncText.format("sync.switch.media.unknown", oldService)) }
+                    if facts.acceptanceUnknown {
                         Text(SyncText.value("sync.switch.acceptanceUnknown"))
                     }
                     Text(SyncText.format("sync.switch.kept", oldService))
