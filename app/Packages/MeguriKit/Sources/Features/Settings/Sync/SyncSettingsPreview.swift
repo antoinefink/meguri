@@ -65,20 +65,19 @@ private struct SyncSettingsPreviewScreen: View {
             }
             #else
             // Touch captures include the popover (the sheet at compact width): the real one.
-            NavigationStack {
-                Form {}
-                    .formStyle(.grouped)
-                    .toolbar { ToolbarItem(placement: .primaryAction) { CloudSyncStatusButton(collection: collection) } }
-                    .task { collection.syncPresentation.statusPresented = true }
-            }
+            statusPopover
             #endif
         case .statusPopover:
-            NavigationStack {
-                Form {}
-                    .formStyle(.grouped)
-                    .toolbar { ToolbarItem(placement: .primaryAction) { CloudSyncStatusButton(collection: collection) } }
-                    .task { collection.syncPresentation.statusPresented = true }
-            }
+            statusPopover
+        }
+    }
+    /// The status button in the toolbar, its popover (the sheet at compact width) open.
+    private var statusPopover: some View {
+        NavigationStack {
+            Form {}
+                .formStyle(.grouped)
+                .toolbar { ToolbarItem(placement: .primaryAction) { CloudSyncStatusButton(collection: collection) } }
+                .task { collection.syncPresentation.statusPresented = true }
         }
     }
     /// Invented counts for both sides (MP6.3 row 4); no core decided them.

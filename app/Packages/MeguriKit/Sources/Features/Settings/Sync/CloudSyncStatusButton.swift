@@ -15,8 +15,11 @@ public struct CloudSyncStatusButton: View {
     #if os(macOS)
     @Environment(\.openSettings) private var openSettings
     #endif
-    /// The panel's own height, which sizes the sheet it shows in on touch.
-    @State private var panelHeight: CGFloat?
+    #if os(iOS)
+    /// The panel's height in each presentation, whose widths differ: it sizes the sheet.
+    @State private var popoverHeight: CGFloat?
+    @State private var sheetHeight: CGFloat?
+    #endif
     public init(collection: ReviewCollection) { self.collection = collection }
     private var meguri: Bool { collection.sync.providerState?.selection == .meguri }
     /// T20.1: the service's name, or `sync.button.label.off` with no service.
@@ -64,15 +67,22 @@ public struct CloudSyncStatusButton: View {
             .disabled(collection.syncPresentation.statusHandoffPending)
             .popover(isPresented: presented(compact: false)) {
                 // N23.1: 320 points wide, as tall as its content.
+                #if os(iOS)
+                // Where the popover becomes a sheet (an iPhone held wide, the Duo
+                // opened), the sheet fits the panel and scrolls past the screen's
+                // height, as at compact width; as a popover it is as tall as the panel.
+                FittedPanelScroll(height: $popoverHeight) {
+                    panel.padding().frame(width: ContentWidth.primaryAction)
+                }
+                .frame(width: ContentWidth.primaryAction)
+                .frame(idealHeight: popoverHeight)
+                .presentationCompactAdaptation(.sheet)
+                .presentationDetents(Self.fittedDetents(popoverHeight))
+                #else
                 panel
                     .padding()
                     .frame(width: ContentWidth.primaryAction)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
-                    .presentationCompactAdaptation(.sheet)
-                    // Where the popover becomes a sheet (an iPhone held wide, the Duo
-                    // opened), the sheet fits the panel, as at compact width.
-                    .presentationDetents(fittedDetents)
+                #endif
             }
             #if os(iOS)
             // Keep status and connection separate; native dismissal, rather
@@ -85,13 +95,8 @@ public struct CloudSyncStatusButton: View {
                 // The same panel as the popover, in a sheet as tall as the panel
                 // (N23.1): the detent grows with the text and stops at the screen's
                 // height, where the panel scrolls.
-                ScrollView {
-                    panel
-                        .padding()
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
-                }
-                .scrollBounceBehavior(.basedOnSize)
-                .presentationDetents(fittedDetents)
+                FittedPanelScroll(height: $sheetHeight) { panel.padding() }
+                    .presentationDetents(Self.fittedDetents(sheetHeight))
                     .onAppear {
                         if nativeCompactStatusID == nil {
                             nativeCompactStatusID = collection.syncPresentation.statusPresentationID
@@ -107,8 +112,8 @@ public struct CloudSyncStatusButton: View {
     }
     /// One detent, the panel's height: no larger detent that would only show
     /// empty space. Until the panel is measured, the system's medium height.
-    private var fittedDetents: Set<PresentationDetent> {
-        panelHeight.map { [.height($0)] } ?? [.medium]
+    private static func fittedDetents(_ height: CGFloat?) -> Set<PresentationDetent> {
+        height.map { [.height($0)] } ?? [.medium]
     }
     private var panel: some View {
         SyncStatusPanel(collection: collection, openEntry: openStatusEntry,
@@ -144,3 +149,21 @@ public struct CloudSyncStatusButton: View {
         #endif
     }
 }
+
+#if os(iOS)
+/// The panel in a scroll view that reports the height it needs, its insets
+/// included (the sheet's safe area), so a sheet can be exactly that tall.
+private struct FittedPanelScroll<Content: View>: View {
+    @Binding var height: CGFloat?
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        ScrollView { content() }
+            .scrollBounceBehavior(.basedOnSize)
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom
+            } action: { _, needed in
+                if needed > 0 { height = needed }
+            }
+    }
+}
+#endif

@@ -134,6 +134,9 @@ public struct NoteTypesView: View {
                     // ⌘S is File › Save's (N4).
                     .disabled(model.selection.map { !model.canSave($0) } ?? true)
                     .accessibilityIdentifier("noteTypes.list.save")
+                } label: {
+                    // The group's title where the toolbar folds it into its overflow menu.
+                    Text("noteTypes.save", bundle: .module)
                 }
             }
         }

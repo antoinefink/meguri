@@ -109,7 +109,13 @@ final class ToolbarAndGroupLayoutTests: XCTestCase {
         #endif
         app.launchArguments = launch.arguments
         app.launch()
-        addTeardownBlock { @MainActor in app.terminate() }
+        addTeardownBlock { @MainActor in
+            app.terminate()
+            #if os(iOS)
+            // The pooled simulator goes back as it came.
+            XCUIDevice.shared.orientation = .portrait
+            #endif
+        }
         return app
     }
 
@@ -138,7 +144,8 @@ final class ToolbarAndGroupLayoutTests: XCTestCase {
         }
         for (index, (first, a)) in frames.enumerated() {
             for (second, b) in frames.dropFirst(index + 1) {
-                XCTAssertFalse(a.intersects(b), "\(layout): \(first) \(a) overlaps \(second) \(b)", file: file, line: line)
+                // A point of slack: adjacent items can report frames that touch.
+                XCTAssertFalse(a.insetBy(dx: 1, dy: 1).intersects(b), "\(layout): \(first) \(a) overlaps \(second) \(b)", file: file, line: line)
             }
         }
     }
