@@ -400,7 +400,7 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 ### N14.2 Tab-layout deck list
 
 - The toolbar has the sync status button, a Search button (`magnifyingglass`, `home.collection.search`) and one Add menu (`plus`): New Note and New Deck…. There is no Go to Deck or Create Deck button and no Study bar.
-- Search presents the system search field ("Search or Create a Deck") with the keyboard; until then the field stays out of the way. The title is N14.8's. Typing replaces the tree with the matching decks, using Go to Deck's filter: each shows its last name component with its parents as secondary text underneath, as Today does; a row opens that deck. When no deck has the typed name, a "Create deck named …" row opens the Create Deck sheet with the name filled in.
+- Search presents the system search field, with the system's own "Search" prompt (changed 2026-11-22; it read "Search or Create a Deck", N20.1), with the keyboard; until then the field stays out of the way. The title is N14.8's. Typing replaces the tree with the matching decks, using Go to Deck's filter: each shows its last name component with its parents as secondary text underneath, as Today does; a row opens that deck. When no deck has the typed name, a "Create deck named …" row opens the Create Deck sheet with the name filled in.
 - The query and the field's presentation are navigation state: a fold, an unfold or a layout switch keeps them.
 - The Go to Deck sheet stays for the sidebar layouts' toolbar, the "/" key and the Mac's Deck menu.
 - Replaces: N13.2's "Touch toolbar items have a symbol and a title" for this list, and N13.1's "Go to Deck and Create Deck stay with the list".
@@ -726,7 +726,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 
 ### N20.1 Deck search in the sidebar
 
-- Sidebar layouts (Mac, iPad at regular width): a search field at the top of the sidebar, in the system's sidebar placement for `.searchable`, with the prompt "Search or Create a Deck". It replaces the Go to Deck sheet.
+- Sidebar layouts (Mac, iPad at regular width): a search field at the top of the sidebar, in the system's sidebar placement for `.searchable`, with the system's own "Search" prompt. It replaces the Go to Deck sheet. Changed 2026-11-22 (Antoine: "what do you think of just having it be 'Search'?"; decided by Claude (coordinator) under his delegation; `decisions.md`, row `home.goToDeck` of 2026-11-22): the prompt read "Search or Create a Deck". Creating a deck from the field is unchanged: the "Create deck named …" row follows the results while no deck has the typed name, and New Deck… stays in the Add menu and the File menu (⇧⌘N).
 - Typing replaces the sidebar's list, the Today row included, with the results, as System Settings does. Each result is two lines: the deck's last name component over its parents in secondary text, joined with " › " (a top-level deck has no second line). Matching and order are the touch Search's (N14.2): `decks/deck-list` H6.1 and H6.2. Filtered decks are listed.
 - After the results, while `decks/decks` D18 finds no deck with the typed name: a row with the `plus` symbol, "Create deck named “<query>”". It opens N20.3's New Deck form with the query as the Name and Parent Deck None.
 - With no result and no create row, H6.3's one-line message shows.
@@ -828,7 +828,7 @@ The English text of the screens above. "New" marks text not used before this rou
 
 | Text | Where | |
 |---|---|---|
-| Search or Create a Deck | the sidebar search prompt (also N14.2's) | |
+| Search | the sidebar search prompt (also N14.2's): the system's own default prompt, no string of ours | changed 2026-11-22: it read "Search or Create a Deck" |
 | Create deck named “%@” | the search's last row; %@ is the typed text, between U+201C and U+201D | changed: the earlier text had no quotation marks |
 | ` › ` (space, U+203A, space) | between the components of every shown deck path | |
 | New Note | Add menu, File menu | |

@@ -228,8 +228,8 @@ screens:
     references: [search-tokens, sidebar]
     purpose: >-
       Find, open or create a deck by name (native-interface-contract N20.1, N14.2; decks/decks D18;
-      decided 2026-11-20). Mac and iPad: a search field at the top of the sidebar, prompt "Search or
-      Create a Deck", which replaces the Go to Deck sheet; typing replaces the sidebar's list with
+      decided 2026-11-20). Mac and iPad: a search field at the top of the sidebar, the system's
+      own "Search" prompt (changed 2026-11-22), which replaces the Go to Deck sheet; typing replaces the sidebar's list with
       the results. iPhone and the Duo: N14.2's Search button and field over the deck list. Each
       result is the deck's name over its parent path joined with " › " (decks/deck-list H6.2
       matching), then a "Create deck named “<query>”" row (plus symbol) while no deck has that name,
