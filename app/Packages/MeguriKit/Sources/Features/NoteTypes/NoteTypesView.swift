@@ -104,38 +104,47 @@ public struct NoteTypesView: View {
         }
         // N22.5: while a save job runs, one status item takes Revert and
         // Save's place; they return when it ends. A plain status, not a control,
-        // so it has no glass of its own.
-        if let id = model.selection, let progress = model.progress, progress.notetypeId == id, jobShown.shown(for: id) {
-            ToolbarItem(placement: .primaryAction) {
-                SaveStatusView(progress: progress, notes: model.typeCounts[id]?.notes)
-            }
-            .sharedBackgroundVisibility(.hidden)
-        } else {
-            // One group, so the two share the toolbar's one glass shape. Save is
-            // not prominent: it is disabled until there is a draft, and a tinted
-            // disabled button reads as broken.
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    model.confirmingRevert = true
-                } label: {
-                    Text("noteTypes.revert", bundle: .module)
-                }
-                .disabled(model.selection.map { !(model.isEdited($0) && model.editable($0)) } ?? true)
-                .accessibilityIdentifier("noteTypes.list.revert")
-                Button {
-                    model.save()
-                } label: {
-                    if let id = model.selection, model.saveAsks(id) {
-                        Text("noteTypes.saveAsks", bundle: .module)
-                    } else {
-                        Text("noteTypes.save", bundle: .module)
+        // so it has no glass of its own. One item either way, so the toolbar
+        // keeps its other items as the job starts and ends.
+        let running = runningProgress
+        ToolbarItem(placement: .primaryAction) {
+            if let running {
+                SaveStatusView(progress: running.progress, notes: model.typeCounts[running.id]?.notes)
+            } else {
+                // One control group: Revert and Save read as one pair in one shape.
+                // Save is not prominent: it is disabled until there is a draft, and
+                // a tinted disabled button reads as broken.
+                ControlGroup {
+                    Button {
+                        model.confirmingRevert = true
+                    } label: {
+                        Text("noteTypes.revert", bundle: .module)
                     }
+                    .disabled(model.selection.map { !(model.isEdited($0) && model.editable($0)) } ?? true)
+                    .accessibilityIdentifier("noteTypes.list.revert")
+                    Button {
+                        model.save()
+                    } label: {
+                        if let id = model.selection, model.saveAsks(id) {
+                            Text("noteTypes.saveAsks", bundle: .module)
+                        } else {
+                            Text("noteTypes.save", bundle: .module)
+                        }
+                    }
+                    // ⌘S is File › Save's (N4).
+                    .disabled(model.selection.map { !model.canSave($0) } ?? true)
+                    .accessibilityIdentifier("noteTypes.list.save")
                 }
-                // ⌘S is File › Save's (N4).
-                .disabled(model.selection.map { !model.canSave($0) } ?? true)
-                .accessibilityIdentifier("noteTypes.list.save")
             }
         }
+        .sharedBackgroundVisibility(running == nil ? .automatic : .hidden)
+    }
+
+    /// The selected note type's save job, once the toolbar shows it.
+    private var runningProgress: (id: Int64, progress: NoteTypesModel.Progress)? {
+        guard let id = model.selection, let progress = model.progress, progress.notetypeId == id,
+              jobShown.shown(for: id) else { return nil }
+        return (id, progress)
     }
     #endif
 }
@@ -213,26 +222,32 @@ struct SaveStatusView: View {
     @Environment(\.locale) private var locale
 
     var body: some View {
-        HStack(spacing: Spacing.xSmall) {
-            ProgressView().controlSize(.small)
-            ZStack(alignment: .leading) {
-                Group {
-                    Text("noteTypes.progress.syncing", bundle: .module)
-                    Text("noteTypes.progress.uploading", bundle: .module)
-                    Text(verbatim: widestCount)
-                }
-                .hidden()
-                Text(verbatim: current)
-            }
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
-            .lineLimit(1)
-            .fixedSize()
+        // Trailing, where Save was: the spinner sits just before the text.
+        ZStack(alignment: .trailing) {
+            ForEach(candidates, id: \.self) { text in line(text).hidden() }
+            line(current)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("noteTypes.saving", bundle: .module))
         .accessibilityValue(Text(verbatim: current))
         .accessibilityIdentifier("noteTypes.list.progress")
+    }
+
+    private func line(_ text: String) -> some View {
+        HStack(spacing: Spacing.xSmall) {
+            ProgressView().controlSize(.small)
+            Text(verbatim: text)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .fixedSize()
+    }
+
+    /// Every text this job can show, so the widest reserves the width.
+    private var candidates: [String] {
+        [NoteTypesStrings.text("noteTypes.progress.syncing", locale: locale),
+         NoteTypesStrings.text("noteTypes.progress.uploading", locale: locale), widestCount]
     }
 
     private var current: String {
