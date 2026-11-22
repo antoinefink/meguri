@@ -50,13 +50,14 @@ pub struct RetentionRecord {
 
 /// What a counted row adds: its group and its outcome (V4.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Outcome {
-    mature: bool,
-    passed: bool,
+pub(crate) struct Outcome {
+    pub(crate) mature: bool,
+    pub(crate) passed: bool,
 }
 
 /// V4.1: a rating, not a cram row, and Review or a long last interval.
-fn outcome(row: &StatsRow) -> Option<Outcome> {
+/// Also `stats/history-reads` H4.1's rows, which H7 counts by hour.
+pub(crate) fn outcome(row: &StatsRow) -> Option<Outcome> {
     let cram = row.kind == RevlogKind::Filtered && row.factor == 0;
     let eligible = row.kind == RevlogKind::Review || long_last_interval(row.last_ivl);
     (row.ease >= 1 && !cram && eligible).then_some(Outcome {

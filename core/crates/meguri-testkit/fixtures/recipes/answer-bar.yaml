@@ -1,0 +1,26 @@
+# Review answer area (N16.9): long cards that scroll under the answers, a
+# short one, and cards whose own styling paints a dark or a coloured page.
+recipe: answer-bar
+description: "Long, short, dark and coloured due cards for the review's answer area."
+now: "2030-01-15T10:00:00+01:00"
+decks:
+  - name: "Bar Long"
+    due: 2
+    tags: ["answer-bar"]
+    fields: ["Long question {n}", "<p>Line 1 of card {n}</p><p>Line 2 of card {n}</p><p>Line 3 of card {n}</p><p>Line 4 of card {n}</p><p>Line 5 of card {n}</p><p>Line 6 of card {n}</p><p>Line 7 of card {n}</p><p>Line 8 of card {n}</p><p>Line 9 of card {n}</p><p>Line 10 of card {n}</p><p>Line 11 of card {n}</p><p>Line 12 of card {n}</p><p>Line 13 of card {n}</p><p>Line 14 of card {n}</p><p>Line 15 of card {n}</p><p>Line 16 of card {n}</p><p>Line 17 of card {n}</p><p>Line 18 of card {n}</p><p>Line 19 of card {n}</p><p>Line 20 of card {n}</p><p>Line 21 of card {n}</p><p>Line 22 of card {n}</p><p>Line 23 of card {n}</p><p>Line 24 of card {n}</p><p>Line 25 of card {n}</p><p>Line 26 of card {n}</p><p>Line 27 of card {n}</p><p>Line 28 of card {n}</p><p>Line 29 of card {n}</p><p>Line 30 of card {n}</p><p id='last'>The last line {n}</p>"]
+  - name: "Bar Medium"
+    due: 2
+    tags: ["answer-bar"]
+    fields: ["Medium question {n}", "<p>Line 1 of card {n}</p><p>Line 2 of card {n}</p><p>Line 3 of card {n}</p><p>Line 4 of card {n}</p><p>Line 5 of card {n}</p><p>Line 6 of card {n}</p><p>Line 7 of card {n}</p><p>Line 8 of card {n}</p><p>Line 9 of card {n}</p><p>Line 10 of card {n}</p><p>Line 11 of card {n}</p><p>Line 12 of card {n}</p><p>Line 13 of card {n}</p><p>Line 14 of card {n}</p><p id='last'>The last line {n}</p>"]
+  - name: "Bar Short"
+    due: 2
+    tags: ["answer-bar"]
+    fields: ["Short question {n}", "<p id='last'>The last line {n}</p>"]
+  - name: "Bar Dark"
+    due: 2
+    tags: ["answer-bar"]
+    fields: ["<style>.card{background:#1c2541;color:#f2f2f2}</style>Dark question {n}", "<p>Line 1 of card {n}</p><p>Line 2 of card {n}</p><p>Line 3 of card {n}</p><p>Line 4 of card {n}</p><p>Line 5 of card {n}</p><p>Line 6 of card {n}</p><p>Line 7 of card {n}</p><p>Line 8 of card {n}</p><p>Line 9 of card {n}</p><p>Line 10 of card {n}</p><p>Line 11 of card {n}</p><p>Line 12 of card {n}</p><p>Line 13 of card {n}</p><p>Line 14 of card {n}</p><p>Line 15 of card {n}</p><p>Line 16 of card {n}</p><p>Line 17 of card {n}</p><p>Line 18 of card {n}</p><p>Line 19 of card {n}</p><p>Line 20 of card {n}</p><p>Line 21 of card {n}</p><p>Line 22 of card {n}</p><p>Line 23 of card {n}</p><p>Line 24 of card {n}</p><p>Line 25 of card {n}</p><p>Line 26 of card {n}</p><p>Line 27 of card {n}</p><p>Line 28 of card {n}</p><p>Line 29 of card {n}</p><p>Line 30 of card {n}</p><p id='last'>The last line {n}</p>"]
+  - name: "Bar Colour"
+    due: 2
+    tags: ["answer-bar"]
+    fields: ["<style>.card{background:#f6d365;color:#2b2b2b}</style>Colour question {n}", "<p>Line 1 of card {n}</p><p>Line 2 of card {n}</p><p>Line 3 of card {n}</p><p>Line 4 of card {n}</p><p>Line 5 of card {n}</p><p>Line 6 of card {n}</p><p>Line 7 of card {n}</p><p>Line 8 of card {n}</p><p>Line 9 of card {n}</p><p>Line 10 of card {n}</p><p>Line 11 of card {n}</p><p>Line 12 of card {n}</p><p>Line 13 of card {n}</p><p>Line 14 of card {n}</p><p>Line 15 of card {n}</p><p>Line 16 of card {n}</p><p>Line 17 of card {n}</p><p>Line 18 of card {n}</p><p>Line 19 of card {n}</p><p>Line 20 of card {n}</p><p>Line 21 of card {n}</p><p>Line 22 of card {n}</p><p>Line 23 of card {n}</p><p>Line 24 of card {n}</p><p>Line 25 of card {n}</p><p>Line 26 of card {n}</p><p>Line 27 of card {n}</p><p>Line 28 of card {n}</p><p>Line 29 of card {n}</p><p>Line 30 of card {n}</p><p id='last'>The last line {n}</p>"]

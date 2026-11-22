@@ -973,7 +973,9 @@ fn g6_each_card_record_encodes_and_decodes() {
         [d.integer().unwrap(), d.integer().unwrap(), d.integer().unwrap()],
         [i64::from(due.have_backlog), i64::from(due.daily_load), i64::from(due.due_tomorrow)]
     );
-    assert!(d.is_done() && due.have_backlog);
+    // H8's `future_due_young`.
+    assert_eq!(decoded_counts(&mut d), widened(&due.future_due_young));
+    assert!(d.is_done() && due.have_backlog && !due.future_due_young.is_empty());
 
     let counted = of(1).downcast_ref::<CardCountsRecord>().unwrap();
     let mut d = Decoder::new(&bytes[1]);
@@ -988,7 +990,11 @@ fn g6_each_card_record_encodes_and_decodes() {
         let written: Vec<(i64, String)> = labels.iter().map(|l| (l.label as i64, l.text.clone())).collect();
         assert_eq!(read, written);
     }
-    assert!(d.is_done());
+    // H8's `suspended_by_state`, its five type rows.
+    for value in &counted.suspended_by_state.values()[..5] {
+        assert_eq!(d.integer().unwrap(), i64::from(*value));
+    }
+    assert!(d.is_done() && counted.suspended_by_state.mature == 1);
 
     let intervals = of(2).downcast_ref::<IntervalsRecord>().unwrap();
     let mut d = Decoder::new(&bytes[2]);

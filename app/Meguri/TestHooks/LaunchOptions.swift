@@ -31,6 +31,7 @@ extension TestHooks {
     /// | `-MeguriRoute` | a route registered in `RouteRegistry`, e.g. `sample/sheet` |
     /// | `-MeguriBackgroundLaunch` | Mac only: `YES` or `NO`; in Debug, `YES` keeps the app out of the Dock and never active (`BackgroundLaunch`, which reads it itself; Profile ignores it). Not a UI-state option: it changes neither the restored state nor the window size |
     /// | `-MeguriStudyTimings` | `on` or `off` (default): a strip below the shell gives the last Study's way to its first card (`StudyStartTrace`, R1813) as `testhooks.studyStart.timings` |
+    /// | `-MeguriSyncRender` | a `SyncCoordinator.RenderState` name (`meguriConnected`, `meguriSyncing`, …), optionally followed by `+justFinished`: with `-MeguriFixture`, once the collection opens the shell shows that synthetic sync status in place of the real one; with a shell route, the shell gets the sync button over that status (captures of the sync button; nothing syncs) |
     struct LaunchOptions: Equatable {
         enum WindowSize: Equatable {
             case minimum, standard, large
@@ -66,12 +67,20 @@ extension TestHooks {
         var integrations: Bool?
         var route: Route?
         var studyTimings = false
+        var syncRender: SyncRender?
+
+        /// `-MeguriSyncRender`: the synthetic status the shell shows, and
+        /// whether the sync button shows a round that just finished.
+        struct SyncRender: Equatable {
+            var state: SyncCoordinator.RenderState
+            var justFinished = false
+        }
 
         static let prefix = "-Meguri"
         static let names = [
             "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
             "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "SizeClass",
-            "Integrations", "Route", "BackgroundLaunch", "ImportSource", "OwnedProviderFixture", "StudyTimings",
+            "Integrations", "Route", "BackgroundLaunch", "ImportSource", "OwnedProviderFixture", "StudyTimings", "SyncRender",
             "NativeReviewRoot", "NativeReviewCase", "NativeReviewPlatform", "NativeReviewFreezeSHA256", "NativeReviewFreezeBytes",
         ]
 
@@ -205,6 +214,17 @@ extension TestHooks {
             if let value = values["Route"] {
                 route = try Route(value)
             }
+            if let value = values["SyncRender"] {
+                let parts = value.split(separator: "+", maxSplits: 1).map(String.init)
+                guard let state = parts.first.flatMap(SyncCoordinator.RenderState.init(rawValue:)),
+                      parts.count == 1 || parts[1] == "justFinished" else {
+                    throw TestHookError("-MeguriSyncRender takes a render state name, optionally +justFinished, got '\(value)'")
+                }
+                guard (values["Fixture"] != nil) != (values["Route"] != nil) else {
+                    throw TestHookError("-MeguriSyncRender needs -MeguriFixture (over the opened collection) or a shell -MeguriRoute, not both")
+                }
+                syncRender = SyncRender(state: state, justFinished: parts.count == 2)
+            }
             if let value = values["BackgroundLaunch"] {
                 guard value == "YES" || value == "NO" else {
                     throw TestHookError("-MeguriBackgroundLaunch takes YES or NO, got '\(value)'")
@@ -328,9 +348,11 @@ extension TestHooks {
             guard let route else { return nil }
             switch try routes.resolve(route, configuration: configuration) {
             case let .presentation(presentation):
+                if syncRender != nil { throw TestHookError("-MeguriSyncRender with a route needs a shell route") }
                 configuration.initialPresentation = presentation
                 return nil
-            case let .shell(launch):
+            case var .shell(launch):
+                if let syncRender { SyncRoutes.addRender(syncRender, to: &launch.features, configuration: configuration) }
                 return launch
             }
         }

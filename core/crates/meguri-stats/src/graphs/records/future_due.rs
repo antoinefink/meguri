@@ -4,12 +4,14 @@
 //! presentation layer's.
 //!
 //! Encoding (G6): the day map (one integer member: cards), then
-//! `have_backlog` as 0 or 1, `daily_load`, due tomorrow.
+//! `have_backlog` as 0 or 1, `daily_load`, due tomorrow, then
+//! `future_due_young` as a day map like the first.
 
 use std::collections::BTreeMap;
 
 use meguri_model::card::{CardQueue, CardType};
 
+use super::card_counts::MATURE_IVL;
 use super::card_rules::{home_due, is_buried, tally, write_counts};
 use super::{GraphInput, GraphRecord, NotBuilt};
 use crate::graphs::encoding::Encoder;
@@ -21,8 +23,8 @@ const TIMESTAMP_ABOVE: i64 = 1_000_000_000;
 
 const DAY_SECS: i64 = 86_400;
 
-/// `stats/graphs-cards` C3.6 (the round 11 extra `future_due_young` is
-/// `stats/history-reads` H8, U288's).
+/// `stats/graphs-cards` C3.6, with the round 11 extra `future_due_young`
+/// of `stats/history-reads` H8 (not observed).
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct FutureDueRecord {
@@ -35,6 +37,10 @@ pub struct FutureDueRecord {
     pub daily_load: u32,
     /// Meguri's extra: the cards at day 1, with the backlog shown or hidden.
     pub due_tomorrow: u32,
+    /// H8: the `future_due` map counting only the cards with `ivl` below
+    /// 21 (learning and relearning cards by their stored `ivl`). Mature on
+    /// a day is `due_days` less this.
+    pub future_due_young: BTreeMap<i32, u32>,
 }
 
 /// C3.2: the day a home due `home` falls on.
@@ -54,6 +60,7 @@ pub(crate) fn build(input: &GraphInput<'_>) -> Result<FutureDueRecord, NotBuilt>
     // C3.2's day numbers subtract in signed 32 bits.
     let today = input.context.today as i32;
     let mut due_days = BTreeMap::new();
+    let mut future_due_young = BTreeMap::new();
     let mut load = 0.0f32;
     for card in input.scope.cards() {
         // C3.1: started cards that are not suspended.
@@ -68,6 +75,9 @@ pub(crate) fn build(input: &GraphInput<'_>) -> Result<FutureDueRecord, NotBuilt>
             continue;
         }
         tally(&mut due_days, day);
+        if card.ivl < MATURE_IVL {
+            tally(&mut future_due_young, day);
+        }
     }
     Ok(FutureDueRecord {
         have_backlog: due_days.keys().next().is_some_and(|day| *day < 0),
@@ -75,6 +85,7 @@ pub(crate) fn build(input: &GraphInput<'_>) -> Result<FutureDueRecord, NotBuilt>
         daily_load: load as u32,
         due_tomorrow: due_days.get(&1).copied().unwrap_or(0),
         due_days,
+        future_due_young,
     })
 }
 
@@ -88,6 +99,7 @@ impl GraphRecord for FutureDueRecord {
         out.integer(i64::from(self.have_backlog));
         out.integer(i64::from(self.daily_load));
         out.integer(i64::from(self.due_tomorrow));
+        write_counts(out, &self.future_due_young);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
