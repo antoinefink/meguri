@@ -64,7 +64,17 @@ licenses = json.loads(notice_bytes)['licenses']
 if not licenses:
     raise ValueError('Missing Cargo license inventory')
 for license in licenses:
-    if license['id'] not in accepted or not license.get('text', '').strip() or not license.get('used_by'):
+    # Mirror the crate-only CDLA allowance without expanding global acceptance.
+    certificate_data_license = (
+        license['id'] == 'CDLA-Permissive-2.0'
+        and len(license.get('used_by') or []) == 1
+        and tuple(license['used_by'][0]['crate'].get(key)
+                  for key in ('name', 'version', 'source')) == (
+            'webpki-root-certs', '1.0.12',
+            'registry+https://github.com/rust-lang/crates.io-index')
+    )
+    if ((license['id'] not in accepted and not certificate_data_license)
+            or not license.get('text', '').strip() or not license.get('used_by')):
         raise ValueError('Missing or unapproved Cargo license')
 (root / 'rust-notices.json').write_bytes(notice_bytes)
 (root / 'covered-source.tar').write_bytes(covered.getvalue())

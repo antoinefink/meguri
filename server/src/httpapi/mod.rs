@@ -342,6 +342,9 @@ async fn dispatch_browser(
     if !mutation(parts.uri.path()) {
         return Err(Error::new("route_not_found"));
     }
+    if parts.uri.path() == "/api/mcp/media-upload" {
+        return media_upload(service, parts, body, deadline).await;
+    }
     content_type(&parts.headers)?;
     if !service.admission_open().await? {
         return Err(Error::new("admission_closed"));
@@ -349,10 +352,29 @@ async fn dispatch_browser(
     let bytes = service.browser_ingress.read(body, deadline).await?;
     dispatch(service, parts, Some(&bytes)).await
 }
+/// Fixed route/header avoids capabilities or uploaded names in request paths.
+async fn media_upload(service: &Service, parts: &axum::http::request::Parts, body: &mut Body, deadline: tokio::time::Instant) -> Result<Response> {
+    if parts.headers.get_all("content-type").iter().count() != 1
+        || parts.headers.get("content-type").and_then(|v|v.to_str().ok()) != Some("application/octet-stream") {
+        return Err(Error::new("unsupported_content_type"));
+    }
+    if parts.headers.get_all("x-meguri-upload").iter().count() != 1 { return Err(Error::new("capability_invalid")); }
+    let id = parts.headers.get("x-meguri-upload").and_then(|v|v.to_str().ok()).ok_or(Error::new("capability_invalid"))?.to_owned();
+    let a = authority(service,&parts.headers).await?;
+    let socket = parts.extensions.get::<ConnectInfo<SocketAddr>>().ok_or(Error::new("internal_error"))?.0;
+    let (ip,_) = effective_peer(&parts.headers,socket,service);
+    service.attempts.capability(ip,&id)?;
+    service.check_media_upload(a.clone(),&id).await?;
+    let permit = service.media_upload_slot()?;
+    let bytes = service.browser_ingress.read_limit(body,deadline,crate::mcp_service::attachments::FILE_BYTES).await?;
+    service.accept_media_upload(a,id,bytes,permit).await?;
+    Ok(data(serde_json::json!({"uploaded":true}),false))
+}
 fn mutation(path: &str) -> bool {
     matches!(
         path,
-        "/api/setup"
+        "/api/mcp/media-upload"
+            | "/api/setup"
             | "/api/invitations/claim"
             | "/api/login"
             | "/api/logout"

@@ -16,10 +16,12 @@ public protocol CardBehaviorPresenting: AnyObject {
     func availability(of url: URL) -> CardURLAvailability
     func dialog(_ request: CardDialog, completion: @escaping @MainActor (CardDialogResult) -> Void) -> CardBehaviorPresentation?
     func open(_ request: CardOpenRequest) -> CardBehaviorPresentation?
+    func openAttachmentPDF(_ bytes: Data) -> CardBehaviorPresentation?
 }
 
 extension CardBehaviorPresenting {
     public var isActive: Bool { isAvailable }
+    public func openAttachmentPDF(_ bytes: Data) -> CardBehaviorPresentation? { nil }
 }
 
 public final class CardBehaviorPresentation {
@@ -41,6 +43,7 @@ public final class CardPageBehavior: NSObject, WKUIDelegate {
     private var pending: [UUID: Pending] = [:]
     private var opened: [CardBehaviorPresentation] = []
     private var epoch = UUID()
+    private var attachmentRead: Task<Void, Never>?
     private struct Pending {
         let finish: @MainActor (CardDialogResult?) -> Void
         var presentation: CardBehaviorPresentation?
@@ -54,6 +57,7 @@ public final class CardPageBehavior: NSObject, WKUIDelegate {
     }
     public func cancel() {
         epoch = UUID()
+        attachmentRead?.cancel(); attachmentRead = nil
         let old = pending; pending.removeAll()
         let presentations = opened; opened.removeAll()
         for item in old.values { item.presentation?.cancel(); item.finish(nil) }
@@ -64,6 +68,34 @@ public final class CardPageBehavior: NSObject, WKUIDelegate {
     }
     private func accepts(_ webView: WKWebView, frame: WKFrameInfo) -> Bool {
         page?.allowsDocumentCallback(from: webView, frame: frame) == true
+    }
+    func openAttachmentPDF(_ name: String) {
+        guard CardAttachmentPDF.accepts(name), active, let page, page.attachmentPDFAvailable,
+              let update = page.update, let resolver = page.mediaResolver,
+              let presenter, presenter.isAvailable, attachmentRead == nil else { return }
+        let epoch = epoch
+        let window = page.webView.window
+        attachmentRead = Task { [weak self, weak page, weak presenter, weak window] in
+            defer { if self?.epoch == epoch { self?.attachmentRead = nil } }
+            do {
+                let file = try await resolver.openAttachmentPDF(name)
+                let bytes: Data
+                do { bytes = try await file.attachmentPDFBytes() }
+                catch { await file.close(); throw error }
+                await file.close()
+                try Task.checkCancellation()
+                guard let self, let page, let presenter, self.matches(update, epoch),
+                      page.attachmentPDFAvailable, page.webView.window === window,
+                      page.mediaResolver === resolver, presenter.isAvailable else { return }
+                if let presentation = presenter.openAttachmentPDF(bytes) {
+                    if self.matches(update, epoch) {
+                        if self.opened.count == 16 { self.opened.removeFirst().cancel() }
+                        self.opened.append(presentation)
+                    }
+                    else { presentation.cancel() }
+                }
+            } catch { /* Unavailable attachments leave the review in place. */ }
+        }
     }
     func dialog(_ request: CardDialog, completion: @escaping @MainActor (CardDialogResult?) -> Void) {
         guard active, let page, let update = page.update, let presenter, presenter.isAvailable else { completion(nil); return }

@@ -4,7 +4,7 @@ mod policy;
 mod tokens;
 #[cfg(test)]
 mod tests;
-pub(crate) use policy::{Authorization, BOTH, READ, callback, client, form, required, resource, scopes};
+pub(crate) use policy::{Authorization, BOTH, READ, callback, client, direct_file_client, form, required, resource, scopes};
 use super::*;
 use rusqlite::TransactionBehavior;
 use serde::{Deserialize, Serialize};
@@ -225,6 +225,10 @@ impl Authority {
     pub(crate) fn grant_id(&self) -> &str { &self.grant }
     pub(crate) fn client_id(&self) -> &str { &self.client }
     pub(crate) fn can_write(&self) -> bool { self.write }
+    pub(crate) fn same_upload_binding(&self, other: &Self) -> bool {
+        self.id == other.id && self.generation == other.generation && self.data_epoch == other.data_epoch
+            && self.grant == other.grant && self.client == other.client && self.resource == other.resource && self.write && other.write
+    }
 }
 fn resolve_authority(c: &Connection, hash: [u8;32]) -> Result<Authority> {
     let mut authority = c.query_row("SELECT g.account_id,g.generation,g.id,g.client,g.resource,g.write_scope,t.expires_at FROM oauth_tokens t JOIN oauth_grants g ON g.id=t.grant_id JOIN accounts a ON a.id=g.account_id WHERE t.hash=?1 AND t.kind='access' AND t.consumed=0 AND t.expires_at>?2 AND g.expires_at>?2 AND g.revoked=0 AND a.enabled=1 AND a.provisioning_state='ready' AND a.generation=g.generation",
@@ -243,6 +247,15 @@ pub(crate) fn check_authority(c: &Connection, original: &Authority, write: bool)
         || a.client != original.client || a.resource != original.resource || a.write != original.write || a.expires != original.expires
     { return Err(Error::new("invalid_token")); }
     if write && !a.write { return Err(Error::new("insufficient_scope")); }
+    Ok(())
+}
+/// Pending browser uploads survive access-token rotation, but never their grant,
+/// credential generation, reset epoch, or grant expiry. No bearer is substituted.
+pub(crate) fn check_upload_binding(c: &Connection, original: &Authority) -> Result<()> {
+    admission(c)?;
+    let valid: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM oauth_grants g JOIN accounts a ON a.id=g.account_id WHERE g.id=?1 AND g.account_id=?2 AND g.generation=?3 AND g.client=?4 AND g.resource=?5 AND g.write_scope=1 AND g.revoked=0 AND g.expires_at>?6 AND a.generation=g.generation AND a.enabled=1 AND a.provisioning_state='ready')",
+        params![original.grant, original.id, original.generation, original.client, original.resource, now()], |r| r.get(0))?;
+    if !valid || crate::storage::reset::admitted_epoch(c, &original.id)? != original.data_epoch { return Err(Error::new("capability_invalid")); }
     Ok(())
 }
 impl Service {

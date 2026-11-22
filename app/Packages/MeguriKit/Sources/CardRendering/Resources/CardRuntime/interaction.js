@@ -78,6 +78,9 @@
       return;
     }
     if (signal === null || typeof signal !== "object" || typeof signal.signal !== "string") return;
+    // This capability is produced only by the isolated trusted-click observer.
+    // The public DOM-event tunnel must never be able to request it.
+    if (signal.signal === "openAttachmentPDF") return;
     switch (signal.signal) {
       case "started":
         paintOwner = null;
@@ -127,6 +130,21 @@
 
   // ---------------------------------------------------------------------------
   // What this world observes.
+
+  window.addEventListener("click", function (event) {
+    if (!event.isTrusted || window !== window.top || !identity
+        || location.href !== "meguri-media://media/") return;
+    const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+    const anchor = target && target.closest("a[href]");
+    if (!anchor) return;
+    const filename = anchor.getAttribute("href");
+    if (typeof filename !== "string" || filename.length !== 75
+        || !/^meguri-[0-9a-f]{64}\.pdf$/.test(filename)) return;
+    // A template may change <base>; raw basename admission alone is insufficient.
+    if (new URL(filename, document.baseURI).href !== "meguri-media://media/" + filename) return;
+    event.preventDefault();
+    observed({ signal: "openAttachmentPDF", filename: filename }, anchor);
+  }, true);
 
   // Failed loads of media and other subresources (R498). The runtime's own
   // preload copies are left out.

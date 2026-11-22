@@ -22,7 +22,7 @@ export_entries.update({name: (tarfile.DIRTYPE, 0o755, 0, 0, 0, '', 0, 0)
                        for name in ['dev', 'dev/pts', 'dev/shm', 'etc', 'proc', 'sys', 'usr',
                                     'usr/local', 'usr/local/bin', 'usr/share', 'usr/share/meguri-sync',
                                     'usr/share/meguri-sync/licenses', 'usr/share/meguri-sync/licenses/rust',
-                                    'usr/share/meguri-sync/web']})
+                                    'usr/share/meguri-sync/web', 'usr/share/meguri-sync/trust']})
 accepted_export_entries = {}
 with tarfile.open(archive) as image:
     for item in image:
@@ -69,7 +69,7 @@ for name in ['NOTICE', 'licenses/server-MIT.txt', 'licenses/web-MIT.txt', 'licen
              'licenses/rust/COPYRIGHT-library.html', 'rust-notice-inputs.sha256', 'web/runtime-notices.txt',
              'web/dependency-notices.txt', 'web/dependency-inventory.json', 'assets.json', 'release.jsonl',
              'target.txt', 'production-features.txt', 'static-packages.txt', 'static-compiler.txt',
-             'static-inputs.sha256', 'rustc.txt', 'elf.txt', 'executable.sha256', 'upstream-records.json']:
+             'static-inputs.sha256', 'trust-inputs.sha256', 'trust/ca-certificates.crt', 'licenses/ca-certificates.txt', 'rustc.txt', 'elf.txt', 'executable.sha256', 'upstream-records.json']:
     if not files.get(base + name, {}).get('bytes'):
         raise ValueError('Missing runtime evidence: ' + name)
 # Hashes are measured from the original pinned component, before copying, and
@@ -92,6 +92,15 @@ for line in notice_inputs:
     runtime = notice_sources.pop(source)
     if digest != files[base + runtime]['sha256']:
         raise ValueError('Runtime Rust notice differs from original component: ' + runtime)
+trust_sources = {'/etc/ssl/certs/ca-certificates.crt': 'trust/ca-certificates.crt',
+                 '/usr/share/doc/ca-certificates/copyright': 'licenses/ca-certificates.txt'}
+trust_inputs = (out / 'trust-inputs.sha256').read_text().splitlines()
+if len(trust_inputs) != len(trust_sources):
+    raise ValueError('Incomplete packaged trust inputs')
+for line in trust_inputs:
+    digest, source = line.split('  ', 1)
+    if source not in trust_sources or files[base + trust_sources.pop(source)]['sha256'] != digest:
+        raise ValueError('Packaged trust differs from build input')
 artifacts = [json.loads(line) for line in (out / 'release.jsonl').read_text().splitlines()]
 executables = [item for item in artifacts if item.get('reason') == 'compiler-artifact'
                and item.get('target', {}).get('name') == 'meguri-sync-server' and item.get('executable')]
@@ -109,12 +118,13 @@ if 'INTERP' in (out / 'elf.txt').read_text():
 # Node, Python, reference runtime, test client, compiler or credential is present.
 allowed_top = {'NOTICE', 'package-inputs.json', 'rust-notices.json', 'covered-source.tar', 'rustc.txt',
                'target.txt', 'production-features.txt', 'static-packages.txt', 'static-compiler.txt',
-               'static-inputs.sha256', 'rust-notice-inputs.sha256', 'release.jsonl', 'elf.txt', 'assets.json',
+               'static-inputs.sha256', 'trust-inputs.sha256', 'rust-notice-inputs.sha256', 'release.jsonl', 'elf.txt', 'assets.json',
                'executable.sha256', 'upstream-records.json'}
 allowed_extra = {'web/runtime-notices.txt', 'web/dependency-notices.txt', 'web/dependency-inventory.json',
                  'licenses/server-MIT.txt', 'licenses/web-MIT.txt', 'licenses/imported-components.txt',
                  'licenses/musl.txt', 'licenses/compiler-runtime.txt', 'licenses/GPL-3',
-                 'licenses/rust/COPYRIGHT.html', 'licenses/rust/COPYRIGHT-library.html'}
+                 'licenses/rust/COPYRIGHT.html', 'licenses/rust/COPYRIGHT-library.html',
+                 'trust/ca-certificates.crt', 'licenses/ca-certificates.txt'}
 for name in files:
     if name.startswith(base):
         relative = name[len(base):]

@@ -159,6 +159,7 @@ For a well-formed supported runtime message or confirmation, compare its emissio
 |---|---|
 | isolated signals `settled`, `shown`, `visible`, `updateFailed` | update/paint bookkeeping for the matching page/card/generation/side; failure reports diagnostics |
 | isolated `command` | Mac `ans` reveal on question; `play:q:N` or `play:a:N` single-entry AV playback; all other commands ignored and logged |
+| isolated `openAttachmentPDF` | native synced PDF viewer under [card behaviors B9](card-behaviors.md#b9-open-a-synced-pdf). Accept only an engine-trusted click. Require the exact generated filename in the bounded receipt and the current visible page, card, generation and side. |
 | isolated `error`, `mediaError` | bounded card-scoped diagnostics; C66 C12 fields, never native execution |
 | isolated `selection`, `focus`, `composition`, `typedText`, `listeners` | C66 current visible page interaction state only; no grading or collection mutation |
 | isolated pair-only `meguriReviewHost` | typed input/map/probe observations under `render/host-reports`; never admitted through the generic `meguriCard` page-event relay |
