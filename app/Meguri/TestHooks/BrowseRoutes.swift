@@ -41,11 +41,12 @@ extension TestHooks {
         enum State { case typical, filtered, today, table, notes, noResults, emptyCollection, error, large }
 
         @MainActor static func launch(_ state: State) -> ShellLaunch {
-            let session = SampleSearchSession(cards: switch state {
+            let cards = switch state {
             case .emptyCollection: 0
             case .large: 150_000
             default: 1_204
-            }, fails: state == .error)
+            }
+            let session = SampleSearchSession(cards: cards, fails: state == .error)
             let model = BrowseModel(backend: SampleBrowseBackend(session: session))
             BrowseScrollDriver.shared.model = model
             let expansion = SampleDeckExpansion()
