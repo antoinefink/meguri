@@ -1036,11 +1036,14 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` ro
 - View › Note Types ⇧⌘T; File › New Note Type… (no key). ⇧⌘N stays New Deck…. R282's and R915's ⇧⌘N for Note Types are superseded.
 - iPhone and the Duo folded: Settings › Collection › Note Types and the Filters menu of Browse push the list; no tab.
 - Under about 1,100 points the sidebar hides itself while the Cards tab shows, as Mail and Xcode do with their navigators.
+- Nothing flashes (added 2026-11-22, after Antoine's report from the Mac app; decided by Claude (coordinator) under his delegation): choosing another note type keeps the shown one on screen until the new one's fields can draw, then the detail changes in one step; the title changes at once. A wait longer than about half a second shows a progress indicator over the old content, never an empty page. After Save or Reload the version shown stays, read-only, until the note type is read again. The rows beside the selection, and on iPad the rows on screen, are read ahead with pure reads. The issues list says "No issues" only once its reads have answered.
 - Changed 2026-11-22 (U281 iPad): on iPad the note type list is the section's root (large title, the system search field as its filter) and a note type opens as a navigation step with its own page (N22.7), instead of the list beside the detail. Accepted by Claude (coordinator) under Antoine's delegation, after the built app was compared in landscape and portrait.
 
 ### N22.2 Fields tab (2B)
 
 A native `Table` (Name, Sort, Used On, Notes with a share indicator) with drag reordering, + and − under it, and an inspector beside it holding Name, Collapsed in Editor, Right-to-Left and Placeholder (`notetypes/workspace` W4). No Advanced group in this version. A deleted field is crossed out until Save.
+
+Changed 2026-11-22 (Antoine's annotation on the Mac toolbar with the inspector open; decided by Claude (coordinator) under his delegation): the inspector's toggle is the last item of the window's toolbar, at its trailing end, as in Pages and Xcode. While the inspector shows, Revert and Save and then the toggle sit in the toolbar above the inspector; while it is hidden they trail the detail's toolbar, which then reaches the window's edge. Fields | Cards stays the detail's centred control. The order at the trailing end is the sync status (when it is there), Revert and Save, then the toggle.
 
 ### N22.3 Cards tab (4B, 5A)
 

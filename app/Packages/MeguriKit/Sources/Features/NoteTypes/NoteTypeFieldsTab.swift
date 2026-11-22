@@ -30,7 +30,8 @@ struct NoteTypeFieldsTab: View {
     let id: Int64
     /// Empty: field order, with no sort indicator. A header click sorts the view.
     @State private var sortOrder: [KeyPathComparator<FieldLine>] = []
-    @State private var showsInspector = true
+    /// The save job's status, as the toolbar shows it (N22.5).
+    @State private var jobShown = SaveJobShown()
     @State private var columns = TableColumnCustomization<FieldLine>()
     @Environment(\.locale) private var locale
 
@@ -72,22 +73,18 @@ struct NoteTypeFieldsTab: View {
             Divider()
             bottomBar
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showsInspector.toggle()
-                } label: {
-                    Label { Text(LocalizedStringKey(showsInspector ? "noteTypes.inspector.hide" : "noteTypes.inspector.show"), bundle: .module) }
-                        icon: { Image(systemName: "sidebar.trailing") }
-                }
-                .help(Text(LocalizedStringKey(showsInspector ? "noteTypes.inspector.hide" : "noteTypes.inspector.show"), bundle: .module))
-                .accessibilityIdentifier("noteTypes.fields.inspectorToggle")
-            }
-        }
-        .inspector(isPresented: $showsInspector) {
+        .inspector(isPresented: $model.inspectorShown) {
             NoteTypeFieldInspector(model: model, id: id)
                 .inspectorColumnWidth(min: Self.inspectorMinimum, ideal: Self.inspectorIdeal, max: Self.inspectorMaximum)
+                // The toolbar above the inspector, at the window's trailing end, as in
+                // Apple's apps: Revert and Save, then the toggle. Hidden, the inspector's
+                // toggle and Revert and Save trail the detail's toolbar (`NoteTypesView`).
+                .toolbar {
+                    NoteTypeSaveToolbar(model: model, running: jobShown.running(in: model))
+                    ToolbarItem(placement: .primaryAction) { InspectorToggle(model: model) }
+                }
         }
+        .task(id: model.progress?.notetypeId) { await SaveJobShown.follow(model.progress?.notetypeId, into: $jobShown) }
     }
 
     private static let inspectorMinimum: CGFloat = 240

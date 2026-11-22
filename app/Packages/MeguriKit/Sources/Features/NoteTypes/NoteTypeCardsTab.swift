@@ -345,7 +345,9 @@ struct NoteTypeCardFieldRows: View {
     }
 
     var body: some View {
-        ForEach(model.draft(id)?.keptRows ?? []) { row in
+        // Their own identities: the card types above share the list, and a field's
+        // row id must never be taken for a card type's.
+        ForEach(model.draft(id)?.keptRows ?? [], id: \.fieldListID) { row in
             let unused = used.map { !$0.contains(row.id) } ?? false
             Text(verbatim: row.name)
                 .foregroundStyle(unused ? .secondary : .primary)
@@ -370,6 +372,11 @@ struct NoteTypeCardFieldRows: View {
         guard let card = model.shownCard(id), model.cardPart != .styling else { return }
         model.request(id, card: card, part: model.cardPart, .insert(.field(name)))
     }
+}
+
+extension NoteTypeFieldRow {
+    /// A field's identity in the card types column's list.
+    nonisolated fileprivate var fieldListID: String { "field.\(id)" }
 }
 
 // MARK: The editor column (W6, W7)

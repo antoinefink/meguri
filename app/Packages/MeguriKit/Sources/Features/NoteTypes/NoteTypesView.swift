@@ -112,11 +112,31 @@ public struct NoteTypesView: View {
             .disabled(model.selection == nil)
             .accessibilityIdentifier("noteTypes.list.tabs")
         }
-        // N22.5: while a save job runs, one status item takes Revert and
-        // Save's place; they return when it ends. A plain status, not a control,
-        // so it has no glass of its own. One item either way, so the toolbar
-        // keeps its other items as the job starts and ends.
-        let running = runningProgress
+        // Revert and Save trail the detail's toolbar; with the Fields tab's
+        // inspector shown they sit above it instead, before its toggle, at
+        // the window's trailing end (`NoteTypeFieldsTab`).
+        if !inspectorHoldsSave {
+            NoteTypeSaveToolbar(model: model, running: jobShown.running(in: model))
+            if model.tab == .fields, model.selection != nil {
+                ToolbarItem(placement: .primaryAction) { InspectorToggle(model: model) }
+            }
+        }
+    }
+
+    private var inspectorHoldsSave: Bool { model.tab == .fields && model.inspectorShown && model.selection != nil }
+    #endif
+}
+
+/// Revert and Save (N22.5), or while a save job runs, one status item in
+/// their place; they return when it ends. A plain status, not a control,
+/// so it has no glass of its own. One item either way, so the toolbar
+/// keeps its other items as the job starts and ends.
+struct NoteTypeSaveToolbar: ToolbarContent {
+    let model: NoteTypesModel
+    /// The selected note type's save job, once the toolbar shows it.
+    let running: (id: Int64, progress: NoteTypesModel.Progress)?
+
+    var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             if let running {
                 SaveStatusView(progress: running.progress, notes: model.typeCounts[running.id]?.notes)
@@ -152,14 +172,24 @@ public struct NoteTypesView: View {
         }
         .sharedBackgroundVisibility(running == nil ? .automatic : .hidden)
     }
+}
 
-    /// The selected note type's save job, once the toolbar shows it.
-    private var runningProgress: (id: Int64, progress: NoteTypesModel.Progress)? {
-        guard let id = model.selection, let progress = model.progress, progress.notetypeId == id,
-              jobShown.shown(for: id) else { return nil }
-        return (id, progress)
+/// The Fields tab's inspector toggle, last in the window's toolbar, as in
+/// Apple's apps: above the inspector while it shows, at the toolbar's
+/// trailing end while it is hidden.
+struct InspectorToggle: View {
+    @Bindable var model: NoteTypesModel
+
+    var body: some View {
+        let key: LocalizedStringKey = model.inspectorShown ? "noteTypes.inspector.hide" : "noteTypes.inspector.show"
+        Button {
+            model.inspectorShown.toggle()
+        } label: {
+            Label { Text(key, bundle: .module) } icon: { Image(systemName: "sidebar.trailing") }
+        }
+        .help(Text(key, bundle: .module))
+        .accessibilityIdentifier("noteTypes.fields.inspectorToggle")
     }
-    #endif
 }
 
 /// When the toolbar shows a running save job (N22.5): half a second after it
@@ -169,6 +199,12 @@ struct SaveJobShown: Equatable {
     private var id: Int64?
 
     func shown(for notetypeId: Int64) -> Bool { id == notetypeId }
+
+    /// The selected note type's save job, once the toolbar shows it.
+    @MainActor func running(in model: NoteTypesModel) -> (id: Int64, progress: NoteTypesModel.Progress)? {
+        guard let id = model.selection, let progress = model.progress, progress.notetypeId == id, shown(for: id) else { return nil }
+        return (id, progress)
+    }
 
     /// The job whose status has shown already: a view that appears while it
     /// runs (the iPad page pushed again) shows the status at once.

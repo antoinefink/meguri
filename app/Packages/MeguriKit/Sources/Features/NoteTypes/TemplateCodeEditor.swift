@@ -360,6 +360,11 @@ struct TemplateCodeEditor: NSViewRepresentable {
                 let origin = textView.textContainerOrigin, side = Self.swatch.side
                 well.frame = NSRect(x: origin.x + rect.minX - side - Spacing.xSmall / 2,
                                     y: origin.y + baseline - Self.swatch.centre - side / 2, width: side, height: side)
+                // The well draws at its own size: its bounds take that size, so the
+                // drawing scales into the side and stays on its line.
+                let natural = well.fittingSize
+                let drawn = max(natural.width, natural.height, side)
+                well.bounds = NSRect(x: 0, y: 0, width: drawn, height: drawn)
                 well.color = .swatch(value)
                 well.tag = index
                 well.isEnabled = textView.isEditable

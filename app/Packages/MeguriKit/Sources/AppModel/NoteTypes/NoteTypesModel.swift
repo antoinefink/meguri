@@ -88,6 +88,9 @@ public final class NoteTypesModel {
     }
     /// iPad: the field whose options show in a popover.
     public var optionsField: Int?
+    /// Mac: the Fields tab's inspector shows (N22.2). While it does, Revert,
+    /// Save and its toggle sit in the toolbar above it, at the window's end.
+    public var inspectorShown = true
     public private(set) var records: [Int64: NotetypeRecord] = [:]
     public private(set) var recordFailed: Set<Int64> = []
     public private(set) var typeCounts: [Int64: NotetypeRemovalCounts] = [:]
