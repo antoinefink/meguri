@@ -2332,8 +2332,6 @@ lint_first_sandbox() {
   : >"$STUB_LOG"
   mkdir -p "$SB/app"
   cp "$REPO_ROOT/app/.swiftlint.yml" "$SB/app/"
-  # The sandbox holds none of the files the repository's allowlist names.
-  write_file tools/lint-ui/allowlist.tsv '# No entries in the sandbox.'
   write_file app/Packages/MeguriKit/Package.swift '// swift-tools-version: 6.2'
   write_file app/Packages/MeguriKit/Sources/CardRendering/CardFace.swift 'import SwiftUI
 
