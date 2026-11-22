@@ -18,6 +18,9 @@ final class HomeBesideTodayTests: XCTestCase {
         XCTAssertTrue(cell(app, holding: "home.today.row").waitForSelected(), "Today's row is the list's selection")
         XCTAssertFalse(cell(app, holding: "home.deck.row.2").isSelected)
         XCTAssertTrue(app.staticTexts["home.collection.decksHeader"].exists, "The decks sit under their own header")
+        // N26.6: the column draws no title; "Decks" is the section header only.
+        XCTAssertFalse(app.navigationBars.staticTexts["Decks"].exists, "The column beside Today has no drawn title")
+        XCTAssertFalse(app.staticTexts["Meguri"].exists, "The column beside Today does not carry the app's name")
         app.terminate()
 
         // Deck 2 is a subdeck ("Japanese::Vocabulary" under deck 1): its row comes through

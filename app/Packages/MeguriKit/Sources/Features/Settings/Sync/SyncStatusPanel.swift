@@ -15,12 +15,16 @@ struct SyncStatusSymbol: View {
     /// The panel and the Sync section draw it in the secondary colour, the
     /// toolbar in its own, Sync Off excepted; needs you is orange everywhere (N23.2).
     var secondary = false
+    /// N23.6: the toolbar's check, for a moment after a sync the person started
+    /// from the button succeeds: the accent colour, then the default again.
+    var accented = false
     var body: some View {
         let glyph = Image(systemName: SyncSymbol.glyph(status.symbol, iCloud: iCloud))
             // Only the moving symbol ever turns, whatever drives `turning`.
             .symbolEffect(.rotate, options: .repeating, isActive: turning && status.symbol == SyncSymbol.moving)
         Group {
             if status.needsYou { glyph.foregroundStyle(.orange) }
+            else if accented, status.symbol == SyncSymbol.upToDate { glyph.foregroundStyle(.tint) }
             else if secondary || status.symbol == SyncSymbol.off { glyph.foregroundStyle(.secondary) }
             else { glyph }
         }
@@ -41,7 +45,10 @@ struct SyncStatusPanel: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     #endif
     private var sync: SyncCoordinator { collection.sync }
-    private var slot: SyncPanel.Slot {
+    private var slot: SyncPanel.Slot { Self.slot(collection) }
+    /// N23.3's action place, which the toolbar button's tap also reads (N23.6).
+    @MainActor static func slot(_ collection: ReviewCollection) -> SyncPanel.Slot {
+        let sync = collection.sync
         let status = sync.mainStatus
         let offered = status.action.map {
             SyncStatusActionButton.offered($0, collection: collection, inPanel: true)

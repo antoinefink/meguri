@@ -1,8 +1,10 @@
-//! Statistics: review aggregates, heatmap and streaks, graphs, Card Info and
-//! the widget snapshot.
+//! Statistics: review aggregates, heatmap and streaks, graphs, the Statistics
+//! page's request, Card Info and the widget snapshot.
 
 pub mod card_info;
 pub mod graphs;
+pub mod history;
+pub mod page;
 pub mod text;
 
 use meguri_engine::{Collection, EngineError};

@@ -134,7 +134,8 @@ pub trait DerivedComponent: Send + Sync + 'static {
     fn release(&self) {}
 
     /// Called once at start with the component's handle to its derived
-    /// writer, for a component that owns files (D1).
+    /// writer: for a component that owns files (D1), or asks for its own
+    /// rebuild ([`ComponentHandle::rebuild`]).
     fn attach(&self, handle: ComponentHandle) {
         let _ = handle;
     }
@@ -177,6 +178,16 @@ impl ComponentHandle {
     /// replaced change nothing.
     pub fn rebuild_if_named(&self, names: Vec<String>) {
         let _ = self.sender.send(Msg::RebuildIfNamed(self.slot, names));
+    }
+
+    /// The component's content no longer serves its readers although its
+    /// rows are current (`stats/history-reads` H14.3: kept for another day
+    /// boundary phase): when it is ready, it gets `ready` 0 and a queued
+    /// rebuild, held as D4's `deferred until` holds any refresh. A component
+    /// that is not ready is unchanged: its refresh is already queued or
+    /// running, or it failed.
+    pub fn rebuild(&self) {
+        let _ = self.sender.send(Msg::Rebuild(self.slot));
     }
 }
 
@@ -397,6 +408,8 @@ enum Msg {
     Sweep(usize),
     /// A component's [`ComponentHandle::rebuild_if_named`].
     RebuildIfNamed(usize, Vec<String>),
+    /// A component's [`ComponentHandle::rebuild`].
+    Rebuild(usize),
     Flush(SyncSender<()>),
     Suspend(SyncSender<()>),
     ReleaseForSuspend(SyncSender<Result<(), EngineError>>),
@@ -439,6 +452,10 @@ struct SlotView {
     /// The refresh allowed to publish progress.
     refresh: Option<u64>,
     last_progress: Option<Duration>,
+    /// Stale with no refresh to come before the next bind or invalidation:
+    /// its refresh failed twice in a row (D7), or the store let go of its
+    /// file (D6).
+    failed: bool,
 }
 
 struct SharedState {
@@ -481,6 +498,9 @@ impl Shared {
         cause: Option<Seq>,
     ) {
         let view = &mut state.slots[slot];
+        if readiness != Readiness::Stale {
+            view.failed = false;
+        }
         if view.generation == generation && view.readiness == readiness {
             return;
         }
@@ -550,6 +570,7 @@ impl DerivedHostBuilder {
                 readiness: Readiness::Stale,
                 refresh: None,
                 last_progress: None,
+                failed: false,
             })
             .collect();
         let shared = Arc::new(Shared {
@@ -571,12 +592,10 @@ impl DerivedHostBuilder {
         });
         let (sender, inbox) = mpsc::channel();
         for (slot, component) in shared.components.iter().enumerate() {
-            if shared.registry.schemas()[slot].files.is_some() {
-                component.attach(ComponentHandle {
-                    sender: sender.clone(),
-                    slot,
-                });
-            }
+            component.attach(ComponentHandle {
+                sender: sender.clone(),
+                slot,
+            });
         }
         let worker = Worker::new(Arc::clone(&shared), inbox, sender.clone());
         let writer = shared
@@ -657,6 +676,20 @@ impl DerivedHost {
                 generation: slot.generation,
                 readiness: slot.readiness.clone(),
             })
+    }
+
+    /// Whether `component` is `Stale` with no refresh to come before the
+    /// next bind or invalidation: its refresh failed twice in a row (D7),
+    /// the store let go of its file or could not open it (D5, D6), or the
+    /// store closed (D11). A consumer then reads without it.
+    pub fn has_failed(&self, component: &str) -> bool {
+        let state = self.shared.lock();
+        state.closed
+            || state
+                .slots
+                .iter()
+                .find(|slot| slot.name == component)
+                .is_some_and(|slot| slot.failed)
     }
 
     /// Whether `component` is `Ready` for `generation`: it follows the
@@ -934,7 +967,13 @@ impl OpenStep for HostPort {
                     seq,
                 });
             }
-            Err(error) => tracing::warn!(%error, "the derived store cannot read the collection mark"),
+            Err(error) => {
+                tracing::warn!(%error, "the derived store cannot read the collection mark");
+                // No bind follows: no refresh can run for this open.
+                for view in &mut self.shared.lock().slots {
+                    view.failed = true;
+                }
+            }
         }
         Ok(())
     }
@@ -1272,6 +1311,7 @@ impl Worker {
             }
             Msg::Sweep(slot) => self.sweep_files(slot),
             Msg::RebuildIfNamed(slot, names) => self.rebuild_if_named(slot, names),
+            Msg::Rebuild(slot) => self.rebuild_slot(slot),
             Msg::Release(name, ack) => {
                 if let Some(slot) = self.slot_of(&name) {
                     self.persist_slot(slot);
@@ -1388,6 +1428,10 @@ impl Worker {
             }
         }
         let Some(verdicts) = self.open_file(&collection, mark, seq) else {
+            // No refresh can run before the next bind or replacement.
+            for view in &mut self.shared.lock().slots {
+                view.failed = true;
+            }
             return;
         };
         let generation = collection.generation();
@@ -1425,6 +1469,8 @@ impl Worker {
                     Readiness::Stale
                 }
             };
+            state.slots[slot].failed = false;
+            self.failures[slot] = 0;
             self.shared.set_readiness(&mut state, slot, generation, readiness, None);
         }
     }
@@ -1637,6 +1683,7 @@ impl Worker {
                 self.shared
                     .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);
             }
+            state.slots[slot].failed = true;
         }
     }
 
@@ -1713,6 +1760,7 @@ impl Worker {
     /// Queues a refresh of `slot` once and publishes `Stale`.
     fn queue_refresh(&mut self, slot: usize, kind: Kind, cause: Option<Seq>) {
         self.slots[slot] = SlotState::Queued;
+        self.shared.lock().slots[slot].failed = false;
         if !self.queue.iter().any(|queued| queued.slot == slot) {
             self.queue.push_back(Queued { slot, kind, cause });
         }
@@ -1749,6 +1797,7 @@ impl Worker {
             if let Some(Err(error)) = staged {
                 tracing::warn!(component = %schema.name, %error, "creating the staging tables");
                 self.slots[slot] = SlotState::Failed;
+                self.shared.lock().slots[slot].failed = true;
                 return;
             }
         }
@@ -1969,11 +2018,12 @@ impl Worker {
 
     fn fail(&mut self, slot: usize, cause: Option<Seq>) {
         self.slots[slot] = SlotState::Failed;
+        let mut state = self.shared.lock();
         if let Some(generation) = self.generation {
-            let mut state = self.shared.lock();
             self.shared
                 .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);
         }
+        state.slots[slot].failed = true;
     }
 
     /// Stops the running refresh: its builder lets go of its reader at its
@@ -2066,6 +2116,7 @@ impl Worker {
             } else {
                 self.slots[slot] = SlotState::Failed;
             }
+            state.slots[slot].failed = !usable;
             state.slots[slot].refresh = None;
             self.shared
                 .set_readiness(&mut state, slot, generation, Readiness::Stale, None);
@@ -2108,6 +2159,9 @@ impl Worker {
                 kind: Kind::Rebuild,
                 cause,
             });
+            // A new recovery: one retry again (D7).
+            self.failures[slot] = 0;
+            state.slots[slot].failed = false;
             self.shared
                 .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);
         }
@@ -2210,6 +2264,18 @@ impl Worker {
             return;
         }
         tracing::warn!(component = %schema.name, "a live derived file does not load: rebuilding");
+        if let Err(error) = self.clear_ready(&[slot]) {
+            tracing::warn!(%error, "the derived store cannot record that a component is stale");
+            self.unbind(None);
+            return;
+        }
+        self.queue_refresh(slot, Kind::Rebuild, None);
+    }
+
+    fn rebuild_slot(&mut self, slot: usize) {
+        if self.slots[slot] != SlotState::Ready {
+            return;
+        }
         if let Err(error) = self.clear_ready(&[slot]) {
             tracing::warn!(%error, "the derived store cannot record that a component is stale");
             self.unbind(None);

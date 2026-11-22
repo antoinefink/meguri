@@ -164,6 +164,8 @@ enum Resolved {
 pub struct StatsCaches {
     shared: Arc<cache::Shared>,
     memo: Mutex<Option<Memo>>,
+    /// The `stats_history` component's state (`stats/history-reads` H14).
+    history: Arc<crate::history::Shared>,
 }
 
 impl Default for StatsCaches {
@@ -223,6 +225,7 @@ impl StatsCaches {
         StatsCaches {
             shared: Arc::default(),
             memo: Mutex::new(None),
+            history: Arc::default(),
         }
     }
 
@@ -231,7 +234,19 @@ impl StatsCaches {
         StatsColumns::new(Arc::clone(&self.shared))
     }
 
-    fn drop_memo(&self) {
+    /// The `stats_history` component (`stats/history-reads` H14), for the
+    /// derived host's builder.
+    pub fn history_component(&self) -> crate::history::StatsHistory {
+        crate::history::StatsHistory::new(Arc::clone(&self.history))
+    }
+
+    pub(crate) fn history_shared(&self) -> &crate::history::Shared {
+        &self.history
+    }
+
+    /// Drops the memo (G8.3): a newer refresh's first request, the page's
+    /// one request (`crate::page`) included, drops it whatever it returns.
+    pub(crate) fn drop_memo(&self) {
         *self.memo.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
@@ -391,6 +406,35 @@ impl StatsCaches {
             browse_scope,
             records,
         })))
+    }
+
+    /// The Statistics page's request (`crate::page`, U293): [`Self::resolve`]
+    /// on `snapshot` with `context`, with no memo. `Err` holds the result
+    /// that stops the request (a scope error, `unreadable_row`, Cancelled).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn resolve_scope(
+        &self,
+        derived: &DerivedHost,
+        snapshot: &Snapshot<'_>,
+        context: &Context,
+        scope: &Scope,
+        history: History,
+        columns: Columns,
+        cancel: &Arc<CancelToken>,
+    ) -> Result<Result<(Arc<ScopeData>, BrowseScope), GraphResult>, StatsError> {
+        let request = GraphRequest {
+            scope: scope.clone(),
+            history,
+            graphs: Vec::new(),
+            refresh: 0,
+            context: None,
+            cancel: Arc::clone(cancel),
+            columns,
+        };
+        Ok(match self.resolve(derived, snapshot, context, scope, &request)? {
+            Resolved::Scope(data, browse) => Ok((data, browse)),
+            Resolved::Stop(result) => Err(result),
+        })
     }
 
     /// G2, G3, G4 and Q2 on the snapshot: the scope's cards and window
