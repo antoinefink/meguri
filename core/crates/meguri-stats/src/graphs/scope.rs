@@ -128,6 +128,31 @@ pub struct ScopeRow {
     pub card: Option<i64>,
 }
 
+/// The ids a resolved scope reads (G3's window, or a narrower span), and
+/// the ids its view holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Span {
+    /// The first id the rows read.
+    pub start: i64,
+    /// The first id past them; none for no upper end.
+    pub end: Option<i64>,
+    /// The first id the view holds: every row at or after it, and before
+    /// `end`, is in the view (`i64::MIN` for the caches, which hold every
+    /// row).
+    pub view_from: i64,
+}
+
+impl Span {
+    /// G3's window, its view holding the window's rows only.
+    pub(crate) fn window(start: i64) -> Span {
+        Span {
+            start,
+            end: None,
+            view_from: start,
+        }
+    }
+}
+
 /// The resolved scope of one request (G8.3's memo): the scope's cards and
 /// its rows in the history window, over one view of the copies.
 #[derive(Debug)]
@@ -140,12 +165,16 @@ pub struct ScopeData {
     /// The patch's cards in the scope.
     patched: HashSet<i64>,
     window_start: i64,
+    /// The first id past the rows read; none for no upper end.
+    window_end: Option<i64>,
+    /// The first id the view holds (see [`Span::view_from`]).
+    view_from: i64,
     first_row: usize,
     from_caches: bool,
 }
 
 impl ScopeData {
-    pub(crate) fn new(view: View, membership: &Membership, window_start: i64, from_caches: bool) -> ScopeData {
+    pub(crate) fn new(view: View, membership: &Membership, span: Span, from_caches: bool) -> ScopeData {
         let cards = &view.cards;
         let patch = &view.patch;
         let slots = (0..cards.slots())
@@ -163,16 +192,57 @@ impl ScopeData {
             .iter()
             .filter_map(|(id, card)| card.filter(|card| membership.holds(card)).map(|_| *id))
             .collect();
-        let first_row = view.revlog.lower_bound(window_start);
+        let first_row = view.revlog.lower_bound(span.start);
         ScopeData {
             collection: matches!(membership, Membership::All),
             view,
             slots,
             patched,
-            window_start,
+            window_start: span.start,
+            window_end: span.end,
+            view_from: span.view_from,
             first_row,
             from_caches,
         }
+    }
+
+    /// The same scope's cards over the same view, reading the rows from
+    /// `start` on with no upper end (`stats/history-reads` H9, H11 read all
+    /// history whatever the window); `None` when the view does not hold
+    /// them. Its first unreadable row is checked again by the caller.
+    pub(crate) fn rows_from(&self, start: i64) -> Option<ScopeData> {
+        // A view read from the snapshot with an upper end lacks the rows
+        // past it; the caches hold every row.
+        let cut = self.window_end.is_some() && self.view_from > i64::MIN;
+        if start < self.view_from || cut {
+            return None;
+        }
+        Some(ScopeData {
+            view: self.view.clone(),
+            collection: self.collection,
+            slots: self.slots.clone(),
+            patched: self.patched.clone(),
+            window_start: start,
+            window_end: None,
+            view_from: self.view_from,
+            first_row: self.view.revlog.lower_bound(start),
+            from_caches: self.from_caches,
+        })
+    }
+
+    /// Whether an id is in the rows read.
+    fn in_span(&self, id: i64) -> bool {
+        id >= self.window_start && self.window_end.is_none_or(|end| id < end)
+    }
+
+    /// The patch rows in the span.
+    fn patch_rows(&self) -> std::collections::btree_map::Range<'_, i64, RowRead> {
+        use std::ops::Bound;
+        let start = self.window_start;
+        // `range` refuses a start past its end: an empty span reads
+        // `start..start`.
+        let end = self.window_end.map_or(Bound::Unbounded, |end| Bound::Excluded(end.max(start)));
+        self.view.patch.rows.range((Bound::Included(start), end))
     }
 
     fn selected(&self, key: Option<CardKey>) -> bool {
@@ -219,13 +289,13 @@ impl ScopeData {
             .revlog
             .bad()
             .iter()
-            .filter(|bad| bad.id >= self.window_start && !patch.hidden.contains(&bad.id))
+            .filter(|bad| self.in_span(bad.id) && !patch.hidden.contains(&bad.id))
             .filter(|bad| {
                 let card = patch.attach.get(&bad.id).copied().or(bad.cid);
                 self.row_counts(card.and_then(|card| self.view.key_of(card)))
             })
             .map(|bad| (bad.id, bad.column))
-            .chain(patch.rows.range(self.window_start..).filter_map(|(id, row)| match row {
+            .chain(self.patch_rows().filter_map(|(id, row)| match row {
                 RowRead::Bad(bad) if self.row_counts(bad.cid.and_then(|card| self.view.key_of(card))) => {
                     Some((*id, bad.column))
                 }
@@ -251,8 +321,14 @@ impl ScopeData {
         Rows {
             data: self,
             next: self.first_row,
-            patched: self.view.patch.rows.range(self.window_start..).peekable(),
+            patched: self.patch_rows().peekable(),
         }
+    }
+
+    /// [`Self::rows`], each with its card's `did` and `odid` now, read from
+    /// the copies (no lookup by card id).
+    pub(crate) fn rows_with_decks(&self) -> RowsWithDecks<'_> {
+        RowsWithDecks(self.rows())
     }
 
     /// The window's first id (G3).
@@ -277,6 +353,41 @@ impl Iterator for Rows<'_> {
     type Item = ScopeRow;
 
     fn next(&mut self) -> Option<ScopeRow> {
+        self.next_keyed().map(|(row, _)| row)
+    }
+}
+
+/// [`ScopeData::rows_with_decks`].
+pub(crate) struct RowsWithDecks<'d>(Rows<'d>);
+
+impl Iterator for RowsWithDecks<'_> {
+    /// The row, and its card's `did` and `odid` now (none for a deleted
+    /// card's row).
+    type Item = (ScopeRow, Option<(i64, i64)>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (row, key) = self.0.next_keyed()?;
+        let view = &self.0.data.view;
+        let decks = key.and_then(|key| match key {
+            CardKey::Slot(slot) => match view.cards.decks(slot) {
+                (Some(did), Some(odid)) => Some((did, odid)),
+                _ => None,
+            },
+            CardKey::Patched(id) => match view.patch.cards.get(&id) {
+                Some(Some(card)) => match card.decks() {
+                    (Some(did), Some(odid)) => Some((did, odid)),
+                    _ => None,
+                },
+                _ => None,
+            },
+        });
+        Some((row, decks))
+    }
+}
+
+impl Rows<'_> {
+    /// The next row with the key of its card now.
+    fn next_keyed(&mut self) -> Option<(ScopeRow, Option<CardKey>)> {
         let data = self.data;
         let revlog = &data.view.revlog;
         let patch = &data.view.patch;
@@ -285,7 +396,9 @@ impl Iterator for Rows<'_> {
             while !patch.hidden.is_empty() && self.next < revlog.len() && patch.hidden.contains(&revlog.id(self.next)) {
                 self.next += 1;
             }
-            let base = (self.next < revlog.len()).then(|| revlog.id(self.next));
+            let base = (self.next < revlog.len())
+                .then(|| revlog.id(self.next))
+                .filter(|id| data.window_end.is_none_or(|end| *id < end));
             let patched = self.patched.peek().map(|(id, _)| **id);
             let (row, card) = match (base, patched) {
                 (None, None) => return None,
@@ -306,10 +419,11 @@ impl Iterator for Rows<'_> {
             if let Some(row) = row
                 && data.row_counts(card)
             {
-                return Some(ScopeRow {
+                let scoped = ScopeRow {
                     row,
                     card: data.card_id(card),
-                });
+                };
+                return Some((scoped, card));
             }
         }
     }

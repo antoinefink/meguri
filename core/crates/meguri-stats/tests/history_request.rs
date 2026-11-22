@@ -32,13 +32,8 @@ const DAY: i64 = 86_400;
 const DAY_MS: i64 = DAY * 1_000;
 const WAIT: Duration = Duration::from_secs(120);
 
-/// The parts whose units have not landed (U288, U291).
-const PENDING: [Part; 4] = [
-    Part::StudiedToday,
-    Part::RetentionByDay,
-    Part::ByDeck,
-    Part::ActivityDays,
-];
+/// The parts whose units have not landed: none now.
+const PENDING: [Part; 0] = [];
 
 fn every_part() -> Vec<Part> {
     Part::all().collect()
@@ -228,13 +223,15 @@ fn h15_parts_equal_the_engine_and_the_history_read_for_their_context() {
                     other => panic!("{other:?}"),
                 }
             }
-            // By Answer is the Reviews record's H6 members.
+            // By Answer counts the Reviews record's rows (H6): every rated
+            // row on its day, the others in `unrated`.
             let reviews: ReviewsRecord = record(&cached, Part::Reviews);
             match value(&cached, Part::ByAnswer) {
                 PartValue::ByAnswer(by_answer) => {
-                    assert_eq!(by_answer.count_by_answer, reviews.count_by_answer);
-                    assert_eq!(by_answer.time_by_answer, reviews.time_by_answer);
-                    assert_eq!(by_answer.unrated, reviews.unrated);
+                    let rated: i64 = by_answer.count_by_answer.values().flatten().sum();
+                    let counted: i64 = reviews.count.values().map(|kinds| kinds.values().iter().sum::<i64>()).sum();
+                    assert_eq!(rated + by_answer.unrated as i64, counted, "{scope:?} {history:?}");
+                    assert!(by_answer.count_by_answer.keys().all(|day| reviews.count.contains_key(day)));
                 }
                 other => panic!("{other:?}"),
             }
@@ -384,19 +381,23 @@ fn h15_an_unreadable_row_in_the_window_fails_every_part_outside_only_the_history
     assert!(messages.is_empty());
     let (messages, end) = run(&f.host, &page_request(Scope::Collection, History::Last12Months, &every_part()));
     assert_eq!(end, PageEnd::Complete);
+    // H18: the parts that read all history fail alone (H2, H11), and the
+    // header carries no `oldest_day` (H9).
+    let all_history = |part: Part| {
+        matches!(part, Part::CardStatesOverTime | Part::Started | Part::ActivityDays | Part::KnowledgeOverTime)
+    };
     for part in Part::all().filter(|p| !PENDING.contains(p)) {
         match outcome(&messages, part) {
             PartOutcome::Failed(PartFailure::UnreadableRow(row)) => {
-                assert!(matches!(part, Part::CardStatesOverTime | Part::Started | Part::KnowledgeOverTime), "{part:?}");
+                assert!(all_history(part), "{part:?}");
                 assert_eq!(*row, bad);
             }
-            PartOutcome::Data(_) => assert!(
-                !matches!(part, Part::CardStatesOverTime | Part::Started | Part::KnowledgeOverTime),
-                "{part:?}"
-            ),
+            PartOutcome::Data(_) => assert!(!all_history(part), "{part:?}"),
             other => panic!("{part:?}: {other:?}"),
         }
     }
+    let header = &parts_of(&messages)[0].header;
+    assert_eq!(header.oldest_day, page::OldestDay::Unavailable(PartFailure::UnreadableRow(bad)));
 }
 
 #[test]

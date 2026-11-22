@@ -33,16 +33,23 @@ use meguri_engine::{CancelToken, Collection, DerivedHost};
 use meguri_sched::model::sched_config::SchedConfig;
 use meguri_storage::ReaderRole;
 
-use crate::graphs::records::reviews::{Answers, ReviewsRecord};
 use crate::graphs::records::{self, Graph, GraphInput, NotBuilt, Record};
 use crate::graphs::{
-    BrowseScope, Columns, Context, ContextToken, GraphResult, History, Preferences, Scope, ScopeError, StatsCaches,
-    StatsError, Unreadable,
+    BrowseScope, Columns, Context, ContextToken, GraphResult, History, Preferences, Scope, ScopeData, ScopeError,
+    StatsCaches, StatsError, Unreadable,
 };
 use crate::history::{
     self, CardStatesOverTime, HistoryRequest, HistoryResult, KnowledgeOverTime, KnowledgeRequest, KnowledgeResult, Progress,
     StartedPart,
 };
+use crate::parts::activity::{self, ActivityDaysPart};
+use crate::parts::by_deck::ByDeckPart;
+use crate::parts::decks::{self, DeckEntry, Retentions};
+use crate::parts::log::{self, LogInputs, LogParts};
+use crate::parts::retention_by_day::RetentionByDayPart;
+use crate::parts::studied_today::{self, StudiedTodayPart};
+
+pub use crate::parts::by_answer::{Answers, ByAnswerPart};
 
 /// The three tiers of `stats/statistics-page` S10.1, in the order the core
 /// returns them.
@@ -56,9 +63,9 @@ pub enum Tier {
     Knowledge = 3,
 }
 
-/// A part of the page request: H5's list, with By Answer as a part of its
-/// own (the spec owner is moving it out of the `reviews` record for G6's
-/// size limit; until then it reads H6's members of that record).
+/// A part of the page request: H5's list, with By Answer (H6) as a part of
+/// its own beside the `reviews` record (decided by the coordinator for G6's
+/// size limit: the record keeps Anki's members only).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Part {
     CardCounts,
@@ -85,23 +92,33 @@ pub enum Part {
 /// Where a part's value comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Source {
-    /// An Anki record with its round 11 extras (G5, H6 to H8).
+    /// An Anki record with its round 11 extras (G5, H7, H8).
     Graph(Graph),
-    /// H6's members of the `reviews` record.
+    /// H6: the rows `reviews` counts, by answer.
     ByAnswer,
+    /// H12: the strip's numbers, from the snapshot by id range.
+    StudiedToday,
+    /// H3.4 and H4: retention and Forgotten per day.
+    RetentionByDay,
+    /// H10: the table per deck.
+    ByDeck,
+    /// H11: the activity of every year.
+    ActivityDays,
     /// H2's read of the `stats_history` component.
     History,
     /// H3's knowledge (U290).
     Knowledge,
     /// A part whose unit has not landed: it fails alone with
-    /// [`PartFailure::NotBuilt`]. The unit named plugs it in here.
+    /// [`PartFailure::NotBuilt`]. The unit named plugs it in here. None is
+    /// pending now (Knowledge has a source of its own).
+    #[allow(dead_code)]
     Pending(&'static str),
 }
 
 /// Each part: its name (H5's), its tier, its source, and whether it is one
 /// of G5's Meguri parts, which run with the Collection and Deck scopes only
 /// (H1: a Search scope gives `unsupported_scope` for that part). By Answer
-/// is H6's extra of an Anki record, so it follows the record's scopes.
+/// reads the `reviews` record's rows, so it follows that record's scopes.
 const PARTS: [(Part, &str, Tier, Source, bool); 19] = [
     (Part::CardCounts, "card_counts", Tier::Present, Source::Graph(Graph::CardCounts), false),
     (Part::FutureDue, "future_due", Tier::Present, Source::Graph(Graph::FutureDue), false),
@@ -109,18 +126,18 @@ const PARTS: [(Part, &str, Tier, Source, bool); 19] = [
     (Part::Stability, "stability", Tier::Present, Source::Graph(Graph::Stability), false),
     (Part::Difficulty, "difficulty", Tier::Present, Source::Graph(Graph::Difficulty), false),
     (Part::Retrievability, "retrievability", Tier::Present, Source::Graph(Graph::Retrievability), false),
-    (Part::StudiedToday, "studied_today", Tier::Present, Source::Pending("U288 (H12)"), true),
+    (Part::StudiedToday, "studied_today", Tier::Present, Source::StudiedToday, true),
     (Part::Reviews, "reviews", Tier::ReviewLog, Source::Graph(Graph::Reviews), false),
     (Part::ByAnswer, "by_answer", Tier::ReviewLog, Source::ByAnswer, false),
     (Part::Retention, "retention", Tier::ReviewLog, Source::Graph(Graph::Retention), false),
-    (Part::RetentionByDay, "retention_by_day", Tier::ReviewLog, Source::Pending("U288 (H3.4, H4)"), true),
+    (Part::RetentionByDay, "retention_by_day", Tier::ReviewLog, Source::RetentionByDay, true),
     (Part::Hours, "hours", Tier::ReviewLog, Source::Graph(Graph::Hourly), false),
     (Part::Buttons, "buttons", Tier::ReviewLog, Source::Graph(Graph::AnswerButtons), false),
     (Part::Added, "added", Tier::ReviewLog, Source::Graph(Graph::Added), false),
     (Part::CardStatesOverTime, "card_states_over_time", Tier::ReviewLog, Source::History, true),
     (Part::Started, "started", Tier::ReviewLog, Source::History, true),
-    (Part::ByDeck, "by_deck", Tier::ReviewLog, Source::Pending("U291 (H10)"), true),
-    (Part::ActivityDays, "activity_days", Tier::ReviewLog, Source::Pending("U288 (H11)"), true),
+    (Part::ByDeck, "by_deck", Tier::ReviewLog, Source::ByDeck, true),
+    (Part::ActivityDays, "activity_days", Tier::ReviewLog, Source::ActivityDays, true),
     (Part::KnowledgeOverTime, "knowledge_over_time", Tier::Knowledge, Source::Knowledge, true),
 ];
 
@@ -222,19 +239,9 @@ pub enum OldestDay {
     Day(i32),
     /// The scope has no such row.
     NoRows,
-    /// Not known: an unreadable row of the scope outside the window (H18),
-    /// or not built yet (U288).
+    /// Not known: an unreadable row of the scope outside the window (H18:
+    /// `UnreadableRow`), or a failure reading the rows of all history.
     Unavailable(PartFailure),
-}
-
-/// By Answer (H6): the rows `reviews` counts with `ease` 1 to 4, per day
-/// index, by answer (index 0 is Again).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ByAnswerPart {
-    pub count_by_answer: BTreeMap<i32, Answers>,
-    pub time_by_answer: BTreeMap<i32, Answers>,
-    /// The rows `reviews` counts with another `ease`, in the window.
-    pub unrated: u64,
 }
 
 /// A part's value.
@@ -243,6 +250,14 @@ pub enum PartValue {
     /// The Anki record of the part's graph (G6), with its H6 to H8 extras.
     Record(Record),
     ByAnswer(ByAnswerPart),
+    /// H12 (`studied_today`).
+    StudiedToday(StudiedTodayPart),
+    /// H3.4 and H4 (`retention_by_day`).
+    RetentionByDay(RetentionByDayPart),
+    /// H10 (`by_deck`).
+    ByDeck(ByDeckPart),
+    /// H11 (`activity_days`).
+    ActivityDays(ActivityDaysPart),
     CardStates(CardStatesOverTime),
     Started(StartedPart),
     /// H3.3's estimate, with its `failed` cards in it.
@@ -352,7 +367,7 @@ fn run(
     let utc_offset_secs = clock.utc_offset_at(now_ms).seconds();
     let zone = clock.zone_id();
     derived.flush()?;
-    let (header, scope_data) = {
+    let (header, scope_data, reads) = {
         let lease = collection.reader(ReaderRole::Query)?;
         let snapshot = lease.snapshot()?;
         let context = Context {
@@ -381,6 +396,15 @@ fn run(
             Err(_) if cancel.is_cancelled() => return Ok(PageEnd::Cancelled),
             Err(error) => return Err(error.into()),
         };
+        // H9 and H11 read the scope's rows of all history on this snapshot,
+        // whatever the window: an unreadable one outside it fails only them
+        // (H15, H18).
+        let all_rows = all_history_rows(&data);
+        let oldest_day = match &all_rows {
+            Ok(all) => activity::oldest_day(all, context.next_day_at).map_or(OldestDay::NoRows, OldestDay::Day),
+            Err(failure) => OldestDay::Unavailable(failure.clone()),
+        };
+        let reads = SnapshotReads::read(&snapshot, &scope, &context, &parts, all_rows);
         let header = PageHeader {
             token: ContextToken {
                 refresh: request.refresh,
@@ -391,13 +415,9 @@ fn run(
             context,
             preferences,
             browse_scope,
-            // U288 (H9) computes it here, on this snapshot, before the
-            // first part: G9's columns give the scope's first row with
-            // `id` ≥ 0, and an unreadable row outside the window makes it
-            // `Unavailable(UnreadableRow)` (H18).
-            oldest_day: OldestDay::Unavailable(PartFailure::NotBuilt),
+            oldest_day,
         };
-        (Arc::new(header), data)
+        (Arc::new(header), data, reads)
     };
     if cancel.is_cancelled() {
         return Ok(PageEnd::Cancelled);
@@ -421,6 +441,8 @@ fn run(
     let mut built: BTreeMap<Graph, Result<Record, NotBuilt>> = BTreeMap::new();
     let mut record = |graph: Graph| built.entry(graph).or_insert_with(|| records::compute(graph, &input)).clone();
     let mut history_read: Option<HistoryRead> = None;
+    let mut log: Option<LogParts> = None;
+    let sources: Vec<Source> = parts.iter().map(|part| part.source()).collect();
     let history_parts: Vec<Part> = parts.iter().copied().filter(|p| p.source() == Source::History).collect();
 
     for part in parts {
@@ -435,17 +457,33 @@ fn run(
                     Ok(record) => PartOutcome::Data(PartValue::Record(record)),
                     Err(NotBuilt(_)) => PartOutcome::Failed(PartFailure::NotBuilt),
                 },
-                Source::ByAnswer => match record(Graph::Reviews) {
-                    Ok(record) => match record.as_any().downcast_ref::<ReviewsRecord>() {
-                        Some(reviews) => PartOutcome::Data(PartValue::ByAnswer(ByAnswerPart {
-                            count_by_answer: reviews.count_by_answer.clone(),
-                            time_by_answer: reviews.time_by_answer.clone(),
-                            unrated: reviews.unrated,
-                        })),
-                        None => PartOutcome::Failed(PartFailure::NotBuilt),
-                    },
-                    Err(NotBuilt(_)) => PartOutcome::Failed(PartFailure::NotBuilt),
+                Source::StudiedToday => match &reads.studied {
+                    Some(Ok(studied)) => PartOutcome::Data(PartValue::StudiedToday(*studied)),
+                    Some(Err(failure)) => PartOutcome::Failed(failure.clone()),
+                    None => PartOutcome::Failed(PartFailure::Failed("the strip's numbers were not read".into())),
                 },
+                Source::ByAnswer | Source::RetentionByDay | Source::ByDeck | Source::ActivityDays => {
+                    // One pass over the rows for all four (`crate::parts::log`).
+                    let computed = log.get_or_insert_with(|| {
+                        let wanted = |source: Source| sources.contains(&source);
+                        log::compute(&LogInputs {
+                            window: scope_data.as_ref(),
+                            all: reads
+                                .all_rows
+                                .as_ref()
+                                .ok()
+                                .filter(|_| !searching && wanted(Source::ActivityDays))
+                                .map(|all| all.as_ref()),
+                            page_scope: &scope,
+                            history: request.history,
+                            next_day_at: header.context.next_day_at,
+                            by_answer: wanted(Source::ByAnswer),
+                            retentions: read_value(&reads.retentions),
+                            decks: read_value(&reads.decks).map(|decks| decks.as_slice()),
+                        })
+                    });
+                    log_outcome(part, computed, &reads)
+                }
                 Source::History => {
                     let read = match &history_read {
                         Some(read) => read,
@@ -489,6 +527,106 @@ impl Sink<'_> {
     fn send(&mut self, message: PageMessage) {
         if !self.cancel.is_cancelled() {
             (self.sink)(message);
+        }
+    }
+}
+
+/// A part of the one review-log pass, from what it computed, or why it
+/// could not be: its own read's failure (H15, H18).
+fn log_outcome(part: Part, log: &mut LogParts, reads: &SnapshotReads) -> PartOutcome {
+    let missing = || PartOutcome::Failed(PartFailure::Failed(format!("{} was not computed", part.name())));
+    match part.source() {
+        Source::ByAnswer => log.by_answer.take().map(PartValue::ByAnswer).map_or_else(missing, PartOutcome::Data),
+        Source::RetentionByDay => read_failure(&reads.retentions).unwrap_or_else(|| {
+            log.retention_by_day
+                .take()
+                .map(PartValue::RetentionByDay)
+                .map_or_else(missing, PartOutcome::Data)
+        }),
+        Source::ByDeck => read_failure(&reads.decks).unwrap_or_else(|| {
+            log.by_deck.take().map(PartValue::ByDeck).map_or_else(missing, PartOutcome::Data)
+        }),
+        Source::ActivityDays => match &reads.all_rows {
+            Err(failure) => PartOutcome::Failed(failure.clone()),
+            Ok(_) => log
+                .activity_days
+                .take()
+                .map(PartValue::ActivityDays)
+                .map_or_else(missing, PartOutcome::Data),
+        },
+        _ => missing(),
+    }
+}
+
+/// A snapshot read's value, when it was made and succeeded.
+fn read_value<T>(read: &Option<Result<T, PartFailure>>) -> Option<&T> {
+    read.as_ref().and_then(|read| read.as_ref().ok())
+}
+
+/// A snapshot read's failure, as its parts' outcome.
+fn read_failure<T>(read: &Option<Result<T, PartFailure>>) -> Option<PartOutcome> {
+    match read {
+        Some(Err(failure)) => Some(PartOutcome::Failed(failure.clone())),
+        _ => None,
+    }
+}
+
+/// The scope's rows of all history (`id` ≥ 0) over the request's view
+/// (`stats/history-reads` H9, H11), or why they cannot be read: the first
+/// unreadable one outside the window (H18).
+fn all_history_rows(data: &Arc<ScopeData>) -> Result<Arc<ScopeData>, PartFailure> {
+    if data.window_start() <= 0 {
+        // The window is all history, and resolved without an unreadable row.
+        return Ok(Arc::clone(data));
+    }
+    let Some(all) = data.rows_from(0) else {
+        return Err(PartFailure::Failed("the view lacks the rows before the window".into()));
+    };
+    match all.first_unreadable() {
+        Some(bad) => Err(PartFailure::UnreadableRow(bad)),
+        None => Ok(Arc::new(all)),
+    }
+}
+
+/// What the parts read on the request's snapshot besides its scope, before
+/// the first part (H12's numbers; the retentions for H3.4 and H4; the decks
+/// for H10), and the scope's rows of all history. `None` for what no
+/// requested part needs; each fails only its own parts.
+struct SnapshotReads {
+    studied: Option<Result<StudiedTodayPart, PartFailure>>,
+    retentions: Option<Result<Retentions, PartFailure>>,
+    decks: Option<Result<Vec<DeckEntry>, PartFailure>>,
+    all_rows: Result<Arc<ScopeData>, PartFailure>,
+}
+
+impl SnapshotReads {
+    fn read(
+        snapshot: &meguri_engine::Snapshot<'_>,
+        scope: &Scope,
+        context: &Context,
+        parts: &[Part],
+        all_rows: Result<Arc<ScopeData>, PartFailure>,
+    ) -> SnapshotReads {
+        let searching = matches!(scope, Scope::Search(_));
+        let wants = |source: Source| !searching && parts.iter().any(|part| part.source() == source);
+        let studied = wants(Source::StudiedToday).then(|| {
+            studied_today::read(&**snapshot, scope, context.next_day_at).map_err(|error| {
+                tracing::warn!(%error, "the page's studied-today numbers failed");
+                PartFailure::Failed(error.to_string())
+            })
+        });
+        let failed = |what: &str, error: meguri_engine::EngineError| {
+            tracing::warn!(%error, "the page's {what} read failed");
+            PartFailure::Failed(error.to_string())
+        };
+        let retentions =
+            wants(Source::RetentionByDay).then(|| Retentions::read(&**snapshot).map_err(|e| failed("retention", e)));
+        let decks = wants(Source::ByDeck).then(|| decks::deck_entries(&**snapshot).map_err(|e| failed("deck", e)));
+        SnapshotReads {
+            studied,
+            retentions,
+            decks,
+            all_rows,
         }
     }
 }
