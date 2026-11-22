@@ -27,6 +27,7 @@ extension TestHooks {
         enum State { case typical, filtered, today }
 
         @MainActor static func launch(_ state: State) -> ShellLaunch {
+            BrowseRollout.shown = true
             let model = BrowseModel(backend: SampleBrowseBackend())
             let expansion = SampleDeckExpansion()
             var features = ShellSample.features(.typical)

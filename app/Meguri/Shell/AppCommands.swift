@@ -108,7 +108,7 @@ struct NativeCommandContext {
     /// while review presents a card, when Card › Show in Browse takes the
     /// key, and while a sheet holds the window.
     var canShowBrowse: Bool {
-        host == .main && layout == .sidebar && collection.navigation.sheet == nil
+        BrowseRollout.shown && host == .main && layout == .sidebar && collection.navigation.sheet == nil
             && collection.review == nil && collection.navigation.review == nil
     }
     func showBrowse() {
@@ -273,9 +273,11 @@ struct AppCommands: Commands {
         // W14: View › Note Types; ⇧⌘N stays New Deck… (N22.1).
         CommandGroup(before: .sidebar) {
             #if os(macOS)
-            Button("Browse") { context?.showBrowse() }
-                .keyboardShortcut("b", modifiers: [.command, .shift])
-                .disabled(context?.canShowBrowse != true)
+            if BrowseRollout.shown {
+                Button("Browse") { context?.showBrowse() }
+                    .keyboardShortcut("b", modifiers: [.command, .shift])
+                    .disabled(context?.canShowBrowse != true)
+            }
             #endif
             Button("Note Types") { context?.showNoteTypes() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])

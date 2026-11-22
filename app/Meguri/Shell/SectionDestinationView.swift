@@ -95,7 +95,8 @@ struct ShellFeatures {
         #if os(macOS)
         features.nativeMacWorkspace = true
         // N21.1: Today, then Browse; Note Types under them (N22.1). The iPad's rows wait for its own layout.
-        features.availableSections = [.home, .browse, .noteTypes]
+        // Browse waits for its table (U270a): `BrowseRollout`.
+        features.availableSections = BrowseRollout.shown ? [.home, .browse, .noteTypes] : [.home, .noteTypes]
         #else
         // W14's iPad row waits for the iPad regular layout (follow-up "U281 iPad"); the view code stays.
         features.availableSections = [.home, .settings]
@@ -104,15 +105,17 @@ struct ShellFeatures {
             switch section {
             case .settings: AnyView(SettingsView(collection: collection))
             #if os(macOS)
-            case .browse: AnyView(BrowseView(model: collection.browse))
+            case .browse where BrowseRollout.shown: AnyView(BrowseView(model: collection.browse))
             #endif
             case .noteTypes: AnyView(NoteTypesView(model: collection.noteTypes))
             default: AnyView(HomeView(collection: collection))
             }
         }
         #if os(macOS)
-        features.browseSidebar = { navigation, header in
-            AnyView(BrowseSidebarHost(collection: collection, navigation: navigation, header: header))
+        if BrowseRollout.shown {
+            features.browseSidebar = { navigation, header in
+                AnyView(BrowseSidebarHost(collection: collection, navigation: navigation, header: header))
+            }
         }
         #endif
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
