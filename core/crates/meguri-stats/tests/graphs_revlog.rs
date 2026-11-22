@@ -339,14 +339,16 @@ fn review_time_sums_no_wrap() {
         row(today + 3).time(3_000_000_000),
         row(today + 4).time(3_000_000_000),
         row(today - DAY * 1_000).time(3_000_000_000),
+        // Beyond the scenario: young times past 2^32 ms on one day too.
+        row(today + 5).last(10).time(4_294_967_295),
     ];
     let parts = Study::paris(&rows).year();
-    assert_eq!(parts.reviews.count, BTreeMap::from([(-1, kinds(0, 0, 0, 1, 0)), (0, kinds(2, 0, 1, 2, 0))]));
+    assert_eq!(parts.reviews.count, BTreeMap::from([(-1, kinds(0, 0, 0, 1, 0)), (0, kinds(2, 0, 2, 2, 0))]));
     assert_eq!(
         parts.reviews.time,
         BTreeMap::from([
             (-1, kinds(0, 0, 0, 3_000_000_000, 0)),
-            (0, kinds(4_400_000_000, 0, 3_000_000_000, 6_000_000_000, 0)),
+            (0, kinds(4_400_000_000, 0, 7_294_967_295, 6_000_000_000, 0)),
         ])
     );
 }
@@ -707,14 +709,13 @@ fn g6_a_record_past_the_limit_is_returned_whole() {
     assert_eq!(decode_reviews(&bytes), reviews);
 }
 
-// V10's oracle goldens for U99's four parts, serialised as V8 says. Every
-// listed scenario writes its rows with one `db_exec` on deleted cards (or
-// on the fixture's first card, in deck `Lang`) and observes Collection,
-// Deck `Lang` or Search `deck:Lang` requests. `reviews/time-wrap` is
-// left out: its golden is Anki's wrapped sum, which Meguri does not
-// reproduce (V9, `review_time_sums_no_wrap`). The `other-creation-zone`
-// scenarios are left out: they set `crt` and `creationOffset`, which this
-// fixture does not take.
+// V10's oracle goldens for U99's four parts, serialised as V8 says. Each
+// listed scenario writes its rows with `db_exec` on deleted cards (or on
+// the fixture's first card, in deck `Lang`), may set `crt` and
+// `creationOffset` and reopen, and observes Collection, Deck `Lang` or
+// Search `deck:Lang` requests. `reviews/time-wrap` is left out: its golden
+// is Anki's wrapped sum, which Meguri does not reproduce (V9,
+// `review_time_sums_no_wrap`).
 
 fn kinds_json(kinds: &ReviewKinds) -> Value {
     let named = [
@@ -843,7 +844,22 @@ fn check_golden(name: &str) {
     let golden: Value =
         serde_json::from_str(&fs::read_to_string(conformance().join(format!("goldens/stats/graphs/{name}.json"))).unwrap())
             .unwrap();
-    assert!(scenario.contains("  config: {\"rollover\": 4}\n"), "{name}");
+    let config: Value = scenario
+        .lines()
+        .find_map(|line| line.strip_prefix("  config: "))
+        .map(|text| serde_json::from_str(text).unwrap())
+        .unwrap();
+    let mut statements = Vec::new();
+    for (key, value) in config.as_object().unwrap() {
+        match key.as_str() {
+            // The fixture's own value.
+            "rollover" => assert_eq!(value, &json!(4), "{name}"),
+            "creationOffset" => statements.push(format!(
+                "INSERT OR REPLACE INTO config VALUES ('creationOffset', 0, 0, CAST('{value}' AS BLOB))"
+            )),
+            other => panic!("{name}: config {other}"),
+        }
+    }
     let clock = scenario.lines().find_map(|line| line.strip_prefix("clock: {tz: ")).unwrap();
     let (zone, rest) = clock.split_once(", start: \"").unwrap();
     let start = rest.split('"').next().unwrap();
@@ -852,12 +868,21 @@ fn check_golden(name: &str) {
         .filter_map(|line| line.strip_prefix("  - "))
         .map(|step| serde_json::from_str(step).unwrap())
         .collect();
-    assert_eq!(steps.len(), 2, "{name}");
-    let sql = steps[0]["db_exec"]["sql"].as_str().unwrap().to_owned();
+    // Every row is written before the one stats observation, the last step;
+    // a reopen or a timing observation before it changes nothing here, since
+    // the collection opens after every statement ran.
+    let (observe, writes) = steps.split_last().unwrap();
+    for step in writes {
+        if let Some(sql) = step["db_exec"]["sql"].as_str() {
+            statements.push(sql.to_owned());
+        } else {
+            assert!(step.get("reopen").is_some() || step["observe"] == json!(["timing"]), "{name}: {step}");
+        }
+    }
     let offset = offset_at(zone, start);
-    let study = Study::new(local_ms(start, offset), offset, zone, &[sql]);
-    let requests = steps[1]["observe"][0]["stats"].as_array().unwrap();
-    let observed = golden["observations"]["steps"][1]["stats"].as_array().unwrap();
+    let study = Study::new(local_ms(start, offset), offset, zone, &statements);
+    let requests = observe["observe"][0]["stats"].as_array().unwrap();
+    let observed = golden["observations"]["steps"][steps.len() - 1]["stats"].as_array().unwrap();
     assert_eq!(requests.len(), observed.len(), "{name}");
     for (request, expected) in requests.iter().zip(observed) {
         let history = match request["history"].as_str().unwrap() {
@@ -918,4 +943,6 @@ goldens! {
     golden_tz_kathmandu_scopes => "buttons/tz-matrix/kathmandu-scopes",
     golden_tz_lord_howe_dst => "buttons/tz-matrix/lord-howe-dst",
     golden_tz_lord_howe_dst_scopes => "buttons/tz-matrix/lord-howe-dst-scopes",
+    golden_tz_other_creation_zone => "buttons/tz-matrix/other-creation-zone",
+    golden_tz_other_creation_zone_scopes => "buttons/tz-matrix/other-creation-zone-scopes",
 }

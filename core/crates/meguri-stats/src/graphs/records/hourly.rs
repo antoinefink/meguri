@@ -55,24 +55,13 @@ pub type Hours = [HourCounts; 24];
 
 /// `stats/graphs-revlog` V5.3: 24 hours per range; `all_time` only with
 /// `allHistory`. The round 11 extras of H7 are U288's.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct HourlyRecord {
     pub one_month: Hours,
     pub three_months: Hours,
     pub one_year: Hours,
     pub all_time: Option<Hours>,
-}
-
-impl Default for HourlyRecord {
-    fn default() -> HourlyRecord {
-        HourlyRecord {
-            one_month: [HourCounts::default(); 24],
-            three_months: [HourCounts::default(); 24],
-            one_year: [HourCounts::default(); 24],
-            all_time: None,
-        }
-    }
 }
 
 /// V5.1: the hour at the zone's offset now, for every row alike; a row
@@ -125,8 +114,8 @@ impl GraphRecord for HourlyRecord {
             .into_iter()
             .chain(self.all_time.as_ref())
             .collect();
-        out.list(&present, |out, day| {
-            out.list(&day[..], |out, hour| {
+        out.list(&present, |out, hours| {
+            out.list(&hours[..], |out, hour| {
                 out.integer(hour.total as i64);
                 out.integer(hour.correct as i64);
             });

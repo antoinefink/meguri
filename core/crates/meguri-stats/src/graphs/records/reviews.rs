@@ -33,15 +33,22 @@ impl ReviewKinds {
         [self.learn, self.relearn, self.young, self.mature, self.filtered]
     }
 
-    fn bump(&mut self, column: Column, amount: i64) {
-        let value = match column {
+    fn slot(&mut self, column: Column) -> &mut i64 {
+        match column {
             Column::Learn => &mut self.learn,
             Column::Relearn => &mut self.relearn,
             Column::Young => &mut self.young,
             Column::Mature => &mut self.mature,
             Column::Filtered => &mut self.filtered,
-        };
-        *value += amount;
+        }
+    }
+
+    fn get(mut self, column: Column) -> i64 {
+        *self.slot(column)
+    }
+
+    fn bump(&mut self, column: Column, amount: i64) {
+        *self.slot(column) += amount;
     }
 }
 
@@ -65,6 +72,10 @@ enum Column {
     Young,
     Mature,
     Filtered,
+}
+
+impl Column {
+    const ALL: [Column; 5] = [Column::Learn, Column::Relearn, Column::Young, Column::Mature, Column::Filtered];
 }
 
 /// V1: Manual and Rescheduled rows count nowhere in Reviews; every `ease`
@@ -91,20 +102,40 @@ pub(crate) fn day_index(id_ms: i64, next_day_at: i64) -> i32 {
 
 pub(crate) fn build(input: &GraphInput<'_>) -> Result<ReviewsRecord, NotBuilt> {
     let next_day_at = input.context.next_day_at;
-    let mut days: BTreeMap<i32, (ReviewKinds, ReviewKinds)> = BTreeMap::new();
+    let mut record = ReviewsRecord::default();
+    // Rows come in id order, so a day's rows are consecutive but for the
+    // rare 32-bit cut: keep the current day open and store it when the key
+    // changes.
+    let mut open: Option<(i32, ReviewKinds, ReviewKinds)> = None;
+    let close = |day: i32, count: ReviewKinds, time: ReviewKinds, record: &mut ReviewsRecord| {
+        let stored = record.count.entry(day).or_default();
+        let at = record.time.entry(day).or_default();
+        for column in Column::ALL {
+            stored.bump(column, count.get(column));
+            at.bump(column, time.get(column));
+        }
+    };
     for scoped in input.scope.rows() {
         let row = scoped.row;
         let Some(column) = column_of(&row) else {
             continue;
         };
-        let (count, time) = days.entry(day_index(row.id, next_day_at)).or_default();
+        let day = day_index(row.id, next_day_at);
+        match &mut open {
+            Some((current, _, _)) if *current == day => {}
+            _ => {
+                if let Some((done, count, time)) = open.take() {
+                    close(done, count, time, &mut record);
+                }
+                open = Some((day, ReviewKinds::default(), ReviewKinds::default()));
+            }
+        }
+        let (_, count, time) = open.as_mut().expect("opened above");
         count.bump(column, 1);
         time.bump(column, i64::from(row.time));
     }
-    let mut record = ReviewsRecord::default();
-    for (day, (count, time)) in days {
-        record.count.insert(day, count);
-        record.time.insert(day, time);
+    if let Some((done, count, time)) = open {
+        close(done, count, time, &mut record);
     }
     Ok(record)
 }
@@ -117,6 +148,7 @@ impl GraphRecord for ReviewsRecord {
     /// One sparse map over the shared day keys with ten members: the five
     /// counts, then the five times, each in [`ReviewKinds::values`] order.
     fn encode(&self, out: &mut Encoder) {
+        debug_assert!(self.count.keys().eq(self.time.keys()), "count and time have the same days (V2.2)");
         let keys: Vec<i64> = self.count.keys().map(|day| i64::from(*day)).collect();
         let column = |map: &BTreeMap<i32, ReviewKinds>, at: usize| -> Vec<i64> {
             map.values().map(|kinds| kinds.values()[at]).collect()
