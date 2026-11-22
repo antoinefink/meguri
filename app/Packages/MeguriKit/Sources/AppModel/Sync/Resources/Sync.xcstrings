@@ -4406,6 +4406,28 @@
         }
       }
     },
+    "sync.needsYou.meguri.structureUpload": {
+      "comment": "sync/meguri-provider MP7 step 5: a note type structure save waits for its upload.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload this collection to finish your note type changes."
+          }
+        }
+      }
+    },
+    "sync.needsYou.meguri.action.upload": {
+      "comment": "sync/meguri-provider MP7 step 5: the needs-you action that uploads the collection.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload…"
+          }
+        }
+      }
+    },
     "sync.settings.account": {
       "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
       "localizations": {

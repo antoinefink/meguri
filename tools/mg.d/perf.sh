@@ -319,6 +319,31 @@ MG_PERF_UI_SUITES="PerfTestCaseTests SmokePerfTests"
 # Every other suite is a performance suite and must yield one.
 MG_PERF_UI_CHECK_SUITES="PerfTestCaseTests CardSwapTimingGateTests"
 
+# The suites that open the generated 150k collection: perf-ui makes it in
+# this checkout (tools/mg fixtures 150k) and, for the test VM, puts it at its
+# own path there, where the test finds it (build/fixtures/<profile>-1-150k).
+MG_PERF_UI_150K_SUITES="BrowserSearchPerfTests"
+
+# mg__perf_ui_fixtures <suite>...: makes the 150k collection for the suites
+# that need it, into MG_PERF_UI_FIXTURE (empty when none does), before the
+# test VM is taken. Returns 1 with a recorded failure.
+mg__perf_ui_fixtures() {
+  local s needs=""
+  MG_PERF_UI_FIXTURE=""
+  for s in "$@"; do mg_word_in "${s%%/*}" "$MG_PERF_UI_150K_SUITES" && needs=1; done
+  [ -n "$needs" ] || return 0
+  echo "$MG_JOB: making the 150k collection: tools/mg fixtures 150k" >&2
+  local result
+  result="$("$MG_TOOLS/mg" fixtures 150k </dev/null)"
+  if [ -n "$result" ] && [ -f "$result" ] && mg_word_in "$(jq -r .status "$result" 2>/dev/null)" "pass warn"; then
+    mg_artifact fixtures "$result" "tools/mg fixtures result"
+    MG_PERF_UI_FIXTURE="$(ls -d "$MG_ROOT"/build/fixtures/*-1-150k 2>/dev/null | sort | tail -n 1)"
+    [ -n "$MG_PERF_UI_FIXTURE" ] && [ -f "$MG_PERF_UI_FIXTURE/collection.anki2" ] && return 0
+  fi
+  mg_failure fixture "the 150k collection could not be made in this checkout; nothing was built or launched" "tools/mg fixtures 150k"
+  return 1
+}
+
 # mg__perf_ui_runner <mac|udid> <out.json>: the perf result's runner, the
 # baseline key U241 uses (model and OS build; CPU and OS on the Mac). A run
 # in the test VM has keys of its own (vm/<name>...): its timings are not this
@@ -388,9 +413,19 @@ mg_perf_ui() {
   export MG_APP_TEST_SCHEME=Meguri-Profile MG_APP_TEST_PLAN=Performance
 
   if [ "$kind" = mac ]; then
+    mg__perf_ui_fixtures "${suites[@]}" || { mg_status error; return 0; }
     mg_mac_ui_begin || return 0
     mg_app_build mac Profile Performance Meguri-Profile || return 0
     mg_mac_ui_take || return 0
+    # The collection at its own path in the test VM, where the test finds it.
+    if [ -n "$MG_PERF_UI_FIXTURE" ] && [ "${MG_MAC_RUNNER:-}" = vm ]; then
+      mg_vm_fixture "$MG_PERF_UI_FIXTURE"
+      case $? in
+        0) ;;
+        2) return 0 ;;
+        *) mg_status error; return 0 ;;
+      esac
+    fi
     platform=mac
     dest="platform=macOS,arch=arm64"
   else

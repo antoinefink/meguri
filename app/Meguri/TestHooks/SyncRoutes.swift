@@ -20,6 +20,8 @@ extension TestHooks {
             registry.register("settings/sync/meguri-setup-media-paused") { settings(.meguriSetupMediaPaused, $0) }
             registry.register("settings/sync/meguri-setup-media-stopped") { settings(.meguriSetupMediaStopped, $0) }
             registry.register("settings/sync/meguri-needs-you") { settings(.meguriNeedsYou, $0) }
+            // MP7 step 5: a note type structure save waits for Upload….
+            registry.register("settings/sync/meguri-structure-upload") { settings(.meguriStructureUploadPending, $0) }
             registry.register("settings/sync/icloud-selected") { settings(.iCloudSelected, $0) }
             registry.register("settings/sync/icloud-connected") { settings(.iCloudConnected, $0) }
             registry.register("settings/sync/icloud-needs-you") { settings(.iCloudNeedsYou, $0) }
@@ -60,6 +62,7 @@ extension TestHooks {
             registry.register("settings/sync/panel/meguri-round-failed") { panel(.meguriRoundFailed, $0) }
             registry.register("settings/sync/panel/meguri-sign-in-refused") { panel(.meguriSignInRefused, $0) }
             registry.register("settings/sync/panel/meguri-choose-collection") { panel(.meguriNeedsYou, $0) }
+            registry.register("settings/sync/panel/meguri-structure-upload") { panel(.meguriStructureUploadPending, $0) }
             registry.register("settings/sync/panel/meguri-blocked") { panel(.meguriBlocked, $0) }
             registry.register("settings/sync/panel/icloud-up-to-date") { panel(.iCloudConnected, $0) }
             registry.register("settings/sync/panel/icloud-syncing") { panel(.iCloudSyncing, $0) }

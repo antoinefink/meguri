@@ -282,6 +282,8 @@ extension ReviewCollection {
     /// preserves the collection's subscription and platform-configuration order.
     public func prepareCloudConnectionPreview(allowDuringReview: Bool = false) async throws {
         guard review == nil || allowDuringReview else { throw BridgeError.sessionActive }
+        // Refused before any write or Host: this installation cannot use iCloud.
+        guard !sync.iCloudUnsupported else { throw BridgeError.unavailable(reason: "configuration") }
         // A recovery call the person starts clears the update hold first (P25.2).
         guard await sync.clearUpdateHold() else { throw BridgeError.unavailable(reason: "paused") }
         try await prepareCloudConnectionHost()
@@ -292,6 +294,49 @@ extension ReviewCollection {
         guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         guard !sync.settings.paused else { throw BridgeError.unavailable(reason: "paused") }
         sync.beginConnectionPreview()
+    }
+    public enum SyncServiceChangeOutcome: Sendable, Equatable {
+        case changed
+        /// The selection was no longer the one the person saw: nothing changed, and they choose again.
+        case superseded
+        case failed
+    }
+    /// The Service control's change (N15.2 row 1), for a destination the person
+    /// chose while `source` was the selection shown. A failure records its step
+    /// and reason for Copy Debug Info; the control stays usable, so choosing
+    /// again is the retry.
+    public func changeSyncService(to target: SyncProviderSelection, from source: SyncProviderSelection?) async -> SyncServiceChangeOutcome {
+        let destination = switch target { case .meguri: "meguri"; case .iCloud: "iCloud"; case .localOnly: "off" }
+        func failed(_ step: SyncServiceChangeFailure.Step, _ reason: SyncServiceChangeFailure.Reason) -> SyncServiceChangeOutcome {
+            // The coordinator that owns the selection now, also after a handoff replaced it.
+            sync.serviceChangeFailed(.init(destination: destination, step: step, reason: reason))
+            return .failed
+        }
+        sync.serviceChangeBegan()
+        // An installation that cannot use iCloud never makes it the service. One
+        // that has it stored cannot read or stop its binding, so it stays as it is.
+        if sync.iCloudUnsupported, target == .iCloud || source == .iCloud || sync.providerState?.selection == .iCloud {
+            return failed(.preparation, .iCloudSetupNeeded)
+        }
+        do { try await prepareSyncServiceSelection() }
+        catch { return failed(.preparation, .init(ProviderFailureReason(error))) }
+        // Preparation may be what first read a stored iCloud selection: refuse
+        // again before the update hold is written.
+        if sync.iCloudUnsupported, sync.providerState?.selection == .iCloud { return failed(.preparation, .iCloudSetupNeeded) }
+        let current = sync
+        // A choice in the Service control clears the update hold, by writing
+        // `paused: false` before the change itself is asked for (P25.2).
+        guard await current.clearUpdateHold() else { return failed(.updateHold, .refused) }
+        // The selection is not reserved across those waits: a change of it
+        // ends this switch, and the person confirms again.
+        // No state yet shows as Off, the same as `.localOnly`.
+        guard (current.providerState?.selection ?? .localOnly) == (source ?? .localOnly) else { return .superseded }
+        if target == .localOnly, source == .iCloud {
+            // V27.5's rows, through the retained operations.
+            return await current.turnOffICloud() ? .changed : failed(.handoff, .refused)
+        }
+        if await current.changeProvider(to: target, removeMeguriCredentials: source == .meguri) { return .changed }
+        return failed(.handoff, .init(current.providerChangeFailureReason))
     }
     public func presentCloudSync(_ entry: CloudSyncEntry, host: AppNavigation.SheetHost = .main) {
         syncPresentation.cancelStatusHandoff()
@@ -395,10 +440,14 @@ public struct MeguriSyncStatusPresentation {
          (SyncText.value("sync.counts.reviews"), reviews.formatted(.number))]
     }
     public init(stopped: Bool, connection: MeguriProviderConnectionPhase, stage: MeguriSetupStage?,
-                routine: MeguriRoutineState?, settling: Bool = false) {
+                routine: MeguriRoutineState?, settling: Bool = false,
+                structureRunning: Bool = false, structureUploadPending: Bool = false) {
         // T19.7's reasons.
         if stopped || connection == .blocked {
             route = .disabled("sync.meguri.now.unavailable.stopped.sync")
+        } else if structureRunning || (structureUploadPending && (stage == nil || stage == .required) && routine != .authentication) {
+            // MP7: the job holds the provider; a waiting upload comes before any round (its Upload… is the status action).
+            route = .disabled(nil)
         } else if let routine {
             route = switch routine {
             case .acceptanceUnknown: .disabled("sync.meguri.now.unavailable.acceptanceUnknown")
@@ -410,11 +459,14 @@ public struct MeguriSyncStatusPresentation {
             }
         } else { route = .account("sync.meguri.setup.continue") }
         if stopped || connection == .blocked { isBusy = false }
+        else if structureRunning { isBusy = true }
         else if connection == .authenticating { isBusy = true }
         else if connection != .setupRequired { isBusy = false }
         else if let stage { isBusy = stage == .preparing || stage == .collection || stage == .media }
         else { isBusy = routine == .exchanging }
         if stopped || connection == .blocked { needsUser = true }
+        else if structureRunning { needsUser = false }
+        else if structureUploadPending, stage == nil || stage == .required, connection == .setupRequired { needsUser = true }
         else if connection == .unconfigured || connection == .authenticating { needsUser = false }
         else if connection == .signedOut || connection == .cancelled { needsUser = true }
         else if let stage {

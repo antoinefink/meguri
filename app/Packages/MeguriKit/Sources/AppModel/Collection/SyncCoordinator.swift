@@ -111,6 +111,26 @@ nonisolated struct SyncCommandResult: Sendable {
     }
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }
+
+/// The sync owner of an installation whose build cannot use iCloud. It carries
+/// the provider facade, so Off and Meguri Sync work as they do beside an idle
+/// iCloud owner. It owns no CloudKit object, issues no command and reads no account.
+@MainActor final class ProviderOnlySyncBackend: SyncCoordinatorBackend {
+    let providerService: CoreProviderService?
+    var connection: CoreCloudConnectionService? { nil }
+    var own: CloudOwnExecutor? { nil }
+    init(provider: CoreProviderService) { providerService = provider }
+    func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput { .commands([]) }
+    func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
+        .init(outputs: [], error: BridgeError.cloudConnection(.notOffered), deferred: false)
+    }
+    func beginAccountRead(transition: Bool) async throws -> UInt64 { throw BridgeError.cloudConnection(.notOffered) }
+    func readAccount(_ read: UInt64) async -> SyncCommandResult {
+        .init(outputs: [], error: BridgeError.cloudConnection(.notOffered), deferred: false)
+    }
+    func quiesce() async throws {}
+    func close() async throws {}
+}
 enum MeguriSignInLocalFailure: Error { case busy, attachment, credentialStore }
 /// T19.3's `sync.setup.done.*` lines for Meguri Sync.
 public enum MeguriSetupDone: Sendable, Equatable { case uploaded, downloaded(backup: Bool) }
@@ -255,7 +275,20 @@ public final class CloudPublicationConfirmation {
 @Observable @MainActor
 public final class SyncCoordinator {
     public enum SetupState: Equatable { case configurationUnavailable, prepared, attached, failed }
-    public private(set) var setupState: SetupState = .configurationUnavailable
+    /// What iCloud can use on this installation. An installation whose build
+    /// cannot use iCloud keeps `configurationUnavailable` here for its whole
+    /// life, while its sync owner still attaches for Off and Meguri Sync.
+    public var setupState: SetupState { cloudConfigured ? ownerState : .configurationUnavailable }
+    /// The sync owner's own preparation and attachment.
+    private var ownerState: SetupState = .configurationUnavailable
+    /// False when the build has no verified iCloud container and schema.
+    @ObservationIgnored private let cloudConfigured: Bool
+    /// Known from the build alone, before any preparation: iCloud is never
+    /// offered a Host, a preview or the selection on this installation.
+    public var iCloudUnsupported: Bool { !cloudConfigured }
+    /// Why the Service control's last change did not finish; nil after a change that did.
+    public private(set) var serviceChangeFailure: SyncServiceChangeFailure?
+    @ObservationIgnored private var providerChangeReason: ProviderFailureReason = .other
     public private(set) var status: CloudPolicyStatus?
     /// P25.1: `media` is true in every value this coordinator holds or sends.
     public private(set) var settings: CloudPolicyDeviceSettings {
@@ -293,7 +326,12 @@ public final class SyncCoordinator {
     public var connectionOperationActive: Bool { (ownTask != nil && !readingPreview) || initialAdoptionEnabledBefore != nil }
     public var initialAdoptionActive: Bool { initialAdoptionEnabledBefore != nil }
     public var connectionActivationActive: Bool { activatingInitialAdoption }
-    public var connectionService: CoreCloudConnectionService? { setupState == .attached && !replacing ? backend?.connection : nil }
+    public var connectionService: CoreCloudConnectionService? { ownerState == .attached && !replacing ? backend?.connection : nil }
+    /// The retained Host has an attached sync owner. With iCloud configured that
+    /// owner has a connection service; without, it is the provider alone.
+    var syncOwnerAttached: Bool {
+        connectionService != nil || (!cloudConfigured && ownerState == .attached && !replacing && backend != nil && provider != nil)
+    }
 
     private enum Input {
         case policy(CloudPolicyEvent)
@@ -507,7 +545,7 @@ public final class SyncCoordinator {
     private var memoryAutomatic = true
     fileprivate func applyRenderFixture(_ state: RenderState) {
         let recent = Int64(clock.now().timeIntervalSince1970 * 1_000) - 240_000
-        setupState = .attached
+        ownerState = .attached
         switch state {
         case .off:
             providerState = .renderFixture(selection: .localOnly, phase: .localOnly)
@@ -589,6 +627,12 @@ public final class SyncCoordinator {
             settings = .init(enabled: true, paused: false, automatic: true, media: true)
             status = .renderFixture(state: .iCloudUnavailable(.noAccount), accountStatus: .noAccount,
                 syncNow: .unavailable(.iCloudUnavailable))
+        case .meguriStructureUploadPending:
+            providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+            meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
+            meguriRoutine = .idle; meguriLastExchange = recent
+            meguriStructureUploadPending = true
+            renderConnected = true
         case .meguriBlocked:
             providerState = .renderFixture(selection: .meguri, phase: .blocked)
             meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
@@ -656,6 +700,9 @@ public final class SyncCoordinator {
     private func migrateRound2Settings(_ retained: Result<CloudRecoveryStatus?, any Error>) async {
         if let pending = providerSettingsTask { await pending.value }
         guard let defaults, round2MigrationPending else { return }
+        // No op can be read where iCloud is unusable; with iCloud stored as the
+        // service it is not proved absent, so nothing opens (P25.2).
+        guard cloudConfigured || providerState?.selection != .iCloud else { return }
         let operation = retainedOperationForMigration?() ?? retained.map { $0 != nil }
         var next = settings
         // P25.3: an off the person chose under the earlier build belongs to the
@@ -773,7 +820,8 @@ public final class SyncCoordinator {
             blockedSource: providerBlockedCause?.source, blockedReason: providerBlockedCause?.reason,
             meguriConnection: providerState?.selection == .meguri ? "\(connection)" : nil,
             meguriSetupStage: meguriStage.map { "\($0)" }, meguriRoutine: meguriRoutine.map { "\($0)" },
-            statusTitleKey: status.titleKey, statusDetailKey: status.detailKey)
+            statusTitleKey: status.titleKey, statusDetailKey: status.detailKey,
+            iCloudConfigured: cloudConfigured ? nil : false, serviceChangeFailure: serviceChangeFailure)
     }
     /// MP6.5: blocked metadata stops network work, including the work already
     /// running. Nothing is discarded: a stopped media step or round keeps its
@@ -825,7 +873,8 @@ public final class SyncCoordinator {
         let shown = status?.state == .needsAttention ? status?.stateWithoutAttention : status?.state
         return SyncPanel.progress(mainStatus, meguri: providerState?.selection == .meguri || providerNeedsAttention,
             setupValue: meguriProgressValue,
-            meguriMoving: meguriAuthenticating || (meguriStage == nil && meguriRoutine == .exchanging), cloudState: shown)
+            meguriMoving: meguriAuthenticating || meguriStructureStage != nil
+                || (meguriStage == nil && meguriRoutine == .exchanging), cloudState: shown)
     }
     /// N23.1: the files line under the bar, while iCloud's media transfers and a
     /// count is known. Meguri Sync's status sentence carries its count (resume fix).
@@ -895,7 +944,8 @@ public final class SyncCoordinator {
         .init(handoffRecovery: providerState?.phase == .handoffRecovery, providerBlocked: providerState?.phase == .blocked,
             connection: meguriAuthenticating ? .authenticating : meguriPhase, stage: meguriStage, routine: meguriRoutine,
             failureKey: meguriFailureKey, finishOffered: meguriCanFinish, automatic: settings.automatic && storedAutomatic,
-            mediaFilesLeft: meguriSetupMediaLeft, mediaListKnown: (meguriAffectedFileCount ?? 0) > 0)
+            mediaFilesLeft: meguriSetupMediaLeft, mediaListKnown: (meguriAffectedFileCount ?? 0) > 0,
+            structureStage: meguriStructureStage, structureUploadPending: meguriStructureUploadPending)
     }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
     private var providerDiscovery: ProviderDiscoveryOwnership?
@@ -952,6 +1002,25 @@ public final class SyncCoordinator {
     public private(set) var meguriProgressFailure: BridgeError?
     public private(set) var meguriBusy = false
     public private(set) var meguriCancelling = false
+    /// MP7: the phase of the note type structure save job (or Upload…) that runs.
+    public private(set) var meguriStructureStage: MeguriStructureStage?
+    /// MP7 step 5: a structure save is committed here and its upload has not
+    /// run. Read from the core on load, after every job and after note type
+    /// changes (an undo withdraws it); no round runs while it holds.
+    public private(set) var meguriStructureUploadPending = false
+    /// The running job, cancelled where MP7 allows.
+    @ObservationIgnored private var meguriStructureJob: Task<MeguriStructureOutcome, any Error>?
+    /// MP7 step 5's Upload… while its upload holds the binding (no ready round
+    /// service then): the connection's own, which the core admits without readiness.
+    @ObservationIgnored private var meguriStructureRound: CoreMeguriRoundService?
+    @ObservationIgnored private var meguriStructureRun: UUID?
+    @ObservationIgnored private var meguriStructureCancelRequested = false
+    /// A save waits for a round or action that runs first.
+    @ObservationIgnored private var meguriStructureWaiting = false
+    /// Tests only: replaces the bridge's structure jobs and the provider's pending read.
+    @ObservationIgnored var meguriStructureJobsOverride: (any MeguriStructureJobService)?
+    /// D7: a completed upload clears the undo history; the Edit menu reads it again.
+    @ObservationIgnored var meguriStructureJobEnded: (@MainActor () -> Void)?
     var meguriCollectionWorkHeld: Bool {
         meguriPreview != nil || meguriSetupPreview != nil || meguriStage == .preparing || meguriStage == .collection
     }
@@ -988,7 +1057,8 @@ public final class SyncCoordinator {
     }
     public var meguriStatus: MeguriSyncStatusPresentation {
         .init(stopped: providerNeedsAttention, connection: meguriAuthenticating ? .authenticating : meguriPhase,
-            stage: meguriStage, routine: meguriRoutine, settling: deviceSettingsSettling)
+            stage: meguriStage, routine: meguriRoutine, settling: deviceSettingsSettling,
+            structureRunning: meguriStructureStage != nil, structureUploadPending: meguriStructureUploadPending)
     }
     var prepareEditorReplacement: (@MainActor (String, ReviewCollection.EditorReplacementDecision, @MainActor () -> Bool) async -> ReviewCollection.EditorReplacementAdmission?)?
     var editorReplacementIsCurrent: (@MainActor (UUID) -> Bool)?
@@ -1080,7 +1150,7 @@ public final class SyncCoordinator {
             && !providerActionInProgress && !providerHandoffInProgress
             && providerState?.selection == .meguri && !providerNeedsAttention
     }
-    var meguriSignInAttached: Bool { provider != nil && setupState == .attached && !backendRetired }
+    var meguriSignInAttached: Bool { provider != nil && ownerState == .attached && !backendRetired }
     func failMeguriSignInPreparation(_ failure: MeguriSignInLocalFailure) {
         meguriLastError = failure
         meguriSignInErrorKey = Self.meguriAuthenticationKey(failure)
@@ -1168,10 +1238,19 @@ public final class SyncCoordinator {
         case .ready:
             let round = try await owner.roundService()
             guard meguriCurrent(owner, expected, revision), meguriBootstrap === facade else { return }
-            meguriReady = true; meguriRound = round; meguriStage = nil; meguriOperation = nil
+            meguriReady = true; meguriRound = round; meguriStage = nil; meguriOperation = nil; meguriStructureRound = nil
             if meguriRoutine == nil { meguriRoutine = .unreported }
+            // MP7 step 5's state survives a relaunch in the core: it is read with the binding.
+            await refreshMeguriStructurePending()
         case .unbound(let retained):
             meguriReady = false; meguriRound = nil; meguriRoutine = nil
+            // A structure upload that held the binding still waits (MP7 step 4);
+            // its Upload… runs on the connection's round service.
+            meguriStructureRound = nil
+            if await refreshMeguriStructurePending() == true, meguriCurrent(owner, expected, revision) {
+                meguriStructureRound = try? await owner.roundService()
+            }
+            guard meguriCurrent(owner, expected, revision), meguriBootstrap === facade else { return }
             // Intent is historical display evidence. Only the checked lookup
             // names an active preparation, which may be newer than that intent.
             let pending = try await facade.pendingPreparation()
@@ -1286,14 +1365,14 @@ public final class SyncCoordinator {
     // Host, before allowing the entry owner to refresh local setup authority.
     func validateRetainedMeguriAttachment(generation expected: UInt64) async throws -> Bool {
         guard generation == expected, !closing, !replacing, !suspended, !drained,
-              retainedHostAdmitted, !backendRetired, setupState == .attached,
+              retainedHostAdmitted, !backendRetired, ownerState == .attached,
               let backend, let provider else { return false }
         let revision = hostRevision
         do {
             let state = try await provider.refresh()
             guard generation == expected, revision == hostRevision, self.backend === backend,
                   self.provider === provider, !closing, !replacing, !suspended, !drained,
-                  !backendRetired, setupState == .attached else { return false }
+                  !backendRetired, ownerState == .attached else { return false }
             return state.selection == .meguri && state.phase != .blocked && state.phase != .handoffRecovery
         } catch { meguriLastError = error; throw error }
     }
@@ -2134,7 +2213,8 @@ public final class SyncCoordinator {
         requestMeguriWake(automatic: false, retryMedia: true)
     }
     private func requestMeguriWake(automatic: Bool, retryMedia: Bool = false) {
-        guard meguriCanRun, meguriSchedulingAllowed(automatic: automatic) else { return }
+        // MP7 step 5: no round runs while a structure upload waits (the core refuses it too).
+        guard meguriCanRun, !meguriStructureUploadPending, meguriSchedulingAllowed(automatic: automatic) else { return }
         switch meguriRoutine {
         case .mediaBlocked: if !retryMedia { return }
         case .acceptanceUnknown, .fullSyncRequired, .authentication, .failed: return
@@ -2289,7 +2369,13 @@ public final class SyncCoordinator {
         wake?.task.cancel()
         await facade?.stop(.system)
         if meguriAuthenticating { await meguriConnectionOwner?.cancelAndDrain() }
+        // MP7: a structure job (a save, or an Upload… on the connection's own
+        // round service) stops where MP7 allows; a stopped upload stays pending.
+        meguriStructureCancelRequested = true
+        meguriStructureJob?.cancel()
+        if meguriStructureWaiting { meguriWake?.task.cancel() }
         await round?.cancelAndDrain()
+        if let structureRound = meguriStructureRound, structureRound !== round { await structureRound.cancelAndDrain() }
         await wake?.task.value
         await action?.task.value
         await meguriCancellation?.value
@@ -2302,7 +2388,7 @@ public final class SyncCoordinator {
         if providerDirectory != nil { providerDirectory = directory }
     }
     private var providerAllowsAccountRead: Bool {
-        desiredProviderSettings?.paused != true
+        cloudConfigured && desiredProviderSettings?.paused != true
             && (providerDirectory == nil || providerDiscovery != nil || providerState?.permitsICloudStartup == true)
     }
 
@@ -2329,7 +2415,9 @@ public final class SyncCoordinator {
         }
         let successor = SyncCoordinator(bootstrap: bootstrap, makeBackend: makeBackend,
             defaults: defaults, clock: clock, directory: directory, observeSignals: observeSignals,
-            providerDirectory: providerDirectory, meguriCredentialStore: meguriCredentialStore, recordDiagnostic: recordDiagnostic)
+            providerDirectory: providerDirectory, meguriCredentialStore: meguriCredentialStore,
+            cloudConfigured: cloudConfigured, recordDiagnostic: recordDiagnostic)
+        successor.serviceChangeFailure = serviceChangeFailure
         // The original already joined its native owners above. The successor
         // needs an attachment retry, not a strong chain of drained owners.
         successor.providerAttachmentPending = true
@@ -2362,20 +2450,26 @@ public final class SyncCoordinator {
 
     public convenience init(directory: URL, clock: AppClock = .system,
                             configuration: CloudBuildConfiguration? = .fromBundle, defaults: UserDefaults? = .standard,
+                            meguriCredentialStore: (any MeguriProviderCredentialStore)? = nil,
                             recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
         let providerDirectory = CoreBridge.CollectionLocation(collectionDirectory: directory,
             backupsDirectory: directory, appGroupSnapshot: directory).manualTransferDirectory
+        // iCloud needs a verified container and schema (R2065). Without them the
+        // owner is the provider alone: Off and Meguri Sync work, and nothing here
+        // constructs a CloudKit object or configures Core's cloud platform.
+        let cloudConfigured = configuration.map {
+            $0.schemaConfigured && !$0.container.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } ?? false
         self.init(bootstrap: {
-            guard let configuration, configuration.schemaConfigured,
-                  !configuration.container.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw SyncOwnerFailure.configurationUnavailable
-            }
+            guard cloudConfigured, let configuration else { return }
             // No potentially network-bound account lookup precedes local open.
             // CouldNotDetermine maps to Rust's ReadFailed, never signed-out.
             try await CoreCloudWorkflowService.configurePlatform(container: configuration.container,
                 environment: configuration.environment, status: .couldNotDetermine, identity: nil)
         }, makeBackend: { persisted in
-            guard let configuration else { throw SyncOwnerFailure.configurationUnavailable }
+            guard cloudConfigured, let configuration else {
+                return ProviderOnlySyncBackend(provider: try await CoreProviderService.attached())
+            }
             #if canImport(CloudKit)
             return try await NativeCollectionCloudBackend.make(configuration: configuration,
                 directory: directory, persisted: persisted)
@@ -2383,15 +2477,18 @@ public final class SyncCoordinator {
             throw SyncOwnerFailure.configurationUnavailable
             #endif
         }, defaults: defaults, clock: clock, directory: directory, observeSignals: true,
-           providerDirectory: providerDirectory, recordDiagnostic: recordDiagnostic)
+           providerDirectory: providerDirectory, meguriCredentialStore: meguriCredentialStore,
+           cloudConfigured: cloudConfigured, recordDiagnostic: recordDiagnostic)
     }
 
     init(bootstrap: @escaping @MainActor () async throws -> Void,
          makeBackend: @escaping @MainActor (@escaping @Sendable () async -> Void) async throws -> any SyncCoordinatorBackend,
          defaults: UserDefaults?, clock: AppClock = .system, directory: URL? = nil, observeSignals: Bool = false,
          providerDirectory: URL? = nil, meguriCredentialStore: (any MeguriProviderCredentialStore)? = nil,
+         cloudConfigured: Bool = true,
          recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
         self.recordDiagnostic = recordDiagnostic
+        self.cloudConfigured = cloudConfigured
         self.bootstrap = bootstrap; self.makeBackend = makeBackend; self.defaults = defaults
         self.clock = clock; self.directory = directory
         self.providerDirectory = providerDirectory
@@ -2414,13 +2511,13 @@ public final class SyncCoordinator {
             do { state = try await prepared.owner.state() }
             catch {
                 guard providerPlatform?.owner === prepared.owner, hostRevision == revision else { return }
-                setupState = .failed; operationFailed = true
+                ownerState = .failed; operationFailed = true
                 return
             }
             guard providerAttachmentPending, providerPlatform?.owner === prepared.owner,
                   generation == prepared.generation, hostRevision == revision,
                   !entryActivationHeld, !replacing, !closing || drained else {
-                setupState = .failed; operationFailed = true
+                ownerState = .failed; operationFailed = true
                 return
             }
             providerState = state
@@ -2428,7 +2525,7 @@ public final class SyncCoordinator {
             // Reuse actual successful setup on this same open Host. Backend
             // construction and provider refresh still run on every attachment.
             platformPrepared = true
-            setupState = .prepared
+            ownerState = .prepared
         }
         if drained { closing = false; drained = false }
         guard !platformPrepared else { return }
@@ -2441,13 +2538,13 @@ public final class SyncCoordinator {
                     if let migrated = providerState?.settings { settings = migrated }
                 } catch { markProviderBlocked(.migration, error); operationFailed = true }
             }
-            do { try await bootstrap(); platformPrepared = true; setupState = .prepared }
-            catch SyncOwnerFailure.configurationUnavailable { setupState = .configurationUnavailable }
+            do { try await bootstrap(); platformPrepared = true; ownerState = .prepared }
+            catch SyncOwnerFailure.configurationUnavailable { ownerState = .configurationUnavailable }
             catch {
                 #if DEBUG
                 DebugCloudDiagnostics.record(.platformBootstrap, error: error)
                 #endif
-                setupState = .failed; operationFailed = true
+                ownerState = .failed; operationFailed = true
             }
         }
         platformTask = task
@@ -2495,7 +2592,7 @@ public final class SyncCoordinator {
                 guard !closing, !Task.isCancelled, !replacing,
                       revision == hostRevision, generation == self.generation else { return }
                 drained = false
-                setupState = .attached
+                ownerState = .attached
                 providerAttachmentPending = false
                 providerPlatform = nil
                 attachmentFailure = nil; connectionFailure = nil
@@ -2520,7 +2617,7 @@ public final class SyncCoordinator {
                 guard revision == hostRevision, generation == self.generation else { return }
                 attachmentFailure = error
                 recordConnectionFailure(error)
-                setupState = .failed
+                ownerState = .failed
             }
         }
         attachmentTask = task
@@ -2528,7 +2625,7 @@ public final class SyncCoordinator {
     }
 
     func requireProviderAttachment() throws {
-        guard setupState == .attached else {
+        guard ownerState == .attached else {
             throw attachmentFailure ?? BridgeError.unavailable(reason: "Provider attachment unavailable")
         }
     }
@@ -2538,7 +2635,7 @@ public final class SyncCoordinator {
         // Preserve the factory/refresh failure from the actual attachment.
         if attachmentFailure == nil { attachmentFailure = error }
         recordConnectionFailure(attachmentFailure ?? error)
-        setupState = .failed
+        ownerState = .failed
     }
 
     private func readRetainedRecovery(_ original: any SyncCoordinatorBackend) async -> Result<CloudRecoveryStatus?, any Error> {
@@ -2573,7 +2670,7 @@ public final class SyncCoordinator {
         guard let pending = retainedRecoveryStart, pending.backend === original,
               pending.generation == expected, pending.revision == revision,
               backend === original, expected == generation, revision == hostRevision,
-              !closing, !suspended, !replacing, !drained, !backendRetired, setupState == .attached,
+              !closing, !suspended, !replacing, !drained, !backendRetired, ownerState == .attached,
               settings.enabled, !settings.paused, accountTask?.isCancelled == false,
               !awaitingResumeProof, !awaitingInitialOwnProof, initialOwnDrain == nil,
               !initialActivationReturned, initialAdoptionEnabledBefore == nil, ownTask == nil,
@@ -2692,7 +2789,7 @@ public final class SyncCoordinator {
         saveSettings(.init(enabled: enabled ?? settings.enabled, paused: paused, automatic: automatic, media: true))
         if wasPaused, !paused, settings.enabled, let pending = retainedRecoveryStart,
            pending.backend === backend, pending.generation == generation, pending.revision == hostRevision,
-           !closing, !suspended, !replacing, !drained, !backendRetired, setupState == .attached,
+           !closing, !suspended, !replacing, !drained, !backendRetired, ownerState == .attached,
            initialAdoptionEnabledBefore == nil {
             // Revisit this attachment through a new ordered read. The proof
             // that returned while paused grants no authority to this attempt.
@@ -2761,7 +2858,7 @@ public final class SyncCoordinator {
     /// Discovery is read-only. Only Rust's explicit no-file directive transfers
     /// the ready authority to a separate, app-owned adoption operation.
     public func beginConnectionPreview() {
-        guard !closing, !suspended, !replacing, !settings.paused, setupState == .attached, initialAdoptionEnabledBefore == nil, ownTask == nil, preview == nil, let backend, let own = backend.own else { return }
+        guard !closing, !suspended, !replacing, !settings.paused, ownerState == .attached, initialAdoptionEnabledBefore == nil, ownTask == nil, preview == nil, let backend, let own = backend.own else { return }
         let expected = generation, revision = hostRevision
         connectionFailure = nil
         readingPreview = true
@@ -2870,11 +2967,20 @@ public final class SyncCoordinator {
     /// MP-E can present these typed commands later. No service picker or
     /// transfer producer is introduced here.
     @discardableResult public func changeProvider(to destination: SyncProviderSelection, removeMeguriCredentials: Bool = false) async -> Bool {
+        // iCloud is never made the service of an installation that cannot use it.
+        // A stored iCloud selection there keeps its binding and any op: nothing
+        // here can read or stop them (V27.5), so leaving it stays refused too.
+        guard cloudConfigured || (destination != .iCloud && providerState?.selection != .iCloud) else {
+            providerChangeReason = .unsupported; return false
+        }
         guard providerChangeAllowed(), let provider, !suspended, !replacing,
               !providerActionInProgress, !entryActivationHeld,
               !closing || providerHandoff != nil else {
+            providerChangeReason = self.provider == nil ? .unavailable : .busy
             connectionFailure = .busy; return false
         }
+        // A return below that names no reason was superseded by another owner.
+        providerChangeReason = .cancelled
         providerActionInProgress = true
         defer { providerActionInProgress = false; replayMeguriMediaResume() }
         let expected = generation, revision = hostRevision
@@ -2925,6 +3031,7 @@ public final class SyncCoordinator {
             guard (self.provider === provider || self.provider == nil && drained && closing),
                   expected == generation, !replacing else { return false }
             operationFailed = true
+            providerChangeReason = ProviderFailureReason(error)
             do { providerState = try await provider.state() }
             catch { meguriLastError = error }
             recordConnectionFailure(error)
@@ -2932,6 +3039,10 @@ public final class SyncCoordinator {
             return false
         }
     }
+    /// The reason of the last `changeProvider` that returned false.
+    var providerChangeFailureReason: ProviderFailureReason { providerChangeReason }
+    func serviceChangeBegan() { serviceChangeFailure = nil }
+    func serviceChangeFailed(_ failure: SyncServiceChangeFailure) { serviceChangeFailure = failure }
     public func meguriConnection() async throws -> MeguriProviderConnectionOwner {
         guard !replacing else { throw BridgeError.busy(runningOperation: "collection replacement") }
         if let meguriConnectionOwner { return meguriConnectionOwner }
@@ -3035,7 +3146,7 @@ public final class SyncCoordinator {
     /// only refreshes typed recovery; explicit recovery has a separate action.
     public func retryProviderAuthority() async {
         if providerAttachmentPending {
-            guard setupState == .failed, !retryingProviderAttachment, !suspended, !replacing,
+            guard ownerState == .failed, !retryingProviderAttachment, !suspended, !replacing,
                   providerChangeAllowed(), let retryProviderAttachment else { return }
             retryingProviderAttachment = true
             defer { retryingProviderAttachment = false }
@@ -3068,7 +3179,7 @@ public final class SyncCoordinator {
                 return
             }
         }
-        guard !closing, !suspended, !replacing, setupState == .attached,
+        guard !closing, !suspended, !replacing, ownerState == .attached,
               initialAdoptionEnabledBefore == nil,
               let backend, let connection = backend.connection else { return }
         guard ownTask == nil, !cancellingConnectionOperation else { connectionFailure = .busy; return }
@@ -3360,7 +3471,7 @@ public final class SyncCoordinator {
     }
     /// V27.5's rows for Off with iCloud selected. Writes nothing when refused.
     @discardableResult public func turnOffICloud() async -> Bool {
-        guard providerState?.selection == .iCloud, !serviceChangeRefusedForOperation else { return false }
+        guard providerState?.selection == .iCloud, cloudConfigured, !serviceChangeRefusedForOperation else { return false }
         if Self.offStopsBinding(bindingActive: status?.controls.bindingActive, operationPresent: recovery != nil) {
             await stopUsingICloud()
         } else { await keepLocalOnly() }
@@ -3764,7 +3875,8 @@ public final class SyncCoordinator {
     func quitAfterLocalFlush(completion: @escaping @MainActor () -> Void) async {
         cancelOwnEditorDecision()
         cancelMeguriEditorDecision(meguriAction?.id)
-        guard backend != nil else { completion(); return }
+        // A provider-only owner has no policy to answer the quit request.
+        guard backend != nil, cloudConfigured else { completion(); return }
         quitCompletion = completion
         receive(.quitRequested)
         await waitForInputs()
@@ -4221,7 +4333,7 @@ public final class SyncCoordinator {
             acknowledged?.resume()
             retryAccountCompletion()
         case .replaced(let next):
-            guard next > generation || (next == generation && setupState == .failed) else { return }
+            guard next > generation || (next == generation && ownerState == .failed) else { return }
             providerPlatform = nil
             if desiredVisibleMedia?.generation != next { desiredVisibleMedia = nil }
             deliveredVisibleMedia = nil
@@ -4681,7 +4793,7 @@ public final class SyncCoordinator {
                     backend = nil
                     continue
                 }
-                setupState = .attached
+                ownerState = .attached
                 try await attachProvider(to: successor)
                 guard !closing, expected == generation, revision == hostRevision else {
                     try await successor.close()
@@ -4703,7 +4815,7 @@ public final class SyncCoordinator {
             #if DEBUG
             DebugCloudDiagnostics.record(.backendReplacement, error: error)
             #endif
-            replacing = true; operationFailed = true; setupState = .failed
+            replacing = true; operationFailed = true; ownerState = .failed
         }
     }
     private static func requiredDuringClose(_ action: CloudPolicyAction) -> Bool {
@@ -4821,7 +4933,7 @@ public final class SyncCoordinator {
         guard drained, closeTask == nil else { throw BridgeError.busy(runningOperation: "iCloud drain") }
         entryActivationHeld = false
         closing = false; drained = false; replacing = false
-        if platformPrepared { setupState = .prepared }
+        if platformPrepared { ownerState = .prepared }
         return true
     }
 
@@ -4958,6 +5070,8 @@ extension SyncCoordinator {
         case meguriPreparing, iCloudNoAccount, meguriMediaBlocked, meguriAcceptanceUnknown, iCloudSetupNeeded
         /// MP6.5 (resume fix): setup's media step paused, and stopped after its automatic attempts.
         case meguriSetupMediaPaused, meguriSetupMediaStopped
+        /// MP7 step 5: a note type structure save waits for Upload….
+        case meguriStructureUploadPending
     }
     /// Builds synthetic Sync section examples. The coordinator is never
     /// attached: it owns no collection, account, binding or server, and its
@@ -4967,5 +5081,228 @@ extension SyncCoordinator {
             defaults: nil, clock: clock)
         sync.applyRenderFixture(state)
         return sync
+    }
+}
+
+// MARK: Note type structure saves (`sync/meguri-provider` MP7, `notetypes/draft-save` D6, D7)
+
+/// Collects a job's answer across the provider action that runs it.
+@MainActor private final class MeguriStructureAnswer {
+    var value: Result<NoteTypeSyncSaveResult, any Error>?
+}
+
+extension SyncCoordinator: NoteTypesMeguriSync {
+    /// The jobs for the ready binding, and the pending read for any binding.
+    private var meguriStructureJobs: (any MeguriStructureJobService)? {
+        if let meguriStructureJobsOverride { return meguriStructureJobsOverride }
+        guard let provider else { return nil }
+        return CoreMeguriStructureJobs(round: meguriRound ?? meguriStructureRound, provider: provider)
+    }
+
+    /// D3 with Meguri Sync chosen: Save and Upload runs only with a ready binding
+    /// and no earlier upload waiting.
+    public var noteTypeSyncState: NoteTypeSyncState {
+        guard providerState?.selection == .meguri, !providerNeedsAttention else { return .notSetUp }
+        if meguriStructureUploadPending { return .uploadPending }
+        if meguriReady, meguriRound != nil || meguriStructureJobsOverride != nil, meguriStage == nil,
+           meguriPhase == .setupRequired, !closing, !replacing, !suspended { return .ready }
+        // Signed out, or no collection chosen yet: setting up is the person's step.
+        if meguriPhase != .setupRequired || meguriStage == .required || meguriStage == .failed || meguriStage == .preview {
+            return .notSetUp
+        }
+        return .busy
+    }
+
+    /// D4: no network path, or the server gives no HTTP answer to a HEAD
+    /// request (no sign-in is sent). An unknown answer counts as reachable:
+    /// the job's round then finds out.
+    public func noteTypeSyncReachable() async -> Bool {
+        if reachable == false { return false }
+        let endpoint = meguriEndpoint
+        guard !endpoint.isEmpty, meguriStructureJobsOverride == nil else { return true }
+        switch await EndpointReachability.check(endpoint) {
+        case .response, .cancelled: return true
+        case .unavailable, .timedOut, .secureConnectionFailed: return false
+        }
+    }
+
+    public func saveNotetypeStructure(_ draft: NotetypeStructureDraft, reachable: Bool,
+                                      progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)
+        async throws -> NoteTypeSyncSaveResult {
+        try await runMeguriStructure(progress: progress) { jobs, onStage in
+            try await jobs.saveNotetypeStructure(draft, reachable: reachable, onStage: onStage)
+        }
+    }
+
+    public func cancelNotetypeStructureSave() {
+        meguriStructureCancelRequested = true
+        meguriStructureJob?.cancel()
+        // A save still waiting for the round before it: that round stops too,
+        // as a drain stops it, so leaving never waits for it.
+        if meguriStructureWaiting { meguriWake?.task.cancel() }
+    }
+
+    /// MP7 step 5's Upload…: the server's facts and the upload, no round and
+    /// no question (the sheet was the consent). Runs from the status row and
+    /// the panel.
+    @discardableResult public func uploadNotetypeStructure() -> Task<Void, Never>? {
+        guard meguriCanUploadStructure else { return nil }
+        return Task { _ = try? await runMeguriStructure(progress: nil) { jobs, onStage in try await jobs.uploadNotetypeStructure(onStage: onStage) } }
+    }
+
+    /// Upload… can run now.
+    public var meguriCanUploadStructure: Bool {
+        meguriStructureUploadPending && meguriStructureStage == nil && !meguriBusy && !closing && !replacing && !suspended
+            && !providerActionInProgress && !providerHandoffInProgress && !providerNeedsAttention
+    }
+
+    /// A note type changed (an undo or redo among them): the waiting upload is
+    /// read again, since undoing the save withdraws it and redoing it brings
+    /// it back (D7, MP7 step 6).
+    func notetypesChanged() {
+        guard providerState?.selection == .meguri, meguriStructureStage == nil else { return }
+        Task { await refreshMeguriStructurePending() }
+    }
+
+    /// Reads MP7 step 5's state. When it is withdrawn (the save was undone),
+    /// ordinary rounds run again.
+    @discardableResult func refreshMeguriStructurePending() async -> Bool? {
+        guard providerState?.selection == .meguri, let jobs = meguriStructureJobs else { return nil }
+        let expected = generation, revision = hostRevision
+        guard let value = try? await jobs.structureUploadPending(), generation == expected, hostRevision == revision else { return nil }
+        let withdrawn = meguriStructureUploadPending && !value
+        meguriStructureUploadPending = value
+        if withdrawn, meguriStructureStage == nil {
+            if !meguriReady, let facade = meguriBootstrap, let owner = meguriConnectionOwner {
+                // The upload had held the binding: read it again, so a binding the
+                // core gave back is ready before the next round is asked for.
+                let expected = generation, revision = hostRevision
+                Task {
+                    try? await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+                    requestMeguriWake(automatic: true)
+                }
+            } else {
+                requestMeguriWake(automatic: true)
+            }
+        }
+        return value
+    }
+
+    /// One job as the provider's one action: a round or another action that
+    /// runs first ends (the job's own round replaces the next one), then the
+    /// job, then what its outcome shows.
+    private func runMeguriStructure(progress: (@MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)?,
+        _ start: @escaping @Sendable (any MeguriStructureJobService,
+            @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void) async throws -> MeguriStructureOutcome)
+        async throws -> NoteTypeSyncSaveResult {
+        meguriStructureCancelRequested = false
+        meguriStructureWaiting = true
+        for _ in 0..<8 where !meguriStructureCancelRequested {
+            if let wake = meguriWake {
+                meguriWakePending = false; meguriWakeManual = false
+                await wake.task.value
+            } else if let action = meguriAction {
+                await action.task.value
+            } else { break }
+        }
+        meguriStructureWaiting = false
+        guard !meguriStructureCancelRequested else { return .cancelled }
+        guard meguriWake == nil, meguriAction == nil, meguriStructureStage == nil, let jobs = meguriStructureJobs else { return .notSaved }
+        let answer = MeguriStructureAnswer()
+        let run = UUID()
+        let issued = issueMeguri { [weak self] _ in
+            guard let self else { return }
+            self.meguriStructureRun = run
+            let onStage: @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void = { [weak self] stage, stream in
+                Task { @MainActor in self?.meguriStructureStarted(stage, stream, run: run, progress: progress) }
+            }
+            let job = Task { try await start(jobs, onStage) }
+            self.meguriStructureJob = job
+            if self.meguriStructureCancelRequested { job.cancel() }
+            let result = await job.result
+            self.meguriStructureJob = nil
+            answer.value = await self.finishMeguriStructure(result)
+            self.meguriStructureRun = nil
+            self.meguriStructureStage = nil
+            self.meguriStructureJobEnded?()
+        }
+        guard issued, let task = meguriAction?.task else { return .notSaved }
+        await task.value
+        guard let value = answer.value else { return .notSaved }
+        return try value.get()
+    }
+
+    private func meguriStructureStarted(_ stage: MeguriStructureStage, _ stream: AsyncStream<CoreProgress>?, run: UUID,
+                                        progress: (@MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)?) {
+        // A phase reported after its job ended changes nothing.
+        guard meguriStructureRun == run else { return }
+        meguriStructureStage = stage
+        let shown = MeguriStructureEffect.stage(stage)
+        progress?(shown, 0, nil)
+        // The save reports "Updating <i> of <n> notes" (D5 step 5).
+        guard stage == .save, let stream, let progress else { return }
+        Task { @MainActor [weak self] in
+            for await report in stream {
+                guard self?.meguriStructureRun == run, self?.meguriStructureStage == .save else { return }
+                progress(.saving, report.completed, report.total)
+            }
+        }
+    }
+
+    /// The pending state is read again after every job, failed ones included:
+    /// an error after the commit still leaves a save this device holds.
+    private func finishMeguriStructure(_ result: Result<MeguriStructureOutcome, any Error>) async -> Result<NoteTypeSyncSaveResult, any Error> {
+        let pending = await refreshMeguriStructurePending()
+        let outcome: MeguriStructureOutcome
+        switch result {
+        case .success(let value): outcome = value
+        case .failure(let error):
+            // The op's own refusals saved nothing for certain; they are the
+            // section's to show, not sync evidence.
+            if Self.meguriStructureRefusal(error) { return .failure(error) }
+            meguriLastError = error
+            // Saved, though the job did not say so: never "nothing was changed".
+            if pending == true { return .success(.saved(uploaded: false)) }
+            // Unknown: neither "saved" (the draft would go) nor "nothing was changed".
+            if pending == nil { return .success(.unconfirmed) }
+            return .failure(error)
+        }
+        var effect = MeguriStructureEffect.after(outcome)
+        // A round stopped because leaving the app asked it to is a cancel, not a sync failure.
+        if meguriStructureCancelRequested, effect.result == .syncStopped { effect.result = .cancelled }
+        if let report = effect.round {
+            meguriRoundReport = report
+            meguriCollectionFinalization = nil; meguriMediaFinalization = nil
+            reduceMeguriRound(report)
+        }
+        if let routine = effect.routine { meguriRoutine = routine }
+        if effect.exchanged { meguriLastExchange = Int64(clock.now().timeIntervalSince1970 * 1_000) }
+        let choose = effect.choose || meguriRoutine == .fullSyncRequired
+        if effect.readiness || choose, let facade = meguriBootstrap, let owner = meguriConnectionOwner {
+            let expected = generation, revision = hostRevision
+            try? await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+            // T19.5 "full sync required": the needs-you row with its Choose action.
+            if choose, meguriCurrent(owner, expected, revision), meguriChoiceAllowed, meguriStage == .required {
+                meguriStage = .failed; meguriFailureKey = MeguriSetupSequence.fullSyncKey
+            }
+        }
+        if effect.wake { meguriReadyWakePending = true }
+        return .success(effect.result)
+    }
+
+    /// The op refused before writing (`LossesChanged`, `Stale`, a failed backup, a cancelled plan).
+    private static func meguriStructureRefusal(_ error: any Error) -> Bool {
+        switch error as? BridgeError {
+        case .notetypeStructureRefused?, .stale?, .staleGeneration?: true
+        default: false
+        }
+    }
+
+    /// Tests only: a coordinator with a ready Meguri Sync binding over `jobs`.
+    func stageMeguriStructureForTests(_ jobs: any MeguriStructureJobService) {
+        meguriStructureJobsOverride = jobs
+        ownerState = .attached
+        providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+        meguriPhase = .setupRequired; meguriReady = true; meguriRoutine = .idle
     }
 }

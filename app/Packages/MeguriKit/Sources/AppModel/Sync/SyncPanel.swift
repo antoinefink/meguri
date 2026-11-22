@@ -86,7 +86,7 @@ extension SyncStatusAction {
     /// a collection replacement at once.
     public var neverDefault: Bool {
         switch self {
-        case .meguriCancel, .meguriFinishSetup, .resumeOp: true
+        case .meguriCancel, .meguriFinishSetup, .resumeOp, .meguriUploadStructure: true
         default: false
         }
     }

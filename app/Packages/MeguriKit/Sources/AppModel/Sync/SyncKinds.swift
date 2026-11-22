@@ -10,6 +10,8 @@ public enum SyncStatusAction: String, Sendable, Equatable, CaseIterable {
     case cancelOp, resumeOp, abandon, checkDatabase
     case serviceRecovery, meguriConnectionRetry, meguriSignIn, meguriCancel
     case meguriTryAgain, meguriFinishSetup, meguriRetryMedia
+    /// MP7 step 5's Upload…: a committed structure save's upload.
+    case meguriUploadStructure
     public var titleKey: String {
         switch self {
         case .copyDebugInfo: "sync.action.copyDebugInfo"
@@ -30,6 +32,7 @@ public enum SyncStatusAction: String, Sendable, Equatable, CaseIterable {
         case .meguriFinishSetup: "sync.meguri.setup.finish"
         // Resume fix: the status row's Try Again (T19.5); Troubleshooting's Retry has its own key.
         case .meguriRetryMedia: "sync.recovery.tryAgain"
+        case .meguriUploadStructure: "sync.needsYou.meguri.action.upload"
         }
     }
 }
@@ -99,10 +102,16 @@ public struct MeguriKindFacts: Sendable, Equatable {
     /// Media blocked has a list of affected files to open (resume fix: no issues
     /// row without one; its Try Again is then on the status row).
     public var mediaListKnown: Bool
+    /// MP7: the phase of a note type structure save job (or Upload…) that runs.
+    public var structureStage: MeguriStructureStage?
+    /// MP7 step 5: a committed structure save waits for Upload….
+    public var structureUploadPending: Bool
     public init(handoffRecovery: Bool = false, providerBlocked: Bool = false,
                 connection: MeguriProviderConnectionPhase = .setupRequired, stage: MeguriSetupStage? = nil,
                 routine: MeguriRoutineState? = nil, failureKey: String? = nil, finishOffered: Bool = false,
-                automatic: Bool = true, mediaFilesLeft: UInt64? = nil, mediaListKnown: Bool = true) {
+                automatic: Bool = true, mediaFilesLeft: UInt64? = nil, mediaListKnown: Bool = true,
+                structureStage: MeguriStructureStage? = nil, structureUploadPending: Bool = false) {
+        self.structureStage = structureStage; self.structureUploadPending = structureUploadPending
         self.handoffRecovery = handoffRecovery; self.providerBlocked = providerBlocked; self.connection = connection
         self.stage = stage; self.routine = routine; self.failureKey = failureKey
         self.finishOffered = finishOffered; self.automatic = automatic
@@ -304,6 +313,16 @@ public enum SyncKinds {
         case .authenticating: return .init(nil, nil)
         case .setupRequired: break
         }
+        // MP7: the job's own title says what moves.
+        if facts.structureStage != nil { return .init(nil, nil) }
+        // MP7 step 5: in place of MP6.3's choice for this binding, also while
+        // its upload holds the binding (setup required, nothing retained); a
+        // collection choice that Upload… found needed, and other setup steps, come first.
+        if facts.structureUploadPending, facts.stage == nil || facts.stage == .required {
+            // The server refused the sign-in during the upload: Sign In first, then Upload….
+            if facts.routine == .authentication { return .init(.needsYou, "sync.needsYou.meguri.signIn", .meguriSignIn) }
+            return .init(.needsYou, "sync.needsYou.meguri.structureUpload", .meguriUploadStructure)
+        }
         if let stage = facts.stage {
             switch stage {
             case .required: return .init(nil, "sync.service.settingUp")
@@ -376,6 +395,14 @@ public enum SyncKinds {
         let busy = SyncSymbol.moving
         let stopped = SyncSymbol.waiting
         if facts.connection == .authenticating { return (busy, "sync.meguri.status.signingIn.title") }
+        // MP7: the round and the save sync; the upload transfers the collection, then its media.
+        if let structure = facts.structureStage {
+            return switch structure {
+            case .round, .save: (busy, "sync.status.syncing.title")
+            case .facts, .serverCopy, .upload: (busy, "sync.meguri.status.transferringCollection.title")
+            case .mediaPrepare, .media: (busy, "sync.meguri.status.transferringMedia.title")
+            }
+        }
         if let stage = facts.stage {
             return switch stage {
             // Nothing moves before preparation or while the sheet asks (N23.2).

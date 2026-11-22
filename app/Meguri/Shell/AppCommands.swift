@@ -108,19 +108,30 @@ struct NativeCommandContext {
     /// while review presents a card, when Card › Show in Browse takes the
     /// key, and while a sheet holds the window.
     var canShowBrowse: Bool {
-        BrowseRollout.shown && host == .main && layout == .sidebar && collection.navigation.sheet == nil
-            && collection.review == nil && collection.navigation.review == nil
+        host == .main && layout == .sidebar && collection.navigation.sheet == nil
+            && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
     func showBrowse() {
         guard canShowBrowse else { return }
         collection.navigation.select(.section(.browse))
     }
 
-    /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review
-    /// and with no sheet over the window.
+    /// N21.8, V2.1: View › Cards and Notes (⌥⌘T) toggles Browse's mode
+    /// while Browse is shown.
+    var canToggleBrowseMode: Bool {
+        canShowBrowse && collection.navigation.section == .browse
+    }
+    func toggleBrowseMode() {
+        guard canToggleBrowseMode else { return }
+        let browse = collection.browse
+        browse.setMode(browse.mode == .cards ? .notes : .cards)
+    }
+
+    /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review,
+    /// with no sheet over the window, and once a collection exists.
     var canShowNoteTypes: Bool {
         host == .main && layout == .sidebar && collection.navigation.sheet == nil
-            && collection.review == nil && collection.navigation.review == nil
+            && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
     func showNoteTypes() {
         guard canShowNoteTypes else { return }
@@ -273,11 +284,12 @@ struct AppCommands: Commands {
         // W14: View › Note Types; ⇧⌘N stays New Deck… (N22.1).
         CommandGroup(before: .sidebar) {
             #if os(macOS)
-            if BrowseRollout.shown {
-                Button("Browse") { context?.showBrowse() }
-                    .keyboardShortcut("b", modifiers: [.command, .shift])
-                    .disabled(context?.canShowBrowse != true)
-            }
+            Button("Browse") { context?.showBrowse() }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+                .disabled(context?.canShowBrowse != true)
+            Button("Cards and Notes") { context?.toggleBrowseMode() }
+                .keyboardShortcut("t", modifiers: [.command, .option])
+                .disabled(context?.canToggleBrowseMode != true)
             #endif
             Button("Note Types") { context?.showNoteTypes() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])

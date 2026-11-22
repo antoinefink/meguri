@@ -391,6 +391,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         let value = NoteTypesModel(backend: CoreNoteTypesBackend())
         value.service = { [weak self] in self?.noteTypeSaveService ?? .other }
         value.writable = { [weak self] in self?.noteTypeWriteAllowed ?? false }
+        value.hasCollection = { [weak self] in self?.hasCollection ?? false }
+        // D6: Save and Upload runs Meguri Sync's structure save job (MP7) on the current coordinator.
+        value.meguriSync = NoteTypesCurrentSync(owner: self)
         value.presentQuestion = { [weak self] in
             guard let self, self.navigation.sheet == nil || self.navigation.sheet == .noteTypeSave else { return false }
             self.navigation.present(.noteTypeSave)
@@ -402,11 +405,16 @@ public final class ReviewCollection: ChangeFanoutSink {
         noteTypesOwner = value
         return value
     }
+    /// A collection exists on this device: false on first run, while Today
+    /// shows the welcome (N18.3). The sections that read a collection (Browse,
+    /// Note Types) are not offered until one is created, imported or synced.
+    public var hasCollection: Bool { state != .noFile }
     /// `notetypes/draft-save` D3 counts Meguri Sync only with a ready binding.
     /// Whether the binding is ready is read in the background and can be
-    /// unknown for a moment, so any Meguri Sync selection counts here: a
-    /// structural save then waits for U269's job and never runs on this
-    /// device alone while the server may hold the collection.
+    /// unknown for a moment, so choosing Meguri Sync is enough here: a
+    /// structural save then runs as MP7's job, or, without a ready binding,
+    /// the sheet says to set Meguri Sync up; it never runs on this device
+    /// alone while the server may hold the collection.
     var noteTypeSaveService: NoteTypeSaveService {
         sync.providerState?.selection == .meguri ? .meguriSync : .other
     }
@@ -617,6 +625,8 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     private func configureSyncOwnership() {
         sync.configureProviderDirectory(providerDirectory)
+        // D7: a completed upload clears the undo history, which the Edit menu reads again.
+        sync.meguriStructureJobEnded = { [weak self] in self?.undoOwner?.scheduleRefresh() }
         let originalSync = sync
         sync.prepareEditorReplacement = { [weak self, weak originalSync] operation, decision, current in
             guard let self, let originalSync, self.sync === originalSync else { return nil }
@@ -1041,7 +1051,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             await original.prepareConnectionAuthority()
             guard sync === original, generation == expected, original.generation == expected,
                   original.meguriSignInAttachmentRevision == revision else { throw CancellationError() }
-            guard original.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+            guard original.syncOwnerAttached else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         }
         // Keep retired waits retained until their actual completion, without
         // making a successor join them or letting their cleanup erase its wait.
@@ -1058,13 +1068,15 @@ public final class ReviewCollection: ChangeFanoutSink {
             let location = try await prepareEntry()
             try Task.checkCancellation()
             guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
-            guard sync.setupState != .configurationUnavailable else { throw BridgeError.unavailable(reason: "configuration") }
-            if sync.connectionService != nil { return }
+            // An installation that cannot use iCloud still attaches its provider
+            // here: Off and Meguri Sync need no iCloud setup. iCloud's own entries
+            // refuse it themselves (`prepareCloudConnectionPreview`).
+            if sync.syncOwnerAttached { return }
             // An existing file follows the owner's ordinary open path. Neither
             // discovery nor its UI may create or replace that file.
             if await Self.exists(configuration.collectionLocation.collectionFile), state != .ready {
                 await start()
-                guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+                guard sync.syncOwnerAttached else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
                 return
             }
             let seed = try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max)
@@ -1075,7 +1087,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             sync.setMeguriLocalCollection(false)
             await sync.completeOpenedHost(generation: retainedGeneration)
             try sync.requireProviderAttachment()
-            guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+            guard sync.syncOwnerAttached else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         }
         cloudHostPreparationTask = task
         try await task.value
@@ -1237,8 +1249,10 @@ public final class ReviewCollection: ChangeFanoutSink {
             // Any write may be a new step (a text-only note edit changes no count); coalesced.
             if event.generation == generation { undoOwner?.scheduleRefresh() }
             if event.generation == generation { deckOptionsOwner?.changesCommitted(changes, generation: event.generation) }
-            if event.generation == generation { browseOwner?.changesCommitted(changes) }
+            if event.generation == generation { browseOwner?.changesCommitted(changes, seq: event.seq) }
             if event.generation == generation { noteTypesOwner?.changesCommitted(changes) }
+            // MP7 step 6: undoing a structure save withdraws its waiting upload.
+            if event.generation == generation, changes.wholeCollection || !changes.notetypes.isEmpty { sync.notetypesChanged() }
             if event.generation == generation,
                changes.wholeCollection || !changes.notetypes.isEmpty || !changes.decks.isEmpty {
                 addFlowOwner?.selectionChanged(generation: event.generation)
@@ -2198,7 +2212,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             if state == .noFile {
                 // A retained NoCollection Host has cloud callbacks to drain,
                 // even though there is no local writer to flush or suspend.
-                if sync.connectionService != nil {
+                if sync.syncOwnerAttached {
                     if active { await sync.foregroundAfterLocalResume() }
                     else { _ = await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired ? nil : backgroundDeadlineMilliseconds) }
                 }
@@ -2577,4 +2591,24 @@ private nonisolated struct LaunchCollectionClock: CollectionClock {
         Int32((zone ?? .autoupdatingCurrent).secondsFromGMT(for: Date(timeIntervalSince1970: Double(value) / 1_000)))
     }
     func zoneIdentifier() -> String { (zone ?? .autoupdatingCurrent).identifier }
+}
+
+/// The Note Types section's Meguri Sync: whichever coordinator is current
+/// (a provider attachment can replace it); a running job's cancellation
+/// reaches the coordinator that runs it.
+@MainActor private final class NoteTypesCurrentSync: NoteTypesMeguriSync {
+    private weak var owner: ReviewCollection?
+    private weak var running: SyncCoordinator?
+    init(owner: ReviewCollection) { self.owner = owner }
+    var noteTypeSyncState: NoteTypeSyncState { owner?.sync.noteTypeSyncState ?? .notSetUp }
+    func noteTypeSyncReachable() async -> Bool { await owner?.sync.noteTypeSyncReachable() ?? true }
+    func saveNotetypeStructure(_ draft: NotetypeStructureDraft, reachable: Bool,
+                               progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)
+        async throws -> NoteTypeSyncSaveResult {
+        guard let sync = owner?.sync else { return .notSaved }
+        running = sync
+        defer { if running === sync { running = nil } }
+        return try await sync.saveNotetypeStructure(draft, reachable: reachable, progress: progress)
+    }
+    func cancelNotetypeStructureSave() { running?.cancelNotetypeStructureSave() }
 }

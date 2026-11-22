@@ -53,6 +53,10 @@ struct ShellFeatures {
         AnyView(ContentUnavailableView("Select a Deck", systemImage: "rectangle.stack"))
     }
     var availableSections: [AppSection] = AppSection.sidebar
+    /// Whether a section's row shows now: Browse and Note Types read the
+    /// collection, so with none on this device (first run, N18.3) they are
+    /// not offered, nor their View commands.
+    var sectionShown: (AppSection) -> Bool = { _ in true }
     var syncStatus: () -> AnyView = { AnyView(EmptyView()) }
     var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
     /// N20.9: the Deck Options page pushed on a deck page.
@@ -97,27 +101,32 @@ struct ShellFeatures {
         #if os(macOS)
         features.nativeMacWorkspace = true
         // N21.1: Today, then Browse; Note Types under them (N22.1). The iPad's rows wait for its own layout.
-        // Browse waits for its table (U270a): `BrowseRollout`.
-        features.availableSections = BrowseRollout.shown ? [.home, .browse, .noteTypes] : [.home, .noteTypes]
+        features.availableSections = [.home, .browse, .noteTypes]
         #else
         // W14: Note Types has a sidebar row at regular width; the tab layout reaches it from Settings (U286).
         features.availableSections = [.home, .noteTypes, .settings]
         #endif
-        features.sectionRoot = { section, _ in
+        features.sectionShown = { section in Self.sectionShown(section, hasCollection: collection.hasCollection) }
+        features.sectionRoot = { section, navigation in
             switch section {
             case .settings: AnyView(SettingsView(collection: collection))
             #if os(macOS)
-            case .browse where BrowseRollout.shown: AnyView(BrowseView(model: collection.browse))
+            case .browse:
+                AnyView(BrowseView(model: collection.browse, addNote: {
+                    // Browse shows no deck: Add opens on its default deck.
+                    navigation.present(.add(deck: nil))
+                }, editNoteType: { id in
+                    collection.noteTypes.selection = id
+                    navigation.select(.section(.noteTypes))
+                }))
             #endif
             case .noteTypes: AnyView(NoteTypesView(model: collection.noteTypes))
             default: AnyView(HomeView(collection: collection))
             }
         }
         #if os(macOS)
-        if BrowseRollout.shown {
-            features.browseSidebar = { navigation, header in
-                AnyView(BrowseSidebarHost(collection: collection, navigation: navigation, header: header))
-            }
+        features.browseSidebar = { navigation, header in
+            AnyView(BrowseSidebarHost(collection: collection, navigation: navigation, header: header))
         }
         #endif
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
@@ -166,6 +175,11 @@ struct ShellFeatures {
         }
         features.deckExists = { collection.deck($0.rawValue) != nil }
         return features
+    }
+
+    /// Today and Settings need no collection; every other section reads one.
+    static func sectionShown(_ section: AppSection, hasCollection: Bool) -> Bool {
+        hasCollection || section == .home || section == .settings
     }
 
     static var standard: ShellFeatures {
