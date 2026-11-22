@@ -25,7 +25,12 @@ import Testing
         return names
     }
     func noteCounts() async throws -> [Int64: UInt64] { [7: 20, 8: 5] }
+    /// Each record read waits this long first.
+    var readWait: Duration?
+    private(set) var reads: [Int64] = []
     func read(_ id: Int64) async throws -> NotetypeRecord {
+        reads.append(id)
+        if let readWait { try? await Task.sleep(for: readWait) }
         guard let record = records[id] else { throw BridgeError.notFound(table: .notetypes, key: "\(id)") }
         return record
     }
@@ -825,6 +830,138 @@ extension NoteTypesModelTests {
         await model.settle()
         #expect(backend.saved.first?.templates[0].front == "{{Back}}")
         #expect(backend.saved.first?.templates[0].back == "{{FrontSide}}\n\n<hr id=answer>\n\n{{Front}}")
+    }
+
+    /// Antoine's "for a moment you will see just this dark page with no rows":
+    /// a selection change keeps the shown note type until the new one can draw.
+    @Test func aSelectionChangeNeverShowsAnEmptyDetailWhileItsRecordIsRead() async throws {
+        let backend = FakeNoteTypesBackend()
+        backend.records[9] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        #expect(model.shownSelection == 7)
+        backend.readWait = .milliseconds(80)
+        model.selection = 9
+        #expect(model.shownSelection == 7, "the shown note type stays while 9 is read")
+        var checks = 0
+        while model.shownSelection != 9, checks < 400 {
+            let shown = try #require(model.shownSelection)
+            #expect(model.draft(shown) != nil, "never an empty detail")
+            #expect(!model.editable(shown) || shown == 9, "the stand-in takes no edits")
+            checks += 1
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(model.shownSelection == 9, "the swap happened")
+        #expect(checks > 1, "the read was in flight")
+        #expect(model.draft(9) != nil, "the detail swaps to 9 in one step, drawn")
+    }
+
+    @Test func aFailedReadShowsItsFailureInsteadOfKeepingTheOldNoteType() async {
+        let (model, _) = await open()
+        model.selection = 9  // the fake has no record for it
+        await model.settle()
+        #expect(model.shownSelection == 9 && model.recordFailed.contains(9))
+    }
+
+    @Test func theRowsBesideTheSelectionAreReadAheadSoTheyShowAtOnce() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[8] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        #expect(model.records[8] != nil, "8 sits beside 7: read ahead")
+        #expect(model.typeCounts[8] == nil, "a read ahead counts nothing")
+        model.selection = 8
+        #expect(model.shownSelection == 8, "drawn at once")
+        await model.settle()
+        #expect(backend.reads.filter { $0 == 8 }.count == 1, "read once")
+        #expect(model.typeCounts[8] != nil, "selected, it reads its counts")
+        #expect(model.usedOn(8) != nil, "and its Used On")
+    }
+
+    @Test func aChangeElsewhereDropsARecordOnlyReadAheadInsteadOfCountingIt() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[8] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        #expect(model.records[8] != nil)
+        model.changesCommitted(.notetypes([8]))
+        await model.settle()
+        #expect(model.records[8] == nil && model.typeCounts[8] == nil, "read again when needed, never counted ahead")
+        model.selection = 8
+        await model.settle()
+        #expect(model.shownSelection == 8 && model.draft(8) != nil)
+    }
+
+    @Test func aReadAheadInFlightDuringAChangeElsewhereIsDropped() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[9] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        backend.readWait = .milliseconds(40)
+        model.warm(9)
+        model.changesCommitted(.notetypes([9]))
+        await model.settle()
+        #expect(model.records[9] == nil, "the version read before the change is never kept")
+    }
+
+    @Test func aNewerReadAheadKeepsItsEntryWhenAnOlderOneEnds() async throws {
+        let backend = FakeNoteTypesBackend()
+        backend.records[9] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        backend.readWait = .milliseconds(60)
+        model.warm(9)
+        model.changesCommitted(.notetypes([9]))  // cancels the first read
+        try await Task.sleep(for: .milliseconds(10))
+        model.warm(9)  // its replacement, still in flight when the first one ends
+        try await Task.sleep(for: .milliseconds(55))
+        model.changesCommitted(.notetypes([9]))  // must still find and cancel the replacement
+        await model.settle()
+        #expect(model.records[9] == nil, "no version from before the second change is kept")
+    }
+
+    @Test func aRenameBegunOnTheShownNoteTypeEndsWhenTheDetailSwaps() async throws {
+        let backend = FakeNoteTypesBackend()
+        backend.records[9] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        backend.readWait = .milliseconds(40)
+        model.selection = 9
+        model.renaming = 0  // begun on the stand-in in the gap
+        await model.settle()
+        #expect(model.shownSelection == 9 && model.renaming == nil)
+    }
+
+    @Test func saveKeepsTheSavedVersionOnScreenUntilItIsReadAgain() async throws {
+        let backend = FakeNoteTypesBackend()
+        let (model, _) = await open(backend)
+        model.setOption(7, row: 0) { $0.rtl = true }
+        await model.settle()
+        backend.readWait = .milliseconds(60)
+        model.save()
+        var sawRereading = false
+        for _ in 0..<40 {
+            #expect(model.draft(7) != nil, "the detail never empties after Save")
+            if model.records[7] == nil { sawRereading = true; #expect(!model.editable(7), "read-only until read again") }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        await model.settle()
+        #expect(sawRereading && model.records[7] != nil && model.editable(7))
+    }
+
+    @Test func flippedChangesNothingUntilTheEditorWritesIt() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        let (model, _) = await open(backend)
+        let flip = model.flipped(7, card: 0)
+        #expect(flip == NoteTypeFlip(front: "{{Back}}", back: "{{FrontSide}}\n\n<hr id=answer>\n\n{{Front}}", previousFront: "{{Front}}"))
+        #expect(model.draft(7)?.text(0, .front) == "{{Front}}" && !model.isEdited(7))
+        model.setText(7, card: 0, part: .back, "<hr id=answer>{{Back}}")
+        #expect(model.flipped(7, card: 0) == nil && model.flipRefused, "A15: no text before the separator")
+    }
+
+    @Test func replaceTextWritesOnlyAnUnchangedText() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        let (model, _) = await open(backend)
+        #expect(model.replaceText(7, card: 0, part: .front, expected: "{{Front}}", with: "{{Back}}"))
+        #expect(model.draft(7)?.text(0, .front) == "{{Back}}")
+        #expect(!model.replaceText(7, card: 0, part: .front, expected: "{{Front}}", with: "{{Extra}}"), "edited since: kept")
+        #expect(model.draft(7)?.text(0, .front) == "{{Back}}")
     }
 
     @Test func addCloseIgnoresAnEarlierCloseOfTheSameSection() async {

@@ -38,21 +38,23 @@ pub(crate) fn open_upload(path: &Path) -> Result<Connection> {
 /// Page-local request open: no integrity scan, copy, hash, or migration. The
 /// publication adapter has already admitted and pinned a verified schema-18 file.
 pub(super) fn open_mcp(path: &Path, writable: bool) -> Result<Connection> {
-    crate::storage::private_collection_file(path)?;
+    use crate::error::McpDiagnosticDetail as Detail;
+    crate::storage::private_collection_file(path).map_err(|e| e.mcp_storage_detail(Detail::CollectionStorage))?;
     let flags = OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW
         | if writable { OpenFlags::SQLITE_OPEN_READ_WRITE } else { OpenFlags::SQLITE_OPEN_READ_ONLY };
-    let c = Connection::open_with_flags(path, flags).map_err(super::mcp::sql_error)?;
+    let c = Connection::open_with_flags(path, flags).map_err(super::mcp::sql_open_error)?;
     // Request latency must not inherit a large native WAL. Maintenance owns
     // checkpointing outside point operations, including the last-handle close.
-    c.set_db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true).map_err(super::mcp::sql_error)?;
-    let c = configure_timeout(c, false, Duration::ZERO)?;
+    c.set_db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true).map_err(super::mcp::sql_open_error)?;
+    let c = configure_timeout_with(c, false, Duration::ZERO, super::mcp::sql_open_storage_error)
+        .map_err(|e| e.mcp_storage_detail(Detail::CollectionOpen))?;
     if writable {
-        c.pragma_update(None, "wal_autocheckpoint", 0).map_err(super::mcp::sql_error)?;
-        c.pragma_update(None, "journal_mode", "WAL").map_err(super::mcp::sql_error)?;
-        c.pragma_update(None, "synchronous", "FULL").map_err(super::mcp::sql_error)?;
-        let mode: String = c.pragma_query_value(None, "journal_mode", |r|r.get(0)).map_err(super::mcp::sql_error)?;
-        let sync: i64 = c.pragma_query_value(None, "synchronous", |r|r.get(0)).map_err(super::mcp::sql_error)?;
-        if mode != "wal" || sync != 2 { return Err(Error::new("storage_unavailable")); }
+        c.pragma_update(None, "wal_autocheckpoint", 0).map_err(super::mcp::sql_open_error)?;
+        c.pragma_update(None, "journal_mode", "WAL").map_err(super::mcp::sql_open_error)?;
+        c.pragma_update(None, "synchronous", "FULL").map_err(super::mcp::sql_open_error)?;
+        let mode: String = c.pragma_query_value(None, "journal_mode", |r|r.get(0)).map_err(super::mcp::sql_open_error)?;
+        let sync: i64 = c.pragma_query_value(None, "synchronous", |r|r.get(0)).map_err(super::mcp::sql_open_error)?;
+        if mode != "wal" || sync != 2 { return Err(Error::new("storage_unavailable").with_mcp_detail(Detail::CollectionOpen)); }
     }
     Ok(c)
 }
@@ -60,24 +62,28 @@ fn configure(c: Connection, writable: bool) -> Result<Connection> {
     configure_timeout(c, writable, Duration::from_secs(5))
 }
 fn configure_timeout(c: Connection, writable: bool, timeout: Duration) -> Result<Connection> {
+    configure_timeout_with(c, writable, timeout, Error::from)
+}
+fn configure_timeout_with(c: Connection, writable: bool, timeout: Duration,
+    sql_error: fn(rusqlite::Error) -> Error) -> Result<Connection> {
     // Set this before any SQL can inspect a locked schema. A request connection
     // must never use rusqlite's default five-second wait during configuration.
-    c.busy_timeout(timeout)?;
+    c.busy_timeout(timeout).map_err(sql_error)?;
     // Extension loading is absent from the selected rusqlite features; do not
     // enable its API merely to disable it. SQLite connections start disabled.
-    c.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_FKEY, false)?;
-    if c.pragma_query_value(None,"foreign_keys",|r|r.get::<_,i64>(0))?!=0 { return Err(Error::new("storage_unavailable")); }
-    c.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
-    c.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_TRIGGER, false)?;
-    c.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_VIEW, false)?;
-    c.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
-    c.pragma_update(None,"ignore_check_constraints",true)?;
+    c.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_FKEY, false).map_err(sql_error)?;
+    if c.pragma_query_value(None,"foreign_keys",|r|r.get::<_,i64>(0)).map_err(sql_error)?!=0 { return Err(Error::new("storage_unavailable")); }
+    c.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false).map_err(sql_error)?;
+    c.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_TRIGGER, false).map_err(sql_error)?;
+    c.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_VIEW, false).map_err(sql_error)?;
+    c.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true).map_err(sql_error)?;
+    c.pragma_update(None,"ignore_check_constraints",true).map_err(sql_error)?;
     super::unicase::register(&c)?;
     if writable {
-        c.pragma_update(None, "journal_mode", "WAL")?;
-        c.pragma_update(None, "synchronous", "FULL")?;
-        let mode: String = c.pragma_query_value(None, "journal_mode", |r| r.get(0))?;
-        let sync: i64 = c.pragma_query_value(None, "synchronous", |r| r.get(0))?;
+        c.pragma_update(None, "journal_mode", "WAL").map_err(sql_error)?;
+        c.pragma_update(None, "synchronous", "FULL").map_err(sql_error)?;
+        let mode: String = c.pragma_query_value(None, "journal_mode", |r| r.get(0)).map_err(sql_error)?;
+        let sync: i64 = c.pragma_query_value(None, "synchronous", |r| r.get(0)).map_err(sql_error)?;
         if mode != "wal" || sync != 2 { return Err(Error::new("storage_unavailable")); }
     }
     Ok(c)

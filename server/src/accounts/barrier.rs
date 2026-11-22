@@ -18,7 +18,8 @@ pub struct PublicationBarrier {
     waiting: tokio::sync::Semaphore,
 }
 impl PublicationBarrier {
-    /// Standalone work must refuse contention without joining the waiter queue.
+    /// Standalone writes refuse contention without joining the waiter queue.
+    /// Bounded MCP reads use enter() with their asynchronous timeout instead.
     /// Keep this barrier's Arc alongside the returned guard until work ends.
     pub(crate) fn try_enter(&self) -> Option<OwnedMutexGuard<()>> {
         self.lock.clone().try_lock_owned().ok()
