@@ -75,7 +75,7 @@ fn parts_of(messages: &[PageMessage]) -> Vec<&PartMessage> {
         .collect()
 }
 
-fn outcome<'a>(messages: &'a [PageMessage], part: Part) -> &'a PartOutcome {
+fn outcome(messages: &[PageMessage], part: Part) -> &PartOutcome {
     let found: Vec<_> = parts_of(messages).into_iter().filter(|m| m.part == part).collect();
     assert_eq!(found.len(), 1, "{part:?} returned once: {found:?}");
     &found[0].outcome
@@ -179,6 +179,16 @@ fn h15_every_part_once_by_tier_with_one_header() {
 #[test]
 fn h15_parts_equal_the_engine_and_the_history_read_for_their_context() {
     let f = studied();
+    // The column caches built, so Cached reads them and Snapshot does not.
+    meguri_stats::graphs::stats_home_idle(f.host.derived());
+    f.host.derived().request_refresh(meguri_stats::graphs::COMPONENT);
+    let deadline = meguri_engine::monotonic::now() + WAIT;
+    while f.host.derived().readiness(meguri_stats::graphs::COMPONENT).unwrap().readiness != Readiness::Ready {
+        assert!(meguri_engine::monotonic::now() < deadline, "the column caches never became ready");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    f.host.derived().flush().unwrap();
+    assert!(f.data(Scope::Collection, History::AllHistory).scope.from_caches());
     for scope in [Scope::Collection, Scope::Deck(meguri_model::ids::DeckId(LANG)), Scope::Deck(meguri_model::ids::DeckId(VERBS))] {
         for history in [History::Last12Months, History::AllHistory] {
             let request = page_request(scope.clone(), history, &every_part());
@@ -486,7 +496,7 @@ fn h15_the_first_tiers_return_while_the_build_runs_then_kept_values_come_at_once
     for part in [Part::CardStatesOverTime, Part::Started] {
         let mut last = 0.0;
         let progress = progress_of(&seen, part);
-        assert!(!progress.is_empty(), "{part:?}");
+        assert!(progress.iter().any(|p| matches!(p, Progress::Fraction(_))), "{part:?}: {progress:?}");
         for p in progress {
             if let Progress::Fraction(fraction) = p {
                 assert!((0.0..=1.0).contains(&fraction), "{fraction}");

@@ -18,7 +18,11 @@
 //!   still return.
 //! - Cancellation (H16): no message after the token fires; the reader
 //!   stops within 50 ms; a `stats_history` build the request started goes
-//!   on.
+//!   on. A record is computed whole from memory once its scope is read, so
+//!   a cancel during one is seen when it ends (no reader is held then, and
+//!   nothing more is sent). The token is checked just before each message,
+//!   so a cancel from another thread at that instant can let one message
+//!   through: the receiver drops messages of a request it cancelled.
 //! - Read only (H17): nothing here writes the collection. The day clock's
 //!   own check, which G1 runs first, is the day clock's write.
 
@@ -309,6 +313,20 @@ pub fn request(
     request: &PageRequest,
     sink: &mut dyn FnMut(PageMessage),
 ) -> Result<PageEnd, StatsError> {
+    match run(caches, collection, derived, request, sink) {
+        // A fired token is Cancelled whatever stopped the work (G8.2).
+        _ if request.cancel.is_cancelled() => Ok(PageEnd::Cancelled),
+        other => other,
+    }
+}
+
+fn run(
+    caches: &StatsCaches,
+    collection: &Collection,
+    derived: &DerivedHost,
+    request: &PageRequest,
+    sink: &mut dyn FnMut(PageMessage),
+) -> Result<PageEnd, StatsError> {
     let cancel = &request.cancel;
     let mut out = Sink { cancel, sink };
     // The one request of a refresh drops the memo, as a first request does
@@ -349,7 +367,9 @@ pub fn request(
             Ok(resolved) => resolved,
             Err(GraphResult::ScopeError(error)) => return Ok(PageEnd::ScopeError(error)),
             Err(GraphResult::UnreadableRow(bad)) => return Ok(PageEnd::UnreadableRow(bad)),
-            Err(_) => return Ok(PageEnd::Cancelled),
+            Err(GraphResult::Cancelled) => return Ok(PageEnd::Cancelled),
+            // A first resolution gives no other result.
+            Err(GraphResult::ContextChanged | GraphResult::Data(_)) => return Ok(PageEnd::ContextChanged),
         };
         let preferences = match Preferences::read(&*snapshot) {
             Ok(preferences) => preferences,
@@ -376,6 +396,14 @@ pub fn request(
     };
     if cancel.is_cancelled() {
         return Ok(PageEnd::Cancelled);
+    }
+    // The history build may take seconds on a first open: release it now
+    // (H14.2, S10.6), so it runs while the first tiers compute.
+    if request.columns == Columns::Cached
+        && !matches!(scope, Scope::Search(_))
+        && parts.iter().any(|part| part.source() == Source::History)
+    {
+        history::release_build(caches, derived, &header.context);
     }
 
     let input = GraphInput {
