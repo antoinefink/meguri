@@ -19,8 +19,8 @@ public struct HomeView: View {
     @Environment(\.shellLayout) private var shellLayout
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.todayBesideDeckList) private var todayBesideDeckList
-    @Environment(\.syncStatusItem) private var syncStatusItem
     #endif
+    @Environment(\.syncStatusItem) private var syncStatusItem
     @Environment(\.locale) private var locale
     public init(collection: ReviewCollection, deckID: Int64? = nil) { self.collection = collection; self.deckID = deckID }
     public var body: some View {
@@ -71,8 +71,9 @@ public struct HomeView: View {
         #endif
         .toolbar {
             #if os(macOS)
-            ToolbarItem(placement: .primaryAction) {
-                // N20.1: one Add menu beside sync.
+            // N23.6, N20.1: the sync button (from the shell), then the one Add menu.
+            ToolbarItemGroup(placement: .primaryAction) {
+                if let syncStatusItem { syncStatusItem }
                 addMenu
             }
             #else

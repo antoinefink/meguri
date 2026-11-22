@@ -75,9 +75,10 @@ struct SidebarRootView: View {
                                     #endif
                             }
                     }
-                    #if !os(macOS)
-                    .environment(\.syncStatusItem, navigation.section == .home ? features.syncStatus?() : nil)
-                    #endif
+                    // N23.6: screens that place the sync button in their own trailing
+                    // group read it here: Home's pages (both platforms) and, on the
+                    // Mac, Browse, after its Cards / Notes control.
+                    .environment(\.syncStatusItem, sectionPlacesSyncItem ? features.syncStatus?() : nil)
                     // Each sidebar row has its own stack: a new selection
                     // starts from its root rather than animating from the
                     // last one's.
@@ -87,15 +88,24 @@ struct SidebarRootView: View {
             .detailColumnChrome()
         }
         #if os(macOS)
-        // N23.6: declared once for every screen of the window (Today, a deck page,
-        // Browse, Note Types), in the trailing group. `.primaryAction` is the
-        // leading edge on the Mac, which a screen with a principal item (Note
-        // Types' Fields | Cards) showed right after the title.
+        // N23.6: an item declared here comes before a screen's own items, so on a
+        // screen with a principal control it sits between the title and that
+        // control. Screens therefore place it themselves (`syncStatusItem`); only
+        // Note Types, whose toolbar does not read it yet, gets it from here.
         .toolbar {
-            if navigation.review == nil, let syncStatus = features.syncStatus {
-                ToolbarItem(placement: .automatic) { syncStatus() }
+            if navigation.review == nil, navigation.section == .noteTypes, let syncStatus = features.syncStatus {
+                ToolbarItem(placement: .primaryAction) { syncStatus() }
             }
         }
+        #endif
+    }
+
+    /// The sections whose screens put the sync button in their own trailing group.
+    private var sectionPlacesSyncItem: Bool {
+        #if os(macOS)
+        navigation.section == .home || navigation.section == .browse
+        #else
+        navigation.section == .home
         #endif
     }
 

@@ -73,10 +73,13 @@ final class SyncButtonPlacementTests: XCTestCase {
         }
     }
 
-    /// The empty capsule Antoine saw was a bottom bar holding the moved item: the Decks
-    /// stack has no bottom toolbar, and every navigation bar button says what it is.
+    /// The empty capsule Antoine saw was a bottom bar holding the moved item: the sync
+    /// button stays in the top bar (in no bottom toolbar), and every navigation bar
+    /// button says what it is.
     private func assertNoBottomBarOrEmptyItem(_ app: XCUIApplication, _ place: String) {
-        XCTAssertEqual(app.toolbars.count, 0, "No bottom bar on \(place)")
+        let sync = app.buttons["sync.status.button"]
+        XCTAssertFalse(app.toolbars.buttons["sync.status.button"].exists, "The sync button is in no toolbar on \(place)")
+        XCTAssertLessThan(sync.frame.midY, app.windows.firstMatch.frame.height / 3, "The sync button stays at the top on \(place)")
         for button in app.navigationBars.buttons.allElementsBoundByIndex where button.exists {
             XCTAssertFalse(button.label.isEmpty && button.identifier.isEmpty, "An empty bar item on \(place): \(button.frame)")
         }
