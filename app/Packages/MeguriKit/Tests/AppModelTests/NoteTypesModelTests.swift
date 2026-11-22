@@ -341,6 +341,16 @@ extension NoteTypesModelTests {
         #expect(backend.saved.last?.fields.first?.name == "Prompt")
     }
 
+    @Test func saveWaitsForACommitStartedWhenFocusLeft() async {
+        let (model, backend) = await open()
+        model.setOption(7, row: 1) { $0.rtl = true }
+        model.trackCommit { await model.commitRename(7, row: 0, typed: "Prompt") }
+        model.save()
+        await model.settle()
+        #expect(backend.saved.last?.fields.first?.name == "Prompt" && backend.saved.last?.fields[1].rtl == true)
+        #expect(!model.committingForSave)
+    }
+
     @Test func aCrossedOutNameIsFreeForAnotherField() async {
         let (model, _) = await open()
         model.deleteField(7, row: 2)

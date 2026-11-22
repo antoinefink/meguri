@@ -113,6 +113,11 @@ public final class NoteTypesModel {
     public var pendingEdits: [String: @MainActor () async -> Bool] = [:]
     /// A Save is between its first commit and its end: a second one waits.
     @ObservationIgnored private var saveRunning = false
+    /// Commits a view started (a rename still being checked after focus
+    /// left), awaited by Save whatever field has the focus now.
+    @ObservationIgnored private var inflightCommits: [Task<Bool, Never>] = []
+    /// Save is committing typed text: text inputs wait, so nothing typed now is lost.
+    public private(set) var committingForSave = false
     /// Raised when the collection goes: work started before must not land.
     private var epoch: UInt64 = 0
     /// How long a summary read waits after the last change (W7's pause).
@@ -313,6 +318,12 @@ public final class NoteTypesModel {
         return true
     }
 
+    /// A commit a view started on its own (focus left a field): Save waits for it.
+    public func trackCommit(_ commit: @escaping @MainActor () async -> Bool) {
+        inflightCommits.removeAll { $0.isCancelled }
+        inflightCommits.append(Task { await commit() })
+    }
+
     public func cancelRename() {
         renaming = nil
         renameRefusal = nil
@@ -408,7 +419,13 @@ public final class NoteTypesModel {
         saveTask = Task {
             defer { saveRunning = false }
             // Typed text that is not committed yet goes into the draft first; a refused name stops Save.
-            for commit in pendingEdits.values { guard await commit() else { return } }
+            committingForSave = true
+            var accepted = true
+            for task in inflightCommits { accepted = await task.value && accepted }
+            inflightCommits.removeAll()
+            for commit in pendingEdits.values where accepted { accepted = await commit() }
+            committingForSave = false
+            guard accepted else { return }
             saveRunning = false
             guard self.epoch == epoch, canSave(id), isEdited(id), let draft = drafts[id] else { return }
             saveRunning = true

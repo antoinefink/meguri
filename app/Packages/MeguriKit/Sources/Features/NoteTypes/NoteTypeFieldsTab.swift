@@ -274,6 +274,7 @@ private struct FieldNameCell: View {
                     .onExitCommand { model.cancelRename() }
                     #endif
                     .onChange(of: focused) { _, now in if !now, model.renaming == line.id { commit() } }
+                    .disabled(model.committingForSave)
                     .accessibilityIdentifier("noteTypes.fields.renameField")
                 if let refusal = model.renameRefusal, refusal.row == line.id {
                     Text(NoteTypesStrings.refusal(refusal.refusal, locale: locale))

@@ -26,8 +26,9 @@ struct NoteTypeFieldInspector: View {
                 Section {
                     TextField(text: $name) { Text("noteTypes.inspector.name", bundle: .module) }
                         .focused($focus, equals: .name)
+                        .disabled(model.committingForSave)
                         .autocorrectionDisabled()
-                        .onSubmit { Task { _ = await commitName(name, row: row.id) } }
+                        .onSubmit { submitName(row: row.id) }
                         .accessibilityIdentifier("noteTypes.fields.inspector.name")
                     if let refusal = model.renameRefusal, refusal.row == row.id, model.renaming != row.id {
                         Text(NoteTypesStrings.refusal(refusal.refusal, locale: locale))
@@ -49,6 +50,7 @@ struct NoteTypeFieldInspector: View {
                         Text("noteTypes.inspector.placeholderHelp", bundle: .module)
                     }
                     .focused($focus, equals: .placeholder)
+                    .disabled(model.committingForSave)
                     .onSubmit { commitPlaceholder(placeholder, row: row.id) }
                     .accessibilityIdentifier("noteTypes.fields.inspector.placeholder")
                 } header: {
@@ -81,6 +83,11 @@ struct NoteTypeFieldInspector: View {
 
     private func load() {
         guard let row else { return }
+        // The selection moved while a field held text: it goes to its own row before the new row shows.
+        if let focus, let editing = editingRow, editing != row.id {
+            commit(focus, row: editing)
+            editingRow = row.id
+        }
         if focus != .name || editingRow != row.id { name = row.name }
         if focus != .placeholder || editingRow != row.id { placeholder = row.field.description }
     }
@@ -104,10 +111,9 @@ struct NoteTypeFieldInspector: View {
         let typedName = name, typedPlaceholder = placeholder, model = model
         switch field {
         case .name:
-            Task {
-                _ = await commitName(typedName, row: row)
-                if focus == nil { model.pendingEdits[Self.pendingKey] = nil }
-            }
+            // Save waits for this check, whichever field has the focus by then.
+            model.trackCommit { await commitName(typedName, row: row) }
+            if focus == nil { model.pendingEdits[Self.pendingKey] = nil }
         case .placeholder:
             commitPlaceholder(typedPlaceholder, row: row)
             model.pendingEdits[Self.pendingKey] = nil
@@ -121,6 +127,17 @@ struct NoteTypeFieldInspector: View {
     private func commitName(_ typed: String, row: Int) async -> Bool {
         guard let current = model.draft(id)?.row(row), typed != current.name else { return true }
         return await model.commitRename(id, row: row, typed: typed)
+    }
+
+    /// Return in Name: the accepted name (quotes removed, ends trimmed) shows
+    /// in the field, unless the person typed on or moved meanwhile.
+    private func submitName(row: Int) {
+        let typed = name
+        Task {
+            guard await commitName(typed, row: row), editingRow == row || self.row?.id == row, name == typed,
+                  let saved = model.draft(id)?.row(row)?.name else { return }
+            name = saved
+        }
     }
 
     private func commitPlaceholder(_ typed: String, row: Int) {
