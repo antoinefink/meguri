@@ -631,4 +631,28 @@ fn d7_a_swap_deletes_the_old_files_once_no_reader_maps_them() {
     assert_eq!(last.len(), 2, "{last:?}");
     assert!(second.iter().all(|name| !last.contains(name)));
     compare(&f, true, "after the swaps");
+
+    // A request keeps its map across a memory warning while a later one
+    // maps the same file again: the file stays until both are gone.
+    let kept = match f.request(Scope::Collection, History::AllHistory) {
+        GraphResult::Data(data) => data,
+        other => panic!("{other:?}"),
+    };
+    meguri_stats::graphs::release_stats_caches(f.host.stats(), f.host.derived());
+    let again = match f.request(Scope::Collection, History::AllHistory) {
+        GraphResult::Data(data) => data,
+        other => panic!("{other:?}"),
+    };
+    assert!(again.scope.from_caches());
+    let before = column_files(&f);
+    rebuild(&f);
+    drop(again);
+    let _ = f.request(Scope::Deck(meguri_model::ids::DeckId(LANG)), History::AllHistory);
+    f.host.derived().flush().unwrap();
+    let during = column_files(&f);
+    assert!(before.iter().all(|name| during.contains(name)), "{during:?}");
+    drop(kept);
+    let _ = f.request(Scope::Collection, History::AllHistory);
+    f.host.derived().flush().unwrap();
+    assert_eq!(column_files(&f).len(), 2);
 }

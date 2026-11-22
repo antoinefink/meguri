@@ -116,7 +116,9 @@ pub(crate) struct Shared {
     handle: Mutex<Option<ComponentHandle>>,
     /// Every file mapped, while any map of it lives (a request's or the
     /// cache's): the derived writer keeps these (D7).
-    open: Mutex<HashMap<String, Weak<MappedBytes>>>,
+    /// One name can have several maps (a release, then a new map, while a
+    /// request keeps the old one): each counts.
+    open: Mutex<HashMap<String, Vec<Weak<MappedBytes>>>>,
 }
 
 impl Shared {
@@ -146,7 +148,9 @@ impl Shared {
         self.open
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(record.name.clone(), Arc::downgrade(&mapped));
+            .entry(record.name.clone())
+            .or_default()
+            .push(Arc::downgrade(&mapped));
         Ok(mapped)
     }
 
@@ -161,7 +165,10 @@ impl Shared {
         };
         drop(superseded);
         let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
-        open.retain(|_, mapped| mapped.strong_count() > 0);
+        open.retain(|_, maps| {
+            maps.retain(|mapped| mapped.strong_count() > 0);
+            !maps.is_empty()
+        });
         open.keys().filter(|name| !live.contains(*name)).cloned().collect()
     }
 
