@@ -15,6 +15,8 @@ public struct CloudSyncStatusButton: View {
     #if os(macOS)
     @Environment(\.openSettings) private var openSettings
     #endif
+    /// The panel's own height, which sizes the sheet it shows in on touch.
+    @State private var panelHeight: CGFloat?
     public init(collection: ReviewCollection) { self.collection = collection }
     private var meguri: Bool { collection.sync.providerState?.selection == .meguri }
     /// T20.1: the service's name, or `sync.button.label.off` with no service.
@@ -65,10 +67,12 @@ public struct CloudSyncStatusButton: View {
                 panel
                     .padding()
                     .frame(width: ContentWidth.primaryAction)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
                     .presentationCompactAdaptation(.sheet)
-                    // When the popover adapts to a sheet, it is the compact sheet's (N23.1).
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
+                    // Where the popover becomes a sheet (an iPhone held wide, the Duo
+                    // opened), the sheet fits the panel, as at compact width.
+                    .presentationDetents(fittedDetents)
             }
             #if os(iOS)
             // Keep status and connection separate; native dismissal, rather
@@ -78,11 +82,16 @@ public struct CloudSyncStatusButton: View {
                 nativeCompactStatusID = nil
                 collection.compactSyncStatusDidDismiss(id)
             }) {
-                // The same panel as the popover; it scrolls at the largest text sizes.
-                ScrollView { panel.padding() }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
+                // The same panel as the popover, in a sheet as tall as the panel
+                // (N23.1): the detent grows with the text and stops at the screen's
+                // height, where the panel scrolls.
+                ScrollView {
+                    panel
+                        .padding()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .presentationDetents(fittedDetents)
                     .onAppear {
                         if nativeCompactStatusID == nil {
                             nativeCompactStatusID = collection.syncPresentation.statusPresentationID
@@ -95,6 +104,11 @@ public struct CloudSyncStatusButton: View {
             }
             #endif
         }
+    }
+    /// One detent, the panel's height: no larger detent that would only show
+    /// empty space. Until the panel is measured, the system's medium height.
+    private var fittedDetents: Set<PresentationDetent> {
+        panelHeight.map { [.height($0)] } ?? [.medium]
     }
     private var panel: some View {
         SyncStatusPanel(collection: collection, openEntry: openStatusEntry,
