@@ -4,7 +4,7 @@ Spec: stats/browse-queries
 Requirements: R1351, R1383, R1393, R1417, R1419, R1420, AE60
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/browse-queries/
-Status: Under review (R1357) for Q9 and the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-22 (R1357) for Q9 and the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). Every other section is in force and unchanged.
 
 The search text a click on a Stats graph opens in the Browser: the scope's part, the item's part, and how the two are joined. Scopes are `stats/graphs-common` G2. Histogram bar queries are `stats/graph-presentation` (U226); this file states the scope text, the join and the queries of fixed items. Search syntax is `search/grammar`, canonical text `search/canonical-form`. The general join and replace services of the search field are `search/join-and-replace` (U88); the Stats join below is its own rule, because R1417 and AE60 fix its exact text.
 
