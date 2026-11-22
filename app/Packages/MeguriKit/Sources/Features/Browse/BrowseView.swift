@@ -5,8 +5,9 @@ import SwiftUI
 /// Browse's detail beside its sidebar (N21.1, N21.3): the window title
 /// "Browse", the Cards / Notes control in the toolbar, the results table and
 /// its status line, or the empty and error states (`docs/design/
-/// screen-inventory.yaml` `browse.browser`). The search field (U271) and the
-/// inspector (U273) join the toolbar later.
+/// screen-inventory.yaml` `browse.browser`), and the search field after
+/// the Cards / Notes control (U271, N21.2). The inspector (U273) joins the
+/// toolbar later.
 public struct BrowseView: View {
     private let model: BrowseModel
     private let addNote: () -> Void
@@ -31,6 +32,7 @@ public struct BrowseView: View {
             .toolbar {
                 ToolbarItem(placement: .principal) { modePicker }
             }
+            .browseSearchField(model)
             .onChange(of: formatterKey) { setFormatter() }
             .onAppear {
                 setFormatter()
