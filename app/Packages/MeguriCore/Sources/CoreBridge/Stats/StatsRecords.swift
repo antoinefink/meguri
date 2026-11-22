@@ -193,6 +193,56 @@ public struct StatsStarted: Sendable, Hashable {
     public let firstDay: Int?
 }
 
+/// `studied_today` (H12): the strip's numbers for the page scope.
+public struct StatsStudiedToday: Sendable, Hashable {
+    public let answers: Int
+    public let cards: Int
+    public let timeMilliseconds: Int
+}
+
+/// One day of `retention_by_day` (H4.2).
+public struct StatsRetentionDay: Sendable, Hashable {
+    public let youngPassed: Int, youngFailed: Int, maturePassed: Int, matureFailed: Int
+    /// The retention in force of each counted row's card, summed (H3.4).
+    public let desiredSum: Double
+    /// The rows in `desiredSum`.
+    public let desiredRows: Int
+    /// Forgotten on the day.
+    public var forgotten: Int { youngFailed + matureFailed }
+}
+
+/// `retention_by_day` (H3.4, H4.2).
+public struct StatsRetentionByDay: Sendable, Hashable {
+    public let days: StatsSparseMap<StatsRetentionDay>
+    /// The distinct retentions in force among the scope's home decks, ascending.
+    public let retentions: [Float]
+    /// More than one: the dashed line is an average.
+    public let several: Bool
+}
+
+/// One window of a By Deck row (H10.2).
+public struct StatsDeckValues: Sendable, Hashable {
+    public let reviews: Int
+    public let timeMilliseconds: Int
+    public let passed: Int
+    public let failed: Int
+}
+
+/// A row of `by_deck` (H10).
+public struct StatsDeckRow: Sendable, Hashable {
+    public let deckID: Int64
+    /// The deck's own cards, outside its subdecks (the first row of a deck's table).
+    public let ownCards: Bool
+    public let cards: Int
+    /// `allTime` only with all history.
+    public let windows: StatsRanges<StatsDeckValues>
+}
+
+/// `by_deck` (H10): rows in the deck tree's order.
+public struct StatsByDeck: Sendable, Hashable {
+    public let rows: [StatsDeckRow]
+}
+
 /// One sample of `knowledge_over_time` (H3.3).
 public struct StatsKnowledgeSample: Sendable, Hashable {
     /// H1's day: −365 to −1 for a day end, earlier for a month end (All only), 0 for today's point.
@@ -234,6 +284,11 @@ public enum StatsPartValue: Sendable, Hashable {
     case cardStatesOverTime(StatsCardStatesOverTime)
     case started(StatsStarted)
     case knowledgeOverTime(StatsKnowledgeOverTime)
+    case studiedToday(StatsStudiedToday)
+    case retentionByDay(StatsRetentionByDay)
+    case byDeck(StatsByDeck)
+    /// H1 day → AH2's rows, every year (H11).
+    case activityDays(StatsSparseMap<Int>)
 }
 
 // MARK: - Decoding
@@ -264,8 +319,12 @@ extension StatsPartValue {
         case .cardStatesOverTime: value = .cardStatesOverTime(try .decode(&bytes))
         case .started: value = .started(StatsStarted(days: try bytes.counts(), firstDay: try bytes.optional { b throws(StatsBytes.Failure) in try b.integer() }))
         case .knowledgeOverTime: value = .knowledgeOverTime(try .decode(&bytes))
-        case .studiedToday, .retentionByDay, .byDeck, .activityDays:
-            throw StatsBytes.Failure(reason: "no decoder for \(part.rawValue) yet")
+        case .studiedToday:
+            value = .studiedToday(StatsStudiedToday(answers: try bytes.count(), cards: try bytes.count(),
+                                                    timeMilliseconds: try bytes.integer()))
+        case .retentionByDay: value = .retentionByDay(try .decode(&bytes))
+        case .byDeck: value = .byDeck(try .decode(&bytes))
+        case .activityDays: value = .activityDays(try bytes.counts())
         }
         try bytes.finish()
         return value
@@ -306,9 +365,6 @@ extension StatsReviews {
             counts.append(StatsReviewKinds(row[0..<5]))
             times.append(StatsReviewKinds(row[5..<10]))
         }
-        // H6's members, which the record still carries after Anki's: the
-        // `by_answer` part reads them on its own.
-        _ = try StatsByAnswer.decode(&bytes)
         return StatsReviews(count: StatsSparseMap(keys: map.keys, values: counts),
                             time: StatsSparseMap(keys: map.keys, values: times))
     }
@@ -442,5 +498,45 @@ extension StatsKnowledgeOverTime {
                                  knowledge: try b.float64(), studied: try b.count())
         }
         return StatsKnowledgeOverTime(samples: samples, failed: try bytes.count(), leftOut: try bytes.count())
+    }
+}
+
+extension StatsRetentionByDay {
+    static func decode(_ bytes: inout StatsBytes) throws(StatsBytes.Failure) -> StatsRetentionByDay {
+        let map = try bytes.map(members: 5) { $0 }
+        let sums = try bytes.list { b throws(StatsBytes.Failure) in try b.float64() }
+        guard sums.count == map.count else { throw StatsBytes.Failure(reason: "\(sums.count) sums for \(map.count) days") }
+        var days: [StatsRetentionDay] = []
+        for (at, row) in map.values.enumerated() {
+            guard row.allSatisfy({ $0 >= 0 }) else { throw StatsBytes.Failure(reason: "a negative count") }
+            days.append(StatsRetentionDay(youngPassed: row[0], youngFailed: row[1], maturePassed: row[2],
+                                          matureFailed: row[3], desiredSum: sums[at], desiredRows: row[4]))
+        }
+        return StatsRetentionByDay(days: StatsSparseMap(keys: map.keys, values: days),
+                                   retentions: try bytes.list { b throws(StatsBytes.Failure) in try b.float32() },
+                                   several: try bytes.flag())
+    }
+}
+
+extension StatsDeckValues {
+    static func decode(_ bytes: inout StatsBytes) throws(StatsBytes.Failure) -> StatsDeckValues {
+        StatsDeckValues(reviews: try bytes.count(), timeMilliseconds: try bytes.integer(), passed: try bytes.count(),
+                        failed: try bytes.count())
+    }
+}
+
+extension StatsByDeck {
+    static func decode(_ bytes: inout StatsBytes) throws(StatsBytes.Failure) -> StatsByDeck {
+        StatsByDeck(rows: try bytes.list { b throws(StatsBytes.Failure) in
+            let deck = Int64(try b.integer())
+            let own = try b.flag()
+            let cards = try b.count()
+            let oneMonth = try StatsDeckValues.decode(&b), threeMonths = try StatsDeckValues.decode(&b)
+            let sixMonths = try StatsDeckValues.decode(&b), oneYear = try StatsDeckValues.decode(&b)
+            let allTime = try b.optional { v throws(StatsBytes.Failure) in try StatsDeckValues.decode(&v) }
+            return StatsDeckRow(deckID: deck, ownCards: own, cards: cards,
+                                windows: StatsRanges(oneMonth: oneMonth, threeMonths: threeMonths, sixMonths: sixMonths,
+                                                     oneYear: oneYear, allTime: allTime))
+        })
     }
 }

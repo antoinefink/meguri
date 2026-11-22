@@ -567,8 +567,54 @@ public enum StatsStaleness: Sendable, Hashable {
     }
 }
 
+/// H13's row kinds for the cards behind a day.
+public enum StatsDayKind: Sendable, Hashable {
+    /// The rows Reviews Over Time counts.
+    case reviewed
+    /// Activity's rows.
+    case answered
+    /// Forgotten's rows (answered Again).
+    case forgotten
+
+    var raw: MeguriCoreBindings.StatsDayKind {
+        switch self {
+        case .reviewed: .reviewed
+        case .answered: .answered
+        case .forgotten: .forgotten
+        }
+    }
+}
+
+/// What H13 gives.
+public enum StatsDayCards: Sendable, Hashable {
+    /// The existing cards with such a row on the day, ascending; never empty.
+    case cards([Int64])
+    case noCards
+    /// A Search scope (H18).
+    case unsupportedScope
+    case scopeError(StatsScopeError)
+    case unreadableRow(StatsUnreadable)
+    case cancelled
+
+    init(_ raw: MeguriCoreBindings.StatsDayCards) {
+        switch raw {
+        case .cards(let ids): self = .cards(ids)
+        case .noCards: self = .noCards
+        case .unsupportedScope: self = .unsupportedScope
+        case .scopeError(.search(let error)): self = .scopeError(.search(BrowseSearchError(error)))
+        case .scopeError(.unknownDeck): self = .scopeError(.unknownDeck)
+        case .unreadableRow(let row): self = .unreadableRow(StatsUnreadable(row))
+        case .cancelled: self = .cancelled
+        }
+    }
+}
+
 /// The Statistics page's reads (U103, U292).
 public protocol StatsService: Sendable {
+    /// H13: the cards behind `day` (H1) of the result on screen, whose header gave `context`.
+    /// A commit since that result does not refuse it.
+    func dayCards(scope: StatsPageScope, context: StatsContext, day: Int, kind: StatsDayKind,
+                  cancel: CancelToken?) async throws(BridgeError) -> StatsDayCards
     /// Starts one page request and returns its stream at once.
     func page(_ request: StatsPageRequest) async throws(BridgeError) -> StatsPageStream
     /// G9.5, H14.4: the memory warning. Releases the column caches and the history component
@@ -578,8 +624,8 @@ public protocol StatsService: Sendable {
     func homeIdle() async throws(BridgeError)
 }
 
-/// Page requests and the release run as core jobs; the idle signal is a short call on the
-/// maintenance lane. None runs on the main actor or writes the collection.
+/// Page requests and the release run as core jobs; the cards behind a day are a short read on
+/// the query lane, the idle signal a short call on the maintenance lane. None runs on the main actor or writes the collection.
 public struct CoreStatsService: StatsService {
     public init() {}
 
@@ -591,6 +637,16 @@ public struct CoreStatsService: StatsService {
     public func releaseCaches() async throws(BridgeError) {
         // A job: the release waits on the derived writer, which can be busy for a while.
         try await Jobs.start(.startReleaseStatsCaches) { try startReleaseStatsCaches() }.value()
+    }
+
+    public func dayCards(scope: StatsPageScope, context: StatsContext, day: Int, kind: StatsDayKind,
+                         cancel: CancelToken? = nil) async throws(BridgeError) -> StatsDayCards {
+        if Task.isCancelled { throw .cancelled }
+        guard let day = Int32(exactly: day) else { throw .invalidArgument("day \(day)") }
+        let rawScope = scope.raw, rawContext = context.raw, rawKind = kind.raw, token = cancel?.raw
+        return try await QueryLane.shared.call(.statsDayCards) {
+            StatsDayCards(try statsDayCards(scope: rawScope, context: rawContext, day: day, kind: rawKind, cancel: token))
+        }
     }
 
     public func homeIdle() async throws(BridgeError) {

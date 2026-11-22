@@ -19,6 +19,8 @@ private typealias StatsOldestDay = CoreBridge.StatsOldestDay
 private typealias StatsScopeError = CoreBridge.StatsScopeError
 private typealias StatsHistory = CoreBridge.StatsHistory
 private typealias StatsPageRequest = CoreBridge.StatsPageRequest
+private typealias StatsDayCards = CoreBridge.StatsDayCards
+private typealias StatsDayKind = CoreBridge.StatsDayKind
 
 // The Statistics page's request through CoreBridge (U103, U292): G6's
 // decoding of every part's value, the router's header, failure, progress
@@ -192,10 +194,9 @@ private func routed(events: [StatsPageEvent], cancelAfter: Int? = nil) async -> 
                                                  average: 0.94, sumByCard: 1.88, sumByNote: 1.5, leftOut: 0)))
         #expect(try decoded(.added) { $0.map([-2, 0], [[3], [1]]) } == .added(StatsSparseMap(keys: [-2, 0], values: [3, 1])))
 
-        // `reviews`: ten members, then the H6 members the record still carries.
+        // `reviews`: ten members, Anki's only (By Answer is its own part).
         let reviews = try decoded(.reviews) { w in
             w.map([-1, 0], [[1, 2, 3, 4, 5, 10, 20, 30, 40, 50], [0, 0, 1, 0, 0, 0, 0, 900, 0, 0]])
-            w.map([-1], [[1, 1, 1, 1, 1, 1, 1, 1]]); w.integer(0)
         }
         #expect(reviews == .reviews(StatsReviews(
             count: StatsSparseMap(keys: [-1, 0], values: [.init(learn: 1, relearn: 2, young: 3, mature: 4, filtered: 5),
@@ -282,8 +283,50 @@ private func routed(events: [StatsPageEvent], cancelAfter: Int? = nil) async -> 
             StatsKnowledgeSample(day: 0, instantMilliseconds: 1_894_701_600_000, knowledge: 1.5, studied: 2),
         ], failed: 1, leftOut: 3)))
 
-        // A part with no decoder yet is refused, never taken as data.
-        #expect(throws: StatsBytes.Failure.self) { try decoded(.studiedToday) { _ in } }
+        #expect(try decoded(.studiedToday) { w in w.integer(12); w.integer(7); w.integer(65_000) }
+            == .studiedToday(StatsStudiedToday(answers: 12, cards: 7, timeMilliseconds: 65_000)))
+        // Truncated bytes are refused, never taken as data.
+        #expect(throws: StatsBytes.Failure.self) { try decoded(.studiedToday) { w in w.integer(12) } }
+
+        let retention = try decoded(.retentionByDay) { w in
+            w.map([-2, 0], [[3, 1, 4, 0, 8], [0, 0, 2, 2, 4]])
+            w.list([7.2, 3.6]) { w, sum in w.float64(sum) }
+            w.list([Float(0.9), 0.95]) { w, r in w.float32(r) }
+            w.integer(1)
+        }
+        #expect(retention == .retentionByDay(StatsRetentionByDay(
+            days: StatsSparseMap(keys: [-2, 0], values: [
+                StatsRetentionDay(youngPassed: 3, youngFailed: 1, maturePassed: 4, matureFailed: 0, desiredSum: 7.2, desiredRows: 8),
+                StatsRetentionDay(youngPassed: 0, youngFailed: 0, maturePassed: 2, matureFailed: 2, desiredSum: 3.6, desiredRows: 4),
+            ]),
+            retentions: [0.9, 0.95], several: true)))
+        // One desired sum per day, no more and no less.
+        #expect(throws: StatsBytes.Failure.self) {
+            try decoded(.retentionByDay) { w in
+                w.map([0], [[1, 0, 0, 0, 1]]); w.list([Double]()) { w, sum in w.float64(sum) }
+                w.list([Float]()) { w, r in w.float32(r) }; w.integer(0)
+            }
+        }
+
+        let values = { (base: Int) in StatsDeckValues(reviews: base, timeMilliseconds: base * 1_000, passed: base - 1, failed: 1) }
+        let byDeck = try decoded(.byDeck) { w in
+            w.list([(1_788_249_600_212, 1, 30, true), (1_788_249_600_214, 0, 5, false)]) { w, row in
+                w.integer(row.0); w.integer(row.1); w.integer(row.2)
+                for base in [2, 3, 6, 12] { w.integer(base); w.integer(base * 1_000); w.integer(base - 1); w.integer(1) }
+                w.list(row.3 ? [99] : []) { w, base in w.integer(base); w.integer(base * 1_000); w.integer(base - 1); w.integer(1) }
+            }
+        }
+        #expect(byDeck == .byDeck(StatsByDeck(rows: [
+            StatsDeckRow(deckID: 1_788_249_600_212, ownCards: true, cards: 30,
+                         windows: StatsRanges(oneMonth: values(2), threeMonths: values(3), sixMonths: values(6),
+                                              oneYear: values(12), allTime: values(99))),
+            StatsDeckRow(deckID: 1_788_249_600_214, ownCards: false, cards: 5,
+                         windows: StatsRanges(oneMonth: values(2), threeMonths: values(3), sixMonths: values(6),
+                                              oneYear: values(12), allTime: nil)),
+        ])))
+
+        #expect(try decoded(.activityDays) { $0.map([-800, -799, 0], [[4], [1], [9]]) }
+            == .activityDays(StatsSparseMap(keys: [-800, -799, 0], values: [4, 1, 9])))
     }
 
     @Test func periodsReadTheirHistoryAndOnlyAllNeedsANewRequest() {
@@ -421,8 +464,8 @@ private final class StatsDiskCapacity: DiskSpaceProviding {
 
 extension EventTests {
     /// One page request on a copy of the schema-18 fixture (11 cards, 6 review-log rows), all
-    /// history: one header, each part once by tier, the parts not built yet failing alone, the
-    /// end, and no relay kept once the job has ended; then a cancelled one.
+    /// history: one header, each part once by tier with its value, the end, and no relay kept
+    /// once the job has ended; the cards behind a day; then a cancelled request.
     @Test(.timeLimit(.minutes(2))) func aPageRequestStreamsItsPartsOnAFixtureCollection() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let directory = root.appending(path: "collection")
@@ -463,10 +506,8 @@ extension EventTests {
             #expect(header.context.nowMilliseconds == 1_894_701_600_000 && header.context.zoneIdentifier == "UTC")
 
             let outcome = { (part: StatsPart) in results.first { $0.part == part }?.outcome }
-            for part in [StatsPart.studiedToday, .retentionByDay, .byDeck, .activityDays] {
-                #expect(outcome(part) == .failed(.notBuilt), "\(part)")
-            }
-            for part in StatsPart.allCases where ![.studiedToday, .retentionByDay, .byDeck, .activityDays].contains(part) {
+            guard case .day = header.oldestDay else { Issue.record("oldest day \(header.oldestDay)"); return }
+            for part in StatsPart.allCases {
                 guard case .data = outcome(part) else { Issue.record("\(part): \(String(describing: outcome(part)))"); continue }
             }
             guard case .data(.cardCounts(let counts)) = outcome(.cardCounts),
@@ -485,6 +526,16 @@ extension EventTests {
                 #expect(knowledge.samples.allSatisfy { $0.knowledge <= Double($0.studied) + 1e-9 })
                 #expect(knowledge.samples.last.map { $0.day == 0 } ?? true, "today's point last")
             }
+            // H13 on the day of the oldest row, and on a day after today.
+            if case .day(let oldest) = header.oldestDay {
+                let behind = try await stats.dayCards(scope: .allDecks, context: header.context, day: oldest, kind: .reviewed,
+                                                      cancel: nil)
+                if case .cards(let ids) = behind { #expect(!ids.isEmpty && ids == ids.sorted()) } else { #expect(behind == .noCards) }
+            }
+            #expect(try await stats.dayCards(scope: .allDecks, context: header.context, day: 5, kind: .answered,
+                                             cancel: nil) == .noCards)
+            #expect(try await stats.dayCards(scope: .search("deck:*"), context: header.context, day: 0, kind: .forgotten,
+                                             cancel: nil) == .unsupportedScope)
             let today = states.counts(on: 0)
             #expect(today.total + states.leftOut == total(counts.includingInactive))
 
