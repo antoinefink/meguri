@@ -128,10 +128,11 @@ struct StatsChartPlot: View {
             .onKeyPress(.rightArrow) { move(1) }
             .onKeyPress(.escape) { clear() }
             .onKeyPress(.return) { browseSelected() }
-            .onChange(of: data.bins) {
+            .onChange(of: data.bins) { old, new in
                 // A refresh in place keeps the same bins and the selection
-                // (S10.2); other bins (a period change, a new day) clear it.
-                selection = .none
+                // (S10.2); other bins (a period change, a new day) clear it. A
+                // phase with no bins in between (loading) changes nothing.
+                if !old.isEmpty, !new.isEmpty, old != new { selection = .none }
             }
             #if os(macOS)
             .onChange(of: focused) {
@@ -193,7 +194,7 @@ struct StatsChartPlot: View {
             case .stackedArea:
                 // Every bin, zeros included, so a band never joins across a
                 // zero; each band but the top keeps a gap above it.
-                let gap = segment.series != topSeries ? segmentGap : 0
+                let gap = segment.series != topSeries ? min(segmentGap, (segment.upper - segment.lower) / 2) : 0
                 AreaMark(
                     x: .value("Period", Self.id(segment.bin)),
                     yStart: .value("From", segment.lower),
@@ -204,7 +205,8 @@ struct StatsChartPlot: View {
                 .accessibilityHidden(true)
             default:
                 if segment.upper > segment.lower {
-                    let gap = separated && topBarSeries[segment.bin] != segment.series ? segmentGap : 0
+                    // Never more than half a thin segment, so it never vanishes.
+                    let gap = separated && topBarSeries[segment.bin] != segment.series ? min(segmentGap, (segment.upper - segment.lower) / 2) : 0
                     BarMark(
                         x: .value("Period", Self.id(segment.bin)),
                         yStart: .value("From", segment.lower),
@@ -241,7 +243,8 @@ struct StatsChartPlot: View {
         }
         ForEach(data.series.filter(\.isLine)) { series in
             if case let .line(dashed, points) = series.mark {
-                lineContent(series, dashed: dashed, points: points || data.isSparse)
+                // A line of fewer than three values shows its points (S8.5).
+                lineContent(series, dashed: dashed, points: points || series.values.count(where: { $0 != nil }) < 3)
             }
         }
     }

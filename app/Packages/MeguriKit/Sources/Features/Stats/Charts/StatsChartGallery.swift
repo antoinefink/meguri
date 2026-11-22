@@ -264,12 +264,18 @@ struct StatsGalleryGrid: View {
     }
 
     var body: some View {
-        Grid(alignment: .topLeading, horizontalSpacing: Spacing.medium, verticalSpacing: Spacing.medium) {
+        VStack(alignment: .leading, spacing: Spacing.medium) {
             ForEach(rows, id: \.self) { row in
-                GridRow(alignment: .top) {
+                HStack(alignment: .top, spacing: Spacing.medium) {
                     ForEach(row, id: \.self) { index in
                         items[index].view
-                            .gridCellColumns(items[index].lead ? columns : 1)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    // Keep a short last row's boxes at one column's width.
+                    if !items[row[0]].lead, row.count < columns {
+                        ForEach(row.count..<columns, id: \.self) { _ in
+                            Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
+                        }
                     }
                 }
             }
@@ -343,11 +349,18 @@ private struct StatsGallerySwitch: View {
         _selected = State(initialValue: selected)
     }
 
+    /// "By Answer" → "byAnswer": identifier parts are lowerCamel words.
+    static func identifierPart(_ text: String) -> String {
+        let words = text.split(separator: " ").map(String.init)
+        guard let first = words.first else { return "option" }
+        return first.lowercased() + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }.joined()
+    }
+
     var body: some View {
         Picker(selection: $selected) {
             ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                 Text(verbatim: option).tag(index)
-                    .accessibilityIdentifier("stats.charts.gallery.\(id).\(index)")
+                    .accessibilityIdentifier("stats.charts.gallery.\(id).\(Self.identifierPart(option))")
             }
         } label: { Text(verbatim: "Show") }
         .pickerStyle(.segmented)

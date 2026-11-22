@@ -71,7 +71,7 @@ public struct StatsChartFormat: Sendable {
             value.formatted(.percent.precision(.fractionLength(0)).locale(locale))
         case .duration:
             {
-                let units: Set<Duration.UnitsFormatStyle.Unit> = value >= 3600 ? [.hours] : [.minutes]
+                let units: Set<Duration.UnitsFormatStyle.Unit> = value >= 3600 ? [.hours] : value >= 60 ? [.minutes] : [.seconds]
                 return Duration.seconds(value.rounded()).formatted(.units(allowed: units, width: .narrow).locale(locale))
             }()
         }
@@ -111,10 +111,11 @@ public struct StatsChartFormat: Sendable {
     }
 
     private func hour(_ hour: Int) -> String {
-        // A fixed winter day, so no clock change ever drops the hour.
-        let reference = calendar.date(from: DateComponents(year: 2001, month: 1, day: 15)) ?? now
-        let date = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: reference) ?? reference
-        return date.formatted(Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).hour())
+        // In a zone with no clock changes, so every hour exists and has its own name.
+        var utc = calendar
+        utc.timeZone = TimeZone(identifier: "UTC") ?? calendar.timeZone
+        let reference = utc.date(from: DateComponents(year: 2001, month: 1, day: 15, hour: hour)) ?? now
+        return reference.formatted(Date.FormatStyle(locale: locale, calendar: utc, timeZone: utc.timeZone).hour())
     }
 
     // MARK: Bin names
@@ -135,7 +136,7 @@ public struct StatsChartFormat: Sendable {
 
     /// The period's axis label: a short date for days and weeks, the month
     /// ("Mar") or the year at January ("2025") for months, the hour, the bin's name.
-    public func axisLabel(_ period: StatsPeriod, monthsShowYear: Bool) -> String {
+    public func axisLabel(_ period: StatsPeriod, monthsShowYear: Bool, spansYears: Bool = false) -> String {
         switch period {
         case let .day(date), let .week(date):
             return formatted(date, template: "dMMM")
@@ -144,7 +145,9 @@ public struct StatsChartFormat: Sendable {
             if monthsShowYear || calendar.component(.month, from: date) == 1 {
                 return date.formatted(style.year())
             }
-            return formatted(date, template: "MMM")
+            // An axis over more than one year names the year ("Nov 25"),
+            // so two Novembers are told apart.
+            return formatted(date, template: spansYears ? "MMMyy" : "MMM")
         case let .hour(value):
             return hour(value)
         case .bucket, .overdue, .later:
@@ -191,8 +194,15 @@ public struct StatsChartFormat: Sendable {
             return labels
         }
         let step = max(1, Int((Double(regular.count) / Double(maximum)).rounded(.up)))
+        let spansYears: Bool = {
+            let years = Set(regular.compactMap { index -> Int? in
+                if case let .month(date) = bins[index] { return calendar.component(.year, from: date) }
+                return nil
+            })
+            return years.count > 1
+        }()
         for (n, index) in regular.reversed().enumerated() where n % step == 0 {
-            labels[index] = axisLabel(bins[index], monthsShowYear: false)
+            labels[index] = axisLabel(bins[index], monthsShowYear: false, spansYears: spansYears && step > 1)
         }
         return labels
     }

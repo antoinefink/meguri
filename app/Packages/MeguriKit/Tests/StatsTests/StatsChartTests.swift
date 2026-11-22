@@ -182,6 +182,19 @@ import Testing
         #expect(labels[25] == "Later")
     }
 
+    @Test func everyHourHasItsOwnNameOnAClockChangeDay() {
+        var calendar = Self.calendar
+        calendar.timeZone = TimeZone(identifier: "Europe/Paris")!
+        let springForward = calendar.date(from: DateComponents(year: 2026, month: 3, day: 29))!
+        let format = StatsChartFormat(locale: Self.locale, calendar: calendar, now: springForward)
+        #expect(Set((0..<24).map { format.name(.hour($0)) }).count == 24)
+    }
+
+    @Test func subMinuteDurationTicksStayApart() {
+        let format = Self.format
+        #expect(format.axisValue(10, unit: .duration) != format.axisValue(20, unit: .duration))
+    }
+
     @Test func compactHourAxesKeepEvenHours() {
         let bins = (0..<24).map(StatsPeriod.hour)
         let labels = Self.format.labelledBins(bins, maximum: 12)

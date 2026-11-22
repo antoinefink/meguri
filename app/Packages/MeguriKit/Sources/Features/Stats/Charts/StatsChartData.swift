@@ -243,7 +243,7 @@ extension StatsChartData {
             guard let low = values.min(), let high = values.max() else { return 0...1 }
             let pad = max((high - low) * 0.15, max(high * 0.02, 1))
             let lower = max(0, StatsChartData.niceFloor(low - pad))
-            let upper = StatsChartData.niceCeiling(high + pad * 0.5)
+            let upper = StatsChartData.fineCeiling(high + pad * 0.5)
             return lower...max(upper, lower + 1)
         case let .fraction(lower):
             let lowest = all.min() ?? lower
@@ -261,6 +261,14 @@ extension StatsChartData {
             return step * magnitude
         }
         return 10 * magnitude
+    }
+
+    /// The smallest multiple of a tenth of `value`'s magnitude at or above it,
+    /// so a fitted axis ends just above its data.
+    static func fineCeiling(_ value: Double) -> Double {
+        guard value > 0, value.isFinite else { return 1 }
+        let step = pow(10, (log10(value)).rounded(.down)) / 10
+        return (value / step).rounded(.up) * step
     }
 
     /// The largest nice number at or below `value`, in steps of a tenth of its magnitude.
