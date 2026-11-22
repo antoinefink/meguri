@@ -414,7 +414,7 @@ impl StatsCaches {
     /// every row (from the caches, or read from the snapshot from id 0 on),
     /// so the parts that read all history whatever the window
     /// (`stats/history-reads` H9, H11) read the same view
-    /// ([`ScopeData::from_id`]). `Err` holds the result that stops the
+    /// ([`ScopeData::rows_from`]). `Err` holds the result that stops the
     /// request (a scope error, `unreadable_row`, Cancelled).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn resolve_scope(

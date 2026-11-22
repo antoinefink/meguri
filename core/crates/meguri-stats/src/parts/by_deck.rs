@@ -89,7 +89,7 @@ fn subtree(node: &Node, out: &mut Vec<i64>) {
     }
 }
 
-fn find<'a>(nodes: &'a [Node], deck: DeckId) -> Option<&'a Node> {
+fn find(nodes: &[Node], deck: DeckId) -> Option<&Node> {
     nodes
         .iter()
         .find_map(|node| if node.id == deck { Some(node) } else { find(&node.children, deck) })

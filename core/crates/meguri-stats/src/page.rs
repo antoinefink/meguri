@@ -539,7 +539,7 @@ fn all_history_rows(data: &Arc<ScopeData>) -> Result<Arc<ScopeData>, PartFailure
         // The window is all history, and resolved without an unreadable row.
         return Ok(Arc::clone(data));
     }
-    let Some(all) = data.from_id(0) else {
+    let Some(all) = data.rows_from(0) else {
         return Err(PartFailure::Failed("the view lacks the rows before the window".into()));
     };
     match all.first_unreadable() {

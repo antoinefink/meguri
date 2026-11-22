@@ -210,7 +210,7 @@ impl ScopeData {
     /// `start` on with no upper end (`stats/history-reads` H9, H11 read all
     /// history whatever the window); `None` when the view does not hold
     /// them. Its first unreadable row is checked again by the caller.
-    pub(crate) fn from_id(&self, start: i64) -> Option<ScopeData> {
+    pub(crate) fn rows_from(&self, start: i64) -> Option<ScopeData> {
         // A view read from the snapshot with an upper end lacks the rows
         // past it; the caches hold every row.
         let cut = self.window_end.is_some() && self.view_from > i64::MIN;

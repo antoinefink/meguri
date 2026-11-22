@@ -384,6 +384,8 @@ fn h10_a_deck_without_own_cards_has_no_own_row_and_caches_change_nothing() {
     }
     f.host.derived().flush().unwrap();
     put_rows(f, &[(20, ((n - 3_000) * 1_000, 1, 30, 2_500, 2_000, 1))]);
+    // The graph request does not wait for the derived writer; the page's does.
+    f.host.derived().flush().unwrap();
     assert!(f.data(Scope::Collection, History::AllHistory).scope.from_caches());
     for scope in [Scope::Collection, Scope::Deck(DeckId(LANG)), Scope::Deck(DeckId(gamma))] {
         for history in [History::Last12Months, History::AllHistory] {
