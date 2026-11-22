@@ -214,7 +214,7 @@ Each committed change set (`engine/change-stream` S1) updates the component, wit
 |---|---|
 | `revlog_added` rows all newer than their card's newest cached row | the card's replay continues from its record: the deltas, and Started if one is a first review, on the new rows' own days (a sync after a rollover can bring yesterday's reviews), and every kept sample at or after the earliest new row's instant recomputed for that card; a new Reset marker or a new learning run replays the card (its item's start moves) |
 | any other `revlog_added` (a row older than the card's newest, as a sync can bring), `revlog_removed` (an undo, a sync) | the card is replayed again from its rows (an indexed read by `cid`): its old contribution is taken out of every day and sample after the earliest changed row, the new one added |
-| `cards` `Added`, `Removed` | `Added`: the card is replayed from its rows, read by `cid` (this covers the undo of a delete and a `CloudRekey`, which shows as `Removed` then `Added`); `Removed`: its contribution, replayed from the record's rows before the commit, is taken out |
+| `cards` `Added`, `Removed` | `Added`: the card is replayed from its rows, read by `cid` (this covers the undo of a delete and a `CloudRekey`, which shows as `Removed` then `Added`); `Removed`: its contribution, replayed from its rows (read by `cid` in the capture, as they were before the commit), is taken out |
 | `cards` `Updated` that changes `did`, `odid`, `queue` to or from −1, or `type` or `ivl` (its current state) | the card is replayed: its contribution moves to its new key, leaves or enters the series, or its last segment changes |
 | a preset change of parameters, decay, cutoff or historical retention; a deck's preset change | H3's samples of the affected cards recomputed in the background; H2 unchanged (a desired-retention change touches neither) |
 | a different phase of `N` (a rollover hour change, a time-zone or daylight-saving offset change) | the component is not current; rebuilt (H14.2) on the next request: a cold pass, with progress, twice a year in a zone with daylight saving |
@@ -253,7 +253,8 @@ Every read here, the component's builds and updates included, writes nothing to 
 |---|---|
 | a deck id that names no deck | G8.2's `unknown_deck` for the request |
 | a Search scope for a part of this file | `unsupported_scope` for that part |
-| an unreadable row in the scope (G4) | `unreadable_row`, every part |
+| an unreadable row of the scope in the window (G4) | `unreadable_row`, every part |
+| an unreadable row of the scope outside the window | `unreadable_row` for H2, H3, H9 and H11 only; the Data results then carry no `oldest_day`, and the page's All axis starts at the window's first month |
 | a crate error replaying one card (H3.1) | that card in `failed`; the part returns |
 | the component cannot be built (disk full, a failed write) | the parts compute from the snapshot directly, without keeping (as G9.2 allows), and the failure is logged |
 
