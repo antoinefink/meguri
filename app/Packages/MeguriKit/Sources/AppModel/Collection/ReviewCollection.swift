@@ -1211,7 +1211,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             // Any write may be a new step (a text-only note edit changes no count); coalesced.
             if event.generation == generation { undoOwner?.scheduleRefresh() }
             if event.generation == generation { deckOptionsOwner?.changesCommitted(changes, generation: event.generation) }
-            if event.generation == generation { browseOwner?.changesCommitted(changes) }
+            if event.generation == generation { browseOwner?.changesCommitted(changes, seq: event.seq) }
             if event.generation == generation { noteTypesOwner?.changesCommitted(changes) }
             if event.generation == generation,
                changes.wholeCollection || !changes.notetypes.isEmpty || !changes.decks.isEmpty {

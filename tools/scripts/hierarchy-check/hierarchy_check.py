@@ -31,7 +31,10 @@ window's SwiftUI scene id, a navigation bar named after its title, an SF
 Symbol's name on its image, and on the Mac a SwiftUI List's ListColumn, a SwiftUI Table's generated column
 ids (UUIDs) and its column header buttons (no identifier or label; one at
 each column's x and width, in a group directly in the table's outline, above
-the columns' body), and a
+the columns' body), the field a split view's sidebar `searchable` puts above
+its list (no identifier, none can be set; in an unnamed group directly in the
+system-named split group, holding only its own unnamed Search and cancel
+buttons), and a
 NavigationSplitView's '<scene id>, SidebarNavigationSplitView', and AppKit's
 exact NSOutlineViewDisclosureButtonKey on a disclosure triangle directly in
 a cell under an outline row in an outline; on iOS a sidebar disclosure row's
@@ -77,6 +80,9 @@ SIDEBAR_TOGGLE_LABELS = {"Show Sidebar", "Hide Sidebar"}
 # The id SwiftUI's Table gives each of its columns on the Mac.
 TABLE_COLUMN_UUID = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$")
 BARS = {"toolbar", "navigationBar"}
+# The buttons inside a system search field: its magnifier and, once it holds
+# text, its clear button (English labels, the driver's usual locale).
+SEARCH_FIELD_BUTTONS = {"Search", "cancel"}
 
 IDENTIFIER = re.compile(r"^[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*(\.[A-Za-z0-9_-]+)?$")
 # Frames that overlap by at most this much (points) in either direction only
@@ -220,6 +226,29 @@ def native_table_headers(root):
                             and b.y + b.h <= body_top + 0.5 for b in buttons)):
                 headers.update(buttons)
     return headers
+
+
+def native_sidebar_search_fields(root):
+    """The Mac field `searchable(placement: .sidebar)` adds: a searchField
+    with no identifier in an unidentified group directly in the
+    NavigationSplitView's system-named split group, whose only children are
+    its own unidentified Search (magnifier) and cancel (clear) buttons. The
+    field and those buttons are system parts; anything else is not this
+    shape and keeps its findings."""
+    parts = set()
+    for split in root.walk():
+        if split.type != "splitGroup" or not SPLIT_VIEW.match(split.identifier):
+            continue
+        for group in split.children:
+            if group.type != "group" or group.identifier or len(group.children) != 1:
+                continue
+            field = group.children[0]
+            if (field.type == "searchField" and not field.identifier
+                    and all(b.type == "button" and not b.identifier and b.label in SEARCH_FIELD_BUTTONS and not b.children
+                            for b in field.children)):
+                parts.add(field)
+                parts.update(field.children)
+    return parts
 
 
 def describe(e):
@@ -506,7 +535,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     elements = [e for e in root.walk() if not e.under(SYSTEM_UI) and not e.under(TRANSIENT)]
     sheet_grabbers = native_sheet_grabbers(document, root)
     toggle_parts = (native_toggle_switch_parts(document, root) | native_stepper_arrows(document, root)
-                    | native_table_headers(root))
+                    | native_table_headers(root) | native_sidebar_search_fields(root))
     disclosure_labels, disclosure_chevrons = native_disclosure_row_parts(document, root)
     title_pairs = native_toolbar_title_pairs(document, root)
     issues = []

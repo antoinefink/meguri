@@ -1185,3 +1185,34 @@ class NativeMacToolbarTitlePair(unittest.TestCase):
         third["value"] = "Another"
         tree["root"]["children"][0]["children"].append(third)
         self.assertIn("text-overlap", kinds(hierarchy_check.check(tree)))
+
+
+class NativeSidebarSearchField(unittest.TestCase):
+    """The field `searchable(placement: .sidebar)` puts above a Mac sidebar
+    (seen in Browse's export, U270): no identifier, in an unnamed group
+    directly in the split view's system-named split group, with its own
+    Search button and, once filled, its cancel button."""
+
+    def tree(self, field_children=None, split_id="main, SidebarNavigationSplitView", group_id="", extra=()):
+        buttons = field_children if field_children is not None else [el("button", label="Search", f=(13, 91, 25, 28))]
+        field = el("searchField", f=(9, 90, 202, 30), children=buttons)
+        return doc(el("splitGroup", split_id, f=(0, 30, 1180, 780), children=[
+            el("group", group_id, f=(10, 91, 200, 28), children=[field, *extra])]))
+
+    def test_the_sidebar_search_field_and_its_buttons_are_system_parts(self):
+        self.assertEqual(hierarchy_check.check(self.tree()), [])
+        filled = [el("button", label="Search", f=(13, 91, 25, 28)), el("button", label="cancel", f=(190, 91, 20, 28))]
+        self.assertEqual(hierarchy_check.check(self.tree(filled)), [])
+
+    def test_search_field_lookalikes_are_still_reported(self):
+        # Another split group, a named group, a field holding another control,
+        # a second element beside it, and a field outside any split view.
+        self.assertEqual(kinds(hierarchy_check.check(self.tree(split_id="sample.screen.split"))),
+                         ["missing-identifier", "missing-identifier"])
+        self.assertEqual(kinds(hierarchy_check.check(self.tree(group_id="sample.screen.group"))),
+                         ["missing-identifier", "missing-identifier"])
+        self.assertEqual(kinds(hierarchy_check.check(self.tree([el("button", label="Delete", f=(13, 91, 25, 28))]))),
+                         ["missing-identifier", "missing-identifier"])
+        self.assertEqual(kinds(hierarchy_check.check(self.tree(extra=[el("button", label="Go", f=(150, 91, 20, 28))]))),
+                         ["missing-identifier", "missing-identifier", "missing-identifier"])
+        self.assertEqual(kinds(hierarchy_check.check(doc(el("searchField", f=(9, 90, 202, 30))))), ["missing-identifier"])

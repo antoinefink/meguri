@@ -596,7 +596,7 @@ budgets:
         limit: 5
         strict: true
         where: [simulator, device]
-        pending: U244
+        note: U270a's Mac table on the 150k collection, scrolled by the browseScroll hook (no synthesized input); the touch lists are U278's and U279's.
       - id: template-renders
         suite: BrowserSearchPerfTests
         name: browser.templateRendersWhileScrolling

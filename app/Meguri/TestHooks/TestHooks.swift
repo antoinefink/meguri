@@ -39,6 +39,8 @@ enum TestHooks {
             }
             #endif
             shell?.prepare(navigation)
+            BrowseScrollDriver.shared.collection = { [weak collection] in collection?.browse }
+            BrowseScrollDriver.shared.listen()
             ShellCommands.shared.listen(navigation: navigation, sizeClass: options.sizeClass,
                 nativeCollection: options.nativeReview == nil ? nil : collection)
         }

@@ -179,7 +179,7 @@ import Testing
     @Test func aNewerRefreshSupersedesTheOlderAndCancelsIt() async {
         let (model, core) = await makeModel(holdCounts: true)
         #expect(core.countCalls.count == 1)
-        model.changesCommitted(Self.changes(tags: ["brask"]))
+        model.changesCommitted(Self.changes(tags: ["brask"]), seq: 1)
         await until { core.countCalls.count == 2 }
         await until { core.cancelledCounts == 1 }
         // The older counts arrive late: ignored.
@@ -188,7 +188,7 @@ import Testing
         await until { !model.counts.isEmpty }
         #expect(model.counts[.deck(10)] == 5)
         // The counts shown stay while the next ones are read (no blank flash).
-        model.changesCommitted(Self.changes(tags: ["brask"]))
+        model.changesCommitted(Self.changes(tags: ["brask"]), seq: 1)
         await until { core.countCalls.count == 3 }
         #expect(model.counts[.deck(10)] == 5)
         // Leaving Browse cancels the counts on their way.
@@ -200,7 +200,7 @@ import Testing
         core.resumeCounts(3) { _ in 6 }
         await until { model.counts[.deck(10)] == 6 }
         // Changes no shown row depends on do not count again.
-        model.changesCommitted(Self.changes(tags: []))
+        model.changesCommitted(Self.changes(tags: []), seq: 1)
         try? await Task.sleep(for: .milliseconds(20))
         #expect(core.countCalls.count == 4)
         core.resumeCounts(2) { _ in 0 }
@@ -587,4 +587,20 @@ import Testing
         else { heldTagWrites[index].resume() }
     }
     var readFails: Set<String> = []
+
+    // The results table (U270a).
+    var searchSession = FakeSearchSession()
+    static let standard = ColumnSetShown(
+        set: .standard, own: false, cards: ["noteFld", "template", "deck", "cardDue", "cardMod"],
+        notes: ["noteFld", "note", "template", "noteTags", "noteCrt"],
+        cardsSort: BrowseSort(key: "noteFld", direction: .ascending), notesSort: BrowseSort(key: "noteFld", direction: .ascending))
+    var columnChanges: [ColumnSetChange] = []
+    var notesModeWrites: [Bool] = []
+    func openSearchSession() async throws -> any BrowseSearching { searchSession }
+    func columnSet(notetype: Int64?) async throws -> ColumnSetShown { Self.standard }
+    func changeColumnSet(_ set: ColumnSetID, mode: BrowseMode, change: ColumnSetChange) async throws {
+        columnChanges.append(change)
+    }
+    func useStandardColumns(notetype: Int64) async throws {}
+    func setNotesMode(_ notes: Bool) async throws { notesModeWrites.append(notes) }
 }
