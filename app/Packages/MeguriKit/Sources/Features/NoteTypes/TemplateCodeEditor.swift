@@ -204,7 +204,7 @@ struct TemplateCodeEditor: NSViewRepresentable {
         private var generation: UInt64 = 0
         /// The colour values of the shown styling, as last coloured.
         private var colours: [NSRange] = []
-        private var swatches: [NSColorWell] = []
+        private var swatches: [ColourSwatch] = []
         /// A swatch is writing its value: its own range moves with it.
         private var applyingSwatch = false
         /// The completion the text view is showing.
@@ -342,10 +342,9 @@ struct TemplateCodeEditor: NSViewRepresentable {
             guard let textView, let manager = textView.layoutManager, let container = textView.textContainer else { return }
             manager.ensureLayout(for: container)
             while swatches.count < colours.count {
-                let well = NSColorWell(style: .minimal)
+                let well = ColourSwatch()
                 well.target = self
                 well.action = #selector(wellChanged(_:))
-                well.isBordered = false
                 textView.addSubview(well)
                 swatches.append(well)
             }
@@ -358,11 +357,8 @@ struct TemplateCodeEditor: NSViewRepresentable {
                 let baseline = manager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil).minY
                     + manager.location(forGlyphAt: glyphs.location).y
                 let origin = textView.textContainerOrigin, side = Self.swatch.side
-                // The well draws at its control size, not its frame: the largest size
-                // that fits the line, centred where the swatch goes.
-                let fitted = Self.fit(well, side: side)
-                let centre = NSPoint(x: origin.x + rect.minX - Spacing.xSmall / 2 - side / 2, y: origin.y + baseline - Self.swatch.centre)
-                well.frame = NSRect(x: centre.x - fitted.width / 2, y: centre.y - fitted.height / 2, width: fitted.width, height: fitted.height)
+                well.frame = NSRect(x: origin.x + rect.minX - side - Spacing.xSmall / 2,
+                                    y: origin.y + baseline - Self.swatch.centre - side / 2, width: side, height: side)
                 well.color = .swatch(value)
                 well.tag = index
                 well.isEnabled = textView.isEditable
@@ -371,20 +367,8 @@ struct TemplateCodeEditor: NSViewRepresentable {
             }
         }
 
-        /// The well's size for a swatch of `side`: the largest control size whose
-        /// well fits the side (the smallest one when none does).
-        private static func fit(_ well: NSColorWell, side: CGFloat) -> NSSize {
-            for size in [NSControl.ControlSize.regular, .small, .mini] {
-                well.controlSize = size
-                let natural = well.fittingSize
-                if natural.width > 0, natural.height > 0, max(natural.width, natural.height) <= side { return natural }
-            }
-            let natural = well.fittingSize
-            return natural.width > 0 && natural.height > 0 ? natural : NSSize(width: side, height: side)
-        }
-
         /// A colour chosen in a well rewrites only that value's characters.
-        @objc private func wellChanged(_ well: NSColorWell) {
+        @objc private func wellChanged(_ well: ColourSwatch) {
             guard well.isEnabled, colours.indices.contains(well.tag), let colour = well.color.usingColorSpace(.sRGB) else { return }
             // The others' ranges move with this edit: they wait for the next colouring.
             for other in swatches where other !== well { other.isEnabled = false }
@@ -429,6 +413,62 @@ struct TemplateCodeEditor: NSViewRepresentable {
                 }
             }
         }
+    }
+}
+
+/// W6's colour swatch on the Mac: the value's colour in a circle drawn
+/// within its frame, which is the size of the line's capitals; a click opens
+/// the system colour panel on it. Not `NSColorWell`: every style of the
+/// system well draws larger than a line of code (checked in the test VM,
+/// 2026-11-22) and so covered the lines above and below.
+final class ColourSwatch: NSControl {
+    var color: NSColor = .clear { didSet { needsDisplay = true } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.colorWell)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
+        color.setFill()
+        path.fill()
+        // A hairline keeps a colour close to the background visible.
+        NSColor.separatorColor.setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    override func mouseDown(with event: NSEvent) { showPanel() }
+
+    override func accessibilityPerformPress() -> Bool {
+        showPanel()
+        return true
+    }
+
+    override func accessibilityValue() -> Any? {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return nil }
+        return SwatchHex.string(red: rgb.redComponent, green: rgb.greenComponent, blue: rgb.blueComponent, alpha: rgb.alphaComponent)
+    }
+
+    private func showPanel() {
+        guard isEnabled else { return }
+        let panel = NSColorPanel.shared
+        panel.setTarget(nil)
+        panel.showsAlpha = true
+        panel.color = color
+        panel.setTarget(self)
+        panel.setAction(#selector(panelChanged(_:)))
+        panel.orderFront(nil)
+    }
+
+    @objc private func panelChanged(_ panel: NSColorPanel) {
+        guard isEnabled else { return }
+        color = panel.color
+        sendAction(action, to: target)
     }
 }
 
@@ -784,8 +824,14 @@ struct TemplateCodeEditor: UIViewRepresentable {
                 let baseline = manager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil).minY
                     + manager.location(forGlyphAt: glyphs.location).y
                 let inset = textView.textContainerInset, place = Self.swatch
-                well.frame = CGRect(x: inset.left + rect.minX - place.side - Spacing.xSmall / 2,
-                                    y: inset.top + baseline - place.centre - place.side / 2, width: place.side, height: place.side)
+                // The system well draws at its own size, larger than a line of code:
+                // it keeps that size and is scaled into the side, on its line.
+                well.transform = .identity
+                let natural = well.intrinsicContentSize
+                let drawn = max(natural.width, natural.height, place.side)
+                well.bounds = CGRect(x: 0, y: 0, width: drawn, height: drawn)
+                well.transform = CGAffineTransform(scaleX: place.side / drawn, y: place.side / drawn)
+                well.center = CGPoint(x: inset.left + rect.minX - Spacing.xSmall / 2 - place.side / 2, y: inset.top + baseline - place.centre)
                 well.selectedColor = .swatch(value)
                 well.tag = index
                 well.isEnabled = textView.isEditable
