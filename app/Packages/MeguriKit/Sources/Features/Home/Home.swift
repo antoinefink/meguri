@@ -67,7 +67,10 @@ public struct HomeView: View {
         .modifier(HomeDeckSearch(enabled: showsDeckSearch, alwaysShown: todayBesideDeckList, collection: collection, search: search))
         // The deck page carries its own title in the content: no empty large-title band above it.
         // The tab layout's deck list shares its bar's row with the title (N14.8).
-        .toolbarTitleDisplayMode(deckID != nil ? .inline : shellLayout == .compact ? .inlineLarge : .automatic)
+        .toolbarTitleDisplayMode(deckID != nil || besideTodayColumn ? .inline : shellLayout == .compact ? .inlineLarge : .automatic)
+        // N26.6: beside Today the column draws no title, as the iPad sidebar (N14.9): its bar holds
+        // only the buttons and the search field follows. "Decks" stays its title for accessibility.
+        .toolbar(removing: besideTodayColumn ? .title : nil)
         #endif
         .toolbar {
             #if os(macOS)
@@ -188,6 +191,8 @@ public struct HomeView: View {
     }
     #if !os(macOS)
     private var showsDeckSearch: Bool { deckID == nil && shellLayout == .compact && showsRootDeckList }
+    /// The deck list as the column beside Today (N14.10), not a page pushed in it.
+    private var besideTodayColumn: Bool { todayBesideDeckList && deckID == nil }
     /// N26.4: beside the detail the column shows the search field itself, so no button repeats it.
     private var showsSearchButton: Bool { showsDeckSearch && !todayBesideDeckList }
     /// Held by the navigation, not the view: a fold, an unfold or a layout switch keeps the query.
@@ -218,9 +223,6 @@ public struct HomeView: View {
             #if !os(macOS)
             // N18.3: the welcome names itself in the content; the tab layout's bar repeats nothing over it.
             if collection.state == .noFile, shellLayout == .compact { return "" }
-            // N26.3: beside Today the column is the app's library, as Music's and Podcasts'
-            // sidebars name theirs; its decks sit under their own "Decks" header.
-            if todayBesideDeckList { return "Meguri" }
             #endif
             return HomeHeading.rootTitle(showsToday: showsToday)
         }
