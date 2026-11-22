@@ -234,6 +234,16 @@ pub trait ReadRows: sealed::Connected {
     fn studied_since(&self, after: i64) -> Result<crate::queries::studied::Studied, StorageError> {
         crate::queries::studied::studied_since(self.connection(), after)
     }
+    /// [`ReadRows::studied_since`] over the rows of the cards whose `did`,
+    /// or non-zero `odid`, is one of `decks` (`stats/history-reads` H12,
+    /// `stats/graphs-common` G2.1); zeros for no deck.
+    fn studied_since_in(
+        &self,
+        after: i64,
+        decks: &[DeckId],
+    ) -> Result<crate::queries::studied::Studied, StorageError> {
+        crate::queries::studied::studied_since_in(self.connection(), after, decks)
+    }
 
     /// The Stats graphs' card columns (`stats/graphs-common` G4, G9.1), one
     /// row per card in ascending id order, as stored: `id`, `nid`, `did`,

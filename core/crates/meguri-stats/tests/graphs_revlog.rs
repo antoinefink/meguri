@@ -262,9 +262,6 @@ fn v2_1_day_index_table_with_its_32_bit_key() {
         (20_718_344, 1),
     ]);
     assert_eq!(mature_count(&all.reviews), expected);
-    // H6's By Answer takes the same cut keys (every row is Good).
-    let good: BTreeMap<i32, i64> = all.reviews.count_by_answer.iter().map(|(day, answers)| (*day, answers[2])).collect();
-    assert_eq!(good, expected);
     let mut year = expected;
     year.insert(-366, 1);
     assert_eq!(mature_count(&study.year().reviews), year);
@@ -596,9 +593,8 @@ fn v8_no_counted_row() {
         assert_eq!(parts.retention, empty);
         assert!(ranges(&parts.hourly).iter().all(|hours| busy(hours).is_empty()));
         assert!(button_ranges(&parts.buttons).iter().all(|range| *range == ButtonCounts::default()));
-        // An empty map is its run count, 0: By Type's, By Answer's (H6),
-        // then `unrated` 0.
-        assert_eq!(encode(&parts.reviews), [0, 0, 0]);
+        // An empty map is its run count, 0.
+        assert_eq!(encode(&parts.reviews), [0]);
     }
 }
 
@@ -615,23 +611,7 @@ fn g6_encodings_round_trip() {
     let bytes = encode(&parts.reviews);
     let mut decoder = Decoder::new(&bytes);
     let map = decoder.sparse_map(&[MemberKind::Integers; 10]).unwrap();
-    // H6's By Answer map and `unrated`.
-    let answers = decoder.sparse_map(&[MemberKind::Integers; 8]).unwrap();
-    assert_eq!(decoder.integer().unwrap(), parts.reviews.unrated as i64);
     assert!(decoder.is_done());
-    let by_answer: Vec<(i64, [i64; 4], [i64; 4])> = (0..answers.keys.len())
-        .map(|at| {
-            let member = |m: usize| answers.integers[m][at];
-            (answers.keys[at], [0, 1, 2, 3].map(member), [4, 5, 6, 7].map(member))
-        })
-        .collect();
-    let want: Vec<(i64, [i64; 4], [i64; 4])> = parts
-        .reviews
-        .count_by_answer
-        .iter()
-        .map(|(day, counts)| (i64::from(*day), *counts, parts.reviews.time_by_answer[day]))
-        .collect();
-    assert_eq!(by_answer, want);
     assert_eq!(map.keys, [-9, -4, -3, 0]);
     let decoded: Vec<(ReviewKinds, ReviewKinds)> = (0..map.keys.len())
         .map(|at| {
@@ -697,13 +677,11 @@ fn g6_encodings_round_trip() {
     assert_eq!(decoded, want);
 }
 
-/// The whole record, H6's extras included.
+/// The whole record.
 fn decode_reviews(bytes: &[u8]) -> ReviewsRecord {
     let mut decoder = Decoder::new(bytes);
     let map = decoder.sparse_map(&[MemberKind::Integers; 10]).unwrap();
-    let answers = decoder.sparse_map(&[MemberKind::Integers; 8]).unwrap();
     let mut record = ReviewsRecord::default();
-    record.unrated = decoder.integer().unwrap() as u64;
     assert!(decoder.is_done());
     for (at, day) in map.keys.iter().enumerate() {
         let member = |m: usize| map.integers[m][at];
@@ -711,22 +689,15 @@ fn decode_reviews(bytes: &[u8]) -> ReviewsRecord {
         record.count.insert(day, kinds(member(0), member(1), member(2), member(3), member(4)));
         record.time.insert(day, kinds(member(5), member(6), member(7), member(8), member(9)));
     }
-    for (at, day) in answers.keys.iter().enumerate() {
-        let member = |m: usize| answers.integers[m][at];
-        let day = i32::try_from(*day).unwrap();
-        record.count_by_answer.insert(day, [0, 1, 2, 3].map(member));
-        record.time_by_answer.insert(day, [4, 5, 6, 7].map(member));
-    }
     record
 }
 
 #[test]
 fn g6_twenty_years_of_daily_study_fit_the_limit() {
     // G6's test: 7,305 consecutive days, rows of every kind on each, 150
-    // counted rows a day, stored times of 5,000 to 60,000 ms. Only Anki's
-    // members: with H6's By Answer maps filled the record passes the limit
-    // (about 294,000 bytes), a spec question recorded in
-    // docs/process/verification-status.md.
+    // counted rows a day, stored times of 5,000 to 60,000 ms. The record
+    // holds Anki's members only: By Answer (H6) is a part of its own, whose
+    // size test is in history_parts.rs.
     let mut record = ReviewsRecord::default();
     for day in -7_304..=0 {
         let spread = i64::from(day).rem_euclid(97);

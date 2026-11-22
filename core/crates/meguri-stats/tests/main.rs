@@ -2,6 +2,8 @@
 //! Each `tests/*.rs` file is a module, loaded by `#[path]`. Add a new test
 //! file here (`tools/mg static-checks --check test-targets`).
 
+#[path = "by_deck.rs"]
+pub mod by_deck;
 #[path = "card_info.rs"]
 pub mod card_info;
 #[path = "graphs_cards.rs"]

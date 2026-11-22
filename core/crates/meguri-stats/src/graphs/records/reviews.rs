@@ -1,7 +1,8 @@
 //! The `reviews` record (`stats/graphs-revlog` V1, V2): per day index, how
-//! many rows of each of five kinds were answered and how long they took,
-//! and, for round 11's By Answer (`stats/history-reads` H6), the same rows
-//! by the answer given.
+//! many rows of each of five kinds were answered and how long they took.
+//! Round 11's By Answer (`stats/history-reads` H6) reads the same rows by
+//! the answer given as a part of its own (`crate::parts::by_answer`), so
+//! this record holds Anki's members only (G6's size limit).
 
 use std::collections::BTreeMap;
 
@@ -54,14 +55,8 @@ impl ReviewKinds {
     }
 }
 
-/// One day's rows by answer, Again, Hard, Good and Easy (index 0 is
-/// Again), as counts or as summed milliseconds.
-pub type Answers = [i64; 4];
-
 /// `stats/graphs-revlog` V2.2: two sparse maps, day index to the five
 /// kinds, with exactly the same keys: the days on which a row counted.
-/// Then the Meguri extras of `stats/history-reads` H6, which are not
-/// observed and change none of the values above.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ReviewsRecord {
@@ -69,14 +64,6 @@ pub struct ReviewsRecord {
     /// Stored `time` values in milliseconds, summed in 64 bits with no wrap
     /// (V9 `stats-review-time-no-wrap`).
     pub time: BTreeMap<i32, ReviewKinds>,
-    /// H6: the rows counted above that have `ease` 1 to 4, by answer, on
-    /// V2's day index. The keys are the days on which such a row counted.
-    pub count_by_answer: BTreeMap<i32, Answers>,
-    /// H6: their summed `time`, in 64 bits as `time`; the same keys.
-    pub time_by_answer: BTreeMap<i32, Answers>,
-    /// H6: the rows counted above with another `ease` (0, or 5 to 255) in
-    /// the window: in By Type, not in By Answer.
-    pub unrated: u64,
 }
 
 /// What one day's rows add up to while the day is open.
@@ -84,27 +71,12 @@ pub struct ReviewsRecord {
 struct DayTotals {
     count: ReviewKinds,
     time: ReviewKinds,
-    answers: Answers,
-    answer_time: Answers,
-    /// Some row of the day had `ease` 1 to 4.
-    rated: bool,
 }
 
 impl DayTotals {
-    fn add(&mut self, column: Column, row: &StatsRow) -> bool {
-        let time = i64::from(row.time);
+    fn add(&mut self, column: Column, row: &StatsRow) {
         self.count.bump(column, 1);
-        self.time.bump(column, time);
-        match row.ease {
-            1..=4 => {
-                let answer = usize::from(row.ease - 1);
-                self.answers[answer] += 1;
-                self.answer_time[answer] += time;
-                self.rated = true;
-                true
-            }
-            _ => false,
-        }
+        self.time.bump(column, i64::from(row.time));
     }
 
     fn store(self, day: i32, record: &mut ReviewsRecord) {
@@ -113,14 +85,6 @@ impl DayTotals {
         for column in Column::ALL {
             count.bump(column, self.count.get(column));
             time.bump(column, self.time.get(column));
-        }
-        if self.rated {
-            let answers = record.count_by_answer.entry(day).or_default();
-            let answer_time = record.time_by_answer.entry(day).or_default();
-            for at in 0..4 {
-                answers[at] += self.answers[at];
-                answer_time[at] += self.answer_time[at];
-            }
         }
     }
 }
@@ -150,6 +114,12 @@ fn column_of(row: &StatsRow) -> Option<Column> {
         RevlogKind::Review => Column::Mature,
         RevlogKind::Manual | RevlogKind::Rescheduled => return None,
     })
+}
+
+/// Whether V2 counts the row (V1): every kind but Manual and Rescheduled,
+/// whatever its `ease`.
+pub(crate) fn counted(row: &StatsRow) -> bool {
+    column_of(row).is_some()
 }
 
 /// `stats/day-buckets` B3 with V2.1's 32-bit key: `(t − N) / 86,400`
@@ -184,9 +154,7 @@ pub(crate) fn build(input: &GraphInput<'_>) -> Result<ReviewsRecord, NotBuilt> {
             }
         }
         let (_, totals) = open.as_mut().expect("opened above");
-        if !totals.add(column, &row) {
-            record.unrated += 1;
-        }
+        totals.add(column, &row);
     }
     if let Some((done, totals)) = open {
         totals.store(done, &mut record);
@@ -201,9 +169,6 @@ impl GraphRecord for ReviewsRecord {
 
     /// One sparse map over the shared day keys with ten members: the five
     /// counts, then the five times, each in [`ReviewKinds::values`] order.
-    /// Then H6's extras: a sparse map over the By Answer day keys with
-    /// eight members, the four counts (Again, Hard, Good, Easy), then the
-    /// four times in the same order; then `unrated`.
     fn encode(&self, out: &mut Encoder) {
         debug_assert!(self.count.keys().eq(self.time.keys()), "count and time have the same days (V2.2)");
         let keys: Vec<i64> = self.count.keys().map(|day| i64::from(*day)).collect();
@@ -216,19 +181,6 @@ impl GraphRecord for ReviewsRecord {
             .collect();
         let members: Vec<Member<'_>> = columns.iter().map(|values| Member::Integers(values)).collect();
         out.sparse_map(&keys, &members);
-        debug_assert!(
-            self.count_by_answer.keys().eq(self.time_by_answer.keys()),
-            "By Answer's counts and times have the same days (H6)"
-        );
-        let keys: Vec<i64> = self.count_by_answer.keys().map(|day| i64::from(*day)).collect();
-        let answer = |map: &BTreeMap<i32, Answers>, at: usize| -> Vec<i64> { map.values().map(|day| day[at]).collect() };
-        let columns: Vec<Vec<i64>> = (0..4)
-            .map(|at| answer(&self.count_by_answer, at))
-            .chain((0..4).map(|at| answer(&self.time_by_answer, at)))
-            .collect();
-        let members: Vec<Member<'_>> = columns.iter().map(|values| Member::Integers(values)).collect();
-        out.sparse_map(&keys, &members);
-        out.integer(self.unrated as i64);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
