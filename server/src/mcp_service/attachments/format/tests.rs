@@ -489,32 +489,55 @@ mod pdf_regressions {
     // the main table, while the final startxref names the first-page table.
     // Object 9 is deliberately absent from the main table.
     fn linearized_document() -> Vec<u8> {
-        fn first_table(offsets: &[usize; 12], main: usize) -> Vec<u8> {
+        linearized_document_with(false, false, false, false)
+    }
+
+    fn linearized_document_with(first_stream: bool, main_stream: bool, post_e: bool, overflow: bool) -> Vec<u8> {
+        fn first_section(offsets: &[usize; 15], main: usize, stream: bool, size: usize, overflow: bool) -> Vec<u8> {
+            if stream {
+                let mut entries = Vec::new();
+                for id in [1].into_iter().chain(3..=12).chain(overflow.then_some(14)) {
+                    entries.push(1);
+                    entries.extend_from_slice(&(offsets[id] as u32).to_be_bytes());
+                    entries.extend_from_slice(&0u16.to_be_bytes());
+                }
+                let extra = if overflow { "14 1" } else { "" };
+                return [format!("12 0 obj\n<< /Type /XRef /Size {size} /Root 1 0 R /W [1 4 2] /Index [1 1 3 10 {extra}] /Prev {main:010} /Length {} >>\nstream\n", entries.len()).into_bytes(),
+                    entries, b"\nendstream\nendobj\nstartxref\n0\n%%EOF\n".to_vec()].concat();
+            }
             let mut table = b"xref\n1 1\n".to_vec();
             table.extend_from_slice(format!("{:010} 00000 n \n3 9\n", offsets[1]).as_bytes());
-            for offset in &offsets[3..] {
+            for offset in &offsets[3..12] {
                 table.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
             }
-            table.extend_from_slice(format!("trailer\n<< /Size 12 /Root 1 0 R /Prev {main:010} >>\nstartxref\n0\n%%EOF\n").as_bytes());
+            if overflow {
+                table.extend_from_slice(format!("14 1\n{:010} 00000 n \n", offsets[14]).as_bytes());
+            }
+            table.extend_from_slice(format!("trailer\n<< /Size {size} /Root 1 0 R /Prev {main:010} >>\nstartxref\n0\n%%EOF\n").as_bytes());
             table
         }
+        fn hint(pdf: &mut Vec<u8>, id: usize) -> (usize, usize, usize) {
+            let offset = pdf.len();
+            // One-page page-offset header and shared-object header.
+            pdf.extend_from_slice(format!("{id} 0 obj\n<< /S 36 /Length 60 >>\nstream\n").as_bytes());
+            let data = pdf.len();
+            pdf.extend_from_slice(&[0; 60]);
+            pdf.extend_from_slice(b"\nendstream\nendobj\n");
+            (offset, data, pdf.len() - offset)
+        }
+        let size = if overflow { 15 } else if first_stream || main_stream { 14 } else { 12 };
         let mut pdf = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n".to_vec();
-        let mut offsets = [0; 12];
+        let mut offsets = [0; 15];
         offsets[10] = pdf.len();
-        pdf.extend_from_slice(b"10 0 obj\n<< /Linearized 1.0 /L 0000000000 /H [0000000000 0000000000] /O 3 /E 0000000000 /N 1 /T 0000000000 >>\nendobj\n");
+        let extra = if overflow { " 0000000000 0000000000" } else { "" };
+        pdf.extend_from_slice(format!("10 0 obj\n<< /Linearized 1.0 /L 0000000000 /H [0000000000 0000000000{extra}] /O 3 /E 0000000000 /N 1 /T 0000000000 >>\nendobj\n").as_bytes());
         let first = pdf.len();
-        let placeholder = first_table(&offsets, 0);
+        offsets[12] = first;
+        let placeholder = first_section(&offsets, 0, first_stream, size, overflow);
         pdf.extend_from_slice(&placeholder);
         offsets[1] = pdf.len();
         pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-        offsets[11] = pdf.len();
-        // One-page hint stream: page-offset header followed by shared-object
-        // header, with no variable-width rows or shared objects.
-        pdf.extend_from_slice(b"11 0 obj\n<< /S 36 /Length 60 >>\nstream\n");
-        let hints = pdf.len();
-        pdf.extend_from_slice(&[0; 60]);
-        pdf.extend_from_slice(b"\nendstream\nendobj\n");
-        let hint_length = pdf.len() - offsets[11];
+        let mut primary = if post_e { None } else { Some(hint(&mut pdf, 11)) };
         let objects = [
             b"<< /Type /Page /Parent 2 0 R /MediaBox 7 0 R /Resources 8 0 R /Contents 5 0 R >>".to_vec(),
             b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
@@ -531,13 +554,37 @@ mod pdf_regressions {
             pdf.extend_from_slice(b"\nendobj\n");
         }
         let end = pdf.len();
+        if post_e { primary = Some(hint(&mut pdf, 11)); }
+        let (primary_offset, hints, hint_length) = primary.unwrap();
+        offsets[11] = primary_offset;
         offsets[2] = pdf.len();
         pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+        let overflow_hint = overflow.then(|| hint(&mut pdf, 14));
+        if let Some((offset, _, _)) = overflow_hint { offsets[14] = offset; }
         let main = pdf.len();
-        pdf.extend_from_slice(b"xref\n0 1\n");
-        let main_entries = pdf.len();
-        pdf.extend_from_slice(format!("0000000000 65535 f \n2 1\n{:010} 00000 n \ntrailer\n<< /Size 12 /Root 1 0 R >>\nstartxref\n{first}\n%%EOF\n", offsets[2]).as_bytes());
-        pdf[first..first + placeholder.len()].copy_from_slice(&first_table(&offsets, main));
+        let main_entries;
+        if main_stream {
+            main_entries = main;
+            let mut entries = vec![0, 0, 0, 0, 0, 255, 255];
+            for offset in [offsets[2], main] {
+                entries.push(1);
+                entries.extend_from_slice(&(offset as u32).to_be_bytes());
+                entries.extend_from_slice(&0u16.to_be_bytes());
+            }
+            pdf.extend_from_slice(format!("13 0 obj\n<< /Type /XRef /Size {size} /Root 1 0 R /W [1 4 2] /Index [0 1 2 1 13 1] /Length {} >>\nstream\n", entries.len()).as_bytes());
+            pdf.extend_from_slice(&entries);
+            pdf.extend_from_slice(format!("\nendstream\nendobj\nstartxref\n{first}\n%%EOF\n").as_bytes());
+        } else {
+            pdf.extend_from_slice(b"xref\n0 1\n");
+            main_entries = pdf.len();
+            pdf.extend_from_slice(format!("0000000000 65535 f \n2 1\n{:010} 00000 n \ntrailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{first}\n%%EOF\n", offsets[2]).as_bytes());
+        }
+        pdf[first..first + placeholder.len()].copy_from_slice(&first_section(&offsets, main, first_stream, size, overflow));
+        if let Some((offset, _, length)) = overflow_hint {
+            let key = b"/H [0000000000 0000000000 ";
+            let at = pdf.windows(key.len()).position(|v| v == key).unwrap() + key.len();
+            pdf[at..at + 21].copy_from_slice(format!("{offset:010} {length:010}").as_bytes());
+        }
         let length = pdf.len();
         for (key, number) in [
             (b"/L ".as_slice(), length), (b"/H [", offsets[11]),
@@ -587,6 +634,71 @@ mod pdf_regressions {
         let stop = at + cyclic[at..].iter().take_while(|c| c.is_ascii_digit()).count();
         cyclic.splice(at..stop, xref.to_string().bytes());
         assert_eq!(detect(&cyclic), None);
+    }
+
+    fn set_linearized_number(pdf: &mut [u8], key: &[u8], number: usize) {
+        let at = pdf.windows(key.len()).position(|v| v == key).unwrap() + key.len();
+        pdf[at..at + 10].copy_from_slice(format!("{number:010}").as_bytes());
+    }
+
+    #[test]
+    fn linearized_stream_sections_and_post_e_hints_keep_revision_bounds() {
+        for first_stream in [false, true] {
+            for main_stream in [false, true] {
+                for post_e in [false, true] {
+                    for overflow in [false, true] {
+                        let original = linearized_document_with(first_stream, main_stream, post_e, overflow);
+                        assert_eq!(detect(&original), Some("pdf"),
+                            "first stream {first_stream}, main stream {main_stream}, post E {post_e}, overflow {overflow}");
+                        // The page Length comes only from the first-page xref;
+                        // both xref forms must share the original base revision.
+                        let newer = b"BT (Stream-form incremental replacement) Tj ET";
+                        let updated = append_revision(original.clone(), newer, newer.len());
+                        assert_eq!(detect(&updated), Some("pdf"));
+                        assert_eq!(detect(&append_revision(updated.clone(), CONTENT, CONTENT.len())), Some("pdf"));
+                        assert_eq!(detect(&append_revision(original.clone(), newer, newer.len() - 1)), None);
+                        let t = original.windows(3).position(|v| v == b"/T ").unwrap() + 3;
+                        let target = std::str::from_utf8(&original[t..t + 10]).unwrap().parse::<usize>().unwrap();
+                        let prev = original.windows(6).position(|v| v == b"/Prev ").unwrap() + 6;
+                        let main = std::str::from_utf8(&original[prev..prev + 10]).unwrap().parse::<usize>().unwrap();
+                        // /T is the first table entry or the stream object,
+                        // never an arbitrary byte following the main xref.
+                        for wrong in [target + 1, if main_stream { main + 9 } else { main }] {
+                            let mut bad = original.clone();
+                            set_linearized_number(&mut bad, b"/T ", wrong);
+                            assert_eq!(detect(&bad), None);
+                        }
+                        for key in [b"/E ".as_slice(), b"/H ["] {
+                            let mut bad = updated.clone();
+                            set_linearized_number(&mut bad, key, original.len() + 1);
+                            assert_eq!(detect(&bad), None, "original L bounds {key:?}");
+                        }
+                        let h = updated.windows(4).position(|v| v == b"/H [").unwrap() + 4;
+                        let mut bad = updated.clone();
+                        bad[h + 11..h + 21].copy_from_slice(format!("{:010}", original.len()).as_bytes());
+                        assert_eq!(detect(&bad), None, "primary hint length exceeds original L");
+                        if overflow {
+                            let primary = std::str::from_utf8(&updated[h..h + 10]).unwrap().parse::<usize>().unwrap();
+                            for (field, number) in [(2, original.len() + 1), (3, original.len()), (2, primary)] {
+                                let mut bad = updated.clone();
+                                bad[h + field * 11..h + field * 11 + 10]
+                                    .copy_from_slice(format!("{number:010}").as_bytes());
+                                assert_eq!(detect(&bad), None, "overflow hint bounds or overlap");
+                            }
+                        }
+                        let mut bad = original.clone();
+                        set_linearized_number(&mut bad, b"/Prev ", main + 1);
+                        assert_eq!(detect(&bad), None, "bogus forward Prev");
+                        if first_stream {
+                            let mut bad = original.clone();
+                            let at = bad.windows(11).position(|v| v == b"/Type /XRef").unwrap();
+                            bad[at + 7] = b'Y';
+                            assert_eq!(detect(&bad), None, "first section must be an XRef dictionary");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Object 9 is the second compressed object, following an ordinary metadata
@@ -657,7 +769,7 @@ mod pdf_regressions {
 
     // Forty distinct Length IDs share a >512 KiB ObjStm. Decoding it for
     // each lookup used over 16 MiB, despite its small single expansion.
-    fn shared_object_stream_document(compressed: bool, stream_first: bool) -> (Vec<u8>, usize) {
+    fn shared_object_stream_document(compressed: bool, stream_first: bool, catalog_extra: &str) -> (Vec<u8>, usize) {
         use std::io::Write;
         const COUNT: usize = 40;
         let source = document("", Some("9 0 R"), "\n", CONTENT);
@@ -669,12 +781,21 @@ mod pdf_regressions {
         let size = xref_id + COUNT;
         let mut offsets = vec![0; size];
         let mut pdf = source[..source_offsets[0]].to_vec();
-        for id in [1, 2, 3, 4, 6, 7, 8] {
+        for id in [3, 4, 6, 7, 8] {
             offsets[id] = pdf.len();
             pdf.extend_from_slice(&source[source_offsets[id - 1]..source_offsets[id]]);
         }
         let mut bodies = Vec::new();
         let mut header = String::new();
+        // Catalog and Pages exist only in this shared stream. Length lookup
+        // can inspect them before the physical walk reaches their container.
+        for (id, body) in [
+            (1, format!("<< /Type /Catalog /Pages 2 0 R {catalog_extra} >>\n")),
+            (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>\n".to_string()),
+        ] {
+            header.push_str(&format!("{id} {} ", bodies.len()));
+            bodies.extend_from_slice(body.as_bytes());
+        }
         for id in 9..9 + COUNT {
             header.push_str(&format!("{id} {} ", bodies.len()));
             bodies.extend_from_slice(format!("{}\n", CONTENT.len()).as_bytes());
@@ -692,7 +813,7 @@ mod pdf_regressions {
             compressor.finish().unwrap()
         } else { decoded };
         let filter = if compressed { "/Filter /FlateDecode" } else { "" };
-        let object_stream = [format!("{stream_id} 0 obj\n<< /Type /ObjStm /N {COUNT} /First {first} /Length {} {filter} >>\nstream\n", bytes.len()).into_bytes(), bytes, b"\nendstream\nendobj\n".to_vec()].concat();
+        let object_stream = [format!("{stream_id} 0 obj\n<< /Type /ObjStm /N {} /First {first} /Length {} {filter} >>\nstream\n", COUNT + 2, bytes.len()).into_bytes(), bytes, b"\nendstream\nendobj\n".to_vec()].concat();
         if stream_first {
             offsets[stream_id] = pdf.len();
             pdf.extend_from_slice(&object_stream);
@@ -713,7 +834,8 @@ mod pdf_regressions {
         let mut entries = Vec::new();
         for (id, offset) in offsets.into_iter().enumerate() {
             let (kind, position, index) = if id == 0 { (0, 0, 65535) }
-                else if (9..9 + COUNT).contains(&id) { (2, stream_id, id - 9) }
+                else if id == 1 || id == 2 { (2, stream_id, id - 1) }
+                else if (9..9 + COUNT).contains(&id) { (2, stream_id, id - 9 + 2) }
                 else { (1, offset, 0) };
             entries.push(kind);
             entries.extend_from_slice(&(position as u32).to_be_bytes());
@@ -730,10 +852,12 @@ mod pdf_regressions {
     fn shared_object_streams_are_decoded_and_indexed_once() {
         for compressed in [false, true] {
             for stream_first in [false, true] {
-                let (pdf, data) = shared_object_stream_document(compressed, stream_first);
+                let (pdf, data) = shared_object_stream_document(compressed, stream_first, "");
                 assert_eq!(detect(&pdf), Some("pdf"), "compressed {compressed}, stream first {stream_first}");
                 let newer = b"BT (New shared-stream revision) Tj ET";
                 assert_eq!(detect(&append_revision(pdf.clone(), newer, newer.len())), Some("pdf"));
+                let (active, _) = shared_object_stream_document(compressed, stream_first, "/AA << /WC << /S /JavaScript >> >>");
+                assert_eq!(detect(&active), None, "active content on either cache path");
                 // A cache hit must still compare both the index and the ID.
                 for index in [0u16, 40] {
                     let mut bad = pdf.clone();

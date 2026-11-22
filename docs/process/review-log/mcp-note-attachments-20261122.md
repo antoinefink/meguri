@@ -93,3 +93,12 @@ The previous head passed `sync-server-test/20261122T145442Z-98457` with 332 case
 | `server/src/mcp_service/attachments/format/isobmff.rs` | `b93a23fdb2c3e467fbbd420237f41f468de24efd3870473b09f614652919f284` |
 | `server/src/mcp_service/attachments/format/pdf.rs` | `6ec6f318a496e6ea4e34ffa30f2526152ce6f90079b38284024ff6801ffaf4fb` |
 | `server/src/mcp_service/attachments/format/tests.rs` | `301abe898ac5392738f521e47e3783e916ab0065281b2e7ee8f744519f7c8fa1` |
+
+The follow-up review on `2debab0eb` identified six format cases. `20261122T153432Z-68669` enforces WebP animation-control ordering. `20261122T153432Z-68758` rejects remote MPEG-4 audio stream declarations and parses AAC and HE-AAC configuration headers. `20261122T153432Z-68402` recognizes linearized cross-reference streams, handles primary and overflow hints within the original revision, and retains catalog and page observations when reusing decoded object streams. The focused WebP and ISO jobs passed 13 cases each in `sync-server-test/20261122T153615Z-70364` and `sync-server-test/20261122T153843Z-71807`. The preceding complete suite passed 345 cases in `sync-server-test/20261122T152133Z-52696`, and exact packaging on that source passed four smoke cases and 59 browser cases.
+
+| Reviewed candidate | SHA-256 |
+|---|---|
+| `server/src/mcp_service/attachments/format/images.rs` | `cea187846d99d4dd66f1b5ed068168f88270d1e1eec6e922c95d096aeff7249b` |
+| `server/src/mcp_service/attachments/format/isobmff.rs` | `4f68edf97ff2d48f3092d9d1b452f5e7c47b1d406afbedc64520f493859dc183` |
+| `server/src/mcp_service/attachments/format/pdf.rs` | `055dd7f1d47ebdea107486e05a6accc6457b5bd2a64481e4a6994ba8d5501969` |
+| `server/src/mcp_service/attachments/format/tests.rs` | `184336d57672d18d9dc3f5dde15dfb796653c9d11318ca393f92b8e451e2c4ef` |

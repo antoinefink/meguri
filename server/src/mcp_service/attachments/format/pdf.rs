@@ -251,6 +251,12 @@ struct Revision {
     xref: usize,
     entries: BTreeMap<usize, Entry>,
 }
+struct DecodedObjects {
+    end: usize,
+    flate: bool,
+    bytes: Rc<Vec<u8>>,
+    observations: Option<Seen>,
+}
 struct Lookup<'a> {
     file: &'a [u8],
     xref: usize,
@@ -259,7 +265,7 @@ struct Lookup<'a> {
     resolving: BTreeSet<(usize, usize, usize)>,
     scalar_offsets: BTreeSet<usize>,
     streams: BTreeMap<usize, usize>,
-    decoded: BTreeMap<usize, (usize, Rc<Vec<u8>>)>,
+    decoded: BTreeMap<usize, DecodedObjects>,
     object_streams: BTreeMap<(usize, usize, usize, usize), Vec<(usize, Option<usize>)>>,
 }
 impl Lookup<'_> {
@@ -275,28 +281,43 @@ impl Lookup<'_> {
         if !matches!(*fields.get(b"Linearized".as_slice())?, b"1" | b"1.0")
             || token(early, &mut at, budget)? != b"endobj" { return None; }
         let first = token(self.file, &mut at, budget)?;
-        if first != b"xref" { return None; }
         let xref = at - first.len();
+        if first != b"xref" {
+            if unsigned(first)? == 0 || unsigned(token(self.file, &mut at, budget)?)? != 0
+                || token(self.file, &mut at, budget)? != b"obj" { return None; }
+            let fields = metadata(self.file, &mut at, budget)?;
+            if name(fields.get(b"Type".as_slice())?.strip_prefix(b"/")?)? != b"XRef" {
+                return None;
+            }
+        }
         let length = unsigned(fields.get(b"L".as_slice())?)?;
         let end = unsigned(fields.get(b"E".as_slice())?)?;
         let main = unsigned(fields.get(b"T".as_slice())?)?;
         if unsigned(fields.get(b"O".as_slice())?)? == 0
             || unsigned(fields.get(b"N".as_slice())?)? == 0
+            || !(xref < end && end < length)
             || !trim(self.file.get(..length)?).ends_with(b"%%EOF") { return None; }
         let hints = numbers(fields.get(b"H".as_slice())?, budget)?;
+        // Primary and overflow hints may follow the first-page section, but
+        // must fit within the original revision and cannot straddle /E.
         if !matches!(hints.len(), 2 | 4) || hints.chunks_exact(2).any(|h| {
-            h[0] <= xref || h[1] == 0 || h[0].checked_add(h[1]).is_none_or(|n| n > end)
+            h[0] <= xref || h[1] == 0 || h[0].checked_add(h[1]).is_none_or(|n| {
+                n > length || (h[0] < end && n > end)
+            })
         }) { return None; }
+        if hints.len() == 4 && hints[2] < hints[0].checked_add(hints[1])? { return None; }
         Some((xref, end, main, length))
     }
     fn section(&self, offset: usize, budget: &mut usize, expanded: &mut usize)
-        -> Option<(BTreeMap<usize, Entry>, Option<usize>, Option<usize>)> {
+        -> Option<(BTreeMap<usize, Entry>, Option<usize>, Option<usize>, usize)> {
         let mut offsets = BTreeMap::new();
         *budget = budget.checked_sub(1)?;
         let b = self.file.get(offset..)?;
         let mut at = 0;
         let first = token(b, &mut at, budget)?;
         let fields;
+        // /T names the first entry in a table, but the object in a stream.
+        let mut target = offset;
         if first == b"xref" {
             loop {
                 let t = token(b, &mut at, budget)?;
@@ -305,7 +326,9 @@ impl Lookup<'_> {
                 let count = unsigned(token(b, &mut at, budget)?)?;
                 start.checked_add(count)?;
                 for object in start..start + count {
-                    let position = unsigned(token(b, &mut at, budget)?)?;
+                    let position_token = token(b, &mut at, budget)?;
+                    if target == offset { target = offset.checked_add(at - position_token.len())?; }
+                    let position = unsigned(position_token)?;
                     let generation = unsigned(token(b, &mut at, budget)?)?;
                     let entry = match token(b, &mut at, budget)? {
                         b"n" if generation <= 65535 => Entry::Plain { generation, offset: position },
@@ -401,7 +424,7 @@ impl Lookup<'_> {
                 None => Some(None),
             }
         };
-        Some((offsets, link(b"Prev")?, link(b"XRefStm")?))
+        Some((offsets, link(b"Prev")?, link(b"XRefStm")?, target))
     }
     fn load(&mut self, budget: &mut usize, expanded: &mut usize) -> Option<()> {
         let mut sections = BTreeMap::new();
@@ -420,18 +443,19 @@ impl Lookup<'_> {
         }
         let linearized = self.linearized(budget).and_then(|(first, end, entries, length)| {
             let main = sections.get(&first)?.1?;
-            (first < end && end <= main && main < entries && entries < length
+            (first < end && end <= main && main < length && entries == sections.get(&main)?.3
+                && entries < length
                 && sections.get(&main)?.1.is_none() && !hybrids.contains(&first)
                 && !hybrids.contains(&main)).then_some((first, main))
         });
-        for (&offset, (_, prev, _)) in &sections {
+        for (&offset, (_, prev, _, _)) in &sections {
             if prev.is_some_and(|prev| prev >= offset && linearized != Some((offset, prev))) {
                 return None;
             }
         }
         // Both links are followed: a hybrid's Prev can point to the previous
         // supplement while the table's Prev points to the previous table.
-        for (&xref, (entries, _, hybrid)) in sections.iter().rev() {
+        for (&xref, (entries, _, hybrid, _)) in sections.iter().rev() {
             if hybrids.contains(&xref) && xref != self.xref { continue; }
             if linearized.is_some_and(|(first, _)| xref == first) { continue; }
             *budget = budget.checked_sub(entries.len())?;
@@ -440,7 +464,7 @@ impl Lookup<'_> {
             let mut visited = BTreeSet::from([xref]);
             while let Some(offset) = next {
                 if !visited.insert(offset) { return None; }
-                let (extra, _, hybrid) = sections.get(&offset)?;
+                let (extra, _, hybrid, _) = sections.get(&offset)?;
                 *budget = budget.checked_sub(extra.len())?;
                 // A hybrid stream supplies the compressed entries represented
                 // as free placeholders in its companion table.
@@ -449,9 +473,9 @@ impl Lookup<'_> {
             }
             if let Some((first, main)) = linearized {
                 if xref == main {
-                    // The first-page table wins duplicates. Both tables end
+                    // The first-page section wins duplicates. Both sections end
                     // the same base revision, after all first-page streams.
-                    let (extra, _, hybrid) = sections.get(&first)?;
+                    let (extra, _, hybrid, _) = sections.get(&first)?;
                     if hybrid.is_some() { return None; }
                     *budget = budget.checked_sub(extra.len())?;
                     entries.extend(extra.iter().map(|(&id, &entry)| (id, entry)));
@@ -567,7 +591,7 @@ impl Lookup<'_> {
             None => false,
         };
         let decoded = self.decoded_objects(absolute, offset.checked_add(end)?, flate,
-            &mut Seen::default(), budget, expanded)?;
+            None, budget, expanded)?;
         let header = decoded.get(..first)?;
         let mut cursor = 0;
         let mut ids = BTreeSet::new();
@@ -598,15 +622,29 @@ impl Lookup<'_> {
         if id != object { return None; }
         scalar
     }
-    fn decoded_objects(&mut self, start: usize, end: usize, flate: bool, seen: &mut Seen,
+    fn decoded_objects(&mut self, start: usize, end: usize, flate: bool, seen: Option<&mut Seen>,
         budget: &mut usize, expanded: &mut usize) -> Option<Rc<Vec<u8>>> {
-        if let Some((previous_end, decoded)) = self.decoded.get(&start) {
-            return (*previous_end == end).then(|| Rc::clone(decoded));
+        if !self.decoded.contains_key(&start) {
+            let bytes = Rc::new(decode_stream(self.file.get(start..end)?, flate, expanded)?);
+            let mut observations = Seen::default();
+            // Validate active content even when a lookup is the first visitor.
+            tokens(&bytes, &mut observations, budget, expanded, true, self)?;
+            self.decoded.insert(start, DecodedObjects {
+                end, flate, bytes, observations: Some(observations),
+            });
         }
-        let decoded = Rc::new(decode_stream(self.file.get(start..end)?, flate, expanded)?);
-        tokens(&decoded, seen, budget, expanded, true, self)?;
-        self.decoded.insert(start, (end, Rc::clone(&decoded)));
-        Some(decoded)
+        let decoded = self.decoded.get_mut(&start)?;
+        if decoded.end != end || decoded.flate != flate { return None; }
+        // Lookups retain observations; the physical walk consumes them once.
+        if let Some(seen) = seen {
+            if let Some(observations) = decoded.observations.take() {
+                seen.catalog |= observations.catalog;
+                seen.pages |= observations.pages;
+                seen.objects += observations.objects;
+                seen.ends += observations.ends;
+            }
+        }
+        Some(Rc::clone(&decoded.bytes))
     }
 }
 fn passive_destination(b: &[u8], at: &mut usize, budget: &mut usize) -> Option<()> {
@@ -796,7 +834,7 @@ fn tokens(
                         if dictionary.iter().any(|v| v == b"ObjStm") {
                             let flate = dictionary.iter().any(|v| v == b"FlateDecode");
                             if !flate && dictionary.iter().any(|v| v == b"Filter") { return None; }
-                            lookup.decoded_objects(at, end, flate, seen, budget, expanded)?;
+                            lookup.decoded_objects(at, end, flate, Some(seen), budget, expanded)?;
                         }
                         at = after;
                         dictionary.clear();

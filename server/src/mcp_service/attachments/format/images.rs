@@ -110,6 +110,8 @@ pub(super) fn webp(b: &[u8]) -> bool {
     let mut at = 12;
     let mut image = false;
     let mut canvas = None;
+    let mut animated = false;
+    let mut animation_control = false;
     for _ in 0..RECORDS {
         if at == b.len() {
             return image;
@@ -132,7 +134,7 @@ pub(super) fn webp(b: &[u8]) -> bool {
                 let Some(dimensions) = bitstream(&h[..4], p) else {
                     return false;
                 };
-                if image || canvas.is_some_and(|size| size != dimensions) {
+                if animated || image || canvas.is_some_and(|size| size != dimensions) {
                     return false;
                 }
                 image = true;
@@ -146,14 +148,18 @@ pub(super) fn webp(b: &[u8]) -> bool {
                     return false;
                 }
                 canvas = Some(dimensions);
+                // Animation flag in the Extended File Header (RFC 9649).
+                animated = p[0] & 2 != 0;
             }
             b"ANIM" => {
-                if n != 6 {
+                // Exactly one Animation chunk precedes all Animation Frame chunks.
+                if !animated || animation_control || image || n != 6 {
                     return false;
                 }
+                animation_control = true;
             }
             b"ANMF" => {
-                if n < 24 || p[15] & 0xfc != 0 {
+                if !animated || !animation_control || n < 24 || p[15] & 0xfc != 0 {
                     return false;
                 }
                 let Some((width, height)) = canvas else {
@@ -263,7 +269,7 @@ mod tests {
     }
 
     // Raw 24-bit fields: x/2, y/2, width-1, height-1.
-    fn animation(canvas_size: Option<(u32, u32)>, rect: [u32; 4], chunks: &[Vec<u8>]) -> Vec<u8> {
+    fn animation_frame(rect: [u32; 4], chunks: &[Vec<u8>]) -> Vec<u8> {
         let mut data = Vec::new();
         for field in rect {
             data.extend_from_slice(&field.to_le_bytes()[..3]);
@@ -272,13 +278,95 @@ mod tests {
         for chunk in chunks {
             data.extend_from_slice(chunk);
         }
+        chunk(b"ANMF", &data)
+    }
+
+    fn animation(canvas_size: Option<(u32, u32)>, rect: [u32; 4], chunks: &[Vec<u8>]) -> Vec<u8> {
         let mut body = Vec::new();
         if let Some((width, height)) = canvas_size {
             body.push(canvas(width, height, true));
         }
         body.push(chunk(b"ANIM", &[0; 6]));
-        body.push(chunk(b"ANMF", &data));
+        body.push(animation_frame(rect, chunks));
         riff(&body)
+    }
+
+    #[test]
+    fn webp_animation_requires_one_animation_chunk_before_frames() {
+        let header = canvas(1, 1, true);
+        let control = chunk(b"ANIM", &[0; 6]);
+        let frame = animation_frame([0; 4], &[lossless()]);
+        for chunks in [
+            vec![header.clone(), frame.clone()],
+            vec![header.clone(), frame.clone(), control.clone()],
+            vec![header.clone(), control.clone(), control.clone(), frame.clone()],
+            vec![header.clone(), control.clone(), frame.clone(), control.clone()],
+            vec![header.clone(), control.clone(), frame.clone(), control.clone(), frame.clone()],
+            vec![control.clone(), header.clone(), frame.clone()],
+        ] {
+            assert!(!webp(&riff(&chunks)));
+        }
+        assert!(webp(&riff(&[header.clone(), control.clone(), frame.clone()])));
+        assert!(webp(&riff(&[header, control, frame.clone(), frame])));
+    }
+
+    #[test]
+    fn webp_animation_requires_a_framed_animation_chunk_and_checked_frame() {
+        let header = canvas(1, 1, true);
+        let frame = animation_frame([0; 4], &[lossless()]);
+        for size in [0, 5, 7, 8] {
+            assert!(!webp(&riff(&[
+                header.clone(), chunk(b"ANIM", &vec![0; size]), frame.clone(),
+            ])));
+        }
+        assert!(webp(&riff(&[
+            header.clone(), chunk(b"ANIM", &[0xff; 6]), frame,
+        ])));
+        assert!(!webp(&riff(&[header.clone()])));
+        assert!(!webp(&riff(&[header.clone(), chunk(b"ANIM", &[0; 6])])));
+        assert!(!webp(&riff(&[
+            header, chunk(b"ANIM", &[0; 6]),
+            animation_frame([0; 4], &[chunk(b"UNKN", b"opaque")]),
+        ])));
+    }
+
+    #[test]
+    fn webp_stills_reject_animation_chunks_without_the_animation_flag() {
+        let control = chunk(b"ANIM", &[0; 6]);
+        let frame = animation_frame([0; 4], &[lossless()]);
+        for header in [vec![], vec![canvas(1, 1, false)]] {
+            for suffix in [
+                vec![control.clone(), lossless()],
+                vec![lossless(), control.clone()],
+                vec![frame.clone()],
+                vec![lossless(), frame.clone()],
+                vec![control.clone(), frame.clone()],
+            ] {
+                let mut chunks = header.clone();
+                chunks.extend(suffix);
+                assert!(!webp(&riff(&chunks)));
+            }
+        }
+    }
+
+    #[test]
+    fn webp_animation_rejects_top_level_still_bitstreams() {
+        let header = canvas(1, 1, true);
+        let control = chunk(b"ANIM", &[0; 6]);
+        let frame = animation_frame([0; 4], &[lossless()]);
+        for image in [lossless(), lossy(1, 1)] {
+            assert!(webp(&riff(&[image.clone()])));
+            assert!(webp(&riff(&[canvas(1, 1, false), image.clone()])));
+            for chunks in [
+                vec![header.clone(), image.clone()],
+                vec![header.clone(), image.clone(), control.clone(), frame.clone()],
+                vec![header.clone(), control.clone(), image.clone()],
+                vec![header.clone(), control.clone(), image.clone(), frame.clone()],
+                vec![header.clone(), control.clone(), frame.clone(), image.clone()],
+            ] {
+                assert!(!webp(&riff(&chunks)));
+            }
+        }
     }
 
     #[test]

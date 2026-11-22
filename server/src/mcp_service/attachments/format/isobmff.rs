@@ -431,9 +431,10 @@ fn esds(b: &[u8], budget: &mut usize) -> Option<()> {
     let (tag, es) = descriptor(&mut root, budget)?;
     if tag != 3 || !root.is_empty() { return None; }
     let flags = *es.get(2)?;
+    // This description is used for self-contained samples, never a URL ES.
+    if flags & 0x40 != 0 { return None; }
     let mut at = 3;
     if flags & 0x80 != 0 { at += 2; } // dependsOn_ES_ID
-    if flags & 0x40 != 0 { at += 1 + usize::from(*es.get(at)?); } // URL
     if flags & 0x20 != 0 { at += 2; } // OCR_ES_Id
     let mut children = es.get(at..)?;
     let mut configured = false;
@@ -455,12 +456,121 @@ fn esds(b: &[u8], budget: &mut usize) -> Option<()> {
         }
         // MPEG-4 audio and MPEG-2 AAC need decoder-specific configuration.
         // MPEG-1/2 audio and other codecs need no AAC AudioSpecificConfig.
-        if matches!(h[0], 0x40 | 0x66..=0x68) && specific.is_none_or(|v| v.len() < 2) {
-            return None;
+        if matches!(h[0], 0x40 | 0x66..=0x68) {
+            aac_config(specific?)?;
         }
         configured = true;
     }
     configured.then_some(())
+}
+
+// Read only elementary configuration headers, not compressed AAC packets.
+// All reads are bounded by the descriptor; PCE loops have fixed-width counts.
+struct AudioBits<'a> {
+    bytes: &'a [u8],
+    at: usize,
+}
+impl AudioBits<'_> {
+    fn read(&mut self, count: usize) -> Option<u32> {
+        let mut value = 0;
+        for _ in 0..count {
+            value = (value << 1) | u32::from((self.bytes.get(self.at / 8)? >> (7 - self.at % 8)) & 1);
+            self.at += 1;
+        }
+        Some(value)
+    }
+    fn remaining(&self) -> usize { self.bytes.len() * 8 - self.at }
+    fn object_type(&mut self) -> Option<u32> {
+        let aot = self.read(5)?;
+        let aot = if aot == 31 { 32 + self.read(6)? } else { aot };
+        (aot != 0).then_some(aot)
+    }
+    fn frequency(&mut self) -> Option<()> {
+        match self.read(4)? {
+            0..=12 => Some(()),
+            15 if self.read(24)? != 0 => Some(()),
+            _ => None,
+        }
+    }
+    fn channels(&mut self) -> Option<u32> {
+        let channels = self.read(4)?;
+        matches!(channels, 0..=7 | 11..=14).then_some(channels)
+    }
+}
+
+fn aac_config(bytes: &[u8]) -> Option<()> {
+    let mut bits = AudioBits { bytes, at: 0 };
+    let mut aot = bits.object_type()?;
+    bits.frequency()?;
+    let channels = bits.channels()?;
+    let explicit_extension = matches!(aot, 5 | 29);
+    if explicit_extension {
+        // SBR and PS signal the core frequency first, then the output frequency
+        // and the underlying audio object type (usually AAC-LC).
+        bits.frequency()?;
+        aot = bits.object_type()?;
+        if aot == 22 { bits.channels()?; }
+    }
+    if !matches!(aot, 1..=4 | 6 | 7 | 17 | 19..=23) { return None; }
+    let short_frame = bits.read(1)?;
+    if aot == 3 && short_frame != 0 { return None; } // SSR has no 960-sample frame.
+    if bits.read(1)? != 0 { bits.read(14)?; } // coreCoderDelay
+    let extension = bits.read(1)?;
+    if channels == 0 { aac_program_config(&mut bits)?; }
+    if matches!(aot, 6 | 20) { bits.read(3)?; } // layerNr
+    if extension != 0 {
+        if aot == 22 { bits.read(5)?; bits.read(11)?; }
+        if matches!(aot, 17 | 19 | 20 | 23) { bits.read(3)?; }
+        // extensionFlag3 reserves a future header syntax.
+        if bits.read(1)? != 0 { return None; }
+    }
+    if matches!(aot, 17 | 19..=23) && bits.read(2)? >= 2 {
+        // These values require ErrorProtectionSpecificConfig, beyond the
+        // elementary header supported here.
+        return None;
+    }
+    if !explicit_extension && bits.remaining() >= 11 && bits.read(11)? == 0x2b7 {
+        match bits.object_type()? {
+            5 => {
+                let sbr = bits.read(1)? != 0;
+                if sbr { bits.frequency()?; }
+                if bits.remaining() >= 11 && bits.read(11)? == 0x548 {
+                    let ps = bits.read(1)? != 0;
+                    if ps && !sbr { return None; }
+                }
+            }
+            22 => {
+                if bits.read(1)? != 0 { bits.frequency()?; }
+                bits.channels()?;
+            }
+            _ => return None,
+        }
+    }
+    Some(())
+}
+
+fn aac_program_config(bits: &mut AudioBits<'_>) -> Option<()> {
+    bits.read(4)?; // element_instance_tag
+    if bits.read(2)? == 3 { return None; } // reserved PCE object_type
+    if bits.read(4)? > 12 { return None; }
+    let front = bits.read(4)?;
+    let side = bits.read(4)?;
+    let back = bits.read(4)?;
+    let lfe = bits.read(2)?;
+    let associated = bits.read(3)?;
+    let cc = bits.read(4)?;
+    if front + side + back + lfe == 0 { return None; }
+    if bits.read(1)? != 0 { bits.read(4)?; } // mono mixdown
+    if bits.read(1)? != 0 { bits.read(4)?; } // stereo mixdown
+    if bits.read(1)? != 0 { bits.read(3)?; } // matrix mixdown
+    for _ in 0..front + side + back { bits.read(5)?; }
+    for _ in 0..lfe + associated { bits.read(4)?; }
+    for _ in 0..cc { bits.read(5)?; }
+    let padding = (8 - bits.at % 8) % 8;
+    bits.read(padding)?;
+    let comments = bits.read(8)?;
+    for _ in 0..comments { bits.read(8)?; }
+    Some(())
 }
 
 // A size table can describe millions of fixed-size PCM samples compactly.
@@ -980,18 +1090,110 @@ mod tests {
         let decoder = [vec![4, 0x80, 0x80, 0x80, 20], config.to_vec(), specific].concat();
         let padded = [vec![0, 0, 0, 0, 3, 0x80, 0x80, 0x80, 31, 0, 1, 0], decoder, vec![6, 1, 2]].concat();
         assert_eq!(admit(&padded), Some("m4a"));
-        // All optional ES fields, including a URL long enough to require a
-        // multi-byte descriptor length. Their bytes are never dereferenced.
-        let mut es = vec![0, 1, 0xe0, 0, 2, 130];
-        es.extend(vec![b'x'; 130]);
-        es.extend([0, 3]);
-        es.extend_from_slice(&valid[9..]);
-        let optional = [vec![0; 4], test_descriptor(3, &es)].concat();
-        assert_eq!(admit(&optional), Some("m4a"));
+        // Dependency and OCR IDs are independent of the forbidden URL flag.
+        for flags in [0, 0x80, 0x20, 0xa0] {
+            let mut es = vec![0, 1, flags];
+            if flags & 0x80 != 0 { es.extend([0, 2]); }
+            if flags & 0x20 != 0 { es.extend([0, 3]); }
+            let header = es.clone();
+            es.extend_from_slice(&valid[9..]);
+            assert_eq!(admit(&[vec![0; 4], test_descriptor(3, &es)].concat()), Some("m4a"));
+            for n in 3..header.len() {
+                assert_eq!(admit(&[vec![0; 4], test_descriptor(3, &header[..n])].concat()), None);
+            }
+            for length in [0, 3, 130] {
+                let mut es = vec![0, 1, flags | 0x40];
+                if flags & 0x80 != 0 { es.extend([0, 2]); }
+                es.push(length);
+                es.extend(vec![b'x'; usize::from(length)]);
+                if flags & 0x20 != 0 { es.extend([0, 3]); }
+                es.extend_from_slice(&valid[9..]);
+                assert_eq!(admit(&[vec![0; 4], test_descriptor(3, &es)].concat()), None);
+            }
+        }
         let mut trailing = valid.clone(); trailing.push(0);
         assert_eq!(admit(&trailing), None);
         let mut budget = 0;
         assert!(esds(&valid, &mut budget).is_none());
+    }
+
+    fn audio_bits(fields: &[(u32, usize)]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut at = 0;
+        for &(value, width) in fields {
+            for shift in (0..width).rev() {
+                if at % 8 == 0 { bytes.push(0); }
+                bytes[at / 8] |= (((value >> shift) & 1) as u8) << (7 - at % 8);
+                at += 1;
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn aac_elementary_headers_and_sbr_ps_extensions() {
+        let bytes = m4a(false);
+        let valid = aac_esds();
+        let admit = |object: u8, asc: &[u8]| {
+            let mut config = valid[11..24].to_vec();
+            config[0] = object;
+            config.extend(test_descriptor(5, asc));
+            let es = [vec![0, 1, 0], test_descriptor(4, &config)].concat();
+            let esds = [vec![0; 4], test_descriptor(3, &es)].concat();
+            detect(&mp4a_entry(&bytes, 0, &iso_box(b"esds", &esds)))
+        };
+        let lc = [(2, 5), (4, 4), (2, 4), (0, 3)];
+        let sync = [lc.as_slice(), &[(0x2b7, 11), (5, 5), (1, 1), (3, 4)]].concat();
+        let ps = [sync.as_slice(), &[(0x548, 11), (1, 1)]].concat();
+        // AAC-LC stereo 44.1 kHz, mono 8 kHz, explicit HE-AAC and HE-AAC v2.
+        let mut good = vec![vec![0x12, 0x10], vec![0x15, 0x88],
+            vec![0x2b, 0x92, 0x08, 0], vec![0xeb, 0x92, 0x08, 0],
+            audio_bits(&sync), audio_bits(&ps),
+            audio_bits(&[(2, 5), (15, 4), (44100, 24), (2, 4), (0, 3)]),
+            audio_bits(&[(5, 5), (7, 4), (2, 4), (15, 4), (44100, 24), (2, 5), (0, 3)]),
+            audio_bits(&[(2, 5), (4, 4), (2, 4), (0, 3), (0x2b7, 11), (5, 5),
+                (1, 1), (15, 4), (48000, 24)]),
+            audio_bits(&[(2, 5), (4, 4), (2, 4), (0, 1), (1, 1), (7, 14), (0, 1)]),
+            audio_bits(&[(2, 5), (4, 4), (2, 4), (1, 3), (0, 1)]),
+            audio_bits(&[(6, 5), (4, 4), (2, 4), (0, 3), (0, 3)]),
+            audio_bits(&[(17, 5), (4, 4), (2, 4), (0, 3), (0, 2)]),
+        ];
+        for channels in [1, 3, 4, 5, 6, 7, 11, 12, 13, 14] {
+            good.push(audio_bits(&[(2, 5), (4, 4), (channels, 4), (0, 3)]));
+        }
+        // Channel configuration zero supplies a complete stereo PCE, including
+        // byte alignment and the comment length. No packet decoding is needed.
+        let pce = audio_bits(&[(2, 5), (4, 4), (0, 4), (0, 3), (0, 4), (1, 2), (4, 4),
+            (1, 4), (0, 4), (0, 4), (0, 2), (0, 3), (0, 4), (0, 3), (1, 1), (0, 4),
+            (0, 1), (0, 8)]);
+        good.push(pce.clone());
+        let mut bad = vec![vec![], vec![0x12], vec![0, 0], vec![0xff, 0xff], vec![0xf8],
+            vec![0x17, 0x80], vec![0x12, 0x11], // truncated explicit rate / extensionFlag3
+            audio_bits(&[(0, 5), (4, 4), (2, 4), (0, 3)]),
+            audio_bits(&[(10, 5), (4, 4), (2, 4), (0, 3)]), // reserved AOT
+            audio_bits(&[(2, 5), (15, 4), (0, 24), (2, 4), (0, 3)]),
+            audio_bits(&[(2, 5), (4, 4), (2, 4), (0, 1), (1, 1)]), // core delay absent
+            audio_bits(&[(3, 5), (4, 4), (2, 4), (4, 3)]), // SSR short frame
+            audio_bits(&[(6, 5), (4, 4), (2, 4), (0, 3)]), // scalable layer absent
+            audio_bits(&[(17, 5), (4, 4), (2, 4), (0, 3)]), // ER epConfig absent
+            audio_bits(&[(17, 5), (4, 4), (2, 4), (0, 3), (2, 2)]),
+            audio_bits(&[(2, 5), (4, 4), (2, 4), (0, 3), (0x2b7, 11), (31, 5)]),
+            audio_bits(&[(2, 5), (4, 4), (2, 4), (0, 3), (0x2b7, 11), (5, 5)]),
+        ];
+        for frequency in [13, 14] {
+            bad.push(audio_bits(&[(2, 5), (frequency, 4), (2, 4), (0, 3)]));
+            bad.push(audio_bits(&[(5, 5), (7, 4), (2, 4), (frequency, 4), (2, 5), (0, 3)]));
+            bad.push(audio_bits(&[lc.as_slice(), &[(0x2b7, 11), (5, 5), (1, 1), (frequency, 4)]].concat()));
+        }
+        for configuration in [&good[2], &good[7], &pce] {
+            for n in 0..configuration.len() { bad.push(configuration[..n].to_vec()); }
+        }
+        // Before a complete sync marker, an LC header is valid on its own.
+        for n in 4..good[8].len() { bad.push(good[8][..n].to_vec()); }
+        for object in [0x40, 0x66, 0x67, 0x68] {
+            for asc in &good { assert_eq!(admit(object, asc), Some("m4a"), "{object:x}: {asc:x?}"); }
+            for asc in &bad { assert_eq!(admit(object, asc), None, "{object:x}: {asc:x?}"); }
+        }
     }
 
     #[test]
