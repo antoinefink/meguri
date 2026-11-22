@@ -127,6 +127,41 @@ extension WebKitSuites {
             await #expect(throws: (any Error).self) { try await resolver.openAttachmentPDF(Self.name) }
         }
 
+        @Test func zeroWidthPDFAliasesAreRefusedOnlyInReservedNamespace() async throws {
+            let media = MediaFixture()
+            let bytes = Data("synthetic attachment alias bytes".utf8)
+            var spellings: [String] = []
+            for scalar in ["\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FEFF}", "\u{FE0F}"] {
+                for offset in [3, 32, Self.name.count] {
+                    var spelling = Self.name.uppercased()
+                    spelling.insert(contentsOf: scalar, at: spelling.index(spelling.startIndex, offsetBy: offset))
+                    spellings.append(spelling)
+                    // Real generated files make refusal independent of filesystem collation.
+                    media.add("/" + spelling, bytes, "")
+                }
+            }
+            let ordinary = "ordinary\u{200D}.pdf"
+            media.add("/" + ordinary, bytes, "")
+            let resolver = try await media.resolved()
+            defer { Task { await resolver.close() } }
+            for spelling in spellings {
+                let file = try await resolver.openURLPath("/" + spelling)
+                #expect(try await file.attachmentPDFBytes() == bytes)
+                await file.close()
+                #expect(!CardAttachmentPDF.accepts(spelling))
+                await #expect(throws: (any Error).self) { try await resolver.openAttachmentPDF(spelling) }
+                let escaped = spelling.utf8.map { String(format: "%%%02X", $0) }.joined()
+                for path in [spelling, escaped] {
+                    let request = URLRequest(url: try #require(URL(string: MediaOrigin.url.absoluteString + path + "?cache=1#page=2")))
+                    let response = try await MediaSchemeHandlerTests.answer(request, fixture: media)
+                    #expect(response.response?.statusCode == 404 && response.body.isEmpty)
+                }
+            }
+            let request = URLRequest(url: MediaOrigin.url.appending(path: ordinary))
+            let response = try await MediaSchemeHandlerTests.answer(request, fixture: media)
+            #expect(response.response?.statusCode == 200 && response.body == bytes)
+        }
+
         @Test func supportedMIMEAndNativeAudioSuffixes() {
             for (suffix, mime) in [("heic", "image/heic"), ("heif", "image/heif"), ("aif", "audio/aiff"),
                                    ("aiff", "audio/aiff"), ("aifc", "audio/aiff"), ("caf", "audio/x-caf"),
