@@ -1,0 +1,256 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "stats.chart.copyImage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Image"
+          }
+        }
+      }
+    },
+    "stats.chart.copyValues": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Values"
+          }
+        }
+      }
+    },
+    "stats.chart.estimated": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated"
+          }
+        }
+      }
+    },
+    "stats.chart.failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t load this chart."
+          }
+        }
+      }
+    },
+    "stats.chart.later": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Later"
+          }
+        }
+      }
+    },
+    "stats.chart.now": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Now"
+          }
+        }
+      }
+    },
+    "stats.chart.openHint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opens the chart’s page."
+          }
+        }
+      }
+    },
+    "stats.chart.overdue": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overdue"
+          }
+        }
+      }
+    },
+    "stats.chart.period": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Period"
+          }
+        }
+      }
+    },
+    "stats.chart.run %@ %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ to %2$@"
+          }
+        }
+      }
+    },
+    "stats.chart.showInBrowse": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show in Browse"
+          }
+        }
+      }
+    },
+    "stats.chart.unit.count": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Count"
+          }
+        }
+      }
+    },
+    "stats.chart.unit.percent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Percent"
+          }
+        }
+      }
+    },
+    "stats.chart.unit.time": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time"
+          }
+        }
+      }
+    },
+    "stats.chart.weekOf %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Week of %@"
+          }
+        }
+      }
+    },
+    "stats.empty.noCardsDue": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No cards due"
+          }
+        }
+      }
+    },
+    "stats.empty.noMemoryEstimate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No cards with a memory estimate"
+          }
+        }
+      }
+    },
+    "stats.empty.noMemoryState": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No cards with a memory state"
+          }
+        }
+      }
+    },
+    "stats.empty.noReviewsIn %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No reviews in %@"
+          }
+        }
+      }
+    },
+    "stats.empty.noReviewsInDeck %@ %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No reviews in %1$@ in %2$@"
+          }
+        }
+      }
+    },
+    "stats.empty.noReviewsYet": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No reviews yet"
+          }
+        }
+      }
+    },
+    "stats.span.last3Months": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "the last 3 months"
+          }
+        }
+      }
+    },
+    "stats.span.last6Months": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "the last 6 months"
+          }
+        }
+      }
+    },
+    "stats.span.lastMonth": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "the last month"
+          }
+        }
+      }
+    },
+    "stats.span.lastYear": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "the last year"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
