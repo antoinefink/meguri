@@ -160,7 +160,9 @@ public final class BrowseResults {
 
         /// The same request as a new search: H8 and H11 need a whole handle.
         var asSearch: Request {
-            Request(kind: .search, text: text, mode: mode, sort: sort, columns: columns, queryIsEmpty: queryIsEmpty)
+            let search = Request(kind: .search, text: text, mode: mode, sort: sort, columns: columns, queryIsEmpty: queryIsEmpty)
+            search.queryRevision = queryRevision
+            return search
         }
     }
 
@@ -222,6 +224,7 @@ public final class BrowseResults {
     @ObservationIgnored private var qaFetching: Set<Int> = []
     /// Failed reads tried again, by page.
     @ObservationIgnored private var retries: [Int: Int] = [:]
+    @ObservationIgnored private var qaRetries: [Int: Int] = [:]
 
     public init(backend: any BrowseBackend) {
         self.backend = backend
@@ -543,6 +546,7 @@ public final class BrowseResults {
                 request.mapping = nil
             }
             retries = [:]
+            qaRetries = [:]
             if let current = currentIndex, current > 0 { bringIntoView(current) }
             if request.complete { stopProgress() }
             // A list that became whole while its first rows were read maps the selection again.
@@ -726,10 +730,19 @@ public final class BrowseResults {
             // A read for a replaced store leaves the new store's entries alone.
             guard self.epoch == epoch, let shown = self.list, shown.token == list.token, self.store === store else { return }
             qaFetching.remove(page)
+            guard let cells else {
+                // A failed read is tried again twice, a moment later; then the cells wait for the rows to show again.
+                let tries = qaRetries[page, default: 0]
+                guard tries < 2 else { return }
+                qaRetries[page] = tries + 1
+                try? await Task.sleep(for: .milliseconds(250))
+                guard self.list?.token == list.token else { return }
+                return readNearRows()
+            }
             // Cells read for another layout or before the page changed do not land; the page's are read again.
-            guard let cells, shown.revision == list.revision, shown.columns == columns,
-                  store.page(page).generation == generation, let rows = store.page(page).rows, rows.count == cells.count
-            else { return readNearRows() }
+            guard shown.revision == list.revision, shown.columns == columns, store.page(page).generation == generation,
+                  let rows = store.page(page).rows, rows.count == cells.count else { return readNearRows() }
+            qaRetries[page] = nil
             store.page(page).fill(zip(rows, cells).map { $0.filling($1) })
         }
     }
@@ -802,7 +815,11 @@ public final class BrowseResults {
             do {
                 result = try await session.invalidatedRows(list.handle, revision: list.revision, changes: changes)
             } catch BridgeError.browse(.unknownHandle) {
-                guard self.epoch == epoch, var shown = self.list, shown.token == list.token else { return }
+                guard self.epoch == epoch, var shown = self.list, shown.token == list.token else {
+                    // Another list is shown: its queued change sets are applied to it.
+                    if self.epoch == epoch { again = true }
+                    return
+                }
                 shown.released = true
                 self.list = shown
                 return

@@ -142,6 +142,87 @@ import Testing
         try await until { results.content == .failed }
     }
 
+    @Test func aFirstPageThatCannotBeReadAfterAnEmptyResultShowsTryAgain() async throws {
+        let session = FakeSearchSession()
+        session.results[""] = []
+        session.results["run:1"] = [1, 2]
+        let results = results(session)
+        results.run(FilterQuery(), mode: .cards)
+        try await until { results.content == .emptyCollection }
+        session.rowsFail = true
+        results.run(Self.deckQuery, mode: .cards)
+        try await until { results.content == .failed }
+    }
+
+    @Test func aResortWhoseHandleWentShowsTheSearchItRunsInstead() async throws {
+        let session = FakeSearchSession()
+        session.results[""] = [1, 2, 3]
+        let results = results(session)
+        results.run(FilterQuery(), mode: .cards)
+        try await until { results.list != nil }
+        session.forgetsHandles = true
+        results.sort(by: "cardDue")
+        try await until { results.list?.sort.key == "cardDue" }
+        #expect(session.starts.count == 2 && results.row(at: 0)?.id == 3)
+    }
+
+    @Test func aHeaderClickWhileTheRunTextIsReadWritesTheNewQuerysSet() async throws {
+        let session = FakeSearchSession()
+        session.results[""] = [1, 2]
+        session.results["run:1"] = [1]
+        let backend = FakeBrowseBackend()
+        backend.ownSets[7] = ColumnSetShown(set: .notetype(7), own: true, cards: ["noteFld", "cardDue"], notes: ["noteFld"],
+                                            cardsSort: BrowseSort(key: "noteFld", direction: .ascending),
+                                            notesSort: BrowseSort(key: "noteFld", direction: .ascending))
+        let results = results(session, backend: backend)
+        results.run(FilterQuery(), mode: .cards)
+        try await until { results.list != nil }
+        backend.runTextDelay = .milliseconds(150)
+        results.run(FilterQuery(tokens: [.value([.notetype(id: 7, name: "Vocabulary")], negated: false)]), mode: .cards)
+        results.sort(by: "cardDue")
+        try await until { results.list?.sort.key == "cardDue" }
+        try await until { backend.columnChangeSets.count == 1 }
+        #expect(backend.columnChangeSets == [.notetype(7)] && results.list?.columns == ["noteFld", "cardDue"])
+    }
+
+    @Test func aMappingTakenBeforeRowsWereChosenNeverReturnsAtCompletion() async throws {
+        let session = FakeSearchSession()
+        session.results[""] = [1, 2, 3]
+        session.results["run:1"] = [1, 2, 3]
+        let results = results(session)
+        results.run(FilterQuery(), mode: .cards)
+        try await until { results.row(at: 2) != nil }
+        results.select([2])
+        session.streams = true
+        session.rowsDelay = .milliseconds(150)
+        results.run(Self.deckQuery, mode: .cards)
+        try await until { session.rowCalls.count >= 2 }
+        // Rows chosen while the new list's first rows are read.
+        results.select([0])
+        try await until { results.list?.token == 2 }
+        #expect(results.selection.isEmpty)
+        session.rowsDelay = nil
+        session.emit(.complete(seq: 2, handle: BrowseHandle(rawValue: 2), count: 3, revision: 0))
+        try await until { results.list?.isComplete == true }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(results.selection.isEmpty)
+    }
+
+    @Test func aQuestionCellReadThatKeepsFailingIsTriedOnlyTwiceMore() async throws {
+        let session = FakeSearchSession()
+        session.results["run:1"] = [1, 2, 3]
+        session.qaFail = true
+        let backend = FakeBrowseBackend()
+        backend.ownSets[7] = ColumnSetShown(set: .notetype(7), own: true, cards: ["noteFld", "question"], notes: ["noteFld"],
+                                            cardsSort: BrowseSort(key: "noteFld", direction: .ascending),
+                                            notesSort: BrowseSort(key: "noteFld", direction: .ascending))
+        let results = results(session, backend: backend)
+        results.run(FilterQuery(tokens: [.value([.notetype(id: 7, name: "Vocabulary")], negated: false)]), mode: .cards)
+        try await until { results.list != nil }
+        try await Task.sleep(for: .seconds(1))
+        #expect(session.qaCalls == 3)
+    }
+
     @Test func aFailureWithNoRowsShowsTryAgain() async throws {
         let session = FakeSearchSession()
         session.results[""] = [4]
@@ -462,6 +543,17 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
     var failNext: BridgeError? { get { locked { _failNext } } set { locked { _failNext = newValue } } }
     private var _failNext: BridgeError?
     var invalidation: BrowseInvalidation? { get { locked { _invalidation } } set { locked { _invalidation = newValue } } }
+    var rowsFail: Bool { get { locked { _rowsFail } } set { locked { _rowsFail = newValue } } }
+    private var _rowsFail = false
+    var rowsDelay: Duration? { get { locked { _rowsDelay } } set { locked { _rowsDelay = newValue } } }
+    private var _rowsDelay: Duration?
+    var qaFail: Bool { get { locked { _qaFail } } set { locked { _qaFail = newValue } } }
+    private var _qaFail = false
+    private(set) var qaCalls: Int { get { locked { _qaCalls } } set { locked { _qaCalls = newValue } } }
+    private var _qaCalls = 0
+    /// Resorts and toggles find their handle gone (H6).
+    var forgetsHandles: Bool { get { locked { _forgets } } set { locked { _forgets = newValue } } }
+    private var _forgets = false
     /// How long a start takes to return after its events went.
     var startDelay: Duration? { get { locked { _startDelay } } set { locked { _startDelay = newValue } } }
     private var _startDelay: Duration?
@@ -542,6 +634,7 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
 
     func resort(_ handle: BrowseHandle, sort: BrowseSort) async throws -> UInt64 {
         resorts.append(sort)
+        if forgetsHandles { throw BridgeError.browse(.unknownHandle) }
         guard let old = locked({ handles[handle.rawValue] }) else { throw BridgeError.browse(.unknownHandle) }
         guard old.complete else { throw BridgeError.browse(.notComplete) }
         return begin(ids: ordered(old.ids, sort), mode: old.mode, text: old.text)
@@ -560,6 +653,8 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
     func rows(_ handle: BrowseHandle, revision: UInt64, range: Range<UInt64>, columns: [String]) async throws
         -> [BrowseRowResult] {
         rowCalls.append(RowCall(handle: handle.rawValue, revision: revision, range: range))
+        if let delay = rowsDelay { try? await Task.sleep(for: delay) }
+        if rowsFail { throw BridgeError.unavailable(reason: "sample") }
         return locked {
             guard let entry = handles[handle.rawValue] else { return [] }
             return range.compactMap { index -> BrowseRowResult? in
@@ -577,7 +672,9 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
 
     func qaCells(_ handle: BrowseHandle, revision: UInt64, range: Range<UInt64>, which: BrowseQAWhich) async throws
         -> [BrowseQAResult] {
-        range.map { _ in .cells(question: .text("q"), answer: .text("a")) }
+        qaCalls += 1
+        if qaFail { throw BridgeError.unavailable(reason: "sample") }
+        return range.map { _ in .cells(question: .text("q"), answer: .text("a")) }
     }
 
     func invalidatedRows(_ handle: BrowseHandle, revision: UInt64, changes: [SequencedChangeSet]) async throws

@@ -544,6 +544,7 @@ import Testing
     }
     func runText(_ query: FilterQuery) async throws -> String {
         runTexts += 1
+        if let runTextDelay { try? await Task.sleep(for: runTextDelay) }
         return query.isEmpty ? "" : "run:\(query.tokens.count)"
     }
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
@@ -595,11 +596,16 @@ import Testing
         notes: ["noteFld", "note", "template", "noteTags", "noteCrt"],
         cardsSort: BrowseSort(key: "noteFld", direction: .ascending), notesSort: BrowseSort(key: "noteFld", direction: .ascending))
     var columnChanges: [ColumnSetChange] = []
+    var columnChangeSets: [ColumnSetID] = []
     var notesModeWrites: [Bool] = []
+    /// Note types with an own set (V2.2).
+    var ownSets: [Int64: ColumnSetShown] = [:]
+    var runTextDelay: Duration?
     func openSearchSession() async throws -> any BrowseSearching { searchSession }
-    func columnSet(notetype: Int64?) async throws -> ColumnSetShown { Self.standard }
+    func columnSet(notetype: Int64?) async throws -> ColumnSetShown { notetype.flatMap { ownSets[$0] } ?? Self.standard }
     func changeColumnSet(_ set: ColumnSetID, mode: BrowseMode, change: ColumnSetChange) async throws {
         columnChanges.append(change)
+        columnChangeSets.append(set)
     }
     func useStandardColumns(notetype: Int64) async throws {}
     func setNotesMode(_ notes: Bool) async throws { notesModeWrites.append(notes) }
