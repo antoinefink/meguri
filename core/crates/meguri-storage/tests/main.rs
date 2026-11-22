@@ -99,5 +99,7 @@ pub mod smoke_integrity;
 #[cfg(feature = "test-hooks")]
 #[path = "snapshots.rs"]
 pub mod snapshots;
+#[path = "studied_scope.rs"]
+pub mod studied_scope;
 #[path = "verified_replace.rs"]
 pub mod verified_replace;

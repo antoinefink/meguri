@@ -1,0 +1,222 @@
+//! By Deck (`stats/history-reads` H10, U291): a table of the page scope's
+//! decks, its cards partitioned by home deck so the rows add up, unlike the
+//! page's other parts, which follow G2.1's deck rule.
+
+use std::collections::{BTreeMap, HashSet};
+
+use meguri_model::ids::DeckId;
+
+use super::decks::{DeckEntry, home_deck};
+use super::{PERIOD_DAYS, period_start};
+use crate::graphs::records::retention::outcome;
+use crate::graphs::records::reviews::counted;
+use crate::graphs::rows::StatsRow;
+use crate::graphs::{History, Scope, ScopeData};
+
+/// One row's values in one period window (H10.2). Member order: `reviews`,
+/// `time_ms`, `passed`, `failed`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DeckValues {
+    /// Its cards' rows that `stats/graphs-revlog` V2 counts.
+    pub reviews: u64,
+    /// Their summed `time`, in 64 bits.
+    pub time_ms: i64,
+    /// Its cards' rows of H4.1 (V4.1) answered with anything but Again.
+    pub passed: u64,
+    /// Those answered Again.
+    pub failed: u64,
+}
+
+impl DeckValues {
+    fn is_empty(&self) -> bool {
+        *self == DeckValues::default()
+    }
+}
+
+/// A row's values per period window (H1). Member order: `one_month`,
+/// `three_months`, `six_months`, `one_year`, `all_time`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DeckWindows {
+    pub one_month: DeckValues,
+    pub three_months: DeckValues,
+    pub six_months: DeckValues,
+    pub one_year: DeckValues,
+    /// Every row the request reads; only with `allHistory`.
+    pub all_time: Option<DeckValues>,
+}
+
+impl DeckWindows {
+    /// The windows present, in member order.
+    pub fn values(&self) -> impl Iterator<Item = &DeckValues> {
+        [&self.one_month, &self.three_months, &self.six_months, &self.one_year]
+            .into_iter()
+            .chain(self.all_time.as_ref())
+    }
+}
+
+/// One row of the table (H10.1). Member order: `deck`, `own_cards`,
+/// `cards`, `windows`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeckRow {
+    /// The row's deck: a top-level normal deck (All Decks), or a direct
+    /// normal subdeck of the scope's deck, or that deck itself for its own
+    /// cards.
+    pub deck: DeckId,
+    /// The scope deck's row of its own cards: only the cards whose home
+    /// deck is that deck, outside its subdecks. It does not filter the page
+    /// (`stats/statistics-page` S7.15).
+    pub own_cards: bool,
+    /// Its existing cards, suspended and buried included; the window plays
+    /// no part.
+    pub cards: u64,
+    pub windows: DeckWindows,
+}
+
+/// Part `by_deck`. Member order: `rows`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ByDeckPart {
+    /// The rows in the deck tree's order (`sched/counts` C1's sibling
+    /// order), the own-cards row first; a deck with no cards and no reviews
+    /// in any window is not a row.
+    pub rows: Vec<DeckRow>,
+}
+
+/// The rows' decks and which row each home deck counts in (H10.1). A deck
+/// is a row's when its folded name is the row deck's or starts with it and
+/// U+001F, as G2.1's subtree is found.
+fn layout(scope: &Scope, decks: &[DeckEntry]) -> (Vec<(DeckId, bool)>, BTreeMap<i64, usize>) {
+    const SEPARATOR: char = '\u{1f}';
+    let mut rows: Vec<(DeckId, bool)> = Vec::new();
+    let mut of_home: BTreeMap<i64, usize> = BTreeMap::new();
+    let normal: HashSet<&str> = decks.iter().filter(|deck| !deck.filtered).map(|deck| deck.folded.as_str()).collect();
+    // The normal decks one level below `parent` (none: the top level), in
+    // order, each with its subtree. A deck whose parent is missing (damaged
+    // data) is a row of the nearest level where a normal deck exists above
+    // it, so its cards are still in exactly one row (H10.1).
+    let mut add_level = |parent: Option<&str>, rows: &mut Vec<(DeckId, bool)>| {
+        for deck in decks.iter().filter(|deck| !deck.filtered) {
+            let rest = match parent {
+                None => Some(deck.folded.as_str()),
+                Some(parent) => deck.folded.strip_prefix(parent).and_then(|rest| rest.strip_prefix(SEPARATOR)),
+            };
+            let Some(rest) = rest else { continue };
+            // A normal deck between `parent` and this one holds it instead.
+            let base = deck.folded.len() - rest.len();
+            let held = rest
+                .match_indices(SEPARATOR)
+                .any(|(at, _)| normal.contains(&deck.folded[..base + at]));
+            if held {
+                continue;
+            }
+            let mut prefix = deck.folded.clone();
+            prefix.push(SEPARATOR);
+            for member in decks.iter().filter(|d| d.folded == deck.folded || d.folded.starts_with(&prefix)) {
+                of_home.insert(member.id, rows.len());
+            }
+            rows.push((DeckId(deck.id), false));
+        }
+    };
+    match scope {
+        Scope::Deck(deck) => {
+            if let Some(entry) = decks.iter().find(|entry| entry.id == deck.0) {
+                // First the deck's own cards, outside its subdecks.
+                rows.push((*deck, true));
+                add_level(Some(&entry.folded), &mut rows);
+                of_home.insert(deck.0, 0);
+            }
+        }
+        // A Search scope never reaches here (H1: `unsupported_scope`).
+        Scope::Collection | Scope::Search(_) => add_level(None, &mut rows),
+    }
+    (rows, of_home)
+}
+
+/// H10's table: its rows from the decks and the scope's cards, then fed the
+/// window's rows.
+pub(crate) struct ByDeckCounter {
+    rows: Vec<DeckRow>,
+    of_home: BTreeMap<i64, usize>,
+    bounds: [i64; 4],
+}
+
+impl ByDeckCounter {
+    pub(crate) fn new(
+        scope: &ScopeData,
+        page_scope: &Scope,
+        history: History,
+        next_day_at: i64,
+        decks: &[DeckEntry],
+    ) -> ByDeckCounter {
+        let (layout, of_home) = layout(page_scope, decks);
+        let mut rows: Vec<DeckRow> = layout
+            .iter()
+            .map(|(deck, own_cards)| DeckRow {
+                deck: *deck,
+                own_cards: *own_cards,
+                cards: 0,
+                windows: DeckWindows {
+                    all_time: (history == History::AllHistory).then(DeckValues::default),
+                    ..DeckWindows::default()
+                },
+            })
+            .collect();
+        // Each existing card of the scope in its home deck's row, if any.
+        // Under G2.1 the scope holds every card whose home deck is in its
+        // tree.
+        for card in scope.cards() {
+            if let Some(at) = of_home.get(&home_deck(card.did, card.odid)) {
+                rows[*at].cards += 1;
+            }
+        }
+        ByDeckCounter {
+            rows,
+            of_home,
+            bounds: PERIOD_DAYS.map(|days| period_start(next_day_at, days)),
+        }
+    }
+
+    /// A row of the window, with its card's `did` and `odid` (none for a
+    /// deleted card's row, which is in no row).
+    pub(crate) fn add(&mut self, row: &StatsRow, card_decks: Option<(i64, i64)>) {
+        let reviewed = counted(row);
+        let answered = outcome(row);
+        if !reviewed && answered.is_none() {
+            return;
+        }
+        let Some(at) = card_decks.and_then(|(did, odid)| self.of_home.get(&home_deck(did, odid))) else {
+            return;
+        };
+        let add = |values: &mut DeckValues| {
+            if reviewed {
+                values.reviews += 1;
+                values.time_ms += i64::from(row.time);
+            }
+            match answered {
+                Some(result) if result.passed => values.passed += 1,
+                Some(_) => values.failed += 1,
+                None => {}
+            }
+        };
+        let windows = &mut self.rows[*at].windows;
+        let timed = [
+            &mut windows.one_month,
+            &mut windows.three_months,
+            &mut windows.six_months,
+            &mut windows.one_year,
+        ];
+        for (values, start) in timed.into_iter().zip(self.bounds) {
+            if row.id >= start {
+                add(values);
+            }
+        }
+        if let Some(all) = windows.all_time.as_mut() {
+            add(all);
+        }
+    }
+
+    pub(crate) fn finish(mut self) -> ByDeckPart {
+        self.rows
+            .retain(|row| row.cards > 0 || row.windows.values().any(|values| !values.is_empty()));
+        ByDeckPart { rows: self.rows }
+    }
+}

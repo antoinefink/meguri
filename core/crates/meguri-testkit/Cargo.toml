@@ -194,6 +194,11 @@ harness = false
 name = "stats_page"
 harness = false
 
+# U288's cards behind one day (stats/history-reads H13, H19).
+[[bench]]
+name = "stats_day_cards"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]
