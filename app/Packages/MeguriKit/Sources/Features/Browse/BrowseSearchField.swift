@@ -159,6 +159,7 @@ private struct BrowseSuggestionList: View {
                         rows(group.rows)
                     } header: {
                         Text(verbatim: BrowseStrings.section(section))
+                            .accessibilityIdentifier("browse.search.section.\(section)")
                     }
                 } else {
                     rows(group.rows)
@@ -198,19 +199,21 @@ private struct BrowseSuggestionList: View {
     @ViewBuilder private func fieldTests(_ field: SuggestedField) -> some View {
         Section {
             row(field.containsText.map { BrowseStrings.containsWord($0) } ?? BrowseStrings.text("browse.token.containsMenu"),
-                symbol: "text.magnifyingglass")
+                symbol: "text.magnifyingglass", identifier: "contains")
                 .searchCompletion(BrowseFieldToken.fieldTest(.contains(field.containsText ?? "")))
-            row(BrowseStrings.text("browse.token.isEmptyMenu"), symbol: "square.dashed")
+            row(BrowseStrings.text("browse.token.isEmptyMenu"), symbol: "square.dashed", identifier: "isEmpty")
                 .searchCompletion(BrowseFieldToken.fieldTest(.empty))
-            row(BrowseStrings.text("browse.token.hasContentMenu"), symbol: "square.fill.text.grid.1x2")
+            row(BrowseStrings.text("browse.token.hasContentMenu"), symbol: "square.fill.text.grid.1x2", identifier: "hasContent")
                 .searchCompletion(BrowseFieldToken.fieldTest(.hasContent))
         } header: {
             Text(verbatim: field.name)
+                .accessibilityIdentifier("browse.search.section.fieldTests")
         }
     }
 
-    private func row(_ label: String, symbol: String) -> some View {
+    private func row(_ label: String, symbol: String, identifier: String) -> some View {
         Label { Text(verbatim: label) } icon: { Image(systemName: symbol) }
+            .accessibilityIdentifier("browse.search.fieldTest.\(identifier)")
     }
 }
 
@@ -239,7 +242,9 @@ private struct BrowseSuggestionRow: View {
                 Text(count, format: .number).monospacedDigit().foregroundStyle(.secondary)
             }
         }
-        .accessibilityIdentifier("browse.search.suggestion.\(identifier)")
+        // One element per row, named area.screen.element.id (R1964).
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("browse.search.suggestion.\(Self.compact(identifier))")
     }
 
     private var label: String {
@@ -328,6 +333,12 @@ private struct BrowseSuggestionRow: View {
         case .saveSearch: "saveSearch"
         case .syntax(let candidate): "syntax.\(candidate.label.hashValue & 0xFFFF)"
         }
+    }
+
+    /// The identifier's last part: letters, digits, `_` and `-` only.
+    private static func compact(_ parts: String) -> String {
+        String(parts.unicodeScalars.map { ("a"..."z").contains($0) || ("A"..."Z").contains($0) || ("0"..."9").contains($0)
+            || $0 == "_" ? Character($0) : "-" })
     }
 
     private static func identifier(_ value: FilterValue) -> String {
