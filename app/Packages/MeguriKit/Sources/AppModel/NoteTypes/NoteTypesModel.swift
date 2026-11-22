@@ -58,6 +58,8 @@ public final class NoteTypesModel {
         didSet { if selection != oldValue { selectionChanged() } }
     }
     public var tab: Tab = .fields
+    /// iPad: the field whose options show in a popover.
+    public var optionsField: Int?
     public private(set) var records: [Int64: NotetypeRecord] = [:]
     public private(set) var recordFailed: Set<Int64> = []
     public private(set) var typeCounts: [Int64: NotetypeRemovalCounts] = [:]
@@ -85,6 +87,18 @@ public final class NoteTypesModel {
     private var listToken: UInt64 = 0
     @ObservationIgnored private var summaryTasks: [Int64: Task<Void, Never>] = [:]
     @ObservationIgnored private var detailTasks: [Int64: Task<Void, Never>] = [:]
+    @ObservationIgnored private var countTasks: [Int64: [Task<Void, Never>]] = [:]
+    /// The base each note type's Notes counts were read for: counts read for
+    /// another field layout are not shown on the draft's rows.
+    private var fieldCountsBase: [Int64: [UInt8]] = [:]
+    /// The newest rename request per row: an older answer never replaces a newer name.
+    @ObservationIgnored private var renameTokens: [RenameKey: UInt64] = [:]
+    private struct RenameKey: Hashable { let notetype: Int64; let row: Int }
+    /// Note types whose stored version changed under their draft (D1), kept
+    /// after Keep Editing hides the row, so Revert reads the newer version.
+    private var stale: Set<Int64> = []
+    /// The section has shown once: a new collection's list is read at once.
+    @ObservationIgnored private var appeared = false
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var countsTask: Task<Void, Never>?
 
@@ -115,7 +129,8 @@ public final class NoteTypesModel {
     @ObservationIgnored private var saveRunning = false
     /// Commits a view started (a rename still being checked after focus
     /// left), awaited by Save whatever field has the focus now.
-    @ObservationIgnored private var inflightCommits: [String: Task<Bool, Never>] = [:]
+    @ObservationIgnored private var inflightCommits: [TrackedCommitKey: Task<Bool, Never>] = [:]
+    private struct TrackedCommitKey: Hashable { let notetype: Int64; let key: String }
     /// Save is committing typed text: text inputs wait, so nothing typed now is lost.
     public private(set) var committingForSave = false
     /// Raised when the collection goes: work started before must not land.
@@ -139,6 +154,7 @@ public final class NoteTypesModel {
     /// Reads the list once, when the section first shows; later changes
     /// refresh it from the change events.
     public func appear() {
+        appeared = true
         guard phase == .idle || phase == .failed else { return }
         reloadList()
     }
@@ -193,6 +209,10 @@ public final class NoteTypesModel {
     }
 
     private func loadDetail(_ id: Int64, force: Bool = false) {
+        // A cached note type whose counts were dropped (its notes changed) reads them again.
+        if !force, records[id] != nil, !recordFailed.contains(id), typeCounts[id] == nil || fieldCounts[id] == nil {
+            readCounts(id)
+        }
         guard force || records[id] == nil || recordFailed.contains(id) else { return }
         detailTasks[id]?.cancel()
         recordFailed.remove(id)
@@ -215,12 +235,25 @@ public final class NoteTypesModel {
     /// The subtitle's counts and W3.1's Notes column, read in the background.
     private func readCounts(_ id: Int64) {
         let epoch = epoch
-        Task {
-            if let counts = try? await backend.typeCounts(id), self.epoch == epoch { typeCounts[id] = counts }
-        }
-        Task {
-            if let counts = try? await backend.fieldContentCounts(id), self.epoch == epoch { fieldCounts[id] = counts }
-        }
+        let base = records[id]?.base
+        for task in countTasks[id] ?? [] { task.cancel() }
+        countTasks[id] = [
+            Task {
+                let counts = try? await backend.typeCounts(id)
+                guard !Task.isCancelled, self.epoch == epoch, let counts else { return }
+                typeCounts[id] = counts
+            },
+        ]
+        // A note type changed elsewhere keeps the draft's older base, while the
+        // core counts the newer layout's fields: those counts would sit on the
+        // wrong rows, so the Notes column waits for Reload or Revert.
+        guard !stale.contains(id) else { return }
+        countTasks[id, default: []].append(Task {
+            let counts = try? await backend.fieldContentCounts(id)
+            guard !Task.isCancelled, self.epoch == epoch, let counts, records[id]?.base == base, !stale.contains(id) else { return }
+            fieldCounts[id] = counts
+            fieldCountsBase[id] = base
+        })
     }
 
     private func readReferences(_ id: Int64) async {
@@ -239,7 +272,8 @@ public final class NoteTypesModel {
     /// W3's Notes for a row: the notes with content of its base field (a new
     /// field shows 0), with the type's notes; nil until known.
     public func notesWithContent(_ id: Int64, row: NoteTypeFieldRow) -> (count: UInt64, of: UInt64)? {
-        guard let counts = fieldCounts[id] else { return nil }
+        // Counts read for another field layout (changed elsewhere) are not shown on these rows.
+        guard let counts = fieldCounts[id], let base = draft(id)?.base.base, fieldCountsBase[id] == base else { return nil }
         guard let origin = row.origin else { return (0, counts.notes) }
         return counts.fields[safe: Int(origin)].map { ($0, counts.notes) }
     }
@@ -294,25 +328,32 @@ public final class NoteTypesModel {
             guard let draft = draft(id), let at = draft.rows.firstIndex(where: { $0.id == row }) else { return nil }
             return (draft.rows.map { $0.deleted ? "" : $0.name }, at)
         }
+        let key = RenameKey(notetype: id, row: row)
+        renameTokens[key, default: 0] &+= 1
+        let token = renameTokens[key]
+        let epoch = epoch
         var check: NotetypeFieldNameCheck?
         // The answer counts only for the names it checked: another rename that
         // landed meanwhile is checked against again.
         for _ in 0..<3 {
             guard let before = names() else { return true }
             guard let answer = try? await backend.checkFieldName(typed, fields: before.names, renaming: UInt32(before.at)) else { return false }
+            // A newer rename of this row owns it now: this answer is dropped.
+            guard self.epoch == epoch, renameTokens[key] == token else { return true }
             if let after = names(), after.names == before.names, after.at == before.at { check = answer; break }
         }
         guard let check else { return false }
+        // The rename field and its refusal belong to the shown note type: an
+        // answer for another one changes its draft only.
+        let shown = selection == id
         switch check {
         case .ignored:
-            renameRefusal = nil
-            if renaming == row { renaming = nil }
+            if shown { renameRefusal = nil; if renaming == row { renaming = nil } }
         case .accepted(let name):
-            renameRefusal = nil
-            if renaming == row { renaming = nil }
+            if shown { renameRefusal = nil; if renaming == row { renaming = nil } }
             edit(id) { $0.rename(row, to: name) }
         case .refused(let refusal):
-            renameRefusal = RenameRefusal(row: row, refusal: refusal)
+            if shown { renameRefusal = RenameRefusal(row: row, refusal: refusal) }
             return false
         }
         return true
@@ -321,13 +362,20 @@ public final class NoteTypesModel {
     /// A commit a view started on its own (focus left a field): Save waits
     /// for it. A newer commit under the same key replaces an older one, so a
     /// corrected name is the one that counts.
-    public func trackCommit(_ key: String, _ commit: @escaping @MainActor () async -> Bool) {
+    /// `notetype`: the note type whose draft the commit changes; only its own
+    /// Save waits for it, and only its refusal stops that Save.
+    public func trackCommit(_ notetype: Int64, _ key: String, _ commit: @escaping @MainActor () async -> Bool) {
+        let key = TrackedCommitKey(notetype: notetype, key: key)
         let task = Task { await commit() }
         inflightCommits[key] = task
         Task { _ = await task.value; if inflightCommits[key] == task { inflightCommits[key] = nil } }
     }
 
     public func cancelRename() {
+        // A check still running for the row being renamed no longer applies.
+        if let id = selection, let row = renaming ?? renameRefusal?.row {
+            renameTokens[RenameKey(notetype: id, row: row), default: 0] &+= 1
+        }
         renaming = nil
         renameRefusal = nil
     }
@@ -355,6 +403,8 @@ public final class NoteTypesModel {
     public func revert(_ id: Int64) {
         confirmingRevert = false
         guard editable(id) else { return }
+        // The note type changed elsewhere: Revert shows the newer version, read again.
+        if stale.contains(id) { reload(id); return }
         drafts[id] = nil
         changedElsewhere.remove(id)
         renaming = nil; renameRefusal = nil
@@ -368,12 +418,14 @@ public final class NoteTypesModel {
         // No edit lands on the old base while the newer one is read.
         records[id] = nil
         changedElsewhere.remove(id)
+        stale.remove(id)
+        if selection == id { cancelRename() }
         draftChanged(id)
         loadDetail(id, force: true)
     }
 
     /// D1's Keep Editing: the row goes; Save meets `Stale` and offers Reload again.
-    public func keepEditing(_ id: Int64) { changedElsewhere.remove(id) }
+    public func keepEditing(_ id: Int64) { changedElsewhere.remove(id) }  // `stale` stays: Revert reads again
 
     private func draftChanged(_ id: Int64) {
         revisions[id, default: 0] &+= 1
@@ -382,9 +434,11 @@ public final class NoteTypesModel {
         let revision = revisions[id] ?? 0
         let structure = draft.structureDraft()
         let delay = summaryDelay
+        let epoch = epoch
         summaryTasks[id] = Task {
             try? await Task.sleep(for: delay)
-            guard !Task.isCancelled, let summary = try? await backend.summary(structure), revisions[id] == revision else { return }
+            guard !Task.isCancelled, let summary = try? await backend.summary(structure), !Task.isCancelled,
+                  self.epoch == epoch, revisions[id] == revision else { return }
             summaries[id] = (revision, summary)
         }
         Task { await readReferences(id) }
@@ -409,14 +463,16 @@ public final class NoteTypesModel {
     }
 
     public func canSave(_ id: Int64) -> Bool {
+        // A refused name (V5) holds Save until it is corrected (typed text Save commits first) or cancelled.
         (isEdited(id) || !pendingEdits.isEmpty) && editable(id) && progress == nil && preparing == nil && question == nil
-            && !saveRunning && writable()
+            && !saveRunning && (renameRefusal == nil || !pendingEdits.isEmpty) && writable()
     }
 
     /// Save (⌘S): D2's summary of the draft as it is, then D3; the sheet
     /// when it asks, else the save at once with nothing confirmed.
-    public func save() {
-        guard let id = selection, canSave(id) else { return }
+    /// `id`: the note type on screen (iPad's page); the selection otherwise.
+    public func save(_ notetype: Int64? = nil) {
+        guard let id = notetype ?? selection, canSave(id) else { return }
         let epoch = epoch
         saveRunning = true
         saveTask = Task {
@@ -425,14 +481,16 @@ public final class NoteTypesModel {
             committingForSave = true
             var accepted = true
             // Commits that start while Save waits are awaited too.
-            while !inflightCommits.isEmpty {
-                let batch = inflightCommits
-                inflightCommits.removeAll()
+            // Another note type's commits change its own draft only: they run on, unawaited.
+            while true {
+                let batch = inflightCommits.filter { $0.key.notetype == id }
+                if batch.isEmpty { break }
+                for key in batch.keys { inflightCommits[key] = nil }
                 for task in batch.values { accepted = await task.value && accepted }
             }
             for commit in pendingEdits.values where accepted { accepted = await commit() }
             committingForSave = false
-            guard accepted else { return }
+            guard accepted, renameRefusal == nil else { return }
             saveRunning = false
             guard self.epoch == epoch, canSave(id), isEdited(id), let draft = drafts[id] else { return }
             saveRunning = true
@@ -471,11 +529,17 @@ public final class NoteTypesModel {
         let id = shown.notetypeId
         let confirmed = NotetypeConfirmedLosses(confirming: shown.summary)
         confirming = true
+        let epoch = epoch
         saveTask = Task {
-            defer { confirming = false }
+            defer { if self.epoch == epoch { confirming = false } }
+            let read: Result<NotetypeDraftSummary, any Error>
+            do { read = .success(try await backend.summary(draft.structureDraft())) } catch { read = .failure(error) }
+            // The collection went while this read ran: nothing of it is submitted.
+            guard self.epoch == epoch, !Task.isCancelled, question == shown else { return }
             let latest: NotetypeDraftSummary
-            do { latest = try await backend.summary(draft.structureDraft()) } catch {
-                closeQuestion(); refused(id, error); return
+            switch read {
+            case .success(let summary): latest = summary
+            case .failure(let error): closeQuestion(); refused(id, error); return
             }
             let service = service()
             if NoteTypeSaveDecision.asksAgain(confirmed: confirmed, shown: shown.decision, latest: latest, service: service) {
@@ -498,7 +562,6 @@ public final class NoteTypesModel {
     public func questionClosed() {
         guard !confirming else { return }
         question = nil
-        if preparing != nil { preparing = nil }
     }
 
     private func ask(_ question: Question) {
@@ -548,8 +611,11 @@ public final class NoteTypesModel {
     /// D5 step 6: the draft is gone and the detail shows the saved note type.
     private func saved(_ id: Int64) {
         drafts[id] = nil
+        // No edit starts from the pre-save version while the saved one is read.
+        records[id] = nil
         summaries[id] = nil
         changedElsewhere.remove(id)
+        stale.remove(id)
         draftChanged(id)
         loadDetail(id, force: true)
         fieldCounts[id] = nil
@@ -565,6 +631,7 @@ public final class NoteTypesModel {
             ask(Question(notetypeId: id, name: drafts[id]?.name ?? "", summary: summary, decision: decision))
         case .stale?:
             changedElsewhere.insert(id)
+            stale.insert(id)
         case .cancelled?:
             break
         default:
@@ -579,6 +646,18 @@ public final class NoteTypesModel {
     public func changesCommitted(_ changes: ChangeSet) {
         guard phase != .idle else { return }
         let notesMoved = changes.notes.contains { $0.change != .updated }
+        // A note edited elsewhere can fill or empty a field: the shown type's Notes column reads again.
+        if !notesMoved, changes.notetypes.isEmpty, !changes.wholeCollection, !changes.notes.isEmpty {
+            if let id = selection, records[id] != nil { readCounts(id) }
+            // Other loaded note types read theirs when they are shown again; reads
+            // already running are cancelled, so no pre-change count lands.
+            for id in records.keys where id != selection {
+                for task in countTasks[id] ?? [] { task.cancel() }
+                countTasks[id] = nil
+                fieldCounts[id] = nil; typeCounts[id] = nil
+            }
+            return
+        }
         guard changes.wholeCollection || !changes.notetypes.isEmpty || notesMoved else { return }
         // A rename elsewhere arrives as an update: the list reads its names again.
         if changes.wholeCollection || !changes.notetypes.isEmpty {
@@ -605,15 +684,19 @@ public final class NoteTypesModel {
             let read = try? await backend.read(id)
             guard self.epoch == epoch else { return }
             guard let record = read else { readCounts(id); return }
-            readCounts(id)
-            guard record.base != records[id]?.base else { return }
+            // Counts are read for the record the rows show, once it is in place.
+            guard record.base != records[id]?.base else { readCounts(id); return }
             if let draft = drafts[id], !draft.isEdited { drafts[id] = nil; draftChanged(id) }
             if let draft = drafts[id], draft.base.base != record.base, progress?.notetypeId != id {
                 // The draft keeps its base: Save meets `Stale` and offers Reload (D1).
                 changedElsewhere.insert(id)
+                stale.insert(id)
+                // The subtitle's counts were dropped with the change: they read again (type counts only).
+                readCounts(id)
                 return
             }
             records[id] = record
+            readCounts(id)
             await readReferences(id)
         }
     }
@@ -626,11 +709,14 @@ public final class NoteTypesModel {
         countsTask?.cancel()
         for task in summaryTasks.values { task.cancel() }
         for task in detailTasks.values { task.cancel() }
-        summaryTasks = [:]; detailTasks = [:]
+        for task in countTasks.values.flatMap({ $0 }) { task.cancel() }
+        summaryTasks = [:]; detailTasks = [:]; countTasks = [:]; fieldCountsBase = [:]; renameTokens = [:]
         if question != nil { closeQuestion() }
         phase = .idle; items = []; selection = nil; records = [:]; recordFailed = []; typeCounts = [:]; fieldCounts = [:]
-        drafts = [:]; revisions = [:]; summaries = [:]; references = [:]; changedElsewhere = []; selectedField = [:]
+        drafts = [:]; revisions = [:]; summaries = [:]; references = [:]; changedElsewhere = []; stale = []; selectedField = [:]
         renaming = nil; renameRefusal = nil; preparing = nil; progress = nil; failure = nil; confirming = false
+        // A section on screen reads the new collection's list at once.
+        if appeared { reloadList() }
     }
 
     /// Waits for a save that runs (the app goes to the background or closes
@@ -647,6 +733,7 @@ public final class NoteTypesModel {
         await saveTask?.value
         for task in summaryTasks.values { await task.value }
         for task in detailTasks.values { await task.value }
+        for task in countTasks.values.flatMap({ $0 }) { await task.value }
         await countsTask?.value
         for _ in 0..<50 { await Task.yield() }
     }

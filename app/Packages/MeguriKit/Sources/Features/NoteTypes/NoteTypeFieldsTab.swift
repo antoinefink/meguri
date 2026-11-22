@@ -59,6 +59,14 @@ struct NoteTypeFieldsTab: View {
     private var editable: Bool { model.editable(id) }
 
     var body: some View {
+        #if os(iOS)
+        NoteTypeFieldsTouchList(model: model, id: id, lines: lines)
+        #else
+        macBody
+        #endif
+    }
+
+    private var macBody: some View {
         VStack(spacing: .zero) {
             table
             Divider()
@@ -118,6 +126,7 @@ struct NoteTypeFieldsTab: View {
             if let row = rows.first, let line = lines.first(where: { $0.id == row }) {
                 if line.deleted {
                     Button { model.restoreField(id, row: row) } label: { Text("noteTypes.fields.restore", bundle: .module) }
+                        .disabled(model.draft(id)?.canRestore(row) != true)
                 } else {
                     Button { startRename(row) } label: { Text("noteTypes.fields.rename", bundle: .module) }
                     Button(role: .destructive) { model.deleteField(id, row: row) } label: { Text("noteTypes.fields.delete", bundle: .module) }
@@ -292,10 +301,19 @@ private struct FieldNameCell: View {
             .onChange(of: text) { _, _ in pending() }
             .onDisappear { model.pendingEdits["rename"] = nil }
         } else {
-            Text(verbatim: line.name)
-                .strikethrough(line.deleted)
-                .foregroundStyle(line.deleted ? .secondary : .primary)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                Text(verbatim: line.name)
+                    .strikethrough(line.deleted)
+                    .foregroundStyle(line.deleted ? .secondary : .primary)
+                    .lineLimit(1)
+                // A refused name stays under its row until it is corrected or cancelled.
+                if let refusal = model.renameRefusal, refusal.row == line.id {
+                    Text(NoteTypesStrings.refusal(refusal.refusal, locale: locale))
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("noteTypes.fields.renameRefusal.\(line.id)")
+                }
+            }
                 .accessibilityValue(line.deleted ? Text("noteTypes.fields.deleted", bundle: .module) : Text(verbatim: ""))
                 .accessibilityIdentifier("noteTypes.fields.row.\(line.id)")
         }

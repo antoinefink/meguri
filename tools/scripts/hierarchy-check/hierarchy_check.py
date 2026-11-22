@@ -27,7 +27,9 @@ split view puts in the toolbar or navigation bar (no identifier; labelled
 Show or Hide Sidebar, so only in English, the driver's usual locale),
 identifiers the system sets (a leading '_', BackButton, Toolbar,
 PopoverDismissRegion, the Mac back button's chevron.backward in a toolbar, a
-window's SwiftUI scene id, a navigation bar named after its title, an SF
+window's SwiftUI scene id, a navigation bar named after its title (drawn,
+or removed and leaving only the sidebar toggle), the segments of a named
+segmented Picker and a `searchable` field in a navigation bar, an SF
 Symbol's name on its image, and on the Mac a SwiftUI List's ListColumn, a SwiftUI Table's generated column
 ids (UUIDs) and its column header buttons (no identifier or label; one at
 each column's x and width, in a group directly in the table's outline, above
@@ -187,8 +189,12 @@ def is_system_identifier(e):
                 and any(a.type == "outlineRow" and any(p.type == "outline" for p in a.ancestors)
                         for a in e.parent.ancestors))
     if e.type == "navigationBar":
-        # UIKit names a navigation bar after its title.
-        return any(c.type == "staticText" and c.label == ident for c in e.children)
+        # UIKit names a navigation bar after its title, also when the app
+        # removed the title (`toolbar(removing: .title)`) and the bar holds
+        # only the split view's sidebar toggle.
+        return any(c.type == "staticText" and c.label == ident for c in e.children) or (
+            bool(e.children) and all(c.type == "button" and not c.identifier and c.label in SIDEBAR_TOGGLE_LABELS
+                                     for c in e.children))
     if e.type == "image":
         return bool(SYMBOL_NAME.match(ident))
     if e.type == "tableColumn":
@@ -197,6 +203,21 @@ def is_system_identifier(e):
     if e.type == "splitGroup":
         return bool(SPLIT_VIEW.match(ident))
     return False
+
+
+def native_control_parts(root):
+    """Parts SwiftUI creates that cannot take an identifier of their own:
+    the segments of a segmented Picker (buttons directly in a segmentedControl
+    the app named), and the field `searchable` puts in a navigation bar."""
+    parts = set()
+    for e in root.walk():
+        if e.type == "button" and not e.identifier and e.label and e.parent is not None \
+                and e.parent.type == "segmentedControl" and e.parent.identifier and not is_system_identifier(e.parent):
+            parts.add(e)
+        if e.type == "searchField" and not e.identifier and e.label and e.parent is not None \
+                and e.parent.type == "navigationBar":
+            parts.add(e)
+    return parts
 
 
 def native_table_headers(root):
@@ -506,7 +527,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     elements = [e for e in root.walk() if not e.under(SYSTEM_UI) and not e.under(TRANSIENT)]
     sheet_grabbers = native_sheet_grabbers(document, root)
     toggle_parts = (native_toggle_switch_parts(document, root) | native_stepper_arrows(document, root)
-                    | native_table_headers(root))
+                    | native_table_headers(root) | native_control_parts(root))
     disclosure_labels, disclosure_chevrons = native_disclosure_row_parts(document, root)
     title_pairs = native_toolbar_title_pairs(document, root)
     issues = []

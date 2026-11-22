@@ -227,12 +227,15 @@ import Testing
 
     @Test func aSaveWithoutASheetThatMeetsLossesChangedAsks() async {
         let backend = FakeNoteTypesBackend()
-        backend.saveErrors = [BridgeError.notetypeStructureRefused(.lossesChanged(summary: Self.losing))]
+        // Extra (ordinal 2) was empty when Save read it and gained content before the op ran.
+        let grown = NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldRemoved(ord: 2, name: "Extra", notesWithContent: 3)],
+                                         losesContent: true)
+        backend.saveErrors = [BridgeError.notetypeStructureRefused(.lossesChanged(summary: grown))]
         let (model, _) = await open(backend)
         model.deleteField(7, row: 2)
         model.save()
         await model.settle()
-        #expect(backend.saved.isEmpty && model.question?.summary == Self.losing)
+        #expect(backend.saved.isEmpty && model.question?.summary == grown)
     }
 
     /// D1: `Stale` shows the changed-elsewhere row; Reload discards the draft.
@@ -344,13 +347,91 @@ extension NoteTypesModelTests {
     @Test func saveWaitsForACommitStartedWhenFocusLeft() async {
         let (model, backend) = await open()
         model.setOption(7, row: 1) { $0.rtl = true }
-        model.trackCommit("name.0") { await model.commitRename(7, row: 0, typed: "back") }
+        model.trackCommit(7, "name.0") { await model.commitRename(7, row: 0, typed: "back") }
         // The corrected name replaces the refused one under the same key.
-        model.trackCommit("name.0") { await model.commitRename(7, row: 0, typed: "Prompt") }
+        model.trackCommit(7, "name.0") { await model.commitRename(7, row: 0, typed: "Prompt") }
         model.save()
         await model.settle()
         #expect(backend.saved.last?.fields.first?.name == "Prompt" && backend.saved.last?.fields[1].rtl == true)
         #expect(!model.committingForSave)
+    }
+
+    @Test func aRefusalThatEndedBeforeSaveStillHoldsSave() async {
+        let (model, backend) = await open()
+        model.setOption(7, row: 1) { $0.rtl = true }
+        model.trackCommit(7, "name.0") { await model.commitRename(7, row: 0, typed: "back") }
+        await model.settle()
+        #expect(model.renameRefusal != nil && !model.canSave(7))
+        model.save()
+        await model.settle()
+        #expect(backend.saved.isEmpty)
+        model.cancelRename()
+        #expect(model.canSave(7))
+    }
+
+    @Test func aRefusalForAnotherNoteTypeNeitherShowsNorHoldsSave() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[8] = NoteTypeDraftTests.record(fields: ["Word", "Back"])
+        let (model, _) = await open(backend)
+        model.selection = 8
+        await model.settle()
+        model.setOption(8, row: 0) { $0.rtl = true }
+        // A refused rename of type 7 that ends while type 8 shows.
+        let accepted = await model.commitRename(7, row: 0, typed: "back")
+        #expect(!accepted && model.renameRefusal == nil && model.canSave(8))
+    }
+
+    @Test func anotherNoteTypesRefusalStillRunningDoesNotStopSave() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[8] = NoteTypeDraftTests.record(fields: ["Word", "Back"])
+        let (model, _) = await open(backend)
+        // Type 7's name check is still running when type 8's Save starts, and is refused after.
+        var release: CheckedContinuation<Void, Never>?
+        model.trackCommit(7, "name.0") {
+            await withCheckedContinuation { release = $0 }
+            return await model.commitRename(7, row: 0, typed: "back")
+        }
+        await model.settle()
+        model.selection = 8
+        await model.settle()
+        model.setOption(8, row: 0) { $0.rtl = true }
+        model.save(8)
+        release?.resume()
+        await model.settle()
+        #expect(backend.saved.last?.fields.first?.name == "Word" && backend.saved.last?.fields.first?.rtl == true)
+        #expect(model.draft(7)?.row(0)?.name == "Front", "type 7's refused name changed nothing")
+    }
+
+    @Test func aDraftChangedElsewhereReadsItsTypeCountsButNotTheNewerLayoutsFieldCounts() async {
+        let backend = FakeNoteTypesBackend()
+        let (model, _) = await open(backend)
+        model.renameField()
+        backend.records[7] = NotetypeRecord(id: 7, name: "Sample", kind: 0, sortField: 0, css: ".card {}", base: [9, 9],
+                                            fields: NoteTypeDraftTests.record().fields, templates: NoteTypeDraftTests.record().templates)
+        backend.contentCounts = NotetypeFieldContentCounts(notes: 20, fields: [1, 2, 3])
+        model.changesCommitted(.notetypes([7]))
+        await model.settle()
+        #expect(model.changedElsewhere == [7])
+        #expect(model.typeCounts[7]?.cards == 31, "the subtitle's counts read again")
+        #expect(model.fieldCounts[7] == nil && model.notesWithContent(7, row: model.draft(7)!.rows[1]) == nil,
+                "the newer layout's counts are not put on the draft's rows")
+        model.reload(7)
+        await model.settle()
+        #expect(model.notesWithContent(7, row: model.draft(7)!.rows[1])?.count == 2)
+    }
+
+    @Test func keepEditingThenRevertReadsTheNewerVersion() async {
+        let backend = FakeNoteTypesBackend()
+        let (model, _) = await open(backend)
+        model.renameField()
+        backend.records[7] = NotetypeRecord(id: 7, name: "Sample", kind: 0, sortField: 0, css: ".card {}", base: [9, 9],
+                                            fields: NoteTypeDraftTests.record().fields, templates: NoteTypeDraftTests.record().templates)
+        model.changesCommitted(.notetypes([7]))
+        await model.settle()
+        model.keepEditing(7)
+        model.revert(7)
+        await model.settle()
+        #expect(model.draft(7)?.base.base == [9, 9])
     }
 
     @Test func aCrossedOutNameIsFreeForAnotherField() async {
