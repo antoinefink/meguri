@@ -696,7 +696,7 @@ async fn mcp_browser_attachments_reach_native_notes_and_media_and_reuse_after_re
     assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM notes",[],|r|r.get(0)).unwrap(),2);drop(db);drop(metadata);h.stop().await;
 }
 #[tokio::test]
-async fn mcp_uploads_deny_other_accounts_grants_revocation_reset_and_unsupported_direct_clients() {
+async fn mcp_uploads_deny_other_accounts_and_grants_and_unsupported_files() {
     let h=Harness::new().await;let c=local_client();let identity=h.setup().await;let cookie=h.login("root.admin",PASSWORD).await;
     attachment_collection(&h,identity["id"].as_str().unwrap());
     h.member(&cookie,"generated.other").await;let other=h.login("generated.other",PASSWORD).await;
@@ -711,8 +711,26 @@ async fn mcp_uploads_deny_other_accounts_grants_revocation_reset_and_unsupported
     for token in [second["access_token"].as_str().unwrap(),other_grant["access_token"].as_str().unwrap()] {
         attachment_failure(&h,&c,token,"create_note",args.clone(),"attachment_unavailable").await;
     }
+    let db=rusqlite::Connection::open(h.database()).unwrap();assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM media_names",[],|r|r.get(0)).unwrap(),0);drop(db);h.stop().await;
+}
+
+#[tokio::test]
+async fn mcp_uploads_deny_unsupported_direct_clients() {
+    let h=Harness::new().await;let c=local_client();let identity=h.setup().await;let cookie=h.login("root.admin",PASSWORD).await;
+    attachment_collection(&h,identity["id"].as_str().unwrap());
     let claude=grant(&h,&c,&cookie,true,true).await;
     attachment_failure(&h,&c,claude["access_token"].as_str().unwrap(),"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{},"files":[{"download_url":"https://files.oaiusercontent.com/never-fetched","file_id":"fixture"}],"file_fields":["Front"]}),"attachment_unavailable").await;
+    let db=rusqlite::Connection::open(h.database()).unwrap();assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM media_names",[],|r|r.get(0)).unwrap(),0);drop(db);h.stop().await;
+}
+
+#[tokio::test]
+async fn mcp_uploads_are_fenced_by_grant_revocation_and_account_reset() {
+    let h=Harness::new().await;let c=local_client();let identity=h.setup().await;let cookie=h.login("root.admin",PASSWORD).await;
+    attachment_collection(&h,identity["id"].as_str().unwrap());
+    let first=grant(&h,&c,&cookie,true,false).await;let access=first["access_token"].as_str().unwrap();
+    let upload=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;let id=upload["upload_id"].as_str().unwrap();
+    assert_eq!(stage_attachment(&h,&cookie,id,attachment_png()).await.status(),200);
+    let args=json!({"deck_id":"1","note_type_id":"10","fields":{},"uploads":[{"upload_id":id,"field":"Front"}]});
     let pending=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
     let grants=h.get("/api/me/mcp-grants",Some(&cookie)).await.json::<Value>().await.unwrap();
     // Revoke all of this generated account's grants through the real browser route.

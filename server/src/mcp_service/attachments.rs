@@ -169,7 +169,6 @@ impl McpService {
         let id = original.account_id().to_owned();
         let budget = self.service.temp.clone();
         let directory = pinned.media.try_clone()?;
-        let directory = pinned.media.try_clone()?;
         let (references, mut prepared, permit) = self.service.metadata.files(move |_| {
             let references = acquired.iter().map(|(field,v)|(field.clone(),v.reference())).collect::<Vec<_>>();
             let mut unique = BTreeMap::<String,Arc<Validated>>::new();

@@ -206,8 +206,8 @@
         "sha256": "e8f82051540e0cbf0fce3d430d5856e63e80a6b454247f81dabf89349b9b3c4f"
       },
       "tests/browser/mcp.spec.ts": {
-        "bytes": 37427,
-        "sha256": "9f421dde95afcdd9e58f4ae8ae98f97a8a7f9326e13be6d6eed0ecda69366ca4"
+        "bytes": 37452,
+        "sha256": "e9199df938f27417f8353b1abfbb362927b19197edd305fb0b9bea48b960c8bf"
       },
       "tests/browser/media-upload.spec.ts": {
         "bytes": 8902,
