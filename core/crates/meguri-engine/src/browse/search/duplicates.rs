@@ -16,7 +16,7 @@ use meguri_model::ids::{NoteId, NotetypeId};
 use meguri_search::SearchMode;
 use meguri_search::browser::duplicates::Groups;
 use meguri_search::browser::fields;
-use meguri_storage::{ReadRows, Table};
+use meguri_storage::ReadRows;
 
 use super::registry::bridge;
 use super::selection::merged;
@@ -30,8 +30,6 @@ use crate::progress::ProgressSink;
 const PACE: u64 = 1_000;
 /// Note ids bound in one statement.
 const CHUNK: usize = 10_000;
-/// Note types read a page at a time.
-const NOTETYPE_PAGE: usize = 250;
 
 /// The notes Find Duplicates looks at (V10's Notes row).
 #[derive(Clone, Copy, Debug)]
@@ -134,21 +132,15 @@ pub fn find_duplicates(
         if token.is_cancelled() { cancelled() } else { BrowseError::from(error) }
     };
     // Each note type with the field, and the field's position in it.
+    // Every note type id, `i64::MIN` included (an id lower bound would
+    // leave it out).
     let mut ords: Vec<(NotetypeId, u32)> = Vec::new();
-    let mut after = None;
-    loop {
-        let ids = snapshot.ids_after(Table::Notetypes, after, NOTETYPE_PAGE)?;
-        for &id in &ids {
-            if let Some(kind) = snapshot.notetype(NotetypeId(id))?
-                && let Some(ord) = fields::ord_of(&kind, field)
-            {
-                ords.push((kind.id, ord));
-            }
+    for (id, _) in snapshot.notetype_names()? {
+        if let Some(kind) = snapshot.notetype(NotetypeId(id))?
+            && let Some(ord) = fields::ord_of(&kind, field)
+        {
+            ords.push((kind.id, ord));
         }
-        if ids.len() < NOTETYPE_PAGE {
-            break;
-        }
-        after = ids.last().copied();
     }
     if token.is_cancelled() {
         return Err(cancelled());

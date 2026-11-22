@@ -401,3 +401,23 @@ fn a_cancel_after_the_read_started_stops_it_for_both_targets() {
     // The reader it held is free again.
     assert_eq!(fx.all("Glif").groups.len(), 3);
 }
+
+#[test]
+fn a_note_type_with_the_lowest_id_is_read() {
+    let fx = fixture();
+    let pair = [fx.add(fx.zorvan, &["zub", "a"]), fx.add(fx.zorvan, &["Zub", "b"])];
+    for sql in [
+        "UPDATE notetypes SET id = ?1 WHERE id = ?2",
+        "UPDATE fields SET ntid = ?1 WHERE ntid = ?2",
+        "UPDATE templates SET ntid = ?1 WHERE ntid = ?2",
+        "UPDATE notes SET mid = ?1 WHERE mid = ?2",
+    ] {
+        raw(
+            &fx.h.collection,
+            sql,
+            &[SqlValue::Integer(i64::MIN), SqlValue::Integer(fx.zorvan.0)],
+        );
+    }
+    let found = fx.all("Glif");
+    assert_eq!((found.groups, found.considered), (vec![pair.to_vec()], 2));
+}
