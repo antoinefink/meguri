@@ -24,4 +24,12 @@ Should fix, fixed: the model and view split and each overlap it named; owners fo
 
 Nits: U293 now used; new requirement ids from R2067; benches in `meguri-testkit/benches`; PR #111 still open; the skipped Calendar scenarios recorded by U99; U302 after every section unit.
 
+## Re-reviews: none blocking
+
+Spec re-review of 143367447: the three blocking findings fixed; four points left (S20's by-construction checks, S16's two footnote strings, H18's unreadable rows outside the window, the T15 row's Status coverage), fixed in eb376c05e.
+
+Plan re-review of 143367447: the six blocking findings fixed; six should-fix points and three nits left (unit order, the unhiding step, owners of Q4.1 and S8.7, a performance interval's owner), fixed in 769ebe914.
+
+CodeRabbit: twelve threads, answered and resolved (143367447, b9f2c9400): T7 for reading tokens, system formatting of tick labels, folding at read time, one end for Reviews Due's All, Today keeps its grid, a period change within the year keeps the running request, and the chart colours recorded as an exception to the rubric's count colours, with the families in the decision row.
+
 Decision: the spec lines stay `Under review (R1357)` until the coordinator approves them under Antoine's permission of 2026-11-20 to update specs.
