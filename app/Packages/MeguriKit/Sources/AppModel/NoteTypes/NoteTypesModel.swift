@@ -77,6 +77,12 @@ public final class NoteTypesModel {
     public var selection: Int64? {
         didSet { if selection != oldValue { selectionChanged() } }
     }
+    /// The note type the Mac's detail shows: the selection once its first
+    /// complete render can draw (its record read, or its read failed). Until
+    /// then the previous note type stays on screen, so a selection change
+    /// never shows an empty page (nothing flashes); the title follows the
+    /// selection at once.
+    public private(set) var shownSelection: Int64?
     public var tab: Tab = .fields {
         didSet { if tab == .cards, oldValue != .cards, let id = selection, records[id] != nil { refreshIssues(id, immediately: true) } }
     }
@@ -125,12 +131,17 @@ public final class NoteTypesModel {
     public var confirmingRevert = false
 
     private var drafts: [Int64: NoteTypeDraft] = [:]
+    /// After Save or Reload, the version shown before, read-only, until the
+    /// note type is read again: the detail never empties in between.
+    private var rereading: [Int64: NoteTypeDraft] = [:]
     private var revisions: [Int64: UInt64] = [:]
     private var summaries: [Int64: (revision: UInt64, summary: NotetypeDraftSummary)] = [:]
     private var references: [Int64: (texts: [String], references: [[String]], cards: [Int])] = [:]
     private var listToken: UInt64 = 0
     @ObservationIgnored private var summaryTasks: [Int64: Task<Void, Never>] = [:]
     @ObservationIgnored private var detailTasks: [Int64: Task<Void, Never>] = [:]
+    /// Records read ahead (`warm`) that are still in flight.
+    @ObservationIgnored private var warming: Set<Int64> = []
     @ObservationIgnored private var countTasks: [Int64: [Task<Void, Never>]] = [:]
     /// The base each note type's Notes counts were read for: counts read for
     /// another field layout are not shown on the draft's rows.
@@ -268,7 +279,7 @@ public final class NoteTypesModel {
 
     /// The draft the detail shows: the open draft, else the base as read.
     public func draft(_ id: Int64) -> NoteTypeDraft? {
-        drafts[id] ?? records[id].map(NoteTypeDraft.init)
+        drafts[id] ?? records[id].map(NoteTypeDraft.init) ?? rereading[id]
     }
 
     public var selectedDraft: NoteTypeDraft? { selection.flatMap(draft) }
@@ -277,8 +288,49 @@ public final class NoteTypesModel {
         renaming = nil
         renameRefusal = nil
         renamingCard = nil
-        guard let id = selection else { return }
+        guard let id = selection else { shownSelection = nil; return }
         loadDetail(id)
+        showSelectionWhenReady()
+        warmNeighbours(of: id)
+    }
+
+    /// The selection becomes the shown note type as soon as it can draw;
+    /// with nothing shown before, at once (the detail's own progress then).
+    private func showSelectionWhenReady() {
+        guard let id = selection else { shownSelection = nil; return }
+        if shownSelection == nil || draft(id) != nil || recordFailed.contains(id) { shownSelection = id }
+    }
+
+    /// Reads ahead, with pure reads, the records of the rows beside the
+    /// selection, so moving to them with the arrow keys draws at once.
+    private func warmNeighbours(of id: Int64) {
+        let rows = filteredItems
+        guard let at = rows.firstIndex(where: { $0.id == id }) else { return }
+        for neighbour in [at - 1, at + 1] where rows.indices.contains(neighbour) { warm(rows[neighbour].id) }
+    }
+
+    /// Reads a note type's record ahead (pure read): a row about to open
+    /// (iPad) or beside the selection. Nothing is selected or counted.
+    public func warm(_ id: Int64) {
+        // Not while its record is read already (a load in flight).
+        guard records[id] == nil, detailTasks[id] == nil, !recordFailed.contains(id) else { return }
+        let epoch = epoch
+        warming.insert(id)
+        detailTasks[id] = Task {
+            defer { warming.remove(id) }
+            do {
+                let record = try await backend.read(id)
+                guard !Task.isCancelled, self.epoch == epoch, records[id] == nil else { return }
+                records[id] = record
+                if drafts[id] == nil, selectedField[id] == nil { selectedField[id] = record.fields.first.map { Int($0.ord) } }
+                // Selected while it was read: it loads as a selection does.
+                if selection == id { finishLoading(id) }
+            } catch {
+                guard !Task.isCancelled, self.epoch == epoch, selection == id else { return }
+                recordFailed.insert(id)
+                showSelectionWhenReady()
+            }
+        }
     }
 
     private func loadDetail(_ id: Int64, force: Bool = false) {
@@ -288,6 +340,8 @@ public final class NoteTypesModel {
         }
         // Notes changed since W8 was read: it reads again when the note type shows.
         if !force, records[id] != nil, blankKeys[id] == nil { refreshIssues(id, immediately: true) }
+        // A read ahead in flight finishes the load itself (`warm`).
+        if !force, warming.contains(id) { return }
         guard force || records[id] == nil || recordFailed.contains(id) else { return }
         detailTasks[id]?.cancel()
         recordFailed.remove(id)
@@ -297,15 +351,25 @@ public final class NoteTypesModel {
                 let record = try await backend.read(id)
                 guard !Task.isCancelled, self.epoch == epoch else { return }
                 records[id] = record
+                rereading[id] = nil
                 if drafts[id] == nil, selectedField[id] == nil { selectedField[id] = record.fields.first.map { Int($0.ord) } }
-                readCounts(id)
-                refreshIssues(id, immediately: true)
-                await readReferences(id)
+                finishLoading(id)
             } catch {
                 guard !Task.isCancelled else { return }
+                rereading[id] = nil
                 if records[id] == nil { recordFailed.insert(id) }
+                if selection == id { showSelectionWhenReady() }
             }
         }
+    }
+
+    /// A record just read: its counts, issues and references, and the
+    /// detail swaps to it in one step if it is the selection.
+    private func finishLoading(_ id: Int64) {
+        if selection == id { showSelectionWhenReady() }
+        readCounts(id)
+        refreshIssues(id, immediately: true)
+        Task { await readReferences(id) }
     }
 
     /// The subtitle's counts and W3.1's Notes column, read in the background.
@@ -369,7 +433,7 @@ public final class NoteTypesModel {
 
     /// Editing stops while a save prepares or runs (D5 step 5).
     public func editable(_ id: Int64) -> Bool {
-        progress?.notetypeId != id && preparing != id && !(question?.notetypeId == id)
+        progress?.notetypeId != id && preparing != id && !(question?.notetypeId == id) && rereading[id] == nil
     }
 
     // MARK: Editing (W3, W4)
@@ -522,19 +586,34 @@ public final class NoteTypesModel {
         edit(id) { $0.setText(card, part, text) }
     }
 
-    /// A15's Flip of a card type's front and back, from the Back's context
-    /// menu; `flipRefused` when the back has no separator with text on both sides.
+    /// A15's Flip of a card type's front and back: the texts it gives, with
+    /// the front it replaces; nil, and `flipRefused`, when the back has no
+    /// separator with text on both sides. Nothing changes yet: the Back's
+    /// editor writes both as one step of its own undo.
+    public func flipped(_ id: Int64, card: Int) -> NoteTypeFlip? {
+        guard editable(id), let texts = draft(id)?.texts(card) else { return nil }
+        guard let flipped = NoteTypeTemplateEditing.flip(front: texts.front, back: texts.back) else { flipRefused = true; return nil }
+        return NoteTypeFlip(front: flipped.front, back: flipped.back, previousFront: texts.front)
+    }
+
+    /// Flip without an editor: both texts in one draft change, so a Save
+    /// never takes one without the other.
     public func flip(_ id: Int64, card: Int) {
-        guard editable(id), let texts = draft(id)?.texts(card) else { return }
-        guard let flipped = NoteTypeTemplateEditing.flip(front: texts.front, back: texts.back) else { flipRefused = true; return }
-        // Both texts change in one draft change, so a Save never takes one
-        // without the other; the text views drop the histories of texts
-        // that changed under them.
+        guard let flipped = flipped(id, card: card) else { return }
         edit(id) { draft in
             let front = draft.setText(card, .front, flipped.front)
             let back = draft.setText(card, .back, flipped.back)
             return front || back
         }
+    }
+
+    /// Writes a part that is not shown (Flip's front, and its undo) when it
+    /// still reads `expected`; false, changing nothing, once it was edited since.
+    @discardableResult
+    public func replaceText(_ id: Int64, card: Int, part: NoteTypeTemplatePart, expected: String, with text: String) -> Bool {
+        guard editable(id), draft(id)?.text(card, part) == expected else { return false }
+        edit(id) { $0.setText(card, part, text) }
+        return true
     }
 
     /// Asks the template editor to apply `command` on a card type's part.
@@ -579,6 +658,14 @@ public final class NoteTypesModel {
     public func liveIssues(_ id: Int64) -> [NoteTypeLiveIssue] {
         guard let draft = draft(id) else { return [] }
         return NoteTypeLiveIssue.lines(red: issueReads[id], yellow: blankReads[id], draft: draft)
+    }
+
+    /// Whether the issue reads have answered for the note type (W7's, and
+    /// W8's unless it is a cloze kind): before that the list says nothing
+    /// rather than "No issues" it cannot know yet.
+    public func issuesKnown(_ id: Int64) -> Bool {
+        guard let draft = draft(id), issueReads[id] != nil else { return false }
+        return draft.isCloze || blankReads[id] != nil
     }
 
     public func redIssueCount(_ id: Int64) -> Int { liveIssues(id).filter { $0.severity == .red }.count }
@@ -705,6 +792,7 @@ public final class NoteTypesModel {
     /// D1's Reload: the draft goes and the note type is read again.
     public func reload(_ id: Int64) {
         guard editable(id) else { return }
+        rereading[id] = draft(id)
         drafts[id] = nil
         // No edit lands on the old base while the newer one is read.
         records[id] = nil
@@ -967,6 +1055,7 @@ public final class NoteTypesModel {
 
     /// D5 step 6: the draft is gone and the detail shows the saved note type.
     private func saved(_ id: Int64) {
+        rereading[id] = draft(id)
         drafts[id] = nil
         // The saved card types have other rows: W8 reads again for them.
         blankKeys[id] = nil
@@ -1088,13 +1177,13 @@ public final class NoteTypesModel {
         for task in blankTasks.values { task.cancel() }
         for task in referencesTask.values { task.cancel() }
         referencesTask = [:]
-        summaryTasks = [:]; detailTasks = [:]; countTasks = [:]; fieldCountsBase = [:]; renameTokens = [:]
+        summaryTasks = [:]; detailTasks = [:]; warming = []; countTasks = [:]; fieldCountsBase = [:]; renameTokens = [:]
         issueTasks = [:]; blankTasks = [:]; blankKeys = [:]; cardCountsBase = [:]
         selectedCard = [:]; renamingCard = nil; templateCardCounts = [:]; issueReads = [:]; blankReads = [:]; editorRequest = nil
         flipRefused = false
         if question != nil { closeQuestion() }
         phase = .idle; items = []; selection = nil; records = [:]; recordFailed = []; typeCounts = [:]; fieldCounts = [:]
-        drafts = [:]; revisions = [:]; summaries = [:]; references = [:]; changedElsewhere = []; stale = []; selectedField = [:]
+        drafts = [:]; rereading = [:]; revisions = [:]; summaries = [:]; references = [:]; changedElsewhere = []; stale = []; selectedField = [:]
         renaming = nil; renameRefusal = nil; preparing = nil; progress = nil; failure = nil; notice = nil; confirming = false
         meguriUnreachable = false
         // A section on screen reads the new collection's list at once.
@@ -1164,5 +1253,19 @@ public final class NoteTypesModel {
     /// locked (test hooks' routes).
     @_spi(MeguriTestHooks) public func stageProgress(_ id: Int64, stage: NoteTypeSyncStage?, completed: UInt64 = 0, total: UInt64? = nil) {
         progress = Progress(notetypeId: id, completed: completed, total: total, stage: stage)
+    }
+}
+
+/// A15's Flip of one card type: the front and back it writes, and the front
+/// it replaces (what Undo puts back).
+public nonisolated struct NoteTypeFlip: Sendable, Hashable {
+    public let front: String
+    public let back: String
+    public let previousFront: String
+
+    public init(front: String, back: String, previousFront: String) {
+        self.front = front
+        self.back = back
+        self.previousFront = previousFront
     }
 }

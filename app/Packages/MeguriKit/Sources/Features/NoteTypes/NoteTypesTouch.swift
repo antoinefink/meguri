@@ -19,6 +19,8 @@ struct NoteTypesTouchRoot: View {
                 NavigationLink(value: Destination.noteType(item.id)) {
                     NoteTypeListRow(item: item, edited: model.isEdited(item.id))
                 }
+                // Its record is read ahead (a pure read), so its page opens drawn.
+                .onAppear { model.warm(item.id) }
             }
         }
         .overlay {
@@ -88,6 +90,8 @@ public struct NoteTypePage: View {
                     }
                 }
                 // The centre keeps the note type's name and counts; Fields | Cards sit with Save.
+                // The segmented control draws its own capsule: no toolbar glass around it,
+                // or it reads as one capsule inside another.
                 ToolbarItem(placement: .topBarTrailing) {
                     Picker(selection: $model.tab) {
                         Text("noteTypes.tab.fields", bundle: .module).tag(NoteTypesModel.Tab.fields)
@@ -100,6 +104,7 @@ public struct NoteTypePage: View {
                     .fixedSize()
                     .accessibilityIdentifier("noteTypes.list.tabs")
                 }
+                .sharedBackgroundVisibility(.hidden)
                 if let progress = model.progress, progress.notetypeId == id, jobRuns, sizeClass == .compact {
                     // N22.5 at compact width, where the tab bar takes the bottom bar's
                     // middle: the spinner takes Save's place and the stage text the
@@ -173,6 +178,8 @@ struct NoteTypeFieldsTouchList: View {
     var body: some View {
         // The column header stays above the rows, which never scroll under it.
         VStack(spacing: .zero) {
+            // The navigation bar's edge, as on the Cards tab.
+            Divider()
             header
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

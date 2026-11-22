@@ -74,6 +74,21 @@ enum SwatchHex {
     }
 }
 
+/// Where a colour swatch sits on its line (W6): centred on the capitals and
+/// inside the line's ascender and descender, so at any text size it stays on
+/// its own line and touches neither the line above nor the line below.
+nonisolated enum SwatchMetrics {
+    /// The swatch's side and the height of its centre above the baseline.
+    static func place(capHeight: CGFloat, ascender: CGFloat, descender: CGFloat) -> (side: CGFloat, centre: CGFloat) {
+        let centre = capHeight / 2
+        // The room from the centre up to the ascender and down to the descender (negative).
+        let room = min(ascender - centre, centre - descender)
+        // A point clear of each, and no larger than the capitals call for.
+        let side = min(capHeight * 1.4, 2 * (room - 1)).rounded(.down)
+        return (max(side, 1), centre)
+    }
+}
+
 #if os(macOS)
 import AppKit
 
@@ -106,7 +121,10 @@ struct TemplateCodeEditor: NSViewRepresentable {
     let accessibilityLabel: String
     let onChange: (String) -> Void
     let onConsume: (UInt64) -> Void
-    let onFlip: (() -> Void)?
+    /// A15's Flip for the shown card type; nil for a cloze kind.
+    let onFlip: (() -> NoteTypeFlip?)?
+    /// Writes the shown card type's front while it still reads `expected`.
+    let onReplaceFront: (_ expected: String, _ text: String) -> Bool
     let syntax: (String, Bool) async -> [NotetypeSyntaxSpan]
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -172,8 +190,8 @@ struct TemplateCodeEditor: NSViewRepresentable {
         /// The person's fixed-pitch font at its own size (Settings › Fonts).
         static let font = NSFont.userFixedPitchFont(ofSize: 0) ?? NSFont.preferredFont(forTextStyle: .body)
         static let plain: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.labelColor]
-        /// The room a colour swatch takes before its value, and its side.
-        static let well: CGFloat = 16
+        /// A colour swatch's side and where it sits on its line.
+        static let swatch = SwatchMetrics.place(capHeight: font.capHeight, ascender: font.ascender, descender: font.descender)
 
         weak var textView: CodeTextView?
         var parent: TemplateCodeEditor?
@@ -311,7 +329,7 @@ struct TemplateCodeEditor: NSViewRepresentable {
                     storage.addAttribute(.foregroundColor, value: colour.colour, range: range)
                 } else if case .colour(let value) = span.kind, span.start > 0 {
                     // Room for the well before the value: the character before it is wider.
-                    storage.addAttribute(.kern, value: Self.well + Spacing.xSmall, range: NSRange(location: span.start - 1, length: 1))
+                    storage.addAttribute(.kern, value: Self.swatch.side + Spacing.xSmall, range: NSRange(location: span.start - 1, length: 1))
                     colours.append((range, value))
                 }
             }
@@ -336,9 +354,12 @@ struct TemplateCodeEditor: NSViewRepresentable {
                 let (range, value) = colours[index]
                 let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: range.location, length: 1), actualCharacterRange: nil)
                 let rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
-                let origin = textView.textContainerOrigin
-                well.frame = NSRect(x: origin.x + rect.minX - Self.well - Spacing.xSmall / 2,
-                                    y: origin.y + rect.midY - Self.well / 2, width: Self.well, height: Self.well)
+                // On the value's baseline, centred on its capitals (flipped: y grows down).
+                let baseline = manager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil).minY
+                    + manager.location(forGlyphAt: glyphs.location).y
+                let origin = textView.textContainerOrigin, side = Self.swatch.side
+                well.frame = NSRect(x: origin.x + rect.minX - side - Spacing.xSmall / 2,
+                                    y: origin.y + baseline - Self.swatch.centre - side / 2, width: side, height: side)
                 well.color = .swatch(value)
                 well.tag = index
                 well.isEnabled = textView.isEditable
@@ -364,6 +385,31 @@ struct TemplateCodeEditor: NSViewRepresentable {
         /// The text wrapped anew: the swatches follow their values.
         func relayoutSwatches() {
             if !colours.isEmpty { recolour() }
+        }
+
+        /// A15's Flip from the Back's context menu, as one step of the Back's
+        /// own undo: Undo puts back both texts, Redo flips them again.
+        func flip() {
+            guard let textView, textView.isEditable, key?.part == .back, let flip = parent?.onFlip?(),
+                  let manager = undoManager(for: textView) else { return }
+            textView.breakUndoCoalescing()
+            manager.beginUndoGrouping()
+            replaceFront(flip.previousFront, with: flip.front, manager: manager)
+            let length = (textView.string as NSString).length
+            perform(NoteTypeTextEdit(range: 0..<length, text: flip.back,
+                                     caret: min(textView.selectedRange().location, (flip.back as NSString).length)))
+            manager.endUndoGrouping()
+            manager.setActionName(NoteTypesStrings.text("noteTypes.editor.flip"))
+            textView.breakUndoCoalescing()
+        }
+
+        /// Flip's front, which is not shown, and its undo. A front edited
+        /// since is kept: the undo then puts back only the Back.
+        private func replaceFront(_ expected: String, with text: String, manager: UndoManager) {
+            guard parent?.onReplaceFront(expected, text) == true else { return }
+            manager.registerUndo(withTarget: self) { coordinator in
+                MainActor.assumeIsolated { coordinator.replaceFront(text, with: expected, manager: manager) }
+            }
         }
     }
 }
@@ -443,7 +489,7 @@ final class CodeTextView: NSTextView {
         return menu
     }
 
-    @objc private func flipCard() { coordinator?.parent?.onFlip?() }
+    @objc private func flipCard() { coordinator?.flip() }
 
     /// ⌃Space: the Insert menu at the insertion point.
     private func showInsertMenu() {
@@ -519,7 +565,10 @@ struct TemplateCodeEditor: UIViewRepresentable {
     let accessibilityLabel: String
     let onChange: (String) -> Void
     let onConsume: (UInt64) -> Void
-    let onFlip: (() -> Void)?
+    /// A15's Flip for the shown card type; nil for a cloze kind.
+    let onFlip: (() -> NoteTypeFlip?)?
+    /// Writes the shown card type's front while it still reads `expected`.
+    let onReplaceFront: (_ expected: String, _ text: String) -> Bool
     let syntax: (String, Bool) async -> [NotetypeSyntaxSpan]
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -570,7 +619,10 @@ struct TemplateCodeEditor: UIViewRepresentable {
             return body.fontDescriptor.withDesign(.monospaced).map { UIFont(descriptor: $0, size: 0) } ?? body
         }
         static var plain: [NSAttributedString.Key: Any] { [.font: font, .foregroundColor: UIColor.label] }
-        static let well: CGFloat = 22
+        /// A colour swatch's side and where it sits on its line, at the text's size.
+        static var swatch: (side: CGFloat, centre: CGFloat) {
+            SwatchMetrics.place(capHeight: font.capHeight, ascender: font.ascender, descender: font.descender)
+        }
 
         weak var textView: CodeTextView?
         var parent: TemplateCodeEditor?
@@ -613,8 +665,8 @@ struct TemplateCodeEditor: UIViewRepresentable {
         }
 
         func textView(_ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]) -> UIMenu? {
-            guard key?.part == .back, let flip = parent?.onFlip, textView.isEditable else { return nil }
-            let action = UIAction(title: NoteTypesStrings.text("noteTypes.editor.flip")) { _ in flip() }
+            guard key?.part == .back, parent?.onFlip != nil, textView.isEditable else { return nil }
+            let action = UIAction(title: NoteTypesStrings.text("noteTypes.editor.flip")) { [weak self] _ in self?.flip() }
             return UIMenu(children: suggestedActions + [action])
         }
 
@@ -681,7 +733,7 @@ struct TemplateCodeEditor: UIViewRepresentable {
                 if let colour = TemplateSyntaxColour(span.kind) {
                     storage.addAttribute(.foregroundColor, value: colour.colour, range: range)
                 } else if case .colour(let value) = span.kind, span.start > 0 {
-                    storage.addAttribute(.kern, value: Self.well + Spacing.xSmall, range: NSRange(location: span.start - 1, length: 1))
+                    storage.addAttribute(.kern, value: Self.swatch.side + Spacing.xSmall, range: NSRange(location: span.start - 1, length: 1))
                     colours.append((range, value))
                 }
             }
@@ -710,9 +762,12 @@ struct TemplateCodeEditor: UIViewRepresentable {
                 let (range, value) = colours[index]
                 let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: range.location, length: 1), actualCharacterRange: nil)
                 let rect = manager.boundingRect(forGlyphRange: glyphs, in: textView.textContainer)
-                let inset = textView.textContainerInset
-                well.frame = CGRect(x: inset.left + rect.minX - Self.well - Spacing.xSmall / 2, y: inset.top + rect.midY - Self.well / 2,
-                                    width: Self.well, height: Self.well)
+                // On the value's baseline, centred on its capitals.
+                let baseline = manager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil).minY
+                    + manager.location(forGlyphAt: glyphs.location).y
+                let inset = textView.textContainerInset, place = Self.swatch
+                well.frame = CGRect(x: inset.left + rect.minX - place.side - Spacing.xSmall / 2,
+                                    y: inset.top + baseline - place.centre - place.side / 2, width: place.side, height: place.side)
                 well.selectedColor = .swatch(value)
                 well.tag = index
                 well.isEnabled = textView.isEditable
@@ -729,6 +784,29 @@ struct TemplateCodeEditor: UIViewRepresentable {
                 well.accessibilityLabel = SwatchHex.string(red: Double(value.red) / 255, green: Double(value.green) / 255,
                                                            blue: Double(value.blue) / 255, alpha: Double(value.alpha) / 255)
                 well.accessibilityIdentifier = "noteTypes.cards.swatch.\(index)"
+            }
+        }
+
+        /// A15's Flip from the Back's edit menu, as one step of the Back's own
+        /// undo: Undo puts back both texts, Redo flips them again.
+        func flip() {
+            guard let textView, textView.isEditable, key?.part == .back, let flip = parent?.onFlip?(),
+                  let manager = textView.undoManager else { return }
+            manager.beginUndoGrouping()
+            replaceFront(flip.previousFront, with: flip.front, manager: manager)
+            let length = ((textView.text ?? "") as NSString).length
+            perform(NoteTypeTextEdit(range: 0..<length, text: flip.back,
+                                     caret: min(textView.selectedRange.location, (flip.back as NSString).length)))
+            manager.endUndoGrouping()
+            manager.setActionName(NoteTypesStrings.text("noteTypes.editor.flip"))
+        }
+
+        /// Flip's front, which is not shown, and its undo. A front edited
+        /// since is kept: the undo then puts back only the Back.
+        private func replaceFront(_ expected: String, with text: String, manager: UndoManager) {
+            guard parent?.onReplaceFront(expected, text) == true else { return }
+            manager.registerUndo(withTarget: self) { coordinator in
+                MainActor.assumeIsolated { coordinator.replaceFront(text, with: expected, manager: manager) }
             }
         }
 

@@ -1046,6 +1046,16 @@ A native `Table` (Name, Sort, Used On, Notes with a share indicator) with drag r
 
 Three columns: the card types list (with counts and an issue dot) over the Fields list; the code editor with Front | Back | Styling and the Insert menu in its bar and the issues list under it; the live preview with its note menu, Question | Answer, Light | Dark (sun and moon), and the Cloze Number menu for cloze types. No device or size picker.
 
+Changed 2026-11-22 (Antoine's annotations on the captures of PR #114; decided by Claude (coordinator) under his delegation; `decisions.md`, rows `noteTypes` of 2026-11-22):
+
+- Column hierarchy, as Mail, Notes and Xcode draw theirs: only the app's navigation sidebar uses sidebar material. On the Mac the note types list is a content list on the window's own background with the system selection, under its filter field; the card types column belongs to the editor's side of the window, on the same background as the editor's bar and issues, not a third sidebar. No custom greys or materials.
+- The card types column is one list with two sections: the card types, with + and − under them (borderless, the list's own controls on its background), then Fields under a section header. No separate strips or bands between them.
+- Each column of the Cards tab starts with a bar of one height: "Card Types" over the list, Front | Back | Styling and Insert over the editor; their hairlines make one line across the tab. On iPad a hairline also marks the navigation bar's edge across the full width (the Fields tab has the same), and both columns and their divider run to the bottom edge, under the home indicator; the lists are plain, edge to edge in their column, with standard separators and touch-sized rows (no inset rounded groups).
+- Front | Back | Styling uses the system's segmented control with the same selection look as the toolbar's Fields | Cards. On iPad the Fields | Cards control has no toolbar glass of its own around it (one capsule, not a capsule inside another); Save keeps its own glass and the job status keeps N22.5's places.
+- The styling's colour swatches sit on their value's line, centred on its capitals and inside its ascender and descender, so at any text size they touch neither neighbouring line.
+- An issue's fix button follows its message when both fit on one line; otherwise it goes on its own line below the message, so the message keeps the full width.
+- Flip (A15) is one step of the Back's own undo ("Undo Flip") that puts back both texts; a front edited after the flip is kept, and only the Back is put back.
+
 ### N22.4 Styling (6B)
 
 The Styling part shows "Shared by All Card Types" in its bar, and above the CSS one Card Text row: Font, Size, Alignment (a three-segment control), Text Colour and Background (colour controls). The row is absent when the CSS has no single plain `.card` rule (`notetypes/workspace` W10).

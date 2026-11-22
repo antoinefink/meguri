@@ -68,8 +68,14 @@ public struct NoteTypesView: View {
     private static let listMaximum: CGFloat = 320
 
     @ViewBuilder private var detail: some View {
-        if let id = model.selection {
+        // The note type shown stays until the newly selected one can draw,
+        // then the detail swaps in one step: never an empty page. A wait of
+        // more than half a second shows a progress indicator over it.
+        if let id = model.shownSelection {
             NoteTypeDetailContent(model: model, id: id)
+                .overlay {
+                    if model.selection != id { DelayedProgress() }
+                }
         } else if model.phase == .ready {
             ContentUnavailableView {
                 Label { Text("noteTypes.detail.none", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
@@ -369,11 +375,15 @@ private struct NoteTypeListColumn: View {
                     .tag(item.id)
             }
         }
+        // A content list beside the app's sidebar (N22.1): the window's own
+        // background, as the filter field above it, with the system selection.
+        // Only the app's navigation sidebar uses sidebar material.
         #if os(macOS)
-        .listStyle(.sidebar)
+        .listStyle(.inset)
         #else
         .listStyle(.plain)
         #endif
+        .scrollContentBackground(.hidden)
         .accessibilityIdentifier("noteTypes.list.table")
         .overlay {
             switch model.phase {
