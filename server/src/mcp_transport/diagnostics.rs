@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Fixed metadata only; never format requests, errors, headers or response bodies.
 use super::{inputs::ValidationError, ToolFailure};
+use crate::error::McpDiagnosticDetail;
 use axum::{http::StatusCode, response::Response};
 use crate::config::LogLevel;
 use std::io::Write;
@@ -65,9 +66,13 @@ pub(super) enum Outcome {
     Protocol(ValidationError), ToolError(ToolFailure), Challenge, StepUp, Internal,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct Diagnostic { pub stage: Stage, pub operation: Operation, pub outcome: Outcome }
+pub(super) struct Diagnostic { pub stage: Stage, pub operation: Operation, pub outcome: Outcome, pub detail: Option<McpDiagnosticDetail> }
 impl Diagnostic {
-    pub fn new(stage: Stage, outcome: Outcome) -> Self { Self { stage, operation:Operation::Unknown, outcome } }
+    pub fn new(stage: Stage, outcome: Outcome) -> Self { Self { stage, operation:Operation::Unknown, outcome, detail:None } }
+    pub fn with_detail(mut self, detail: Option<McpDiagnosticDetail>) -> Self {
+        self.detail = detail;
+        self
+    }
     pub fn attach(self, mut response: Response) -> Response {
         response.extensions_mut().insert(self);
         response
@@ -88,6 +93,7 @@ impl Diagnostic {
         };
         let mut record = format!("mcp_response_ready stage={stage} operation={} status={} outcome={outcome} reason={reason}",
             self.operation.label(), status.as_u16());
+        if let Some(detail) = self.detail { record.push_str(&format!(" detail={}", detail.label())); }
         if level == LogLevel::Debug { record.push_str(&format!(" elapsed_ms={elapsed_ms}")); }
         Some(record)
     }
