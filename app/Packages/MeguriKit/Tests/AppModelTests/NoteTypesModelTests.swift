@@ -98,7 +98,7 @@ import Testing
         model.reloadList()
         exists.value = false
         await model.settle()
-        #expect(model.phase == .noCollection)
+        #expect(model.phase == .noCollection && model.items.isEmpty && model.selection == nil)
     }
 
     /// A real read failure with a collection keeps the failure state and its Try Again.
