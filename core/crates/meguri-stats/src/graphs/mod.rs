@@ -315,8 +315,6 @@ impl StatsCaches {
         scope: Scope,
         token: &ContextToken,
     ) -> Result<GraphResult, StatsError> {
-        // The memo goes when the second request returns, whatever it gives.
-        let memo = self.memo.lock().unwrap_or_else(PoisonError::into_inner).take();
         if request.cancel.is_cancelled() {
             return Ok(GraphResult::Cancelled);
         }
@@ -338,7 +336,13 @@ impl StatsCaches {
             next_day_at: context.next_day_at,
             refresh: request.refresh,
         };
-        let (data, browse) = match memo.filter(|memo| memo.key == key) {
+        // Only this refresh's second request takes the memo, and it goes
+        // when that request returns, whatever it gives (G8.3).
+        let memo = {
+            let mut held = self.memo.lock().unwrap_or_else(PoisonError::into_inner);
+            if held.as_ref().is_some_and(|memo| memo.key == key) { held.take() } else { None }
+        };
+        let (data, browse) = match memo {
             Some(memo) => (memo.data, memo.browse),
             None => match self.resolve(derived, &snapshot, &context, &scope, request)? {
                 Resolved::Scope(data, browse) => (data, browse),

@@ -317,7 +317,9 @@ pub(crate) fn read_row(cells: &[Cell]) -> RowRead {
     let Some(cid_value) = cid else {
         return bad(BadColumn::RevlogCid);
     };
-    if integer(cells.get(2)).and_then(|usn| i32::try_from(usn).ok()).is_none() {
+    // `model/row-records` R1 (changed 2026-11-17): any INTEGER `usn` reads,
+    // its low 32 bits kept; only another storage class is unreadable.
+    if integer(cells.get(2)).is_none() {
         return bad(BadColumn::RevlogUsn);
     }
     let Some(ease) = integer(cells.get(3)).and_then(|ease| u8::try_from(ease).ok()) else {

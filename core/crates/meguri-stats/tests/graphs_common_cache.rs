@@ -465,3 +465,116 @@ fn g9_6_with_unreadable_rows_written_raw_before_the_build() {
     ]);
     mix_run(f, 99, vec![old]);
 }
+
+#[test]
+fn g9_4_a_rekeyed_card_keeps_its_rows_unreadable_one_included() {
+    let f = Fixture::new();
+    f.host.derived().request_refresh(COMPONENT);
+    wait_ready(&f);
+    let (good, bad) = (NOW_MS - 5_000, NOW_MS - 4_000);
+    f.write_raw(move |scope| {
+        scope.put(&card(100, VERBS))?;
+        scope.insert_revlog(&revlog(good, 100))?;
+        let cells = revlog_cells(bad, 100, Cell::Integer(300), Cell::Integer(1), Cell::Integer(0), Cell::Integer(1), Cell::Integer(1));
+        scope.restore(Table::Revlog, &RowKey::Id(bad), Some(&cells))?;
+        Ok(())
+    });
+    compare(&f, true, "before the re-key");
+    f.write_raw(move |scope| {
+        let mut c = scope_card(scope, 100);
+        scope.remove_card(CardId(100))?;
+        c.id = CardId(200);
+        c.deck_id = DeckId(CRAM);
+        scope.put(&c)?;
+        for id in [good, bad] {
+            let mut image = scope_row(scope, id);
+            image[1] = Cell::Integer(200);
+            scope.restore(Table::Revlog, &RowKey::Id(id), Some(&image))?;
+        }
+        Ok(())
+    });
+    compare(&f, true, "after the re-key");
+    // The rows went with the card, the unreadable one included.
+    assert!(matches!(
+        outcome(f.request(Scope::Deck(DeckId(VERBS)), History::AllHistory)),
+        Outcome::Data { .. }
+    ));
+    assert_eq!(
+        outcome(f.request(Scope::Deck(DeckId(CRAM)), History::AllHistory)),
+        Outcome::Unreadable(Unreadable {
+            table: "revlog",
+            column: "ease",
+            key: bad
+        })
+    );
+    f.write(move |scope| {
+        scope.remove_revlog(RevlogId(bad))?;
+        Ok(())
+    });
+    compare(&f, true, "the unreadable row removed");
+    match outcome(f.request(Scope::Deck(DeckId(CRAM)), History::AllHistory)) {
+        Outcome::Data { rows, .. } => assert_eq!(rows.iter().map(|r| (r.0, r.1)).collect::<Vec<_>>(), vec![(good, Some(200))]),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn d5_1_the_bind_deletes_the_files_no_row_names() {
+    let mut f = Fixture::new();
+    f.host.derived().request_refresh(COMPONENT);
+    wait_ready(&f);
+    let root = f.path().with_file_name("meguri-derived.files");
+    std::fs::write(root.join(COMPONENT).join("orphan.col"), b"left by a crash").unwrap();
+    std::fs::create_dir_all(root.join("gone_component")).unwrap();
+    std::fs::write(root.join("gone_component").join("x.col"), b"x").unwrap();
+    f.reopen();
+    assert!(f.host.derived().wait_idle(WAIT));
+    assert!(!root.join(COMPONENT).join("orphan.col").exists());
+    assert!(!root.join("gone_component").exists());
+    assert_eq!(std::fs::read_dir(root.join(COMPONENT)).unwrap().count(), 2);
+    // A store deleted while closed: the new file's bind empties the root.
+    let mut g = Fixture::new();
+    g.host.derived().request_refresh(COMPONENT);
+    wait_ready(&g);
+    let root = g.path().with_file_name("meguri-derived.files");
+    let path = g.path();
+    g.host.close().unwrap();
+    std::fs::remove_file(path.with_file_name("meguri-derived.db")).unwrap();
+    g.reopen_closed();
+    assert!(g.host.derived().wait_idle(WAIT));
+    assert_eq!(std::fs::read_dir(root.join(COMPONENT)).map_or(0, |d| d.count()), 0);
+}
+
+#[test]
+fn g9_3_a_file_that_no_longer_matches_its_row_is_rebuilt_at_the_next_persist() {
+    let f = Fixture::new();
+    f.write(|scope| {
+        scope.put(&card(100, LANG))?;
+        scope.insert_revlog(&revlog(NOW_MS - 1_000, 100))?;
+        Ok(())
+    });
+    let mut f = f;
+    f.host.derived().request_refresh(COMPONENT);
+    wait_ready(&f);
+    let dir = f.path().with_file_name("meguri-derived.files").join(COMPONENT);
+    let path = f.path();
+    f.host.close().unwrap();
+    // A file damaged while the collection is closed: one byte changed.
+    let file = std::fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+    let mut bytes = std::fs::read(&file).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    std::fs::write(&file, bytes).unwrap();
+    let _ = path;
+    f.reopen_closed();
+    assert!(f.host.derived().wait_idle(WAIT));
+    // Fresh at bind, but its files do not match: requests compute from the
+    // snapshot, with the same values.
+    let served = outcome(f.request(Scope::Collection, History::AllHistory));
+    assert!(matches!(served, Outcome::Data { cached: false, .. }));
+    compare(&f, false, "a damaged file");
+    meguri_stats::graphs::stats_home_idle(f.host.derived());
+    meguri_stats::graphs::release_stats_caches(f.host.stats(), f.host.derived());
+    wait_ready(&f);
+    compare(&f, true, "rebuilt");
+}

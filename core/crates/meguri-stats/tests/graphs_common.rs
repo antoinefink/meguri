@@ -40,6 +40,7 @@ pub const CRAM_CARD: i64 = 1_788_249_600_233;
 
 pub struct Fixture {
     _dir: TempDir,
+    path_closed: std::path::PathBuf,
     pub clock: Arc<StepClock>,
     pub host: CoreHost,
 }
@@ -83,7 +84,12 @@ impl Fixture {
         }
         let clock = Arc::new(StepClock::new(NOW_MS, UtcOffset::UTC, "UTC"));
         let host = meguri_testkit::bench::fixtures::open_engine_collection(&path, clock.clone()).unwrap();
-        let fixture = Fixture { _dir: dir, clock, host };
+        let fixture = Fixture {
+            _dir: dir,
+            path_closed: path,
+            clock,
+            host,
+        };
         let ids = fixture_revlog(&fixture.collection());
         fixture.write(move |scope| {
             for id in ids {
@@ -98,6 +104,12 @@ impl Fixture {
         self.host.collection().unwrap()
     }
 
+    /// Opens the collection again after its host was closed.
+    pub fn reopen_closed(&mut self) {
+        let path = self.path_closed.clone();
+        self.host = meguri_testkit::bench::fixtures::open_engine_collection(&path, self.clock.clone()).unwrap();
+    }
+
     /// Closes the host (the derived store persists and marks itself clean)
     /// and opens the collection again.
     pub fn reopen(&mut self) {
@@ -107,7 +119,7 @@ impl Fixture {
     }
 
     pub fn path(&self) -> std::path::PathBuf {
-        self.collection().path().to_path_buf()
+        self.path_closed.clone()
     }
 
     /// Runs `work` in one op.
@@ -750,9 +762,27 @@ fn q2_the_browse_scope_text_of_each_scope() {
 
 /// Q6's test-only join, built from `stats_browse_scope`'s text: Q3.
 fn join(scope: &BrowseScope, item: &str) -> Option<String> {
-    // Q3: an item with an OR at its top level is grouped (this table's
-    // items hold no group).
-    let top_level_or = item.contains(" OR ") && !item.starts_with('(');
+    // Q3: an item with an OR at its top level (outside every group and
+    // every quoted text) is grouped.
+    let top_level_or = {
+        let (mut depth, mut quoted, mut escaped, mut found) = (0i32, false, false, false);
+        let chars: Vec<char> = item.chars().collect();
+        for (at, c) in chars.iter().enumerate() {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => quoted = !quoted,
+                '(' if !quoted => depth += 1,
+                ')' if !quoted => depth -= 1,
+                ' ' if !quoted && depth == 0 => {
+                    let next: String = chars[at + 1..].iter().take(3).collect();
+                    found |= next.eq_ignore_ascii_case("or ");
+                }
+                _ => {}
+            }
+        }
+        found
+    };
     match scope {
         BrowseScope::None => Some(item.to_owned()),
         BrowseScope::Unavailable => None,
@@ -764,15 +794,113 @@ fn join(scope: &BrowseScope, item: &str) -> Option<String> {
     }
 }
 
+fn put_deck(f: &Fixture, id: i64, native: &str) {
+    let mut deck = meguri_engine::decks::new_deck(native.to_owned());
+    deck.id = DeckId(id);
+    f.write(move |scope| {
+        scope.put(&deck)?;
+        Ok(())
+    });
+}
+
 #[test]
 fn q3_the_join_table_byte_for_byte() {
-    assert_eq!(join(&BrowseScope::None, "\"is:new\"").unwrap(), "\"is:new\"");
-    assert_eq!(join(&BrowseScope::None, "\"is:new\" OR \"is:due\"").unwrap(), "\"is:new\" OR \"is:due\"");
-    assert_eq!(
-        join(&BrowseScope::Text("deck:\"Lang\"".into()), "\"is:new\" OR \"is:due\"").unwrap(),
-        "(deck:\"Lang\") AND (\"is:new\" OR \"is:due\")"
-    );
-    assert_eq!(join(&BrowseScope::Unavailable, "\"is:new\""), None);
+    let f = Fixture::new();
+    put_deck(&f, 1_700_000_000_101, "Japanese");
+    put_deck(&f, 1_700_000_000_102, "a_b*");
+    put_deck(&f, 1_700_000_000_103, "x \"y\"");
+    put_deck(&f, 1_700_000_000_104, "a\\b\u{1f}c");
+    put_deck(&f, 1_700_000_000_105, "Lang\u{1f}日本語");
+    put_deck(&f, 1_700_000_000_106, "current");
+    put_deck(&f, 1_700_000_000_107, "current\u{1f}a");
+    put_deck(&f, 1_700_000_000_001, "a\u{a0}b");
+    put_deck(&f, 1_700_000_000_002, "a\u{a0}b\u{1f}c");
+    let young = "(\"is:review\" AND -\"is:learn\") AND \"prop:ivl<21\" AND -(\"is:buried\" OR \"is:suspended\")";
+    let table: Vec<(Scope, &str, Option<String>)> = vec![
+        (Scope::Collection, "\"is:new\"", Some("\"is:new\"".into())),
+        (Scope::Collection, "\"is:new\" OR \"is:due\"", Some("\"is:new\" OR \"is:due\"".into())),
+        (
+            Scope::Deck(DeckId(LANG)),
+            "\"is:new\" OR \"is:due\"",
+            Some("(deck:\"Lang\") AND (\"is:new\" OR \"is:due\")".into()),
+        ),
+        (Scope::Deck(DeckId(1_700_000_000_101)), young, Some(format!("(deck:\"Japanese\") AND {young}"))),
+        (Scope::Deck(DeckId(1_700_000_000_102)), "\"is:new\"", Some("(deck:\"a\\_b\\*\") AND \"is:new\"".into())),
+        (
+            Scope::Deck(DeckId(1_700_000_000_103)),
+            "\"is:buried\"",
+            Some("(deck:\"x \\\"y\\\"\") AND \"is:buried\"".into()),
+        ),
+        (
+            Scope::Deck(DeckId(1_700_000_000_104)),
+            "\"is:new\"",
+            Some("(deck:\"a\\\\b::c\") AND \"is:new\"".into()),
+        ),
+        (
+            Scope::Deck(DeckId(1_700_000_000_105)),
+            "\"prop:rated=-3\"",
+            Some("(deck:\"Lang::日本語\") AND \"prop:rated=-3\"".into()),
+        ),
+        (
+            Scope::Deck(DeckId(1_700_000_000_106)),
+            "\"is:suspended\"",
+            Some("(deck:\"Current\") AND \"is:suspended\"".into()),
+        ),
+        (
+            Scope::Deck(DeckId(1_700_000_000_001)),
+            "\"is:suspended\"",
+            Some("(did:1700000000001,1700000000002) AND \"is:suspended\"".into()),
+        ),
+        (
+            Scope::Search("tag:a or tag:b".into()),
+            "\"is:buried\"",
+            Some("(tag:a or tag:b) AND \"is:buried\"".into()),
+        ),
+        (Scope::Search("  is:due  ".into()), "\"is:new\"", Some("(is:due) AND \"is:new\"".into())),
+        (Scope::Search("   ".into()), "\"is:new\"", Some("\"is:new\"".into())),
+    ];
+    for (scope, item, expected) in table {
+        let browse = f.data(scope.clone(), History::AllHistory).browse_scope;
+        assert_eq!(join(&browse, item), expected, "{scope:?} {item}");
+    }
+    // The last row: the ids form with a negative id is unavailable.
+    let g = Fixture::new();
+    put_deck(&g, -5, "a\u{a0}b");
+    let browse = g.data(Scope::Deck(DeckId(-5)), History::AllHistory).browse_scope;
+    assert_eq!(browse, BrowseScope::Unavailable);
+    assert_eq!(join(&browse, "\"is:new\""), None);
+}
+
+#[test]
+fn r1_a_review_usn_beyond_32_bits_reads_and_one_of_another_class_does_not() {
+    let f = Fixture::new();
+    let id = NOW_MS - 2_000;
+    f.write_raw(move |scope| {
+        scope.put(&card(100, LANG))?;
+        let mut cells = revlog_cells(id, 100, Cell::Integer(3), Cell::Integer(1), Cell::Integer(0), Cell::Integer(1), Cell::Integer(1));
+        cells[2] = Cell::Integer(4_294_967_297);
+        scope.restore(Table::Revlog, &RowKey::Id(id), Some(&cells))?;
+        let mut text = revlog_cells(id + 1, 100, Cell::Integer(3), Cell::Integer(1), Cell::Integer(0), Cell::Integer(1), Cell::Integer(1));
+        text[2] = Cell::text("x");
+        scope.restore(Table::Revlog, &RowKey::Id(id + 1), Some(&text))?;
+        Ok(())
+    });
+    match f.request(Scope::Collection, History::AllHistory) {
+        GraphResult::UnreadableRow(bad) => assert_eq!(
+            bad,
+            Unreadable {
+                table: "revlog",
+                column: "usn",
+                key: id + 1
+            }
+        ),
+        other => panic!("{other:?}"),
+    }
+    f.write(move |scope| {
+        scope.remove_revlog(RevlogId(id + 1))?;
+        Ok(())
+    });
+    assert_eq!(f.rows(Scope::Collection, History::AllHistory), vec![id]);
 }
 
 #[test]

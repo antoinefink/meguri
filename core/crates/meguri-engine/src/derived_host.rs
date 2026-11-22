@@ -460,6 +460,18 @@ impl DerivedHostBuilder {
 
     /// Checks the components (D4) and starts the derived writer.
     pub fn start(self) -> Result<DerivedHost, EngineError> {
+        for component in &self.components {
+            if let Some(signal) = component.deferred_until() {
+                let mut chars = signal.chars();
+                let valid = chars.next().is_some_and(|c| c.is_ascii_lowercase())
+                    && chars.all(|c| c.is_ascii_alphanumeric());
+                if !valid {
+                    return Err(EngineError::internal(format!(
+                        "a deferred-until signal must be [a-z][A-Za-z0-9]*, not {signal:?}"
+                    )));
+                }
+            }
+        }
         let registry = Registry::new(self.schemas)?;
         let slots = registry
             .schemas()
@@ -1288,14 +1300,16 @@ impl Worker {
     /// D5; `hold` at an open: each component with `deferred until` holds its
     /// refreshes again (D4).
     fn bind(&mut self, collection: Collection, mark: CollectionMark, seq: Seq, hold: bool) {
-        let Some(verdicts) = self.open_file(&collection, mark, seq) else {
-            return;
-        };
+        // Before the file opens: a bind that cannot open it still holds,
+        // and a later replacement that opens it rebuilds held (D4).
         if hold {
             for slot in 0..self.slots.len() {
                 self.holds[slot] = self.shared.components[slot].deferred_until().is_some();
             }
         }
+        let Some(verdicts) = self.open_file(&collection, mark, seq) else {
+            return;
+        };
         let generation = collection.generation();
         self.queue.clear();
         let mut state = self.shared.lock();

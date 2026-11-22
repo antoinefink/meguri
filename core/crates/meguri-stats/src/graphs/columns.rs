@@ -457,6 +457,27 @@ fn bits32(value: f32) -> i32 {
 }
 
 impl CardsBuilder {
+    /// Room for `cards` cards, so a build of 150,000 never doubles a list.
+    pub(crate) fn with_capacity(cards: usize) -> CardsBuilder {
+        CardsBuilder {
+            ids: Vec::with_capacity(cards),
+            nids: Vec::with_capacity(cards),
+            dids: Vec::with_capacity(cards),
+            odids: Vec::with_capacity(cards),
+            types: Vec::with_capacity(cards),
+            queues: Vec::with_capacity(cards),
+            dues: Vec::with_capacity(cards),
+            odues: Vec::with_capacity(cards),
+            ivls: Vec::with_capacity(cards),
+            present: Vec::with_capacity(cards),
+            stabilities: Vec::with_capacity(cards),
+            difficulties: Vec::with_capacity(cards),
+            decays: Vec::with_capacity(cards),
+            lrts: Vec::with_capacity(cards),
+            bad: Vec::new(),
+        }
+    }
+
     pub(crate) fn push(&mut self, card: CardRead) {
         let card = match card {
             CardRead::Card(card) => card,
@@ -543,6 +564,21 @@ pub(crate) struct RevlogBuilder {
 }
 
 impl RevlogBuilder {
+    /// Room for `rows` rows, so a build of 1,200,000 never doubles a list.
+    pub(crate) fn with_capacity(rows: usize) -> RevlogBuilder {
+        RevlogBuilder {
+            ids: Vec::with_capacity(rows),
+            slots: Vec::with_capacity(rows),
+            eases: Vec::with_capacity(rows),
+            ivls: Vec::with_capacity(rows),
+            last_ivls: Vec::with_capacity(rows),
+            factors: Vec::with_capacity(rows),
+            times: Vec::with_capacity(rows),
+            kinds: Vec::with_capacity(rows),
+            bad: Vec::new(),
+        }
+    }
+
     /// Adds a row; `slot` gives its card's slot, none for a deleted card.
     pub(crate) fn push(&mut self, row: RowRead, slot: impl Fn(i64) -> Option<usize>) {
         match row {

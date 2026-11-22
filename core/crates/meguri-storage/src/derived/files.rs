@@ -146,8 +146,12 @@ pub struct MappedFile {
     len: usize,
 }
 
-// SAFETY: the mapping is read-only and private to this value; nothing
-// writes through it, so shared references from any thread are sound.
+// SAFETY: the mapping is read-only and private to this value, and a
+// component file is never written again once `write_new` created it
+// (`create_new`, then only read and deleted): its bytes cannot change under
+// a reader. Deleting it while mapped is fine; truncating it from outside
+// the store would not be (SIGBUS), which D1 rules out while the collection
+// is open.
 unsafe impl Send for MappedFile {}
 // SAFETY: as above.
 unsafe impl Sync for MappedFile {}

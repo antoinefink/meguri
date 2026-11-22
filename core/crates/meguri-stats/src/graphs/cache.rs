@@ -199,6 +199,7 @@ impl Shared {
                 return None;
             }
         };
+        self.forget_unused(&[&card_file.name, &revlog_file.name]);
         let generation = snapshot.generation().0;
         let base = self.base_seq(generation, &card_file, &revlog_file);
         let patch = self.patch(generation, base, snapshot.seq().0)?;
@@ -207,6 +208,19 @@ impl Shared {
             revlog,
             patch: Arc::new(patch),
         })
+    }
+
+    /// Unmaps the files a swap or a merge superseded that no running
+    /// request holds (D7); the derived writer deletes them at its next
+    /// persist or bind.
+    fn forget_unused(&self, live: &[&str]) {
+        let mut state = self.lock();
+        state
+            .cards
+            .retain(|name, table| live.contains(&name.as_str()) || Arc::strong_count(table) > 1);
+        state
+            .revlog
+            .retain(|name, table| live.contains(&name.as_str()) || Arc::strong_count(table) > 1);
     }
 
     /// A new file name: kind, generation, seq and a counter.
@@ -450,7 +464,7 @@ impl DerivedComponent for StatsColumns {
             }
             true
         };
-        let mut cards = CardsBuilder::default();
+        let mut cards = CardsBuilder::with_capacity(usize::try_from(source.row_count(Table::Cards)?).unwrap_or(0));
         source.visit_stats_cards(&|| false, &mut |cells| {
             cards.push(rows::read_card(cells, &rows::VISITED_CARD));
             step(sink, &mut done, &mut stopped)
@@ -459,7 +473,7 @@ impl DerivedComponent for StatsColumns {
             return Err(error);
         }
         let slots = cards.slots();
-        let mut revlog = RevlogBuilder::default();
+        let mut revlog = RevlogBuilder::with_capacity(usize::try_from(source.row_count(Table::Revlog)?).unwrap_or(0));
         // One ascending pass over every row the graphs can read (id ≥ 0):
         // the files become live only at the swap, so the window's rows are
         // never read before the rest anyway (G9.2).
@@ -497,6 +511,11 @@ impl DerivedComponent for StatsColumns {
             Ok(())
         })?;
         if let Some((card_file, revlog_file)) = base_records(records) {
+            // A file that no longer matches its row is a rebuild (G9.3): the
+            // error marks the component `ready` 0 and queues one (D4). Until
+            // then requests compute from their snapshot.
+            self.shared.card_table(&dir, &card_file)?;
+            self.shared.revlog_table(&dir, &revlog_file)?;
             let base = self.shared.base_seq(generation, &card_file, &revlog_file);
             let through = {
                 let state = self.shared.lock();
