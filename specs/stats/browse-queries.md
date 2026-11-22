@@ -119,7 +119,7 @@ With X = ` AND -("is:buried" OR "is:suspended")` when `cardCountsSeparateInactiv
 
 ## Q5. Opening the Browser
 
-Changed 2026-11-22 (round 11): the Statistics page opens Browse as Q9 says; its action is "Show in Browse" (`stats/statistics-page` S8.4), and the rest of this section applies.
+Changed 2026-11-22 (round 11): the Statistics page opens Browse as Q9 says, not with the joined text: it hands Browse the tokens Q9 makes (the deck's part and the item's part), and the field shows those tokens, not Q3's text; its action is "Show in Browse" (`stats/statistics-page` S8.4). The other bullets apply (same window, cards or notes mode, coming back restores the page, recent searches record the tokens' canonical form).
 
 - The joined text goes to the `open(search:)` route on AppNavigation (R1417, U210; the plan's U225 calls the same route U150's `openBrowser(search:)`, `browser/entry-points` E1). The Browser opens in the same window (sidebar Browse on Mac and iPad, the Browse tab on iPhone), shows exactly that text in its search field, and runs it in its current cards or notes mode, as Anki's Browser does with a search handed to it.
 - On touch, the item's tooltip shows "Show in Browser" first; on Mac a click opens at once (R1418, U226).
