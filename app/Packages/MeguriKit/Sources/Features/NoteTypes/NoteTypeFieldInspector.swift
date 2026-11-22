@@ -83,10 +83,16 @@ struct NoteTypeFieldInspector: View {
 
     private func load() {
         guard let row else { return }
-        // The selection moved while a field held text: it goes to its own row before the new row shows.
+        // The selection moved while a field held text: it goes to its own row,
+        // then both fields show the new row, so nothing typed for one row
+        // reaches another.
         if let focus, let editing = editingRow, editing != row.id {
             commit(focus, row: editing)
             editingRow = row.id
+            name = row.name
+            placeholder = row.field.description
+            refreshPending()
+            return
         }
         if focus != .name || editingRow != row.id { name = row.name }
         if focus != .placeholder || editingRow != row.id { placeholder = row.field.description }
@@ -112,7 +118,7 @@ struct NoteTypeFieldInspector: View {
         switch field {
         case .name:
             // Save waits for this check, whichever field has the focus by then.
-            model.trackCommit { await commitName(typedName, row: row) }
+            model.trackCommit("inspector.name.\(row)") { await commitName(typedName, row: row) }
             if focus == nil { model.pendingEdits[Self.pendingKey] = nil }
         case .placeholder:
             commitPlaceholder(typedPlaceholder, row: row)
@@ -134,7 +140,7 @@ struct NoteTypeFieldInspector: View {
     private func submitName(row: Int) {
         let typed = name
         Task {
-            guard await commitName(typed, row: row), editingRow == row || self.row?.id == row, name == typed,
+            guard await commitName(typed, row: row), self.row?.id == row, editingRow == row, name == typed,
                   let saved = model.draft(id)?.row(row)?.name else { return }
             name = saved
         }
