@@ -31,8 +31,37 @@ final class AnswerBarUITests: XCTestCase {
         capture(app, "medium-light-answer-bottom")
     }
 
+    /// A tap just right of Easy on a new card: Easy's own (the button's hit
+    /// region reaches past its shape) sends the card out of the session; a
+    /// tap that reached the card's right-half zone would answer Good and
+    /// keep it, as a learning card, in the session.
+    func testATapBesideEasyIsEasysNotTheCards() throws {
+        let app = try open("Bar New", dark: false)
+        try reveal(app)
+        let progress = element(app, "review.session.progress")
+        let total = Int((progress.value as? String)?.split(separator: " ").last ?? "")
+        let easy = element(app, "review.session.rate.easy").frame, window = app.windows.firstMatch
+        settle(0.4)
+        window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: min(window.frame.maxX - 2, easy.maxX + 8) - window.frame.minX, dy: easy.midY - window.frame.minY)).tap()
+        settle(1.5)
+        let after = (progress.value as? String) ?? ""
+        capture(app, "new-light-after-tap-beside-easy")
+        if after.hasPrefix("1 ") {
+            XCTAssertEqual(Int(after.split(separator: " ").last ?? ""), total, "Answered Easy (the button), not Good (a zone): \(after)")
+        }
+    }
+
+    func testShortCardIsNotCoveredDark() throws {
+        let app = try open("Bar Short", dark: true)
+        try reveal(app)
+        try checkSpacing(app)
+        capture(app, "short-dark-answer")
+    }
+
     func testShortCardIsNotCoveredLight() throws {
         let app = try open("Bar Short", dark: false)
+        capture(app, "short-light-question")
         try reveal(app)
         let last = lastLine(app)
         XCTAssertTrue(last.waitForExistence(timeout: 10))
@@ -76,18 +105,18 @@ final class AnswerBarUITests: XCTestCase {
 
     // MARK: Checks
 
-    /// One standard spacing (8 pt) from the answer buttons to the progress bar.
+    /// The progress bar lies on the screen's very bottom edge, under the
+    /// home indicator; the buttons sit just clear of the indicator's strip.
     private func checkSpacing(_ app: XCUIApplication) throws {
         let good = element(app, "review.session.rate.good"), progress = element(app, "review.session.progress")
         XCTAssertTrue(good.waitForExistence(timeout: 10) && progress.exists)
-        // The bar's accessibility frame can be taller than its track; its
-        // bottom is the track's: 8 pt of spacing plus the track (4 pt).
-        let gap = progress.frame.maxY - good.frame.maxY
-        XCTAssertTrue((8...14).contains(gap), "Answers to the progress bar's bottom: \(gap) pt (\(good.frame), \(progress.frame))")
-        // Above the home indicator, never under it.
         let window = app.windows.firstMatch.frame
-        // Every pool device has a home indicator, whose safe area is at least 20 pt.
-        XCTAssertLessThanOrEqual(progress.frame.maxY, window.maxY - 20, "The progress bar keeps the bottom safe area")
+        XCTAssertEqual(progress.frame.maxY, window.maxY, accuracy: 1, "The bar's bottom is the screen's: \(progress.frame)")
+        XCTAssertLessThanOrEqual(progress.frame.height, 12, "The bar's element is the bar, not the answer area: \(progress.frame)")
+        // Every pool device has a home indicator: its strip (20 pt on iPad,
+        // 34 pt on iPhone) is the only space between the buttons and the bar.
+        let strip = window.maxY - good.frame.maxY
+        XCTAssertTrue((20...40).contains(strip), "Buttons to the screen's bottom: \(strip) pt")
     }
 
     private func scrollToLastLine(_ app: XCUIApplication, _ card: XCUIElement) throws {

@@ -198,6 +198,8 @@ extension ReviewCardHost: UIViewControllerRepresentable {
                 guard let interaction = edge.interactions.first as? UIScrollEdgeElementContainerInteraction else { continue }
                 if interaction.scrollView !== scrollView { interaction.scrollView = scrollView }
                 interaction.edge = .bottom
+                // Soft only: the hard style draws a line at the answers' top edge.
+                scrollView.bottomEdgeEffect.style = .soft
                 view.bringSubviewToFront(edge)
             }
             view.setNeedsLayout()

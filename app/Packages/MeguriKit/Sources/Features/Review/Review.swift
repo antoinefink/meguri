@@ -271,6 +271,7 @@ struct ReviewLayout<Card: View>: View {
     var actions = ReviewMoreActions()
     @State private var noticeContentHeight: CGFloat?
     @State private var answerAreaTop: CGFloat?
+    @State private var bottomInset: CGFloat = 0
     @ViewBuilder let card: () -> Card
     var body: some View {
         #if os(macOS)
@@ -286,6 +287,7 @@ struct ReviewLayout<Card: View>: View {
         // The card runs on under the answers (N16.9); the window has no bottom
         // inset, so the progress bar is the window's last row (N16.1).
         .safeAreaBar(edge: .bottom, spacing: 0) { answerArea }
+        .scrollEdgeEffectStyle(.soft, for: .bottom)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button(action: close) {
@@ -316,10 +318,22 @@ struct ReviewLayout<Card: View>: View {
         NavigationStack {
             cardRegion
             // The card runs on under the answers, which float over it in the
-            // system's bottom bar; the progress bar follows them, above the
-            // home indicator, in every fold position (N16.1, N16.9).
+            // system's bottom bar, just above the home indicator (N16.9).
             .safeAreaBar(edge: .bottom, spacing: 0) { answerArea }
+            // Soft only: no line where the card passes under the answers (N16.9).
+            .scrollEdgeEffectStyle(.soft, for: .bottom)
             .background(.token(.cardPage))
+            // On the screen's very bottom edge, under the home indicator, in
+            // every fold position; not a control, so it may cross a fold (N16.1).
+            .overlay {
+                if showsProgress {
+                    Color.clear
+                        .overlay(alignment: .bottom) { ReviewProgressBar(progress: progress) }
+                        .ignoresSafeArea(.container, edges: .bottom)
+                        .allowsHitTesting(false)
+                }
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { bottomInset = $0 }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     // N20.5: the xmark's name is "Back to Decks", as the sidebar layouts' button.
@@ -392,9 +406,20 @@ struct ReviewLayout<Card: View>: View {
     /// The answers, then one standard spacing, then the progress bar (N16.1,
     /// N16.9). Its top edge tells the card how much of it lies underneath.
     private var answerArea: some View {
-        VStack(spacing: Spacing.xSmall) {
+        Group {
+            #if os(macOS)
+            // The window has no bottom inset: 8 pt, then the bar as the last row.
+            VStack(spacing: Spacing.xSmall) {
+                ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
+                if showsProgress { ReviewProgressBar(progress: progress).allowsHitTesting(false) }
+            }
+            #else
+            // The buttons' bottom is the safe area's: just clear of the home
+            // indicator, whose strip holds the progress bar at the very edge.
+            // With no bottom inset, 8 pt and the bar's thickness stay free.
             ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
-            if showsProgress { ReviewProgressBar(progress: progress).allowsHitTesting(false) }
+                .padding(.bottom, bottomInset > 0 ? 0 : Spacing.xSmall + ReviewProgressBar.thickness)
+            #endif
         }
         // A bar: a touch between or beside its buttons stays in it, so it
         // reaches neither the card's page nor its tap zones (N16.9).
@@ -436,7 +461,17 @@ private struct ReviewEditNotePresentation: ViewModifier {
 struct ReviewProgressBar: View {
     let progress: ReviewSessionProgress
     var body: some View {
-        bar
+        #if os(macOS)
+        element(bar)
+        #else
+        // The system indicator's own element reported the whole answer area
+        // as its frame; the track itself carries the element instead.
+        bar.accessibilityHidden(true)
+            .overlay { element(Color.clear) }
+        #endif
+    }
+    private func element(_ view: some View) -> some View {
+        view
             // Read as text: it takes no input, and as a progress control the
             // audit asks a full hit region of this thin bar.
             .accessibilityElement(children: .ignore)
@@ -445,6 +480,8 @@ struct ReviewProgressBar: View {
             .accessibilityValue(Text("\(progress.answered) of \(progress.total)", bundle: .module))
             .accessibilityIdentifier("review.session.progress")
     }
+    /// About the system indicator's track.
+    static let thickness: CGFloat = 4
     #if os(macOS)
     /// Drawn on the Mac (exception, N16.1): the system's linear indicator
     /// draws its rounded track inset in its frame, so it could not lie on
@@ -463,8 +500,6 @@ struct ReviewProgressBar: View {
             .frame(maxWidth: .infinity)
             .frame(height: Self.thickness)
     }
-    /// About the system indicator's track.
-    private static let thickness: CGFloat = 4
     #else
     /// The system's linear indicator lies on the screen's bottom edge as it is.
     private var bar: some View {
