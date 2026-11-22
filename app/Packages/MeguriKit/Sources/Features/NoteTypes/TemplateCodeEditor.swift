@@ -215,7 +215,8 @@ struct TemplateCodeEditor: NSViewRepresentable {
             recolour()
             // W6: typing `{{`, `{{#`, `{{^` or a filter prefix lists the names.
             let caret = textView.selectedRange().location
-            if key?.part != .styling, !textView.hasMarkedText(),
+            // A completion's preview changes the text too: it starts no other completion.
+            if key?.part != .styling, !textView.hasMarkedText(), !textView.completing,
                NoteTypeTemplateEditing.completionContext(textView.string, caret: caret) != nil {
                 DispatchQueue.main.async { [weak textView] in textView?.complete(nil) }
             }
@@ -350,6 +351,8 @@ struct TemplateCodeEditor: NSViewRepresentable {
 /// ⌃Space's Insert menu and Flip in the Back's context menu.
 final class CodeTextView: NSTextView {
     weak var coordinator: TemplateCodeEditor.Coordinator?
+    /// The completion list shows and previews its highlighted name.
+    private(set) var completing = false
 
     override var rangeForUserCompletion: NSRange {
         let caret = selectedRange().location
@@ -363,6 +366,9 @@ final class CodeTextView: NSTextView {
     }
 
     override func insertCompletion(_ word: String, forPartialWordRange charRange: NSRange, movement: Int, isFinal flag: Bool) {
+        // While it previews and while it finishes, the text's changes start no other completion.
+        completing = true
+        defer { completing = !flag }
         guard flag, movement != NSTextMovement.cancel.rawValue, let context = coordinator?.completion else {
             super.insertCompletion(word, forPartialWordRange: charRange, movement: movement, isFinal: flag)
             return
