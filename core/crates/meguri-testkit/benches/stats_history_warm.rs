@@ -6,6 +6,9 @@
 //!   all history and the last 12 months.
 //! - `stats_history_warm.deck_all`, `.deck_year`: the deck with the most
 //!   cards.
+//! - `stats_history_warm.knowledge_collection_all` and the three others:
+//!   Knowledge Over Time (U290) for the same scopes, today's point
+//!   replayed from every card's record.
 //!
 //! Sizes come from `$MEGURI_BENCH_SIZES` (default `10k,150k`), made first by
 //! `tools/mg bench`.
@@ -57,6 +60,28 @@ fn main() -> ExitCode {
             let mut measurement = Measurement::start(name, Some(&size));
             criterion.bench_function(&format!("{name}/{size}"), |b| {
                 b.iter_custom(|n| measurement.run(n, |_| black_box(support::read(&host, &scope, history))))
+            });
+            if measurement.samples().count() > 0 {
+                suite.push(measurement.finish());
+            }
+        }
+        let deck = Scope::Deck(DeckId(support::largest_deck(&host)));
+        let cases = [
+            ("stats_history_warm.knowledge_collection_all", Scope::Collection, History::AllHistory),
+            ("stats_history_warm.knowledge_collection_year", Scope::Collection, History::Last12Months),
+            ("stats_history_warm.knowledge_deck_all", deck.clone(), History::AllHistory),
+            ("stats_history_warm.knowledge_deck_year", deck, History::Last12Months),
+        ];
+        for (name, scope, history) in cases {
+            let first = support::read_knowledge(&host, &scope, history);
+            eprintln!(
+                "{name}/{size}: {} samples, today {:?}",
+                first.knowledge.samples.len(),
+                first.knowledge.samples.last()
+            );
+            let mut measurement = Measurement::start(name, Some(&size));
+            criterion.bench_function(&format!("{name}/{size}"), |b| {
+                b.iter_custom(|n| measurement.run(n, |_| black_box(support::read_knowledge(&host, &scope, history))))
             });
             if measurement.samples().count() > 0 {
                 suite.push(measurement.finish());

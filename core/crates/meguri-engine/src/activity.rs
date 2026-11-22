@@ -79,13 +79,18 @@ fn subtree(rows: &impl ReadRows, deck: DeckId) -> Result<Vec<DeckId>, EngineErro
 /// day 0 at rollover hour `hour`, taken to the nearest date so that an offset
 /// change since `next_day_at` was computed cannot move it by a day.
 pub fn today_date(next_day_at: i64, hour: u8, offset: i64) -> CivilDate {
+    civil(today_day_number(next_day_at, hour, offset))
+}
+
+/// [`today_date`] as a count of days since 1970-01-01.
+pub fn today_day_number(next_day_at: i64, hour: u8, offset: i64) -> i64 {
     let start = next_day_at - DAY - i64::from(hour.min(23)) * 3_600;
-    civil((start + offset + DAY / 2).div_euclid(DAY))
+    (start + offset + DAY / 2).div_euclid(DAY)
 }
 
 /// The date `days` days after 1970-01-01 (a Thursday). The usual
 /// era-based conversion of the proleptic Gregorian calendar.
-fn civil(days: i64) -> CivilDate {
+pub fn civil(days: i64) -> CivilDate {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);

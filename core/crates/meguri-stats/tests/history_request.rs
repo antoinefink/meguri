@@ -32,13 +32,12 @@ const DAY: i64 = 86_400;
 const DAY_MS: i64 = DAY * 1_000;
 const WAIT: Duration = Duration::from_secs(120);
 
-/// The parts whose units have not landed (U288, U290, U291).
-const PENDING: [Part; 5] = [
+/// The parts whose units have not landed (U288, U291).
+const PENDING: [Part; 4] = [
     Part::StudiedToday,
     Part::RetentionByDay,
     Part::ByDeck,
     Part::ActivityDays,
-    Part::KnowledgeOverTime,
 ];
 
 fn every_part() -> Vec<Part> {
@@ -257,6 +256,22 @@ fn h15_parts_equal_the_engine_and_the_history_read_for_their_context() {
                 }
                 other => panic!("{other:?}"),
             }
+            // H3's part is the knowledge read's for the header's context.
+            let cold = history::knowledge_cold(
+                &collection,
+                &header.context,
+                &history::KnowledgeRequest {
+                    scope: scope.clone(),
+                    history,
+                    oldest_day: None,
+                    cancel: CancelToken::new(),
+                },
+            )
+            .unwrap();
+            match (cold, value(&cached, Part::KnowledgeOverTime)) {
+                (history::KnowledgeResult::Data(cold), PartValue::Knowledge(mine)) => assert_eq!(*mine, cold.knowledge),
+                other => panic!("{other:?}"),
+            }
         }
     }
 }
@@ -372,10 +387,13 @@ fn h15_an_unreadable_row_in_the_window_fails_every_part_outside_only_the_history
     for part in Part::all().filter(|p| !PENDING.contains(p)) {
         match outcome(&messages, part) {
             PartOutcome::Failed(PartFailure::UnreadableRow(row)) => {
-                assert!(matches!(part, Part::CardStatesOverTime | Part::Started), "{part:?}");
+                assert!(matches!(part, Part::CardStatesOverTime | Part::Started | Part::KnowledgeOverTime), "{part:?}");
                 assert_eq!(*row, bad);
             }
-            PartOutcome::Data(_) => assert!(!matches!(part, Part::CardStatesOverTime | Part::Started), "{part:?}"),
+            PartOutcome::Data(_) => assert!(
+                !matches!(part, Part::CardStatesOverTime | Part::Started | Part::KnowledgeOverTime),
+                "{part:?}"
+            ),
             other => panic!("{part:?}: {other:?}"),
         }
     }

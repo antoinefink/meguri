@@ -137,4 +137,28 @@ impl ReadSnapshot<'_> {
             visit,
         )
     }
+
+    /// [`ReadSnapshot::visit_derived`] for the rows that `filter`, an SQL
+    /// condition on that table's columns, holds for: SQLite skips the rest
+    /// without building their cells.
+    pub fn visit_derived_where(
+        &self,
+        component: &str,
+        table: &str,
+        columns: &str,
+        filter: &str,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[Cell]) -> bool,
+    ) -> Result<(), StorageError> {
+        if self.reader().derived.is_none() {
+            return Ok(());
+        }
+        crate::search_rows::visit_cells(
+            self.conn(),
+            &format!("SELECT {columns} FROM {ATTACH_SCHEMA}.\"{component}__{table}\" WHERE {filter}"),
+            &[],
+            cancel,
+            visit,
+        )
+    }
 }
