@@ -529,7 +529,8 @@ def native_toolbar_title_pairs(document, root):
     the window with the same frame, each with a value. AppKit reports both at
     the title area's frame; they are drawn one above the other, so they do not
     overlap on screen. Exactly two at a frame: three or more are not this shape
-    and keep their overlaps. Returns the set of such pairs as frozensets.
+    and keep their overlaps. On iOS, the navigation bar's pair instead
+    (`navigation_bar_title_pairs`). Returns the set of such pairs as frozensets.
     """
     pairs = set()
     if document.get("platform") != "mac":

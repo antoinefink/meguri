@@ -556,6 +556,8 @@ public struct HomeDeckTree: View {
     @State private var rowFrames: [Int64: CGRect] = [:]
     @State private var restoring: Int64?
     @State private var tracking = false
+    /// A row the list selected itself (keys) while its page opens: shown until the detail follows.
+    @State private var pendingRow: HomeListRow?
 
     public init(nodes: [CountedDeckNode], navigation: AppNavigation? = nil, collection: ReviewCollection? = nil,
                 previousAnswerCount: Int? = nil, error: String? = nil,
@@ -574,14 +576,18 @@ public struct HomeDeckTree: View {
     }
 
     public var body: some View {
+        // Read here, not only in the binding: expanding or collapsing a deck moves the mark.
+        let marked = today.flatMap { markedRow($0.selection) }
         GeometryReader { viewport in
             ScrollViewReader { proxy in
                 // N26.1: beside Today the list draws its selection itself, as the iPad sidebar
                 // does. A tap runs the row's button; a selection the list makes itself (keys)
-                // takes the same path. Either way the binding then reads where the detail is.
+                // takes the same path, and shows at once while the page opens. Otherwise the
+                // binding reads where the detail is.
                 List(selection: today.map { today in
-                    Binding(get: { markedRow(today.selection) }, set: { row in
-                        guard let row, row != markedRow(today.selection) else { return }
+                    Binding(get: { pendingRow ?? marked }, set: { row in
+                        guard let row, row != (pendingRow ?? marked) else { return }
+                        pendingRow = row
                         switch row {
                         case .today: today.open()
                         case .deck(let id): select(id)
@@ -625,6 +631,8 @@ public struct HomeDeckTree: View {
                     }
                 }
                 .coordinateSpace(name: "home.deck.list")
+                // The detail followed (or went elsewhere): the navigation's mark is the selection again.
+                .onChange(of: marked) { _, _ in pendingRow = nil }
                 .activityLoading(activity, scope: .collection, active: activityActive,
                                  widths: navigation?.activityRowWidths, page: .deckList)
                 // List does not use the ScrollView target-layout modifier.

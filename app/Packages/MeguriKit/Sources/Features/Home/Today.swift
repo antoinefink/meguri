@@ -168,8 +168,8 @@ struct TodaySummaryContent: View {
         // N24.5: the deck page's inset grouped list (N14.3).
         .listStyle(.insetGrouped)
         // N26.2: the totals are the large title's subtitle, as the Mac's toolbar shows them
-        // (N14.4, set by the page there); nothing at all while nothing waits.
-        .navigationSubtitle(Text(verbatim: HomeHeading.todaySubtitle(totals, locale: locale)))
+        // (N14.4, set by the page there); no subtitle at all while nothing waits.
+        .modifier(TodaySubtitle(text: HomeHeading.todaySubtitle(totals, locale: locale)))
         #endif
     }
 
@@ -299,6 +299,16 @@ struct TodaySummaryContent: View {
                 : AnyLayout(HStackLayout(alignment: .center, spacing: Spacing.medium))) { content() }
     }
 }
+
+#if !os(macOS)
+/// N26.2: the totals under the large title; none while nothing waits, so no empty line shows.
+private struct TodaySubtitle: ViewModifier {
+    let text: String
+    func body(content: Content) -> some View {
+        if text.isEmpty { content } else { content.navigationSubtitle(Text(verbatim: text)) }
+    }
+}
+#endif
 
 private struct TodayTitle: ViewModifier {
     let enabled: Bool
