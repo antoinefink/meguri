@@ -400,7 +400,7 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 ### N14.2 Tab-layout deck list
 
 - The toolbar has the sync status button, a Search button (`magnifyingglass`, `home.collection.search`) and one Add menu (`plus`): New Note and New Deck…. There is no Go to Deck or Create Deck button and no Study bar.
-- Search presents the system search field ("Search or Create a Deck") with the keyboard; until then the field stays out of the way. The title is N14.8's. Typing replaces the tree with the matching decks, using Go to Deck's filter: each shows its last name component with its parents as secondary text underneath, as Today does; a row opens that deck. When no deck has the typed name, a "Create deck named …" row opens the Create Deck sheet with the name filled in.
+- Search presents the system search field, with the system's own "Search" prompt (changed 2026-11-22; it read "Search or Create a Deck", N20.1), with the keyboard; until then the field stays out of the way. The title is N14.8's. Typing replaces the tree with the matching decks, using Go to Deck's filter: each shows its last name component with its parents as secondary text underneath, as Today does; a row opens that deck. When no deck has the typed name, a "Create deck named …" row opens the Create Deck sheet with the name filled in.
 - The query and the field's presentation are navigation state: a fold, an unfold or a layout switch keeps them.
 - The Go to Deck sheet stays for the sidebar layouts' toolbar, the "/" key and the Mac's Deck menu.
 - Replaces: N13.2's "Touch toolbar items have a symbol and a title" for this list, and N13.1's "Go to Deck and Create Deck stay with the list".
@@ -578,7 +578,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 ### N16.3 Show Answer and the answer row
 
 - Show Answer is centred in the answer row on touch, as wide as two answer buttons. At the accessibility text sizes it keeps the full row.
-- With a fold through the row (iPhone Duo held wide) it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9).
+- With a fold through the row (iPhone Duo held wide) it keeps the size it has there, one column of the split row, and is centred in the row, under the card, across the fold. Exception to R9, decided by Antoine on 2026-11-22 ("Not aligned", and a much wider button would look odd to him (his words were relayed by the coordinator)): the button's label sits on the fold. Accepted because the card's own content is already centred there and tap zones make the button secondary. After reveal the four answers still split at the fold. Replaced (2026-11-19 text): "it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9)".
 - The answer buttons' group is centred: on touch it is at most `ContentWidth.readable` wide and spans the full width when a fold crosses it; on Mac the four standard buttons are centred in the window, as is Show Answer.
 - Replaces: N13.3's trailing-half Show Answer where no fold crosses the row.
 
@@ -726,7 +726,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 
 ### N20.1 Deck search in the sidebar
 
-- Sidebar layouts (Mac, iPad at regular width): a search field at the top of the sidebar, in the system's sidebar placement for `.searchable`, with the prompt "Search or Create a Deck". It replaces the Go to Deck sheet.
+- Sidebar layouts (Mac, iPad at regular width): a search field at the top of the sidebar, in the system's sidebar placement for `.searchable`, with the system's own "Search" prompt. It replaces the Go to Deck sheet. Changed 2026-11-22 (Antoine: "what do you think of just having it be 'Search'?"; decided by Claude (coordinator) under his delegation; `decisions.md`, row `home.goToDeck` of 2026-11-22): the prompt read "Search or Create a Deck". Creating a deck from the field is unchanged: the "Create deck named …" row follows the results while no deck has the typed name, and New Deck… stays in the Add menu and the File menu (⇧⌘N).
 - Typing replaces the sidebar's list, the Today row included, with the results, as System Settings does. Each result is two lines: the deck's last name component over its parents in secondary text, joined with " › " (a top-level deck has no second line). Matching and order are the touch Search's (N14.2): `decks/deck-list` H6.1 and H6.2. Filtered decks are listed.
 - After the results, while `decks/decks` D18 finds no deck with the typed name: a row with the `plus` symbol, "Create deck named “<query>”". It opens N20.3's New Deck form with the query as the Name and Parent Deck None.
 - With no result and no create row, H6.3's one-line message shows.
@@ -828,7 +828,7 @@ The English text of the screens above. "New" marks text not used before this rou
 
 | Text | Where | |
 |---|---|---|
-| Search or Create a Deck | the sidebar search prompt (also N14.2's) | |
+| Search | the sidebar search prompt (also N14.2's): the system's own default prompt, no string of ours | changed 2026-11-22: it read "Search or Create a Deck" |
 | Create deck named “%@” | the search's last row; %@ is the typed text, between U+201C and U+201D | changed: the earlier text had no quotation marks |
 | ` › ` (space, U+203A, space) | between the components of every shown deck path | |
 | New Note | Add menu, File menu | |
@@ -1046,6 +1046,13 @@ The Styling part shows "Shared by All Card Types" in its bar, and above the CSS 
 
 One Save in the toolbar. When D3 asks, a sheet titled `Save Changes to “<name>”?` lists the changes (losses first, in red, each with its count), then the sync paragraph, then Cancel and the confirm button (Save and Upload with Meguri Sync; Save otherwise; destructive when content is lost). Progress while it saves shows in the toolbar ("Updating 212 of 412 notes").
 
+Changed 2026-11-22 (Antoine's feedback on the captures of PR #112: on Mac "I can't help but think those don't look really good", on iPad "This section looks kind of strange as well"; decided by Claude (coordinator) under his delegation; `decisions.md`, row `noteTypes` of 2026-11-22):
+
+- While a save job runs (once it has run for half a second, D5 step 5), the toolbar shows one status item in place of Revert and Save: a small system progress indicator and the stage text ("Syncing…", "Updating 212 of 412 notes", "Uploading…"; "Saving…" until the first count arrives), with no glass of its own. Its width is the widest text the job can show, with monospaced digits, so the toolbar does not move as the text changes. Revert and Save are not shown until the job ends; the note type stays locked (W3).
+- No disabled prominent button: Revert and Save are one toolbar group in the standard style, and Save is not prominent, since it is disabled until there is a draft.
+- iPad: Fields | Cards and Save are separate items with their own glass shapes; the job's status sits in the bottom toolbar's status place, as Mail's does, so nothing wide sits in the navigation bar beside the tabs at any width. At compact width (the iPhone and the Duo folded, where the tab bar takes the bottom bar's middle), the spinner takes Save's place and the stage text takes the subtitle's place under the note type's name.
+- This replaces the earlier toolbar, where the progress, Revert and a tinted Save were three separate shapes and, on iPad, the progress overlapped the tabs.
+
 ### N22.6 New and Duplicate (7B)
 
 New Note Type… is a sheet listing the six stock kinds as rows, each with its one-line explanation in secondary text, and a Name field; Cancel and Create. Duplicate is a direct command (⌘D, context menu).
@@ -1071,6 +1078,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, row `sync.statusPopove
 ### N23.1 The panel
 
 - The sync status button opens one small panel: a popover on Mac and on iPad at regular width, `ContentWidth.primaryAction` (320 pt) wide and as tall as its content; at compact width (iPhone, the Duo folded or held tall) a sheet with the same content, the medium and large detents and the drag indicator, which scrolls at the largest text sizes. Both services, every state.
+- Changed 2026-11-22 (Antoine on his iPhone Duo: opened, "Too much space below the downloading media"; folded, "same issue here"; decided by Claude (coordinator) under his delegation): the sheet is as tall as the panel. It has one detent, measured from the panel's own height, which grows with the text size and stops at the screen's height, where the panel scrolls; there is no larger detent that would only show empty space, and so no drag indicator. The sheet opens at that height: the panel is measured before the sheet shows, not first shown at a default height. Where the popover itself becomes a sheet (an iPhone at regular width, such as the Duo opened), that sheet fits the panel the same way. This replaces the medium and large detents and the drag indicator above and in N23.5.
 - Top to bottom, with no inner box, form group, divider or section header:
   1. One status line: the state's symbol (N23.2) leading, the status title beside it.
   2. Under the title, in secondary text, the status detail: one sentence, or none when the status has none. A detail that repeats the title is not shown, here or in the Sync section.
@@ -1120,7 +1128,7 @@ The first row that applies decides, in this order.
 
 - Only the status action counts (T19.4 rule 1, T19.5's Action column). The actions of an issues row (Retry, Check Database…) stay in its list.
 - A built action shows also while it cannot run, disabled, with no reason line (Try Again is enabled as Sync Now is, T9.2). An action whose conditions do not apply (Cancel Setup while nothing prepares, Cancel Replacement… with no operation, Meguri Sync's Choose… while its work runs, Copy Debug Info with no diagnostics) is not shown. For a needs you row the panel is then the third row's (Sync Settings, no default button); otherwise Sync Now keeps its place.
-- No default button: an action that runs a collection replacement at once (Finish Setup, Resume of a waiting replacement) and Cancel Setup. Return then does nothing. Actions that open a confirmation first (Cancel Replacement…, Set Up Again…, Choose…) can be the default: their confirmation is the step that changes anything, and its destructive button is never the default (N11.8).
+- No default button: an action that runs a collection replacement at once (Finish Setup, Resume of a waiting replacement), Cancel Setup, and Copy Debug Info (changed 2026-11-22, same decision as N23.1's fitted sheet: a diagnostic does not resolve the state, so it is never the prominent button; this covers the damaged-collection row, whose built action is Copy Debug Info). Return then does nothing. Actions that open a confirmation first (Cancel Replacement…, Set Up Again…, Choose…) can be the default: their confirmation is the step that changes anything, and its destructive button is never the default (N11.8).
 - Sync Now stays in its place while the status moves, disabled, even where `sync/policy#P12.1` would let a press join the running exchange, so the buttons never jump. Outside the panel nothing changes: File › Sync Now, Y and the Sync section keep their availability and their reason (T19.7); the panel shows no reason line, and the Mac help tag of its Sync Now gives the reason where T19.7 has one. A running Sync Now has no Cancel in any status surface (the panel, the Sync section, T19.6).
 - When the state needs you, its action takes Sync Now's place: a disabled Sync Now with a reason would only repeat the sentence.
 - An action that runs at once runs from the panel, which stays open and updates (Sync Now, Try Again, Resume, Finish Setup, Copy Debug Info). An action with a confirmation (Cancel Replacement…, Change the service recovery's action): on iPhone and iPad its confirmation shows over the panel, as the Sync section's row does; on Mac the panel closes and the action opens the Sync section, whose row asks, since a transient popover can close when its alert takes the keys. Meguri Sync's sign-in action is Sign In… and opens the Sync section at the sign-in fields; an action that opens a sheet of the Sync section (Meguri Sync's Choose…, a setup started again) opens the Sync section, which presents it (N15.3). iCloud's Choose…, Set Up Again… and Resume Syncing open their sheets directly, as built (for Resume Syncing see N23.5). On iPhone the panel's sheet closes before the Sync section or another sheet opens, so no sheet sits on a sheet.

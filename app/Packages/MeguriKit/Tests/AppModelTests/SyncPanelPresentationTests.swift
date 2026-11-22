@@ -28,11 +28,12 @@ import Testing
         #expect(account.needsYou && account.action == nil)
         let nothing = SyncPanel.slot(account, serviceSelected: true, offered: false)
         #expect(nothing == .nothingToRun && !SyncPanel.settingsIsDefault(nothing) && !SyncPanel.slotIsDefault(nothing))
-        // Actions that run a replacement at once, and Cancel Setup, are never the default.
-        for action in [SyncStatusAction.meguriFinishSetup, .resumeOp, .meguriCancel] {
+        // Actions that run a replacement at once, Cancel Setup and Copy Debug Info
+        // (a diagnostic, changed 2026-11-22) are never the default.
+        for action in [SyncStatusAction.meguriFinishSetup, .resumeOp, .meguriCancel, .copyDebugInfo, .repair] {
             #expect(!SyncPanel.slotIsDefault(.action(action)), "\(action)")
         }
-        #expect(SyncPanel.slotIsDefault(.action(.chooseCollection)) && SyncPanel.slotIsDefault(.action(.copyDebugInfo)))
+        #expect(SyncPanel.slotIsDefault(.action(.chooseCollection)))
         // Any other status: Sync Now, the default.
         for status in [SyncKinds.cloud(state: .upToDate(asOfMilliseconds: 1)), SyncKinds.cloud(state: .syncingCollection),
                        SyncKinds.meguri(.init(routine: .exchanging)), SyncKinds.meguri(.init(routine: .network)),
