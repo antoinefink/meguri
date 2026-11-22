@@ -768,6 +768,14 @@ extension NoteTypesModelTests {
         await model.settle()
         #expect(backend.saved.isEmpty && model.question == nil && model.redIssueCount(7) == 1)
         #expect(model.liveIssues(7).first?.fix == .addClose("{{/Extra}}"))
+        // The fix applies only to the text the issue was read on: an earlier
+        // close elsewhere does not block it, a text changed since does.
+        model.applyFix(7, model.liveIssues(7)[0])
+        #expect(model.editorRequest?.command == .append("{{/Extra}}"))
+        model.consumeEditorRequest(model.editorRequest!.token)
+        model.setText(7, card: 0, part: .back, "{{#Extra}}{{/Extra}}")
+        model.applyFix(7, model.liveIssues(7)[0])
+        #expect(model.editorRequest == nil)
         backend.issues = []
         model.setText(7, card: 0, part: .back, "{{#Extra}}{{/Extra}}")
         await model.settle()

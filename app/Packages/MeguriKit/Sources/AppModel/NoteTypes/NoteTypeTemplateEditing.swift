@@ -198,7 +198,7 @@ public nonisolated enum NoteTypeTemplateEditing {
         let clamped = selection.clamped(to: 0..<ns.length)
         let lines = ns.lineRange(for: NSRange(location: clamped.lowerBound, length: clamped.count))
         let block = ns.substring(with: lines)
-        let endsWithBreak = block.hasSuffix("\n")
+        let endsWithBreak = block.utf16.last == 0x0A
         var parts = block.components(separatedBy: "\n")
         if endsWithBreak { parts.removeLast() }
         // A CR LF line keeps its CR after the comment's close.

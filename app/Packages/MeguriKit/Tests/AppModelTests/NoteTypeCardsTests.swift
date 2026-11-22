@@ -152,6 +152,7 @@ import Testing
         // A CR LF line keeps its CR after the close, and uncomments again.
         let crlf = NoteTypeTemplateEditing.toggleComment("{{Front}}\r\nkept", selection: 0..<0, styling: false)
         #expect(crlf.text == "<!-- {{Front}} -->\r\n")
+        #expect(crlf.caret == 18, "the caret ends the line, before its CR LF")
         #expect(NoteTypeTemplateEditing.toggleComment("<!-- {{Front}} -->\r\n", selection: 0..<0, styling: false).text == "{{Front}}\r\n")
     }
 

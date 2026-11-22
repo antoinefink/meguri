@@ -61,10 +61,13 @@ public nonisolated struct NoteTypeIssueRead: Sendable, Hashable {
     public let cards: [Int]
     public let fields: [String]
     public let issues: [NotetypeTemplateIssue]
-    public init(cards: [Int], fields: [String], issues: [NotetypeTemplateIssue]) {
+    /// The texts read, by card type row and part: a fix applies only to these.
+    public let texts: [Int: [NoteTypeTemplatePart: String]]
+    public init(cards: [Int], fields: [String], issues: [NotetypeTemplateIssue], texts: [Int: [NoteTypeTemplatePart: String]] = [:]) {
         self.cards = cards
         self.fields = fields
         self.issues = issues
+        self.texts = texts
     }
 }
 

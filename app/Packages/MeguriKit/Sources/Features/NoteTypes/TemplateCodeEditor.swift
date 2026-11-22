@@ -197,6 +197,8 @@ struct TemplateCodeEditor: NSViewRepresentable {
         func show(key newKey: TemplateEditorKey, text: String) {
             guard let textView else { return }
             if let key, key != newKey { selections[key.history] = textView.selectedRange() }
+            // The swatches' ranges belong to the text shown before: they wait for its colouring.
+            if key != newKey || textView.string != text { swatches.forEach { $0.isEnabled = false } }
             let sameKey = key?.history == newKey.history
             key = newKey
             // A text changed while elsewhere (Flip, Revert, a save that renumbered
@@ -585,6 +587,7 @@ struct TemplateCodeEditor: UIViewRepresentable {
         func show(key newKey: TemplateEditorKey, text: String) {
             guard let textView else { return }
             if let key, key != newKey { selections[key.history] = textView.selectedRange }
+            if key != newKey || textView.text != text { swatches.forEach { $0.isEnabled = false } }
             let sameKey = key?.history == newKey.history
             key = newKey
             // Each text keeps its own history; one changed while elsewhere loses it.
