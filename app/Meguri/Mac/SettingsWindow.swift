@@ -10,8 +10,13 @@ struct SettingsWindow: View {
     let configuration: LaunchConfiguration
     private var context: NativeCommandContext { .init(collection: collection, host: .settings) }
     var body: some View {
+        // N15.7: as System Settings, a fixed width and a height the person can
+        // change. The Settings scene's resizability (`contentSize`, its default)
+        // takes the window's minimum and maximum from this frame; the ideal
+        // height is the default, tall enough for the Sync section signed in or out.
         MacSettingsView(collection: collection, present: context.present)
-            .frame(minWidth: 680, idealWidth: 760, minHeight: 480, idealHeight: 560)
+            .frame(width: 760)
+            .frame(minHeight: 480, idealHeight: 640, maxHeight: .infinity)
             .focusedSceneValue(\.nativeCommandContext, context)
             .modifier(PresentationHost(navigation: collection.navigation, features: features,
                 configuration: configuration, isActive: true, host: .settings))

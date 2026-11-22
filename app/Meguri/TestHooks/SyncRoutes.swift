@@ -112,9 +112,12 @@ extension TestHooks {
                 var serviceSwitch: SyncCoordinator.RenderServiceSwitch? = nil
                 let configuration: LaunchConfiguration
                 @Environment(\.openSettings) private var openSettings
+                /// The Settings window's resizing facts, for captures (N15.7).
+                @State private var windowFacts = ""
                 var body: some View {
                     Text(verbatim: "Settings window preview")
                         .accessibilityIdentifier("settings.sync.windowPreview")
+                        .accessibilityValue(windowFacts)
                         .task {
                             // A hidden launch (xcode-check's probe, -MeguriBackgroundLaunch)
                             // stays accessory and must never come to the front: it
@@ -127,6 +130,15 @@ extension TestHooks {
                             preview.syncPresentation.settingsRequest = UUID()
                             SettingsWindowPreview.shared.collection = preview
                             openSettings()
+                            try? await Task.sleep(for: .seconds(1))
+                            windowFacts = NSApp.windows.filter { $0.isVisible }.map { window in
+                                let id = window.identifier?.rawValue ?? "none"
+                                return "\(id): resizable=\(window.styleMask.contains(.resizable)) "
+                                    + "min=\(Int(window.minSize.width))x\(Int(window.minSize.height)) "
+                                    + "max=\(Int(min(window.maxSize.width, 99_999)))x\(Int(min(window.maxSize.height, 99_999))) "
+                                    + "size=\(Int(window.frame.width))x\(Int(window.frame.height)) "
+                                    + "autosave=\(window.frameAutosaveName.isEmpty ? "none" : window.frameAutosaveName)"
+                            }.joined(separator: "; ")
                         }
                 }
             }
