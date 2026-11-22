@@ -10,6 +10,7 @@ use super::decks::{DeckEntry, home_deck};
 use super::{PERIOD_DAYS, period_start};
 use crate::graphs::records::retention::outcome;
 use crate::graphs::records::reviews::counted;
+use crate::graphs::rows::StatsRow;
 use crate::graphs::{History, Scope, ScopeData};
 
 /// One row's values in one period window (H10.2). Member order: `reviews`,
@@ -121,46 +122,61 @@ fn layout(scope: &Scope, decks: &[DeckEntry]) -> (Vec<(DeckId, bool)>, BTreeMap<
     (rows, of_home)
 }
 
-/// H10 over the scope's cards and window rows.
-pub(crate) fn build(
-    scope: &ScopeData,
-    page_scope: &Scope,
-    history: History,
-    next_day_at: i64,
-    decks: &[DeckEntry],
-) -> ByDeckPart {
-    let (layout, of_home) = layout(page_scope, decks);
-    let mut rows: Vec<DeckRow> = layout
-        .iter()
-        .map(|(deck, own_cards)| DeckRow {
-            deck: *deck,
-            own_cards: *own_cards,
-            cards: 0,
-            windows: DeckWindows {
-                all_time: (history == History::AllHistory).then(DeckValues::default),
-                ..DeckWindows::default()
-            },
-        })
-        .collect();
-    // Each existing card of the scope in its home deck's row, if any. Under
-    // G2.1 the scope holds every card whose home deck is in its tree.
-    for card in scope.cards() {
-        if let Some(at) = of_home.get(&home_deck(card.did, card.odid)) {
-            rows[*at].cards += 1;
+/// H10's table: its rows from the decks and the scope's cards, then fed the
+/// window's rows.
+pub(crate) struct ByDeckCounter {
+    rows: Vec<DeckRow>,
+    of_home: BTreeMap<i64, usize>,
+    bounds: [i64; 4],
+}
+
+impl ByDeckCounter {
+    pub(crate) fn new(
+        scope: &ScopeData,
+        page_scope: &Scope,
+        history: History,
+        next_day_at: i64,
+        decks: &[DeckEntry],
+    ) -> ByDeckCounter {
+        let (layout, of_home) = layout(page_scope, decks);
+        let mut rows: Vec<DeckRow> = layout
+            .iter()
+            .map(|(deck, own_cards)| DeckRow {
+                deck: *deck,
+                own_cards: *own_cards,
+                cards: 0,
+                windows: DeckWindows {
+                    all_time: (history == History::AllHistory).then(DeckValues::default),
+                    ..DeckWindows::default()
+                },
+            })
+            .collect();
+        // Each existing card of the scope in its home deck's row, if any.
+        // Under G2.1 the scope holds every card whose home deck is in its
+        // tree.
+        for card in scope.cards() {
+            if let Some(at) = of_home.get(&home_deck(card.did, card.odid)) {
+                rows[*at].cards += 1;
+            }
+        }
+        ByDeckCounter {
+            rows,
+            of_home,
+            bounds: PERIOD_DAYS.map(|days| period_start(next_day_at, days)),
         }
     }
-    let bounds = PERIOD_DAYS.map(|days| period_start(next_day_at, days));
-    for (scoped, card_decks) in scope.rows_with_decks() {
-        // Deleted cards' rows are in no row.
-        let Some(at) = card_decks.and_then(|(did, odid)| of_home.get(&home_deck(did, odid))) else {
-            continue;
-        };
-        let row = scoped.row;
-        let reviewed = counted(&row);
-        let answered = outcome(&row);
+
+    /// A row of the window, with its card's `did` and `odid` (none for a
+    /// deleted card's row, which is in no row).
+    pub(crate) fn add(&mut self, row: &StatsRow, card_decks: Option<(i64, i64)>) {
+        let reviewed = counted(row);
+        let answered = outcome(row);
         if !reviewed && answered.is_none() {
-            continue;
+            return;
         }
+        let Some(at) = card_decks.and_then(|(did, odid)| self.of_home.get(&home_deck(did, odid))) else {
+            return;
+        };
         let add = |values: &mut DeckValues| {
             if reviewed {
                 values.reviews += 1;
@@ -172,14 +188,14 @@ pub(crate) fn build(
                 None => {}
             }
         };
-        let windows = &mut rows[*at].windows;
+        let windows = &mut self.rows[*at].windows;
         let timed = [
             &mut windows.one_month,
             &mut windows.three_months,
             &mut windows.six_months,
             &mut windows.one_year,
         ];
-        for (values, start) in timed.into_iter().zip(bounds) {
+        for (values, start) in timed.into_iter().zip(self.bounds) {
             if row.id >= start {
                 add(values);
             }
@@ -188,6 +204,10 @@ pub(crate) fn build(
             add(all);
         }
     }
-    rows.retain(|row| row.cards > 0 || row.windows.values().any(|values| !values.is_empty()));
-    ByDeckPart { rows }
+
+    pub(crate) fn finish(mut self) -> ByDeckPart {
+        self.rows
+            .retain(|row| row.cards > 0 || row.windows.values().any(|values| !values.is_empty()));
+        ByDeckPart { rows: self.rows }
+    }
 }

@@ -40,10 +40,10 @@ use crate::graphs::{
 };
 use crate::history::{self, CardStatesOverTime, HistoryRequest, HistoryResult, Progress, StartedPart};
 use crate::parts::activity::{self, ActivityDaysPart};
-use crate::parts::by_answer;
-use crate::parts::by_deck::{self, ByDeckPart};
+use crate::parts::by_deck::ByDeckPart;
 use crate::parts::decks::{self, DeckEntry, Retentions};
-use crate::parts::retention_by_day::{self, RetentionByDayPart};
+use crate::parts::log::{self, LogInputs, LogParts};
+use crate::parts::retention_by_day::RetentionByDayPart;
 use crate::parts::studied_today::{self, StudiedTodayPart};
 
 pub use crate::parts::by_answer::{Answers, ByAnswerPart};
@@ -436,6 +436,8 @@ fn run(
     let mut built: BTreeMap<Graph, Result<Record, NotBuilt>> = BTreeMap::new();
     let mut record = |graph: Graph| built.entry(graph).or_insert_with(|| records::compute(graph, &input)).clone();
     let mut history_read: Option<HistoryRead> = None;
+    let mut log: Option<LogParts> = None;
+    let sources: Vec<Source> = parts.iter().map(|part| part.source()).collect();
     let history_parts: Vec<Part> = parts.iter().copied().filter(|p| p.source() == Source::History).collect();
 
     for part in parts {
@@ -450,39 +452,33 @@ fn run(
                     Ok(record) => PartOutcome::Data(PartValue::Record(record)),
                     Err(NotBuilt(_)) => PartOutcome::Failed(PartFailure::NotBuilt),
                 },
-                Source::ByAnswer => PartOutcome::Data(PartValue::ByAnswer(by_answer::build(
-                    scope_data.as_ref(),
-                    header.context.next_day_at,
-                ))),
                 Source::StudiedToday => match &reads.studied {
                     Some(Ok(studied)) => PartOutcome::Data(PartValue::StudiedToday(*studied)),
                     Some(Err(failure)) => PartOutcome::Failed(failure.clone()),
                     None => PartOutcome::Failed(PartFailure::Failed("the strip's numbers were not read".into())),
                 },
-                Source::RetentionByDay => match &reads.retentions {
-                    Some(Ok(decks)) => PartOutcome::Data(PartValue::RetentionByDay(retention_by_day::build(
-                        scope_data.as_ref(),
-                        header.context.next_day_at,
-                        decks,
-                    ))),
-                    Some(Err(failure)) => PartOutcome::Failed(failure.clone()),
-                    None => PartOutcome::Failed(PartFailure::Failed("the retentions were not read".into())),
-                },
-                Source::ByDeck => match &reads.decks {
-                    Some(Ok(decks)) => PartOutcome::Data(PartValue::ByDeck(by_deck::build(
-                        scope_data.as_ref(),
-                        &scope,
-                        request.history,
-                        header.context.next_day_at,
-                        decks,
-                    ))),
-                    Some(Err(failure)) => PartOutcome::Failed(failure.clone()),
-                    None => PartOutcome::Failed(PartFailure::Failed("the decks were not read".into())),
-                },
-                Source::ActivityDays => match &reads.all_rows {
-                    Ok(all) => PartOutcome::Data(PartValue::ActivityDays(activity::build(all, header.context.next_day_at))),
-                    Err(failure) => PartOutcome::Failed(failure.clone()),
-                },
+                Source::ByAnswer | Source::RetentionByDay | Source::ByDeck | Source::ActivityDays => {
+                    // One pass over the rows for all four (`crate::parts::log`).
+                    let computed = log.get_or_insert_with(|| {
+                        let wanted = |source: Source| sources.contains(&source);
+                        log::compute(&LogInputs {
+                            window: scope_data.as_ref(),
+                            all: reads
+                                .all_rows
+                                .as_ref()
+                                .ok()
+                                .filter(|_| !searching && wanted(Source::ActivityDays))
+                                .map(|all| all.as_ref()),
+                            page_scope: &scope,
+                            history: request.history,
+                            next_day_at: header.context.next_day_at,
+                            by_answer: wanted(Source::ByAnswer),
+                            retentions: read_value(&reads.retentions),
+                            decks: read_value(&reads.decks).map(|decks| decks.as_slice()),
+                        })
+                    });
+                    log_outcome(part, computed, &reads)
+                }
                 Source::History => {
                     let read = match &history_read {
                         Some(read) => read,
@@ -528,6 +524,46 @@ impl Sink<'_> {
         if !self.cancel.is_cancelled() {
             (self.sink)(message);
         }
+    }
+}
+
+/// A part of the one review-log pass, from what it computed, or why it
+/// could not be: its own read's failure (H15, H18).
+fn log_outcome(part: Part, log: &mut LogParts, reads: &SnapshotReads) -> PartOutcome {
+    let missing = || PartOutcome::Failed(PartFailure::Failed(format!("{} was not computed", part.name())));
+    match part.source() {
+        Source::ByAnswer => log.by_answer.take().map(PartValue::ByAnswer).map_or_else(missing, PartOutcome::Data),
+        Source::RetentionByDay => read_failure(&reads.retentions).unwrap_or_else(|| {
+            log.retention_by_day
+                .take()
+                .map(PartValue::RetentionByDay)
+                .map_or_else(missing, PartOutcome::Data)
+        }),
+        Source::ByDeck => read_failure(&reads.decks).unwrap_or_else(|| {
+            log.by_deck.take().map(PartValue::ByDeck).map_or_else(missing, PartOutcome::Data)
+        }),
+        Source::ActivityDays => match &reads.all_rows {
+            Err(failure) => PartOutcome::Failed(failure.clone()),
+            Ok(_) => log
+                .activity_days
+                .take()
+                .map(PartValue::ActivityDays)
+                .map_or_else(missing, PartOutcome::Data),
+        },
+        _ => missing(),
+    }
+}
+
+/// A snapshot read's value, when it was made and succeeded.
+fn read_value<T>(read: &Option<Result<T, PartFailure>>) -> Option<&T> {
+    read.as_ref().and_then(|read| read.as_ref().ok())
+}
+
+/// A snapshot read's failure, as its parts' outcome.
+fn read_failure<T>(read: &Option<Result<T, PartFailure>>) -> Option<PartOutcome> {
+    match read {
+        Some(Err(failure)) => Some(PartOutcome::Failed(failure.clone())),
+        _ => None,
     }
 }
 

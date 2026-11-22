@@ -7,6 +7,7 @@ use super::decks::Retentions;
 use super::page_day;
 use crate::graphs::records::retention::outcome;
 use crate::graphs::ScopeData;
+use crate::graphs::rows::StatsRow;
 
 /// One day's counts (H4.2). Member order: `young_passed`, `young_failed`,
 /// `mature_passed`, `mature_failed`, `desired_sum`, `desired_rows`.
@@ -45,22 +46,50 @@ pub struct RetentionByDayPart {
     pub several: bool,
 }
 
-/// H4 over the scope's window rows; H3.4's retentions over its cards.
-pub(crate) fn build(scope: &ScopeData, next_day_at: i64, decks: &Retentions) -> RetentionByDayPart {
-    let mut distinct: Vec<u32> = Vec::new();
-    for card in scope.cards() {
-        if let Some(retention) = decks.of(card.did, card.odid)
-            && !distinct.contains(&retention.to_bits())
-        {
-            distinct.push(retention.to_bits());
+/// H4's counts, fed the window's rows in id order; H3.4's retentions from
+/// the scope's cards.
+pub(crate) struct RetentionCounter<'d> {
+    next_day_at: i64,
+    decks: &'d Retentions,
+    part: RetentionByDayPart,
+    open: Option<(i32, RetentionDay)>,
+}
+
+impl<'d> RetentionCounter<'d> {
+    pub(crate) fn new(scope: &ScopeData, next_day_at: i64, decks: &'d Retentions) -> RetentionCounter<'d> {
+        let mut distinct: Vec<u32> = Vec::new();
+        for card in scope.cards() {
+            if let Some(retention) = decks.of(card.did, card.odid)
+                && !distinct.contains(&retention.to_bits())
+            {
+                distinct.push(retention.to_bits());
+            }
+        }
+        let mut retentions: Vec<f32> = distinct.into_iter().map(f32::from_bits).collect();
+        retentions.sort_by(f32::total_cmp);
+        RetentionCounter {
+            next_day_at,
+            decks,
+            part: RetentionByDayPart {
+                several: retentions.len() > 1,
+                retentions,
+                days: BTreeMap::new(),
+            },
+            open: None,
         }
     }
-    let mut part = RetentionByDayPart::default();
-    for (scoped, card_decks) in scope.rows_with_decks() {
-        let Some(counted) = outcome(&scoped.row) else {
-            continue;
+
+    /// A row of the window, with its card's `did` and `odid` (none for a
+    /// deleted card's row).
+    pub(crate) fn add(&mut self, row: &StatsRow, card_decks: Option<(i64, i64)>) {
+        let Some(counted) = outcome(row) else {
+            return;
         };
-        let day = part.days.entry(page_day(scoped.row.id, next_day_at)).or_default();
+        let at = page_day(row.id, self.next_day_at);
+        if self.open.is_some_and(|(open, _)| open != at) {
+            self.store();
+        }
+        let (_, day) = self.open.get_or_insert((at, RetentionDay::default()));
         let count = match (counted.mature, counted.passed) {
             (false, true) => &mut day.young_passed,
             (false, false) => &mut day.young_failed,
@@ -68,14 +97,21 @@ pub(crate) fn build(scope: &ScopeData, next_day_at: i64, decks: &Retentions) -> 
             (true, false) => &mut day.mature_failed,
         };
         *count += 1;
-        if let Some(retention) = card_decks.and_then(|(did, odid)| decks.of(did, odid)) {
+        if let Some(retention) = card_decks.and_then(|(did, odid)| self.decks.of(did, odid)) {
             day.desired_sum += f64::from(retention);
             day.desired_rows += 1;
         }
     }
-    let mut retentions: Vec<f32> = distinct.into_iter().map(f32::from_bits).collect();
-    retentions.sort_by(f32::total_cmp);
-    part.several = retentions.len() > 1;
-    part.retentions = retentions;
-    part
+
+    fn store(&mut self) {
+        if let Some((at, day)) = self.open.take() {
+            // Days are monotonic in id, so a day is stored once.
+            self.part.days.insert(at, day);
+        }
+    }
+
+    pub(crate) fn finish(mut self) -> RetentionByDayPart {
+        self.store();
+        self.part
+    }
 }

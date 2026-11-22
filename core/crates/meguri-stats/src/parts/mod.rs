@@ -15,6 +15,7 @@ pub mod by_answer;
 pub mod by_deck;
 pub mod day_cards;
 pub(crate) mod decks;
+pub(crate) mod log;
 pub mod retention_by_day;
 pub mod studied_today;
 

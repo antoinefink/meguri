@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use crate::graphs::encoding::{Encoder, Member};
 use crate::graphs::records::reviews::{counted, day_index};
-use crate::graphs::ScopeData;
+use crate::graphs::rows::StatsRow;
 
 /// One day's rows by answer, Again, Hard, Good and Easy (index 0 is
 /// Again), as counts or as summed milliseconds.
@@ -32,25 +32,57 @@ pub struct ByAnswerPart {
     pub unrated: u64,
 }
 
-/// H6 over the scope's window rows.
-pub(crate) fn build(scope: &ScopeData, next_day_at: i64) -> ByAnswerPart {
-    let mut part = ByAnswerPart::default();
-    for scoped in scope.rows() {
-        let row = scoped.row;
-        if !counted(&row) {
-            continue;
-        }
-        match row.ease {
-            1..=4 => {
-                let day = day_index(row.id, next_day_at);
-                let answer = usize::from(row.ease - 1);
-                part.count_by_answer.entry(day).or_default()[answer] += 1;
-                part.time_by_answer.entry(day).or_default()[answer] += i64::from(row.time);
-            }
-            _ => part.unrated += 1,
+/// H6's counts, fed the window's rows in id order.
+pub(crate) struct ByAnswerCounter {
+    next_day_at: i64,
+    part: ByAnswerPart,
+    /// The day being counted: rows come in id order, so a day's rows are
+    /// consecutive but for V2.1's rare 32-bit cut.
+    open: Option<(i32, Answers, Answers)>,
+}
+
+impl ByAnswerCounter {
+    pub(crate) fn new(next_day_at: i64) -> ByAnswerCounter {
+        ByAnswerCounter {
+            next_day_at,
+            part: ByAnswerPart::default(),
+            open: None,
         }
     }
-    part
+
+    pub(crate) fn add(&mut self, row: &StatsRow) {
+        if !counted(row) {
+            return;
+        }
+        let 1..=4 = row.ease else {
+            self.part.unrated += 1;
+            return;
+        };
+        let day = day_index(row.id, self.next_day_at);
+        if self.open.is_some_and(|(open, _, _)| open != day) {
+            self.store();
+        }
+        let (_, counts, times) = self.open.get_or_insert((day, [0; 4], [0; 4]));
+        let answer = usize::from(row.ease - 1);
+        counts[answer] += 1;
+        times[answer] += i64::from(row.time);
+    }
+
+    fn store(&mut self) {
+        if let Some((day, counts, times)) = self.open.take() {
+            let stored = self.part.count_by_answer.entry(day).or_default();
+            let stored_time = self.part.time_by_answer.entry(day).or_default();
+            for at in 0..4 {
+                stored[at] += counts[at];
+                stored_time[at] += times[at];
+            }
+        }
+    }
+
+    pub(crate) fn finish(mut self) -> ByAnswerPart {
+        self.store();
+        self.part
+    }
 }
 
 impl ByAnswerPart {
