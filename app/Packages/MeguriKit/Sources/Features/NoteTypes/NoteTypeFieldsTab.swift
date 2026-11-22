@@ -126,6 +126,7 @@ struct NoteTypeFieldsTab: View {
             if let row = rows.first, let line = lines.first(where: { $0.id == row }) {
                 if line.deleted {
                     Button { model.restoreField(id, row: row) } label: { Text("noteTypes.fields.restore", bundle: .module) }
+                        .disabled(model.draft(id)?.canRestore(row) != true)
                 } else {
                     Button { startRename(row) } label: { Text("noteTypes.fields.rename", bundle: .module) }
                     Button(role: .destructive) { model.deleteField(id, row: row) } label: { Text("noteTypes.fields.delete", bundle: .module) }

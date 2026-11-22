@@ -142,13 +142,26 @@ struct NoteTypeFieldsTouchList: View {
     private var editable: Bool { model.editable(id) }
 
     var body: some View {
+        // The column header stays above the rows, which never scroll under it.
+        VStack(spacing: .zero) {
+            header
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, Spacing.medium)
+                .padding(.vertical, Spacing.xSmall)
+            Divider()
+            list
+        }
+    }
+
+    private var list: some View {
         List {
             Section {
                 ForEach(lines) { line in
                     row(line)
                         .deleteDisabled(line.deleted || line.deleteBlock != nil)
                         .swipeActions(edge: .trailing) {
-                            if line.deleted {
+                            if line.deleted, model.draft(id)?.canRestore(line.id) == true {
                                 Button { model.restoreField(id, row: line.id) } label: { Text("noteTypes.fields.restore", bundle: .module) }
                                     .tint(.accentColor)
                             } else if line.deleteBlock == nil {
@@ -162,11 +175,13 @@ struct NoteTypeFieldsTouchList: View {
                 .onDelete { offsets in
                     for offset in offsets { model.deleteField(id, row: lines[offset].id) }
                 }
-            } header: {
-                header
             }
         }
         .listStyle(.plain)
+        // The last row scrolls clear of the floating bottom bar (+ and Edit).
+        .safeAreaInset(edge: .bottom, spacing: .zero) {
+            Color.clear.frame(height: ControlMetrics.minimumTarget + Spacing.large)
+        }
         .disabled(!editable)
         .toolbar {
             ToolbarItemGroup(placement: .bottomBar) {

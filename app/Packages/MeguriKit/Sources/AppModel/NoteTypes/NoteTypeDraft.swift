@@ -111,6 +111,14 @@ public nonisolated struct NoteTypeDraft: Sendable, Hashable {
         return nil
     }
 
+    /// Restore is refused while another field that stays has this name
+    /// (under case folding): two fields would share it.
+    public func canRestore(_ id: Int) -> Bool {
+        guard let row = row(id), row.deleted else { return false }
+        let name = row.name.lowercased()
+        return !keptRows.contains { $0.name.lowercased() == name }
+    }
+
     /// The step ⌘Z undoes and Edit › Undo names; nil when there is none.
     public var undoStep: NoteTypeDraftStep? { undoStack.last?.step }
     public var redoStep: NoteTypeDraftStep? { redoStack.last?.step }
@@ -151,7 +159,7 @@ public nonisolated struct NoteTypeDraft: Sendable, Hashable {
 
     /// Takes a crossed-out row back (its context menu's Restore).
     @discardableResult public mutating func restore(_ id: Int) -> Bool {
-        guard let at = index(id), state.rows[at].deleted else { return false }
+        guard let at = index(id), state.rows[at].deleted, canRestore(id) else { return false }
         record(.restoreField) { $0.rows[at].deleted = false }
         return true
     }

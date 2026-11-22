@@ -1017,6 +1017,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` ro
 - View › Note Types ⇧⌘T; File › New Note Type… (no key). ⇧⌘N stays New Deck…. R282's and R915's ⇧⌘N for Note Types are superseded.
 - iPhone and the Duo folded: Settings › Collection › Note Types and the Filters menu of Browse push the list; no tab.
 - Under about 1,100 points the sidebar hides itself while the Cards tab shows, as Mail and Xcode do with their navigators.
+- Changed 2026-11-22 (U281 iPad): on iPad the note type list is the section's root (large title, the system search field as its filter) and a note type opens as a navigation step with its own page (N22.7), instead of the list beside the detail. Accepted by Claude (coordinator) under Antoine's delegation, after the built app was compared in landscape and portrait.
 
 ### N22.2 Fields tab (2B)
 

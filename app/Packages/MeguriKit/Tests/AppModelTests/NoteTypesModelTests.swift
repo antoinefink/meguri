@@ -227,12 +227,15 @@ import Testing
 
     @Test func aSaveWithoutASheetThatMeetsLossesChangedAsks() async {
         let backend = FakeNoteTypesBackend()
-        backend.saveErrors = [BridgeError.notetypeStructureRefused(.lossesChanged(summary: Self.losing))]
+        // Extra (ordinal 2) was empty when Save read it and gained content before the op ran.
+        let grown = NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldRemoved(ord: 2, name: "Extra", notesWithContent: 3)],
+                                         losesContent: true)
+        backend.saveErrors = [BridgeError.notetypeStructureRefused(.lossesChanged(summary: grown))]
         let (model, _) = await open(backend)
         model.deleteField(7, row: 2)
         model.save()
         await model.settle()
-        #expect(backend.saved.isEmpty && model.question?.summary == Self.losing)
+        #expect(backend.saved.isEmpty && model.question?.summary == grown)
     }
 
     /// D1: `Stale` shows the changed-elsewhere row; Reload discards the draft.
