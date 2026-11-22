@@ -146,7 +146,8 @@ field() { jq -r "$@" "$result"; }
 lease --no-session
 swift test" ]
   jq -se --arg scratch "$SB/build/swift-test/MeguriCore/Profile" '
-    .[0] == ["build", "--package-path", "app/Packages/MeguriCore", "--configuration", "release", "--scratch-path", $scratch, "-Xswiftc", "-enable-testing", "--build-tests"]
+    .[0][:-2] == ["build", "--package-path", "app/Packages/MeguriCore", "--configuration", "release", "--scratch-path", $scratch, "-Xswiftc", "-enable-testing", "--build-tests"]
+    and .[0][-2] == "-j"
     and .[1][0:9] == ["test", "--package-path", "app/Packages/MeguriCore", "--configuration", "release", "--scratch-path", $scratch, "-Xswiftc", "-enable-testing"]
     and .[1][9:11] == ["--skip-build", "--xunit-output"]
     and .[1][-2:] == ["--filter", "DeckServiceTests/twoThousandDecks"]' "$STUB_CALLS"

@@ -917,7 +917,7 @@ PY
     [ "$(field .status)" = pass ]
     called '^lint$'
     called '^xcframework .* --configuration Debug$'
-    called '^xcodebuild build -project app/Meguri.xcodeproj -scheme Meguri -configuration Debug -destination platform=macOS,arch=arm64 -derivedDataPath build/app/StandaloneDerivedData '
+    called '^xcodebuild build -jobs [0-9]+ -project app/Meguri.xcodeproj -scheme Meguri -configuration Debug -destination platform=macOS,arch=arm64 -derivedDataPath build/app/StandaloneDerivedData '
     called '^xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -scheme Meguri -configuration Debug -destination platform=macOS,arch=arm64 -derivedDataPath build/app/StandaloneDerivedData'
     not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-test|host-lease)|xcrun (simctl|devicectl)'
     if [ "$mode" = team ]; then
