@@ -9,7 +9,7 @@ import UIKit
 extension NativeCardBehaviorPresenter {
     public func openAttachmentPDF(_ bytes: Data) -> CardBehaviorPresentation? {
         guard isAvailable, bytes.count <= CardAttachmentPDF.maximumBytes,
-              let document = PDFDocument(data: bytes) else { return nil }
+              let document = PDFDocument(data: bytes), !document.isLocked, document.pageCount > 0 else { return nil }
         #if os(macOS)
         guard let window else { return nil }
         let panel = CardPDFPanel(contentRect: window.contentLayoutRect,

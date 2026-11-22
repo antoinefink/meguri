@@ -10,7 +10,8 @@ extension WebKitSuites {
         @Test func exactNameAndNavigationRefusal() throws {
             #expect(CardAttachmentPDF.accepts(Self.name))
             for name in ["/" + Self.name, "./" + Self.name, Self.name + "?x", Self.name + "#",
-                         Self.name.uppercased(), Self.name.replacingOccurrences(of: "7", with: "%37"),
+                         Self.name.uppercased(), "MeGuRi-" + String(repeating: "7B", count: 32) + ".pDf",
+                         Self.name.replacingOccurrences(of: "7", with: "%37"),
                          "meguri-" + String(repeating: "a", count: 63) + ".pdf", "other.pdf"] {
                 #expect(!CardAttachmentPDF.accepts(name))
             }
@@ -63,13 +64,28 @@ extension WebKitSuites {
             let file = try await resolver.openAttachmentPDF(Self.name)
             #expect(try await file.attachmentPDFBytes() == bytes)
             await file.close()
+            let spellings = [Self.name, Self.name.uppercased(),
+                             "MeGuRi-" + String(repeating: "7B", count: 32) + ".pDf"]
+            for spelling in spellings {
+                // Prove that each refused endpoint could otherwise serve the tracked file.
+                let aliased = try await resolver.openURLPath("/" + spelling)
+                #expect(try await aliased.attachmentPDFBytes() == bytes)
+                await aliased.close()
+                if spelling != Self.name {
+                    #expect(!CardAttachmentPDF.accepts(spelling))
+                    await #expect(throws: (any Error).self) { try await resolver.openAttachmentPDF(spelling) }
+                }
+                let escaped = spelling.utf8.map { String(format: "%%%02X", $0) }.joined()
+                for path in [spelling, escaped] {
+                    for suffix in ["", "?cache=1", "#page=2", "?cache=%37#page=2"] {
+                        let request = URLRequest(url: try #require(URL(string: MediaOrigin.url.absoluteString + path + suffix)))
+                        let response = try await MediaSchemeHandlerTests.answer(request, fixture: media)
+                        #expect(response.response?.statusCode == 404 && response.body.isEmpty)
+                    }
+                }
+            }
             await resolver.update(trackedNames: [])
             await #expect(throws: (any Error).self) { try await resolver.openAttachmentPDF(Self.name) }
-            for suffix in ["", "?cache=1", "#page=2"] {
-                let request = URLRequest(url: try #require(URL(string: MediaOrigin.url.absoluteString + Self.name + suffix)))
-                let response = try await MediaSchemeHandlerTests.answer(request, fixture: media)
-                #expect(response.response?.statusCode == 404 && response.body.isEmpty)
-            }
         }
 
         @Test func supportedMIMEAndNativeAudioSuffixes() {
@@ -80,6 +96,24 @@ extension WebKitSuites {
             }
             for suffix in ["aif", "aiff", "aifc", "caf"] { #expect(NativePlaybackCopy.extensions.contains(suffix)) }
             for suffix in ["ogg", "oga", "opus", "pdf"] { #expect(!NativePlaybackCopy.extensions.contains(suffix)) }
+        }
+
+        @Test func presentationHandlesAreBoundedAndCancelled() async throws {
+            let fixture = try await CardBehaviorFixture()
+            defer { fixture.close() }
+            fixture.media.add("/" + Self.name, Data("synthetic PDF presenter input".utf8), "")
+            let resolver = try await fixture.media.resolved()
+            await resolver.update(trackedNames: [.init(name: Self.name, caseKey: Self.name)])
+            try await fixture.present(.init(cardID: 77, question: "question", answer: "answer"))
+            for count in 1...17 {
+                fixture.pair.current.behavior.openAttachmentPDF(Self.name)
+                try await CardBehaviorFixture.until("PDF receipt not presented") { fixture.presenter.attachments.count == count }
+                #expect(fixture.presenter.dismissals == max(0, count - 16))
+            }
+            fixture.pair.current.behavior.cancel()
+            #expect(fixture.presenter.dismissals == 17)
+            fixture.pair.current.behavior.cancel()
+            #expect(fixture.presenter.dismissals == 17)
         }
 
         @Test func syntheticAndTunneledClicksCannotOpenAndBindingCancelsPresentation() async throws {
@@ -109,7 +143,10 @@ extension WebKitSuites {
                 fixture.configuration.bridge.receive(name: CardRuntime.signalHandlerName, world: world, body: body, page: page)
             }
             send(receipt, world: WKContentWorld.page.name)
-            send(receipt.merging(["filename": Self.name + "?x"], uniquingKeysWith: { _, new in new }))
+            for name in [Self.name.uppercased(), "MeGuRi-" + String(repeating: "7B", count: 32) + ".pDf",
+                         Self.name.replacingOccurrences(of: "7", with: "%37"), Self.name + "?x", Self.name + "#page=2"] {
+                send(receipt.merging(["filename": name], uniquingKeysWith: { _, new in new }))
+            }
             send(receipt.merging(["generation": update.generation + 1], uniquingKeysWith: { _, new in new }))
             #expect(fixture.presenter.attachments.isEmpty)
             send(receipt)
