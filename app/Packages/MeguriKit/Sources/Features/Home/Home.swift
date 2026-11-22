@@ -600,7 +600,9 @@ public struct HomeDeckTree: View {
                         Section {
                             branches
                         } header: {
+                            // The system's header grey falls short of 4.5:1 here, as on the iPad sidebar.
                             Text("Decks", bundle: .module)
+                                .foregroundStyle(.token(.textSecondary))
                                 .accessibilityIdentifier("home.collection.decksHeader")
                         }
                     } else {
