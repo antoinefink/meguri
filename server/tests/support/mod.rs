@@ -267,3 +267,29 @@ pub async fn within<T>(future: impl std::future::Future<Output = T>) -> T {
         .await
         .expect("bounded fixture progress")
 }
+
+/// Generated one-pixel PNG, including fixture-calculated chunk CRCs and DEFLATE.
+pub fn attachment_png() -> Vec<u8> {
+    use std::io::Write;
+    fn chunk(out: &mut Vec<u8>, name: &[u8;4], content: &[u8]) {
+        out.extend_from_slice(&(content.len() as u32).to_be_bytes());
+        let start=out.len();out.extend_from_slice(name);out.extend_from_slice(content);
+        let mut crc=!0u32;
+        for byte in &out[start..] {
+            crc^=u32::from(*byte);
+            for _ in 0..8 {crc=(crc>>1)^(0xedb8_8320u32 & 0u32.wrapping_sub(crc&1));}
+        }
+        out.extend_from_slice(&(!crc).to_be_bytes());
+    }
+    let mut out=b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut header=Vec::new();header.extend_from_slice(&1u32.to_be_bytes());header.extend_from_slice(&1u32.to_be_bytes());header.extend_from_slice(&[8,2,0,0,0]);
+    chunk(&mut out,b"IHDR",&header);
+    let mut encoded=flate2::write::ZlibEncoder::new(Vec::new(),flate2::Compression::fast());
+    encoded.write_all(&[0,24,48,96]).unwrap();
+    chunk(&mut out,b"IDAT",&encoded.finish().unwrap());chunk(&mut out,b"IEND",&[]);out
+}
+pub fn attachment_mp3() -> Vec<u8> {
+    let mut bytes=vec![0;834];
+    for offset in [0,417] {bytes[offset..offset+4].copy_from_slice(&[0xff,0xfb,0x90,0]);}
+    bytes
+}

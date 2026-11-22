@@ -15,6 +15,11 @@ unused-allowed-license = "allow"
 name = "meguri-model"
 allow = ["MPL-2.0"]
 
+[[licenses.exceptions]]
+name = "webpki-root-certs"
+version = "=1.0.12"
+allow = ["CDLA-Permissive-2.0"]
+
 [bans]
 multiple-versions = "allow"
 

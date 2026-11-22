@@ -285,3 +285,47 @@ counter. OAuth and collection secrets still use the existing OS randomness
 path. `sync-server-deps/20261119T151112Z-72539` records the locked graph,
 advisory check and package notices for this change. The MCP adapter uses the
 existing HTTP stack. Its SDK trial was rejected by the dependency audit.
+
+## M8 restricted attachment HTTPS (audit correction pending verification)
+
+Promote the existing exact `reqwest =0.13.5` pin to production with defaults
+disabled and only `rustls`. Its dev-only `json` feature remains for loopback
+tests. No default cookie, proxy, HTTP/2, compression or alternate TLS feature
+is requested. The client also disables redirects, proxies and all automatic
+HTTP decompression, sends `Accept-Encoding: identity`, rejects encoded replies
+and pins checked public DNS results per request while retaining TLS hostname
+verification. No client identity, authorization or cookie is configured.
+
+The supplied seed includes the Cargo-generated resolved lock. Dependency receipt
+`20261122T124641Z-96532` rejects only `webpki-root-certs` 1.0.12's
+`CDLA-Permissive-2.0` license in cargo-deny and cargo-about. This certificate-data
+package enters through `rustls-platform-verifier` as a wasm32 normal edge and a
+dependency-crate development edge. Linux native TLS uses native certificates;
+this allowance does not select a bundled trust store for Linux or change the
+pinned release reqwest/platform-trust configuration.
+
+The [primary CDLA Permissive 2.0 terms](https://cdla.dev/permissive-2-0/)
+permit use and redistribution of the data with the agreement text included.
+`deny.toml` adds only the exact `webpki-root-certs =1.0.12` exception, leaving
+the global license allowlist and every advisory/source control unchanged.
+`about.toml` accepts the license only for that crate so the locked graph can
+generate its resolved notice, including the agreement text. That crate-specific
+notice setting is bounded to the supplied version by Cargo.lock and cargo-deny's
+exact-version check; it is not a global acceptance of CDLA. Retain the generated
+notice even though this data is outside the native Linux trust path.
+
+No new audit or notice generation ran in this filtered correction. The integrator
+must rerun the locked dependency job, verify the exact resolved notice contains
+the agreement, and complete provider build, musl linkage and package checks.
+The original failed receipt remains failed.
+
+The scratch runtime gains exactly a PEM CA bundle and the supplying package's
+notice, copied from the digest-pinned build image, plus their original measured
+hashes in `trust-inputs.sha256`. `static-packages.txt` records that image's
+ca-certificates version; no package-manager or remote trust update is added to
+the runtime. `SSL_CERT_FILE` names the private runtime bundle for the platform
+verifier. The exact runtime inventory now requires these files and validates
+the copied bytes against the build-input hashes. Package verification must
+confirm the resolved verifier honors this selection on the actual musl image.
+This is implementation intent and a verification requirement, not measured
+graph, packaged TLS or hosted-client compatibility evidence.

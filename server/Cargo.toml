@@ -46,10 +46,12 @@ base64 = "=0.23.1"
 url = "=2.5.9"
 time = { version = "=0.3.55", default-features = false, features = ["std", "formatting"] }
 libc = "=0.2.190"
+# M8 restricted HTTPS acquisition only; no default compression/proxy/cookie graph.
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 tempfile = "=3.27.0"
-# Real loopback HTTP client only; no external endpoints or TLS graph needed.
+# Loopback fixture JSON support; shares the exact runtime HTTP pin.
 reqwest = { version = "=0.13.5", default-features = false, features = ["json"] }
 
 # Integration tests: one binary. A file gets its own target only when it
