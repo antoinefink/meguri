@@ -126,12 +126,9 @@ fn escape(text: &str) -> String {
 }
 fn blank_notice(kind: BlankKind, ord: u32) -> String {
     let (message, anchor) = match kind {
-        BlankKind::EmptyFront => ("The front of this card is blank.".into(), "front-of-card-is-blank"),
+        BlankKind::EmptyFront => ("This card’s front shows no field content.".into(), "front-of-card-is-blank"),
         BlankKind::MissingCloze => (
-            format!(
-                "No cloze {} found on card.\nPlease either add a cloze deletion, or use the Empty Cards tool.",
-                u64::from(ord) + 1
-            ),
+            format!("This card’s note has no cloze {}.", u64::from(ord) + 1),
             "no-cloze-filter-on-cloze-note-type",
         ),
     };

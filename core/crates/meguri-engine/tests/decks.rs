@@ -21,6 +21,11 @@ fn names(h: &Harness) -> Vec<String> {
         .map(|d| d.human_name())
         .collect()
 }
+/// D8 step 6: the summary read right before the delete, as a caller
+/// with no question passes it.
+fn confirmed(h: &Harness, ids: &[meguri_model::ids::DeckId]) -> decks::ConfirmedLosses {
+    decks::ConfirmedLosses::Counts(decks::deletion_summary(&*h.collection.reader(ReaderRole::Query).unwrap(), ids).unwrap())
+}
 fn top(h: &Harness) -> Option<&'static str> {
     match h.collection.peek_undo(UndoScope::Global).unwrap() {
         UndoStatus::Available(s) => Some(s.name),
@@ -101,7 +106,7 @@ fn delete_120_cards_summary_changes_backup_and_undo() {
     assert_eq!(summary, decks::DeletionSummary { decks: 3, cards: 120 });
     let backup = Arc::new(Backup::default());
     h.clock.step_ms(60_000);
-    let deleted = decks::delete(&h.collection, vec![a, b], backup.clone()).unwrap();
+    let deleted = decks::delete(&h.collection, vec![a, b], decks::ConfirmedLosses::Counts(summary), backup.clone()).unwrap();
     assert_eq!(deleted.value, summary);
     assert_eq!(backup.0.load(Ordering::SeqCst), 1);
     assert_eq!(deleted.changes.decks.len(), 3);
@@ -149,7 +154,7 @@ fn collapse_scope_selection_and_not_found() {
     let a = decks::add(&h.collection, "A".into()).unwrap().value.id;
     let b = decks::add(&h.collection, "B".into()).unwrap().value.id;
     let backup = Arc::new(Backup::default());
-    decks::delete(&h.collection, vec![b], backup.clone()).unwrap();
+    decks::delete(&h.collection, vec![b], confirmed(&h, &[b]), backup.clone()).unwrap();
     assert_eq!(backup.0.load(Ordering::SeqCst), 0);
     decks::collapse(&h.collection, vec![a], CollapseScope::Browser, false).unwrap();
     assert_eq!(top(&h), Some("Expand/Collapse"));
@@ -301,7 +306,7 @@ fn backup_failure_aborts_and_concurrent_card_addition_replans() {
         })
         .unwrap();
     let before = col_mod(&h.collection);
-    assert!(decks::delete(&h.collection, vec![a], Arc::new(FailedBackup)).is_err());
+    assert!(decks::delete(&h.collection, vec![a], decks::ConfirmedLosses::Any, Arc::new(FailedBackup)).is_err());
     assert_eq!(col_mod(&h.collection), before);
     assert_eq!(query_int(&h.collection, "SELECT count(*) FROM cards"), 1);
     let backup = Arc::new(BackupWithWrite {
@@ -309,7 +314,9 @@ fn backup_failure_aborts_and_concurrent_card_addition_replans() {
         deck: a,
         calls: AtomicUsize::new(0),
     });
-    let deleted = decks::delete(&h.collection, vec![a], backup.clone()).unwrap();
+    // `Any` (AnkiConnect's `cardsToo`): the card added during the backup is
+    // removed after a replan; counts would refuse it (deck_delete_losses.rs).
+    let deleted = decks::delete(&h.collection, vec![a], decks::ConfirmedLosses::Any, backup.clone()).unwrap();
     assert_eq!(deleted.value, decks::DeletionSummary { cards: 2, decks: 1 });
     assert_eq!(backup.calls.load(Ordering::SeqCst), 1);
 }
@@ -424,7 +431,7 @@ fn delete_undo_restores_every_row_and_review_history_and_redo_reapplies() {
     let summary = summary_of(&h, &[home]);
     assert_eq!(summary, decks::DeletionSummary { decks: 2, cards: 4 });
     let backup = Arc::new(Backup::default());
-    let deleted = decks::delete(&h.collection, vec![home], backup.clone()).unwrap();
+    let deleted = decks::delete(&h.collection, vec![home], confirmed(&h, &[home]), backup.clone()).unwrap();
     assert_eq!(deleted.value, summary);
     assert_eq!(backup.0.load(Ordering::SeqCst), 1);
     assert_eq!(top(&h), Some("Delete Deck"));
@@ -506,7 +513,7 @@ fn filtered_deck_delete_returns_cards_home_and_undo_puts_them_back() {
     // N20.7: no card is lost, so the UI deletes at once.
     assert_eq!(summary_of(&h, &[filt]), decks::DeletionSummary { decks: 1, cards: 0 });
     let backup = Arc::new(Backup::default());
-    let deleted = decks::delete(&h.collection, vec![filt], backup.clone()).unwrap();
+    let deleted = decks::delete(&h.collection, vec![filt], confirmed(&h, &[filt]), backup.clone()).unwrap();
     assert_eq!(deleted.value, decks::DeletionSummary { decks: 1, cards: 0 });
     assert_eq!(backup.0.load(Ordering::SeqCst), 0);
     assert_eq!(top(&h), Some("Delete Deck"));
@@ -542,7 +549,7 @@ fn deleting_a_deck_whose_cards_sit_in_a_filtered_deck_keeps_the_filtered_deck() 
     // The card is counted for its home deck, not for the filtered deck.
     assert_eq!(summary_of(&h, &[home]), decks::DeletionSummary { decks: 1, cards: 1 });
     assert_eq!(summary_of(&h, &[filt]), decks::DeletionSummary { decks: 1, cards: 0 });
-    let deleted = decks::delete(&h.collection, vec![home], Arc::new(Backup::default())).unwrap();
+    let deleted = decks::delete(&h.collection, vec![home], confirmed(&h, &[home]), Arc::new(Backup::default())).unwrap();
     assert_eq!(deleted.value.cards, 1);
     assert_eq!(query_int(&h.collection, "SELECT count(*) FROM cards"), 0);
     assert!(names(&h).contains(&"Filt".into()));
@@ -586,7 +593,7 @@ fn deleting_the_nested_default_deck_keeps_it_renamed_at_the_top_and_undo_restore
     let before = dump(&h.collection);
     // The default deck counts among the decks; it asks as any deck does.
     assert_eq!(summary_of(&h, &[outer]), decks::DeletionSummary { decks: 3, cards: 2 });
-    decks::delete(&h.collection, vec![outer], Arc::new(Backup::default())).unwrap();
+    decks::delete(&h.collection, vec![outer], confirmed(&h, &[outer]), Arc::new(Backup::default())).unwrap();
     let reader = h.collection.reader(ReaderRole::Query).unwrap();
     let default = reader.deck(DeckId(1)).unwrap().unwrap();
     assert_eq!(default.human_name(), "Default+");

@@ -48,6 +48,13 @@ public enum IntervalNames {
 
     /// Starting a review → the first card visible (R1813).
     public static let reviewStartToFirstCard = IntervalName("review.startToFirstCard", .review)
+    /// Starting a review → both card pages loaded for its session: next to
+    /// nothing when warm pages were waiting (a part of `startToFirstCard`).
+    public static let reviewStartPagesReady = IntervalName("review.startPagesReady", .review)
+    /// The session's first head → its first card ready in the idle page:
+    /// render and page update, or a check of the preloaded card (a part of
+    /// `startToFirstCard`).
+    public static let reviewStartCardReady = IntervalName("review.startCardReady", .review)
     /// Card N presented → card N+1 settled in the idle page (U176, U241).
     public static let reviewPresentToNextSettled = IntervalName("review.presentToNextSettled", .review)
     /// A card rendered on demand because nothing was prepared (U176).
@@ -88,7 +95,8 @@ public enum IntervalNames {
     public static let all: [IntervalName] = [
         answerToNextVisible, revealToAnswerVisible, launchToDeckListInteractive, keystrokeToResultsVisible,
         browserOpenToFirstPage, statsFirstGraphs, editorOpenToEditable, syncStartToEnd,
-        reviewStartToFirstCard, reviewPresentToNextSettled, reviewOnDemandRender, reviewAnswerMainThread,
+        reviewStartToFirstCard, reviewStartPagesReady, reviewStartCardReady,
+        reviewPresentToNextSettled, reviewOnDemandRender, reviewAnswerMainThread,
         reviewUndoToCardVisible, reviewActionToNextVisible, reviewTouchDownToTint, searchFirstPage,
         statsAllGraphs, statsScopeChange, heatmapRender, cardInfoOpen,
         probeSyntheticDelay, probeNativeSwap,
@@ -402,6 +410,22 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let browseClose = BridgeCall("BrowseSearchSession.close")
     public static let browseSelectionResolve = BridgeCall("BrowseSelection.resolve")
 
+    public static let filterRunText = BridgeCall("filter_run_text")
+    public static let filterReadText = BridgeCall("filter_read_text")
+    public static let filterCommit = BridgeCall("filter_commit")
+    public static let filterTextIncomplete = BridgeCall("filter_text_incomplete")
+    public static let filterDeckValue = BridgeCall("filter_deck_value")
+    public static let filterSuggestions = BridgeCall("filter_suggestions")
+    public static let startFilterCounts = BridgeCall("start_filter_counts")
+    public static let filterCountsJobResult = BridgeCall("FilterCountsJob.result")
+    public static let browserColumnSet = BridgeCall("browser_column_set")
+    public static let changeBrowserColumnSet = BridgeCall("change_browser_column_set")
+    public static let useStandardBrowserColumns = BridgeCall("use_standard_browser_columns")
+    public static let startBrowseSelectionCounts = BridgeCall("start_browse_selection_counts")
+    public static let browseSelectionCountsJobResult = BridgeCall("BrowseSelectionCountsJob.result")
+    public static let startFindDuplicates = BridgeCall("start_find_duplicates")
+    public static let findDuplicatesJobResult = BridgeCall("FindDuplicatesJob.result")
+
     public static let startCreateBackup = BridgeCall("start_create_backup")
     public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
     public static let startRestoreBackup = BridgeCall("start_restore_backup")
@@ -708,5 +732,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
         startNotetypeStructureSave, notetypeStructureJobResult, notetypeCheckFieldName, templateFieldReferences,
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
+        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, startBrowseSelectionCounts, browseSelectionCountsJobResult,
+        startFindDuplicates, findDuplicatesJobResult,
     ]
 }

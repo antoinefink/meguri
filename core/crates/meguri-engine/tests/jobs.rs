@@ -279,3 +279,36 @@ fn a_busy_thread_is_listed_busy_until_its_work_ends() {
         thread::sleep(Duration::from_millis(5));
     }
 }
+
+/// T12.4's "lower priority than a search": a utility job's worker runs at
+/// utility QoS while its work runs, and goes back to user-initiated after.
+#[test]
+fn a_utility_job_runs_at_utility_qos_and_its_worker_returns_to_user_initiated() {
+    let h = Harness::open();
+    let threads = h.engine.threads().clone();
+    let qos_of = |threads: &ThreadRegistry, name: &str| {
+        threads
+            .threads()
+            .into_iter()
+            .find(|thread| thread.name == name)
+            .map(|thread| thread.qos)
+    };
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let inside = threads.clone();
+    h.engine
+        .start_utility_job(JobKind::BulkOp, move |_| {
+            let name = thread::current().name().unwrap_or_default().to_owned();
+            let _ = sender.send((name.clone(), qos_of(&inside, &name)));
+            Ok(())
+        })
+        .unwrap();
+    let (worker, during) = receiver.recv_timeout(Duration::from_secs(20)).unwrap();
+    assert_eq!(during, Some(Qos::Utility), "{worker}");
+    // The scope ends when the work returns, before the job is finished.
+    let mut tries = 0;
+    while qos_of(&threads, &worker) != Some(Qos::UserInitiated) {
+        tries += 1;
+        assert!(tries < 4_000, "{worker} stayed at {:?}", qos_of(&threads, &worker));
+        thread::sleep(Duration::from_millis(5));
+    }
+}

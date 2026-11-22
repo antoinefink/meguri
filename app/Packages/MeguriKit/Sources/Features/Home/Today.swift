@@ -103,12 +103,15 @@ public struct TodayView: View {
             summary: TodaySummary(nodes: collection.decks, studied: collection.studiedToday, previous: previous),
             nextLearningReadyAt: collection.nextLearningReadyAt, totals: totals,
             error: besideDeckList ? nil : collection.error,
-            canStudy: collection.studyAllAvailable,
+            // While Study starts, the button keeps its look until the card shows (N16.8).
+            canStudy: collection.studyAllAvailable || collection.studyStarting,
             study: { Task { await collection.startStudyAll() } },
             activity: collection.activity, widths: collection.navigation.activityRowWidths)
             .activityLoading(collection.activity, scope: .collection, active: collection.heatmapRefreshes,
                              widths: collection.navigation.activityRowWidths, page: .today)
             .modifier(TodayTitle(enabled: besideDeckList, subtitle: HomeHeading.todaySubtitle(totals, locale: locale)))
+            // Study starts the walk's first deck: its first card waits beneath (N16.8).
+            .modifier(StudyActionTarget(collection: collection, deckID: collection.studyAllDecks.first?.id))
     }
 
     /// The walk's in this launch, else the last deck's session the store keeps (N24.2).

@@ -19,7 +19,8 @@ extension EventTests {
             try await MaintenanceLane.shared.bootstrapCollection(location)
             try await collection.open(location, randomSeed: 329)
             let decks = try await CoreDeckService().allDeckNames().decks.map(\.id)
-            let deletion = try await CoreDeckService().startDeleteDecks(ids: decks)
+            let deletion = try await CoreDeckService().startDeleteDecks(
+                ids: decks, confirmed: try await CoreDeckService().deckDeletionSummary(ids: decks))
             _ = try await deletion.value()
             _ = try await CoreDeckService().renameDeck(id: 1, name: "Generated-D1")
             let child = try await CoreDeckService().addDeck(name: "Generated-D1::Generated-D2")

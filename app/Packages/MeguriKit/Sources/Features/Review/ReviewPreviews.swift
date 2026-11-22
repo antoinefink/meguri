@@ -61,7 +61,7 @@ private struct ReviewFixture: View {
             enabled: true, close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in },
             actions: ReviewMoreActions(editNoteEnabled: { state != .loading }, cardActionsEnabled: { state != .loading })) {
                 if state == .loading {
-                    ReviewStatusLayout { LoadingStateView(Text(verbatim: "Preparing review…")) }
+                    ReviewStatusLayout { ProgressView() }
                 }
                 else {
                     ScrollView {

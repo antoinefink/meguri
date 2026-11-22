@@ -72,13 +72,15 @@ public final class DeckDeletionModel {
     private var task: Task<Void, Never>?
     // Tests replace the two calls; production uses U28's deck service.
     @ObservationIgnored var readSummary: @MainActor ([Int64]) async throws -> DeckDeletionSummary
-    @ObservationIgnored var deleteDecks: @MainActor ([Int64]) async throws -> DeckDeletion
+    /// The decks and the confirmed losses (`decks/decks` D8 step 6): the last
+    /// summary read before the delete.
+    @ObservationIgnored var deleteDecks: @MainActor ([Int64], DeckDeletionSummary) async throws -> DeckDeletion
 
     init(owner: ReviewCollection) {
         self.owner = owner
         readSummary = { @MainActor in try await CoreDeckService().deckDeletionSummary(ids: $0) }
-        deleteDecks = { @MainActor ids in
-            let job = try await CoreDeckService().startDeleteDecks(ids: ids)
+        deleteDecks = { @MainActor ids, confirmed in
+            let job = try await CoreDeckService().startDeleteDecks(ids: ids, confirmed: confirmed)
             // Planning and a queued write observe cancellation; an admitted write completes.
             return try await withTaskCancellationHandler {
                 try await job.value()
@@ -137,21 +139,39 @@ public final class DeckDeletionModel {
             // commit can drop them from the tree, and a lost result needs them.
             let processed = owner.deckSubtree(deckID)
             do {
-                let summary = try await readSummary([deckID])
+                var summary = try await readSummary([deckID])
                 // A deck that is already gone (a sync removed it) writes nothing.
                 guard isCurrent(), summary.decks > 0 else { return }
-                let subdecks = summary.decks - 1
-                if summary != shown, let message = Message(subdecks: subdecks, cards: summary.cards) {
-                    confirmation = Confirmation(deckID: deckID, anchor: anchor, name: name, subdecks: subdecks,
-                        cards: summary.cards, message: message, summary: summary, generation: expected)
+                var shown = shown
+                while true {
+                    let subdecks = summary.decks - 1
+                    if summary != shown, let message = Message(subdecks: subdecks, cards: summary.cards) {
+                        confirmation = Confirmation(deckID: deckID, anchor: anchor, name: name, subdecks: subdecks,
+                            cards: summary.cards, message: message, summary: summary, generation: expected)
+                        return
+                    }
+                    // Backgrounding before the write starts stops it; the alert says nothing was deleted.
+                    try Task.checkCancellation()
+                    let deleted: DeckDeletion
+                    do {
+                        // D8 step 6: this read is what the delete may remove.
+                        deleted = try await deleteDecks([deckID], summary)
+                    } catch BridgeError.deckRefused(.lossesChanged(let decks, let cards)) {
+                        // Something arrived after that read; nothing was written. The
+                        // fresh counts are a new read: ask with them, or delete at once
+                        // when no card would be lost (N20.7). Each repeat needs another write.
+                        // Backgrounding cancelled the task: drop the question, as nothing
+                        // was written and nobody would answer it.
+                        guard isCurrent(), !Task.isCancelled else { return }
+                        summary = DeckDeletionSummary(decks: decks, cards: cards)
+                        shown = nil
+                        continue
+                    }
+                    guard isCurrent(), deleted.summary.generation == expected else { return }
+                    let removed = deleted.summary.changes.decks.filter { $0.change == .removed }.map(\.id)
+                    await finish(processed: processed.union(removed), owner: owner, generation: expected)
                     return
                 }
-                // Backgrounding before the write starts stops it; the alert says nothing was deleted.
-                try Task.checkCancellation()
-                let deleted = try await deleteDecks([deckID])
-                guard isCurrent(), deleted.summary.generation == expected else { return }
-                let removed = deleted.summary.changes.decks.filter { $0.change == .removed }.map(\.id)
-                await finish(processed: processed.union(removed), owner: owner, generation: expected)
             } catch BridgeError.commitCompleted {
                 // The write committed; only its result was lost.
                 guard isCurrent() else { return }

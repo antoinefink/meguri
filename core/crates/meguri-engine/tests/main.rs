@@ -48,6 +48,8 @@ pub mod controlled_services;
 pub mod day_conformance;
 #[path = "deck_config.rs"]
 pub mod deck_config;
+#[path = "deck_delete_losses.rs"]
+pub mod deck_delete_losses;
 #[path = "deck_options.rs"]
 pub mod deck_options;
 #[path = "decks.rs"]
@@ -62,6 +64,8 @@ pub mod executor_ordering;
 pub mod external_change;
 #[path = "filter_counts.rs"]
 pub mod filter_counts;
+#[path = "find_duplicates.rs"]
+pub mod find_duplicates;
 #[path = "find_replace.rs"]
 pub mod find_replace;
 #[path = "flags.rs"]

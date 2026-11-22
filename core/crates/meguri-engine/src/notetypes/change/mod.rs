@@ -629,18 +629,9 @@ fn plan(
         return Err(StructureRefusal::SchemaChanged.into());
     }
     let shape = Shape::of(&old, &new);
+    // A field map may name one old field more than once, to any note type
+    // (R945): the structure report carries the repeat (K19.2).
     check_maps(&shape, request)?;
-    // R945's repeated field map between two note types is not built: the
-    // structure report refuses a repeated origin in a `type_changes` map.
-    // Refused here, before any backup or write.
-    if request.old_notetype != request.new_notetype {
-        let mut seen = std::collections::HashSet::new();
-        if request.fields.iter().flatten().any(|o| !seen.insert(*o)) {
-            return Err(EngineError::Unsupported {
-                feature: "change_notetype.repeated_field_between_note_types".into(),
-            });
-        }
-    }
     // Check 2.
     if changes_nothing(request) {
         return Err(StructureRefusal::NoChanges.into());

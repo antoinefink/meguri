@@ -73,6 +73,9 @@ public enum DeckRefusal: Sendable, Hashable {
     case underDescendant
     case filteredDeck
     case defaultPreset
+    /// `decks/decks` D8 step 6: the deletion's live counts grew past the
+    /// confirmed ones; the question shows again with these.
+    case lossesChanged(decks: UInt64, cards: UInt64)
     init(_ raw: MeguriCoreBindings.DeckRefusal) {
         switch raw {
         case .filteredParent: self = .filteredParent
@@ -80,6 +83,7 @@ public enum DeckRefusal: Sendable, Hashable {
         case .underDescendant: self = .underDescendant
         case .filteredDeck: self = .filteredDeck
         case .defaultPreset: self = .defaultPreset
+        case .lossesChanged(let decks, let cards): self = .lossesChanged(decks: decks, cards: cards)
         }
     }
 }

@@ -38,6 +38,12 @@ public final class ReviewCoordinator {
     /// Collection-owned routing; pages retain only render metadata, never sync ownership.
     public var onVisibleMediaChanged: (([String]) -> Void)?
     public private(set) var visibleMediaNames: [String] = []
+    /// The Study click's way to the first card (R1813); the collection sets it.
+    @ObservationIgnored var startTrace: StudyStartTrace?
+    /// Called once: just before the session's first card is swapped in, or as
+    /// its first state other than loading shows with a session open. Study's
+    /// review appears then, with its card (N16.8).
+    @ObservationIgnored var onFirstPresentation: (() -> Void)?
     private let client: any ReviewSessionClient
     private let store: ReviewRecordStore
     private let clock: AppClock
@@ -99,6 +105,7 @@ public final class ReviewCoordinator {
             }
         }
         surface.onRecovery = { [weak self] in self?.requestRefresh(question: true) }
+        surface.onWillPresent = { [weak self] in self?.firstPresentation() }
         (surface as? ReviewPages)?.onMediaReady = { [weak self] in self?.mediaPresentationReady() }
         if nativeInput != nil, let pair = surface.pair {
             let previous = pair.onPlaybackObservation
@@ -217,15 +224,18 @@ public final class ReviewCoordinator {
         #endif
         do {
             let result = try await coreStart.value
+            startTrace?.mark(.core)
             failureStage = .presentation
             #if DEBUG
             logger.notice("core.returned")
             #endif
             switch result {
             case .refused(.fsrsPolicyPending):
+                startTrace?.cancel()
                 recordDiagnostic(.init(component: .review, operation: .start, stage: .admission, outcome: .refused))
                 onPolicyRefusal?(); phase = .error; notice = "Meguri couldn’t prepare this collection for study."
             case .refused(.presetUnsupported):
+                startTrace?.cancel()
                 recordDiagnostic(.init(component: .review, operation: .start, stage: .admission, outcome: .refused))
                 phase = .error; notice = "This preset needs a newer Meguri"
             case .started(let id, let generation, let head, _):
@@ -239,7 +249,7 @@ public final class ReviewCoordinator {
                 logger.notice("surface.begin")
                 #endif
                 let loaded = try await preparePages { try await self.surface.load() }
-                if loaded { startupNeedsPreparation = false }
+                if loaded { startupNeedsPreparation = false; startTrace?.mark(.loaded) }
                 #if DEBUG
                 logger.notice("surface.end")
                 logger.notice("apply.begin")
@@ -637,6 +647,8 @@ public final class ReviewCoordinator {
                 }
             }
         case .waitingUntil, .finished:
+            // No first card to show: the start's intervals end without one.
+            startTrace?.cancel()
             clearVisibleMedia()
             preload?.cancel(); await preload?.value; preload = nil
             timer.pause(at: uptime()); activeTime.pause(at: uptime()); surface.pair?.pauseAudio()
@@ -647,6 +659,7 @@ public final class ReviewCoordinator {
                 waitingUntil = Date(timeIntervalSince1970: Double(instant)); phase = .waiting
             } else { waitingUntil = nil; phase = .finished }
             terminalPresentation = phase
+            firstPresentation()
             if entering { onTerminal?() }
             // An empty head settles the restoration it belongs to.
             // Later work still requires a new explicit action.
@@ -722,6 +735,7 @@ public final class ReviewCoordinator {
         #endif
         try await surface.render(sessionID: sessionID, items: head.items)
         try Task.checkCancellation()
+        startTrace?.mark(.rendered)
         #if DEBUG
         logger.notice("render.end")
         #endif
@@ -737,6 +751,7 @@ public final class ReviewCoordinator {
             #endif
             try await surface.present(item: item, inputTime: inputTime ?? uptime())
             try Task.checkCancellation()
+            startTrace?.mark(.presented)
             #if DEBUG
             logger.notice("present.end")
             #endif
@@ -751,6 +766,7 @@ public final class ReviewCoordinator {
         try Task.checkCancellation()
         terminalPresentation = nil
         phase = sideIsAnswer ? .answer : .question
+        firstPresentation()
         finishRestoration(intent)
         if !paused { activeTime.resume(at: uptime()) }
         if let next = head.items.dropFirst().first {
@@ -933,6 +949,7 @@ public final class ReviewCoordinator {
         if let endTask { return await endTask.value }
         closingAdmission = true
         restorationID = nil
+        startTrace?.cancel()
         beginPause()
         let task = Task { () -> Bool in
             do {
@@ -958,6 +975,7 @@ public final class ReviewCoordinator {
     public func generationEnded() {
         closingAdmission = true
         restorationID = nil
+        startTrace?.cancel()
         summaryTask?.cancel()
         paused = true; deadlineTimer?.invalidate(); preload?.cancel()
         sessionID = nil; phase = .ended; surface.close()
@@ -996,7 +1014,15 @@ public final class ReviewCoordinator {
     }
     private func fail(_ error: any Error) {
         guard phase != .ended else { return }
+        startTrace?.cancel()
         notice = String(describing: error); phase = .error
+        // A start that failed before its session opened never shows (N16.8).
+        if sessionID != nil { firstPresentation() }
+    }
+    private func firstPresentation() {
+        guard let hook = onFirstPresentation else { return }
+        onFirstPresentation = nil
+        hook()
     }
     public static func name(_ rating: ReviewRating) -> String {
         switch rating { case .again: "again"; case .hard: "hard"; case .good: "good"; case .easy: "easy" }
