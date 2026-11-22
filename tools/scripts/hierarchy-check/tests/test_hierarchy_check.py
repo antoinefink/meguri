@@ -1224,7 +1224,8 @@ class NativeNavigationBarTitlePair(unittest.TestCase):
         self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(subtitle_frame=(340, 120, 178, 13.5)))))
         self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(title_label="Decks"))))
         second = el("staticText", "", "Another", f=(340, 131.25, 120, 13.5))
-        self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(extra=[second]))))
+        # Both texts under the title keep their overlaps with it, besides their own.
+        self.assertEqual(kinds(hierarchy_check.check(self.tree(extra=[second]))), ["text-overlap"] * 3)
 
 
 class NativeSidebarSearchField(unittest.TestCase):

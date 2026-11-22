@@ -7,6 +7,9 @@ struct Rows: View {
         List(selection: $selection) {
             Text("Today").listRowBackground(selected ? Color.gray : nil)
             Text("Decks").listRowBackground(isSelected ? Color.gray : nil)
+            Text("Wrapped").listRowBackground(
+                selected ? Color.gray : nil
+            )
             Text("Plain").tag(1)
             Text("Clear").listRowBackground(Color.clear)
             // .listRowBackground(selected ? Color.gray : nil) in a comment is not code.

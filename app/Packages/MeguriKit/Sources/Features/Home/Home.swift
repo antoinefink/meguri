@@ -577,9 +577,16 @@ public struct HomeDeckTree: View {
         GeometryReader { viewport in
             ScrollViewReader { proxy in
                 // N26.1: beside Today the list draws its selection itself, as the iPad sidebar
-                // does; the rows' buttons navigate and the binding only reads where the detail is.
+                // does. A tap runs the row's button; a selection the list makes itself (keys)
+                // takes the same path. Either way the binding then reads where the detail is.
                 List(selection: today.map { today in
-                    Binding(get: { markedRow(today.selection) }, set: { _ in })
+                    Binding(get: { markedRow(today.selection) }, set: { row in
+                        guard let row, row != markedRow(today.selection) else { return }
+                        switch row {
+                        case .today: today.open()
+                        case .deck(let id): select(id)
+                        }
+                    })
                 }) {
                     if let today {
                         // N14.10, N26.3: Today in its own section, then the decks under "Decks".
