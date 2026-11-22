@@ -283,41 +283,53 @@ private struct WelcomeRow: View {
     }
 
     var body: some View {
-        Button(action: action.run) {
-            HStack(spacing: Spacing.small) {
-                // At the accessibility text sizes the text takes the row: a label there wraps
-                // each text around its symbol, and the state views leave their symbols out too.
-                if decorated {
-                    Label { text } icon: {
-                        // The title names the row; the symbol is decoration.
-                        Image(systemName: choice.systemImage)
-                            .opacity(dimming)
-                            .accessibilityHidden(true)
-                    }
-                } else {
-                    text
-                }
-                Spacer(minLength: 0)
-                if decorated {
-                    // Drawn: these rows act in place, so the system adds no disclosure indicator of its own.
-                    Image(systemName: "chevron.forward")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(chevronStyle)
-                        .opacity(dimming)
-                        .accessibilityHidden(true)
-                }
+        Group {
+            if action.enabled {
+                Button(action: action.run) { content }
+                #if os(macOS)
+                .buttonStyle(.plain)
+                #endif
+            } else {
+                // Not a button while unavailable: the Mac's disabled button style dims all
+                // of its content, the reason line too. It is still read as a dimmed button.
+                content
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isButton)
             }
-            .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
-            .contentShape(Rectangle())
         }
-        #if os(macOS)
-        .buttonStyle(.plain)
-        #endif
         .disabled(!action.enabled)
-        // The title names the row; the explanation is its hint.
+        // The title names the row; the explanation, or the reason, is its hint.
         .accessibilityLabel(Text(verbatim: choice.title))
         .accessibilityHint(Text(verbatim: secondaryLine))
         .accessibilityIdentifier(choice.identifier)
+    }
+
+    private var content: some View {
+        HStack(spacing: Spacing.small) {
+            // At the accessibility text sizes the text takes the row: a label there wraps
+            // each text around its symbol, and the state views leave their symbols out too.
+            if decorated {
+                Label { text } icon: {
+                    // The title names the row; the symbol is decoration.
+                    Image(systemName: choice.systemImage)
+                        .opacity(dimming)
+                        .accessibilityHidden(true)
+                }
+            } else {
+                text
+            }
+            Spacer(minLength: 0)
+            if decorated {
+                // Drawn: these rows act in place, so the system adds no disclosure indicator of its own.
+                Image(systemName: "chevron.forward")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(chevronStyle)
+                    .opacity(dimming)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 
