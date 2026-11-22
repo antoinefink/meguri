@@ -850,6 +850,11 @@ PUBLIC_ARTIFACTS = {
         'f24e5bf89ad95dd53b90d300bebe3d1b6318c41c082171361f90a5c49441db75',
     'server/src/mcp_service/transport.rs':
         '6c0fed2e3865fbdf02cd4faa84340fc70e8b888f3834cd64529ade113705bab9',
+    # Complete-content PUBLIC review: mcp-search-candidates, 2026-11-22.
+    'server/src/collection/mcp/search_cache.rs':
+        'f0f5d92a2f3d79056c19d1d4953d2d9376c4633f3ab198380db38c5ba48d82be',
+    'server/src/collection/mcp/search_index.rs':
+        'eceacc44bfa21be963bb4744c75c52bd694da92ec3b77405339c754621807e58',
     'server/src/mcp_service/authority_tests.rs':
         '7b4c9e754a30ca8dca5dbfd226f2856104ec8627de5c69cc4fcb6adb0152b2e2',
     'server/src/mcp_service/attachments/format/audio.rs':
@@ -1192,7 +1197,7 @@ PUBLIC_ARTIFACTS = {
     "specs/servers/meguri-sync-web.md":
         '5b80364781b6b1eaa16529b666cfd1ca3e6a76098dcb8c2282e7406810640bea',
     "specs/servers/meguri-collection-mcp.md":
-        "343caeef1e94b42c4ab4483382a920984aecac2cc47011740cb8668ada266d66",
+        "54f68d949b88f1d0b6bc09b5d25c98123ea20e05bcc9bc4a4cab22b7574ed03d",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
         "81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb",
     "specs/conformance/meguri-sync-server.md":
