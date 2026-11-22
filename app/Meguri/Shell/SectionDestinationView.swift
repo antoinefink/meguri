@@ -57,7 +57,9 @@ struct ShellFeatures {
     /// collection, so with none on this device (first run, N18.3) they are
     /// not offered, nor their View commands.
     var sectionShown: (AppSection) -> Bool = { _ in true }
-    var syncStatus: () -> AnyView = { AnyView(EmptyView()) }
+    /// N23.6: the toolbar's sync status button; nil (sample shells) declares no item,
+    /// since an item with nothing in it would still get an empty glass.
+    var syncStatus: (() -> AnyView)?
     var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
     /// N20.9: the Deck Options page pushed on a deck page.
     var deckOptions: (DeckID, AppNavigation) -> AnyView = { _, _ in AnyView(EmptyView()) }

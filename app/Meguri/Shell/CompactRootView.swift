@@ -76,8 +76,9 @@ struct CompactRootView: View {
     private var decksList: some View {
         NavigationStack {
             SectionDestinationView(screen: .root(.home), navigation: navigation, features: features)
-                .toolbar { ToolbarItem(placement: .primaryAction) { features.syncStatus() } }
         }
+        // N23.6: the list's own trailing group carries the sync button first (Home).
+        .environment(\.syncStatusItem, features.syncStatus?())
         // Today shows beside this list: the list does not repeat it (N14.1).
         .environment(\.todayBesideDeckList, true)
     }
@@ -113,13 +114,15 @@ struct CompactRootView: View {
     private func singleStack(_ tab: CompactTab) -> some View {
         NavigationStack(path: Binding(get: { navigation.compactPath(tab) }, set: { navigation.setCompactPath($0, for: tab) })) {
             SectionDestinationView(screen: .root(tab.section), navigation: navigation, features: features)
-                .toolbar {
-                    if tab == .decks { ToolbarItem(placement: .primaryAction) { features.syncStatus() } }
-                }
                 .navigationDestination(for: Destination.self) { destination in
                     SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
                 }
         }
+        // N23.6: every screen of the Decks stack (the list, a deck page, a subdeck's)
+        // puts the sync button first in its own trailing group with search and Add, so
+        // the system keeps it in that group: never a separate item, which it moved
+        // to the bottom when the large title scrolled away.
+        .environment(\.syncStatusItem, tab == .decks ? features.syncStatus?() : nil)
     }
 }
 

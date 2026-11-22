@@ -39,6 +39,9 @@ enum TestHooks {
             }
             #endif
             shell?.prepare(navigation)
+            if let render = options.syncRender, let collection {
+                SyncRoutes.showRender(render, over: collection, clock: collection.configuration.clock)
+            }
             BrowseScrollDriver.shared.collection = { [weak collection] in collection?.browse }
             BrowseScrollDriver.shared.listen()
             ShellCommands.shared.listen(navigation: navigation, sizeClass: options.sizeClass,

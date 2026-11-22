@@ -24,15 +24,6 @@ public struct CloudSyncStatusButton: View {
     @State private var sheetHeight: CGFloat?
     #endif
     public init(collection: ReviewCollection) { self.collection = collection }
-    private var meguri: Bool { collection.sync.providerState?.selection == .meguri }
-    /// T20.1: the service's name, or `sync.button.label.off` with no service.
-    private var accessibilityLabelKey: String {
-        switch collection.sync.providerState?.selection {
-        case .meguri: "sync.meguri.button.label"
-        case .iCloud: "sync.button.label"
-        case .localOnly, nil: "sync.button.label.off"
-        }
-    }
     /// N15.4: the needs-attention symbol only for needs you; otherwise the state underneath.
     private var main: SyncMainStatus { collection.sync.mainStatus }
     private var titleKey: String { main.titleKey }
@@ -52,71 +43,151 @@ public struct CloudSyncStatusButton: View {
             set: { if self.compact == compact { presented.wrappedValue = $0 } })
     }
     public var body: some View {
-        HStack {
-            if let mediaLine {
-                Text(mediaLine).font(.footnote).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("sync.status.mediaIndicator")
+        // N23.6: one plain toolbar symbol, like its neighbours. A tap syncs at once
+        // in the ordinary states and opens the panel only where a sync cannot
+        // resolve the state; a long press (a secondary click on the Mac) shows
+        // the status line, Sync Now and Sync Settings. No text beside it and
+        // no view around it, so the system draws it as one item of its group.
+        Menu {
+            Section(statusLine) {
+                Button(SyncText.value("sync.now.command")) { syncNowFromMenu() }
+                    .disabled(!syncNowEnabled)
+                    .accessibilityIdentifier("sync.status.menu.syncNow")
+                Button(SyncText.value("sync.status.openSettings")) { openSettingsFromMenu() }
+                    .accessibilityIdentifier("sync.status.menu.settings")
             }
-            Button { presented.wrappedValue.toggle() } label: {
-                // N23.2: the moving symbol turns exactly while the panel's bar shows.
-                SyncStatusSymbol(status: main, iCloud: collection.sync.symbolsAreICloud,
-                    turning: !reduceMotion && collection.sync.panelProgress != nil)
-            }
-            .accessibilityLabel(SyncText.value(accessibilityLabelKey))
-            .accessibilityValue(SyncText.value(titleKey).replacingOccurrences(of: "…", with: ""))
-            .help([SyncText.value(titleKey), SyncStatusCopy.detail(collection.sync, now: clock.now())]
-                .compactMap { $0 }.joined(separator: "\n"))
-            .accessibilityIdentifier("sync.status.button")
-            .disabled(collection.syncPresentation.statusHandoffPending)
-            .popover(isPresented: presented(compact: false)) {
-                // N23.1: 320 points wide, as tall as its content.
-                #if os(iOS)
-                // Where the popover becomes a sheet (an iPhone held wide, the Duo
-                // opened), the sheet fits the panel and scrolls past the screen's
-                // height, as at compact width; as a popover it is as tall as the panel.
-                FittedPanelScroll(height: $popoverHeight, learns: .popover) {
-                    panel.padding().frame(width: ContentWidth.primaryAction)
-                }
-                .frame(width: ContentWidth.primaryAction)
-                .frame(idealHeight: popoverHeight)
-                .presentationCompactAdaptation(.sheet)
-                .presentationDetents(Self.fittedDetents(popoverHeight))
-                #else
-                panel
-                    .padding()
-                    .frame(width: ContentWidth.primaryAction)
-                #endif
-            }
+        } label: {
+            // N23.2: the moving symbol turns exactly while the panel's bar shows.
+            SyncStatusSymbol(status: main, iCloud: collection.sync.symbolsAreICloud,
+                turning: !reduceMotion && collection.sync.panelProgress != nil,
+                accented: feedback.accented || collection.syncPresentation.buttonAccentHeld)
+        } primaryAction: {
+            tap()
+        }
+        .menuIndicator(.hidden)
+        .accessibilityLabel(SyncText.value("sync.button.accessibilityLabel"))
+        .accessibilityValue(SyncText.value(titleKey).replacingOccurrences(of: "…", with: ""))
+        .accessibilityHint(hint)
+        .help([SyncText.value(titleKey), SyncStatusCopy.detail(collection.sync, now: clock.now())]
+            .compactMap { $0 }.joined(separator: "\n"))
+        .accessibilityIdentifier("sync.status.button")
+        .disabled(collection.syncPresentation.statusHandoffPending)
+        .popover(isPresented: presented(compact: false)) {
+            // N23.1: 320 points wide, as tall as its content.
             #if os(iOS)
-            // Keep status and connection separate; native dismissal, rather
-            // than a delay or view disappearance, orders the compact handoff.
-            .sheet(isPresented: presented(compact: true), onDismiss: {
-                guard let id = nativeCompactStatusID else { return }
-                nativeCompactStatusID = nil
-                collection.compactSyncStatusDidDismiss(id)
-            }) {
-                // The same panel as the popover, in a sheet as tall as the panel
-                // (N23.1): the detent grows with the text and stops at the screen's
-                // height, where the panel scrolls.
-                FittedPanelScroll(height: $sheetHeight, learns: .sheet) { panel.padding() }
-                    .presentationDetents(Self.fittedDetents(sheetHeight))
-                    .onAppear {
-                        if nativeCompactStatusID == nil {
-                            nativeCompactStatusID = collection.syncPresentation.statusPresentationID
-                        }
-                    }
+            // Where the popover becomes a sheet (an iPhone held wide, the Duo
+            // opened), the sheet fits the panel and scrolls past the screen's
+            // height, as at compact width; as a popover it is as tall as the panel.
+            FittedPanelScroll(height: $popoverHeight, learns: .popover) {
+                panel.padding().frame(width: ContentWidth.primaryAction)
             }
-            .onChange(of: sizeClass) { _, _ in
-                collection.syncPresentation.cancelStatusHandoff()
-                collection.syncPresentation.statusPresented = false
-            }
+            .frame(width: ContentWidth.primaryAction)
+            .frame(idealHeight: popoverHeight)
+            .presentationCompactAdaptation(.sheet)
+            .presentationDetents(Self.fittedDetents(popoverHeight))
+            #else
+            panel
+                .padding()
+                .frame(width: ContentWidth.primaryAction)
             #endif
         }
         #if os(iOS)
-        // The sheet opens at the panel's height, not at a default that it then
-        // leaves: the panel is measured here, out of sight, while no sheet shows.
-        // Outside the button, so the button's identifier stays on one element.
-        .background { sheetMeasure }
+        // Keep status and connection separate; native dismissal, rather
+        // than a delay or view disappearance, orders the compact handoff.
+        .sheet(isPresented: presented(compact: true), onDismiss: {
+            guard let id = nativeCompactStatusID else { return }
+            nativeCompactStatusID = nil
+            collection.compactSyncStatusDidDismiss(id)
+        }) {
+            // The same panel as the popover, in a sheet as tall as the panel
+            // (N23.1): the detent grows with the text and stops at the screen's
+            // height, where the panel scrolls.
+            FittedPanelScroll(height: $sheetHeight, learns: .sheet) { panel.padding() }
+                .presentationDetents(Self.fittedDetents(sheetHeight))
+                .onAppear {
+                    if nativeCompactStatusID == nil {
+                        nativeCompactStatusID = collection.syncPresentation.statusPresentationID
+                    }
+                }
+        }
+        .onChange(of: sizeClass) { _, _ in
+            collection.syncPresentation.cancelStatusHandoff()
+            collection.syncPresentation.statusPresented = false
+        }
+        #endif
+        .onChange(of: observed) { _, now in observe(now) }
+        // The check keeps the accent colour for a moment after a success, then
+        // returns to the default colour.
+        .task(id: feedback.accented) {
+            guard feedback.accented else { return }
+            try? await Task.sleep(for: SyncButton.accentDuration)
+            guard !Task.isCancelled else { return }
+            collection.syncPresentation.buttonFeedback.endAccent()
+        }
+    }
+    private var feedback: SyncButton.Feedback { collection.syncPresentation.buttonFeedback }
+    private var moving: Bool { collection.sync.panelProgress != nil }
+    private var syncNowAvailable: Bool {
+        SyncNowButton.available(collection) && collection.navigation.sheet == nil
+    }
+    /// The panel's Sync Now rule (N23.3): disabled while the status moves.
+    private var syncNowEnabled: Bool { SyncPanel.syncNowEnabled(available: syncNowAvailable, moving: moving) }
+    private var tapDecision: SyncButton.Tap {
+        SyncButton.tap(main, serviceSelected: collection.sync.panelServiceSelected,
+            slot: SyncStatusPanel.slot(collection), syncNowAvailable: syncNowAvailable, moving: moving)
+    }
+    private var hint: String {
+        switch tapDecision {
+        case .syncNow: SyncText.value("sync.button.hint.syncNow")
+        case .openPanel: SyncText.value("sync.button.hint.status")
+        case .nothing: ""
+        }
+    }
+    /// The status line at the top of the long-press menu: the title and its sentence.
+    private var statusLine: String {
+        [SyncText.value(titleKey), SyncStatusCopy.detail(collection.sync, now: clock.now())]
+            .compactMap { $0 }.joined(separator: "\n")
+    }
+    private func tap() {
+        switch tapDecision {
+        case .syncNow: startSync()
+        case .openPanel: presented.wrappedValue.toggle()
+        case .nothing: break
+        }
+    }
+    private func syncNowFromMenu() {
+        guard syncNowEnabled else { return }
+        startSync()
+    }
+    private func startSync() {
+        guard collection.requestSyncNow(source: .command) else { return }
+        collection.syncPresentation.buttonFeedback.requested(at: clock.now())
+    }
+    /// What the feedback follows: whether the status moves, and how it ends.
+    private struct Observed: Equatable { var moving, upToDate, needsYou: Bool }
+    private var observed: Observed {
+        Observed(moving: moving, upToDate: main.symbol == SyncSymbol.upToDate, needsYou: main.needsYou)
+    }
+    private func observe(_ now: Observed) {
+        let outcome = collection.syncPresentation.buttonFeedback.observe(moving: now.moving, upToDate: now.upToDate,
+            needsYou: now.needsYou, now: clock.now())
+        // T1: the end of a sync the person started is announced.
+        switch outcome {
+        case .succeeded?: announce(SyncText.value("sync.result.succeeded"))
+        case .ended?: announce(SyncText.value(titleKey).replacingOccurrences(of: "…", with: ""))
+        case nil: break
+        }
+    }
+    private func announce(_ text: String) {
+        AccessibilityNotification.Announcement(text).post()
+    }
+    private func openSettingsFromMenu() {
+        collection.syncPresentation.statusPresented = false
+        #if os(macOS)
+        collection.syncPresentation.settingsRequest = UUID()
+        openSettings()
+        #else
+        collection.openAccountSyncFromStatus(keepCollection: false)
         #endif
     }
     /// One detent, the panel's height: no larger detent that would only show
@@ -129,13 +200,6 @@ public struct CloudSyncStatusButton: View {
             showSettings: { showSettings(keepCollection: $0) })
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("sync.status.popover")
-    }
-    private var mediaLine: String? {
-        if meguri { return nil }
-        guard let media = collection.sync.status?.media,
-              (media.uploadsRunning ?? 0) > 0 || (media.downloadsRunning ?? 0) > 0,
-              let count = SyncStatusCopy.sum(media.uploadFiles, media.downloadFiles) else { return nil }
-        return SyncText.format("sync.media.filesLeft", Int64(clamping: count))
     }
     private func openStatusEntry(_ entry: CloudSyncEntry, _ host: AppNavigation.SheetHost) {
         if compact { collection.queueCloudSyncAfterStatusDismissal(entry, host: host) }

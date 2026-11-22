@@ -19,6 +19,7 @@ public struct HomeView: View {
     @Environment(\.shellLayout) private var shellLayout
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.todayBesideDeckList) private var todayBesideDeckList
+    @Environment(\.syncStatusItem) private var syncStatusItem
     #endif
     @Environment(\.locale) private var locale
     public init(collection: ReviewCollection, deckID: Int64? = nil) { self.collection = collection; self.deckID = deckID }
@@ -69,8 +70,17 @@ public struct HomeView: View {
         .toolbarTitleDisplayMode(deckID != nil ? .inline : shellLayout == .compact ? .inlineLarge : .automatic)
         #endif
         .toolbar {
-            #if !os(macOS)
+            #if os(macOS)
             ToolbarItem(placement: .primaryAction) {
+                // N20.1: one Add menu beside sync.
+                addMenu
+            }
+            #else
+            // N23.6: one trailing group, the sync button first (from the tab layout's
+            // stack), then search and Add. Only the items that show are declared:
+            // an item with nothing in it would still get an empty glass.
+            ToolbarItemGroup(placement: .primaryAction) {
+                if let syncStatusItem { syncStatusItem }
                 if showsSearchButton {
                     // N14.2: the list's deck search; the system field appears when asked for.
                     Button { search.presented = true } label: {
@@ -78,16 +88,10 @@ public struct HomeView: View {
                     }
                     .accessibilityIdentifier("home.collection.search")
                 }
+                // N20.1: one Add menu beside sync; the tab layout's deck page keeps Add Note (N14.3).
+                if deckID != nil, shellLayout == .compact { addNoteButton } else { addMenu }
             }
             #endif
-            ToolbarItem(placement: .primaryAction) {
-                // N20.1: one Add menu beside sync; the tab layout's deck page keeps Add Note (N14.3).
-                #if os(macOS)
-                addMenu
-                #else
-                if deckID != nil, shellLayout == .compact { addNoteButton } else { addMenu }
-                #endif
-            }
         }
         #if os(macOS)
         .focusable(homeKeyboardActive)

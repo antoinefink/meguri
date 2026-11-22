@@ -71,6 +71,10 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     public var serviceChangeFailed = false
     public var showStatusForCommands = true
     public var connectionPath: [CloudSyncEntry] = []
+    /// N23.6: the sync the person started from the toolbar button, until it ends.
+    public var buttonFeedback = SyncButton.Feedback()
+    /// Test hooks: the button holds the moment after a success (`-MeguriSyncRender …+justFinished`).
+    public var buttonAccentHeld = false
     public init() {}
 }
 

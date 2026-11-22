@@ -2464,6 +2464,12 @@ public final class ReviewCollection: ChangeFanoutSink {
             appGroupSnapshot: location.directory.appending(path: "meguri-widget-unavailable.json"), manualTransferDirectory: providerDirectory)
     }
     @concurrent private nonisolated static func exists(_ url: URL) async -> Bool { FileManager.default.fileExists(atPath: url.path) }
+    /// Captures only (`-MeguriSyncRender`): once the collection is open, the
+    /// shell shows `fixture`'s synthetic status in place of the real one. The
+    /// real coordinator keeps running unseen; nothing is synced or written.
+    @_spi(MeguriTestHooks) public func showSyncRenderFixtureForTestHooks(_ fixture: SyncCoordinator) {
+        sync = fixture
+    }
 }
 
 #if DEBUG
