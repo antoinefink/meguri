@@ -378,7 +378,7 @@ fn the_last_report_is_the_total_for_both_targets() {
 }
 
 #[test]
-fn a_cancel_after_the_read_started_stops_it_for_both_targets() {
+fn a_cancel_at_the_first_progress_report_stops_both_targets() {
     let fx = fixture();
     for index in 0..30 {
         fx.add(fx.zorvan, &[&format!("q{}", index % 3), "m"]);
