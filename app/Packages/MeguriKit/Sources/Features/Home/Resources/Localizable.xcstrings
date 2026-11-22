@@ -585,16 +585,6 @@
         }
       }
     },
-    "Search or Create a Deck": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Search or Create a Deck"
-          }
-        }
-      }
-    },
     "Study %@": {
       "localizations": {
         "en": {

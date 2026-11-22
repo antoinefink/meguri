@@ -137,7 +137,16 @@ struct HomeWelcome: View {
             notices
         }
         .formStyle(.grouped)
+        #if os(macOS)
         .contentMargins(.horizontal, WelcomeArrangement.columnMargin(width: width), for: .scrollContent)
+        #else
+        // On touch a list's content margins are measured from its own edges, which
+        // reach under the iPad's sidebar, and they replace the safe area there: the
+        // group then started under the sidebar, its leading corners hidden. Widening
+        // the safe area instead keeps the system's margin and the sidebar's inset,
+        // so the group has the same margin on both sides and all four corners.
+        .safeAreaPadding(.horizontal, WelcomeArrangement.columnMargin(width: width) ?? 0)
+        #endif
         .welcomeBarEdge()
     }
 
@@ -306,7 +315,18 @@ private struct WelcomeRow: View {
 
     /// In a button the symbol takes the button's colour. An unavailable row is not a
     /// button, and on touch the list would still tint its symbol: it dims with the title.
-    @ViewBuilder private var symbol: some View {
+    /// Every row's symbol takes the width of the widest of the three, so the
+    /// titles start in one column (Start Empty's plus is narrower than the rest).
+    private var symbol: some View {
+        ZStack {
+            ForEach(WelcomeChoice.allCases, id: \.self) { other in
+                Image(systemName: other.systemImage).hidden()
+            }
+            glyph
+        }
+    }
+
+    @ViewBuilder private var glyph: some View {
         if action.enabled {
             Image(systemName: choice.systemImage)
         } else {

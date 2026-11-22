@@ -82,11 +82,14 @@ extension SyncMainStatus {
 }
 
 extension SyncStatusAction {
-    /// N23.3: never the default button. Cancel Setup, and the actions that run
-    /// a collection replacement at once.
+    /// N23.3: never the default button. Cancel Setup, the actions that run
+    /// a collection replacement at once, and Copy Debug Info (changed
+    /// 2026-11-22): a diagnostic does not resolve the state, so it is never
+    /// the prominent button; the damaged-collection row's built action is
+    /// Copy Debug Info too.
     public var neverDefault: Bool {
         switch self {
-        case .meguriCancel, .meguriFinishSetup, .resumeOp, .meguriUploadStructure: true
+        case .meguriCancel, .meguriFinishSetup, .resumeOp, .meguriUploadStructure, .copyDebugInfo, .repair: true
         default: false
         }
     }
