@@ -838,6 +838,8 @@ PUBLIC_ARTIFACTS = {
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
+    'docs/process/review-log/mcp-note-attachments-20261122.md':
+        '9ab4f1074eba351094ed1660f1a69fea51d46097a917c040eac6e1fbd7bf4ea8',
     'docs/process/review-log/meguri-collection-mcp-20261119.md':
         '05cb4950ef3ced22e56e850a70ff9d1859ac49a216953314eb4aa0ada3ff6ab2',
     'server/src/accounts/oauth/mod.rs':
@@ -845,17 +847,29 @@ PUBLIC_ARTIFACTS = {
     'server/src/httpapi/oauth.rs':
         'efe2fe1940f7a3e08f0982fd79073a64ec0202a1af8932254207f95e2b2e43c8',
     'server/tests/mcp_oauth.rs':
-        'f86fc4956ddf11a21b42432345dad9211890be57ea97f9531d4ad08fe882704f',
+        'f24e5bf89ad95dd53b90d300bebe3d1b6318c41c082171361f90a5c49441db75',
     'server/src/mcp_service/transport.rs':
         '6c0fed2e3865fbdf02cd4faa84340fc70e8b888f3834cd64529ade113705bab9',
     'server/src/mcp_service/authority_tests.rs':
-        '838db9c2d104b449d041dce05dda4fc44f5d5f6b9e5fc7828c868c4c58b16e2d',
+        '7714d0522108e89ef351884762e6557f17ad1184e46cbf0a06eb7e68be35453c',
+    'server/src/mcp_service/attachments/format/audio.rs':
+        '1eca9c96b3c638ad66723119d54ed0537246a3fedcd3fe6fd9acb5e8fa8043a9',
+    'server/src/mcp_service/attachments/format/images.rs':
+        'cea187846d99d4dd66f1b5ed068168f88270d1e1eec6e922c95d096aeff7249b',
+    'server/src/mcp_service/attachments/format/isobmff.rs':
+        '194a76940c9b0a123bb9203b591adee3e50a9c7954cff4f809e32af8c4ca78eb',
+    'server/src/mcp_service/attachments/format/tests.rs':
+        '62b28b28286f06f5973cc23ab806c4089dc1ab2a3fcbcf7dde9dd3608cc7ebdf',
+    'server/tests/support/attachment_formats.rs':
+        'ff6d752781665d9c0a80403079e653681629b52c1e384c834df4b3952fa76522',
+    'server/src/mcp_service/attachments/format/pdf.rs':
+        '2420851e5a4460084995d61923ff7f5faf2c5a4dde414988ef070ee8e42a7183',
     'server/src/mcp_transport/backend.rs':
-        '3632c2986b074bfcce7243302242f3d5ed504c9735e6e8aa676b57082a4f9643',
+        '4a0708c96150f2a28f5c68a493898163eee4c51bd0d52088b3c74f751e07ae62',
     'server/src/mcp_transport/diagnostics.rs':
         '3e03a73d427f6d33145db2ded9a456c7e28f500dd725f780ce5bcfd998d57bda',
     'server/src/mcp_transport/inputs.rs':
-        '170b1cf74ccb75c963e9350399af64521729fc77e11009f4ff7cfdaf1c1bdcac',
+        '35fcbf999f5235196af4ae965cd2bf75b9482e5bfc83f16a566260f35d577522',
     'server/src/mcp_transport/mod.rs':
         '6b852054131da7a1bf66c372461188d278cd6647c0117a1fde22e774f410b30b',
     'server/src/mcp_transport/tests.rs':
@@ -865,7 +879,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/collection/mcp/tests/size_scaling.rs':
         '6a7e9ae78d1ef2688703f1ce292b25ebebcb34ceb3e8f3b20dbdf66bc2dde7a0',
     'server/src/accounts/oauth/policy.rs':
-        '305463b17d26a788b961d8dabf8265d3a34f02f51593db1cf181c186dc92b993',
+        '802fd74612b1ae0d70b3ed32106b873b5e6dbd1824795eddbd40fa846ab16e46',
     'server/src/accounts/oauth/tests.rs':
         '0439b970e98b4937bbc1777b46a4e3bf88d9e50cf6da937258a63ef8bdaa0db7',
     'server/src/accounts/oauth/tokens.rs':
@@ -883,7 +897,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '8b4d6446cf91a819dc37742d9a0f98dee4b0547917280765724b87d4e4c2e843',
+        '5333a1f1e2980c2c8559cc912026c2774aa68aef86df15df246a0ac84a1893ee',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1178,7 +1192,9 @@ PUBLIC_ARTIFACTS = {
     "specs/servers/meguri-sync-web.md":
         '5b80364781b6b1eaa16529b666cfd1ca3e6a76098dcb8c2282e7406810640bea',
     "specs/servers/meguri-collection-mcp.md":
-        "013e3aa719a920b3d97e4a0792071b5f9d19b9a710e36f6082c1b399fe954fc8",
+        "027bf623ffb399d420722072fbcbde82a0feb7c2d5eaaf44675b8d787bf5ca26",
+    "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
+        "81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb",
     "specs/conformance/meguri-sync-server.md":
         '4c0e7651ab72236ad31320925e8c1c163c6dc7f1904e9c0c3e52df50e8f9e479',
     "conformance/schema/meguri-sync-server.schema.json":

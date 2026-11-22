@@ -4,7 +4,11 @@
 
 #[path = "card_info.rs"]
 pub mod card_info;
+#[path = "graphs_cards.rs"]
+pub mod graphs_cards;
 #[path = "graphs_common.rs"]
 pub mod graphs_common;
 #[path = "graphs_common_cache.rs"]
 pub mod graphs_common_cache;
+#[path = "graphs_revlog.rs"]
+pub mod graphs_revlog;

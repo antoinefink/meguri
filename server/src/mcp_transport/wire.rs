@@ -45,6 +45,14 @@ fn singleton<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a str>, 
 fn members(object: &Map<String, Value>, allowed: &[&str]) -> bool {
     object.keys().all(|k| allowed.contains(&k.as_str()))
 }
+fn contains_null(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Array(values) => values.iter().any(contains_null),
+        Value::Object(values) => values.values().any(contains_null),
+        _ => false,
+    }
+}
 fn client_info(value: Option<&Value>) -> bool {
     value.and_then(Value::as_object).is_some_and(|v|
         ["name", "version"].iter().all(|k| v.get(*k).and_then(Value::as_str)
@@ -136,7 +144,7 @@ pub(super) fn validate(headers: &HeaderMap, value: Value, bytes: &[u8]) -> Resul
             Operation::Ping
         }
         "tools/list" => {
-            // The four descriptors form one complete page; no invented cursor.
+            // The descriptors form one complete page; no invented cursor.
             if !members(params, &["_meta"]) { return Err(params_error()); }
             Operation::List
         }
@@ -151,8 +159,10 @@ pub(super) fn validate(headers: &HeaderMap, value: Value, bytes: &[u8]) -> Resul
                 Some(v) => v.as_object().ok_or_else(params_error)?.clone(),
                 None => Map::new(),
             };
+            let null = arguments.values().any(contains_null);
             let call = inputs::parse(name, arguments).map_err(|reason|
                 rpc_error(StatusCode::OK, id.clone(), -32602, reason))?;
+            if null { return Err(rpc_error(StatusCode::OK, id.clone(), -32602, V::Arguments)); }
             raw_validation.map_err(|_| rpc_error(StatusCode::OK, id.clone(), -32602, V::Arguments))?;
             Operation::Call { name:name.to_owned(), call }
         }
@@ -175,8 +185,14 @@ fn backend_arguments(bytes: &[u8], name: &str) -> Result<(), ()> {
     match name {
         "search_notes" => mcp::Backend::parse::<mcp::SearchInput>(raw).map(|_| ()),
         "list_decks_and_note_types" => mcp::Backend::parse::<mcp::CatalogInput>(raw).map(|_| ()),
-        "create_note" => mcp::Backend::parse::<mcp::CreateInput>(raw).map(|_| ()),
-        "edit_note" => mcp::Backend::parse::<mcp::EditInput>(raw).map(|_| ()),
+        "create_note" => mcp::Backend::parse::<inputs::CreateNote>(raw).map(|_| ()),
+        "edit_note" => mcp::Backend::parse::<inputs::EditNote>(raw).map(|_| ()),
+        "prepare_media_upload" => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Prepare {}
+            mcp::Backend::parse::<Prepare>(raw).map(|_| ())
+        }
         _ => return Err(()),
     }.map_err(|_| ())
 }

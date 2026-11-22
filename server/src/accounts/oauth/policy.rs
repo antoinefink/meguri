@@ -13,10 +13,11 @@ pub(crate) struct Client {
     pub id: &'static str,
     pub redirect: &'static str,
     pub name: &'static str,
+    pub direct_files: bool,
 }
 const CLIENTS: &[Client] = &[
-    Client { id: "https://chatgpt.com/oauth/client.json", redirect: "https://chatgpt.com/connector_platform_oauth_redirect", name: "ChatGPT" },
-    Client { id: "https://claude.ai/oauth/mcp-oauth-client-metadata", redirect: "https://claude.ai/api/mcp/auth_callback", name: "Claude" },
+    Client { id: "https://chatgpt.com/oauth/client.json", redirect: "https://chatgpt.com/connector_platform_oauth_redirect", name: "ChatGPT", direct_files:true },
+    Client { id: "https://claude.ai/oauth/mcp-oauth-client-metadata", redirect: "https://claude.ai/api/mcp/auth_callback", name: "Claude", direct_files:false },
 ];
 pub(crate) fn client(id: &str) -> Result<Client> {
     CLIENTS.iter().find(|c| c.id == id).copied().ok_or(Error::new("invalid_client"))
@@ -135,4 +136,9 @@ pub(crate) fn callback(origin: &str, redirect: &str, state: Option<&str>, key: &
         if let Some(state) = state { query.append_pair("state", state); }
     }
     url.into()
+}
+
+/// Select capabilities only from the reviewed exact client binding on the grant.
+pub(crate) fn direct_file_client(authority: &super::Authority) -> bool {
+    authority.can_write() && client(authority.client_id()).is_ok_and(|c|c.direct_files)
 }

@@ -27,6 +27,57 @@ impl WriteRuntime for Runtime {
     // P4's published vector for p=1. Tests with due-order decks never call it.
     fn random_position(&self,p:u32)->Result<u32> { assert_eq!(p,1);Ok(825) }
 }
+#[test]
+fn media_hook_authority_loss_rolls_back_create_and_edit_with_guard_still_held() {
+    use std::rc::Rc;
+    struct Held(Rc<Cell<bool>>);
+    impl Drop for Held { fn drop(&mut self) { self.0.set(false); } }
+    struct Guarded { access: Access, held: Rc<Cell<bool>> }
+    impl Authority for Guarded {
+        type Guard = Held;
+        fn context(&self) -> &Context { &self.access.context }
+        fn admit(&self, write: bool) -> Result<Held> {
+            self.access.admit(write)?;
+            assert!(!self.held.replace(true));
+            Ok(Held(self.held.clone()))
+        }
+        fn recheck(&self, guard: &Held) -> Result<()> {
+            assert!(Rc::ptr_eq(&self.held,&guard.0));
+            assert!(self.held.get());
+            self.access.recheck(&())
+        }
+    }
+    for create in [true,false] {
+        let f = Fixture::new();
+        let original = f.create("original",vec![],1000).unwrap();
+        let before = f.exact(&original.note_id);
+        let stamps = f.stamp();
+        let positions = write::config(&f.db,"nextPos").unwrap();
+        let a = Guarded { access:Access::new(),held:Rc::new(Cell::new(false)) };
+        let mut hook = || {
+            assert!(a.held.get());
+            assert_eq!(a.access.checks.get(),1);
+            a.access.fail.set(true);
+            Ok(())
+        };
+        let references = [("Back".into(),"[sound:meguri-generated.mp3]".into())];
+        let result = if create {
+            f.backend.create_note_with_media(&f.path,&a,CreateInput { deck_id:"1".into(),note_type_id:"10".into(),
+                fields:Fields(BTreeMap::from([("Front".into(),"new".into())])),tags:Some(vec!["new-tag".into()]) },
+                &Runtime(2000),&references,Some(&mut hook))
+        } else {
+            f.backend.edit_note_with_media(&f.path,&a,EditInput { note_id:original.note_id.clone(),revision:original.revision,
+                fields:None,add_tags:Some(vec!["new-tag".into()]),remove_tags:None },
+                &Runtime(2000),&references,Some(&mut hook))
+        };
+        assert_eq!(result.unwrap_err().code,"permission_denied");
+        assert_eq!(a.access.checks.get(),2); assert!(!a.held.get());
+        assert_eq!(f.exact(&original.note_id),before); assert_eq!(f.stamp(),stamps);
+        assert_eq!(write::config(&f.db,"nextPos").unwrap(),positions);
+        let counts:(i64,i64,i64) = f.db.query_row("SELECT (SELECT count(*) FROM notes),(SELECT count(*) FROM cards),(SELECT count(*) FROM tags)",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(counts,(1,1,0));
+    }
+}
 struct Fixture { _temp:tempfile::TempDir,path:PathBuf,db:rusqlite::Connection,backend:Backend,access:Access }
 impl Fixture {
     fn new()->Self {

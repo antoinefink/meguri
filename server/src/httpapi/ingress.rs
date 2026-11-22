@@ -52,14 +52,17 @@ impl Ingress {
         let _all = self.slots.clone().acquire_many_owned(CAPACITY as u32).await;
     }
     pub(super) async fn read(&self, body: &mut Body, deadline: Instant) -> Result<Vec<u8>> {
+        self.read_limit(body,deadline,BODY_BYTES).await
+    }
+    pub(super) async fn read_limit(&self, body: &mut Body, deadline: Instant, maximum: usize) -> Result<Vec<u8>> {
         let mut stopping = self.stopping.subscribe();
         if *stopping.borrow_and_update() {
             return Err(Error::new("admission_closed"));
         }
-        if body.size_hint().lower() > BODY_BYTES as u64 {
+        if body.size_hint().lower() > maximum as u64 {
             return Err(Error::new("request_too_large"));
         }
-        bounded(collect(body), deadline, async move {
+        bounded(collect_limit(body,maximum), deadline, async move {
             let _ = stopping.changed().await;
         })
         .await
@@ -87,12 +90,14 @@ async fn bounded_until<T>(
         result = work => result,
     }
 }
-async fn collect(body: &mut Body) -> Result<Vec<u8>> {
+#[cfg(test)]
+async fn collect(body: &mut Body) -> Result<Vec<u8>> { collect_limit(body,BODY_BYTES).await }
+async fn collect_limit(body: &mut Body, maximum: usize) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     while let Some(frame) = poll_fn(|cx| Pin::new(&mut *body).poll_frame(cx)).await {
         let frame = frame.map_err(|_| Error::new("invalid_request"))?;
         if let Ok(data) = frame.into_data() {
-            if data.len() > BODY_BYTES - bytes.len() {
+            if data.len() > maximum - bytes.len() {
                 return Err(Error::new("request_too_large"));
             }
             bytes.extend_from_slice(&data);

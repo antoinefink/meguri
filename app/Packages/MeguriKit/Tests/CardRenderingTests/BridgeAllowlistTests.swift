@@ -211,6 +211,10 @@ extension WebKitSuites {
                     uniquingKeysWith: { _, value in value }), .bodySize),
                 (signal, world, body(["generation": 1, "side": true]), .side),
                 (signal, world, body(["generation": 1, "signal": "nativeOpen"]), .unknownSignal),
+                (signal, world, body(["generation": 1, "signal": "openAttachmentPDF"]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "openAttachmentPDF", "filename": "other.pdf"]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "openAttachmentPDF", "filename": String(repeating: "x", count: 76)]), .signalValue),
+                (signal, world, body(["generation": 1, "signal": "openAttachmentPDF", "filename": CardAttachmentPDFTests.name, "url": "ignored"]), .signalFields),
                 (signal, world, body(["generation": 1, "signal": true]), .signalType),
                 (signal, world, body(["generation": 1, "extra": true]), .signalFields),
                 (signal, world, body(["generation": 1, "signal": "visible", "token": -1]), .signalValue),
@@ -320,6 +324,7 @@ extension WebKitSuites {
             let oldSignals: [(String, [String: Any])] = [
                 ("settled", [:]), ("shown", [:]), ("visible", ["token": visibleToken]),
                 ("updateFailed", ["error": "old failure"]),
+                ("openAttachmentPDF", ["filename": CardAttachmentPDFTests.name]),
                 ("command", ["command": "ans"]), ("command", ["reveal": true]),
                 // Valid for the old payload; outside the new AV list. Age must
                 // be classified before consulting the new payload's bounds.

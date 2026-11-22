@@ -17,7 +17,7 @@ fn normalized(c: &Connection, value: &str) -> Result<String> {
     let text: String = value.chars().filter(|c|!c.is_ascii_control() || matches!(*c,'\t'|'\n')).collect();
     Ok(if config(c,"normalize_note_text")?.and_then(|v|v.as_bool()).unwrap_or(true) { text.nfc().collect() } else { text })
 }
-fn patch_fields(c: &Connection, nt: &Notetype, old: Option<&str>, patch: &Fields) -> Result<String> {
+fn patch_fields(c: &Connection, nt: &Notetype, old: Option<&str>, patch: &Fields, references: &[(String, String)]) -> Result<String> {
     if patch.0.len() > MAX_FIELDS || patch.0.keys().any(|name|!nt.fields.iter().any(|f|f.name == *name)) { return Err(invalid()); }
     let mut values = match old {
         Some(old) => old.split('\u{1f}').map(str::to_owned).collect::<Vec<_>>(),
@@ -27,6 +27,14 @@ fn patch_fields(c: &Connection, nt: &Notetype, old: Option<&str>, patch: &Fields
     for (i,f) in nt.fields.iter().enumerate() {
         if let Some(value) = patch.0.get(&f.name) { values[i] = normalized(c,value)?; }
     }
+    for (field, reference) in references {
+        let i = nt.fields.iter().position(|f| f.name == *field).ok_or_else(invalid)?;
+        if !values[i].contains(reference) {
+            if !values[i].is_empty() { values[i].push_str("<br>"); }
+            values[i].push_str(reference);
+        }
+    }
+    if !references.is_empty() && values.iter().any(|v| v.len() > 64 * 1024) { return Err(too_large()); }
     let fields = values.join("\u{1f}");
     if fields.len() > MAX_RECORD_BYTES { return Err(too_large()); }
     Ok(fields)
@@ -152,16 +160,20 @@ impl Stamps {
 }
 impl Backend {
     pub fn create_note<A: Authority>(&self, path: &Path, a: &A, input: CreateInput, runtime: &impl WriteRuntime) -> Result<WriteResult> {
+        self.create_note_with_media(path, a, input, runtime, &[], None)
+    }
+    pub(crate) fn create_note_with_media<A: Authority>(&self, path: &Path, a: &A, input: CreateInput,
+        runtime: &impl WriteRuntime, references: &[(String, String)], hook: Option<&mut dyn FnMut() -> Result<()>>) -> Result<WriteResult> {
         input::bounded_input(&input)?;
         let did=input::id(&input.deck_id)?; let mid=input::id(&input.note_type_id)?;
         input::tag_inputs(input.tags.as_deref().unwrap_or(&[]))?;
-        self.transaction(path,a,true,|c| {
+        self.transaction_with_hook(path,a,true,|c| {
             let d=read::deck(c,did)?.ok_or_else(invalid)?;
             if !matches!(&d.kind.kind,DeckKind::Normal(_)) { return Err(invalid()); }
             if c.query_row("SELECT id FROM notetypes WHERE id=?1",[mid],|r|r.get::<_,i64>(0)).optional().map_err(sql_error)?.is_none() { return Err(invalid()); }
             let nt=notetype(c,mid)?;
             generation::validate_type(&nt)?;
-            let fields=patch_fields(c,&nt,None,&input.fields)?;
+            let fields=patch_fields(c,&nt,None,&input.fields,references)?;
             let (tags,registered)=canonical_tags(c,input.tags.as_deref().unwrap_or(&[]))?;
             let now=runtime.now_millis()?; let stamps=Stamps::read(c,now)?;
             let id=allocate(c,"notes",now)?;
@@ -172,18 +184,22 @@ impl Backend {
             generation::generate(c,id,&nt,&fields,&tags,Some(did),now,stamps.usn,runtime)?;
             stamps.save(c)?;
             self.write_result(c,a.context(),id,&nt)
-        })
+        }, hook)
     }
     pub fn edit_note<A: Authority>(&self, path: &Path, a: &A, input: EditInput, runtime: &impl WriteRuntime) -> Result<WriteResult> {
+        self.edit_note_with_media(path, a, input, runtime, &[], None)
+    }
+    pub(crate) fn edit_note_with_media<A: Authority>(&self, path: &Path, a: &A, input: EditInput,
+        runtime: &impl WriteRuntime, references: &[(String, String)], hook: Option<&mut dyn FnMut() -> Result<()>>) -> Result<WriteResult> {
         input::bounded_input(&input)?;
         let id=input::id(&input.note_id)?;
-        if input.revision.len()>128 || (input.fields.is_none() && input.add_tags.is_none() && input.remove_tags.is_none()) { return Err(invalid()); }
-        self.transaction(path,a,true,|c| {
+        if input.revision.len()>128 || (input.fields.is_none() && input.add_tags.is_none() && input.remove_tags.is_none() && references.is_empty()) { return Err(invalid()); }
+        self.transaction_with_hook(path,a,true,|c| {
             let note=stored_note(c,id)?.ok_or_else(||Error::new("not_found"))?;
             let nt=notetype(c,note.mid)?;
             let current=self.revision(a.context(),&revision_state(note.state.clone(),&nt))?;
             if !crate::crypto::same_digest(current.as_bytes(),input.revision.as_bytes()) { return Err(conflict()); }
-            let fields=patch_fields(c,&nt,Some(&note.fields),input.fields.as_ref().unwrap_or(&Fields::default()))?;
+            let fields=patch_fields(c,&nt,Some(&note.fields),input.fields.as_ref().unwrap_or(&Fields::default()),references)?;
             let (tags,registered)=edit_tags(c,&note.tags,input.add_tags.as_deref(),input.remove_tags.as_deref())?;
             if fields==note.fields && tags==note.tags { return Ok(WriteResult { note_id:id.to_string(),revision:current }); }
             generation::validate_type(&nt)?;
@@ -194,7 +210,7 @@ impl Backend {
             generation::generate(c,id,&nt,&fields,&tags,None,now,stamps.usn,runtime)?;
             stamps.save(c)?;
             self.write_result(c,a.context(),id,&nt)
-        })
+        }, hook)
     }
     fn write_result(&self, c: &Connection, context: &Context, id: i64, nt: &Notetype) -> Result<WriteResult> {
         let note=stored_note(c,id)?.ok_or_else(unsupported)?;

@@ -83,7 +83,7 @@ export function Connection({ me, sessionLoss, refreshIdentity }: { me: Me; sessi
   }
   return <div className="stack"><header className="page-heading"><p className="eyebrow">Your account</p><h1>Connect your devices</h1><p>Use the same account in your browser and native clients.</p></header>
     <Card><CardHeader><CardTitle level={2}>Connection details</CardTitle><CardDescription>Sign in to a compatible client with your username and account password.</CardDescription></CardHeader><CardContent className="stack"><CopyValue label="Server URL" value={me.server_url} /><CopyValue label="Username" value={me.username} /></CardContent></Card>
-    <Card ref={section} tabIndex={-1} aria-labelledby="mcp-connections"><CardHeader><CardTitle level={2} id="mcp-connections">MCP connections</CardTitle><CardDescription>Manage clients with access to your synced collection.</CardDescription></CardHeader>
+    <Card ref={section} tabIndex={-1} aria-labelledby="mcp-connections"><CardHeader><CardTitle level={2} id="mcp-connections">MCP connections</CardTitle><CardDescription>Manage clients with access to your synced collection. Read and edit access includes attaching images and audio to notes.</CardDescription></CardHeader>
       <CardContent className="stack"><CopyValue label="MCP URL" value={new URL("/mcp", me.server_url).href} />
         <Outcome value={outcome} />
         {loading ? <p role="status">Loading MCP connections…</p>

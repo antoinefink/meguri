@@ -53,6 +53,9 @@ impl Backend<FixtureAuthority> for Fixture {
                     note_id:"9007199254740994".into(), revision:"generated-created".into(),
                 })),
                 ToolCall::EditNote(_) => ("edit_note", Err(ToolFailure::Conflict.into())),
+                ToolCall::PrepareMediaUpload => ("prepare_media_upload", Ok(ToolOutput::Upload {
+                    upload_id:"u".repeat(43),upload_url:"https://generated.example.test/mcp/upload#upload=fixture".into(),expires_at:"2026-11-22T14:00:00Z".into(),
+                })),
             };
             self.calls.lock().unwrap().push((authority.0, name));
             result
@@ -108,6 +111,32 @@ fn modern_meta() -> Value {
         (wire::CLIENT_INFO):{"name":"Generated fixture", "version":"1"},
         (wire::CLIENT_CAPABILITIES):{}})
 }
+#[test]
+fn attachment_wire_shapes_reject_missing_null_and_duplicate_members_before_dispatch() {
+    let valid_file = json!({"download_url":"https://files.oaiusercontent.com/generated","file_id":"generated"});
+    for (name,arguments) in [
+        ("create_note",json!({"deck_id":"1","note_type_id":"1","fields":{},"files":[valid_file.clone()],"file_fields":["Front"]})),
+        ("edit_note",json!({"note_id":"1","revision":"generated","files":[valid_file.clone()],"file_fields":["Front"]})),
+        ("prepare_media_upload",json!({})),
+    ] {
+        let value = body("tools/call",json!({"name":name,"arguments":arguments}));
+        let bytes = serde_json::to_vec(&value).unwrap();
+        assert!(wire::validate(&axum::http::HeaderMap::new(),value,&bytes).is_ok());
+    }
+    for arguments in [
+        json!({"note_id":"1","revision":"generated","files":[{"download_url":"x"}],"file_fields":["Front"]}),
+        json!({"note_id":"1","revision":"generated","files":[{"download_url":"x","file_id":"f","file_name":null}],"file_fields":["Front"]}),
+        json!({"note_id":"1","revision":"generated","uploads":null}),
+    ] {
+        let value = body("tools/call",json!({"name":"edit_note","arguments":arguments}));
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let response = wire::validate(&axum::http::HeaderMap::new(),value,&bytes).err().unwrap();
+        assert_eq!(response.extensions().get::<Diagnostic>().unwrap().outcome,
+            Outcome::InvalidParameters(ValidationError::Arguments));
+    }
+    let duplicate = br#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"edit_note","arguments":{"note_id":"1","revision":"generated","uploads":[{"upload_id":"u","field":"Front","field":"Back"}]}}}"#;
+    assert!(super::json::parse(duplicate).is_err());
+}
 fn body(method: &str, params: Value) -> Value {
     json!({"jsonrpc":"2.0", "id":7, "method":method, "params":params})
 }
@@ -154,7 +183,7 @@ async fn both_lifecycles_list_real_descriptors_and_bind_each_call_to_its_bearer(
             assert_eq!(listed["result"]["_meta"][wire::VERSION], revision);
         }
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 5);
         for expected in descriptors::descriptors() {
             let actual = tools.iter().find(|v| v["name"] == expected["name"]).unwrap();
             for key in ["inputSchema", "annotations", "securitySchemes", "_meta"] {
@@ -365,7 +394,7 @@ async fn legacy_initialize_negotiates_only_its_proposal_and_rejects_old_calls() 
     // After a lower proposal, both currently supported lanes remain usable.
     for revision in SUPPORTED_REVISIONS {
         let result=rpc(&r,revision,"generated-fixture-a","tools/list",json!({})).await;
-        assert_eq!(result["result"]["tools"].as_array().unwrap().len(),4);
+        assert_eq!(result["result"]["tools"].as_array().unwrap().len(),5);
     }
     r.stop().await;
 }

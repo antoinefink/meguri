@@ -92,7 +92,7 @@ export function Consent({ request, clearRequest, me, onLogin, onSessionLoss, lin
             <fieldset className="consent-choices" disabled={pending}><legend>Collection access</legend>
               {(["read", "read_write"] as const).filter(option => authorization.access_options.includes(option)).map(option => <Field key={option}>
                 <FieldLabel className="consent-option" htmlFor={`${prefix}-${option}`}><input id={`${prefix}-${option}`} type="radio" name="access" value={option} checked={access === option} onChange={() => setAccess(option)} aria-labelledby={`${prefix}-${option}-label`} aria-describedby={`${prefix}-${option}-description`} />
-                  <span><span id={`${prefix}-${option}-label`}>{accessLabel[option]}</span><span className="muted" id={`${prefix}-${option}-description`}>{option === "read" ? "Find notes and see decks and note types." : "Read your collection, and add and edit notes."}</span></span>
+                  <span><span id={`${prefix}-${option}-label`}>{accessLabel[option]}</span><span className="muted" id={`${prefix}-${option}-description`}>{option === "read" ? "Find notes and see decks and note types." : "Read your collection, add and edit notes, and attach images and audio."}</span></span>
                 </FieldLabel>
               </Field>)}
             </fieldset>

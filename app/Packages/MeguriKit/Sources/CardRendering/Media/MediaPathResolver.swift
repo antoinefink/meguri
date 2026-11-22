@@ -110,6 +110,13 @@ public actor MediaPathResolver {
         return try openName(String(path.dropFirst()))
     }
 
+    func openAttachmentPDF(_ name: String) throws -> MediaFile {
+        guard CardAttachmentPDF.accepts(name), index[Data(name.utf8)]?.contains(name) == true else {
+            throw Failure.missing
+        }
+        return try openName(name, exact: true)
+    }
+
     /// AV metadata is already decoded. Percent characters remain literal.
     public func openAudioName(_ name: String) throws -> MediaFile {
         guard !name.contains("\0"), !name.contains("\\"), let last = name.split(separator: "/", omittingEmptySubsequences: false).last else {
@@ -118,7 +125,7 @@ public actor MediaPathResolver {
         return try openName(String(last))
     }
 
-    private func openName(_ name: String) throws -> MediaFile {
+    private func openName(_ name: String, exact: Bool = false) throws -> MediaFile {
         guard descriptor >= 0 else { throw Failure.closed }
         var current = stat()
         guard lstat(root, &current) == 0, current.st_mode & S_IFMT == S_IFDIR,
@@ -126,7 +133,7 @@ public actor MediaPathResolver {
         guard MediaOrigin.filename(name) else { throw Failure.missing }
         let nfc = name.precomposedStringWithCanonicalMapping
         let nfd = nfc.decomposedStringWithCanonicalMapping
-        let candidates = [nfc, nfd] + (index[Data(nfc.lowercased().utf8)] ?? [])
+        let candidates = exact ? [name] : [nfc, nfd] + (index[Data(nfc.lowercased().utf8)] ?? [])
         for candidate in candidates {
             // O_NONBLOCK prevents a substituted FIFO from hanging open.
             let fd = openat(descriptor, candidate, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
@@ -180,6 +187,19 @@ public actor MediaFile {
         guard !nativeInUse else { return }
         if descriptor >= 0 { Darwin.close(descriptor); descriptor = -1 }
         playbackCopy = nil
+    }
+
+    /// Actor-owned descriptor, bounded chunks, no path reopening or disk copy.
+    func attachmentPDFBytes() throws -> Data {
+        func validate() throws {
+            var info = stat()
+            guard descriptor >= 0, !closeRequested, fstat(descriptor, &info) == 0,
+                  opening == MediaFileIdentity(info) else { throw MediaPathResolver.Failure.read }
+        }
+        try validate()
+        let bytes = try CardAttachmentPDF.read(length: length) { try read(offset: $0, count: $1) }
+        try validate()
+        return bytes
     }
 
     func beginNativePlayback() throws -> URL {

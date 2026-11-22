@@ -39,7 +39,7 @@ impl ValidationError {
             Self::CatalogKind => "Use kind all, deck or note_type, or omit kind.",
             Self::Create => "Provide deck_id and note_type_id as positive decimal strings, with fields and tags within the published limits.",
             Self::Edit => "Provide note_id as a positive decimal string. Use the revision returned for that note. Keep fields and tags within the published limits.",
-            Self::NoChange => "Provide fields, add_tags or remove_tags to edit the note.",
+            Self::NoChange => "Provide fields, add_tags, remove_tags or attachments to edit the note.",
         }
     }
 }
@@ -71,6 +71,9 @@ pub struct CreateNote {
     pub note_type_id: String,
     pub fields: BTreeMap<String, String>,
     pub tags: Option<Vec<String>>,
+    pub files: Option<Vec<FileInput>>,
+    pub file_fields: Option<Vec<String>>,
+    pub uploads: Option<Vec<UploadInput>>,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -80,6 +83,34 @@ pub struct EditNote {
     pub fields: Option<BTreeMap<String, String>>,
     pub add_tags: Option<Vec<String>>,
     pub remove_tags: Option<Vec<String>>,
+    pub files: Option<Vec<FileInput>>,
+    pub file_fields: Option<Vec<String>>,
+    pub uploads: Option<Vec<UploadInput>>,
+}
+/// Metadata is advisory; it is never a saved name, MIME authority or credential.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileInput {
+    pub download_url: String,
+    pub file_id: String,
+    pub file_name: Option<String>,
+    pub mime_type: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UploadInput { pub upload_id: String, pub field: String }
+pub fn validate_attachments(files: &Option<Vec<FileInput>>, fields: &Option<Vec<String>>, uploads: &Option<Vec<UploadInput>>) -> Result<(), ValidationError> {
+    let invalid = ValidationError::Arguments;
+    if files.is_none() && fields.is_none() && uploads.is_none() { return Ok(()); }
+    let count = files.as_ref().map_or(0,Vec::len) + uploads.as_ref().map_or(0,Vec::len);
+    if !(1..=4).contains(&count) || files.is_some() != fields.is_some() { return Err(invalid); }
+    if let Some(files) = files {
+        if fields.as_ref().is_none_or(|fields|fields.len() != files.len() || fields.iter().any(|f|f.is_empty() || f.len() > MAX_FILTER_BYTES))
+            || files.iter().any(|f|f.download_url.is_empty() || f.download_url.len() > 4096 || f.file_id.is_empty() || f.file_id.len() > 256
+                || f.file_name.as_ref().is_some_and(|v|v.len() > 1024) || f.mime_type.as_ref().is_some_and(|v|v.len() > 256)) { return Err(invalid); }
+    }
+    if uploads.as_ref().is_some_and(|v|v.iter().any(|v|v.upload_id.len() != 43 || v.field.is_empty() || v.field.len() > MAX_FILTER_BYTES)) { return Err(invalid); }
+    Ok(())
 }
 #[derive(Clone, Debug)]
 pub enum ToolCall {
@@ -87,12 +118,13 @@ pub enum ToolCall {
     ListDecksAndNoteTypes(ListCatalog),
     CreateNote(CreateNote),
     EditNote(EditNote),
+    PrepareMediaUpload,
 }
 impl ToolCall {
     pub fn access(&self) -> Access {
         match self {
             Self::SearchNotes(_) | Self::ListDecksAndNoteTypes(_) => Access::Read,
-            Self::CreateNote(_) | Self::EditNote(_) => Access::Write,
+            Self::CreateNote(_) | Self::EditNote(_) | Self::PrepareMediaUpload => Access::Write,
         }
     }
 }
@@ -148,19 +180,46 @@ pub fn parse(name: &str, arguments: Map<String, Value>) -> Result<ToolCall, Vali
         "create_note" => {
             let v: CreateNote = serde_json::from_value(value).map_err(|_| V::Arguments)?;
             if !id(&v.deck_id) || !id(&v.note_type_id) || !fields(&v.fields) || !tags(&v.tags) { return Err(V::Create); }
+            validate_attachments(&v.files,&v.file_fields,&v.uploads)?;
             ToolCall::CreateNote(v)
         }
         "edit_note" => {
             let v: EditNote = serde_json::from_value(value).map_err(|_| V::Arguments)?;
-            if v.fields.is_none() && v.add_tags.is_none() && v.remove_tags.is_none() { return Err(V::NoChange); }
+            if v.fields.is_none() && v.add_tags.is_none() && v.remove_tags.is_none() && v.files.is_none() && v.uploads.is_none() { return Err(V::NoChange); }
             if !id(&v.note_id) || !string(&v.revision, MAX_HANDLE_BYTES)
                 || v.fields.as_ref().is_some_and(|v| !fields(v))
                 || !tags(&v.add_tags) || !tags(&v.remove_tags) { return Err(V::Edit); }
             // Case-folding/canonical tag overlap requires the collection's tag
             // rules; the backend rejects it before mutation, under its authority.
+            validate_attachments(&v.files,&v.file_fields,&v.uploads)?;
             ToolCall::EditNote(v)
         }
+        "prepare_media_upload" if value.as_object().is_some_and(|v|v.is_empty()) => ToolCall::PrepareMediaUpload,
         _ => return Err(V::Arguments),
     };
     Ok(call)
+}
+
+#[cfg(test)]
+mod attachment_tests {
+    use super::*;
+    use serde_json::json;
+    fn parsed(name: &str, v: Value) -> Result<ToolCall,ValidationError> { parse(name,v.as_object().unwrap().clone()) }
+    #[test]
+    fn file_mapping_is_bounded_and_attachment_only_edits_are_changes() {
+        let files = json!([{"download_url":"https://files.oaiusercontent.com/generated","file_id":"generated-secret","file_name":"advisory.png","mime_type":"image/png"}]);
+        let input = json!({"note_id":"1","revision":"generated","files":files,"file_fields":["Front"],"uploads":[{"upload_id":"u".repeat(43),"field":"Back"}]});
+        let ToolCall::EditNote(edit) = parsed("edit_note",input.clone()).unwrap() else { panic!() };
+        assert_eq!(edit.files.unwrap()[0].file_id,"generated-secret");
+        assert_eq!(edit.file_fields.unwrap(),vec!["Front"]);
+        assert_eq!(edit.uploads.unwrap()[0].field,"Back");
+        for (key,value) in [("file_fields",json!([])),("files",json!([])),("uploads",json!([{"upload_id":"bad","field":"Back"}])),("unknown",json!(1))] {
+            let mut bad = input.clone(); bad[key] = value; assert!(parsed("edit_note",bad).is_err());
+        }
+        let mut bad = input.clone(); bad.as_object_mut().unwrap().remove("file_fields"); assert!(parsed("edit_note",bad).is_err());
+        let mut bad = input.clone(); bad["files"] = json!(vec![json!({"download_url":"x","file_id":"f"});5]); bad["file_fields"] = json!(vec!["Front";5]);
+        assert!(parsed("edit_note",bad).is_err());
+        assert!(parsed("prepare_media_upload",json!({})).is_ok());
+        assert!(parsed("prepare_media_upload",json!({"account_id":"other"})).is_err());
+    }
 }
