@@ -101,28 +101,32 @@ struct ShellFeatures {
         #if os(macOS)
         features.nativeMacWorkspace = true
         // N21.1: Today, then Browse; Note Types under them (N22.1). The iPad's rows wait for its own layout.
-        // Browse waits for its table (U270a): `BrowseRollout`.
-        features.availableSections = BrowseRollout.shown ? [.home, .browse, .noteTypes] : [.home, .noteTypes]
+        features.availableSections = [.home, .browse, .noteTypes]
         #else
         // W14: Note Types has a sidebar row at regular width; the tab layout reaches it from Settings (U286).
         features.availableSections = [.home, .noteTypes, .settings]
         #endif
         features.sectionShown = { section in Self.sectionShown(section, hasCollection: collection.hasCollection) }
-        features.sectionRoot = { section, _ in
+        features.sectionRoot = { section, navigation in
             switch section {
             case .settings: AnyView(SettingsView(collection: collection))
             #if os(macOS)
-            case .browse where BrowseRollout.shown: AnyView(BrowseView(model: collection.browse))
+            case .browse:
+                AnyView(BrowseView(model: collection.browse, addNote: {
+                    // Browse shows no deck: Add opens on its default deck.
+                    navigation.present(.add(deck: nil))
+                }, editNoteType: { id in
+                    collection.noteTypes.selection = id
+                    navigation.select(.section(.noteTypes))
+                }))
             #endif
             case .noteTypes: AnyView(NoteTypesView(model: collection.noteTypes))
             default: AnyView(HomeView(collection: collection))
             }
         }
         #if os(macOS)
-        if BrowseRollout.shown {
-            features.browseSidebar = { navigation, header in
-                AnyView(BrowseSidebarHost(collection: collection, navigation: navigation, header: header))
-            }
+        features.browseSidebar = { navigation, header in
+            AnyView(BrowseSidebarHost(collection: collection, navigation: navigation, header: header))
         }
         #endif
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }

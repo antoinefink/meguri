@@ -24,6 +24,19 @@ import Foundation
     /// A newer call cancels this one; cancelling the task cancels the job.
     func counts(_ mode: BrowseMode, _ items: [FilterCountItem]) async throws -> [UInt64?]
     func setTagsCollapsed(_ names: [String], collapsed: Bool) async throws
+
+    // The results table (U270a).
+
+    /// H2: a search session for the results table.
+    func openSearchSession() async throws -> any BrowseSearching
+    /// V2.2: the column set the query's note type (or none) uses.
+    func columnSet(notetype: Int64?) async throws -> ColumnSetShown
+    /// V2.3, V4.3: a person's change to a set; no undo step (V2.4).
+    func changeColumnSet(_ set: ColumnSetID, mode: BrowseMode, change: ColumnSetChange) async throws
+    /// V2.2: Use Standard Columns.
+    func useStandardColumns(notetype: Int64) async throws
+    /// V2.1, K6.1: the Cards / Notes control's write.
+    func setNotesMode(_ notes: Bool) async throws
 }
 
 /// The shell's reads over CoreBridge.
@@ -54,4 +67,13 @@ import Foundation
     public func setTagsCollapsed(_ names: [String], collapsed: Bool) async throws {
         _ = try await tags.setTagsCollapsed(names: names, collapsed: collapsed)
     }
+    public func openSearchSession() async throws -> any BrowseSearching { try await CoreBrowseSearch.open() }
+    public func columnSet(notetype: Int64?) async throws -> ColumnSetShown { try await CoreBrowseQuery.columnSet(notetype: notetype) }
+    public func changeColumnSet(_ set: ColumnSetID, mode: BrowseMode, change: ColumnSetChange) async throws {
+        _ = try await CoreBrowseQuery.changeColumnSet(set, mode: mode, change: change)
+    }
+    public func useStandardColumns(notetype: Int64) async throws {
+        _ = try await CoreBrowseQuery.useStandardColumns(notetype: notetype)
+    }
+    public func setNotesMode(_ notes: Bool) async throws { _ = try await CoreBrowseQuery.setNotesMode(notes) }
 }

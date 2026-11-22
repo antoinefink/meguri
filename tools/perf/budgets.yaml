@@ -596,7 +596,8 @@ budgets:
         limit: 5
         strict: true
         where: [simulator, device]
-        pending: U244
+        pending: U278
+        note: U270a measures the Mac table on the 150k collection, scrolled by the browseScroll hook (no synthesized input), and a pending case is judged when measured; it stays pending until the iPad and iPhone lists (U278, U279) measure theirs.
       - id: template-renders
         suite: BrowserSearchPerfTests
         name: browser.templateRendersWhileScrolling
