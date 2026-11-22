@@ -8,6 +8,14 @@
 // common;`), as it did in a binary of its own.
 #![allow(clippy::duplicate_mod)]
 
+/// The crate's `layering-check` binary. nextest sets `CARGO_BIN_EXE_layering-check` at run
+/// time to where the binary is, which follows a build reused from an archive
+/// (`tools/mg core-test --archive`); `env!` (the path at build time) serves
+/// plain `cargo test`.
+pub fn bin_exe() -> std::path::PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_layering-check").map_or_else(|| env!("CARGO_BIN_EXE_layering-check").into(), Into::into)
+}
+
 #[path = "layering.rs"]
 pub mod layering;
 #[path = "pins.rs"]
