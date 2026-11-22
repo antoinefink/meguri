@@ -1257,6 +1257,13 @@ class NativeToolbarSearchField(unittest.TestCase):
     def test_the_toolbar_search_field_its_buttons_and_scrolled_tokens_are_system_parts(self):
         self.assertEqual(hierarchy_check.check(self.tree()), [])
 
+    def test_an_open_token_menu_beside_the_field_is_a_system_part(self):
+        tree = self.tree()
+        group = tree["root"]["children"][0]["children"][0]["children"][0]
+        group["children"].append(el("menu", f=(980, 67, 166, 120), children=[
+            el("menuItem", "menuAction:", f=(980, 67, 166, 24)), el("menuItem", "menuAction:", f=(980, 91, 166, 24))]))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
     def test_toolbar_search_field_lookalikes_are_still_reported(self):
         self.assertIn("missing-identifier", kinds(hierarchy_check.check(self.tree(group_id="sample.screen.group"))))
         self.assertIn("missing-identifier",

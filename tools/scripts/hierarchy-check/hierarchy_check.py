@@ -190,6 +190,12 @@ def is_system_identifier(e):
         return True
     if ALERT_BUTTON.match(ident):
         return e.type == "button" and any(a.type in ("sheet", "alert") for a in e.ancestors)
+    if ident == "menuAction:":
+        # AppKit's action name on the items of a search token's menu (U271),
+        # open under the toolbar search field's group.
+        return (e.type == "menuItem" and e.parent is not None and e.parent.type == "menu"
+                and e.parent.parent is not None and e.parent.parent.type == "group"
+                and e.parent.parent.parent is not None and e.parent.parent.parent.type == "toolbar")
     if ident == "chevron.backward":
         return e.type == "button" and e.parent is not None and e.parent.type == "toolbar"
     if ident == "NSOutlineViewDisclosureButtonKey":
@@ -293,10 +299,14 @@ def native_toolbar_search_fields(document, root):
         if bar.type != "toolbar":
             continue
         for group in bar.children:
-            if group.type != "group" or group.identifier or len(group.children) != 1:
+            # The field, and while a token's menu is open, that menu.
+            fields = [c for c in group.children if c.type == "searchField"]
+            menus = [c for c in group.children if c.type == "menu"]
+            if (group.type != "group" or group.identifier or len(fields) != 1
+                    or len(fields) + len(menus) != len(group.children) or len(menus) > 1):
                 continue
-            field = group.children[0]
-            if field.type != "searchField" or field.identifier:
+            field = fields[0]
+            if field.identifier:
                 continue
             buttons = [c for c in field.children if c.type == "button"]
             tokens = [c for c in field.children if c.type == "textField"]
