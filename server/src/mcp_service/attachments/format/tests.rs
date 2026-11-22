@@ -485,6 +485,110 @@ mod pdf_regressions {
         assert_eq!(detect(&append_revision(active, newer, newer.len())), None);
     }
 
+    // The first-page table precedes the page stream; its forward Prev names
+    // the main table, while the final startxref names the first-page table.
+    // Object 9 is deliberately absent from the main table.
+    fn linearized_document() -> Vec<u8> {
+        fn first_table(offsets: &[usize; 12], main: usize) -> Vec<u8> {
+            let mut table = b"xref\n1 1\n".to_vec();
+            table.extend_from_slice(format!("{:010} 00000 n \n3 9\n", offsets[1]).as_bytes());
+            for offset in &offsets[3..] {
+                table.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+            }
+            table.extend_from_slice(format!("trailer\n<< /Size 12 /Root 1 0 R /Prev {main:010} >>\nstartxref\n0\n%%EOF\n").as_bytes());
+            table
+        }
+        let mut pdf = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n".to_vec();
+        let mut offsets = [0; 12];
+        offsets[10] = pdf.len();
+        pdf.extend_from_slice(b"10 0 obj\n<< /Linearized 1.0 /L 0000000000 /H [0000000000 0000000000] /O 3 /E 0000000000 /N 1 /T 0000000000 >>\nendobj\n");
+        let first = pdf.len();
+        let placeholder = first_table(&offsets, 0);
+        pdf.extend_from_slice(&placeholder);
+        offsets[1] = pdf.len();
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+        offsets[11] = pdf.len();
+        // One-page hint stream: page-offset header followed by shared-object
+        // header, with no variable-width rows or shared objects.
+        pdf.extend_from_slice(b"11 0 obj\n<< /S 36 /Length 60 >>\nstream\n");
+        let hints = pdf.len();
+        pdf.extend_from_slice(&[0; 60]);
+        pdf.extend_from_slice(b"\nendstream\nendobj\n");
+        let hint_length = pdf.len() - offsets[11];
+        let objects = [
+            b"<< /Type /Page /Parent 2 0 R /MediaBox 7 0 R /Resources 8 0 R /Contents 5 0 R >>".to_vec(),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+            [b"<< /Length 9 0 R >>\nstream\n".as_slice(), CONTENT, b"\nendstream"].concat(),
+            b"<< /Producer (Meguri synthetic linearization) >>".to_vec(),
+            b"[0 0 200 100]".to_vec(),
+            b"<< /Font << /F1 4 0 R >> >>".to_vec(),
+            CONTENT.len().to_string().into_bytes(),
+        ];
+        for (id, body) in (3..=9).zip(objects) {
+            offsets[id] = pdf.len();
+            pdf.extend_from_slice(format!("{id} 0 obj\n").as_bytes());
+            pdf.extend_from_slice(&body);
+            pdf.extend_from_slice(b"\nendobj\n");
+        }
+        let end = pdf.len();
+        offsets[2] = pdf.len();
+        pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+        let main = pdf.len();
+        pdf.extend_from_slice(b"xref\n0 1\n");
+        let main_entries = pdf.len();
+        pdf.extend_from_slice(format!("0000000000 65535 f \n2 1\n{:010} 00000 n \ntrailer\n<< /Size 12 /Root 1 0 R >>\nstartxref\n{first}\n%%EOF\n", offsets[2]).as_bytes());
+        pdf[first..first + placeholder.len()].copy_from_slice(&first_table(&offsets, main));
+        let length = pdf.len();
+        for (key, number) in [
+            (b"/L ".as_slice(), length), (b"/H [", offsets[11]),
+            (b"/H [0000000000 ", hint_length), (b"/E ", end), (b"/T ", main_entries),
+        ].into_iter().rev() {
+            let at = pdf.windows(key.len()).position(|v| v == key).unwrap() + key.len();
+            pdf[at..at + 10].copy_from_slice(format!("{number:010}").as_bytes());
+        }
+        // With one page all delta widths are zero; the minimum values are
+        // the exact counts, offsets and lengths for that page.
+        pdf[hints..hints + 4].copy_from_slice(&7u32.to_be_bytes());
+        pdf[hints + 4..hints + 8].copy_from_slice(&(offsets[3] as u32).to_be_bytes());
+        pdf[hints + 10..hints + 14].copy_from_slice(&((end - offsets[3]) as u32).to_be_bytes());
+        pdf[hints + 16..hints + 20].copy_from_slice(&((offsets[5] - offsets[3]) as u32).to_be_bytes());
+        pdf[hints + 22..hints + 26].copy_from_slice(&((offsets[6] - offsets[5]) as u32).to_be_bytes());
+        pdf[hints + 34..hints + 36].copy_from_slice(&1u16.to_be_bytes());
+        pdf
+    }
+
+    #[test]
+    fn linearized_xrefs_share_one_base_revision_before_incremental_updates() {
+        let original = linearized_document();
+        assert_eq!(detect(&original), Some("pdf"));
+        let newer = b"BT (Incremental linearized replacement) Tj ET";
+        let updated = append_revision(original.clone(), newer, newer.len());
+        assert_eq!(detect(&updated), Some("pdf"));
+        assert_eq!(detect(&append_revision(updated, CONTENT, CONTENT.len())), Some("pdf"));
+        assert_eq!(detect(&append_revision(original.clone(), newer, newer.len() - 1)), None);
+        for (marker, replacement) in [
+            (b"/Linearized 1.0".as_slice(), b"/Linearized 0.0".as_slice()),
+            (b"/Linearized 1.0", b"/Linearizex 1.0"),
+            (b"/O 3", b"/O 0"),
+            (b"10 0 obj", b"10 1 obj"),
+        ] {
+            let mut bad = original.clone();
+            let at = bad.windows(marker.len()).position(|v| v == marker).unwrap();
+            bad[at..at + marker.len()].copy_from_slice(replacement);
+            assert_eq!(detect(&bad), None);
+        }
+        // An ordinary incremental Prev cycle must not be classified as a
+        // linearized base, even with a decoy name in the catalog.
+        let mut cyclic = append_revision(document("/Linearized 1.0", Some("9 0 R"), "\n", CONTENT), newer, newer.len());
+        let marker = cyclic.windows(9).rposition(|v| v == b"startxref").unwrap();
+        let xref = std::str::from_utf8(&cyclic[marker + 9..]).unwrap()
+            .split_whitespace().next().unwrap().parse::<usize>().unwrap();
+        let at = cyclic.windows(6).rposition(|v| v == b"/Prev ").unwrap() + 6;
+        let stop = at + cyclic[at..].iter().take_while(|c| c.is_ascii_digit()).count();
+        cyclic.splice(at..stop, xref.to_string().bytes());
+        assert_eq!(detect(&cyclic), None);
+    }
+
     // Object 9 is the second compressed object, following an ordinary metadata
     // dictionary. Both the ID and nonzero object index must agree with the xref.
     fn object_stream_document(decoded: &[u8], first: usize, count: usize, index: u16,
@@ -547,6 +651,96 @@ mod pdf_regressions {
                 assert_eq!(detect(&pdf), Some("pdf"), "compressed {compressed}, hybrid {hybrid}");
                 let newer = b"BT (Incremental object stream replacement) Tj ET";
                 assert_eq!(detect(&append_revision(pdf, newer, newer.len())), Some("pdf"));
+            }
+        }
+    }
+
+    // Forty distinct Length IDs share a >512 KiB ObjStm. Decoding it for
+    // each lookup used over 16 MiB, despite its small single expansion.
+    fn shared_object_stream_document(compressed: bool, stream_first: bool) -> (Vec<u8>, usize) {
+        use std::io::Write;
+        const COUNT: usize = 40;
+        let source = document("", Some("9 0 R"), "\n", CONTENT);
+        let table = source.windows(10).position(|v| v == b"xref\n0 10\n").unwrap();
+        let source_offsets: Vec<usize> = std::str::from_utf8(&source[table..]).unwrap().lines()
+            .skip(3).take(9).map(|line| line[..10].parse().unwrap()).collect();
+        let stream_id = 9 + COUNT;
+        let xref_id = stream_id + 1;
+        let size = xref_id + COUNT;
+        let mut offsets = vec![0; size];
+        let mut pdf = source[..source_offsets[0]].to_vec();
+        for id in [1, 2, 3, 4, 6, 7, 8] {
+            offsets[id] = pdf.len();
+            pdf.extend_from_slice(&source[source_offsets[id - 1]..source_offsets[id]]);
+        }
+        let mut bodies = Vec::new();
+        let mut header = String::new();
+        for id in 9..9 + COUNT {
+            header.push_str(&format!("{id} {} ", bodies.len()));
+            bodies.extend_from_slice(format!("{}\n", CONTENT.len()).as_bytes());
+            if id == 9 {
+                bodies.push(b'%');
+                bodies.extend_from_slice(&vec![b'p'; 512 * 1024]);
+                bodies.push(b'\n');
+            }
+        }
+        let first = header.len();
+        let decoded = [header.as_bytes(), &bodies].concat();
+        let bytes = if compressed {
+            let mut compressor = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+            compressor.write_all(&decoded).unwrap();
+            compressor.finish().unwrap()
+        } else { decoded };
+        let filter = if compressed { "/Filter /FlateDecode" } else { "" };
+        let object_stream = [format!("{stream_id} 0 obj\n<< /Type /ObjStm /N {COUNT} /First {first} /Length {} {filter} >>\nstream\n", bytes.len()).into_bytes(), bytes, b"\nendstream\nendobj\n".to_vec()].concat();
+        if stream_first {
+            offsets[stream_id] = pdf.len();
+            pdf.extend_from_slice(&object_stream);
+        }
+        for index in 0..COUNT {
+            let id = if index == 0 { 5 } else { xref_id + index };
+            offsets[id] = pdf.len();
+            pdf.extend_from_slice(format!("{id} 0 obj\n<< /Length {} 0 R >>\nstream\n", 9 + index).as_bytes());
+            pdf.extend_from_slice(CONTENT);
+            pdf.extend_from_slice(b"\nendstream\nendobj\n");
+        }
+        if !stream_first {
+            offsets[stream_id] = pdf.len();
+            pdf.extend_from_slice(&object_stream);
+        }
+        let xref = pdf.len();
+        offsets[xref_id] = xref;
+        let mut entries = Vec::new();
+        for (id, offset) in offsets.into_iter().enumerate() {
+            let (kind, position, index) = if id == 0 { (0, 0, 65535) }
+                else if (9..9 + COUNT).contains(&id) { (2, stream_id, id - 9) }
+                else { (1, offset, 0) };
+            entries.push(kind);
+            entries.extend_from_slice(&(position as u32).to_be_bytes());
+            entries.extend_from_slice(&(index as u16).to_be_bytes());
+        }
+        pdf.extend_from_slice(format!("{xref_id} 0 obj\n<< /Type /XRef /Size {size} /Root 1 0 R /W [1 4 2] /Length {} >>\nstream\n", entries.len()).as_bytes());
+        let data = pdf.len();
+        pdf.extend_from_slice(&entries);
+        pdf.extend_from_slice(format!("\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n").as_bytes());
+        (pdf, data)
+    }
+
+    #[test]
+    fn shared_object_streams_are_decoded_and_indexed_once() {
+        for compressed in [false, true] {
+            for stream_first in [false, true] {
+                let (pdf, data) = shared_object_stream_document(compressed, stream_first);
+                assert_eq!(detect(&pdf), Some("pdf"), "compressed {compressed}, stream first {stream_first}");
+                let newer = b"BT (New shared-stream revision) Tj ET";
+                assert_eq!(detect(&append_revision(pdf.clone(), newer, newer.len())), Some("pdf"));
+                // A cache hit must still compare both the index and the ID.
+                for index in [0u16, 40] {
+                    let mut bad = pdf.clone();
+                    let entry = data + 48 * 7 + 5;
+                    bad[entry..entry + 2].copy_from_slice(&index.to_be_bytes());
+                    assert_eq!(detect(&bad), None);
+                }
             }
         }
     }
@@ -663,5 +857,84 @@ mod pdf_regressions {
         assert_eq!(detect(&document(&destination, None, "\n", CONTENT)), None);
         let length = format!("9 {comments}0 R");
         assert_eq!(detect(&document("", Some(&length), "\n", CONTENT)), None);
+    }
+
+    #[test]
+    fn local_stream_resource_names_and_name_values_are_accepted() {
+        let content = b"BT /F 12 Tf 20 50 Td (Meguri local font) Tj ET";
+        for entry in [
+            "/Type /XObject /Subtype /Form /BBox [0 0 200 100] /Resources << /Font << /F 4 0 R >> >>",
+            "/Type /XObject /Subtype /Form /BBox [0 0 200 100] /Resources << /Font << /#46 4 0 R >> >>",
+            "/Fixture /F",
+            "/Fixture /#46",
+            "/Fixture /FFilter",
+            "/Fixture /FDecodeParms",
+            "/Fixture [/F /#46 /FFilter /FDecodePar#6ds]",
+            "/Fixture << /Name /F /FFilter null /FDecodeParms null >>",
+        ] {
+            for length in [content.len().to_string(), "9 0 R".to_string()] {
+                let fields = format!("{length} {entry}");
+                assert_eq!(detect(&document("", Some(&fields), "\n", content)), Some("pdf"), "{fields}");
+            }
+        }
+    }
+
+    #[test]
+    fn external_file_stream_entries_are_refused_without_rejecting_annotation_flags() {
+        for entry in [
+            "/F (meguri-synthetic-stream.bin)",
+            "/#46 (meguri-synthetic-stream.bin)",
+            "/F << /Type /Filespec /F (meguri-synthetic-stream.bin) >>",
+            "/FFilter /FlateDecode",
+            "/#46#46ilter /FlateDecode",
+            "/FDecodeParms << /Columns 1 >>",
+            "/FDecodePar#6ds << /Columns 1 >>",
+        ] {
+            for length in [CONTENT.len().to_string(), "9 0 R".to_string()] {
+                let fields = format!("{length} {entry}");
+                assert_eq!(detect(&document("", Some(&fields), "\n", CONTENT)), None, "{fields}");
+            }
+        }
+        for flag in ["/F", "/#46"] {
+            let annotation = format!("<< /Type /Annot /Subtype /Text /Rect [0 0 20 20] {flag} 4 >>");
+            assert_eq!(
+                detect(&document_with_scalar("", None, "\n", CONTENT, &annotation)),
+                Some("pdf"),
+                "non-stream annotation after the stream: {flag}"
+            );
+            assert_eq!(
+                detect(&document(&format!("/Fixture {annotation}"), None, "\n", CONTENT)),
+                Some("pdf"),
+                "non-stream annotation before the stream: {flag}"
+            );
+        }
+    }
+
+    #[test]
+    fn external_keys_in_xref_and_object_stream_dictionaries_are_refused() {
+        let header = "12 0 9 5\n";
+        let decoded = format!("{header}null\n{}\n", CONTENT.len());
+        for entry in [
+            "/F (meguri-synthetic-stream.bin)",
+            "/#46 (meguri-synthetic-stream.bin)",
+            "/FFilter /FlateDecode",
+            "/#46#46ilter /FlateDecode",
+            "/FDecodeParms << /Columns 1 >>",
+            "/FDecodePar#6ds << /Columns 1 >>",
+            "/Resources << /Font << /F 4 0 R >> >> /F (meguri-synthetic-stream.bin)",
+        ] {
+            for compressed in [false, true] {
+                let mut xref = with_xref_stream(document("", Some("9 0 R"), "\n", CONTENT), compressed, false);
+                // Only the final xref object's dictionary grows: all indexed
+                // object offsets, including its own, remain unchanged.
+                let at = xref.windows(4).position(|v| v == b" /W ").unwrap();
+                xref.splice(at..at, format!(" {entry}").bytes());
+                assert_eq!(detect(&xref), None, "xref compressed {compressed}: {entry}");
+
+                let length = format!("{} {entry}", decoded.len());
+                assert_eq!(detect(&object_stream_document(decoded.as_bytes(), header.len(), 2, 1, false, compressed, Some(&length))),
+                    None, "object stream hybrid {compressed}: {entry}");
+            }
+        }
     }
 }

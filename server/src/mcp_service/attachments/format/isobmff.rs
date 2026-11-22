@@ -218,8 +218,10 @@ fn avif_associations(
                     }
                     continue;
                 }
-                if configs.get(index - 1)?.kind == b"av1C" {
-                    configured.insert(id);
+                if configs.get(index - 1)?.kind == b"av1C" && !configured.insert(id) {
+                    // Count associations per item, including repeats of the
+                    // same property and associations in separate ipma boxes.
+                    return None;
                 }
             }
         }
@@ -373,15 +375,92 @@ fn audio(moov: &[u8], media: &[(u64, u64)], budget: &mut usize) -> Option<()> {
                 2 => 64,
                 _ => return None,
             };
-            boxes(entry.data.get(header..)?, budget)?;
+            let extensions = boxes(entry.data.get(header..)?, budget)?;
+            let configured = entry.kind != b"mp4a" || mp4a_config(extensions, budget).is_some();
             let index = usize::from(be16(&entry.data[6..8]));
-            local.push(index.checked_sub(1).and_then(|i| references.get(i))
+            local.push(configured && index.checked_sub(1).and_then(|i| references.get(i))
                 .is_some_and(|v| v.kind == b"url " && v.data == [0, 0, 0, 1]));
         }
         sample |= audio_samples(&stbl, &local, media)?;
         tracks += 1;
     }
     (tracks > 0 && sample).then_some(())
+}
+
+// QuickTime can put esds inside wave alongside frma, mp4a and a terminator.
+// Only wave is a container here; the shared box budget bounds nested layouts.
+fn mp4a_config(mut extensions: Vec<BoxRef<'_>>, budget: &mut usize) -> Option<()> {
+    let mut configured = false;
+    while let Some(extension) = extensions.pop() {
+        match extension.kind {
+            b"wave" => extensions.extend(boxes(extension.data, budget)?),
+            b"esds" => {
+                if configured { return None; }
+                esds(extension.data, budget)?;
+                configured = true;
+            }
+            _ => {}
+        }
+    }
+    configured.then_some(())
+}
+
+// MPEG-4 descriptor lengths use at most four base-128 bytes. Padded lengths
+// are ordinary, but neither a fifth byte nor a payload past its parent is.
+fn descriptor<'a>(bytes: &mut &'a [u8], budget: &mut usize) -> Option<(u8, &'a [u8])> {
+    *budget = budget.checked_sub(1)?;
+    let tag = *bytes.first()?;
+    let mut length = 0usize;
+    for at in 1..=4 {
+        let byte = *bytes.get(at)?;
+        length = length.checked_mul(128)?.checked_add(usize::from(byte & 0x7f))?;
+        if byte & 0x80 == 0 {
+            let start = at + 1;
+            let end = start.checked_add(length)?;
+            let data = bytes.get(start..end)?;
+            *bytes = bytes.get(end..)?;
+            return Some((tag, data));
+        }
+    }
+    None
+}
+
+fn esds(b: &[u8], budget: &mut usize) -> Option<()> {
+    if b.get(..4)? != [0, 0, 0, 0] { return None; }
+    let mut root = b.get(4..)?;
+    let (tag, es) = descriptor(&mut root, budget)?;
+    if tag != 3 || !root.is_empty() { return None; }
+    let flags = *es.get(2)?;
+    let mut at = 3;
+    if flags & 0x80 != 0 { at += 2; } // dependsOn_ES_ID
+    if flags & 0x40 != 0 { at += 1 + usize::from(*es.get(at)?); } // URL
+    if flags & 0x20 != 0 { at += 2; } // OCR_ES_Id
+    let mut children = es.get(at..)?;
+    let mut configured = false;
+    while !children.is_empty() {
+        let (tag, config) = descriptor(&mut children, budget)?;
+        if tag != 4 { continue; }
+        if configured { return None; }
+        let h = config.get(..13)?;
+        // Registered audio object type indications, and audio streamType (5)
+        // with its reserved bit set. Never admit a video decoder as mp4a.
+        if !matches!(h[0], 0x40 | 0x66..=0x69 | 0x6b | 0xa5 | 0xa6 | 0xa9..=0xae | 0xc1 | 0xdd)
+            || h[1] >> 2 != 5 || h[1] & 1 == 0
+        { return None; }
+        let mut specific = None;
+        let mut nested = &config[13..];
+        while !nested.is_empty() {
+            let (tag, data) = descriptor(&mut nested, budget)?;
+            if tag == 5 && specific.replace(data).is_some() { return None; }
+        }
+        // MPEG-4 audio and MPEG-2 AAC need decoder-specific configuration.
+        // MPEG-1/2 audio and other codecs need no AAC AudioSpecificConfig.
+        if matches!(h[0], 0x40 | 0x66..=0x68) && specific.is_none_or(|v| v.len() < 2) {
+            return None;
+        }
+        configured = true;
+    }
+    configured.then_some(())
 }
 
 // A size table can describe millions of fixed-size PCM samples compactly.
@@ -467,6 +546,14 @@ fn audio_samples(
     media: &[(u64, u64)],
 ) -> Option<bool> {
     let mut sizes = SampleSizes::parse(stbl)?;
+    let timing = table_rows(child(stbl, b"stts")?, 8)?;
+    let mut timed = 0usize;
+    for row in timing.chunks_exact(8) {
+        let count = be32(row) as usize;
+        if count == 0 { return None; }
+        timed = timed.checked_add(count)?;
+    }
+    if timed != sizes.count { return None; }
     let table = one_of(stbl, b"stco", b"co64")?;
     let width = if table.kind == b"stco" { 4 } else { 8 };
     let offsets = table_rows(table.data, width)?;
@@ -735,6 +822,38 @@ mod tests {
         }
     }
 
+    #[test]
+    fn avif_rejects_repeated_and_conflicting_codec_associations() {
+        for version in [0, 1] {
+            for wide in [false, true] {
+                let essential = if wide { 0x8000 } else { 0x80 };
+                let ipma = associations(version, wide, &[(1, &[2])]);
+                let bytes = avif(1, &[(1, b"av01")], Some(&ipma), None);
+                let configs = [
+                    iso_box(b"ispe", &words(&[0, 1, 1])),
+                    iso_box(b"av1C", &[0x81, 0, 0, 0]),
+                    iso_box(b"av1C", &[0x81, 0x20, 0, 0]),
+                ].concat();
+                let bytes = replace(&bytes, &[b"meta", b"iprp", b"ipco"], Some(&configs));
+                for entries in [
+                    vec![(1, vec![2, 2])],
+                    vec![(1, vec![2, essential | 2])],
+                    vec![(1, vec![2, 3])],
+                    vec![(1, vec![2]), (1, vec![3])],
+                ] {
+                    let entries: Vec<_> = entries.iter().map(|(id, v)| (*id, v.as_slice())).collect();
+                    let repeated = associations(version, wide, &entries);
+                    assert_eq!(detect(&replace(&bytes, &[b"meta", b"iprp", b"ipma"], Some(&repeated))), None);
+                }
+                let iprp = [iso_box(b"ipco", &configs), iso_box(b"ipma", &ipma), iso_box(b"ipma", &ipma)].concat();
+                assert_eq!(detect(&replace(&bytes, &[b"meta", b"iprp"], Some(&iprp))), None);
+                // Two coded grid inputs can share exactly the same property.
+                let shared = associations(version, wide, &[(2, &[2]), (3, &[2])]);
+                assert_eq!(detect(&avif(1, &[(1, b"grid"), (2, b"av01"), (3, b"av01")], Some(&shared), Some((version, 1, &[2, 3])))), Some("avif"));
+            }
+        }
+    }
+
     const STBL: &[&[u8]] = &[b"moov", b"trak", b"mdia", b"minf", b"stbl"];
     fn audio_table(bytes: &[u8], kind: &[u8], data: Option<&[u8]>) -> Vec<u8> {
         let mut path = STBL.to_vec();
@@ -745,6 +864,169 @@ mod tests {
         let mut budget = RECORDS;
         boxes(bytes, &mut budget).unwrap().iter()
             .find(|v| v.kind == b"mdat").unwrap().payload_start as u32
+    }
+
+    fn audio_tables(bytes: &[u8]) -> &[u8] {
+        let mut budget = RECORDS;
+        let mut data = bytes;
+        for kind in STBL {
+            data = boxes(data, &mut budget).unwrap().into_iter()
+                .find(|v| v.kind == *kind).unwrap().data;
+        }
+        data
+    }
+
+    fn mp4a_entry(bytes: &[u8], version: u16, extensions: &[u8]) -> Vec<u8> {
+        let mut budget = RECORDS;
+        let tables = boxes(audio_tables(bytes), &mut budget).unwrap();
+        let entries = boxes(&child(&tables, b"stsd").unwrap()[8..], &mut budget).unwrap();
+        let mut entry = entries[0].data[..28].to_vec();
+        entry[8..10].copy_from_slice(&version.to_be_bytes());
+        entry.resize(match version { 0 => 28, 1 => 44, 2 => 64, _ => unreachable!() }, 0);
+        entry.extend_from_slice(extensions);
+        let stsd = [words(&[0, 1]), iso_box(b"mp4a", &entry)].concat();
+        audio_table(bytes, b"stsd", Some(&stsd))
+    }
+
+    fn aac_esds() -> Vec<u8> {
+        // ES_ID 1, audio DecoderConfigDescriptor, 128 kbit/s, AAC-LC at
+        // 8 kHz mono (AudioSpecificConfig 0x1588), SL predefined MP4 (2).
+        vec![
+            0, 0, 0, 0, 0x03, 0x19, 0, 1, 0, 0x04, 0x11, 0x40, 0x15,
+            0, 0, 0, 0, 1, 0xf4, 0, 0, 1, 0xf4, 0,
+            0x05, 0x02, 0x15, 0x88, 0x06, 0x01, 0x02,
+        ]
+    }
+
+    fn test_descriptor(tag: u8, data: &[u8]) -> Vec<u8> {
+        let mut length = vec![(data.len() & 127) as u8];
+        let mut rest = data.len() >> 7;
+        while rest > 0 {
+            length.insert(0, 0x80 | (rest & 127) as u8);
+            rest >>= 7;
+        }
+        [vec![tag], length, data.to_vec()].concat()
+    }
+
+    #[test]
+    fn mp4a_requires_configured_audio_directly_or_inside_quicktime_wave() {
+        let bytes = m4a(false);
+        let esds = iso_box(b"esds", &aac_esds());
+        let wave = iso_box(b"wave", &[
+            iso_box(b"frma", b"mp4a"), iso_box(b"mp4a", &[0; 4]),
+            esds.clone(), iso_box(&[0; 4], &[]),
+        ].concat());
+        for version in [0, 1, 2] {
+            for extension in [&esds, &wave, &iso_box(b"wave", &wave)] {
+                assert_eq!(detect(&mp4a_entry(&bytes, version, extension)), Some("m4a"));
+            }
+            for extension in [vec![], iso_box(b"esds", &[0; 4]), iso_box(b"wave", &[]),
+                [esds.clone(), wave.clone()].concat(), [esds.clone(), esds.clone()].concat()]
+            {
+                assert_eq!(detect(&mp4a_entry(&bytes, version, &extension)), None);
+            }
+        }
+        // An unused description need not have decoder configuration. Once a
+        // chunk references it, it must satisfy the same admission as the first.
+        let unconfigured = mp4a_entry(&bytes, 0, &[]);
+        let configured = mp4a_entry(&bytes, 0, &esds);
+        let mut budget = RECORDS;
+        let good = boxes(audio_tables(&configured), &mut budget).unwrap();
+        let bad = boxes(audio_tables(&unconfigured), &mut budget).unwrap();
+        let descriptions = [words(&[0, 2]), child(&good, b"stsd").unwrap()[8..].to_vec(),
+            child(&bad, b"stsd").unwrap()[8..].to_vec()].concat();
+        let both = audio_table(&bytes, b"stsd", Some(&descriptions));
+        assert_eq!(detect(&both), Some("m4a"));
+        assert_eq!(detect(&audio_table(&both, b"stsc", Some(&words(&[0, 1, 1, 800, 2])))), None);
+    }
+
+    #[test]
+    fn esds_descriptor_framing_and_audio_object_types() {
+        let bytes = m4a(false);
+        let valid = aac_esds();
+        let admit = |data: &[u8]| detect(&mp4a_entry(&bytes, 0, &iso_box(b"esds", data)));
+        assert_eq!(admit(&valid), Some("m4a"));
+        for n in 0..valid.len() { assert_eq!(admit(&valid[..n]), None, "prefix {n}"); }
+        for (at, value) in [(0, 1), (4, 2), (9, 5), (11, 0), (11, 0x20), (12, 0x11), (12, 0x14)] {
+            let mut bad = valid.clone();
+            bad[at] = value;
+            assert_eq!(admit(&bad), None, "field {at}: {value}");
+        }
+        let wrap_es = |children: &[u8]| [vec![0; 4], test_descriptor(3, &[vec![0, 1, 0], children.to_vec()].concat())].concat();
+        assert_eq!(admit(&wrap_es(&[6, 1, 2])), None, "missing decoder config");
+        let config = &valid[11..24];
+        for specific in [vec![], vec![5, 0], vec![5, 1, 0], vec![5, 2, 0x15],
+            vec![5, 0x80], vec![5, 0x80, 0x80, 0x80, 0x80, 0],
+            vec![5, 0xff, 0xff, 0xff, 0x7f], vec![5, 2, 0x15, 0x88, 5, 2, 0x15, 0x88]]
+        {
+            let decoder = test_descriptor(4, &[config.to_vec(), specific].concat());
+            assert_eq!(admit(&wrap_es(&decoder)), None);
+        }
+        assert_eq!(admit(&wrap_es(&test_descriptor(4, &config[..12]))), None);
+        assert_eq!(admit(&wrap_es(&[valid[9..28].to_vec(), valid[9..28].to_vec()].concat())), None);
+        // These audio object indications carry no AAC AudioSpecificConfig.
+        for object in [0x69, 0x6b, 0xa5, 0xa6, 0xa9, 0xad, 0xc1] {
+            let mut config = config.to_vec();
+            config[0] = object;
+            assert_eq!(admit(&wrap_es(&test_descriptor(4, &config))), Some("m4a"));
+        }
+        for object in [0x66, 0x67, 0x68] {
+            let mut configured = valid.clone();
+            configured[11] = object;
+            assert_eq!(admit(&configured), Some("m4a"));
+        }
+        // Four-byte padded lengths at every level are common encoder output.
+        let specific = vec![5, 0x80, 0x80, 0x80, 2, 0x15, 0x88];
+        let decoder = [vec![4, 0x80, 0x80, 0x80, 20], config.to_vec(), specific].concat();
+        let padded = [vec![0, 0, 0, 0, 3, 0x80, 0x80, 0x80, 31, 0, 1, 0], decoder, vec![6, 1, 2]].concat();
+        assert_eq!(admit(&padded), Some("m4a"));
+        // All optional ES fields, including a URL long enough to require a
+        // multi-byte descriptor length. Their bytes are never dereferenced.
+        let mut es = vec![0, 1, 0xe0, 0, 2, 130];
+        es.extend(vec![b'x'; 130]);
+        es.extend([0, 3]);
+        es.extend_from_slice(&valid[9..]);
+        let optional = [vec![0; 4], test_descriptor(3, &es)].concat();
+        assert_eq!(admit(&optional), Some("m4a"));
+        let mut trailing = valid.clone(); trailing.push(0);
+        assert_eq!(admit(&trailing), None);
+        let mut budget = 0;
+        assert!(esds(&valid, &mut budget).is_none());
+    }
+
+    #[test]
+    fn audio_requires_one_exact_timing_table_with_matching_sample_count() {
+        let bytes = m4a(false);
+        let valid = words(&[0, 2, 300, 1, 500, 2]);
+        assert_eq!(detect(&audio_table(&bytes, b"stts", Some(&valid))), Some("m4a"));
+        assert_eq!(detect(&audio_table(&bytes, b"stts", None)), None);
+        for n in 0..valid.len() {
+            assert_eq!(detect(&audio_table(&bytes, b"stts", Some(&valid[..n]))), None);
+        }
+        for invalid in [
+            words(&[0, 0]), words(&[0, 1, 799, 1]), words(&[0, 1, 801, 1]),
+            words(&[0, 2, 300, 1, 499, 1]), words(&[0, 2, 300, 1, 501, 1]),
+            words(&[0, 1, 800, 1, 0]), words(&[0, 2, 800, 1]),
+            words(&[1, 1, 800, 1]), words(&[0, u32::MAX, 800, 1]),
+            words(&[0, 2, 0, 1, 800, 1]), words(&[0, 2, u32::MAX, 1, 801, 1]),
+        ] {
+            assert_eq!(detect(&audio_table(&bytes, b"stts", Some(&invalid))), None, "{invalid:?}");
+        }
+        let duplicate = [audio_tables(&bytes), &iso_box(b"stts", &words(&[0, 1, 800, 1]))].concat();
+        assert_eq!(detect(&replace(&bytes, STBL, Some(&duplicate))), None);
+        // A compact timing run supports long PCM without a per-sample budget.
+        let count = 1_000_000;
+        let long = replace(&bytes, &[b"mdat"], Some(&vec![0; count * 2]));
+        let long = audio_table(&long, b"stsz", Some(&words(&[0, 2, count as u32])));
+        let long = audio_table(&long, b"stsc", Some(&words(&[0, 1, 1, count as u32, 1])));
+        let long = audio_table(&long, b"stts", Some(&words(&[0, 1, count as u32, 1])));
+        assert!(long.len() < crate::mcp_service::attachments::FILE_BYTES);
+        assert_eq!(detect(&long), Some("m4a"));
+        // Many on-disk timing rows, like sizes and chunks, are bounded by bytes.
+        let count = 70000;
+        let variable = aac_like(count, count, false, false);
+        let timing = [words(&[0, count as u32]), words(&[1, 1024]).repeat(count)].concat();
+        assert_eq!(detect(&audio_table(&variable, b"stts", Some(&timing))), Some("m4a"));
     }
 
     // Structural AAC-like packets, deliberately opaque rather than decodable.
@@ -778,9 +1060,7 @@ mod tests {
         bytes = audio_table(&bytes, b"stco", Some(&offsets));
         bytes = audio_table(&bytes, b"stsc", Some(&stsc));
         bytes = audio_table(&bytes, b"stts", Some(&words(&[0, 1, count as u32, 1024])));
-        let at = bytes.windows(4).position(|v| v == b"sowt").unwrap();
-        bytes[at..at + 4].copy_from_slice(b"mp4a");
-        bytes
+        mp4a_entry(&bytes, 0, &iso_box(b"esds", &aac_esds()))
     }
 
     #[test]
@@ -848,6 +1128,7 @@ mod tests {
         // Fixed-size PCM may have a huge count, but is checked in one run.
         let huge = audio_table(&bytes, b"stsz", Some(&words(&[0, u32::MAX, u32::MAX])));
         let huge = audio_table(&huge, b"stsc", Some(&words(&[0, 1, 1, u32::MAX, 1])));
+        let huge = audio_table(&huge, b"stts", Some(&words(&[0, 1, u32::MAX, 1])));
         assert_eq!(detect(&huge), None);
         let mut sizes = SampleSizes { count: 3, fixed: 0, width: 8, data: &[2, 3, 4], consumed: 0 };
         assert_eq!(sizes.take_sum(2), Some(5));
@@ -945,9 +1226,8 @@ mod tests {
         let split = audio_table(&bytes, b"stco", Some(&words(&[0, 2, offset, offset + 400])));
         let split = audio_table(&split, b"stsc", Some(&words(&[0, 2, 1, 200, 1, 2, 600, 1])));
         assert_eq!(detect(&split), Some("m4a"));
-        // Structural admission still permits ordinary AAC/ALAC sample entries.
-        // These mutations test recognition only; the PCM fixture is playable.
-        for codec in [b"mp4a", b"alac"] {
+        // Other sample entries need no AAC-specific configuration.
+        for codec in [b"alac", b"ac-3", b"Opus"] {
             let mut bytes = bytes.clone();
             let at = bytes.windows(4).position(|v| v == b"sowt").unwrap();
             bytes[at..at + 4].copy_from_slice(codec);
@@ -959,7 +1239,7 @@ mod tests {
     fn audio_rejects_missing_invalid_or_unmapped_samples() {
         let bytes = m4a(false);
         let offset = audio_offset(&bytes);
-        for kind in [b"stsz", b"stsc", b"stco"] {
+        for kind in [b"stsz", b"stsc", b"stco", b"stts"] {
             assert_eq!(detect(&audio_table(&bytes, kind, None)), None);
         }
         for (kind, data) in [
@@ -981,7 +1261,11 @@ mod tests {
             (b"stco", words(&[0, 1, offset + 1])),
             (b"stco", words(&[0, 1, u32::MAX])),
         ] {
-            assert_eq!(detect(&audio_table(&bytes, kind, Some(&data))), None, "{kind:?}: {data:?}");
+            let mut invalid = audio_table(&bytes, kind, Some(&data));
+            if kind == b"stsz" {
+                invalid = audio_table(&invalid, b"stts", Some(&words(&[0, 1, be32(&data[8..]), 1])));
+            }
+            assert_eq!(detect(&invalid), None, "{kind:?}: {data:?}");
         }
         let mut headers_only = bytes.clone();
         for kind in [b"stsz", b"stsc", b"stco"] { headers_only = audio_table(&headers_only, kind, None); }

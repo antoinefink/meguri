@@ -4,6 +4,7 @@
 use super::RECORDS;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
+use std::rc::Rc;
 fn space(c: u8) -> bool {
     matches!(c, 0 | 9 | 10 | 12 | 13 | 32)
 }
@@ -258,9 +259,36 @@ struct Lookup<'a> {
     resolving: BTreeSet<(usize, usize, usize)>,
     scalar_offsets: BTreeSet<usize>,
     streams: BTreeMap<usize, usize>,
-    inspected: BTreeSet<usize>,
+    decoded: BTreeMap<usize, (usize, Rc<Vec<u8>>)>,
+    object_streams: BTreeMap<(usize, usize, usize, usize), Vec<(usize, Option<usize>)>>,
 }
 impl Lookup<'_> {
+    // Only the first early indirect object can establish linearization. A
+    // forward Prev alone (or a cycle in Prev) is not evidence of it.
+    fn linearized(&self, budget: &mut usize) -> Option<(usize, usize, usize, usize)> {
+        let early = &self.file[..self.file.len().min(1024)];
+        let mut at = 0;
+        if unsigned(token(early, &mut at, budget)?)? == 0
+            || unsigned(token(early, &mut at, budget)?)? != 0
+            || token(early, &mut at, budget)? != b"obj" { return None; }
+        let fields = metadata(early, &mut at, budget)?;
+        if !matches!(*fields.get(b"Linearized".as_slice())?, b"1" | b"1.0")
+            || token(early, &mut at, budget)? != b"endobj" { return None; }
+        let first = token(self.file, &mut at, budget)?;
+        if first != b"xref" { return None; }
+        let xref = at - first.len();
+        let length = unsigned(fields.get(b"L".as_slice())?)?;
+        let end = unsigned(fields.get(b"E".as_slice())?)?;
+        let main = unsigned(fields.get(b"T".as_slice())?)?;
+        if unsigned(fields.get(b"O".as_slice())?)? == 0
+            || unsigned(fields.get(b"N".as_slice())?)? == 0
+            || !trim(self.file.get(..length)?).ends_with(b"%%EOF") { return None; }
+        let hints = numbers(fields.get(b"H".as_slice())?, budget)?;
+        if !matches!(hints.len(), 2 | 4) || hints.chunks_exact(2).any(|h| {
+            h[0] <= xref || h[1] == 0 || h[0].checked_add(h[1]).is_none_or(|n| n > end)
+        }) { return None; }
+        Some((xref, end, main, length))
+    }
     fn section(&self, offset: usize, budget: &mut usize, expanded: &mut usize)
         -> Option<(BTreeMap<usize, Entry>, Option<usize>, Option<usize>)> {
         let mut offsets = BTreeMap::new();
@@ -390,10 +418,22 @@ impl Lookup<'_> {
             }
             sections.insert(offset, section);
         }
+        let linearized = self.linearized(budget).and_then(|(first, end, entries, length)| {
+            let main = sections.get(&first)?.1?;
+            (first < end && end <= main && main < entries && entries < length
+                && sections.get(&main)?.1.is_none() && !hybrids.contains(&first)
+                && !hybrids.contains(&main)).then_some((first, main))
+        });
+        for (&offset, (_, prev, _)) in &sections {
+            if prev.is_some_and(|prev| prev >= offset && linearized != Some((offset, prev))) {
+                return None;
+            }
+        }
         // Both links are followed: a hybrid's Prev can point to the previous
         // supplement while the table's Prev points to the previous table.
         for (&xref, (entries, _, hybrid)) in sections.iter().rev() {
             if hybrids.contains(&xref) && xref != self.xref { continue; }
+            if linearized.is_some_and(|(first, _)| xref == first) { continue; }
             *budget = budget.checked_sub(entries.len())?;
             let mut entries = entries.clone();
             let mut next = *hybrid;
@@ -406,6 +446,16 @@ impl Lookup<'_> {
                 // as free placeholders in its companion table.
                 entries.extend(extra.iter().map(|(&id, &entry)| (id, entry)));
                 next = *hybrid;
+            }
+            if let Some((first, main)) = linearized {
+                if xref == main {
+                    // The first-page table wins duplicates. Both tables end
+                    // the same base revision, after all first-page streams.
+                    let (extra, _, hybrid) = sections.get(&first)?;
+                    if hybrid.is_some() { return None; }
+                    *budget = budget.checked_sub(extra.len())?;
+                    entries.extend(extra.iter().map(|(&id, &entry)| (id, entry)));
+                }
             }
             self.revisions.push(Revision { xref, entries });
         }
@@ -464,6 +514,11 @@ impl Lookup<'_> {
     fn compressed_scalar(&mut self, revision: usize, object: usize, stream: usize, index: usize,
         budget: &mut usize, expanded: &mut usize) -> Option<usize> {
         let Entry::Plain { generation, offset } = self.entry(revision, stream)? else { return None; };
+        let key = (revision, stream, generation, offset);
+        if let Some(objects) = self.object_streams.get(&key) {
+            let &(id, scalar) = objects.get(index)?;
+            return (id == object).then_some(scalar).flatten();
+        }
         self.indexed(offset)?;
         let b = self.file.get(offset..)?;
         let mut at = 0;
@@ -511,9 +566,8 @@ impl Lookup<'_> {
             }
             None => false,
         };
-        let decoded = decode_stream(&b[start..end], flate, expanded)?;
-        tokens(&decoded, &mut Seen::default(), budget, expanded, true, self)?;
-        self.inspected.insert(absolute);
+        let decoded = self.decoded_objects(absolute, offset.checked_add(end)?, flate,
+            &mut Seen::default(), budget, expanded)?;
         let header = decoded.get(..first)?;
         let mut cursor = 0;
         let mut ids = BTreeSet::new();
@@ -530,21 +584,29 @@ impl Lookup<'_> {
         let gap = &decoded[first..objects[0].1];
         let mut cursor = 0;
         if token(gap, &mut cursor, budget).is_some() || cursor != gap.len() { return None; }
-        for (i, &(_, start)) in objects.iter().enumerate() {
+        let mut scalars = Vec::new();
+        for (i, &(id, start)) in objects.iter().enumerate() {
             let end = objects.get(i + 1).map_or(decoded.len(), |&(_, position)| position);
             let body = &decoded[start..end];
             let mut cursor = 0;
-            value(body, &mut cursor, budget, 0)?;
+            let scalar = unsigned(value(body, &mut cursor, budget, 0)?);
             if token(body, &mut cursor, budget).is_some() || cursor != body.len() { return None; }
+            scalars.push((id, scalar));
         }
-        let (id, start) = objects[index];
+        self.object_streams.insert(key, scalars);
+        let &(id, scalar) = self.object_streams.get(&key)?.get(index)?;
         if id != object { return None; }
-        let end = objects.get(index + 1).map_or(decoded.len(), |&(_, position)| position);
-        let scalar = &decoded[start..end];
-        let mut cursor = 0;
-        let n = unsigned(token(scalar, &mut cursor, budget)?)?;
-        if token(scalar, &mut cursor, budget).is_some() || cursor != scalar.len() { return None; }
-        Some(n)
+        scalar
+    }
+    fn decoded_objects(&mut self, start: usize, end: usize, flate: bool, seen: &mut Seen,
+        budget: &mut usize, expanded: &mut usize) -> Option<Rc<Vec<u8>>> {
+        if let Some((previous_end, decoded)) = self.decoded.get(&start) {
+            return (*previous_end == end).then(|| Rc::clone(decoded));
+        }
+        let decoded = Rc::new(decode_stream(self.file.get(start..end)?, flate, expanded)?);
+        tokens(&decoded, seen, budget, expanded, true, self)?;
+        self.decoded.insert(start, (end, Rc::clone(&decoded)));
+        Some(decoded)
     }
 }
 fn passive_destination(b: &[u8], at: &mut usize, budget: &mut usize) -> Option<()> {
@@ -598,6 +660,7 @@ fn tokens(
 ) -> Option<()> {
     let mut at = 0;
     let mut dictionary = Vec::<Vec<u8>>::new();
+    let mut object_body = None;
     let mut length = None;
     while at < b.len() {
         *budget = budget.checked_sub(1)?;
@@ -691,17 +754,28 @@ fn tokens(
                 match &b[start..at] {
                     b"obj" => {
                         seen.objects += 1;
+                        object_body = Some(at);
                         dictionary.clear();
                         length = None;
                     }
                     b"endobj" => {
                         seen.ends += 1;
+                        object_body = None;
                         dictionary.clear();
                         length = None;
                     }
                     b"stream" => {
                         if nested {
                             return None;
+                        }
+                        if dictionary.iter().any(|v| matches!(v.as_slice(), b"F" | b"FFilter" | b"FDecodeParms")) {
+                            // Names in nested resources or name values are local
+                            // data. Only outer stream keys declare external data.
+                            let mut position = object_body?;
+                            let fields = metadata(b, &mut position, budget)?;
+                            if [b"F".as_slice(), b"FFilter", b"FDecodeParms"].iter().any(|key| fields.contains_key(*key)) {
+                                return None;
+                            }
                         }
                         match b.get(at) {
                             Some(13) => {
@@ -719,11 +793,10 @@ fn tokens(
                         // a scalar object, including forward-referenced objects.
                         if lookup.scalar_offsets.range(at..after).next().is_some() { return None; }
                         lookup.streams.insert(at, after);
-                        if dictionary.iter().any(|v| v == b"ObjStm") && !lookup.inspected.contains(&at) {
+                        if dictionary.iter().any(|v| v == b"ObjStm") {
                             let flate = dictionary.iter().any(|v| v == b"FlateDecode");
                             if !flate && dictionary.iter().any(|v| v == b"Filter") { return None; }
-                            let decoded = decode_stream(&b[at..end], flate, expanded)?;
-                            tokens(&decoded, seen, budget, expanded, true, lookup)?;
+                            lookup.decoded_objects(at, end, flate, seen, budget, expanded)?;
                         }
                         at = after;
                         dictionary.clear();
@@ -772,7 +845,8 @@ pub(super) fn valid(b: &[u8]) -> bool {
         let mut lookup = Lookup {
             file: b, xref: offset, revisions: Vec::new(),
             scalars: BTreeMap::new(), resolving: BTreeSet::new(),
-            scalar_offsets: BTreeSet::new(), streams: BTreeMap::new(), inspected: BTreeSet::new(),
+            scalar_offsets: BTreeSet::new(), streams: BTreeMap::new(), decoded: BTreeMap::new(),
+            object_streams: BTreeMap::new(),
         };
         tokens(b, &mut seen, &mut budget, &mut expanded, false, &mut lookup)?;
         (seen.catalog && seen.pages && seen.objects > 0 && seen.objects == seen.ends).then_some(())

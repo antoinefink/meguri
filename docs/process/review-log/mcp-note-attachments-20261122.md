@@ -82,3 +82,14 @@ Review runs `20261122T143743Z-41455` and `20261122T144628Z-74838` checked the co
 | `server/src/mcp_service/attachments/format/pdf.rs` | `45ff26c7b441c3ce02c09a6a62ed1a4278e6b1cd91259ee50860023bf49097c2` |
 | `server/src/mcp_service/attachments/format/tests.rs` | `21da443e4142d955f93c2cb387194a7858d7fbb5064afe920fe495506238d659` |
 | `server/tests/support/attachment_formats.rs` | `ff6d752781665d9c0a80403079e653681629b52c1e384c834df4b3952fa76522` |
+
+The next CodeRabbit review on `c4e7153f1` grouped nine findings into eight inline threads. The WebP repairs cap canvas area, compare encoded frame dimensions with the frame and canvas, require one bitstream and verify RIFF pad bytes. `sync-server-test/20261122T151328Z-44759` passed all nine image checks after these changes. AVIF permits one codec configuration per coded item. M4A uses the audio timing table and checks MPEG-4 audio decoder metadata. The PDF reader shares the xref view for linearized sections and caches checked object streams within their revision context. Attachment ingestion requires PDF streams to be self-contained. Independent review `20261122T151534Z-46635` identified a valid nested font name that the first check refused. Fixer export `20261122T151820Z-49631` limits the refusal to outer stream-dictionary file keys and adds positive cases for local resources. The preceding complete server suite passed all 343 cases in `sync-server-test/20261122T151556Z-47285`.
+
+The previous head passed `sync-server-test/20261122T145442Z-98457` with 332 cases, four package smoke cases and 59 browser cases in `sync-server-package-test/20261122T145647Z-8572`, and six native sync and review phases in `meguri-provider-real-server/20261122T150052Z-22049`. Full checks for the final changes are tracked on PR #124.
+
+| Reviewed candidate | SHA-256 |
+|---|---|
+| `server/src/mcp_service/attachments/format/images.rs` | `9b9cb73cec43e8a60d9dddf195b92583c9b746eff24eb1a531326653d178ee4b` |
+| `server/src/mcp_service/attachments/format/isobmff.rs` | `b93a23fdb2c3e467fbbd420237f41f468de24efd3870473b09f614652919f284` |
+| `server/src/mcp_service/attachments/format/pdf.rs` | `6ec6f318a496e6ea4e34ffa30f2526152ce6f90079b38284024ff6801ffaf4fb` |
+| `server/src/mcp_service/attachments/format/tests.rs` | `301abe898ac5392738f521e47e3783e916ab0065281b2e7ee8f744519f7c8fa1` |
