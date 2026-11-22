@@ -961,6 +961,33 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
         }
     }
 
+    /// N18.3: the click that activates an inactive window starts the collection:
+    /// the press waits for the activity that arrives just after it.
+    @Test(.timeLimit(.minutes(1)))
+    func startEmptyPressWaitsForTheActivationItsClickCauses() async throws {
+        try await withNativeMeguriNoFileOwner { app in
+            app.owner.setApplicationActive(false)
+            app.owner.setSceneActive(false)
+            let press = Task { await app.owner.startEmptyFromPress() }
+            await Task.yield()
+            app.owner.setApplicationActive(true)
+            app.owner.setSceneActive(true)
+            await press.value
+            try #require(app.owner.state == .ready, "\(app.owner.error ?? "Start Empty did not run")")
+            #expect(app.owner.decks.first?.name == "Default")
+        }
+    }
+
+    /// A press that no activation follows is dropped after the wait, as before.
+    @Test(.timeLimit(.minutes(1)))
+    func startEmptyPressWithoutActivationDoesNothing() async throws {
+        try await withNativeMeguriNoFileOwner { app in
+            app.owner.setApplicationActive(false)
+            await app.owner.startEmptyFromPress(activationWait: .milliseconds(50))
+            #expect(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
+        }
+    }
+
     @Test(arguments: [false, true])
     func startEmptyOpensRealDefaultDeckWithoutProviderTransfer(coldSelected: Bool) async throws {
         try await withNativeMeguriNoFileOwner(coldSelected: coldSelected) { app in

@@ -325,7 +325,7 @@ public struct HomeView: View {
             // inactive window. A wait for sync says so in the row (N18.3).
             startEmpty: .init(enabled: collection.startEmptyAvailable,
                 unavailableReason: collection.startEmptyAvailable || !collection.startEmptyWaitsForSync
-                    ? nil : WelcomeChoice.waitsForSyncReason) { Task { await collection.startEmpty() } },
+                    ? nil : WelcomeChoice.waitsForSyncReason) { Task { await collection.startEmptyFromPress() } },
             error: collection.error,
             previousAnswerCount: collection.previousRecord?.answers.count)
     }

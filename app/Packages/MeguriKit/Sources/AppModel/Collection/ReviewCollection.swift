@@ -771,6 +771,19 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// Start Empty waits for sync work (a service change not finished, Meguri
     /// Sync working). Nothing else on the welcome shows that, so its row says so.
     public var startEmptyWaitsForSync: Bool { sync.meguriBusy || sync.deviceSettingsSettling }
+    /// The welcome row's press (N18.3). A click in an inactive Mac window activates
+    /// it and reaches the row at once, while the app's and the scene's activity
+    /// arrive by notification just after: wait briefly for them instead of dropping
+    /// the press, so this row acts on that click as Set Up Sync and Import do.
+    public func startEmptyFromPress(activationWait: Duration = .milliseconds(500)) async {
+        let step = Duration.milliseconds(25)
+        var waited = Duration.zero
+        while !canStartEmpty, startEmptyAvailable, waited < activationWait {
+            try? await Task.sleep(for: step)
+            waited += step
+        }
+        await startEmpty()
+    }
     /// Reserve synchronously before yielding, just like entry confirmation.
     /// Close/background already join openTask, including host completion.
     public func startEmpty() async {

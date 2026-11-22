@@ -17,7 +17,8 @@ struct SyncStatusSymbol: View {
     var secondary = false
     var body: some View {
         let glyph = Image(systemName: SyncSymbol.glyph(status.symbol, iCloud: iCloud))
-            .symbolEffect(.rotate, options: .repeating, isActive: turning)
+            // Only the moving symbol ever turns, whatever drives `turning`.
+            .symbolEffect(.rotate, options: .repeating, isActive: turning && status.symbol == SyncSymbol.moving)
         Group {
             if status.needsYou { glyph.foregroundStyle(.orange) }
             else if secondary || status.symbol == SyncSymbol.off { glyph.foregroundStyle(.secondary) }
