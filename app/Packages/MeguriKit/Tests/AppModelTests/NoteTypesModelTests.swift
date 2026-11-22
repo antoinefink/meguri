@@ -868,10 +868,11 @@ extension NoteTypesModelTests {
         backend.readWait = .milliseconds(60)
         backend.countsWait = .milliseconds(60)
         model.selection = 9
+        // A change elsewhere drops 7's cached counts: the subtitle shown keeps them.
+        model.changesCommitted(.notetypes([7]))
         var checks = 0
         while model.headerSelection != 9, checks < 400 {
-            let header = try #require(model.headerSelection)
-            #expect(model.typeCounts[header] != nil, "never a title over a blank subtitle")
+            #expect(model.headerSelection != nil && model.headerCounts != nil, "never a title over a blank subtitle")
             checks += 1
             try await Task.sleep(for: .milliseconds(5))
         }

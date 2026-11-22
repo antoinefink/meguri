@@ -99,7 +99,7 @@ public struct NoteTypesView: View {
     }
 
     private var subtitle: String {
-        guard let id = model.headerSelection, let counts = model.typeCounts[id] else { return "" }
+        guard model.headerSelection != nil, let counts = model.headerCounts else { return "" }
         return NoteTypesStrings.subtitle(notes: counts.notes, cards: counts.cards, locale: locale)
     }
 
