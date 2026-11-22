@@ -125,7 +125,7 @@ case "$1" in
     echo "path: /Applications/Other.app (0x1)"
     if [ -n "${FX_KEEP_REGISTERED:-}" ] && [ -f "$FX/built" ]; then echo "path: $FX_KEEP_REGISTERED (0x2)"; fi
     sed "s/.*/path: & (0x3)/" "$FX/ls-registry" 2>/dev/null ;;
-  -f) [ -n "${FX_LS_NO_REGISTER:-}" ] || echo "$2" >>"$FX/ls-registry" ;;
+  -f) [ -n "${FX_LS_NO_REGISTER:-}" ] || grep -qxF -- "$2" "$FX/ls-registry" 2>/dev/null || echo "$2" >>"$FX/ls-registry" ;;
   -u)
     case "$2" in *"${FX_LS_STICKY:-//never//}"*) exit 0 ;; esac
     grep -vxF -- "$2" "$FX/ls-registry" >"$FX/ls-registry.new" 2>/dev/null; mv "$FX/ls-registry.new" "$FX/ls-registry" ;;
@@ -509,6 +509,8 @@ PY
   # An earlier install left its staging path registered in Applications.
   echo "$FX/Applications/.meguri-install.Ab12Cd/Meguri.app" >"$FX/ls-registry"
   echo "$FX/Applications/.meguri-install.Ab12Cd/Meguri.app/Contents/PlugIns/MeguriWidget.appex" >"$FX/pk-registry"
+  # A killed install left its staging folder with a daily-id app in it.
+  mkdir -p "$SB/build/app/real-copy/.meguri-install.Ef34Gh/Meguri.app/Contents"
   FX_AUTO_REGISTER=1 real_copy --install
   [ "$status" -eq 0 ] || cat "$STUB_LOG"
   [ "$(field .status)" = pass ]
@@ -517,9 +519,13 @@ PY
   called "^pluginkit -r $SB/build/app/real-copy/\.meguri-install\.[^/]+/Meguri.app/Contents/PlugIns/MeguriWidget.appex$"
   [ "$(cat "$FX/ls-registry")" = "$FX/Applications/Meguri.app" ]
   [ ! -s "$FX/pk-registry" ]
+  [ ! -e "$SB/build/app/real-copy/.meguri-install.Ef34Gh" ]
+  called "^lsregister -u $SB/build/app/real-copy/\.meguri-install\.Ef34Gh/Meguri.app$"
   [ "$(field .details.real_copy_registration.installed_path_registered)" = true ]
-  # The register comes after the swap, the check after the register.
-  [ "$(grep -n "^lsregister -f $FX/Applications/Meguri.app$" "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^lsregister -dump$' "$STUB_LOG" | tail -n 1 | cut -d: -f1)" ]
+  # Registered after the swap and again after the unregistrations, each
+  # before the dump that checks it.
+  [ "$(grep -c "^lsregister -f $FX/Applications/Meguri.app$" "$STUB_LOG")" -eq 2 ]
+  [ "$(grep -n "^lsregister -f $FX/Applications/Meguri.app$" "$STUB_LOG" | tail -n 1 | cut -d: -f1)" -lt "$(grep -n '^lsregister -dump$' "$STUB_LOG" | tail -n 1 | cut -d: -f1)" ]
 }
 
 @test "the install fails clearly when LaunchServices keeps a staging path or does not list the installed app" {

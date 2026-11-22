@@ -305,9 +305,9 @@ mg_app_build_action() {
     [ "$plan" != CloudAgent ] || plan_arg=" --test-plan $plan"
     # The destination's state, when Xcode stopped at it (fixed messages; the
     # log names the device). Developer Mode first: Xcode then also times out.
-    if [ "$platform" = ios-device ] && grep -Eqi 'Developer Mode (is )?disabled|enable Developer Mode' "$log"; then
+    if [ "$platform" = ios-device ] && grep -Eqi 'error: ?.*(Developer Mode (is )?disabled|enable Developer Mode)' "$log"; then
       mg_app_physical_device_failure developer-mode "Xcode stopped at the destination; nothing was installed"
-    elif [ "$platform" = ios-device ] && grep -Eqi 'device is locked|is passcode protected|Unlock .* to continue' "$log"; then
+    elif [ "$platform" = ios-device ] && grep -Eqi 'error: ?.*(device is locked|is passcode protected|Unlock .* to continue)' "$log"; then
       mg_app_physical_device_failure locked "Xcode stopped at the destination; nothing was installed"
     elif [ "$platform" = ios-device ] && grep -Eqi 'Timed out waiting for all destinations' "$log"; then
       mg_app_physical_device_failure unreachable "Xcode timed out waiting for the destination; nothing was installed"
@@ -1013,9 +1013,10 @@ mg_app_real_copy_same_volume() {
 # mg_app_real_copy_drop_stage <stage>: the staging folder leaves LaunchServices,
 # PlugInKit and the disk, whether its app is still in it or was moved away.
 mg_app_real_copy_drop_stage() {
+  [ -n "$1" ] || return 1
   pluginkit -r "$1/Meguri.app/Contents/PlugIns/MeguriWidget.appex" >/dev/null 2>&1
   "$MG_LSREGISTER" -u "$1/Meguri.app" >/dev/null 2>&1
-  rm -rf "$1"
+  rm -rf "${1:?}"
 }
 
 mg_app_real_copy_install_mac() {
@@ -1029,10 +1030,16 @@ mg_app_real_copy_install_mac() {
   if ! mg_app_real_copy_same_volume "$stage_root" "$MG_APP_REAL_COPY_APPLICATIONS"; then
     stage_root="$MG_APP_REAL_COPY_APPLICATIONS"
   fi
-  stage="$(mktemp -d "$stage_root/.meguri-install.XXXXXX")" || {
+  # A killed earlier install left its staging folder (a daily-id app): drop it.
+  local leftover
+  for leftover in "$stage_root"/.meguri-install.*; do
+    [ ! -d "$leftover" ] || [ -L "$leftover" ] || mg_app_real_copy_drop_stage "$leftover"
+  done
+  stage="$(mktemp -d "$stage_root/.meguri-install.XXXXXX")" && [ -n "$stage" ] || {
     mg_failure real-copy-install "could not create a staging folder in $stage_root; nothing was changed"
     mg_status fail; return 1
   }
+  mg_on_exit "[ ! -d $(mvl_q "$stage") ] || mg_app_real_copy_drop_stage $(mvl_q "$stage")"
   if ! ditto -x -k "$zip" "$stage/" || ! codesign --verify --deep --strict "$stage/Meguri.app" ||
       [ "$(plutil -convert json -o - "$stage/Meguri.app/Contents/Info.plist" 2>/dev/null | jq -r '.CFBundleIdentifier // empty')" != com.antoinefink.meguri ]; then
     mg_app_real_copy_drop_stage "$stage"
@@ -1054,9 +1061,17 @@ mg_app_real_copy_install_mac() {
     mg_detail real_copy_previous "$(jq -nc --arg p "$old" '{moved_to: $p}')"
   fi
   if ! mv "$stage/Meguri.app" "$target"; then
-    [ -z "$old" ] || { mv "$old" "$target" && "$MG_LSREGISTER" -f "$target" >/dev/null 2>&1; }
+    local restored="nothing was installed and there was no earlier copy"
+    if [ -n "$old" ]; then
+      if mv "$old" "$target"; then
+        "$MG_LSREGISTER" -f "$target" >/dev/null 2>&1
+        restored="the earlier one is back at $target"
+      else
+        restored="the earlier one could not be put back and is still at $old"
+      fi
+    fi
     mg_app_real_copy_drop_stage "$stage"
-    mg_failure real-copy-install "the new real copy could not be moved into place; the earlier one is back at $target"
+    mg_failure real-copy-install "the new real copy could not be moved into place; $restored"
     mg_status fail; return 1
   fi
   # The staging path leaves LaunchServices and PlugInKit; the installed path
@@ -1065,7 +1080,10 @@ mg_app_real_copy_install_mac() {
   "$MG_LSREGISTER" -f "$target" >/dev/null 2>&1
   mg_detail real_copy_installed "$(jq -nc --arg p "$target" '{path: $p, launched: false}')"
   echo "build-app: installed $target (not launched)." >&2
-  mg_app_real_copy_registration_check "$target" "$stage" || { mg_status fail; return 1; }
+  if ! mg_app_real_copy_registration_check "$target" "$stage"; then
+    mg_message "build-app: the real copy is installed at $target, but its LaunchServices registration needs the repair in failures[0]"
+    mg_status fail; return 1
+  fi
 }
 
 # mg_app_real_copy_registration_check <target> <stage>: LaunchServices lists
@@ -1074,13 +1092,14 @@ mg_app_real_copy_install_mac() {
 # lists no staging widget. Read-only but for those unregistrations.
 mg_app_real_copy_registration_check() {
   local target="$1" stage="$2" dump records plugins stale p pass
+  [ -n "$stage" ] && [ -n "$target" ] || return 1
   for pass in 1 2; do
     dump="$("$MG_LSREGISTER" -dump 2>/dev/null)" && grep -q '^path: ' <<<"$dump" || {
       mg_failure real-copy-registration "LaunchServices could not be read after the install, so its registration of $target is unverified (the app is installed): run \"$MG_LSREGISTER -dump | grep -E '^path: .*Meguri.*\\.app'\""
       return 1
     }
     plugins="$(pluginkit -mADvvv -i com.antoinefink.meguri.widget 2>/dev/null)" || {
-      mg_failure real-copy-registration "PlugInKit could not be read after the install, so the widget registration of $target is unverified (the app is installed)"
+      mg_failure real-copy-registration "PlugInKit could not be read after the install, so the widget registration of $target is unverified (the app is installed): run \"pluginkit -mAvvv -i com.antoinefink.meguri.widget\""
       return 1
     }
     records="$(sed -n 's/^path: *\(.*\) (0x[0-9a-fA-F]*)$/\1/p' <<<"$dump"
@@ -1094,6 +1113,8 @@ mg_app_real_copy_registration_check() {
         *) "$MG_LSREGISTER" -u "$p" >/dev/null 2>&1 ;;
       esac
     done <<<"$stale"
+    # A stale record may have stood for the moved bundle: register it again.
+    "$MG_LSREGISTER" -f "$target" >/dev/null 2>&1
   done
   if [ -n "$stale" ]; then
     mg_failure real-copy-registration "LaunchServices or PlugInKit still lists a staging path after the install: $(tr '\n' ' ' <<<"$stale")(the app is installed at $target); remove each with \"$MG_LSREGISTER -u <path>\" (\"pluginkit -r <path>\" for a widget), then run \"$MG_LSREGISTER -f $target\""
@@ -2250,8 +2271,11 @@ mg_run__physical_device_ready() {
   if ! xcrun devicectl device info details --device "$device" --json-output "$dir/details.json" \
         --log-output "$dir/details.log" >/dev/null 2>&1 ||
       ! state="$(jq -ce 'if .info.outcome == "success" and (.result | type) == "object" then .result |
-          {developer_mode: (.deviceProperties.developerModeStatus // "unknown" | tostring),
-           pairing: (.connectionProperties.pairingState // "unknown" | tostring)} else error("refused") end' "$dir/details.json" 2>/dev/null)"; then
+          {developer_mode: (.deviceProperties.developerModeStatus as $v | if $v == null then "unknown"
+             elif ($v | type) == "string" and ($v == "enabled" or $v == "disabled") then $v else "other" end),
+           pairing: (.connectionProperties.pairingState as $v | if $v == null then "unknown"
+             elif ($v | type) == "string" and ($v == "paired" or $v == "unpaired") then $v else "other" end)}
+          else error("refused") end' "$dir/details.json" 2>/dev/null)"; then
     kind=unreachable
     ! grep -Eqi 'Developer Mode (is )?disabled|enable Developer Mode' "$dir/details.json" "$dir/details.log" 2>/dev/null || kind=developer-mode
   elif [ "$(jq -r .developer_mode <<<"$state")" = disabled ]; then

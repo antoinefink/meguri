@@ -190,9 +190,9 @@ mg() {
 field() { jq -r "$@" "$result"; }
 called() { grep -Eq -- "$1" "$STUB_LOG" || { cat "$STUB_LOG"; return 1; }; }
 not_called() { ! grep -Eq -- "$1" "$STUB_LOG" || { cat "$STUB_LOG"; return 1; }; }
-# Every devicectl call the route itself made is a read-only info query.
+# Every devicectl call the route made is a read-only info query.
 only_device_info_queries() {
-  [ -z "$(grep '^xcrun devicectl' "$STUB_LOG" | grep -Ev '^xcrun devicectl device info (details|lockState) --device ')" ] || { cat "$STUB_LOG"; return 1; }
+  [ -z "$(grep devicectl "$STUB_LOG" | grep -Ev '^xcrun devicectl device info (details|lockState) --device ')" ] || { cat "$STUB_LOG"; return 1; }
 }
 phone_run() { mg ui-test --physical-device "$PHONE" --config Profile --suite MediaTests/testAudio --suite MediaTests/testVideo "$@"; }
 test_tree() {
@@ -411,6 +411,13 @@ EOF
       personal) dd=PersonalPreviewDerivedData; config=Release; personal_facts; args=(--personal-preview) ;;
       ios) platform=ios-sim ;;
     esac
+    if [ "$mode" = personal ]; then
+      # A folder this route built records its identity settings; one without
+      # that record would be removed before the build (mg_app_dd_identity).
+      mg build-app --platform mac "${args[@]}"
+      [ "$status" -eq 0 ]
+      [ -f "$SB/build/app/$dd/meguri-build-identity.json" ]
+    fi
     for build_dir in DerivedData StandaloneDerivedData PersonalPreviewDerivedData; do
       for build_config in Debug Profile Release; do
         products="$SB/build/app/$build_dir/Build/Products/$build_config"
@@ -3984,7 +3991,7 @@ real_copy_phone() { mg run --real-copy --owner-requested --platform iphone --phy
   only_device_info_queries
   # The raw response stays private: kept in the run, never in the receipt.
   [ -f "$(dirname "$result")/device-preflight/details.json" ]
-  ! grep -q PRIVATE_PHONE_NAME "$result"
+  run ! grep -q PRIVATE_PHONE_NAME "$result"
   # A refused details query that says so is read the same way.
   : >"$STUB_LOG"
   FX_DETAILS_RC=1 FX_DETAILS_ERROR="Developer Mode disabled" real_copy_phone

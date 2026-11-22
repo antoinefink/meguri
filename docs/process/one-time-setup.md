@@ -166,7 +166,7 @@ Building and installing the real copy, at Antoine's request only. The coordinato
 - **Mac:** `MEGURI_APP_SIGNING=team tools/mg build-app --platform mac --real-copy --owner-requested --install`.
   - Quit Meguri first. Rename an earlier dev install at `/Applications/Meguri.app` to `Meguri Dev.app` first, or the install refuses.
   - It packs `build/app/real-copy/Meguri.zip` and unregisters and deletes the built app. It then verifies the unpacked app in a staging folder, unregisters an earlier real copy and moves it to the Trash (its data stays), and puts the new one in place. Without `--install` it stops at the zip.
-  - It then registers `/Applications/Meguri.app` and checks that LaunchServices lists it and no staging path. If that check fails, the app is installed but the result names the `lsregister` commands that repair the registration.
+  - It then registers `/Applications/Meguri.app` and checks that LaunchServices lists it and no staging path. If that check fails, the app is installed and the failure names the commands that repair or check the registration.
   - The read-only clean-up checks are in `details.real_copy_cleanup_checks`.
   - Don't use Meguri while it builds: until the route forgets it, the built copy is a registered app with the real bundle id, container and Keychain group.
 - **iPhone:** `tools/mg run --platform iphone --physical-device <id> --real-copy --owner-requested`.
