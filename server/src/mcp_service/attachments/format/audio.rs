@@ -246,6 +246,8 @@ fn caf(b: &[u8]) -> bool {
 fn ogg(b: &[u8]) -> bool {
     let mut at = 0;
     let mut serial = None;
+    // At most one new serial per page, bounded by the file's RECORDS budget.
+    let mut seen_serials = std::collections::HashSet::new();
     let mut sequence = 0u32;
     let mut packet = Vec::new();
     let mut identified = false;
@@ -284,7 +286,7 @@ fn ogg(b: &[u8]) -> bool {
                 return false;
             }
         } else {
-            if h[5] & 2 == 0 || h[5] & 1 != 0 {
+            if h[5] & 2 == 0 || h[5] & 1 != 0 || !seen_serials.insert(id) {
                 return false;
             }
             serial = Some(id);
@@ -372,4 +374,31 @@ fn ogg(b: &[u8]) -> bool {
         at = end;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ogg;
+    use crate::mcp_service::attachment_formats as fixtures;
+
+    #[test]
+    fn ogg_chains_require_serials_unique_across_the_whole_file() {
+        for codecs in [[true, false, true], [false, true, false]] {
+            let mut distinct = Vec::new();
+            for (index, opus) in codecs.into_iter().enumerate() {
+                distinct.extend(fixtures::ogg_with_serial(opus, index as u32));
+            }
+            assert!(ogg(&distinct), "distinct serials, including zero");
+            assert!(ogg(&distinct), "serial tracking is local to each file");
+
+            let mut duplicate = fixtures::ogg_with_serial(codecs[0], 17);
+            duplicate.extend(fixtures::ogg_with_serial(codecs[1], 17));
+            assert!(!ogg(&duplicate), "adjacent streams reuse a serial");
+
+            let mut duplicate = fixtures::ogg_with_serial(codecs[0], 17);
+            duplicate.extend(fixtures::ogg_with_serial(codecs[1], 18));
+            duplicate.extend(fixtures::ogg_with_serial(codecs[2], 17));
+            assert!(!ogg(&duplicate), "a nonadjacent stream reuses a serial");
+        }
+    }
 }

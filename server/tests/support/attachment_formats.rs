@@ -156,6 +156,9 @@ pub fn flac() -> Vec<u8> {
     out
 }
 pub fn ogg(opus: bool) -> Vec<u8> {
+    ogg_with_serial(opus, if opus { 17 } else { 18 })
+}
+pub fn ogg_with_serial(opus: bool, serial: u32) -> Vec<u8> {
     let head = if opus {
         b"OpusHead\x01\x01\0\0\x80\xbb\0\0\0\0\0".to_vec()
     } else {
@@ -191,7 +194,7 @@ pub fn ogg(opus: bool) -> Vec<u8> {
             0
         });
         page.extend_from_slice(&(if seq == 3 { 960u64 } else { 0 }).to_le_bytes());
-        page.extend_from_slice(&17u32.to_le_bytes());
+        page.extend_from_slice(&serial.to_le_bytes());
         page.extend_from_slice(&(seq as u32).to_le_bytes());
         page.extend_from_slice(&[0; 4]);
         page.push(1);
@@ -221,11 +224,21 @@ pub fn iso_box(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
     out
 }
 pub fn m4a(video: bool) -> Vec<u8> {
-    let mut out = iso_box(b"ftyp", b"M4A \0\0\0\0M4A isom");
+    // A complete QuickTime audio movie: 100 ms of generated 400 Hz mono PCM.
+    // No encoder, downloaded asset or opaque fake AAC payload is required.
+    let mut out = iso_box(b"ftyp", b"qt  \0\0\0\0qt  ");
     out.extend(iso_box(b"free", &[0; 5]));
+    let offset = (out.len() + 8) as u32;
+    let mut pcm = Vec::new();
+    for i in 0..800 {
+        let value = if i % 20 < 10 { 4000i16 } else { -4000i16 };
+        pcm.extend_from_slice(&value.to_le_bytes());
+    }
+    out.extend(iso_box(b"mdat", &pcm));
     let mut hdlr = vec![0; 8];
     hdlr.extend_from_slice(if video { b"vide" } else { b"soun" });
-    hdlr.extend_from_slice(&[0; 13]);
+    hdlr.extend_from_slice(&[0; 12]);
+    hdlr.extend_from_slice(b"Meguri PCM\0");
     let mut entry = vec![0; 28];
     entry[6..8].copy_from_slice(&1u16.to_be_bytes());
     entry[16..18].copy_from_slice(&1u16.to_be_bytes());
@@ -233,17 +246,44 @@ pub fn m4a(video: bool) -> Vec<u8> {
     entry[24..28].copy_from_slice(&(8000u32 << 16).to_be_bytes());
     let mut stsd = vec![0; 4];
     stsd.extend_from_slice(&1u32.to_be_bytes());
-    stsd.extend(iso_box(b"mp4a", &entry));
-    let mut mdia = iso_box(b"hdlr", &hdlr);
-    mdia.extend(iso_box(
-        b"minf",
-        &iso_box(b"stbl", &iso_box(b"stsd", &stsd)),
-    ));
-    out.extend(iso_box(
-        b"moov",
-        &iso_box(b"trak", &iso_box(b"mdia", &mdia)),
-    ));
-    out.extend(iso_box(b"mdat", &[0; 16]));
+    stsd.extend(iso_box(b"sowt", &entry));
+    let words = |values: &[u32]| -> Vec<u8> {
+        values.iter().flat_map(|v| v.to_be_bytes()).collect()
+    };
+    let mut stbl = iso_box(b"stsd", &stsd);
+    stbl.extend(iso_box(b"stts", &words(&[0, 1, 800, 1])));
+    stbl.extend(iso_box(b"stsz", &words(&[0, 2, 800])));
+    stbl.extend(iso_box(b"stsc", &words(&[0, 1, 1, 800, 1])));
+    stbl.extend(iso_box(b"stco", &words(&[0, 1, offset])));
+    let mut dref = words(&[0, 1]);
+    dref.extend(iso_box(b"url ", &[0, 0, 0, 1]));
+    let mut minf = iso_box(b"smhd", &[0; 8]);
+    minf.extend(iso_box(b"dinf", &iso_box(b"dref", &dref)));
+    minf.extend(iso_box(b"stbl", &stbl));
+    let mut mdhd = words(&[0, 0, 0, 8000, 800]);
+    mdhd.extend_from_slice(&[0x55, 0xc4, 0, 0]); // language: und
+    let mut mdia = iso_box(b"mdhd", &mdhd);
+    mdia.extend(iso_box(b"hdlr", &hdlr));
+    mdia.extend(iso_box(b"minf", &minf));
+    let matrix = words(&[0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000]);
+    let mut tkhd = vec![0; 84];
+    tkhd[3] = 3; // enabled, in movie
+    tkhd[12..16].copy_from_slice(&1u32.to_be_bytes());
+    tkhd[20..24].copy_from_slice(&800u32.to_be_bytes());
+    tkhd[36..38].copy_from_slice(&0x100u16.to_be_bytes());
+    tkhd[40..76].copy_from_slice(&matrix);
+    let mut trak = iso_box(b"tkhd", &tkhd);
+    trak.extend(iso_box(b"mdia", &mdia));
+    let mut mvhd = vec![0; 100];
+    mvhd[12..16].copy_from_slice(&8000u32.to_be_bytes());
+    mvhd[16..20].copy_from_slice(&800u32.to_be_bytes());
+    mvhd[20..24].copy_from_slice(&0x10000u32.to_be_bytes());
+    mvhd[24..26].copy_from_slice(&0x100u16.to_be_bytes());
+    mvhd[36..72].copy_from_slice(&matrix);
+    mvhd[96..100].copy_from_slice(&2u32.to_be_bytes());
+    let mut moov = iso_box(b"mvhd", &mvhd);
+    moov.extend(iso_box(b"trak", &trak));
+    out.extend(iso_box(b"moov", &moov));
     out
 }
 pub fn heif(brand: &[u8; 4]) -> Vec<u8> {
@@ -270,7 +310,12 @@ pub fn heif(brand: &[u8; 4]) -> Vec<u8> {
         ],
     ));
     meta.extend(iso_box(b"iinf", &iinf));
-    meta.extend(iso_box(b"iprp", &iso_box(b"ipco", &props)));
+    let mut iprp = iso_box(b"ipco", &props);
+    if avif {
+        // Item 1 uses spatial property 1 and essential AV1 config property 2.
+        iprp.extend(iso_box(b"ipma", &[0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 2, 1, 0x82]));
+    }
+    meta.extend(iso_box(b"iprp", &iprp));
     out.extend(iso_box(b"meta", &meta));
     let offset = (out.len() + 8) as u32;
     let iloc = out.windows(4).position(|v| v == b"iloc").unwrap() + 4;

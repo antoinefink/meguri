@@ -65,3 +65,20 @@ Independent non-author `s-20261122T133702Z-023bbfaa` reviewed each complete file
 | `server/src/mcp_transport/backend.rs` | `4a0708c96150f2a28f5c68a493898163eee4c51bd0d52088b3c74f751e07ae62` | `20261122T140335Z-7608` |
 | `server/tests/mcp_oauth.rs` | `f24e5bf89ad95dd53b90d300bebe3d1b6318c41c082171361f90a5c49441db75` | `20261122T141226Z-39714` |
 | `server/web/scripts/audit-assessment.json` | `5333a1f1e2980c2c8559cc912026c2774aa68aef86df15df246a0ac84a1893ee` | `20261122T140849Z-28060` |
+
+## CodeRabbit follow-up
+
+PR #124 review on `2b299778b` raised eight inline findings. The native viewer now supplies a retained PDFKit delegate that suppresses URL and remote-document actions, and the scheme handler denies reserved PDF filename aliases containing default-ignorable scalars. Each viewer retains its internal PDF navigation. The render vocabulary includes the PDF signal. Independent source review `20261122T143224Z-22035` confirmed the delegate boundary. `swift-test/20261122T144543Z-70283` passed all nine focused tests, and `build-app/20261122T144541Z-69973` passed the iOS build without warnings.
+
+The server checks cover unique Ogg chain serials, bounded WebP animation geometry and extension chunks, AVIF item-specific codec properties, and self-contained M4A sample tables that resolve to the uploaded bytes. `sync-server-test/20261122T143528Z-33469` passed all 22 focused tests at the Ogg/WebP stage. `sync-server-test/20261122T144742Z-78304` passed all eight final ISO tests, including long audio tables; `20261122T144628Z-74838` reviewed the final ISO file. Exact PDF stream boundaries now use declared cross-reference lengths, including incremental revisions and compressed length objects. The intermediate run `sync-server-test/20261122T143823Z-42948` passed 324 of 325 tests. Its wrong-length case counted a tolerated separator, so the final fixture also exercises genuinely truncated or excessive lengths. The next run `sync-server-test/20261122T145122Z-90094` passed 331 of 332. Its object stream fixture now distinguishes valid leading whitespace from a truncated header. The full follow-up checks are tracked on the PR.
+
+Review runs `20261122T143743Z-41455` and `20261122T144628Z-74838` checked the complete applicable source files. The following are the final candidate digests for the format repairs.
+
+| File | SHA-256 |
+|---|---|
+| `server/src/mcp_service/attachments/format/audio.rs` | `1eca9c96b3c638ad66723119d54ed0537246a3fedcd3fe6fd9acb5e8fa8043a9` |
+| `server/src/mcp_service/attachments/format/images.rs` | `988ce9459cf9172fe1c71f5b92914c53f1da7d55b9a513a40b466e935cc422be` |
+| `server/src/mcp_service/attachments/format/isobmff.rs` | `86d7f0acb3ad4ebead3c807876593a2ecd166fcaf59e33c8127ff6778bb393e9` |
+| `server/src/mcp_service/attachments/format/pdf.rs` | `45ff26c7b441c3ce02c09a6a62ed1a4278e6b1cd91259ee50860023bf49097c2` |
+| `server/src/mcp_service/attachments/format/tests.rs` | `21da443e4142d955f93c2cb387194a7858d7fbb5064afe920fe495506238d659` |
+| `server/tests/support/attachment_formats.rs` | `ff6d752781665d9c0a80403079e653681629b52c1e384c834df4b3952fa76522` |

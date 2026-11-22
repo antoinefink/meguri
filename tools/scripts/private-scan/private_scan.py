@@ -839,7 +839,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
     'docs/process/review-log/mcp-note-attachments-20261122.md':
-        '3bda3107ca80dea55595e70d0c795c5f2eae9bffd6f874c0fed90699bd11a581',
+        '1eef61d1420d7b383d5d61c0cd4b08641adc455ee84a07d2d675a78139198c68',
     'docs/process/review-log/meguri-collection-mcp-20261119.md':
         '05cb4950ef3ced22e56e850a70ff9d1859ac49a216953314eb4aa0ada3ff6ab2',
     'server/src/accounts/oauth/mod.rs':
@@ -853,13 +853,15 @@ PUBLIC_ARTIFACTS = {
     'server/src/mcp_service/authority_tests.rs':
         '7714d0522108e89ef351884762e6557f17ad1184e46cbf0a06eb7e68be35453c',
     'server/src/mcp_service/attachments/format/audio.rs':
-        '0950666b1b175bd5839f5ff9d830e5e048d44bfcbdec13804b52796ef408d9b3',
+        '1eca9c96b3c638ad66723119d54ed0537246a3fedcd3fe6fd9acb5e8fa8043a9',
     'server/src/mcp_service/attachments/format/isobmff.rs':
-        'b337b94d622f4e69e0f3851b76cc76342a3ca9a52f1c556236a083ce3d702e2c',
+        '86d7f0acb3ad4ebead3c807876593a2ecd166fcaf59e33c8127ff6778bb393e9',
     'server/src/mcp_service/attachments/format/tests.rs':
-        '1fb734dd0b26e06e4048f28f7ddb802bb2aadcbb0bdf12e504c6431f26649d28',
+        '21da443e4142d955f93c2cb387194a7858d7fbb5064afe920fe495506238d659',
     'server/tests/support/attachment_formats.rs':
-        'ddf1bbee4b1a5515b011ff3c8d9b1957424ad552faf99f23b5dddb5b4754bbb0',
+        'ff6d752781665d9c0a80403079e653681629b52c1e384c834df4b3952fa76522',
+    'server/src/mcp_service/attachments/format/pdf.rs':
+        '45ff26c7b441c3ce02c09a6a62ed1a4278e6b1cd91259ee50860023bf49097c2',
     'server/src/mcp_transport/backend.rs':
         '4a0708c96150f2a28f5c68a493898163eee4c51bd0d52088b3c74f751e07ae62',
     'server/src/mcp_transport/diagnostics.rs':
