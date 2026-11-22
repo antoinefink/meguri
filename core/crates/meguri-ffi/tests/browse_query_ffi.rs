@@ -61,6 +61,11 @@ fn finish(rx: &mpsc::Receiver<CoreEvent>, id: u64) -> JobOutcome {
 }
 
 fn open(dir: &tempfile::TempDir) -> mpsc::Receiver<CoreEvent> {
+    open_with(dir, |_| {})
+}
+
+/// Opens a new collection after `prepare` has changed its file.
+fn open_with(dir: &tempfile::TempDir, prepare: impl FnOnce(&std::path::Path)) -> mpsc::Receiver<CoreEvent> {
     let collection = dir.path().join("collection");
     let backups = dir.path().join("backups");
     std::fs::create_dir_all(&collection).unwrap();
@@ -71,6 +76,7 @@ fn open(dir: &tempfile::TempDir) -> mpsc::Receiver<CoreEvent> {
         &meguri_model::rng::SeededRandom::new(7),
     )
     .unwrap();
+    prepare(&collection.join("collection.anki2"));
     let (tx, rx) = mpsc::channel();
     meguri_ffi::events::set_event_listener(Arc::new(Listener(tx))).unwrap();
     let handle = collection::start_open(
@@ -419,4 +425,47 @@ fn the_query_model_suggestions_counts_columns_and_selection_counts_run_through_t
         })
     );
     session.close().unwrap();
+}
+
+/// T14 and K6.1: a new collection opens Browse on the whole collection, in
+/// Cards.
+#[test]
+fn browse_opening_of_a_new_collection_is_the_whole_collection_in_cards() {
+    let dir = tempfile::tempdir().unwrap();
+    let _core = open(&dir);
+    assert_eq!(
+        browse_opening().unwrap(),
+        BrowseOpening {
+            default_search: None,
+            notes_mode: false
+        }
+    );
+}
+
+/// T14 and K6.4: a set default search comes back as stored, untrimmed, and
+/// the notes mode as stored (K6.1).
+#[test]
+fn browse_opening_reads_a_set_default_search_and_the_notes_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let _core = open_with(&dir, |path| {
+        let db = meguri_storage::raw::PlainDatabase::open(path).unwrap();
+        for (key, value) in [("defaultSearchText", "\"  deck:x \""), ("browserTableShowNotesMode", "true")] {
+            db.execute(
+                "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES (?, 0, 0, ?)",
+                &[
+                    meguri_storage::raw::RawValue::text(key),
+                    meguri_storage::raw::RawValue::Blob(value.as_bytes().to_vec()),
+                ],
+            )
+            .unwrap();
+        }
+        db.close().unwrap();
+    });
+    assert_eq!(
+        browse_opening().unwrap(),
+        BrowseOpening {
+            default_search: Some("  deck:x ".into()),
+            notes_mode: true
+        }
+    );
 }

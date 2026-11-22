@@ -191,6 +191,12 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let providerStartMediaRound = BridgeCall("ProviderConnection.start_media_round")
     public static let providerRoundOutcome = BridgeCall("ProviderRoundResult.outcome")
     public static let providerRoundRetryFinalization = BridgeCall("ProviderRoundResult.retry_finalization")
+    public static let providerStartStructureSave = BridgeCall("ProviderConnection.start_structure_save")
+    public static let providerStartStructureUpload = BridgeCall("ProviderConnection.start_structure_upload")
+    public static let providerStructureAdvance = BridgeCall("ProviderStructureJob.advance")
+    public static let providerStructureCancel = BridgeCall("ProviderStructureJob.cancel")
+    public static let providerStructureSaved = BridgeCall("ProviderStructureJob.saved")
+    public static let providerStructureUploadPending = BridgeCall("ProviderOwner.structure_upload_pending")
     public static let providerBootstrapPendingPreparation = BridgeCall("ProviderConnection.pending_bootstrap_preparation")
     public static let providerBootstrapDiscardPreview = BridgeCall("ProviderConnection.discard_bootstrap_preview")
     public static let providerBootstrapDiscardOperation = BridgeCall("ProviderConnection.discard_bootstrap_operation")
@@ -423,6 +429,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let useStandardBrowserColumns = BridgeCall("use_standard_browser_columns")
     public static let startBrowseSelectionCounts = BridgeCall("start_browse_selection_counts")
     public static let browseSelectionCountsJobResult = BridgeCall("BrowseSelectionCountsJob.result")
+    public static let browseOpening = BridgeCall("browse_opening")
     public static let startFindDuplicates = BridgeCall("start_find_duplicates")
     public static let findDuplicatesJobResult = BridgeCall("FindDuplicatesJob.result")
 
@@ -689,6 +696,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         providerBootstrapOutcome, providerBootstrapMediaSnapshot, providerBootstrapRequestStop,
         providerBootstrapRetainedOperation,
         providerStartCollectionRound, providerStartMediaRound, providerRoundOutcome, providerRoundRetryFinalization,
+        providerStartStructureSave, providerStartStructureUpload, providerStructureAdvance, providerStructureCancel,
+        providerStructureSaved, providerStructureUploadPending,
         providerBootstrapPendingPreparation, providerBootstrapDiscardPreview, providerBootstrapDiscardOperation, providerBootstrapRecovery,
         testCloudZoneDeletionFixture, testCloudZoneDeletionRows,
         cloudPolicyExecutionBeginCleanupPass, cloudCleanupPassSubmitInventory, cloudCleanupPassCompleteInventory, cloudCleanupPassFinish,
@@ -732,7 +741,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
         startNotetypeStructureSave, notetypeStructureJobResult, notetypeCheckFieldName, templateFieldReferences,
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
-        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, startBrowseSelectionCounts, browseSelectionCountsJobResult,
+        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
         startFindDuplicates, findDuplicatesJobResult,
     ]
 }

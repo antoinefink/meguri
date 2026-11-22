@@ -85,6 +85,9 @@ extension EventTests {
             #expect(change.written && change.summary.undoName == nil)
             #expect(try await CoreBrowseQuery.columnSet(notetype: nil).notes.contains("noteCrt") == false)
 
+            // T14: a new collection opens Browse on the whole collection, in Cards.
+            #expect(try await CoreBrowseQuery.opening() == BrowseOpening(defaultSearch: nil, notesMode: false))
+
             let session = try await BrowseSearchSession.open()
             var events = session.events.makeAsyncIterator()
             let seq = try await session.startSearch("", mode: .notes, sort: BrowseSort(key: "noteFld", direction: .ascending))

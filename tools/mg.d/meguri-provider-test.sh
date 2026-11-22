@@ -170,6 +170,7 @@ mg_meguri_provider__result() {
     .checks==(if $phase=="upload" then ["fresh-upload-client","explicit-collection-and-media","retained-safety-artifacts","all-media-accounted","ready-automatic","exact-fixture","closed"]
       elif $phase=="download" then ["initial-no-collection","explicit-collection-and-media","initial-no-backup","all-media-accounted","ready-automatic","exact-fixture","closed"]
       elif $phase=="reopen" then ["cold-ready","persisted-binding-epoch","exact-fixture","closed"]
+      elif $phase=="structure-save" then ["cold-ready","round-save-upload-one-job","structure-saved","ready-automatic","nothing-pending","history-cleared","server-holds-save","reopened-ready","closed"]
       elif $phase=="review-send" then ["cold-ready","original-binding-epoch-settings","initial-unreviewed","fsrs-ok","rendered-question-and-answer","good-answer-ended","one-good-revlog","second-card-unreviewed","media-replaced","owned-collection-merged","owned-media-complete","retained-binding-epoch-settings","exported-full-daily-facts","closed"]
       elif $phase=="review-receive" then ["cold-ready","original-binding-epoch-settings","initial-unreviewed","owned-collection-merged","owned-media-complete","retained-binding-epoch-settings","fsrs-ok","one-good-revlog","second-card-unreviewed","exact-daily-row-and-media-equality","closed"]
       elif $phase=="review-reopen" then ["cold-ready","original-binding-epoch-settings","persisted-daily-witness","fsrs-ok","no-active-review","exact-daily-row-and-media-equality","closed"] else [] end)' "$result" >/dev/null
@@ -180,7 +181,7 @@ mg_meguri_provider__phase() {
   owner="$(mg_meguri_provider__nonce)" || return 1
   uid="$(id -u)"; gid="$(id -g)"
   mkdir "$output" || return 1
-  if [ "$phase" != upload ]; then
+  if [ "$phase" != upload ] && [ "$phase" != structure-save ]; then
     extra=(--mount "type=bind,src=$provider_private/expected,dst=/expected,readonly")
     operands=(--expected /expected)
   fi
@@ -244,6 +245,10 @@ mg_meguri_provider__run() {
     mg_meguri_provider__phase review-receive "$provider_private/B" || return 1
     mg_meguri_provider__phase review-reopen "$provider_private/B" || return 1
   fi
+  if [ "${provider_structure_save:-0}" = 1 ]; then
+    # MP7 on the uploading device, last: its upload replaces the server's collection.
+    mg_meguri_provider__phase structure-save "$provider_private/A" || return 1
+  fi
   mg_meguri_provider__owned "$provider_fixture_name" "$provider_fixture_owner" "$provider_tool_image" running || return 1
   docker stop --time 30 "$provider_fixture_name" >"$provider_private/fixture-stop" || return 1
   mg_meguri_provider__owned "$provider_fixture_name" "$provider_fixture_owner" "$provider_tool_image" exited || return 1
@@ -256,23 +261,29 @@ mg_meguri_provider__run() {
     '{source_commit:$source,runtime_image_id:$runtime,fixture_image_id:$tool,dev_image_id:$dev,client_sha256:$binary}')"
   local total=3
   [ "${provider_review_round:-0}" != 1 ] || total=6
+  [ "${provider_structure_save:-0}" != 1 ] || total=$((total + 1))
   mg_count total "$total"; mg_count passed "$total"; mg_count failed 0; mg_count skipped 0
 }
 mg_meguri_provider_real_server() {
-  local explicit= provider_receipt provider_commit provider_review_round=0 bad=0
+  local explicit= provider_receipt provider_commit provider_review_round=0 provider_structure_save=0 bad=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --review-round)
         [ "$provider_review_round" = 0 ] || { bad=1; break; }
         provider_review_round=1; shift ;;
+      --structure-save)
+        [ "$provider_structure_save" = 0 ] || { bad=1; break; }
+        provider_structure_save=1; shift ;;
       --package-receipt)
         [ -z "$explicit" ] && [ "$#" -ge 2 ] && [ -n "$2" ] && [[ "$2" != --* ]] || { bad=1; break; }
         explicit="$2"; shift 2 ;;
       *) bad=1; break ;;
     esac
   done
+  # The structure phase checks the fixture as the upload left it: it does not follow a review round.
+  [ "$provider_review_round" != 1 ] || [ "$provider_structure_save" != 1 ] || bad=1
   if [ "$bad" = 1 ]; then
-    mg_failure usage "meguri-provider-real-server [--review-round] [--package-receipt <result.json>]"; mg_status error; return
+    mg_failure usage "meguri-provider-real-server [--review-round | --structure-save] [--package-receipt <result.json>]"; mg_status error; return
   fi
   mg_sync_server__clean || { mg_status fail; return; }
   provider_commit="$(mg_meguri_provider__commit)" || { mg_status fail; return; }

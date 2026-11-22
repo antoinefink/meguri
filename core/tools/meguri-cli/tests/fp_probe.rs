@@ -15,7 +15,7 @@ fn conformance() -> PathBuf {
 }
 
 fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_meguri-cli"))
+    Command::new(crate::bin_exe())
         .args(args)
         .output()
         .unwrap()

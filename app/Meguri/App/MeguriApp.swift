@@ -48,6 +48,12 @@ struct MeguriApp: App {
         self.hooks = hooks
         if hooks.startsFresh {
             uiStateStore = UIStateStore(defaults: nil)
+            configuration.deviceDefaults = nil
+        }
+        // Browse is hidden until its table lands (U270a); hook launches and the
+        // app-hosted tests show it so they exercise it.
+        if hooks.startsFresh || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            BrowseRollout.shown = true
         }
         if let shell = hooks.shell {
             features = shell.features

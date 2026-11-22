@@ -1,8 +1,9 @@
 //! Disposable synthetic CoreHost bootstrap and opt-in daily round against the packaged service.
 use meguri_engine::{CancelToken, EventKind, OpSource, OpSpec, Subscription};
-use meguri_host::{CoreHost, HostConfig, ManualTransferTask, MeguriAccess,
+use meguri_host::{CoreHost, HostConfig, ManualTransferTask, MeguriAccess, MeguriAccessSource,
     MeguriBootstrapDirection, MeguriBootstrapError, MeguriCollectionState, MeguriRoundStart,
-    MeguriRoundTask, MeguriRoundResult, ProcessCore};
+    MeguriRoundTask, MeguriRoundResult, MeguriStructureOutcome, MeguriStructureStep, MeguriStructureUploadOutcome,
+    ProcessCore};
 use meguri_model::{card::{CardQueue, CardType}, clock::{FixedClock, UtcOffset},
     ids::{DeckId, NotetypeId}, rng::SeededRandom, time::EpochMillis};
 use meguri_storage::{Cell, Record, ReadRows, ReaderRole, Table, space::StatvfsSpace};
@@ -80,7 +81,8 @@ struct Args { phase: String, review_round: bool, fixture: PathBuf, root: PathBuf
 fn args() -> Result<Args> {
     let mut input = env::args().skip(1);
     let phase = input.next().ok_or_else(|| failure("arguments", "mode"))?;
-    require(matches!(phase.as_str(), "upload" | "download" | "reopen" | "review-send" | "review-receive" | "review-reopen"), "arguments")?;
+    require(matches!(phase.as_str(), "upload" | "download" | "reopen" | "review-send" | "review-receive" | "review-reopen"
+        | "structure-save"), "arguments")?;
     let mut review_round = false;
     let mut fixture = None; let mut root = None; let mut expected = None; let mut output = None;
     while let Some(key) = input.next() {
@@ -102,7 +104,7 @@ fn args() -> Result<Args> {
         for b in &paths[i + 1..] { require(!a.starts_with(b) && !b.starts_with(a), "path-alias")?; }
     }
     let get = |p: Option<PathBuf>| p.ok_or_else(|| failure("arguments", "missing"));
-    require((phase == "upload") == expected.is_none(), "arguments")?;
+    require((phase == "upload" || phase == "structure-save") == expected.is_none(), "arguments")?;
     require(!phase.starts_with("review-") || review_round, "arguments")?;
     Ok(Args { phase, review_round, fixture: get(fixture)?, root: get(root)?, expected, output: get(output)? })
 }
@@ -117,7 +119,8 @@ fn config(args: &Args, fixture: &Fixture) -> Result<HostConfig> {
     let collection = args.root.join("collection");
     checked(fs::create_dir_all(&collection), "collection-directory")?;
     Ok(HostConfig::new(collection, args.root.join("backups"), args.root.join("widget"),
-        Arc::new(FixedClock::new(if args.phase.starts_with("review-") { daily_time(fixture)? } else { fixture.now_ms }, UtcOffset::UTC)),
+        Arc::new(FixedClock::new(if args.phase == "structure-save" { structure_time(fixture)? }
+            else if args.phase.starts_with("review-") { daily_time(fixture)? } else { fixture.now_ms }, UtcOffset::UTC)),
         Arc::new(SeededRandom::new(if args.phase == "upload" { 418 } else { 919 })), Arc::new(StatvfsSpace)))
 }
 fn settle(host: &CoreHost) -> Result<()> {
@@ -699,6 +702,108 @@ fn execute_daily(args: &Args, fixture: &Fixture, config: &HostConfig) -> Result<
     write_json(&args.output.join("result.json"), &json!({"format":1,"phase":args.phase,"status":"pass",
         "checks":checks,"counts":{"notes":2,"cards":2,"media":2,"revlogs":1,"reps":1}}))
 }
+fn structure_time(fixture: &Fixture) -> Result<i64> {
+    // After every earlier phase's exchange, so that the save stamps `scm` past
+    // `ls`, and within the server's tolerance for a device clock.
+    fixture.now_ms.checked_add(120_000).ok_or_else(|| failure("structure-clock", "overflow"))
+}
+/// `sync/meguri-provider` MP7 against the packaged service: on a device whose
+/// binding is ready, one job runs the round, removes a field whose content
+/// the caller confirmed, and uploads; a normal round then finds nothing to
+/// exchange, so the server holds the saved structure.
+fn execute_structure(args: &Args, fixture: &Fixture, config: &HostConfig) -> Result<()> {
+    use meguri_engine::notetypes::structure::{self, StructureDraft};
+    let host = checked(CoreHost::open(config.clone()), "structure-cold-open")?;
+    settle(&host)?;
+    require(bootstrap(host.meguri_readiness(), "structure-readiness")? == MeguriReadiness::Ready, "structure-cold-ready")?;
+    let ca = checked(fs::read(args.fixture.with_file_name("ca.der")), "fixture-ca")?;
+    let connection = checked(host.provider_authority().snapshot(), "structure-connection")?.meguri
+        .ok_or_else(|| failure("structure-connection", "missing"))?;
+    let key = authenticate(&host, config, &connection, fixture, &ca)?;
+    let fields = |host: &CoreHost, id: NotetypeId| -> Result<usize> {
+        let collection = checked(host.collection(), "structure-collection")?;
+        let reader = checked(collection.reader(ReaderRole::Query), "structure-reader")?;
+        Ok(checked(reader.notetype(id), "structure-notetype")?.ok_or_else(|| failure("structure-notetype", "missing"))?.fields.len())
+    };
+    let draft = {
+        let collection = checked(host.collection(), "structure-collection")?;
+        let reader = checked(collection.reader(ReaderRole::Query), "structure-reader")?;
+        let note = checked(reader.notes_after(None, 1), "structure-notes")?.into_iter().next()
+            .ok_or_else(|| failure("structure-notes", "missing"))?;
+        let stored = checked(reader.notetype(note.notetype_id), "structure-notetype")?
+            .ok_or_else(|| failure("structure-notetype", "missing"))?;
+        require(stored.fields.len() == 2, "structure-two-fields")?;
+        let mut draft = StructureDraft::of(&stored);
+        draft.fields.remove(1);
+        draft.skip_checks = true;
+        // Both notes hold content in the removed field.
+        draft.confirmed.fields.insert(1, 2);
+        draft
+    };
+    let notetype = draft.notetype;
+    let source: MeguriAccessSource = {
+        let (connection, username, key, ca) = (connection.clone(), fixture.username.clone(), key.clone(), ca.clone());
+        Arc::new(move || {
+            let endpoint = provider::native_endpoint(&connection.endpoint).map_err(|_| MeguriBootstrapError::ConnectionChanged)?;
+            let transport = HttpTransport::new(&JobOptions::new(endpoint, ServerKind::SelfHosted).trust_root(ca.clone()))
+                .map_err(|_| MeguriBootstrapError::ConnectionChanged)?;
+            Ok(MeguriAccess::new(connection.clone(), &username, key.clone())?.with_transport_for_testing(Box::new(transport)))
+        })
+    };
+    let task = host.start_meguri_structure_save(source, Box::new(move |collection, job| {
+        structure::apply(collection, draft, job.cancel.clone(), job.progress.clone()).map(|_| ())
+    }), true).map_err(|_| failure("structure-start", "refused"))?;
+    // With the round after it, inside the job runner's limit for one phase.
+    let deadline = timeout_clock::now() + Duration::from_secs(45);
+    let outcome = loop {
+        let events = host.engine().stream().subscribe();
+        match host.advance_meguri_structure(&task).map_err(|_| failure("structure-advance", "refused"))? {
+            MeguriStructureStep::Finished(outcome) => break outcome,
+            MeguriStructureStep::Running { job, .. } => loop {
+                let remaining = deadline.checked_duration_since(timeout_clock::now())
+                    .ok_or_else(|| failure("structure-phase", "JobFinishedDeadline"))?;
+                let event = events.recv_timeout(remaining).ok_or_else(|| failure("structure-phase", "JobFinishedUnavailable"))?;
+                if matches!(event.kind, EventKind::JobFinished { id, .. } if id == job.id) { break; }
+            },
+        }
+    };
+    // Category only: no payload of the outcome is printed.
+    require(matches!(*outcome, MeguriStructureOutcome::Saved(MeguriStructureUploadOutcome::Uploaded { media_complete: true })),
+        match &*outcome {
+            MeguriStructureOutcome::NotSaved(meguri_host::MeguriStructureStop::Refused(_)) => "structure-op-refused",
+            MeguriStructureOutcome::NotSaved(meguri_host::MeguriStructureStop::FullSyncRequired) => "structure-full-sync-required",
+            MeguriStructureOutcome::NotSaved(meguri_host::MeguriStructureStop::Round { .. }) => "structure-round-stopped",
+            MeguriStructureOutcome::NotSaved(_) => "structure-not-saved",
+            MeguriStructureOutcome::Saved(MeguriStructureUploadOutcome::ChooseCollection) => "structure-choose-collection",
+            MeguriStructureOutcome::Saved(MeguriStructureUploadOutcome::Pending(_)) => "structure-upload-pending",
+            MeguriStructureOutcome::Saved(_) => "structure-upload-incomplete",
+        })?;
+    settle(&host)?;
+    require(fields(&host, notetype)? == 1, "structure-saved")?;
+    ready(&host)?;
+    require(!checked(host.meguri_structure_upload_pending(), "structure-pending")?
+        && checked(host.provider_authority().snapshot(), "structure-record")?.meguri_structure.is_none(), "structure-nothing-pending")?;
+    require(checked(checked(host.collection(), "structure-undo")?.undo_depth_for_testing(), "structure-undo")? == 0, "structure-history-cleared")?;
+    // The server holds what this device holds: a round has nothing to exchange.
+    let events = host.engine().stream().subscribe();
+    let result = owned_result(&host, events, host.start_meguri_collection(access(&connection, fixture, &key, &ca)?))?;
+    let collection = result.collection.as_ref().ok_or_else(|| failure("structure-round", "missing"))?;
+    require(result.recovery.is_none() && collection.state == MeguriCollectionState::NoChanges && collection.error.is_none()
+        && collection.refusal.is_none() && !collection.acceptance_unknown, "structure-server-holds-save")?;
+    ready(&host)?;
+    checked(host.close(), "structure-close")?;
+    drop(host);
+    // The save and its record survive a relaunch as a ready, clean binding.
+    let reopened = checked(CoreHost::open(config.clone()), "structure-reopen")?;
+    settle(&reopened)?;
+    ready(&reopened)?;
+    require(fields(&reopened, notetype)? == 1 && !checked(reopened.meguri_structure_upload_pending(), "structure-pending")?, "structure-reopened")?;
+    checked(reopened.close(), "structure-close")?;
+    write_json(&args.output.join("result.json"), &json!({"format":1,"phase":args.phase,"status":"pass",
+        "checks":["cold-ready", "round-save-upload-one-job", "structure-saved", "ready-automatic", "nothing-pending",
+            "history-cleared", "server-holds-save", "reopened-ready", "closed"],
+        "counts":{"notes":2,"cards":2,"media":2,"revlogs":0,"reps":0}}))
+}
 fn execute(args: &Args) -> Result<()> {
     require(checked(fs::read_dir(&args.output), "output-directory")?.next().is_none(), "fresh-output")?;
     let fixture: Fixture = checked(serde_json::from_slice(&checked(fs::read(&args.fixture), "fixture-input")?), "fixture-format")?;
@@ -707,6 +812,7 @@ fn execute(args: &Args) -> Result<()> {
     if matches!(args.phase.as_str(), "upload" | "download") { require(checked(fs::read_dir(&args.root), "client-root")?.next().is_none(), "fresh-client")?; }
     let config = config(args, &fixture)?;
     if args.phase.starts_with("review-") { return execute_daily(args, &fixture, &config); }
+    if args.phase == "structure-save" { return execute_structure(args, &fixture, &config); }
     let mut process = None;
     let host = if upload {
         checked(meguri_engine::bootstrap::create(&config.collection_directory.join("collection.anki2"),

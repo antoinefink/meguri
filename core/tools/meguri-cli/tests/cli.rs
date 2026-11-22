@@ -11,7 +11,7 @@ fn conformance() -> PathBuf {
 }
 
 fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_meguri-cli"))
+    Command::new(crate::bin_exe())
         .args(args)
         .output()
         .unwrap()
@@ -747,7 +747,7 @@ fn schema_checker_uses_observation_conversion_and_keeps_authored_d2_limits() {
             .args(["-B", "-I"])
             .arg(conformance().join("../tools/conformance/check_schemas.py"))
             .arg("--cli")
-            .arg(env!("CARGO_BIN_EXE_meguri-cli"))
+            .arg(crate::bin_exe())
             .arg("--conformance")
             .arg(&root)
             .arg("--report")
@@ -1141,7 +1141,7 @@ fn run_live_checks_the_fault_proxy_api_before_any_worker_starts() {
     let _ = worker(root, &recorded, LOCK);
     let cmd = serde_json::to_string(&["env", "TZ={tz}", "sh", script.to_str().unwrap()]).unwrap();
     let run = |api: &str| {
-        Command::new(env!("CARGO_BIN_EXE_meguri-cli"))
+        Command::new(crate::bin_exe())
             .args([
                 "conformance",
                 "run",

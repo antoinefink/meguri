@@ -9,6 +9,10 @@ mod provider;
 mod provider_bootstrap;
 mod provider_normal;
 mod provider_setup;
+mod provider_structure;
+pub use provider_structure::{MeguriAccessSource, MeguriStructureOutcome, MeguriStructureRefusal, MeguriStructureStage,
+    MeguriStructureStep, MeguriStructureStop, MeguriStructureTask, MeguriStructureUploadOutcome, MeguriStructureWork,
+    MeguriUploadPending};
 pub use provider_setup::{MeguriSetupChange, MeguriSetupChoice, MeguriSetupDecision, MeguriSetupRow, MeguriSetupSettlement, MeguriSetupSide};
 pub use provider_normal::{MeguriCollectionState, MeguriCollectionResult, MeguriMediaResult, MeguriRoundRecovery, MeguriRoundResult, MeguriRoundStage, MeguriRoundStart, MeguriRoundTask};
 pub use provider_bootstrap::{MeguriAccess, MeguriBootstrapDirection, MeguriBootstrapError};

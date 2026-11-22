@@ -21,6 +21,10 @@ public struct LaunchConfiguration {
     /// A screen, sheet or alert the root shows at launch; nil shows the
     /// navigation's own state.
     public var initialPresentation: InitialPresentation?
+    /// Where features keep device-only state across launches (Browse's
+    /// query and sidebar, `browser/config-keys` K11); nil keeps nothing, as
+    /// a test-hook launch that starts fresh asks.
+    public var deviceDefaults: UserDefaults? = .standard
 
     public init() {}
 }

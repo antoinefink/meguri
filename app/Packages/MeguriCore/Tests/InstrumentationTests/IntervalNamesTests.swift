@@ -78,6 +78,8 @@ import Testing
             "ProviderBootstrapResult.outcome", "ProviderBootstrapResult.media_snapshot", "ProviderBootstrapResult.request_stop",
             "ProviderBootstrapResult.retained_operation",
             "ProviderConnection.start_collection_round", "ProviderConnection.start_media_round", "ProviderRoundResult.outcome", "ProviderRoundResult.retry_finalization",
+            "ProviderConnection.start_structure_save", "ProviderConnection.start_structure_upload", "ProviderStructureJob.advance", "ProviderStructureJob.cancel",
+            "ProviderStructureJob.saved", "ProviderOwner.structure_upload_pending",
             "ProviderConnection.pending_bootstrap_preparation", "ProviderConnection.discard_bootstrap_preview",
             "ProviderConnection.discard_bootstrap_operation", "ProviderConnection.start_bootstrap_recovery",
             "test_cloud_zone_deletion_fixture", "test_cloud_zone_deletion_rows",
@@ -127,7 +129,7 @@ import Testing
             "notetype_list", "start_notetype_note_counts", "NotetypeNoteCountsJob.result", "start_notetype_field_content_counts", "NotetypeFieldContentCountsJob.result", "start_notetype_draft_summary", "NotetypeDraftSummaryJob.result", "start_notetype_notes_without_card", "NotetypeNotesWithoutCardJob.result", "start_notetype_removal_counts", "NotetypeRemovalCountsJob.result", "notetype_near_field_name",
             "start_notetype_structure_save", "NotetypeStructureJob.result", "notetype_check_field_name", "template_field_references",
             "open_search_session", "BrowseSearchSession.start_search", "BrowseSearchSession.resort", "BrowseSearchSession.toggle", "BrowseSearchSession.reverse", "BrowseSearchSession.invalidated_rows", "BrowseSearchSession.rows", "BrowseSearchSession.qa_cells", "BrowseSearchSession.index_of", "BrowseSearchSession.map_selection", "BrowseSearchSession.resolve_selection", "BrowseSearchSession.selection", "BrowseSearchSession.handle_state", "BrowseSearchSession.close", "BrowseSelection.resolve",
-            "filter_run_text", "filter_read_text", "filter_commit", "filter_text_incomplete", "filter_deck_value", "filter_suggestions", "start_filter_counts", "FilterCountsJob.result", "browser_column_set", "change_browser_column_set", "use_standard_browser_columns", "start_browse_selection_counts", "BrowseSelectionCountsJob.result",
+            "filter_run_text", "filter_read_text", "filter_commit", "filter_text_incomplete", "filter_deck_value", "filter_suggestions", "start_filter_counts", "FilterCountsJob.result", "browser_column_set", "change_browser_column_set", "use_standard_browser_columns", "start_browse_selection_counts", "BrowseSelectionCountsJob.result", "browse_opening",
             "start_find_duplicates", "FindDuplicatesJob.result",
         ])
         for call in BridgeCall.all {

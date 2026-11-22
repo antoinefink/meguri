@@ -10,7 +10,7 @@ use std::process::{Command, Output};
 use serde_json::Value;
 
 fn cli_env(args: &[&str], env: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_meguri-cli"));
+    let mut command = Command::new(crate::bin_exe());
     command.args(args);
     for marker in meguri_testkit::private::vault::CI_MARKERS {
         command.env_remove(marker);

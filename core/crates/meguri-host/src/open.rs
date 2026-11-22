@@ -522,6 +522,9 @@ impl CoreHost {
         }
         host.set_close_state(CloseState::Active);
         host.refresh_provider_admission();
+        // MP7: a structure save that a kill stopped before its commit left
+        // its record with `scm <= ls`; nothing is pending for it.
+        let _ = host.settle_meguri_structure_upload();
         Ok(host)
     }
 

@@ -1598,6 +1598,80 @@ core_report_names() {
   [ ! -s "$STUB_LOG" ]
 }
 
+@test "core-test builds quick's tests once into an archive that shards run without compiling" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  core_modes_fixture
+  local quick one two sha
+  write_file list.txt "meguri-ffi::hooks hooks_enabled  # needs the FFI hooks feature"
+  mg core-test --quick --exclude-list list.txt
+  [ "$status" -eq 0 ]
+  quick="$(core_report_names)"
+
+  mg core-test --build-archive build/archive/core-tests.tar.zst
+  [ "$status" -eq 0 ]
+  [ -s "$SB/build/archive/core-tests.tar.zst" ]
+  sha="$(field .details.archive.sha256)"
+  [ "$sha" = "$(sha256sum "$SB/build/archive/core-tests.tar.zst" | cut -c1-64)" ]
+  jq -e '.details.archive | .file == "build/archive/core-tests.tar.zst" and .features == ["meguri-ffi/test-hooks"] and .bytes > 0' "$result"
+  validate "$result"
+
+  # The shards run the archived binaries: each runs the canary, together
+  # they are exactly quick's run, and each names the archive it ran.
+  mg core-test --quick --archive build/archive/core-tests.tar.zst --partition hash:1/2 --exclude-list list.txt
+  [ "$status" -eq 0 ]
+  one="$(core_report_names)"
+  jq -e --arg sha "$sha" '.details.hosted_selection.archive == {file: "build/archive/core-tests.tar.zst", sha256: $sha}' "$result"
+  validate "$result"
+  mg core-test --quick --archive build/archive/core-tests.tar.zst --partition hash:2/2 --exclude-list list.txt
+  [ "$status" -eq 0 ]
+  two="$(core_report_names)"
+  jq -ne --argjson a "$one" --argjson b "$two" --argjson q "$quick" '
+    ["meguri-engine::canary_pins$pin_held"] as $c
+    | ($a | index($c[0])) != null and ($b | index($c[0])) != null
+    and (($a - $c) + ($b - $c) + $c | sort) == $q'
+
+  # A run's extraction is gone when it ends; one a cancelled run left behind
+  # (its run has a result.json) goes at the next archive run.
+  [ -z "$(ls -A "$CARGO_TARGET_DIR/nextest-archive")" ]
+  mkdir -p "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-1" "$SB/build/mg/core-test/20000101T000000Z-1"
+  echo '{}' >"$SB/build/mg/core-test/20000101T000000Z-1/result.json"
+  touch -d '-11 minutes' "$SB/build/mg/core-test/20000101T000000Z-1/result.json"
+  # A run that ended just now keeps its extraction for now.
+  mkdir -p "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-3" "$SB/build/mg/core-test/20000101T000000Z-3"
+  echo '{}' >"$SB/build/mg/core-test/20000101T000000Z-3/result.json"
+  # Unmarked and two days old (a killed run, or a pruned result): removed.
+  mkdir -p "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-4"
+  touch -d '-2 days' "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-4"
+  mkdir -p "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-2"
+  mg core-test --quick --archive build/archive/core-tests.tar.zst --partition hash:1/2 --exclude-list list.txt
+  [ "$status" -eq 0 ]
+  [ "$(ls "$CARGO_TARGET_DIR/nextest-archive" | tr '\n' ' ')" = "20000101T000000Z-2 20000101T000000Z-3 " ]
+
+  # The timing-sensitive job's run: exactly the listed test, from the archive.
+  mg core-test --quick --archive build/archive/core-tests.tar.zst --only-list list.txt
+  [ "$status" -eq 0 ]
+  jq -e '[.details.listed_results[].event] == ["ok"]' "$result"
+
+  # A canary that fails in the archive stops the shard before its tests.
+  write_file core/crates/meguri-engine/tests/canary_pins.rs '#[test] fn pin_held() { panic!("pin drifted"); }'
+  mg core-test --build-archive build/archive/core-tests.tar.zst
+  [ "$status" -eq 0 ]
+  write_file core/crates/meguri-engine/tests/canary_pins.rs '#[test] fn pin_held() {}'
+  mg core-test --quick --archive build/archive/core-tests.tar.zst --partition hash:1/2
+  [ "$status" -eq 1 ]
+  [[ "$(field .message)" == *"canary failed"* ]]
+
+  # Bad paths are usage errors, and nothing is built or run.
+  mg core-test --build-archive /tmp/outside.tar.zst
+  [ "$status" -eq 2 ]
+  mg core-test --build-archive build/archive/core-tests.tar
+  [ "$status" -eq 2 ]
+  mg core-test --quick --archive build/archive/missing.tar.zst
+  [ "$status" -eq 2 ]
+  mg core-test --build-archive build/archive/core-tests.tar.zst --quick
+  [ "$status" -eq 2 ]
+}
+
 @test "core-test hosted options leave out, partition or run exactly the listed tests" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   core_modes_fixture

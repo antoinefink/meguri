@@ -725,6 +725,10 @@ impl CoreHost {
     /// upload and changes nothing on either side. A failed read is the
     /// task's error: the state stays unknown.
     pub fn settle_meguri_setup(&self, access: MeguriAccess) -> Result<ManualTransferTask<MeguriSetupSettlement>> {
+        // MP7 step 1: an upload the structure save job has in flight is not
+        // settled under it; a read made before the server commits would
+        // record that nothing was sent.
+        if self.meguri_structure_job_active() { return Err(MeguriBootstrapError::Busy); }
         let connection = access.connection().clone();
         let account = self.setup_account(&connection, access.username())?;
         let op = self

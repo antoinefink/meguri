@@ -16,7 +16,7 @@ pub struct MeguriBootstrapIntent {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MeguriBinding {
-    connection: MeguriConnection, account: AccountRef, publication: PublicationId,
+    pub(super) connection: MeguriConnection, pub(super) account: AccountRef, pub(super) publication: PublicationId,
     operation: OperationId, media_epoch: MediaEpochEvidence, completed_at_ms: i64,
 }
 impl MediaEpochEvidence {
@@ -86,9 +86,9 @@ pub struct ReadyEvidence {
     document_revision: u64, media_epoch: MediaEpochEvidence, accounting: MediaAccounting,
 }
 impl ReadyEvidence { pub fn accounting(&self) -> &MediaAccounting { &self.accounting } }
-type Result<T> = std::result::Result<T, MeguriReadyRefusal>;
+pub(super) type Result<T> = std::result::Result<T, MeguriReadyRefusal>;
 
-fn check_document(doc: &ProviderDocument, connection: &MeguriConnection) -> Result<()> {
+pub(super) fn check_document(doc: &ProviderDocument, connection: &MeguriConnection) -> Result<()> {
     if doc.selection != Selection::Meguri { return Err(MeguriReadyRefusal::NotSelected); }
     if doc.handoff.is_some() || doc.meguri.as_ref() != Some(connection) {
         return Err(MeguriReadyRefusal::ConnectionChanged);
@@ -111,7 +111,7 @@ fn operation(policy: &TransferPolicy, id: &OperationId) -> Result<Operation> {
 fn active(policy: &TransferPolicy) -> Result<Option<Operation>> {
     policy.active().map_err(|_| MeguriReadyRefusal::NotComplete)
 }
-fn readiness(doc: &ProviderDocument, settled: Option<&Publication>) -> MeguriReadiness {
+pub(super) fn readiness(doc: &ProviderDocument, settled: Option<&Publication>) -> MeguriReadiness {
     if doc.selection != Selection::Meguri { return MeguriReadiness::NotSelected; }
     let Some(binding) = &doc.meguri_binding else {
         return MeguriReadiness::Unbound { intent: doc.meguri_bootstrap.as_ref().map(|i| i.operation.clone()) };
@@ -124,7 +124,7 @@ fn readiness(doc: &ProviderDocument, settled: Option<&Publication>) -> MeguriRea
 impl Authority {
     // Preserve typed refusals without placing filenames or journal errors into
     // the storage error channel. The publication closure writes no refused state.
-    fn bootstrap_update(&self, generation: u64, publication: Option<Publication>,
+    pub(super) fn bootstrap_update(&self, generation: u64, publication: Option<Publication>,
         change: impl FnOnce(&mut ProviderDocument) -> Result<()>) -> Result<()> {
         let mut refusal = None;
         let result = self.update_publication(Some((generation, publication)), true, |_, doc| {
@@ -248,9 +248,14 @@ impl Authority {
                 account: op.account, publication: publication.identity, operation: op.id,
                 media_epoch: evidence.media_epoch, completed_at_ms: receipt.completed_at });
             doc.meguri_bootstrap = None;
+            // MP7: a completed bootstrap settles a structure upload recorded
+            // for this connection, whichever collection was kept. The job
+            // held the binding, which turned Sync Automatically off: the
+            // stored choice comes back with the new binding (MP6.2).
+            let automatic = doc.meguri_structure.take().is_none_or(|upload| upload.automatic());
             doc.settings.enabled = true;
-            doc.settings.automatic = true;
-            doc.meguri_settings.automatic = true;
+            doc.settings.automatic = automatic;
+            doc.meguri_settings.automatic = automatic;
             doc.revision = doc.revision.checked_add(1).ok_or_else(invalid)?;
             Ok(())
         })?;

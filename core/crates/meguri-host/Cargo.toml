@@ -49,6 +49,13 @@ name = "provider_media_kill"
 path = "tests/provider_media_kill.rs"
 required-features = ["test-hooks"]
 
+# Re-runs this binary with `--exact <test>` (a process killed inside the
+# structure save job): it needs unprefixed test names.
+[[test]]
+name = "provider_structure_kill"
+path = "tests/provider_structure_kill.rs"
+required-features = ["test-hooks"]
+
 # Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
 [[test]]
 name = "cloud_adoption_guards"

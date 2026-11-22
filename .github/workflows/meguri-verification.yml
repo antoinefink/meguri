@@ -5,15 +5,17 @@ name: Verify Meguri
 # request and master push starts this workflow; "Select suites" decides what
 # runs, and a suite the change does not affect still reports, as a quick pass
 # that says it was not selected, so no check waits forever. Linux · selftest
-# is the exception: it skips (a skipped check counts as passing), so a change
-# outside tools/ and .github/ takes no runner for it.
+# is the exception: it skips (a skipped check counts as passing), so a pull
+# request outside tools/, .github/ and docker/ takes no runner for it.
 #
 # - Linux · core: one result for the Core suite. It passes only when every
 #   shard ran and passed `tools/mg core-test --quick` and the lint job passed
 #   `tools/mg core-lint`, on this commit; a job that failed, was cancelled or
 #   never started fails it.
+# - Linux · core · build: the canaries, then quick's test binaries built
+#   once into a nextest archive (`core-test --build-archive`).
 # - Linux · core · shard M/N: nextest partition M of N of the quick tests,
-#   without the tests in .github/core-timing-sensitive.txt.
+#   from that archive, without the tests in .github/core-timing-sensitive.txt.
 # - Linux · core · lint: `tools/mg core-lint` (clippy, layering-check, the
 #   AnkiWeb scan).
 # - Linux · core (timing-sensitive): advisory. Runs the listed tests alone,
@@ -22,7 +24,11 @@ name: Verify Meguri
 # - Linux · checks: every run. static-checks against the base, lint-ui,
 #   design-docs and core-deny, one after another on one runner.
 # - Linux · selftest: `tools/mg selftest` and `image-tools-selftest`, for
-#   changes to tools/ or .github/.
+#   pull requests that change tools/, .github/ or docker/, every master push
+#   and manual and scheduled runs.
+# - macOS · Swift packages: advisory. `tools/mg swift-test --package
+#   MeguriCore` on the hosted Xcode 27 runner, for changes to the packages or
+#   the core's FFI interface.
 # - Linux · similarity: the similarity scan against the pinned Anki releases
 #   (.github/similarity.sh), for the files this change adds or modifies.
 
@@ -62,6 +68,7 @@ jobs:
       core: ${{ steps.select.outputs.core }}
       linux: ${{ steps.select.outputs.linux }}
       selftest: ${{ steps.select.outputs.selftest }}
+      swift: ${{ steps.select.outputs.swift }}
       core_shards: ${{ steps.select.outputs.core_shards }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,6 +108,7 @@ jobs:
           core=yes
           linux=yes
           selftest=yes
+          swift=yes
           # -z: git would quote a name with non-ASCII or special bytes, and
           # the anchored patterns below would miss it. --no-renames: a moved
           # file counts for both its old and its new directory.
@@ -110,9 +118,23 @@ jobs:
             if ! grep -qE "^(($linux_dirs)/|\.github/workflows/meguri-verification\.yml$|\.github/dev-image\.sh$)" <<<"$changed"; then
               linux=no
             fi
-            # The self-tests cover tools/mg and what the workflow runs.
-            if ! grep -qE '^(tools|\.github)/' <<<"$changed"; then
+            # The self-tests cover tools/mg, its scripts, the workflow and the
+            # images they build. A pull request runs them only when it changes
+            # one of those; every master push runs them.
+            if [[ "$EVENT" == pull_request ]] && ! grep -qE '^(tools|\.github|docker)/' <<<"$changed"; then
               selftest=no
+            fi
+            # MeguriCore's Swift tests, only for Swift or the core's FFI
+            # surface: the package, the FFI crate and the bindings generator,
+            # the workspace manifest, lock, vendored crates and toolchain that
+            # build the XCFramework, the scripts that build it, swift-test's
+            # job and the hosted skip list. A trade: the XCFramework holds all
+            # of core, but a change elsewhere in core is left to Linux · core.
+            # A change only to tools/mg or this workflow does not run it: run
+            # it by hand (workflow_dispatch) after one.
+            swift_paths='app/Packages/MeguriCore/|core/crates/meguri-ffi/|core/tools/uniffi-bindgen-swift/|core/Cargo\.toml$|core/Cargo\.lock$|core/vendor/|core/rust-toolchain\.toml$|tools/scripts/build-core-xcframework\.sh$|tools/scripts/repair-swift-integer-reader\.py$|tools/mg\.d/bridge\.sh$|\.github/swift-timing-sensitive\.txt$'
+            if ! grep -qE "^($swift_paths)" <<<"$changed"; then
+              swift=no
             fi
             core_dirs='core|conformance|specs|tools/conformance'
             core_files='\.github/workflows/meguri-verification\.yml|\.github/dev-image\.sh|\.github/rust-cache\.sh|\.github/core-timing-sensitive\.txt|tools/mg|tools/mg\.d/core\.sh|tools/scripts/ankiweb-scan\.py|tools/mg-result\.schema\.json|docker/compose\.yml|docker/dev\.Dockerfile(\.dockerignore)?'
@@ -139,6 +161,7 @@ jobs:
             echo "core=$core"
             echo "linux=$linux"
             echo "selftest=$selftest"
+            echo "swift=$swift"
             # The one list of Core shards: the shard matrix and the check in
             # "Linux · core" both read it.
             echo 'core_shards=[1,2,3,4]'
@@ -149,6 +172,7 @@ jobs:
             echo "- Core (4 shards, lint and the timing-sensitive job): **$core**"
             echo "- server, conformance, package-smoke: **$linux**"
             echo "- selftest: **$selftest** (Linux · checks runs on every change)"
+            echo "- Swift packages (macOS, advisory): **$swift**"
             if [[ -n "$added" ]]; then
               echo
               echo "**This change adds tests to .github/core-timing-sensitive.txt; they no longer block Linux · core:**"
@@ -217,10 +241,128 @@ jobs:
           path: ${{ runner.temp }}/dev-image-digest
           key: dev-image-v1-${{ steps.hash.outputs.hash }}-${{ github.run_id }}
 
-  core-shard:
-    name: Linux · core · shard ${{ matrix.shard }}/${{ strategy.job-total }}
+  # Builds quick's test binaries once, as a nextest archive (`core-test
+  # --build-archive`). The shards and the timing-sensitive job download it
+  # and only run tests: one compile per run instead of one per shard.
+  core-build:
+    name: Linux · core · build
     needs: [suites, image]
     if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.core == 'yes' }}
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    concurrency:
+      group: meguri-verification-${{ github.ref }}-core-build-${{ needs.suites.outputs.core == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Pull the shared dev image
+        id: pull
+        if: needs.image.outputs.ref != ''
+        shell: bash
+        env:
+          REF: ${{ needs.image.outputs.ref }}
+          TOKEN: ${{ github.token }}
+        run: .github/dev-image.sh pull
+
+      # Third-party crates only (local crates are pruned before saving), keyed
+      # on the image hash (so the toolchain) and Cargo.lock. Only with the
+      # shared image, so never on cold runs or with an image built here.
+      - name: Restore the Rust dependency cache
+        id: rust-cache
+        if: steps.pull.outputs.used == 'yes'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/cargo-home/registry/index
+            ${{ runner.temp }}/cargo-home/registry/cache
+            ${{ runner.temp }}/cargo-target
+          key: core-deps-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: core-deps-v1-${{ needs.image.outputs.hash }}-
+
+      # The canaries first, building only their packages (AE82): a pin drift
+      # that also breaks the build of other crates is still reported. Then
+      # the archive. Each leaves its receipt for Linux · core.
+      - name: Run the canaries, then build the Core test archive
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/cargo-target" "$RUNNER_TEMP/receipts"
+          # step <name> <tools/mg args...>: run, keep the receipt as <name>.json, check it.
+          step() {
+            local name="$1" rc=0 receipt artifact="$RUNNER_TEMP/receipts/$1.json" want
+            shift
+            receipt="$(sudo -n env MEGURI_CI_DEV_IMAGE="${MEGURI_CI_DEV_IMAGE:-}" \
+              MEGURI_DOCKER_CARGO_HOME="$RUNNER_TEMP/cargo-home" MEGURI_DOCKER_CARGO_TARGET="$RUNNER_TEMP/cargo-target" \
+              GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
+              GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" "$@")" || rc=$?
+            local prefix="$GITHUB_WORKSPACE/build/mg/core-test/"
+            local suffix="${receipt#"$prefix"}"
+            if [[ "$receipt" == "$prefix"* && "$suffix" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+/result\.json$ ]] &&
+               sudo -n test -f "$receipt"; then
+              sudo -n cat -- "$receipt" > "$artifact.tmp"
+              mv -- "$artifact.tmp" "$artifact"
+              jq -r --arg n "$name" '"\($n): \(.status). \(.message)"' "$artifact" >>"$GITHUB_STEP_SUMMARY"
+              jq -r '.failures[]? | "- `\(.id)`"' "$artifact" >>"$GITHUB_STEP_SUMMARY"
+            fi
+            ((rc == 0)) || return 1
+            want="$(printf '%s\n' "${@:2}" | jq -Rnc '[inputs]')"
+            jq -e --arg sha "$GITHUB_SHA" --argjson want "$want" '
+              .status == "pass" and .commit.sha == $sha and .commit.dirty == false
+              and .job == "core-test" and .args == $want' "$artifact" >/dev/null
+          }
+          step canaries core-test --canaries
+          step build core-test --build-archive build/ci/core-tests.tar.zst
+          jq -e '.details.archive.file == "build/ci/core-tests.tar.zst"' "$RUNNER_TEMP/receipts/build.json"
+
+      # Already compressed (zstd), so the upload stores it as it is.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: meguri-linux-core-tests-archive
+          path: build/ci/core-tests.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+      # Only a master push or manual run saves, and only a new key, once the
+      # archive built: pull requests read master's cache but never add
+      # to the 10 GB budget. A manual run on a branch saves where only that
+      # branch reads it; unused entries age out (7 days, or least recently
+      # used first when the budget is full).
+      - name: Keep only third-party crates in the Rust cache
+        id: prune
+        if: >-
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && steps.pull.outputs.used == 'yes' && steps.rust-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: .github/rust-cache.sh prune "Rust dependency cache" 4096
+
+      - name: Save the Rust dependency cache
+        if: steps.prune.outputs.save == 'yes'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/cargo-home/registry/index
+            ${{ runner.temp }}/cargo-home/registry/cache
+            ${{ runner.temp }}/cargo-target
+          key: core-deps-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: meguri-linux-core-build-result
+          path: ${{ runner.temp }}/receipts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  core-shard:
+    name: Linux · core · shard ${{ matrix.shard }}/${{ strategy.job-total }}
+    needs: [suites, image, core-build]
+    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.core == 'yes' && needs.core-build.result == 'success' }}
     permissions:
       contents: read
       packages: read
@@ -247,20 +389,11 @@ jobs:
           TOKEN: ${{ github.token }}
         run: .github/dev-image.sh pull
 
-      # Third-party crates only (local crates are pruned before saving), keyed
-      # on the image hash (so the toolchain) and Cargo.lock. Only with the
-      # shared image, so never on cold runs or with an image built here.
-      - name: Restore the Rust dependency cache
-        id: rust-cache
-        if: steps.pull.outputs.used == 'yes'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # The test binaries Linux · core · build archived on this commit.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: |
-            ${{ runner.temp }}/cargo-home/registry/index
-            ${{ runner.temp }}/cargo-home/registry/cache
-            ${{ runner.temp }}/cargo-target
-          key: core-deps-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
-          restore-keys: core-deps-v1-${{ needs.image.outputs.hash }}-
+          name: meguri-linux-core-tests-archive
+          path: build/ci
 
       - name: Run Core shard ${{ matrix.shard }}
         shell: bash
@@ -268,15 +401,13 @@ jobs:
           SHARD: ${{ matrix.shard }}
           SHARDS: ${{ needs.suites.outputs.core_shards }}
         run: |
-          mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/cargo-target"
           mg() {
             sudo -n env MEGURI_CI_DEV_IMAGE="${MEGURI_CI_DEV_IMAGE:-}" \
-              MEGURI_DOCKER_CARGO_HOME="$RUNNER_TEMP/cargo-home" MEGURI_DOCKER_CARGO_TARGET="$RUNNER_TEMP/cargo-target" \
               GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
               GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" "$@"
           }
           count="$(jq length <<<"$SHARDS")"
-          args=(core-test --quick --partition "hash:$SHARD/$count" --exclude-list .github/core-timing-sensitive.txt)
+          args=(core-test --quick --archive build/ci/core-tests.tar.zst --partition "hash:$SHARD/$count" --exclude-list .github/core-timing-sensitive.txt)
 
           rc=0
           receipt="$(mg "${args[@]}")" || rc=$?
@@ -298,29 +429,6 @@ jobs:
             .status == "pass" and .commit.sha == $sha and .commit.dirty == false
             and .job == "core-test" and .args == $want' "$artifact"
 
-      # Only shard 1 of a master push or manual run saves, and only a new key,
-      # once its tests passed: pull requests read master's cache but never add
-      # to the 10 GB budget. A manual run on a branch saves where only that
-      # branch reads it; unused entries age out (7 days, or least recently
-      # used first when the budget is full).
-      - name: Keep only third-party crates in the Rust cache
-        id: prune
-        if: >-
-          matrix.shard == 1 && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-          && steps.pull.outputs.used == 'yes' && steps.rust-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: .github/rust-cache.sh prune "Rust dependency cache" 4096
-
-      - name: Save the Rust dependency cache
-        if: steps.prune.outputs.save == 'yes'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ runner.temp }}/cargo-home/registry/index
-            ${{ runner.temp }}/cargo-home/registry/cache
-            ${{ runner.temp }}/cargo-target
-          key: core-deps-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
-
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -333,8 +441,8 @@ jobs:
   # core"; continue-on-error keeps its failure from failing the run.
   core-timing:
     name: Linux · core (timing-sensitive)
-    needs: [suites, image]
-    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.core == 'yes' }}
+    needs: [suites, image, core-build]
+    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.core == 'yes' && needs.core-build.result == 'success' }}
     permissions:
       contents: read
       packages: read
@@ -358,32 +466,21 @@ jobs:
           TOKEN: ${{ github.token }}
         run: .github/dev-image.sh pull
 
-      # Third-party crates only (local crates are pruned before saving), keyed
-      # on the image hash (so the toolchain) and Cargo.lock. Only with the
-      # shared image, so never on cold runs or with an image built here.
-      - name: Restore the Rust dependency cache
-        id: rust-cache
-        if: steps.pull.outputs.used == 'yes'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # The test binaries Linux · core · build archived on this commit.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: |
-            ${{ runner.temp }}/cargo-home/registry/index
-            ${{ runner.temp }}/cargo-home/registry/cache
-            ${{ runner.temp }}/cargo-target
-          key: core-deps-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
-          restore-keys: core-deps-v1-${{ needs.image.outputs.hash }}-
+          name: meguri-linux-core-tests-archive
+          path: build/ci
 
       - name: Run the timing-sensitive Core tests alone
         shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/cargo-target"
           mg() {
             sudo -n env MEGURI_CI_DEV_IMAGE="${MEGURI_CI_DEV_IMAGE:-}" \
-              MEGURI_DOCKER_CARGO_HOME="$RUNNER_TEMP/cargo-home" MEGURI_DOCKER_CARGO_TARGET="$RUNNER_TEMP/cargo-target" \
               GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
               GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" "$@"
           }
-          args=(core-test --quick --only-list .github/core-timing-sensitive.txt)
+          args=(core-test --quick --archive build/ci/core-tests.tar.zst --only-list .github/core-timing-sensitive.txt)
 
           rc=0
           receipt="$(mg "${args[@]}")" || rc=$?
@@ -534,7 +631,7 @@ jobs:
   # would count as passing, so this job never skips itself.
   core:
     name: Linux · core
-    needs: [suites, core-shard, core-lint]
+    needs: [suites, core-build, core-shard, core-lint]
     if: always()
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
@@ -546,6 +643,14 @@ jobs:
         with:
           pattern: meguri-linux-core-shard-*-result
           path: ${{ runner.temp }}/shards
+
+      - name: Download the build receipt
+        if: needs.suites.outputs.core == 'yes'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: meguri-linux-core-build-result
+          path: ${{ runner.temp }}/build
 
       - name: Download the lint receipt
         if: needs.suites.outputs.core == 'yes'
@@ -560,6 +665,7 @@ jobs:
         env:
           SUITES: ${{ needs.suites.result }}
           CORE: ${{ needs.suites.outputs.core }}
+          BUILD_JOB: ${{ needs.core-build.result }}
           SHARD_JOBS: ${{ needs.core-shard.result }}
           LINT_JOB: ${{ needs.core-lint.result }}
           SHARDS: ${{ needs.suites.outputs.core_shards }}
@@ -589,6 +695,16 @@ jobs:
             lint_error="The lint receipt is not a passing core-lint run on $GITHUB_SHA."
           fi
           printf 'Lint: %s\n\n' "${lint_error:-$(jq -r '.message' "$lint")}" >>"$GITHUB_STEP_SUMMARY"
+          [[ "$BUILD_JOB" == success ]] || fail "Linux · core · build ended $BUILD_JOB (failed, cancelled or not started), so no shard ran."
+          build="$RUNNER_TEMP/build/build.json"
+          [[ -f "$build" ]] || fail "Linux · core · build left no build receipt."
+          jq -e --arg sha "$GITHUB_SHA" '.status == "pass" and .commit.sha == $sha and .commit.dirty == false
+            and .job == "core-test" and .args == ["--canaries"] and .summary.passed > 0' "$RUNNER_TEMP/build/canaries.json" >/dev/null 2>&1 ||
+            fail "Linux · core · build left no passing canary receipt on $GITHUB_SHA."
+          archive_sha="$(jq -r --arg sha "$GITHUB_SHA" '
+            select(.status == "pass" and .commit.sha == $sha and .commit.dirty == false and .job == "core-test"
+              and .args == ["--build-archive", "build/ci/core-tests.tar.zst"]) | .details.archive.sha256 // empty' "$build")"
+          [[ "$archive_sha" =~ ^[0-9a-f]{64}$ ]] || fail "The build receipt is not a passing --build-archive run on $GITHUB_SHA."
           [[ "$SHARD_JOBS" == success ]] || fail "The Core shards ended $SHARD_JOBS (failed, cancelled or not started)."
           count="$(jq length <<<"$SHARDS")"
           ((count > 0)) || fail "The shard list is empty."
@@ -603,10 +719,11 @@ jobs:
           for shard in $(jq -r '.[]' <<<"$SHARDS"); do
             receipt="$RUNNER_TEMP/shards/meguri-linux-core-shard-$shard-result/meguri-result.json"
             [[ -f "$receipt" ]] || fail "Shard $shard left no receipt."
-            jq -e --arg sha "$GITHUB_SHA" --arg partition "hash:$shard/$count" '
+            jq -e --arg sha "$GITHUB_SHA" --arg partition "hash:$shard/$count" --arg archive "$archive_sha" '
               .status == "pass" and .commit.sha == $sha and .commit.dirty == false
               and .job == "core-test" and .summary.failed == 0 and .summary.passed > 0
-              and .args == ["--quick", "--partition", $partition, "--exclude-list", ".github/core-timing-sensitive.txt"]
+              and .args == ["--quick", "--archive", "build/ci/core-tests.tar.zst", "--partition", $partition, "--exclude-list", ".github/core-timing-sensitive.txt"]
+              and .details.hosted_selection.archive == {file: "build/ci/core-tests.tar.zst", sha256: $archive}
               and .details.hosted_selection.partition == $partition' "$receipt" >/dev/null ||
               fail "Shard $shard's receipt is not a passing hash:$shard/$count run on $GITHUB_SHA."
             jq -r --arg shard "$shard" '"| \($shard) | \(.summary.passed) | \(.summary.failed) | \(.summary.skipped) |"' \
@@ -952,6 +1069,134 @@ jobs:
         if: always()
         with:
           name: meguri-linux-selftest-result
+          path: ${{ runner.temp }}/receipts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Advisory until it has passed on ten pull requests (docs/process/tiers.md):
+  # Antoine (2026-11-21) let unsigned Swift package tests run on GitHub's
+  # hosted macOS runner. MeguriCore's tests on the Xcode this project pins,
+  # with the Debug core XCFramework built here. Nothing is signed, no secret
+  # is read, and nothing runs in a simulator, the test VM or the app. lint-ui
+  # needs Docker, which these runners lack, so swift-test leaves it to Linux ·
+  # checks, which lints the same commit.
+  swift:
+    name: macOS · Swift packages
+    needs: suites
+    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.swift == 'yes' }}
+    continue-on-error: true
+    permissions:
+      contents: read
+    runs-on: xcode-27
+    timeout-minutes: 60
+    concurrency:
+      group: meguri-verification-${{ github.ref }}-swift-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+      cancel-in-progress: true
+    env:
+      # The Xcode this Mac and the test VM use (tools/mg doctor needs 27.1 or
+      # newer). The image keeps it at this path.
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      MEGURI_CI_LINT_UI_ELSEWHERE: Linux · checks
+      # Keeps the cached core/target small: no incremental state.
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the pinned Xcode
+        shell: bash
+        run: |
+          xcodebuild -version
+          xcodebuild -version | grep -qx 'Xcode 27.2' ||
+            { echo "::error::$DEVELOPER_DIR is not Xcode 27.2"; exit 1; }
+          xcrun --sdk macosx --show-sdk-version
+
+      # The pinned Rust toolchain with its Apple targets, the cargo registry
+      # and the Apple builds of the core. Saved by master pushes and manual
+      # runs, once per key; pull requests read master's. A fresh checkout
+      # gives every source file a new time, so cargo rebuilds the local
+      # crates from this commit's source.
+      - name: Restore the Rust and XCFramework cache
+        id: cache
+        if: github.event_name != 'schedule' && inputs.cold != true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            core/target
+          key: swift-core-v1-${{ runner.os }}-${{ runner.arch }}-xcode27.2-${{ hashFiles('core/rust-toolchain.toml') }}-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: swift-core-v1-${{ runner.os }}-${{ runner.arch }}-xcode27.2-${{ hashFiles('core/rust-toolchain.toml') }}-
+
+      # The toolchain, components and Apple targets core/rust-toolchain.toml
+      # pins (a no-op when the cache restored them).
+      - name: Install the pinned Rust toolchain
+        shell: bash
+        run: cd core && rustup toolchain install && rustc -V
+
+      - name: swift-test MeguriCore
+        shell: bash
+        env:
+          MG_STEP_SUDO: "no"
+        run: |
+          # The tests of .github/swift-timing-sensitive.txt, skipped by name.
+          skips=()
+          while read -r name _ || [[ -n "$name" ]]; do
+            [[ -n "$name" && "$name" != \#* ]] || continue
+            [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::bad line in .github/swift-timing-sensitive.txt: $name"; exit 1; }
+            skips+=(--skip "$name")
+          done < .github/swift-timing-sensitive.txt
+          .github/mg-step.sh "swift-test MeguriCore" swift-test --package MeguriCore ${skips[0]+-- "${skips[@]}"}
+
+      # Only third-party crates, as in the Linux caches: local packages'
+      # artifacts and the profile roots' copies are deleted, and an entry over
+      # 3 GB is not saved. Also after a failing test run: the builds are good.
+      - name: Keep only third-party crates in the cache
+        id: prune
+        if: >-
+          !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          pkgs="$(find core -name Cargo.toml -not -path '*/target/*' -print0 |
+            xargs -0 awk 'FNR == 1 { p = 0 } /^\[package\]/ { p = 1; next } /^\[/ { p = 0 }
+              p && /^name[[:space:]]*=/ { gsub(/[" ]/, ""); sub(/^name=/, ""); print }' | sort -u)"
+          [[ -n "$pkgs" ]] || { echo "::error::No local packages found"; exit 1; }
+          for dir in core/target/*/ core/target/*/*/; do
+            [[ -d "$dir/deps" ]] || continue
+            rm -rf -- "$dir/incremental"
+            while IFS= read -r p; do
+              u="${p//-/_}"
+              rm -rf -- "$dir"deps/"$u"-* "$dir"deps/lib"$u"-* "$dir".fingerprint/"$p"-* "$dir"build/"$p"-*
+            done <<<"$pkgs"
+            find "$dir" -maxdepth 1 -type f -delete
+          done
+          size="$(du -smc ~/.rustup/toolchains ~/.cargo/registry/index ~/.cargo/registry/cache core/target 2>/dev/null | tail -n 1 | cut -f1)"
+          echo "Swift job cache: $size MB"
+          if ((size > 3072)); then
+            echo "::warning::Swift job cache is $size MB, over its 3072 MB cap; not saving it."
+            echo "save=no" >>"$GITHUB_OUTPUT"
+          else
+            echo "save=yes" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Save the Rust and XCFramework cache
+        if: ${{ !cancelled() && steps.prune.outputs.save == 'yes' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            core/target
+          key: swift-core-v1-${{ runner.os }}-${{ runner.arch }}-xcode27.2-${{ hashFiles('core/rust-toolchain.toml') }}-${{ hashFiles('core/Cargo.lock') }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: meguri-macos-swift-result
           path: ${{ runner.temp }}/receipts/
           if-no-files-found: ignore
           retention-days: 7
