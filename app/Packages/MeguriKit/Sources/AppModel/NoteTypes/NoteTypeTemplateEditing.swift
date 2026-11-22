@@ -93,15 +93,18 @@ public nonisolated enum NoteTypeTemplateEditing {
     /// `{{/<name>}}` follows the caret.
     public static func accept(_ name: String, context: CompletionContext, in text: String) -> NoteTypeTextEdit {
         let units = Array(text.utf16)
-        let after = units[context.range.upperBound...].prefix(2)
+        // Inside a name already written (`{{F|ront}}`), the rest of it goes too.
+        var end = context.range.upperBound
+        while end < units.count, ![0x7B, 0x7D, 0x3A, 0x0A, 0x0D].contains(units[end]) { end += 1 }
+        let after = units[end...].prefix(2)
         let closed = Array(after) == [0x7D, 0x7D]
         var inserted = name + (closed ? "" : "}}")
         var caret = context.range.lowerBound + inserted.utf16.count + (closed ? 2 : 0)
-        var range = context.range
+        var range = context.range.lowerBound..<end
         if context.section {
             if closed {
                 // The open tag is already closed: the close goes after it.
-                range = context.range.lowerBound..<(context.range.upperBound + 2)
+                range = context.range.lowerBound..<(end + 2)
                 inserted = name + "}}"
                 caret = context.range.lowerBound + inserted.utf16.count
             }

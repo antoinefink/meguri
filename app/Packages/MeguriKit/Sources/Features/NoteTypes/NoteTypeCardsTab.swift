@@ -234,6 +234,16 @@ private struct CardTypeRowView: View {
                         if !now, model.renamingCard == line.id { model.renameCardType(id, row: line.id, typed: text) }
                     }
                     .onAppear { text = line.name; focused = true }
+                    // Save commits the typed name first, as it does a field's.
+                    .onChange(of: text) { _, typed in
+                        let model = model, id = id, row = line.id
+                        guard typed != line.name else { model.pendingEdits["cardRename"] = nil; return }
+                        model.pendingEdits["cardRename"] = {
+                            model.renameCardType(id, row: row, typed: typed)
+                            return true
+                        }
+                    }
+                    .onDisappear { model.pendingEdits["cardRename"] = nil }
                     .accessibilityIdentifier("noteTypes.cards.renameField")
             } else {
                 Text(verbatim: line.name)
@@ -313,7 +323,7 @@ struct NoteTypeCardFieldsList: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) { insert(row.name) }
-                        .draggable("{{\(row.name)}}")
+                        .draggable(reference(row.name))
                         .accessibilityAddTraits(.isButton)
                         .accessibilityAction { insert(row.name) }
                         .accessibilityIdentifier("noteTypes.cards.field.\(row.id)")
@@ -323,6 +333,12 @@ struct NoteTypeCardFieldsList: View {
         .listStyle(.sidebar)
         #endif
         .accessibilityIdentifier("noteTypes.cards.fieldsList")
+    }
+
+    /// The reference a drag drops, in the shown part's delimiters (A14).
+    private func reference(_ name: String) -> String {
+        let text = model.shownCard(id).flatMap { model.draft(id)?.text($0, model.cardPart == .styling ? .front : model.cardPart) } ?? ""
+        return NoteTypeTemplateEditing.insert(.field(name), in: text, selection: 0..<0).text
     }
 
     private func insert(_ name: String) {

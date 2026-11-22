@@ -98,6 +98,9 @@ import Testing
         #expect(NoteTypeTemplateEditing.completions(typed, fields: fields) == ["Front", "FrontSide"])
         let edit = NoteTypeTemplateEditing.accept("Front", context: typed, in: "{{fr")
         #expect(edit == NoteTypeTextEdit(range: 2..<4, text: "Front}}", caret: 9))
+        // Inside a name already written, the rest of it is replaced too.
+        let inside = try #require(NoteTypeTemplateEditing.completionContext("{{Front}}", caret: 3))
+        #expect(NoteTypeTemplateEditing.accept("Front", context: inside, in: "{{Front}}") == NoteTypeTextEdit(range: 2..<7, text: "Front", caret: 9))
         // Nothing to complete outside a tag or on another line.
         #expect(NoteTypeTemplateEditing.completionContext("plain", caret: 5) == nil)
         #expect(NoteTypeTemplateEditing.completionContext("{{\nx", caret: 4) == nil)

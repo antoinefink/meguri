@@ -9,6 +9,10 @@ struct TemplateEditorKey: Hashable {
     let notetype: Int64
     let card: Int
     let part: NoteTypeTemplatePart
+
+    /// The text's own undo history: one per front and back, and one for
+    /// the styling every card type shares.
+    var history: TemplateEditorKey { part == .styling ? TemplateEditorKey(notetype: notetype, card: 0, part: .styling) : self }
 }
 
 /// One entry of the Insert menu (W6), shared by the editor bar's menu and
@@ -192,24 +196,24 @@ struct TemplateCodeEditor: NSViewRepresentable {
         /// Flip): the text view's history for it no longer applies.
         func show(key newKey: TemplateEditorKey, text: String) {
             guard let textView else { return }
-            if let key, key != newKey { selections[key] = textView.selectedRange() }
-            let sameKey = key == newKey
+            if let key, key != newKey { selections[key.history] = textView.selectedRange() }
+            let sameKey = key?.history == newKey.history
             key = newKey
             // A text changed while elsewhere (Flip, Revert, a save that renumbered
             // card types): its history was recorded on other characters.
-            if historyText[newKey] != text { undoManagers[newKey]?.removeAllActions() }
-            historyText[newKey] = text
+            if historyText[newKey.history] != text { undoManagers[newKey.history]?.removeAllActions() }
+            historyText[newKey.history] = text
             if textView.string != text {
                 textView.string = text
             }
             let length = (text as NSString).length
-            let selection = sameKey ? textView.selectedRange() : (selections[newKey] ?? NSRange(location: 0, length: 0))
+            let selection = sameKey ? textView.selectedRange() : (selections[newKey.history] ?? NSRange(location: 0, length: 0))
             textView.setSelectedRange(NSRange(location: min(selection.location, length), length: 0))
             recolour()
         }
 
         func undoManager(for view: NSTextView) -> UndoManager? {
-            guard let key else { return nil }
+            guard let key = key?.history else { return nil }
             if let manager = undoManagers[key] { return manager }
             let manager = UndoManager()
             undoManagers[key] = manager
@@ -218,7 +222,7 @@ struct TemplateCodeEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
-            if let key { historyText[key] = textView.string }
+            if let key { historyText[key.history] = textView.string }
             // The swatches' ranges are the last colouring's until the next lands.
             if !applyingSwatch { swatches.forEach { $0.isEnabled = false } }
             parent?.onChange(textView.string)
@@ -344,6 +348,8 @@ struct TemplateCodeEditor: NSViewRepresentable {
         /// A colour chosen in a well rewrites only that value's characters.
         @objc private func wellChanged(_ well: NSColorWell) {
             guard well.isEnabled, colours.indices.contains(well.tag), let colour = well.color.usingColorSpace(.sRGB) else { return }
+            // The others' ranges move with this edit: they wait for the next colouring.
+            for other in swatches where other !== well { other.isEnabled = false }
             applyingSwatch = true
             defer { applyingSwatch = false }
             let range = colours[well.tag]
@@ -578,27 +584,26 @@ struct TemplateCodeEditor: UIViewRepresentable {
 
         func show(key newKey: TemplateEditorKey, text: String) {
             guard let textView else { return }
-            if let key, key != newKey { selections[key] = textView.selectedRange }
-            let sameKey = key == newKey
+            if let key, key != newKey { selections[key.history] = textView.selectedRange }
+            let sameKey = key?.history == newKey.history
             key = newKey
             // Each text keeps its own history; one changed while elsewhere loses it.
-            let manager = undoManagers[newKey] ?? UndoManager()
-            undoManagers[newKey] = manager
-            if historyText[newKey] != text { manager.removeAllActions() }
-            historyText[newKey] = text
+            let manager = undoManagers[newKey.history] ?? UndoManager()
+            undoManagers[newKey.history] = manager
+            if historyText[newKey.history] != text { manager.removeAllActions() }
+            historyText[newKey.history] = text
             textView.history = manager
             if textView.text != text {
                 textView.text = text
-                manager.removeAllActions()
             }
             let length = (text as NSString).length
-            let selection = sameKey ? textView.selectedRange : (selections[newKey] ?? NSRange(location: 0, length: 0))
+            let selection = sameKey ? textView.selectedRange : (selections[newKey.history] ?? NSRange(location: 0, length: 0))
             textView.selectedRange = NSRange(location: min(selection.location, length), length: 0)
             recolour()
         }
 
         func textViewDidChange(_ textView: UITextView) {
-            if let key { historyText[key] = textView.text }
+            if let key { historyText[key.history] = textView.text }
             if !applyingSwatch { swatches.forEach { $0.isEnabled = false } }
             parent?.onChange(textView.text)
             recolour()
@@ -720,6 +725,7 @@ struct TemplateCodeEditor: UIViewRepresentable {
 
         @objc private func wellChanged(_ well: UIColorWell) {
             guard well.isEnabled, colours.indices.contains(well.tag), let colour = well.selectedColor else { return }
+            for other in swatches where other !== well { other.isEnabled = false }
             applyingSwatch = true
             defer { applyingSwatch = false }
             var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0

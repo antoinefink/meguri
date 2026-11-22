@@ -127,7 +127,7 @@ public final class NoteTypesModel {
     private var drafts: [Int64: NoteTypeDraft] = [:]
     private var revisions: [Int64: UInt64] = [:]
     private var summaries: [Int64: (revision: UInt64, summary: NotetypeDraftSummary)] = [:]
-    private var references: [Int64: (texts: [String], references: [[String]])] = [:]
+    private var references: [Int64: (texts: [String], references: [[String]], cards: [Int])] = [:]
     private var listToken: UInt64 = 0
     @ObservationIgnored private var summaryTasks: [Int64: Task<Void, Never>] = [:]
     @ObservationIgnored private var detailTasks: [Int64: Task<Void, Never>] = [:]
@@ -341,15 +341,15 @@ public final class NoteTypesModel {
 
     private func readReferences(_ id: Int64) async {
         guard let texts = draft(id)?.referenceTexts, references[id]?.texts != texts else { return }
-        guard let refs = try? await backend.fieldReferences(texts), draft(id)?.referenceTexts == texts else { return }
-        references[id] = (texts, refs)
+        guard let refs = try? await backend.fieldReferences(texts), let draft = draft(id), draft.referenceTexts == texts else { return }
+        references[id] = (texts, refs, draft.keptCardRows.map(\.id))
     }
 
     /// W1's Used On for each row of the note type, by card type position;
     /// nil until the references are read.
     public func usedOn(_ id: Int64) -> [Int: [Int]]? {
         // The last read shows while typing's next read runs, for the same card types.
-        guard let draft = draft(id), let read = references[id], read.texts.count == draft.referenceTexts.count else { return nil }
+        guard let draft = draft(id), let read = references[id], read.cards == draft.keptCardRows.map(\.id) else { return nil }
         return draft.usedOn(references: read.references)
     }
 
@@ -534,6 +534,19 @@ public final class NoteTypesModel {
     public func request(_ id: Int64, card: Int, part: NoteTypeTemplatePart, _ command: NoteTypeEditorRequest.Command) {
         // Only a caret move is asked of a locked note type (a save runs).
         if case .moveCaret = command {} else if !editable(id) { return }
+        // A whole-text change still waiting (Flip's back, a fix) lands in the
+        // draft before another request takes the slot, so no half is lost.
+        if let pending = editorRequest {
+            switch pending.command {
+            case .replaceAll(let text):
+                edit(pending.notetype) { $0.setText(pending.card, pending.part, text) }
+            case .append(let suffix):
+                if let text = draft(pending.notetype)?.text(pending.card, pending.part) {
+                    edit(pending.notetype) { $0.setText(pending.card, pending.part, text + suffix) }
+                }
+            default: break
+            }
+        }
         editorToken &+= 1
         editorRequest = NoteTypeEditorRequest(token: editorToken, notetype: id, card: card, part: part, command: command)
     }
@@ -579,7 +592,8 @@ public final class NoteTypesModel {
         case .showNotes(let notes):
             showNotes?(notes)
         case .addClose(let close):
-            guard let part = issue.part else { return }
+            // The read may be older than the text: a close typed since needs no second one.
+            guard let part = issue.part, let text = draft(id)?.text(issue.card, part), !text.contains(close) else { return }
             selectedCard[id] = issue.card
             cardPart = part
             request(id, card: issue.card, part: part, .append(close))
@@ -617,7 +631,7 @@ public final class NoteTypesModel {
         }
         guard !draft.isCloze else { blankReads[id] = nil; return }
         // W8 reads every note of the type: only for the Cards tab, which shows it.
-        guard tab == .cards else { return }
+        guard tab == .cards, selection == id else { return }
         let key = structure.templates.map(\.front) + ["\u{0}"] + structure.fields.map { "\($0.origin.map(String.init) ?? "+")\u{1}\($0.name)" }
             + ["\u{0}"] + cards.map(String.init)
         guard key != blankKeys[id] else { return }
@@ -625,7 +639,11 @@ public final class NoteTypesModel {
         blankTasks[id]?.cancel()
         blankTasks[id] = Task {
             if delay > .zero { try? await Task.sleep(for: delay) }
-            guard !Task.isCancelled else { return }
+            // Left the Cards tab or this note type while it waited: the next look reads it.
+            guard !Task.isCancelled, tab == .cards, selection == id else {
+                if blankKeys[id] == key { blankKeys[id] = nil }
+                return
+            }
             let fronts = try? await backend.notesWithoutCard(structure)
             guard !Task.isCancelled, self.epoch == epoch else { return }
             // A newer front's read replaces this one; until then this one shows.
@@ -684,23 +702,24 @@ public final class NoteTypesModel {
     private func draftChanged(_ id: Int64) {
         revisions[id, default: 0] &+= 1
         refreshIssues(id)
+        // Used On reads again for the texts shown, a reverted draft's too.
+        let delay = summaryDelay
+        referencesTask[id]?.cancel()
+        referencesTask[id] = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await readReferences(id)
+        }
         summaryTasks[id]?.cancel()
         guard let draft = drafts[id], draft.isEdited else { summaries[id] = nil; return }
         let revision = revisions[id] ?? 0
         let structure = draft.structureDraft()
-        let delay = summaryDelay
         let epoch = epoch
         summaryTasks[id] = Task {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let summary = try? await backend.summary(structure), !Task.isCancelled,
                   self.epoch == epoch, revisions[id] == revision else { return }
             summaries[id] = (revision, summary)
-        }
-        referencesTask[id]?.cancel()
-        referencesTask[id] = Task {
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled else { return }
-            await readReferences(id)
         }
     }
 
@@ -968,10 +987,10 @@ public final class NoteTypesModel {
         let notesMoved = changes.notes.contains { $0.change != .updated }
         // A note edited elsewhere can fill or empty a field: the shown type's Notes column reads again.
         if !notesMoved, changes.notetypes.isEmpty, !changes.wholeCollection, !changes.notes.isEmpty {
+            // An edited note can fill or empty a front's field (W8): every read is old.
+            blankKeys = [:]
             if let id = selection, records[id] != nil {
                 readCounts(id)
-                // An edited note can fill or empty a front's field (W8).
-                blankKeys[id] = nil
                 refreshIssues(id, immediately: true)
             }
             // Other loaded note types read theirs when they are shown again; reads
@@ -1006,9 +1025,9 @@ public final class NoteTypesModel {
             for id in records.keys where !touched.contains(id) { readCounts(id) }
         }
         // Notes added or removed change W8's notes: the shown type reads it again.
-        if notesMoved || changes.wholeCollection, let id = selection, records[id] != nil {
-            blankKeys[id] = nil
-            refreshIssues(id, immediately: true)
+        if notesMoved || changes.wholeCollection {
+            blankKeys = [:]
+            if let id = selection, records[id] != nil { refreshIssues(id, immediately: true) }
         }
     }
 
