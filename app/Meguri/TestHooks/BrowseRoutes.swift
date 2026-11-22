@@ -6,9 +6,10 @@ import Home
 import SwiftUI
 
 extension TestHooks {
-    /// Browse's section shell (U270; N21.1, `browser/workspace` V6): the
-    /// shell over a made-up collection held in memory. No collection is
-    /// opened; nothing is written.
+    /// Browse's section shell (U270; N21.1, `browser/workspace` V6) and its
+    /// results table (U270a; N21.3, V2.5, V5, V11): the shell over a made-up
+    /// collection held in memory. No collection is opened; nothing is
+    /// written.
     ///
     /// - `browse/sidebar/typical`: Browse selected, the query Deck: Languages
     ///   and Card State: Suspended, so two rows show selected; Flags and
@@ -17,18 +18,37 @@ extension TestHooks {
     ///   field (`browser/sidebar` S6).
     /// - `browse/sidebar/today`: Today selected: the decks, with the Browse
     ///   row under Today.
+    /// - `browse/table/typical`: Deck: Languages, Cards, one row selected.
+    /// - `browse/table/notes`: the same in Notes.
+    /// - `browse/table/no-results`: a query that finds nothing.
+    /// - `browse/table/empty-collection`: a collection with no cards.
+    /// - `browse/table/error`: a search that fails for storage reasons.
+    /// - `browse/table/large`: 150,000 rows of the whole collection, for
+    ///   the scrolling performance test (`BrowserSearchPerfTests`).
     enum BrowseRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.registerShell("browse/sidebar/typical") { _ in launch(.typical) }
             registry.registerShell("browse/sidebar/filtered") { _ in launch(.filtered) }
             registry.registerShell("browse/sidebar/today") { _ in launch(.today) }
+            registry.registerShell("browse/table/typical") { _ in launch(.table) }
+            registry.registerShell("browse/table/notes") { _ in launch(.notes) }
+            registry.registerShell("browse/table/no-results") { _ in launch(.noResults) }
+            registry.registerShell("browse/table/empty-collection") { _ in launch(.emptyCollection) }
+            registry.registerShell("browse/table/error") { _ in launch(.error) }
+            registry.registerShell("browse/table/large") { _ in launch(.large) }
         }
 
-        enum State { case typical, filtered, today }
+        enum State { case typical, filtered, today, table, notes, noResults, emptyCollection, error, large }
 
         @MainActor static func launch(_ state: State) -> ShellLaunch {
-            BrowseRollout.shown = true
-            let model = BrowseModel(backend: SampleBrowseBackend())
+            let cards = switch state {
+            case .emptyCollection: 0
+            case .large: 150_000
+            default: 1_204
+            }
+            let session = SampleSearchSession(cards: cards, fails: state == .error)
+            let model = BrowseModel(backend: SampleBrowseBackend(session: session))
+            BrowseScrollDriver.shared.model = model
             let expansion = SampleDeckExpansion()
             var features = ShellSample.features(.typical)
             features.todayRoot = true
@@ -50,13 +70,23 @@ extension TestHooks {
                     })
                 }, navigate: { navigation.select(.section($0)) }) { header })
             }
+            let query: FilterQuery = switch state {
+            case .typical, .filtered, .today:
+                FilterQuery(tokens: [.value([SampleBrowseBackend.deck(1)], negated: false), .value([.state(.suspended)], negated: false)])
+            case .table, .notes, .error: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(1)], negated: false)])
+            case .noResults: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(7)], negated: false), .value([.state(.learning)], negated: false)])
+            case .emptyCollection, .large: FilterQuery()
+            }
             return ShellLaunch(features: features, probe: false) { navigation in
                 navigation.select(.section(state == .today ? .home : .browse))
                 if state == .filtered { model.filter = "voc" }
+                if state == .notes { model.setMode(.notes) }
                 Task { @MainActor in
-                    await model.prepareForTestHooks(query: FilterQuery(tokens: [
-                        .value([SampleBrowseBackend.deck(1)], negated: false), .value([.state(.suspended)], negated: false),
-                    ]))
+                    await model.prepareForTestHooks(query: query)
+                    guard state == .table || state == .notes else { return }
+                    // One row chosen, as after a click.
+                    for _ in 0..<200 where model.results.list == nil { try? await Task.sleep(for: .milliseconds(10)) }
+                    model.results.select([2])
                 }
             }
         }
@@ -74,6 +104,11 @@ extension TestHooks {
     /// `HomeSidebarPreview`'s decks, four note types, a few tags, one saved
     /// search, and counts for every row.
     @MainActor final class SampleBrowseBackend: BrowseBackend {
+        private let session: SampleSearchSession
+        init(session: SampleSearchSession = SampleSearchSession(cards: 1_204, fails: false)) {
+            self.session = session
+        }
+
         /// The deck value of a `HomeSidebarPreview` deck.
         static func deck(_ id: Int64) -> FilterValue {
             func find(_ nodes: [CountedDeckNode]) -> CountedDeckNode? {
@@ -95,7 +130,18 @@ extension TestHooks {
 
         func opening() async throws -> BrowseOpening { BrowseOpening(defaultSearch: nil, notesMode: false) }
         func read(_ text: String) async throws -> FilterQuery { FilterQuery(text: text) }
-        func runText(_ query: FilterQuery) async throws -> String { "" }
+        /// The query as the sample session reads it: the decks and states
+        /// of its is tokens.
+        func runText(_ query: FilterQuery) async throws -> String {
+            var decks: [Int64] = [], states: [String] = []
+            for case .value(let values, false) in query.tokens {
+                for value in values {
+                    if case .deck(_, _, let tree) = value { decks += tree }
+                    if case .state(let state) = value { states.append("\(state)") }
+                }
+            }
+            return "decks=\(decks.map(String.init).joined(separator: ",")) states=\(states.joined(separator: ","))"
+        }
         func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
             switch section {
             case .savedSearches:
@@ -128,11 +174,22 @@ extension TestHooks {
                 case .value(.deck(let id, _, _)): Self.deckCounts[id]
                 case .value(.notetype(_, let name)): Self.notetypeCounts.first { $0.0 == name }?.1
                 case .value(.tag(let name)): Self.tagCounts[name]
+                case .query(let query) where query.isEmpty: UInt64(mode == .notes ? (session.cards + 1) / 2 : session.cards)
                 default: nil
                 }
             }
         }
         func setTagsCollapsed(_ names: [String], collapsed: Bool) async throws {}
+        func openSearchSession() async throws -> any BrowseSearching { session }
+        func columnSet(notetype: Int64?) async throws -> ColumnSetShown {
+            ColumnSetShown(set: .standard, own: false, cards: ["noteFld", "template", "deck", "cardDue", "cardMod"],
+                           notes: ["noteFld", "note", "template", "noteTags", "noteCrt"],
+                           cardsSort: BrowseSort(key: "noteFld", direction: .ascending),
+                           notesSort: BrowseSort(key: "noteFld", direction: .ascending))
+        }
+        func changeColumnSet(_ set: ColumnSetID, mode: BrowseMode, change: ColumnSetChange) async throws {}
+        func useStandardColumns(notetype: Int64) async throws {}
+        func setNotesMode(_ notes: Bool) async throws {}
     }
 }
 #endif

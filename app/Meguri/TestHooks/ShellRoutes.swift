@@ -385,7 +385,7 @@ extension TestHooks {
     ///   or failed (object / state 2). Other launches do not listen for it.
     final class ShellCommands: NSObject {
         enum Command: String, CaseIterable {
-            case toggleSizeClass, presentAdd, closeWindow, closeNativeReview, flushNativeReview
+            case toggleSizeClass, presentAdd, closeWindow, closeNativeReview, flushNativeReview, showBrowse
             #if os(macOS)
             case readNativeReviewPhase
             #endif
@@ -470,6 +470,9 @@ extension TestHooks {
             case .presentAdd:
                 guard let navigation else { return }
                 navigation.present(.add(deck: navigation.selectedDeck))
+            case .showBrowse:
+                // As the Browse sidebar row (U270a's performance test).
+                navigation?.select(.section(.browse))
             case .closeWindow:
                 #if os(macOS)
                 NSApplication.shared.windows.first { $0.isVisible && $0.canBecomeMain }?.performClose(nil)
