@@ -33,7 +33,7 @@ extension TestHooks {
             features.todayRoot = true
             #if os(macOS)
             features.nativeMacWorkspace = true
-            features.availableSections = [.home, .browse]
+            features.availableSections = [.home, .browse, .noteTypes]
             #else
             features.availableSections = [.home, .browse, .settings]
             #endif

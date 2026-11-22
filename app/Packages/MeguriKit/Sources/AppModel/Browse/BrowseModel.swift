@@ -63,6 +63,9 @@ public final class BrowseModel {
 
     /// Tag disclosures toggled in this launch, before the tree is read again.
     private var tagExpansion: [String: Bool] = [:]
+    /// Each tag's latest disclosure write: a failed write undoes only its own toggle.
+    @ObservationIgnored private var tagWrites: [String: UInt64] = [:]
+    @ObservationIgnored private var tagWriteToken: UInt64 = 0
     /// The top-level tags' note counts, which pick the eight Tags shows (V6).
     private var tagNotes: [String: UInt64] = [:] {
         didSet { if tagNotes != oldValue { updateShownTags() } }
@@ -158,7 +161,13 @@ public final class BrowseModel {
                 if kept == nil { keepRunText() }
                 return
             }
-            guard let read = try? await backend.read(text), self.epoch == epoch, revision == queryRevision else { return }
+            let read: FilterQuery
+            do { read = try await backend.read(text) } catch {
+                // Not read: the next appear opens again, unless the query changed meanwhile.
+                if self.epoch == epoch, revision == queryRevision { opened = false }
+                return
+            }
+            guard self.epoch == epoch, revision == queryRevision else { return }
             setQuery(read)
         }
     }
@@ -186,15 +195,12 @@ public final class BrowseModel {
     private func replace(byReading text: String, handed: Bool = false) {
         queryRevision &+= 1
         let revision = queryRevision, epoch = epoch
-        if handed { pendingSearch = nil }
+        // A handed search is kept until it is applied: a failed read, or one the
+        // collection turning ready again discards, is tried again.
+        if handed { pendingSearch = text }
         Task {
-            let read: FilterQuery
-            do { read = try await backend.read(text) } catch {
-                // A handed search is kept until it can be read, unless something newer came.
-                if handed, self.epoch == epoch, revision == queryRevision { pendingSearch = text }
-                return
-            }
-            guard self.epoch == epoch, revision == queryRevision else { return }
+            guard let read = try? await backend.read(text), self.epoch == epoch, revision == queryRevision else { return }
+            if handed, pendingSearch == text { pendingSearch = nil }
             setQuery(read)
         }
     }
@@ -344,7 +350,7 @@ public final class BrowseModel {
         query = FilterQuery()
         queryRevision &+= 1
         savedSearches = []; deckValues = [:]; notetypes = []; tags = []; flagNames = []
-        counts = [:]; tagNotes = [:]; tagExpansion = [:]; filter = ""
+        counts = [:]; tagNotes = [:]; tagExpansion = [:]; tagWrites = [:]; filter = ""
         stale = true
         device.runText = nil
         device.notesMode = nil
@@ -496,11 +502,16 @@ public final class BrowseModel {
     public func setTagExpanded(_ node: TagNode, _ expanded: Bool) {
         guard tagExpanded(node) != expanded else { return }
         tagExpansion[node.fullName] = expanded
-        let backend = backend, name = node.fullName
+        tagWriteToken &+= 1
+        let backend = backend, name = node.fullName, token = tagWriteToken, epoch = epoch
+        tagWrites[name] = token
         Task {
             do { try await backend.setTagsCollapsed([name], collapsed: !expanded) } catch {
                 // Not written: the disclosure shows the stored state again, unless toggled since.
-                if tagExpansion[name] == expanded { tagExpansion[name] = nil }
+                if self.epoch == epoch, tagWrites[name] == token {
+                    tagExpansion[name] = nil
+                    tagWrites[name] = nil
+                }
             }
         }
     }

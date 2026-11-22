@@ -222,6 +222,23 @@ import Testing
         #expect(core.countCalls.count == 2)
     }
 
+    @Test func tagNoteCountsLeftUnfinishedAreReadAgainWhenBrowseShows() async {
+        let names = (1...14).map { String(format: "t%02d", $0) }
+        let (model, core) = await makeModel(holdCounts: true,
+                                            tags: names.map { TagNode(name: $0, fullName: $0, collapsed: false, implicit: false, children: []) })
+        core.resumeCounts(0) { _ in 3 }
+        await until { core.countCalls.count == 2 }
+        model.disappear()
+        await until { core.cancelledCounts == 1 }
+        model.appear()
+        await until { core.countCalls.count == 3 }
+        core.resumeCounts(2) { _ in 4 }
+        await until { core.countCalls.count == 4 }
+        #expect(core.countCalls[3].0 == .notes)
+        core.resumeCounts(3) { _ in 5 }
+        core.resumeCounts(1) { _ in 0 }
+    }
+
     @Test func withMoreThanTwelveTopLevelTagsTagsShowsTheEightWithTheMostNotes() async {
         let names = (1...14).map { String(format: "t%02d", $0) }
         let (model, core) = await makeModel(holdCounts: true,
@@ -307,6 +324,51 @@ import Testing
         model.disappear()
         model.appear()
         await until { model.query == FilterQuery(tokens: [token(Self.spanish)]) }
+    }
+
+    @Test func aFailedFirstReadingOpensAgainOnTheNextAppear() async {
+        let core = FakeBrowseBackend()
+        core.openingValue = BrowseOpening(defaultSearch: "deck:x", notesMode: false)
+        core.readFails = ["deck:x"]
+        let model = BrowseModel(backend: core)
+        model.appear()
+        await until { core.readTexts == ["deck:x"] && !model.opened }
+        core.readFails = []
+        core.reads["deck:x"] = FilterQuery(tokens: [token(Self.spanish)])
+        model.disappear()
+        model.appear()
+        await until { model.query == FilterQuery(tokens: [token(Self.spanish)]) }
+    }
+
+    @Test func aHandedSearchReadAcrossAReadyCollectionIsReadAgain() async {
+        let (model, core) = await makeModel()
+        core.reads["deck:Japanese"] = FilterQuery(tokens: [token(Self.japanese)])
+        let handed = Handed()
+        model.takeEntrySearch = { defer { handed.search = nil }; return handed.search }
+        core.holdReads = true
+        model.disappear()
+        model.appear()
+        await until { core.heldReadCount == 1 }
+        // The collection turns ready again while the reading is on its way: it is discarded.
+        model.collectionReady()
+        core.releaseReads()
+        await until { model.query == FilterQuery(tokens: [token(Self.japanese)]) }
+    }
+
+    @Test func aFailedTagWriteUndoesOnlyItsOwnToggle() async {
+        let (model, core) = await makeModel()
+        let tag = TagNode(name: "brask", fullName: "brask", collapsed: true, implicit: false, children: [])
+        core.holdTagWrites = true
+        model.setTagExpanded(tag, true)   // A
+        model.setTagExpanded(tag, false)  // B
+        model.setTagExpanded(tag, true)   // C
+        await until { core.tagWriteCount == 3 }
+        core.endTagWrite(0, failing: true)
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(model.tagExpanded(tag))
+        core.endTagWrite(1, failing: false)
+        core.endTagWrite(2, failing: true)
+        await until { !model.tagExpanded(tag) }
     }
 
     @Test func theModeIsKeptOnTheDeviceAcrossARelaunch() async throws {
@@ -449,6 +511,7 @@ import Testing
     var openCalls = 0
     var reads: [String: FilterQuery] = [:]
     var readTexts: [String] = []
+    var readCalls = 0
     var holdReads = false
     private var heldReads: [CheckedContinuation<Void, Never>] = []
     var heldReadCount: Int { heldReads.count }
@@ -468,8 +531,10 @@ import Testing
         return openingValue
     }
     func read(_ text: String) async throws -> FilterQuery {
+        readCalls += 1
         readTexts.append(text)
         if holdReads { await withCheckedContinuation { heldReads.append($0) } }
+        if readFails.contains(text) { throw BridgeError.unavailable(reason: "sample") }
         return reads[text] ?? FilterQuery(text: text)
     }
     func releaseReads() {
@@ -509,5 +574,17 @@ import Testing
         guard let continuation = heldCounts.removeValue(forKey: call) else { return }
         continuation.resume(returning: countCalls[call].1.map(value))
     }
-    func setTagsCollapsed(_ names: [String], collapsed: Bool) async throws {}
+    var holdTagWrites = false
+    private var heldTagWrites: [CheckedContinuation<Void, any Error>] = []
+    var tagWriteCount: Int { heldTagWrites.count }
+    func setTagsCollapsed(_ names: [String], collapsed: Bool) async throws {
+        guard holdTagWrites else { return }
+        try await withCheckedThrowingContinuation { heldTagWrites.append($0) }
+    }
+    /// Ends held tag write `index`, failing it or not.
+    func endTagWrite(_ index: Int, failing: Bool) {
+        if failing { heldTagWrites[index].resume(throwing: BridgeError.unavailable(reason: "sample")) }
+        else { heldTagWrites[index].resume() }
+    }
+    var readFails: Set<String> = []
 }
