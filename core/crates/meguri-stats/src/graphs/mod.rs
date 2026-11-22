@@ -164,6 +164,8 @@ enum Resolved {
 pub struct StatsCaches {
     shared: Arc<cache::Shared>,
     memo: Mutex<Option<Memo>>,
+    /// The `stats_history` component's state (`stats/history-reads` H14).
+    history: Arc<crate::history::Shared>,
 }
 
 impl Default for StatsCaches {
@@ -223,12 +225,23 @@ impl StatsCaches {
         StatsCaches {
             shared: Arc::default(),
             memo: Mutex::new(None),
+            history: Arc::default(),
         }
     }
 
     /// The `stats_columns` component, for the derived host's builder.
     pub fn component(&self) -> StatsColumns {
         StatsColumns::new(Arc::clone(&self.shared))
+    }
+
+    /// The `stats_history` component (`stats/history-reads` H14), for the
+    /// derived host's builder.
+    pub fn history_component(&self) -> crate::history::StatsHistory {
+        crate::history::StatsHistory::new(Arc::clone(&self.history))
+    }
+
+    pub(crate) fn history_shared(&self) -> &crate::history::Shared {
+        &self.history
     }
 
     fn drop_memo(&self) {

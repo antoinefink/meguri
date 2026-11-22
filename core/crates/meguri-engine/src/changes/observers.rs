@@ -70,6 +70,17 @@ impl ObserverRows<'_> {
         self.writer.revlog_ids_of_card(card)
     }
 
+    /// The card's review-log rows in this committed view, every column by
+    /// storage class, ascending by `id` (an indexed read by `cid`).
+    pub fn card_revlog_images(&self, card: CardId) -> Result<Vec<RowImage>, StorageError> {
+        self.writer.card_revlog_images(card)
+    }
+
+    /// The number of rows `table` holds in this committed view.
+    pub fn row_count(&self, table: Table) -> Result<u64, StorageError> {
+        self.writer.row_count(table)
+    }
+
     /// Raw notetype parts from this same committed image, including parts
     /// newly added or removed by the op (never a tracking-layout enumeration).
     pub fn notetype_fields_page(&self, id: meguri_model::ids::NotetypeId, after: Option<i64>) -> Result<Vec<RowImage>, StorageError> {

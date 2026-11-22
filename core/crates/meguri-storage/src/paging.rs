@@ -284,6 +284,30 @@ pub trait ReadRows: sealed::Connected {
         }
     }
 
+    /// Every card with its review-log rows of `id` ≥ 0, cards in `id`
+    /// order (`sched/fsrs-items` I1.1's bulk read, `stats/history-reads`
+    /// H14.2): one row per joined pair, as stored, the card's columns first
+    /// (`id`, `nid`, `did`, `odid`, `type`, `queue`, `due`, `odue`, `ivl`),
+    /// then the row's in [`ReadRows::visit_stats_revlog`]'s order, all NULL
+    /// for a card without rows. A card's rows come together, in no set
+    /// order. Cancelled as [`ReadRows::visit_id_rows`] is; `visit` returns
+    /// false to stop.
+    fn visit_stats_histories(
+        &self,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[Cell]) -> bool,
+    ) -> Result<(), StorageError> {
+        crate::search_rows::visit_cells(
+            self.connection(),
+            "SELECT c.id, c.nid, c.did, c.odid, c.type, c.queue, c.due, c.odue, c.ivl, \
+             r.id, r.cid, r.usn, r.ease, r.ivl, r.lastIvl, r.factor, r.time, r.type \
+             FROM cards AS c LEFT JOIN revlog AS r ON r.cid = c.id AND r.id >= 0 ORDER BY c.id",
+            &[],
+            cancel,
+            visit,
+        )
+    }
+
     /// The ids of the review-log rows whose `cid` is `card`, ascending (an
     /// indexed read): what the Stats column caches attach to an added card
     /// (`stats/graphs-common` G9.4).
