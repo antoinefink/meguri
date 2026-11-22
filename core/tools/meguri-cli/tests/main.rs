@@ -8,6 +8,14 @@
 // common;`), as it did in a binary of its own.
 #![allow(clippy::duplicate_mod)]
 
+/// The crate's `meguri-cli` binary. nextest sets `CARGO_BIN_EXE_meguri-cli` at run
+/// time to where the binary is, which follows a build reused from an archive
+/// (`tools/mg core-test --archive`); `env!` (the path at build time) serves
+/// plain `cargo test`.
+pub fn bin_exe() -> std::path::PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_meguri-cli").map_or_else(|| env!("CARGO_BIN_EXE_meguri-cli").into(), Into::into)
+}
+
 #[path = "anonymize.rs"]
 pub mod anonymize;
 #[path = "cli.rs"]

@@ -290,6 +290,22 @@ pub trait ReadRows: sealed::Connected {
         crate::search_rows::visit_note_tags(self.connection(), cancel, visit)
     }
 
+    /// Find Duplicates' read (`browser/workspace` V10): the id, `mid` and
+    /// `flds` of each note of one of `notetypes`, limited to `notes` when
+    /// given, in no promised order: text, or none for NULL and BLOB;
+    /// cancelled as [`ReadRows::visit_id_rows`] is.
+    fn visit_note_fields(
+        &self,
+        notetypes: &[NotetypeId],
+        notes: Option<&[NoteId]>,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut crate::search_rows::FieldsVisit<'_>,
+    ) -> Result<(), StorageError> {
+        let kinds: Vec<i64> = notetypes.iter().map(|id| id.0).collect();
+        let notes: Option<Vec<i64>> = notes.map(|notes| notes.iter().map(|id| id.0).collect());
+        crate::search_rows::visit_note_fields(self.connection(), &kinds, notes.as_deref(), cancel, visit)
+    }
+
     /// Every deck's id and its `name` read as a deck term reads it (T12.4's
     /// deck counts): text, or none for NULL and BLOB.
     fn deck_names(&self) -> Result<Vec<(i64, Option<String>)>, StorageError> {

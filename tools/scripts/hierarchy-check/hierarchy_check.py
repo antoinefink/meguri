@@ -28,7 +28,10 @@ Show or Hide Sidebar, so only in English, the driver's usual locale),
 identifiers the system sets (a leading '_', BackButton, Toolbar,
 PopoverDismissRegion, the Mac back button's chevron.backward in a toolbar, a
 window's SwiftUI scene id, a navigation bar named after its title, an SF
-Symbol's name on its image, and on the Mac a SwiftUI List's ListColumn and a
+Symbol's name on its image, and on the Mac a SwiftUI List's ListColumn, a SwiftUI Table's generated column
+ids (UUIDs) and its column header buttons (no identifier or label; one at
+each column's x and width, in a group directly in the table's outline, above
+the columns' body), and a
 NavigationSplitView's '<scene id>, SidebarNavigationSplitView', and AppKit's
 exact NSOutlineViewDisclosureButtonKey on a disclosure triangle directly in
 a cell under an outline row in an outline; on iOS a sidebar disclosure row's
@@ -71,6 +74,8 @@ SYMBOL_NAME = re.compile(r"^[a-z0-9]+(\.[a-z0-9]+)*$")
 # SwiftUI's NavigationSplitView on the Mac, after the window's scene id.
 SPLIT_VIEW = re.compile(r"^(?:.+, )?SidebarNavigationSplitView$")
 SIDEBAR_TOGGLE_LABELS = {"Show Sidebar", "Hide Sidebar"}
+# The id SwiftUI's Table gives each of its columns on the Mac.
+TABLE_COLUMN_UUID = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$")
 BARS = {"toolbar", "navigationBar"}
 
 IDENTIFIER = re.compile(r"^[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*(\.[A-Za-z0-9_-]+)?$")
@@ -187,10 +192,34 @@ def is_system_identifier(e):
     if e.type == "image":
         return bool(SYMBOL_NAME.match(ident))
     if e.type == "tableColumn":
-        return ident == "ListColumn"
+        return ident == "ListColumn" or bool(
+            TABLE_COLUMN_UUID.match(ident) and e.parent is not None and e.parent.type in ("outline", "table"))
     if e.type == "splitGroup":
         return bool(SPLIT_VIEW.match(ident))
     return False
+
+
+def native_table_headers(root):
+    """A SwiftUI Table's column headers on the Mac: unlabelled buttons with no
+    identifier, none can be set, in a group directly in the table's outline,
+    each at the x and width of one of its generated columns."""
+    headers = set()
+    for table in root.walk():
+        if table.type not in ("outline", "table"):
+            continue
+        generated = [c for c in table.children if c.type == "tableColumn" and TABLE_COLUMN_UUID.match(c.identifier)]
+        if not generated:
+            continue
+        columns = {(c.x, c.w) for c in generated}
+        # The header row sits above the columns' body, which starts at its bottom.
+        body_top = min(c.y for c in generated)
+        for group in table.children:
+            buttons = group.children
+            if (group.type == "group" and buttons and group.y + group.h <= body_top + 0.5
+                    and all(b.type == "button" and not b.identifier and not b.label and (b.x, b.w) in columns
+                            and b.y + b.h <= body_top + 0.5 for b in buttons)):
+                headers.update(buttons)
+    return headers
 
 
 def describe(e):
@@ -476,7 +505,8 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     """Ordinary diagnostics for one observation, without merging identities."""
     elements = [e for e in root.walk() if not e.under(SYSTEM_UI) and not e.under(TRANSIENT)]
     sheet_grabbers = native_sheet_grabbers(document, root)
-    toggle_parts = native_toggle_switch_parts(document, root) | native_stepper_arrows(document, root)
+    toggle_parts = (native_toggle_switch_parts(document, root) | native_stepper_arrows(document, root)
+                    | native_table_headers(root))
     disclosure_labels, disclosure_chevrons = native_disclosure_row_parts(document, root)
     title_pairs = native_toolbar_title_pairs(document, root)
     issues = []

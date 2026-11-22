@@ -131,6 +131,11 @@ harness = false
 name = "browse_filters"
 harness = false
 
+# U266's Find Duplicates over All Notes and All Found.
+[[bench]]
+name = "browse_duplicates"
+harness = false
+
 # U267's Note Types reads: list counts, field contents, no-card notes, the
 # save summary and the delete counts.
 [[bench]]

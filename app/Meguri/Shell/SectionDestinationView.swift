@@ -3,6 +3,7 @@ import DeckOptions
 import DesignSystem
 import Editor
 import Home
+import NoteTypes
 import Review
 import Settings
 import SwiftUI
@@ -87,13 +88,17 @@ struct ShellFeatures {
         features.today = { _ in AnyView(TodayView(collection: collection, besideDeckList: true)) }
         #if os(macOS)
         features.nativeMacWorkspace = true
-        features.availableSections = [.home]
+        features.availableSections = [.home, .noteTypes]
         #else
+        // W14's iPad row waits for the iPad regular layout (follow-up "U281 iPad"); the view code stays.
         features.availableSections = [.home, .settings]
         #endif
         features.sectionRoot = { section, _ in
-            if section == .settings { AnyView(SettingsView(collection: collection)) }
-            else { AnyView(HomeView(collection: collection)) }
+            switch section {
+            case .settings: AnyView(SettingsView(collection: collection))
+            case .noteTypes: AnyView(NoteTypesView(model: collection.noteTypes))
+            default: AnyView(HomeView(collection: collection))
+            }
         }
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
@@ -133,6 +138,7 @@ struct ShellFeatures {
             case .cloudSync(let entry): AnyView(CloudConnectionView(collection: collection, entry: entry))
             case .accountSync: AnyView(AccountSyncSheet(collection: collection))
             case .add: AnyView(AddNoteView(collection: collection))
+            case .noteTypeSave: AnyView(NoteTypeSaveSheet(model: collection.noteTypes))
             }
         }
         features.deckExists = { collection.deck($0.rawValue) != nil }
@@ -204,7 +210,8 @@ extension AppSection {
         case .home: "house"
         case .browse: "magnifyingglass"
         case .stats: "chart.bar.xaxis"
-        case .noteTypes: "list.bullet.rectangle"
+        // W14: a system symbol, like Today and Browse.
+        case .noteTypes: "rectangle.stack"
         case .settings: "gearshape"
         }
     }

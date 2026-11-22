@@ -15,8 +15,8 @@ private final class QueryDiskCapacity: DiskSpaceProviding {
 extension EventTests {
     /// U264a through CoreBridge on an opened collection: T7's reading and
     /// T4's run text, the commit, the incomplete text, the suggestions with
-    /// a UTF-16 caret, the filter counts and selection counts as jobs, and
-    /// a column set change.
+    /// a UTF-16 caret, the filter counts, selection counts and Find
+    /// Duplicates as jobs, and a column set change.
     @Test(.timeLimit(.minutes(2))) @MainActor func browseQueriesSuggestCountAndChangeColumnsThroughCoreBridge() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let directory = root.appending(path: "collection")
@@ -34,9 +34,11 @@ extension EventTests {
             let added = try await types.addNotetype(.init(name: "Duo", cloze: false, fields: ["Front", "Back"],
                 templates: [.init(name: "Forward", front: "{{Front}}", back: "{{FrontSide}}", browserFront: "", browserBack: "")],
                 css: ""))
+            var firstIDs: [Int64] = []
             for (front, tag) in [("alpha", "\u{1D11E}zorb"), ("beta", "plain")] {
-                _ = try await notes.addNote(.init(notetypeId: added.id, fields: [front, "x"], tags: [tag], deckId: 1, guid: nil,
-                                                  updateAddDefaults: false))
+                let note = try await notes.addNote(.init(notetypeId: added.id, fields: [front, "x"], tags: [tag], deckId: 1,
+                                                         guid: nil, updateAddDefaults: false))
+                firstIDs.append(note.id)
             }
 
             let read = try await CoreBrowseQuery.read("-is:suspended tag:plain word")
@@ -95,6 +97,17 @@ extension EventTests {
             let selected = try await CoreBrowseQuery.startSelectionCounts(selection).value()
             #expect(selected == BrowseSelectionCounts(cards: 2, notes: 2, suspended: 0, buried: 0, decks: 1, deck: 1,
                                                       notetypes: [added.id]))
+
+            // V10: a note whose Front differs from alpha's only in case,
+            // markup and spaces. All Notes finds the pair; the selection's
+            // two rows hold one note of each Front.
+            let third = try await notes.addNote(.init(notetypeId: added.id, fields: ["<b>ALPHA</b> ", "y"], tags: [],
+                                                      deckId: 1, guid: nil, updateAddDefaults: false))
+            let everyNote = try await CoreBrowseQuery.startFindDuplicates(field: "Front", in: nil).value()
+            let pair = [firstIDs[0], third.id].sorted()
+            #expect(everyNote == FindDuplicatesResult(groups: [pair], noteIds: pair, considered: 3))
+            let inFound = try await CoreBrowseQuery.startFindDuplicates(field: "Front", in: selection).value()
+            #expect(inFound == FindDuplicatesResult(groups: [], noteIds: [], considered: 2))
             try await session.close()
             try await service.close()
         } catch {

@@ -84,7 +84,7 @@ jobs:
           DIGEST_FILE: ${{ runner.temp }}/dev-image-digest
         run: .github/dev-image.sh pull
 
-      # Read only: the Core shards of "Verify Meguri" save this cache.
+      # Read only: "Linux · core · build" of "Verify Meguri" saves this cache.
       - name: Restore the Rust dependency cache
         if: steps.pull.outputs.used == 'yes'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
