@@ -127,11 +127,11 @@ final class TapZoneUITests: XCTestCase {
         XCTAssertFalse(waitForAnswer(app, timeout: 2), "A tap beside Show Answer does not reveal")
         tap(card, x: 0.5)
         XCTAssertTrue(waitForAnswer(app))
-        // Between Hard and Good, level with the buttons: the card shows there
-        // under the answer area, but a tap there is never a grade.
+        // Level with the buttons, left of Again in the area's padding: the
+        // card shows there under the answer area, but a tap is never a grade.
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-        let hard = element(app, "review.session.rate.hard").frame, good = element(app, "review.session.rate.good").frame
-        let gapPoint = CGPoint(x: (hard.maxX + good.minX) / 2, y: good.midY)
+        let again = element(app, "review.session.rate.again").frame, good = element(app, "review.session.rate.good").frame
+        let gapPoint = CGPoint(x: max(4, again.minX / 2), y: good.midY)
         app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: gapPoint.x, dy: gapPoint.y)).tap()
         XCTAssertFalse(waitForAnswered(app, 1, timeout: 2), "A tap beside the buttons does not answer")

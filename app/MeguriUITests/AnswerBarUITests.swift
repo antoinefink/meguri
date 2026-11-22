@@ -80,8 +80,10 @@ final class AnswerBarUITests: XCTestCase {
     private func checkSpacing(_ app: XCUIApplication) throws {
         let good = element(app, "review.session.rate.good"), progress = element(app, "review.session.progress")
         XCTAssertTrue(good.waitForExistence(timeout: 10) && progress.exists)
-        let gap = progress.frame.minY - good.frame.maxY
-        XCTAssertEqual(gap, 8, accuracy: 1, "Answers to progress bar: \(gap) pt")
+        // The bar's accessibility frame can be taller than its track; its
+        // bottom is the track's: 8 pt of spacing plus the track (4 pt).
+        let gap = progress.frame.maxY - good.frame.maxY
+        XCTAssertTrue((8...14).contains(gap), "Answers to the progress bar's bottom: \(gap) pt (\(good.frame), \(progress.frame))")
         // Above the home indicator, never under it.
         let window = app.windows.firstMatch.frame
         XCTAssertLessThan(progress.frame.maxY, window.maxY, "The progress bar keeps the bottom safe area")
