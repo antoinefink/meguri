@@ -4,7 +4,7 @@ Spec: stats/graphs-common
 Requirements: R1281, R1282, R1283, R1285, R1289, R1290, R1291, R1292, R1293, R1294, R1295, R1349, R1350, R1351, R1352, R1353, R1355, R1356, R1357, R1360, R1367, R1446, R1838
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/graphs/scope/
-Status: Under review (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). Every other section is in force and unchanged.
 
 The machinery every Stats-screen graph shares (U98): which cards and review-log rows a request reads (scope and history), how it reads them, what it returns, the column caches behind it, and what the Stats shell (U225) can rely on. Individual graphs are `stats/graphs-revlog` (U99) and `stats/graphs-cards` (U101); binning, ranges and text are `stats/graph-presentation` (U226); browse queries are `stats/browse-queries`. Days are `stats/day-buckets`, the Today section `stats/studied-today`.
 
