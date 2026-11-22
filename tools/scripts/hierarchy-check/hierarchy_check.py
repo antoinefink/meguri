@@ -42,7 +42,8 @@ NavigationSplitView's '<scene id>, SidebarNavigationSplitView', and AppKit's
 exact NSOutlineViewDisclosureButtonKey on a disclosure triangle directly in
 a cell under an outline row in an outline; on iOS a sidebar disclosure row's
 system button, which copies its label's identifier, with its own chevron; and
-on the Mac the window toolbar's title and subtitle, reported at one frame), elements
+on the Mac the window toolbar's title and subtitle, reported at one frame; on iOS a
+navigation bar's title and the subtitle drawn under it, whose line boxes touch), elements
 with an empty frame, and transient elements (activity and progress
 indicators) with everything inside them. Wrong colors, broken alignment and
 unreadable text are judgments for the critic (U10), not checks here.
@@ -532,7 +533,7 @@ def native_toolbar_title_pairs(document, root):
     """
     pairs = set()
     if document.get("platform") != "mac":
-        return pairs
+        return navigation_bar_title_pairs(root)
     for window in root.walk():
         if window.type != "window":
             continue
@@ -542,6 +543,33 @@ def native_toolbar_title_pairs(document, root):
         for t in texts:
             by_frame.setdefault(tuple(sorted(t.frame.items())), []).append(t)
         pairs.update(frozenset(group) for group in by_frame.values() if len(group) == 2)
+    return pairs
+
+
+# A navigation bar's title and subtitle on iOS: their line boxes share a few
+# points where the subtitle is drawn under the title.
+SUBTITLE_TOUCH = 4.0
+
+
+def navigation_bar_title_pairs(root):
+    """An iOS navigation bar's title and its subtitle (a page's navigationTitle and
+    navigationSubtitle): unidentified static texts inside the bar, the title
+    labelled as the bar is named, the subtitle starting on the title's leading
+    edge and drawn under it, its top within SUBTITLE_TOUCH points of the title's
+    bottom. Exactly one such text under the title: anything else keeps its
+    overlaps. Returns the set of such pairs as frozensets.
+    """
+    pairs = set()
+    for bar in root.walk():
+        if bar.type != "navigationBar" or not bar.identifier:
+            continue
+        texts = [e for e in bar.walk() if e is not bar and e.type == "staticText" and not e.identifier]
+        for title in (t for t in texts if t.label == bar.identifier):
+            bottom = title.y + title.h
+            under = [t for t in texts if t is not title and abs(t.x - title.x) <= EDGE_TOLERANCE
+                     and t.y > title.y + title.h / 2 and bottom - SUBTITLE_TOUCH <= t.y <= bottom + SUBTITLE_TOUCH]
+            if len(under) == 1:
+                pairs.add(frozenset((title, under[0])))
     return pairs
 
 
