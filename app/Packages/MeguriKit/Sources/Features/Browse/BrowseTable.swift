@@ -59,7 +59,7 @@ struct BrowseTable: View {
             }
             // Another handle shown is another table: no diff of its rows with the last list's.
             .id(list?.token ?? 0)
-            .accessibilityIdentifier("browse.table")
+            .accessibilityIdentifier("browse.results.table")
             .onChange(of: results.scrollTarget) {
                 guard let target = results.scrollTarget, target.token == list?.token else { return }
                 proxy.scrollTo(target.index, anchor: .center)

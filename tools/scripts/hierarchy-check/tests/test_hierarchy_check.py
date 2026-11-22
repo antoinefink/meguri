@@ -1216,3 +1216,25 @@ class NativeSidebarSearchField(unittest.TestCase):
         self.assertEqual(kinds(hierarchy_check.check(self.tree(extra=[el("button", label="Go", f=(150, 91, 20, 28))]))),
                          ["missing-identifier", "missing-identifier", "missing-identifier"])
         self.assertEqual(kinds(hierarchy_check.check(doc(el("searchField", f=(9, 90, 202, 30))))), ["missing-identifier"])
+
+
+class NativeTableCellsAndSegments(unittest.TestCase):
+    """A SwiftUI Table's row is named by one of its cells (Browse names its
+    state cell, U270a); a named segmented Picker in a Mac toolbar reports
+    its segments as radio buttons."""
+
+    def test_cells_of_an_identified_row_and_named_segments_are_not_missing(self):
+        row = el("outlineRow", f=(0, 0, 400, 20), children=[
+            el("cell", f=(0, 0, 20, 20), children=[el("staticText", "browse.table.row.7", f=(2, 2, 16, 16))]),
+            el("cell", f=(20, 0, 200, 20)), el("cell", f=(220, 0, 180, 20))])
+        segments = el("radioGroup", "browse.toolbar.mode", "Cards or Notes", f=(500, 0, 120, 30), children=[
+            el("radioButton", label="Cards", f=(500, 0, 60, 30)), el("radioButton", label="Notes", f=(560, 0, 60, 30))])
+        self.assertEqual(hierarchy_check.check(doc(el("outline", "sample.screen.table", f=(0, 0, 400, 400), children=[row]), segments)), [])
+
+    def test_cells_of_an_unnamed_row_and_unnamed_segments_are_still_reported(self):
+        row = el("outlineRow", f=(0, 0, 400, 20), children=[el("cell", f=(0, 0, 20, 20)), el("cell", f=(20, 0, 200, 20))])
+        segments = el("radioGroup", f=(500, 0, 120, 30), children=[el("radioButton", label="Cards", f=(500, 0, 60, 30))])
+        loose = el("radioButton", label="Notes", f=(600, 0, 60, 30))
+        self.assertEqual(kinds(hierarchy_check.check(doc(el("outline", "sample.screen.table", f=(0, 0, 400, 400), children=[row]),
+                                                         segments, loose))),
+                         ["missing-identifier"] * 5)

@@ -27,7 +27,7 @@ final class BrowserSearchPerfTests: PerfTestCase {
         let status = app.staticTexts["browse.status.text"]
         XCTAssert(status.waitForExistence(timeout: 60), "Browse's table did not show")
         // The whole collection's first page is shown.
-        XCTAssert(app.descendants(matching: .any)["browse.table"].waitForExistence(timeout: 60))
+        XCTAssert(app.descendants(matching: .any)["browse.results.table"].waitForExistence(timeout: 60))
         let done = "\(bundle).testhooks.browseScrolled"
         try measure(app: app) { _ in
             let finished = expectation(forNotification: Notification.Name(done), object: nil,

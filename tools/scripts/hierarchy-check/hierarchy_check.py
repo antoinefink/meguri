@@ -8,7 +8,8 @@ Reads the JSON that AgentDriverTests writes before and after every drive step
   accessibility identifier (R1964). A row counts as identified when an
   element inside it has one: SwiftUI's List puts a row's modifiers on its
   content, inside the row and cell views AppKit and UIKit wrap it in, and no
-  API names those;
+  API names those. A cell directly in a row counts as identified with its
+  row (a SwiftUI Table's other cells, which can be empty);
 - bad-identifier: an identifier that is not area.screen.element[.id], each of
   area, screen and element lowerCamel (R1964);
 - duplicate-identifier: one identifier on several elements;
@@ -249,6 +250,16 @@ def native_sidebar_search_fields(root):
                 parts.add(field)
                 parts.update(field.children)
     return parts
+
+
+def native_radio_segments(root):
+    """The segments of a segmented Picker the app named, as the Mac reports
+    one in a window toolbar: radio buttons with a label and no identifier
+    directly in a radioGroup that has the app's identifier. A segment cannot
+    take an identifier of its own."""
+    return {e for e in root.walk()
+            if e.type == "radioButton" and not e.identifier and e.label and e.parent is not None
+            and e.parent.type == "radioGroup" and e.parent.identifier and not is_system_identifier(e.parent)}
 
 
 def describe(e):
@@ -538,6 +549,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
                     | native_table_headers(root) | native_sidebar_search_fields(root))
     disclosure_labels, disclosure_chevrons = native_disclosure_row_parts(document, root)
     title_pairs = native_toolbar_title_pairs(document, root)
+    segment_buttons = native_radio_segments(root)
     issues = []
 
     for e in elements:
@@ -551,7 +563,10 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
         if ((e.type in INTERACTIVE or e.type in ROWS) and not e.identifier and e not in native_ids and not comparison_link and e.visible and not e.in_system_alert()
                 and not e.is_sidebar_toggle() and e not in sheet_grabbers and e not in toggle_parts
                 and e not in disclosure_chevrons
-                and not (e.type in ROWS and e.identified_inside())):
+                and not (e.type in ROWS and e.identified_inside())
+                and not (e.type == "cell" and e.parent is not None and e.parent.type in ROWS
+                         and e.parent.identified_inside())
+                and e not in segment_buttons):
             issues.append(dict(kind="missing-identifier", message="%s '%s' has no accessibility identifier" % (e.type, e.label),
                                **describe(e)))
 
