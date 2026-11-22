@@ -62,11 +62,6 @@ public struct CloudSyncStatusButton: View {
                 SyncStatusSymbol(status: main, iCloud: collection.sync.symbolsAreICloud,
                     turning: !reduceMotion && collection.sync.panelProgress != nil)
             }
-            #if os(iOS)
-            // The sheet opens at the panel's height, not at a default that it then
-            // leaves: the panel is measured here, out of sight, while no sheet shows.
-            .background { sheetMeasure }
-            #endif
             .accessibilityLabel(SyncText.value(accessibilityLabelKey))
             .accessibilityValue(SyncText.value(titleKey).replacingOccurrences(of: "…", with: ""))
             .help([SyncText.value(titleKey), SyncStatusCopy.detail(collection.sync, now: clock.now())]
@@ -117,6 +112,12 @@ public struct CloudSyncStatusButton: View {
             }
             #endif
         }
+        #if os(iOS)
+        // The sheet opens at the panel's height, not at a default that it then
+        // leaves: the panel is measured here, out of sight, while no sheet shows.
+        // Outside the button, so the button's identifier stays on one element.
+        .background { sheetMeasure }
+        #endif
     }
     /// One detent, the panel's height: no larger detent that would only show
     /// empty space. Until the panel is measured, the system's medium height.
