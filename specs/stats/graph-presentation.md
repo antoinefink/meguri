@@ -556,7 +556,7 @@ The memory-state footnote of P10 and P11 shows whenever the left-out count is ab
 
 ## P17. Cumulative overlay and colours
 
-Changed 2026-11-22 (round 11): P17.1 and P17.2 are replaced by `stats/statistics-page` S8.2 (no second axis) and S8.1 (two colour families, indigo for single measures, Forgotten orange); P17.3's automatic axes stay, labels on the trailing side. P24.
+Changed 2026-11-22 (round 11): P17.1 and P17.2 are replaced by `stats/statistics-page` S8.2 (no second axis) and S8.1 (two colour families, indigo for single measures, Forgotten orange); P17.3's automatic axes stay, labels on the trailing side, but on the Statistics page every tick label, counts included, uses the system's formatters (`stats/statistics-page` S8.7), not L. P24.
 
 ### P17.1 Running total area
 

@@ -66,7 +66,7 @@ On this page a review is remembered when `stats/graphs-revlog` V4.1 counts it an
 
 ### S4.2 Reviews Due, ahead
 
-Overdue cards (`future_due` keys below 0) are one bar on the left, labelled "Overdue", shown only when there are some. Then, from today: 30 days for 1M; 13, 26 or 52 weeks starting with the current week for 3M, 6M and 1Y; for All, months from the current one to the last month with a card due, at least 12 and at most 24; cards due after the 24th month go into a last bar labelled "Later". Each bar sums `future_due` over its days (k = 0 is today).
+Overdue cards (`future_due` keys below 0) are one bar on the left, labelled "Overdue", shown only when there are some. Then, from today: 30 days for 1M; 13, 26 or 52 weeks starting with the current week for 3M, 6M and 1Y; for All, months from the current one to the later of the 12th month and the last month with a card due, but never past the 24th month; cards due after the 24th month go into a last bar labelled "Later". Each bar sums `future_due` over its days (k = 0 is today).
 
 ### S4.3 Windows of the charts with no time axis
 
@@ -158,7 +158,7 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 - **Streaks** (Meguri's own; `stats/heatmap-addon`'s streak rules are not used): a day is studied when its H11 count is above 0. The current streak is the number of consecutive studied days ending today, or ending yesterday while today has none yet (a day not yet studied does not break it). The longest is the longest such run in all history. Days follow Anki's day (`stats/history-reads` H1, the collection's rollover hour), so a review just after midnight before the rollover counts for the day before, and travel across time zones can move a day.
 - Selection: a day shows its date and count; Show in Browse for a day with reviews, "Cards Reviewed on <date>" (H13 `answered`).
 - On the iPhone and the folded Duo the year blocks are one horizontal strip of weeks that swipes back through time (N25.6), not stacked blocks.
-- No streak and no grid appear on the Today page (round 10 kept them off; round 11's 7A puts them here only).
+- No streak appears on the Today page, which keeps its one small grid (N14.11, N24.6; round 10 kept the streak off Today, and round 11's 7A puts it here only).
 
 ### S7.6 Cards Over Time (lead)
 
@@ -249,6 +249,7 @@ Two fixed families, system colours with their light, dark and Increase Contrast 
 | Card states | New blue, Learning orange, Relearning red, Young mint, Mature green (the heatmap's system green, N24.6), Suspended yellow, Buried grey; Filtered purple only in Reviews Over Time › By Type |
 | Answers | Again red, Hard orange, Good green, Easy blue |
 
+- Exception, with its need: these are chart series colours (`ChartColors`), not the count colours of the rubric's `color-meaning` rule (New blue, Learn red, Due green for deck counts; Hard and Easy neutral for the answer buttons, R32, R355), which stay where they apply. Stacked series need a distinct colour for each member, Anki users know these chart colours (R1363 already gives Learning orange and Relearning red), and Antoine approved both families with round 11. Verification: the critic is told of this exception; the VM captures show each family in light, dark and Increase Contrast.
 - A chart shows one family, never both. A chart of a single measure uses indigo (Stability, Difficulty, Time of Day's reviews, By Deck), except Forgotten (orange), Retention, Retrievability and Knowledge's Known line (green), and Studied (grey, dashed).
 - Every chart has a legend in stack order and a callout that names each value, so colour is never the only cue (R1443). With Differentiate Without Colour, stacked series get a separating line.
 - Replaces `stats/graph-presentation` P17.2 and R1363's Young light green and Mature dark green (now mint and green).
@@ -324,7 +325,7 @@ The toolbar subtitle (Mac) or the navigation subtitle (touch) reads "<n> cards i
 
 ### S10.5 Cancellation
 
-Changing the deck or the period, leaving the page, or a newer refresh cancels the superseded request (H16); the boxes keep what they show until the new parts arrive. The page stays scrollable and its controls respond throughout (S19).
+Changing the deck, changing the period to or from All, leaving the page, or a newer refresh cancels the superseded request (H16); the boxes keep what they show until the new parts arrive. A period change among 1M to 1Y keeps the running request, which already asks for `last12Months`: its parts arrive and are drawn in the new period's bins. The page stays scrollable and its controls respond throughout (S19).
 
 ### S10.6 No precomputation required
 

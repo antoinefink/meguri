@@ -159,7 +159,7 @@ Meguri-only tests: the `did:` form, with a name of each Q2.2 case (an empty leve
 
 ## Q9. The Statistics page's items (round 11)
 
-Changed 2026-11-22 (round 11; `stats/statistics-page` S8.4). The Statistics page has no Search scope (`stats/history-reads` H1), so its scope text is Q2.1's or Q2.2's. Show in Browse opens Browse (Q5's route) with a query made of tokens (`search/filter-tokens`): the joined text Q3 gives for the page scope and the item below, read into tokens by `search/filter-tokens` T4 (a deck becomes its Deck token; an item that no kind shows stays an advanced token). A card-ids item is made as the heatmap's day is (`browser/workspace` V15): the Deck token, when a deck is the filter, and a Studied On token holding the ids that `stats/history-reads` H13 returned. Scope text `unavailable` makes no item of the page clickable (Q2.2).
+Changed 2026-11-22 (round 11; `stats/statistics-page` S8.4). The Statistics page has no Search scope (`stats/history-reads` H1), so its scope text is Q2.1's or Q2.2's. Show in Browse opens Browse (Q5's route) with a query made of tokens (`search/filter-tokens`): the joined text Q3 gives for the page scope and the item below, read into tokens by `search/filter-tokens` T7 (a deck written by name becomes its Deck token; a deck written as Q2.2's `did:` list, and an item that no kind shows, stay advanced tokens, which find the same rows). A card-ids item is made as the heatmap's day is (`browser/workspace` V15): the Deck token, when a deck is the filter, and a Studied On token holding the ids that `stats/history-reads` H13 returned. Scope text `unavailable` makes no item of the page clickable (Q2.2).
 
 | Box (`stats/statistics-page`) | Item | Item text |
 |---|---|---|

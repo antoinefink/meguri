@@ -198,7 +198,7 @@ The replay behind H2 and H3 is kept in a derived-store component, `stats_history
 - per deck key, per day: H2's deltas and H2.3's started counts, as day-keyed changes;
 - per deck key, per H3.2 sample day: the knowledge sum and the studied count.
 
-A page scope's series is the sum of the series of the deck keys it selects (H1), never a new replay. The days are kept on an absolute grid fixed by `N` modulo 86,400 (the phase of the day boundary), which the component keeps in a record row of its own with the samples' latest day; the store's stamp (`storage/derived-store` D3) gives the generation and seq. A request whose `N` has another phase finds the component not current (H14.3).
+A page scope's series is the sum of the series of the deck keys it selects (H1), never a new replay. Rows are kept on their own absolute day, never folded: the fold of H1 (a row after `N` on day 0) is applied when a request reads, against that request's `N`, so a rollover moves nothing kept. The days are kept on an absolute grid fixed by `N` modulo 86,400 (the phase of the day boundary), which the component keeps in a record row of its own with the samples' latest day; the store's stamp (`storage/derived-store` D3) gives the generation and seq. A request whose `N` has another phase finds the component not current (H14.3).
 
 H4, H6 to H13 are computed per request from G9's columns and the card columns, like Anki's graphs: one pass over the window's rows, with no kept aggregate of their own.
 
@@ -241,7 +241,7 @@ Each committed change set (`engine/change-stream` S1) updates the component, wit
 
 ## H16. Cancellation
 
-Every request carries a cancel token (KTD9). A newer refresh, a deck or period change, or leaving the page cancels the superseded request: its parts not yet returned are dropped and its reader is interrupted within 50 ms. A build of `stats_history` started by a cancelled request is not cancelled with it: it continues at utility QoS, so the next request finds it further on, and stops only where `storage/derived-store` D7 stops a refresh (a close, a suspend, a replacement, an invalidation, an exclusive phase). A memory warning releases the component (H14.4) once that build has committed. Nothing a cancelled request computed is kept, except the component's own build.
+Every request carries a cancel token (KTD9). A newer refresh, a deck change, a period change to or from All, or leaving the page cancels the superseded request (a period change among 1M to 1Y keeps it, `stats/statistics-page` S10.5): its parts not yet returned are dropped and its reader is interrupted within 50 ms. A build of `stats_history` started by a cancelled request is not cancelled with it: it continues at utility QoS, so the next request finds it further on, and stops only where `storage/derived-store` D7 stops a refresh (a close, a suspend, a replacement, an invalidation, an exclusive phase). A memory warning releases the component (H14.4) once that build has committed. Nothing a cancelled request computed is kept, except the component's own build.
 
 ## H17. Read only
 
