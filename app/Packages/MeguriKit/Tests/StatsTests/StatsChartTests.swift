@@ -243,6 +243,15 @@ import Testing
         #expect(StatsChartSelection(bin: 0, pinned: true).carried(from: old, to: new) == .none)
     }
 
+    @Test func aPinnedSelectionSurvivesTheFocusALoadingPhaseTakes() {
+        // Loading makes the plot unfocusable: the pin stays.
+        #expect(!StatsChartSelection.unpinsOnFocusLoss(focused: false, pinned: true, ready: false))
+        // A click elsewhere while ready unpins.
+        #expect(StatsChartSelection.unpinsOnFocusLoss(focused: false, pinned: true, ready: true))
+        #expect(!StatsChartSelection.unpinsOnFocusLoss(focused: true, pinned: true, ready: true))
+        #expect(!StatsChartSelection.unpinsOnFocusLoss(focused: false, pinned: false, ready: true))
+    }
+
     @Test func aSelectionIsNeverLeftOutOfRange() {
         let bins: [StatsPeriod] = [.bucket("a"), .bucket("b")]
         #expect(StatsChartSelection(bin: 5, pinned: true).carried(from: [], to: bins) == .none)

@@ -21,6 +21,12 @@ public struct StatsChartSelection: Hashable, Sendable {
 
     public static let none = StatsChartSelection()
 
+    /// Whether losing the plot's focus unpins: only a ready plot that lost it
+    /// to a click elsewhere (S8.3), never one a loading phase made unfocusable.
+    public static func unpinsOnFocusLoss(focused: Bool, pinned: Bool, ready: Bool) -> Bool {
+        !focused && pinned && ready
+    }
+
     /// The selection carried from the last ready bins to new ones (S10.2):
     /// kept while the selected period is still there (at its new index),
     /// cleared when it is gone; never out of range. Empty new bins (a loading
@@ -162,8 +168,11 @@ struct StatsChartPlot: View {
             .onAppear { if !data.bins.isEmpty { lastReadyBins = data.bins } }
             #if os(macOS)
             .onChange(of: focused) {
-                // A click elsewhere that takes the focus unpins (S8.3).
-                if !focused, selection.pinned { selection = .none }
+                // A click elsewhere that takes the focus unpins (S8.3); a
+                // loading phase, which makes the plot unfocusable, does not.
+                if StatsChartSelection.unpinsOnFocusLoss(focused: focused, pinned: selection.pinned, ready: isReady) {
+                    selection = .none
+                }
             }
             #endif
             .accessibilityElement(children: .contain)
