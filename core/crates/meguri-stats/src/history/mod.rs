@@ -152,8 +152,9 @@ pub enum HistoryResult {
 const POLL: Duration = Duration::from_millis(10);
 /// H15: progress at most every 100 ms.
 const REPORT_EVERY: Duration = Duration::from_millis(100);
-/// A component found ready but not current this many times in a row is
-/// read around (it should never happen: the read flushes first).
+/// A component found ready but not current, or not rebuilt for this
+/// request's grid, this many times in a row is read around (it should
+/// never happen: the read flushes first).
 const MAX_TRIES: u32 = 20;
 
 /// H15's progress for one part: between 0 and 1, never decreasing, at most
@@ -234,7 +235,7 @@ fn selection(snapshot: &Snapshot<'_>, scope: &Scope) -> Result<Option<Selection>
 /// then the clock, then the snapshot (after the derived writer has applied
 /// every commit sent to it, so the snapshot's first read of the store sees
 /// them, D8).
-fn context(collection: &Collection, derived: &DerivedHost) -> Result<Context, StatsError> {
+pub fn page_context(collection: &Collection, derived: &DerivedHost) -> Result<Context, StatsError> {
     let day = collection.check_rollover()?;
     let clock = collection.clock();
     let now_ms = clock.now_ms();
@@ -270,7 +271,7 @@ pub fn card_states(
     if request.cancel.is_cancelled() {
         return Ok(HistoryResult::Cancelled);
     }
-    let context = context(collection, derived)?;
+    let context = page_context(collection, derived)?;
     card_states_in(caches, collection, derived, &context, request, progress)
 }
 
@@ -314,22 +315,22 @@ pub fn card_states_in(
                 return Ok(HistoryResult::UnknownDeck);
             };
             // Before the snapshot's first read of `derived` (D8).
-            if derived.is_current(HISTORY_COMPONENT, &snapshot) {
-                if store::kept_grid(&snapshot)? == Some(grid) {
-                    let read = read_kept(&snapshot, context, grid, request.history, selection, &cancelled);
-                    return finish(read, context, true, &cancelled);
-                }
-                // Kept for another phase of `N` (H14.3): rebuilt on this
-                // request's grid. The flush lets the writer mark it stale.
-                shared.rebuild();
-                derived.flush()?;
-            } else if derived.has_failed(HISTORY_COMPONENT)
-                || derived.readiness(HISTORY_COMPONENT).is_none()
-                || tries >= MAX_TRIES
+            let current = derived.is_current(HISTORY_COMPONENT, &snapshot);
+            if current && store::kept_grid(&snapshot)? == Some(grid) {
+                let read = read_kept(&snapshot, context, grid, request.history, selection, &cancelled);
+                return finish(read, context, true, &cancelled);
+            }
+            if derived.has_failed(HISTORY_COMPONENT) || derived.readiness(HISTORY_COMPONENT).is_none() || tries >= MAX_TRIES
             {
                 tracing::warn!("the stats history cannot be built: Cards Over Time computed from the snapshot");
                 let read = read_cold(&snapshot, context, grid, request.history, selection, &cancelled);
                 return finish(read, context, false, &cancelled);
+            }
+            if current {
+                // Kept for another phase of `N` (H14.3): rebuilt on this
+                // request's grid. The flush lets the writer mark it stale.
+                shared.rebuild();
+                derived.flush()?;
             }
         }
         derived.request_refresh(HISTORY_COMPONENT);

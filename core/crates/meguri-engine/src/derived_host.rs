@@ -134,7 +134,8 @@ pub trait DerivedComponent: Send + Sync + 'static {
     fn release(&self) {}
 
     /// Called once at start with the component's handle to its derived
-    /// writer, for a component that owns files (D1).
+    /// writer: for a component that owns files (D1), or asks for its own
+    /// rebuild ([`ComponentHandle::rebuild`]).
     fn attach(&self, handle: ComponentHandle) {
         let _ = handle;
     }
@@ -591,12 +592,10 @@ impl DerivedHostBuilder {
         });
         let (sender, inbox) = mpsc::channel();
         for (slot, component) in shared.components.iter().enumerate() {
-            if shared.registry.schemas()[slot].files.is_some() {
-                component.attach(ComponentHandle {
-                    sender: sender.clone(),
-                    slot,
-                });
-            }
+            component.attach(ComponentHandle {
+                sender: sender.clone(),
+                slot,
+            });
         }
         let worker = Worker::new(Arc::clone(&shared), inbox, sender.clone());
         let writer = shared
