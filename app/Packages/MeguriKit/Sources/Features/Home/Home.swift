@@ -516,8 +516,7 @@ private struct HomeDeckSearch: ViewModifier {
     func body(content: Content) -> some View {
         if enabled {
             // Out of the way until the toolbar's search button presents it, so the large title stays.
-            content.searchable(text: $search.text, isPresented: $search.presented, placement: .navigationBarDrawer(displayMode: .automatic),
-                               prompt: Text("Search or Create a Deck", bundle: .module))
+            content.searchable(text: $search.text, isPresented: $search.presented, placement: .navigationBarDrawer(displayMode: .automatic))
                 // N20.5: Return opens the first row, deck or create row, as in the sidebar layouts.
                 .onSubmit(of: .search) {
                     guard let query = search.query,
