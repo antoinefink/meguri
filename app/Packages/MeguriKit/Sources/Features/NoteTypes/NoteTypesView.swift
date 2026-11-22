@@ -5,14 +5,16 @@ import SwiftUI
 
 /// The Note Types section (`native-interface-contract` N22.1): the list of
 /// note types beside the selected one's detail, with Fields and Cards in the
-/// toolbar, then Revert and Save at its trailing edge (`notetypes/workspace`
-/// W2, `notetypes/draft-save` D1, D3, D5). The shell shows it as the section's
+/// toolbar, then Revert and Save at its trailing edge, or while a save job
+/// runs one status item in their place (`notetypes/workspace` W2,
+/// `notetypes/draft-save` D1, D3, D5; N22.5). The shell shows it as the section's
 /// root in the sidebar layout (Mac, iPad); the model outlives it.
 public struct NoteTypesView: View {
     @Bindable private var model: NoteTypesModel
     /// The Cards tab, until U282 builds it.
     private let cards: (Int64) -> AnyView
     @Environment(\.locale) private var locale
+    @State private var jobShown = SaveJobShown()
 
     public init(model: NoteTypesModel, cards: @escaping (Int64) -> AnyView = { _ in AnyView(CardsPlaceholder()) }) {
         self.model = model
@@ -43,6 +45,7 @@ public struct NoteTypesView: View {
                 Button(role: .cancel) { model.confirmingRevert = false } label: { Text("noteTypes.discard.keepEditing", bundle: .module) }
             }
             .modifier(SaveOutcomeAlerts(model: model))
+            .task(id: model.progress?.notetypeId) { await SaveJobShown.follow(model.progress?.notetypeId, into: $jobShown) }
             .onAppear { model.appear() }
     }
 
@@ -99,33 +102,59 @@ public struct NoteTypesView: View {
             .disabled(model.selection == nil)
             .accessibilityIdentifier("noteTypes.list.tabs")
         }
-        ToolbarItemGroup(placement: .primaryAction) {
-            if let id = model.selection, let progress = model.progress, progress.notetypeId == id {
-                SaveProgressView(progress: progress)
+        // N22.5: while a save job runs, one status item takes Revert and
+        // Save's place; they return when it ends. A plain status, not a control,
+        // so it has no glass of its own.
+        if let id = model.selection, let progress = model.progress, progress.notetypeId == id, jobShown.shown(for: id) {
+            ToolbarItem(placement: .primaryAction) {
+                SaveStatusView(progress: progress, notes: model.typeCounts[id]?.notes)
             }
-            Button {
-                model.confirmingRevert = true
-            } label: {
-                Text("noteTypes.revert", bundle: .module)
-            }
-            .disabled(model.selection.map { !(model.isEdited($0) && model.editable($0)) } ?? true)
-            .accessibilityIdentifier("noteTypes.list.revert")
-            Button {
-                model.save()
-            } label: {
-                if let id = model.selection, model.saveAsks(id) {
-                    Text("noteTypes.saveAsks", bundle: .module)
-                } else {
-                    Text("noteTypes.save", bundle: .module)
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            // One group, so the two share the toolbar's one glass shape. Save is
+            // not prominent: it is disabled until there is a draft, and a tinted
+            // disabled button reads as broken.
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    model.confirmingRevert = true
+                } label: {
+                    Text("noteTypes.revert", bundle: .module)
                 }
+                .disabled(model.selection.map { !(model.isEdited($0) && model.editable($0)) } ?? true)
+                .accessibilityIdentifier("noteTypes.list.revert")
+                Button {
+                    model.save()
+                } label: {
+                    if let id = model.selection, model.saveAsks(id) {
+                        Text("noteTypes.saveAsks", bundle: .module)
+                    } else {
+                        Text("noteTypes.save", bundle: .module)
+                    }
+                }
+                // ⌘S is File › Save's (N4).
+                .disabled(model.selection.map { !model.canSave($0) } ?? true)
+                .accessibilityIdentifier("noteTypes.list.save")
             }
-            // ⌘S is File › Save's (N4).
-            .buttonStyle(.borderedProminent)
-            .disabled(model.selection.map { !model.canSave($0) } ?? true)
-            .accessibilityIdentifier("noteTypes.list.save")
         }
     }
     #endif
+}
+
+/// When the toolbar shows a running save job (N22.5): half a second after it
+/// starts (D5 step 5's "once a save has run for a moment"). A short save
+/// leaves the toolbar as it was.
+struct SaveJobShown: Equatable {
+    private var id: Int64?
+
+    func shown(for notetypeId: Int64) -> Bool { id == notetypeId }
+
+    /// Follows the job of `notetypeId` (nil: none runs) for as long as the task lives.
+    static func follow(_ notetypeId: Int64?, into state: Binding<SaveJobShown>) async {
+        state.wrappedValue = SaveJobShown()
+        guard let notetypeId else { return }
+        guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { return }
+        state.wrappedValue = SaveJobShown(id: notetypeId)
+    }
 }
 
 /// The selected note type's detail: D1's row when it changed elsewhere, then
@@ -172,38 +201,53 @@ public struct CardsPlaceholder: View {
     }
 }
 
-/// D5 step 5: "Updating 212 of 412 notes", shown once a save has run for a
-/// moment; with Meguri Sync, the job's stage first ("Syncing…", then the
-/// count, then "Uploading…", D6).
-struct SaveProgressView: View {
+/// D5 step 5's status while a save job runs (N22.5): a small spinner and
+/// "Updating 212 of 412 notes"; with Meguri Sync, the job's stage first
+/// ("Syncing…", then the count, then "Uploading…", D6). The widest text the
+/// job can show reserves its width, so the toolbar does not move as the
+/// stage or the count changes.
+struct SaveStatusView: View {
     let progress: NoteTypesModel.Progress
+    /// The note type's notes, which the count can reach before its total is known.
+    let notes: UInt64?
     @Environment(\.locale) private var locale
-    @State private var visible = false
 
     var body: some View {
         HStack(spacing: Spacing.xSmall) {
             ProgressView().controlSize(.small)
-            switch progress.stage {
-            case .syncing?:
-                Text("noteTypes.progress.syncing", bundle: .module).foregroundStyle(.secondary)
-            case .uploading?:
-                Text("noteTypes.progress.uploading", bundle: .module).foregroundStyle(.secondary)
-            case .saving?, nil:
-                if let total = progress.total {
-                    Text(NoteTypesStrings.progress(completed: progress.completed, total: total, locale: locale))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+            ZStack(alignment: .leading) {
+                Group {
+                    Text("noteTypes.progress.syncing", bundle: .module)
+                    Text("noteTypes.progress.uploading", bundle: .module)
+                    Text(verbatim: widestCount)
                 }
+                .hidden()
+                Text(verbatim: current)
             }
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
         }
-        .opacity(visible ? 1 : 0)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("noteTypes.saving", bundle: .module))
+        .accessibilityValue(Text(verbatim: current))
         .accessibilityIdentifier("noteTypes.list.progress")
-        .task {
-            try? await Task.sleep(for: .milliseconds(500))
-            visible = true
+    }
+
+    private var current: String {
+        switch progress.stage {
+        case .syncing?: NoteTypesStrings.text("noteTypes.progress.syncing", locale: locale)
+        case .uploading?: NoteTypesStrings.text("noteTypes.progress.uploading", locale: locale)
+        case .saving?, nil:
+            progress.total.map { NoteTypesStrings.progress(completed: progress.completed, total: $0, locale: locale) } ?? ""
         }
+    }
+
+    /// The count at its end, with the largest total this job can have: its digits are monospaced.
+    private var widestCount: String {
+        let total = max(progress.total ?? 0, notes ?? 0, progress.completed)
+        return NoteTypesStrings.progress(completed: total, total: total, locale: locale)
     }
 }
 
