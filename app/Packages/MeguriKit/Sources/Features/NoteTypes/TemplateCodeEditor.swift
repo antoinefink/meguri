@@ -875,13 +875,31 @@ struct TemplateCodeEditor: UIViewRepresentable {
         func flip() {
             guard let textView, textView.isEditable, key?.part == .back, let flip = parent?.onFlip?(),
                   let manager = textView.undoManager else { return }
+            // Both halves are this coordinator's own undo actions, in one group: the
+            // Back is not written through the text input, so UIKit's typing undo,
+            // which coalesces consecutive typing, cannot fold the last typing into it.
             manager.beginUndoGrouping()
             replaceFront(flip.previousFront, with: flip.front, manager: manager)
-            let length = ((textView.text ?? "") as NSString).length
-            perform(NoteTypeTextEdit(range: 0..<length, text: flip.back,
-                                     caret: min(textView.selectedRange.location, (flip.back as NSString).length)))
+            replaceBack(with: flip.back, manager: manager)
             manager.endUndoGrouping()
             manager.setActionName(NoteTypesStrings.text("noteTypes.editor.flip"))
+        }
+
+        /// Flip's Back, written straight into the text storage, and its undo.
+        private func replaceBack(with text: String, manager: UndoManager) {
+            guard let textView, key?.part == .back else { return }
+            let before = textView.text ?? ""
+            let caret = min(textView.selectedRange.location, (text as NSString).length)
+            textView.textStorage.replaceCharacters(in: NSRange(location: 0, length: textView.textStorage.length),
+                                                   with: NSAttributedString(string: text, attributes: Self.plain))
+            textView.selectedRange = NSRange(location: caret, length: 0)
+            publish(textView)
+            manager.registerUndo(withTarget: self) { [weak manager] coordinator in
+                MainActor.assumeIsolated {
+                    guard let manager else { return }
+                    coordinator.replaceBack(with: before, manager: manager)
+                }
+            }
         }
 
         /// Flip's front, which is not shown, and its undo. A front edited

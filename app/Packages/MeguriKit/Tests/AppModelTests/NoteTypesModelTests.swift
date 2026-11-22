@@ -34,7 +34,12 @@ import Testing
         guard let record = records[id] else { throw BridgeError.notFound(table: .notetypes, key: "\(id)") }
         return record
     }
-    func typeCounts(_ id: Int64) async throws -> NotetypeRemovalCounts { NotetypeRemovalCounts(notes: 20, cards: 31) }
+    /// Each type count read waits this long first.
+    var countsWait: Duration?
+    func typeCounts(_ id: Int64) async throws -> NotetypeRemovalCounts {
+        if let countsWait { try? await Task.sleep(for: countsWait) }
+        return NotetypeRemovalCounts(notes: 20, cards: 31)
+    }
     func fieldContentCounts(_ id: Int64) async throws -> NotetypeFieldContentCounts { contentCounts }
     func summary(_ draft: NotetypeStructureDraft) async throws -> NotetypeDraftSummary {
         summaryReads += 1
@@ -855,11 +860,31 @@ extension NoteTypesModelTests {
         #expect(model.draft(9) != nil, "the detail swaps to 9 in one step, drawn")
     }
 
+    @Test func theTitleAndCountsChangeTogetherOnceTheNewCountsAreIn() async throws {
+        let backend = FakeNoteTypesBackend()
+        backend.records[9] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        #expect(model.headerSelection == 7 && model.typeCounts[7] != nil)
+        backend.readWait = .milliseconds(60)
+        backend.countsWait = .milliseconds(60)
+        model.selection = 9
+        var checks = 0
+        while model.headerSelection != 9, checks < 400 {
+            let header = try #require(model.headerSelection)
+            #expect(model.typeCounts[header] != nil, "never a title over a blank subtitle")
+            checks += 1
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(model.headerSelection == 9 && model.typeCounts[9] != nil)
+        #expect(checks > 1, "the counts were in flight")
+    }
+
     @Test func aFailedReadShowsItsFailureInsteadOfKeepingTheOldNoteType() async {
         let (model, _) = await open()
         model.selection = 9  // the fake has no record for it
         await model.settle()
         #expect(model.shownSelection == 9 && model.recordFailed.contains(9))
+        #expect(model.headerSelection == 9, "the title follows a failed read too")
     }
 
     @Test func theRowsBesideTheSelectionAreReadAheadSoTheyShowAtOnce() async {
@@ -867,12 +892,13 @@ extension NoteTypesModelTests {
         backend.records[8] = NoteTypeCardsTests.record()
         let (model, _) = await open(backend)
         #expect(model.records[8] != nil, "8 sits beside 7: read ahead")
-        #expect(model.typeCounts[8] == nil, "a read ahead counts nothing")
+        #expect(model.typeCounts[8] != nil && model.fieldCounts[8] == nil, "a read ahead reads the subtitle's counts, not the notes")
         model.selection = 8
         #expect(model.shownSelection == 8, "drawn at once")
         await model.settle()
         #expect(backend.reads.filter { $0 == 8 }.count == 1, "read once")
-        #expect(model.typeCounts[8] != nil, "selected, it reads its counts")
+        #expect(model.headerSelection == 8, "its title and counts at once")
+        #expect(model.fieldCounts[8] != nil, "selected, it reads its notes' counts")
         #expect(model.usedOn(8) != nil, "and its Used On")
     }
 
