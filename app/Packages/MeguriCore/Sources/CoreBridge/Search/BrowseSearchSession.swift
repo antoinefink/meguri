@@ -80,6 +80,14 @@ public struct BrowseSearchError: Sendable, Hashable {
     /// (`NSRange`/`String.UTF16View` offsets).
     public let utf16Range: Range<Int>
 
+    public init(kind: String, provided: String?, context: String?, message: String, utf16Range: Range<Int>) {
+        self.kind = kind
+        self.provided = provided
+        self.context = context
+        self.message = message
+        self.utf16Range = utf16Range
+    }
+
     init(_ raw: MeguriCoreBindings.BrowseSearchError) {
         kind = raw.kind
         provided = raw.provided
@@ -172,6 +180,15 @@ public struct BrowseRowState: Sendable, Hashable {
     public let suspended: Bool
     public let buried: Bool
     public let filtered: Bool
+
+    public init(flag: UInt8, marked: Bool, leech: Bool, suspended: Bool, buried: Bool, filtered: Bool) {
+        self.flag = flag
+        self.marked = marked
+        self.leech = leech
+        self.suspended = suspended
+        self.buried = buried
+        self.filtered = filtered
+    }
 }
 
 /// C5's row background.
@@ -187,6 +204,11 @@ public enum BrowseTint: Sendable, Hashable {
 public struct BrowseFont: Sendable, Hashable {
     public let name: String?
     public let size: UInt32?
+
+    public init(name: String?, size: UInt32?) {
+        self.name = name
+        self.size = size
+    }
 }
 
 /// The Answer cell (C10): a blank card's has no text.
@@ -271,6 +293,17 @@ public struct BrowseRow: Sendable, Hashable {
     public let sortFieldRightToLeft: Bool
     /// One per requested column, in request order.
     public let cells: [BrowseCell]
+
+    public init(id: Int64, noteID: Int64, state: BrowseRowState, tint: BrowseTint, font: BrowseFont,
+                sortFieldRightToLeft: Bool, cells: [BrowseCell]) {
+        self.id = id
+        self.noteID = noteID
+        self.state = state
+        self.tint = tint
+        self.font = font
+        self.sortFieldRightToLeft = sortFieldRightToLeft
+        self.cells = cells
+    }
 }
 
 /// One index of a page: its row, or its row error (C3.1).
@@ -349,6 +382,14 @@ public struct BrowseHandleState: Sendable, Hashable {
     public let count: UInt64
     public let isComplete: Bool
     public let sort: BrowseSort
+
+    public init(mode: BrowseMode, revision: UInt64, count: UInt64, isComplete: Bool, sort: BrowseSort) {
+        self.mode = mode
+        self.revision = revision
+        self.count = count
+        self.isComplete = isComplete
+        self.sort = sort
+    }
 }
 
 /// What `invalidatedRows` says (H10).
@@ -366,6 +407,14 @@ public struct BrowseInvalidation: Sendable, Hashable {
     public let isComplete: Bool
     /// The final prefix's length while in progress, the whole count after.
     public let count: UInt64
+
+    public init(removed: [UInt64], refetch: Refetch, revision: UInt64, isComplete: Bool, count: UInt64) {
+        self.removed = removed
+        self.refetch = refetch
+        self.revision = revision
+        self.isComplete = isComplete
+        self.count = count
+    }
 }
 
 /// A `changes` core event's change set with the event's seq (H10).
@@ -415,6 +464,11 @@ public enum BrowseSelected: Sendable, Hashable {
 public struct BrowseMappedSelection: Sendable, Hashable {
     public let selected: [Range<UInt64>]
     public let current: UInt64?
+
+    public init(selected: [Range<UInt64>], current: UInt64?) {
+        self.selected = selected
+        self.current = current
+    }
 }
 
 extension Range where Bound == UInt64 {

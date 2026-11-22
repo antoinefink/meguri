@@ -1202,3 +1202,65 @@ class NativeMacToolbarTitlePair(unittest.TestCase):
         third["value"] = "Another"
         tree["root"]["children"][0]["children"].append(third)
         self.assertIn("text-overlap", kinds(hierarchy_check.check(tree)))
+
+
+class NativeSidebarSearchField(unittest.TestCase):
+    """The field `searchable(placement: .sidebar)` puts above a Mac sidebar
+    (seen in Browse's export, U270): no identifier, in an unnamed group
+    directly in the split view's system-named split group, with its own
+    Search button and, once filled, its cancel button."""
+
+    def tree(self, field_children=None, split_id="main, SidebarNavigationSplitView", group_id="", extra=()):
+        buttons = field_children if field_children is not None else [el("button", label="Search", f=(13, 91, 25, 28))]
+        field = el("searchField", f=(9, 90, 202, 30), children=buttons)
+        tree = doc(el("splitGroup", split_id, f=(0, 30, 1180, 780), children=[
+            el("group", group_id, f=(10, 91, 200, 28), children=[field, *extra])]))
+        tree["platform"] = "mac"
+        return tree
+
+    def test_the_sidebar_search_field_and_its_buttons_are_system_parts(self):
+        self.assertEqual(hierarchy_check.check(self.tree()), [])
+        filled = [el("button", label="Search", f=(13, 91, 25, 28)), el("button", label="cancel", f=(190, 91, 20, 28))]
+        self.assertEqual(hierarchy_check.check(self.tree(filled)), [])
+
+    def test_search_field_lookalikes_are_still_reported(self):
+        # Another split group, a named group, a field holding another control,
+        # a second element beside it, and a field outside any split view.
+        self.assertEqual(kinds(hierarchy_check.check(self.tree(split_id="sample.screen.split"))),
+                         ["missing-identifier", "missing-identifier"])
+        self.assertEqual(kinds(hierarchy_check.check(self.tree(group_id="sample.screen.group"))),
+                         ["missing-identifier", "missing-identifier"])
+        self.assertEqual(kinds(hierarchy_check.check(self.tree([el("button", label="Delete", f=(13, 91, 25, 28))]))),
+                         ["missing-identifier", "missing-identifier"])
+        self.assertEqual(kinds(hierarchy_check.check(self.tree(extra=[el("button", label="Go", f=(150, 91, 20, 28))]))),
+                         ["missing-identifier", "missing-identifier", "missing-identifier"])
+        self.assertEqual(kinds(hierarchy_check.check(doc(el("searchField", f=(9, 90, 202, 30))))), ["missing-identifier"])
+        # The same shape outside the Mac.
+        ios = self.tree()
+        ios["platform"] = "ios"
+        self.assertEqual(kinds(hierarchy_check.check(ios)), ["missing-identifier", "missing-identifier"])
+
+
+class NativeTableCellsAndSegments(unittest.TestCase):
+    """A SwiftUI Table's row is named by one of its cells (Browse names its
+    state cell, U270a); a named segmented Picker in a Mac toolbar reports
+    its segments as radio buttons."""
+
+    def test_cells_of_an_identified_row_and_named_segments_are_not_missing(self):
+        row = el("outlineRow", f=(0, 0, 400, 20), children=[
+            el("cell", f=(0, 0, 20, 20), children=[el("staticText", "browse.table.row.7", f=(2, 2, 16, 16))]),
+            el("cell", f=(20, 0, 200, 20)), el("cell", f=(220, 0, 180, 20))])
+        segments = el("radioGroup", "browse.toolbar.mode", "Cards or Notes", f=(500, 0, 120, 30), children=[
+            el("radioButton", label="Cards", f=(500, 0, 60, 30)), el("radioButton", label="Notes", f=(560, 0, 60, 30))])
+        self.assertEqual(hierarchy_check.check(doc(el("outline", "sample.screen.table", f=(0, 0, 400, 400), children=[row]), segments)), [])
+        # A row named itself, with empty cells.
+        named = el("outlineRow", "sample.screen.row", f=(0, 0, 400, 20), children=[el("cell", f=(0, 0, 20, 20)), el("cell", f=(20, 0, 200, 20))])
+        self.assertEqual(hierarchy_check.check(doc(el("outline", "sample.screen.table", f=(0, 0, 400, 400), children=[named]))), [])
+
+    def test_cells_of_an_unnamed_row_and_unnamed_segments_are_still_reported(self):
+        row = el("outlineRow", f=(0, 0, 400, 20), children=[el("cell", f=(0, 0, 20, 20)), el("cell", f=(20, 0, 200, 20))])
+        segments = el("radioGroup", f=(500, 0, 120, 30), children=[el("radioButton", label="Cards", f=(500, 0, 60, 30))])
+        loose = el("radioButton", label="Notes", f=(600, 0, 60, 30))
+        self.assertEqual(kinds(hierarchy_check.check(doc(el("outline", "sample.screen.table", f=(0, 0, 400, 400), children=[row]),
+                                                         segments, loose))),
+                         ["missing-identifier"] * 5)

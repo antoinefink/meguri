@@ -32,6 +32,9 @@ public struct BrowseSidebar<Header: View>: View {
     }
 
     private var filter: BrowseSidebarFilter { BrowseSidebarFilter(model.filter) }
+    @Environment(\.locale) private var locale
+    @Environment(\.timeZone) private var timeZone
+    @Environment(\.appClock) private var clock
 
     public var body: some View {
         List(selection: $selection) {
@@ -53,6 +56,7 @@ public struct BrowseSidebar<Header: View>: View {
         .accessibilityIdentifier("browse.sidebar.list")
         .onAppear {
             selection = model.listSelection
+            model.useFormatter(locale: locale, timeZone: timeZone, clock: clock)
             model.appear()
         }
         .onDisappear { model.disappear() }
@@ -311,7 +315,7 @@ public struct BrowseSidebar<Header: View>: View {
                 highlighted(label)
             } icon: {
                 Image(systemName: "flag.fill")
-                    .foregroundStyle(Self.flagColor(flag))
+                    .foregroundStyle(BrowseStrings.flagColor(flag))
                     .accessibilityHidden(true)
             }
         } else {
@@ -328,19 +332,6 @@ public struct BrowseSidebar<Header: View>: View {
             text[lower..<upper].inlinePresentationIntent = .stronglyEmphasized
         }
         return Text(text)
-    }
-
-    /// The flags' colours (`tags/flags-and-marked` F1): the system's.
-    private static func flagColor(_ flag: UInt8) -> Color {
-        switch flag {
-        case 1: .red
-        case 2: .orange
-        case 3: .green
-        case 4: .blue
-        case 5: .pink
-        case 6: .teal
-        default: .purple
-        }
     }
 
     fileprivate func deckRow(_ node: CountedDeckNode, ancestors: [String]) -> some View {

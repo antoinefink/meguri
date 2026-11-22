@@ -8,7 +8,8 @@ Reads the JSON that AgentDriverTests writes before and after every drive step
   accessibility identifier (R1964). A row counts as identified when an
   element inside it has one: SwiftUI's List puts a row's modifiers on its
   content, inside the row and cell views AppKit and UIKit wrap it in, and no
-  API names those;
+  API names those. A cell directly in a row counts as identified with its
+  row (a SwiftUI Table's other cells, which can be empty);
 - bad-identifier: an identifier that is not area.screen.element[.id], each of
   area, screen and element lowerCamel (R1964);
 - duplicate-identifier: one identifier on several elements;
@@ -33,7 +34,10 @@ segmented Picker and a `searchable` field in a navigation bar, an SF
 Symbol's name on its image, and on the Mac a SwiftUI List's ListColumn, a SwiftUI Table's generated column
 ids (UUIDs) and its column header buttons (no identifier or label; one at
 each column's x and width, in a group directly in the table's outline, above
-the columns' body), and a
+the columns' body), the field a split view's sidebar `searchable` puts above
+its list (no identifier, none can be set; in an unnamed group directly in the
+system-named split group, holding only its own unnamed Search and cancel
+buttons), and a
 NavigationSplitView's '<scene id>, SidebarNavigationSplitView', and AppKit's
 exact NSOutlineViewDisclosureButtonKey on a disclosure triangle directly in
 a cell under an outline row in an outline; on iOS a sidebar disclosure row's
@@ -79,6 +83,9 @@ SIDEBAR_TOGGLE_LABELS = {"Show Sidebar", "Hide Sidebar"}
 # The id SwiftUI's Table gives each of its columns on the Mac.
 TABLE_COLUMN_UUID = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$")
 BARS = {"toolbar", "navigationBar"}
+# The buttons inside a system search field: its magnifier and, once it holds
+# text, its clear button (English labels, the driver's usual locale).
+SEARCH_FIELD_BUTTONS = {"Search", "cancel"}
 
 IDENTIFIER = re.compile(r"^[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*(\.[A-Za-z0-9_-]+)?$")
 # Frames that overlap by at most this much (points) in either direction only
@@ -241,6 +248,41 @@ def native_table_headers(root):
                             and b.y + b.h <= body_top + 0.5 for b in buttons)):
                 headers.update(buttons)
     return headers
+
+
+def native_sidebar_search_fields(document, root):
+    """The Mac field `searchable(placement: .sidebar)` adds: a searchField
+    with no identifier in an unidentified group directly in the
+    NavigationSplitView's system-named split group, whose only children are
+    its own unidentified Search (magnifier) and cancel (clear) buttons. The
+    field and those buttons are system parts; anything else is not this
+    shape and keeps its findings. The Mac only."""
+    parts = set()
+    if document.get("platform") != "mac":
+        return parts
+    for split in root.walk():
+        if split.type != "splitGroup" or not SPLIT_VIEW.match(split.identifier):
+            continue
+        for group in split.children:
+            if group.type != "group" or group.identifier or len(group.children) != 1:
+                continue
+            field = group.children[0]
+            if (field.type == "searchField" and not field.identifier
+                    and all(b.type == "button" and not b.identifier and b.label in SEARCH_FIELD_BUTTONS and not b.children
+                            for b in field.children)):
+                parts.add(field)
+                parts.update(field.children)
+    return parts
+
+
+def native_radio_segments(root):
+    """The segments of a segmented Picker the app named, as the Mac reports
+    one in a window toolbar: radio buttons with a label and no identifier
+    directly in a radioGroup that has the app's identifier. A segment cannot
+    take an identifier of its own."""
+    return {e for e in root.walk()
+            if e.type == "radioButton" and not e.identifier and e.label and e.parent is not None
+            and e.parent.type == "radioGroup" and e.parent.identifier and not is_system_identifier(e.parent)}
 
 
 def describe(e):
@@ -527,9 +569,11 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     elements = [e for e in root.walk() if not e.under(SYSTEM_UI) and not e.under(TRANSIENT)]
     sheet_grabbers = native_sheet_grabbers(document, root)
     toggle_parts = (native_toggle_switch_parts(document, root) | native_stepper_arrows(document, root)
-                    | native_table_headers(root) | native_control_parts(root))
+                    | native_table_headers(root) | native_control_parts(root)
+                    | native_sidebar_search_fields(document, root))
     disclosure_labels, disclosure_chevrons = native_disclosure_row_parts(document, root)
     title_pairs = native_toolbar_title_pairs(document, root)
+    segment_buttons = native_radio_segments(root)
     issues = []
 
     for e in elements:
@@ -543,7 +587,11 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
         if ((e.type in INTERACTIVE or e.type in ROWS) and not e.identifier and e not in native_ids and not comparison_link and e.visible and not e.in_system_alert()
                 and not e.is_sidebar_toggle() and e not in sheet_grabbers and e not in toggle_parts
                 and e not in disclosure_chevrons
-                and not (e.type in ROWS and e.identified_inside())):
+                and not (e.type in ROWS and e.identified_inside())
+                and not (e.type == "cell" and e.parent is not None and e.parent.type in ROWS
+                         and ((e.parent.identifier and not is_system_identifier(e.parent))
+                              or e.parent.identified_inside()))
+                and e not in segment_buttons):
             issues.append(dict(kind="missing-identifier", message="%s '%s' has no accessibility identifier" % (e.type, e.label),
                                **describe(e)))
 
