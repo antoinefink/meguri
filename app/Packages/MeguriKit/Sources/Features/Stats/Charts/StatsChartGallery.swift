@@ -313,19 +313,19 @@ private struct StatsGalleryReviewsBox: View {
             HStack(spacing: Spacing.xSmall) {
                 Picker(selection: $byAnswer) {
                     Text(verbatim: "By Type").tag(false)
-                        .accessibilityIdentifier("stats.charts.gallery.kind.byType")
+                        .accessibilityIdentifier("stats.charts.kind.byType")
                     Text(verbatim: "By Answer").tag(true)
-                        .accessibilityIdentifier("stats.charts.gallery.kind.byAnswer")
+                        .accessibilityIdentifier("stats.charts.kind.byAnswer")
                 } label: { Text(verbatim: "Kind") }
-                .accessibilityIdentifier("stats.charts.gallery.kind")
+                .accessibilityIdentifier("stats.charts.kind")
                 #if os(macOS)
                 Picker(selection: $time) {
                     Text(verbatim: "Count").tag(false)
-                        .accessibilityIdentifier("stats.charts.gallery.measure.count")
+                        .accessibilityIdentifier("stats.charts.measure.count")
                     Text(verbatim: "Time").tag(true)
-                        .accessibilityIdentifier("stats.charts.gallery.measure.time")
+                        .accessibilityIdentifier("stats.charts.measure.time")
                 } label: { Text(verbatim: "Measure") }
-                .accessibilityIdentifier("stats.charts.gallery.measure")
+                .accessibilityIdentifier("stats.charts.measure")
                 #endif
             }
             .pickerStyle(.segmented)
@@ -360,13 +360,13 @@ private struct StatsGallerySwitch: View {
         Picker(selection: $selected) {
             ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                 Text(verbatim: option).tag(index)
-                    .accessibilityIdentifier("stats.charts.gallery.\(id).\(Self.identifierPart(option))")
+                    .accessibilityIdentifier("stats.charts.\(id).\(Self.identifierPart(option))")
             }
         } label: { Text(verbatim: "Show") }
         .pickerStyle(.segmented)
         .labelsHidden()
         .fixedSize()
-        .accessibilityIdentifier("stats.charts.gallery.\(id)")
+        .accessibilityIdentifier("stats.charts.\(id)")
     }
 }
 

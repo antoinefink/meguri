@@ -222,7 +222,8 @@ struct StatsChartPlot: View {
         // Reviews Due's Overdue bar is labelled on the plot with its count (S7.9).
         ForEach(data.bins.indices.filter { data.bins[$0] == .overdue && data.stackTotal(at: $0) > 0 }, id: \.self) { bin in
             RuleMark(x: .value("Period", Self.id(bin)), yStart: .value("From", 0), yEnd: .value("To", data.stackTotal(at: bin)))
-                .opacity(0)
+                // Clear, not transparent: an invisible mark would hide its annotation too.
+                .foregroundStyle(Color.clear)
                 .annotation(position: .top, spacing: Spacing.xxSmall) {
                     Text(verbatim: format.count(data.stackTotal(at: bin)))
                         .font(.caption2)

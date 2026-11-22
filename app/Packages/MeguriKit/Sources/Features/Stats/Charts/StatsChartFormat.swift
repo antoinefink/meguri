@@ -142,7 +142,7 @@ public struct StatsChartFormat: Sendable {
             return formatted(date, template: "dMMM")
         case let .month(date):
             let style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
-            if monthsShowYear || calendar.component(.month, from: date) == 1 {
+            if monthsShowYear || (!spansYears && calendar.component(.month, from: date) == 1) {
                 return date.formatted(style.year())
             }
             // An axis over more than one year names the year ("Nov 25"),
