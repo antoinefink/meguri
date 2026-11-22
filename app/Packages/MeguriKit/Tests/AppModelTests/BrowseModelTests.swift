@@ -343,6 +343,13 @@ import Testing
         model.showsAllTags = true
         let again = BrowseModel(backend: FakeBrowseBackend(), store: store)
         #expect(again.folded == [.flags, .decks] && again.showsAllTags)
+        // A replaced collection drops the kept query and mode, not the folding.
+        var kept = store.load()
+        kept.runText = "deck:x"
+        kept.notesMode = true
+        store.save(kept)
+        store.forgetCollection()
+        #expect(store.load() == BrowseDeviceState(runText: nil, notesMode: nil, folded: [.flags, .decks], showsAllTags: true))
     }
 
     @Test func nothingIsReadBeforeTheCollectionIsReady() async {

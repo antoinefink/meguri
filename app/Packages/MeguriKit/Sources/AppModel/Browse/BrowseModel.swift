@@ -305,6 +305,7 @@ public final class BrowseModel {
         }
         if visible, ready() {
             if !opened { open() }
+            if let search = takeEntrySearch(), !search.isEmpty { replace(byReading: search) }
             reload()
         }
     }
@@ -339,6 +340,8 @@ public final class BrowseModel {
             async let flags = try? backend.flagNames()
             let (savedRows, deckRows, notetypeList, tagTree, flagList) = await (saved, decks, notetypes, tags, flags)
             guard token == namesToken, self.epoch == epoch else { return }
+            // A read that failed is tried again on the next appear or change.
+            if savedRows == nil || deckRows == nil || notetypeList == nil || tagTree == nil || flagList == nil { stale = true }
             if let savedRows {
                 savedSearches = savedRows.compactMap {
                     if case .savedSearch(let name, let text) = $0 { SavedSearch(name: name, text: text) } else { nil }

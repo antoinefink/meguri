@@ -40,6 +40,16 @@ public struct BrowseDeviceStore {
         return state
     }
 
+    /// The collection was replaced: what this device kept of the old one's
+    /// query and mode is dropped, so the next open is a first open (T14).
+    public func forgetCollection() {
+        guard let defaults, defaults.data(forKey: Self.key) != nil else { return }
+        var state = load()
+        state.runText = nil
+        state.notesMode = nil
+        save(state)
+    }
+
     public func save(_ state: BrowseDeviceState) {
         guard let defaults, let data = try? JSONEncoder().encode(state) else { return }
         defaults.set(data, forKey: Self.key)

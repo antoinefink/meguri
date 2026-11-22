@@ -372,6 +372,12 @@ public final class ReviewCollection: ChangeFanoutSink {
         browseOwner = value
         return value
     }
+    /// T14: a replaced collection's next Browse open is a first open, whether
+    /// or not Browse has opened in this launch.
+    private func browseCollectionReplaced() {
+        if let browseOwner { browseOwner.collectionReplaced() }
+        else { BrowseDeviceStore(defaults: configuration.deviceDefaults).forgetCollection() }
+    }
     /// Browse reads the open collection only while it is ready.
     public var browseReadable: Bool {
         guard state == .ready, !opening, !closed, !closing, case .ready(let current) = lifecycle else { return false }
@@ -1054,7 +1060,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         do {
             if candidateActive {
                 navigation.collectionReplaced()
-                browseOwner?.collectionReplaced()
+                browseCollectionReplaced()
                 previousRecord = nil; recoveryDrops.removeAll(); dropWalk()
                 try await records.remove()
                 try await completeOpenedHost(loadRecord: false)
@@ -1197,7 +1203,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             studyPreparation.collectionEnded()
             decks = []; countTimer?.invalidate(); countsTask?.cancel()
             navigation.collectionReplaced(keepingEntrySheet: opening)
-            browseOwner?.collectionReplaced()
+            browseCollectionReplaced()
             if !opening {
                 navigation.dismissSheet()
                 entryOwner?.destinationChanged()
