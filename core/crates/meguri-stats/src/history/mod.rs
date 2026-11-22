@@ -371,6 +371,14 @@ pub fn card_states_in(
     }
 }
 
+/// Releases the component's build for a page request whose context is
+/// `context` (U293), on that request's grid, before the request reads its
+/// other parts: what [`card_states_in`] then waits for. Returns at once.
+pub(crate) fn release_build(caches: &StatsCaches, derived: &DerivedHost, context: &Context) {
+    caches.history_shared().want(Grid::of(context.next_day_at));
+    derived.request_refresh(HISTORY_COMPONENT);
+}
+
 /// The parts, or why they cannot be given.
 enum Read {
     Parts(CardStatesOverTime, StartedPart),

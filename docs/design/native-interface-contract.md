@@ -1385,7 +1385,7 @@ From Antoine's annotations on a capture of his opened iPhone Duo (`decisions.md`
 
 ### N26.3 Top destinations and the decks
 
-- Built (variant A, chosen): Today is a section of its own, then the decks in a section with the system header "Decks", as the iPad sidebar has (N14.6). The column's large title, which would repeat "Decks", is "Meguri", as Music's and Podcasts' sidebars carry the app's name over their library. The tab is still called Decks.
+- Built (variant A, chosen): Today is a section of its own, then the decks in a section with the system header "Decks", as the iPad sidebar has (N14.6). The column draws no title (N26.6). The tab is still called Decks.
 - Variant B: the same two sections with the system's section spacing only, no header, and the title "Decks".
 - Recommendation and reason: Apple's sidebars with fixed destinations above the person's own list put a header over that list: Mail (Favorites, then each account), Notes (the account's folders under its name), Reminders ("My Lists" under the smart lists), Files (Locations, Favorites, Tags). A header also matches the iPad, so the Duo opened and the iPad read the same.
 
@@ -1399,3 +1399,9 @@ From Antoine's annotations on a capture of his opened iPhone Duo (`decisions.md`
 - Cause of the mismatch: the 44-point minimum sat on rows with a disclosure only, and the list added its own vertical padding around it, so those rows were about 73 points against 52.
 - iPad and Mac sidebars draw the system's own rows, which already share one height; unchanged.
 - Checked by UI tests in the test VM.
+
+### N26.6 No title over the list beside Today (2026-11-22)
+
+- Antoine, on the opened Duo: "Should we remove the big Meguri text on the top left?"; the coordinator decided yes. The column beside Today draws no title: its navigation bar holds only the trailing buttons (sync, Add) and the always-visible search field follows directly, with the inline title mode so no large-title band is left (`toolbar(removing: .title)`, as the iPad sidebar, N14.9). "Decks" stays the column's navigation title for VoiceOver and the scene; "Decks" is drawn once, as the section header (N26.3).
+- Single-column layouts (an iPhone, the Duo folded or held tall) keep the large title "Decks" (N14.8) and have no "Decks" header, so the word shows once there too. The iPad sidebar draws no title (N14.9); the Mac sidebar never drew one. Both unchanged.
+- Replaces N26.3's column title "Meguri".
