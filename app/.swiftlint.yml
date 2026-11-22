@@ -75,7 +75,7 @@ custom_rules:
 
   painted-selection:
     name: Painted row selection
-    regex: '\.listRowBackground\s*\((?=[^)]*(?:selected|isSelected|selection|isMarked))'
+    regex: '\.listRowBackground\s*\((?=[^)"/]*(?:selected|isSelected|selection|isMarked))'
     message: "A list's selection is the system's: give the List a selection binding and tag the rows (List(selection:)); never paint a selected row with listRowBackground (native-interface-contract N26.1)."
     severity: error
     excluded_match_kinds: [comment, doccomment, string]

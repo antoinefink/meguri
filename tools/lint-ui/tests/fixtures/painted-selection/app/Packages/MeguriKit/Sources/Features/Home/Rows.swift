@@ -11,6 +11,7 @@ struct Rows: View {
                 selected ? Color.gray : nil
             )
             Text("Plain").tag(1)
+            Text("Asset").listRowBackground(Color("selection"))
             Text("Clear").listRowBackground(Color.clear)
             // .listRowBackground(selected ? Color.gray : nil) in a comment is not code.
         }

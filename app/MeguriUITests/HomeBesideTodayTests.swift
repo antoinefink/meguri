@@ -20,6 +20,8 @@ final class HomeBesideTodayTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["home.collection.decksHeader"].exists, "The decks sit under their own header")
         app.terminate()
 
+        // Deck 2 is a subdeck ("Japanese::Vocabulary" under deck 1): its row comes through
+        // HomeDeckBranch's child branch (AnyView), so this checks a nested row's tag.
         let deckApp = try launch(route: "home/deck-list/beside-deck")
         XCTAssertTrue(deckApp.buttons["home.deck.row.2"].waitForExistence(timeout: 20))
         XCTAssertTrue(cell(deckApp, holding: "home.deck.row.2").waitForSelected(), "The shown deck's row is the selection")
