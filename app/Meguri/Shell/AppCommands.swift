@@ -109,18 +109,18 @@ struct NativeCommandContext {
     /// key, and while a sheet holds the window.
     var canShowBrowse: Bool {
         BrowseRollout.shown && host == .main && layout == .sidebar && collection.navigation.sheet == nil
-            && collection.review == nil && collection.navigation.review == nil
+            && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
     func showBrowse() {
         guard canShowBrowse else { return }
         collection.navigation.select(.section(.browse))
     }
 
-    /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review
-    /// and with no sheet over the window.
+    /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review,
+    /// with no sheet over the window, and once a collection exists.
     var canShowNoteTypes: Bool {
         host == .main && layout == .sidebar && collection.navigation.sheet == nil
-            && collection.review == nil && collection.navigation.review == nil
+            && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
     func showNoteTypes() {
         guard canShowNoteTypes else { return }

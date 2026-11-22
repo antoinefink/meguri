@@ -11,10 +11,17 @@ import Testing
     /// Each summary read takes the first of these; the last one stays.
     var summaries: [NotetypeDraftSummary] = []
     var saveErrors: [any Error] = []
+    /// Each list read throws the first of these.
+    var listErrors: [any Error] = []
+    private(set) var listReads = 0
     private(set) var summaryReads = 0
     private(set) var saved: [NotetypeStructureDraft] = []
 
-    func list() async throws -> [NotetypeName] { names }
+    func list() async throws -> [NotetypeName] {
+        listReads += 1
+        if !listErrors.isEmpty { throw listErrors.removeFirst() }
+        return names
+    }
     func noteCounts() async throws -> [Int64: UInt64] { [7: 20, 8: 5] }
     func read(_ id: Int64) async throws -> NotetypeRecord {
         guard let record = records[id] else { throw BridgeError.notFound(table: .notetypes, key: "\(id)") }
@@ -70,6 +77,41 @@ import Testing
         #expect(model.filteredItems.map(\.id) == [7, 8, 9])
         model.filter = "zzz"
         #expect(model.filteredItems.isEmpty)
+    }
+
+    /// First run: no collection is not a failed read, and nothing offers Try Again.
+    @Test func withNoCollectionTheListReadsNothingAndHasNotFailed() async {
+        let backend = FakeNoteTypesBackend()
+        let model = NoteTypesModel(backend: backend)
+        let exists = Flag()
+        model.hasCollection = { exists.value }
+        model.appear()
+        await model.settle()
+        #expect(model.phase == .noCollection && backend.listReads == 0 && model.items.isEmpty && model.selection == nil)
+        // Start Empty (or an import, or sync) opens one: the section reads it at once.
+        exists.value = true
+        model.invalidate()
+        await model.settle()
+        #expect(model.phase == .ready && backend.listReads == 1 && model.selection == 7)
+        // The collection goes while the list is read: still no failure.
+        backend.listErrors = [BridgeError.unavailable(reason: "no collection")]
+        model.reloadList()
+        exists.value = false
+        await model.settle()
+        #expect(model.phase == .noCollection)
+    }
+
+    /// A real read failure with a collection keeps the failure state and its Try Again.
+    @Test func aFailedReadWithACollectionIsAFailure() async {
+        let backend = FakeNoteTypesBackend()
+        backend.listErrors = [BridgeError.unavailable(reason: "busy")]
+        let model = NoteTypesModel(backend: backend)
+        model.appear()
+        await model.settle()
+        #expect(model.phase == .failed)
+        model.reloadList()
+        await model.settle()
+        #expect(model.phase == .ready && backend.listReads == 2)
     }
 
     @Test func aDraftIsEditedSurvivesSwitchingAndRevertDiscardsIt() async {
@@ -474,6 +516,8 @@ extension NoteTypesModelTests {
         #expect(model.changedElsewhere.isEmpty && model.draft(7)?.base.base == [9, 9])
     }
 }
+
+@MainActor private final class Flag { var value = false }
 
 private extension NoteTypesModel {
     func renameField() { edit(7) { $0.rename(0, to: "Prompt") } }
