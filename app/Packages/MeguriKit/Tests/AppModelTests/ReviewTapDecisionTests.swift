@@ -203,6 +203,23 @@ struct ReviewTapDecisionTests {
         #expect(pairing.add(Self.observation(), point: CGPoint(x: 195, y: 200), at: 1.25) == nil)
     }
 
+    @Test func aDelayedFirstReportNeverTakesTheNextTapWithoutABaseline() {
+        // Taps at x 199 and 201, the first page report arriving only after
+        // the second touch ended, and no earlier pair on this page.
+        var pairing = ReviewTapPairing()
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 199, down: 10), at: 10.1)
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 201, down: 10.3), at: 10.4)
+        #expect(pairing.add(Self.observation(at: 50.0), point: CGPoint(x: 199, y: 200), at: 10.45) == nil)
+        // The second tap's own report comes too late to pair: nothing acts.
+        #expect(pairing.add(Self.observation(at: 50.3), point: CGPoint(x: 201, y: 200), at: 10.46) == nil)
+        // The next ordinary tap pairs again.
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 300, down: 11), at: 11.1)
+        #expect(pairing.add(Self.observation(at: 51.0), point: CGPoint(x: 300, y: 200), at: 11.11) != nil)
+    }
+
     @Test func aLateObservationOfAnEarlierTapCannotPairWithTheNextGesture() {
         var pairing = ReviewTapPairing()
         // First tap: a baseline for this page's clock (page time 100 s ~ uptime 10.08 s).

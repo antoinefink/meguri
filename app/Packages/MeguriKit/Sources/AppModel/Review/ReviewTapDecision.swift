@@ -150,6 +150,9 @@ public nonisolated struct ReviewTapPairing: Sendable {
     private var gesture: (value: ReviewTapGesture, arrival: TimeInterval)?
     private var observation: (value: ReviewTapObservation, point: CGPoint, arrival: TimeInterval)?
     private var last: [Int: (up: TimeInterval, page: TimeInterval)] = [:]
+    /// A gesture went unpaired before another touch began: its report may
+    /// still come, so a pair the page's clock cannot check is refused.
+    private var unpairedBefore = false
 
     public init() {}
 
@@ -167,7 +170,10 @@ public nonisolated struct ReviewTapPairing: Sendable {
 
     public mutating func clear() { gesture = nil; observation = nil }
     /// A new touch went down: nothing waiting belongs to it.
-    public mutating func touchDown() { gesture = nil; observation = nil }
+    public mutating func touchDown() {
+        if gesture != nil { unpairedBefore = true }
+        gesture = nil; observation = nil
+    }
 
     private mutating func pair(now: TimeInterval) -> (ReviewTapGesture, ReviewTapObservation)? {
         if let waiting = gesture, now - waiting.arrival > Self.maximumWait { gesture = nil }
@@ -177,6 +183,11 @@ public nonisolated struct ReviewTapPairing: Sendable {
         let dx = gesture.value.location.x - observation.point.x, dy = gesture.value.location.y - observation.point.y
         guard (dx * dx + dy * dy).squareRoot() <= Self.maximumDistance else { return nil }
         let up = gesture.value.upUptime, time = observation.value.pageTime, page = observation.value.page
+        if unpairedBefore {
+            unpairedBefore = false
+            // Fail closed: with no baseline the report could be the earlier tap's.
+            guard last[page] != nil else { return nil }
+        }
         if let previous = last[page], abs((up - previous.up) - (time - previous.page)) > Self.maximumDrift {
             // Refused; the next pair starts a new baseline (a reloaded page has a new clock).
             last[page] = nil
