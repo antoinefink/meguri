@@ -131,6 +131,7 @@ import Testing
             "open_search_session", "BrowseSearchSession.start_search", "BrowseSearchSession.resort", "BrowseSearchSession.toggle", "BrowseSearchSession.reverse", "BrowseSearchSession.invalidated_rows", "BrowseSearchSession.rows", "BrowseSearchSession.qa_cells", "BrowseSearchSession.index_of", "BrowseSearchSession.map_selection", "BrowseSearchSession.resolve_selection", "BrowseSearchSession.selection", "BrowseSearchSession.handle_state", "BrowseSearchSession.close", "BrowseSelection.resolve",
             "filter_run_text", "filter_read_text", "filter_commit", "filter_text_incomplete", "filter_deck_value", "filter_suggestions", "start_filter_counts", "FilterCountsJob.result", "browser_column_set", "change_browser_column_set", "use_standard_browser_columns", "set_browser_notes_mode", "start_browse_selection_counts", "BrowseSelectionCountsJob.result", "browse_opening",
             "start_find_duplicates", "FindDuplicatesJob.result",
+            "FindReplacePreviews.new", "FindReplacePreviews.start", "FindReplacePreviewJob.result", "start_find_replace", "BulkActionJob.result",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)

@@ -15,8 +15,8 @@ private final class QueryDiskCapacity: DiskSpaceProviding {
 extension EventTests {
     /// U264a through CoreBridge on an opened collection: T7's reading and
     /// T4's run text, the commit, the incomplete text, the suggestions with
-    /// a UTF-16 caret, the filter counts, selection counts and Find
-    /// Duplicates as jobs, and a column set change.
+    /// a UTF-16 caret, the filter counts, selection counts, Find Duplicates
+    /// and Find and Replace as jobs, and a column set change.
     @Test(.timeLimit(.minutes(2))) @MainActor func browseQueriesSuggestCountAndChangeColumnsThroughCoreBridge() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let directory = root.appending(path: "collection")
@@ -111,6 +111,26 @@ extension EventTests {
             #expect(everyNote == FindDuplicatesResult(groups: [pair], noteIds: pair, considered: 3))
             let inFound = try await CoreBrowseQuery.startFindDuplicates(field: "Front", in: selection).value()
             #expect(inFound == FindDuplicatesResult(groups: [], noteIds: [], considered: 2))
+
+            // F10, F11: the preview on the selection's notes (alpha, beta),
+            // the run it confirms, and a typed refusal.
+            let previews = try await CoreFindReplacePreviews.open()
+            let request = FindReplaceRequest(find: "alpha", replace: "quint", scope: .field("Front"))
+            let previewJob = try await previews.start(request, on: selection)
+            #expect(previewJob.request == request)
+            let previewed = try await previewJob.value()
+            #expect(previewed == FindReplacePreview(changed: 1, considered: 2, entries: [
+                FindReplacePreviewEntry(noteID: firstIDs[0], sortField: "alpha", field: "Front", spans: [
+                    FindReplaceSpan(edit: .removed, text: "alpha"), FindReplaceSpan(edit: .inserted, text: "quint"),
+                ]),
+            ]))
+            let done = try await CoreFindReplace.start(request, on: selection, confirmed: previewed.changed).value()
+            #expect(done.affected == 1 && done.considered == 2 && done.summary.undoName == "Find and Replace")
+            #expect(try await notes.readNote(id: firstIDs[0]).fields[0] == "quint")
+            let spaced = FindReplaceRequest(find: "plain", replace: "two words", scope: .tags)
+            await #expect(throws: BridgeError.findReplaceRefused(.separatorInReplacement)) {
+                try await previews.start(spaced, on: nil).value()
+            }
             try await session.close()
             try await service.close()
         } catch {

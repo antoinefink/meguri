@@ -595,7 +595,8 @@ public struct FindDuplicatesResult: Sendable, Hashable {
     /// Every grouped note, ascending: the Duplicates token's note ids
     /// (`FilterValue.duplicates`).
     public let noteIds: [Int64]
-    /// The target notes read: those whose note type has the field.
+    /// The target notes read: those whose note type has the field, those
+    /// left out (an empty key, a negative id) included.
     public let considered: UInt64
     public init(groups: [[Int64]], noteIds: [Int64], considered: UInt64) {
         self.groups = groups

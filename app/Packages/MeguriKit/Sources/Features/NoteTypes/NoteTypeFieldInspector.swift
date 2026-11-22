@@ -118,7 +118,7 @@ struct NoteTypeFieldInspector: View {
         switch field {
         case .name:
             // Save waits for this check, whichever field has the focus by then.
-            model.trackCommit("inspector.name.\(row)") { await commitName(typedName, row: row) }
+            model.trackCommit(id, "inspector.name.\(row)") { await commitName(typedName, row: row) }
             if focus == nil { model.pendingEdits[Self.pendingKey] = nil }
         case .placeholder:
             commitPlaceholder(typedPlaceholder, row: row)

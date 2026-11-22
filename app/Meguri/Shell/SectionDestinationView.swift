@@ -57,6 +57,8 @@ struct ShellFeatures {
     var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
     /// N20.9: the Deck Options page pushed on a deck page.
     var deckOptions: (DeckID, AppNavigation) -> AnyView = { _, _ in AnyView(EmptyView()) }
+    /// N22.7: a note type's page pushed over the Note Types list (iPad).
+    var noteType: (Int64, AppNavigation) -> AnyView = { _, _ in AnyView(EmptyView()) }
     var addPanel: () -> AnyView = { AnyView(EmptyView()) }
     /// N17.2: Import opens the file picker on the presenting window, before any sheet.
     var collectionEntry: CollectionEntryCoordinator?
@@ -97,8 +99,8 @@ struct ShellFeatures {
         // N21.1: Today, then Browse; Note Types under them (N22.1). The iPad's rows wait for its own layout.
         features.availableSections = [.home, .browse, .noteTypes]
         #else
-        // W14's iPad row waits for the iPad regular layout (follow-up "U281 iPad"); the view code stays.
-        features.availableSections = [.home, .settings]
+        // W14: Note Types has a sidebar row at regular width; the tab layout reaches it from Settings (U286).
+        features.availableSections = [.home, .noteTypes, .settings]
         #endif
         features.sectionRoot = { section, navigation in
             switch section {
@@ -125,6 +127,9 @@ struct ShellFeatures {
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
+        #if os(iOS)
+        features.noteType = { id, _ in AnyView(NoteTypePage(model: collection.noteTypes, id: id)) }
+        #endif
         features.deckOptions = { deck, navigation in
             AnyView(DeckOptionsPage(model: collection.deckOptions) { navigation.popDeckOptions(deck) })
         }
@@ -187,6 +192,7 @@ struct SectionDestinationView: View {
         case root(AppSection)
         case deckPage(DeckID)
         case deckOptions(DeckID)
+        case noteType(Int64)
         case settingsPage(SettingsPage)
 
         /// The screen a pushed destination shows.
@@ -195,6 +201,7 @@ struct SectionDestinationView: View {
             case let .deckPage(deck): self = .deckPage(deck)
             case let .deckOptions(deck): self = .deckOptions(deck)
             case .noteTypes: self = .root(.noteTypes)
+            case .noteType(let id): self = .noteType(id)
             case .settingsPage(let page): self = .settingsPage(page)
             }
         }
@@ -209,6 +216,7 @@ struct SectionDestinationView: View {
         case let .root(section): features.sectionRoot(section, navigation)
         case let .deckPage(deck): features.deckPage(deck, navigation)
         case let .deckOptions(deck): features.deckOptions(deck, navigation)
+        case let .noteType(id): features.noteType(id, navigation)
         case let .settingsPage(page): features.settingsPage(page)
         }
     }

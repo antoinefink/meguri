@@ -20,6 +20,16 @@ public struct NoteTypesView: View {
     }
 
     public var body: some View {
+        #if os(macOS)
+        macBody
+        #else
+        // iPad: the list is the section's root and a note type is a navigation step (N22.7).
+        NoteTypesTouchRoot(model: model, cards: cards)
+        #endif
+    }
+
+    #if os(macOS)
+    private var macBody: some View {
         split
             .navigationTitle(title)
             .navigationSubtitle(subtitle)
@@ -42,21 +52,12 @@ public struct NoteTypesView: View {
     }
 
     @ViewBuilder private var split: some View {
-        #if os(macOS)
         HSplitView {
             NoteTypeListColumn(model: model)
                 .frame(minWidth: Self.listMinimum, idealWidth: Self.listIdeal, maxWidth: Self.listMaximum)
             detail
                 .frame(minWidth: ContentWidth.primaryAction, maxWidth: .infinity, maxHeight: .infinity)
         }
-        #else
-        HStack(spacing: .zero) {
-            NoteTypeListColumn(model: model)
-                .frame(width: ContentWidth.primaryAction)
-            Divider()
-            detail
-        }
-        #endif
     }
 
     /// The list column fits the longest stock name with its count (N22.1).
@@ -66,26 +67,7 @@ public struct NoteTypesView: View {
 
     @ViewBuilder private var detail: some View {
         if let id = model.selection {
-            if model.draft(id) != nil {
-                VStack(spacing: .zero) {
-                    if model.changedElsewhere.contains(id) {
-                        ChangedElsewhereRow(model: model, id: id)
-                        Divider()
-                    }
-                    switch model.tab {
-                    case .fields: NoteTypeFieldsTab(model: model, id: id)
-                    case .cards: cards(id)
-                    }
-                }
-            } else if model.recordFailed.contains(id) {
-                ContentUnavailableView {
-                    Label { Text("noteTypes.detail.failed.title", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
-                } actions: {
-                    Button { model.reload(id) } label: { Text("noteTypes.tryAgain", bundle: .module) }
-                }
-            } else {
-                DelayedProgress()
-            }
+            NoteTypeDetailContent(model: model, id: id, cards: cards)
         } else if model.phase == .ready {
             ContentUnavailableView {
                 Label { Text("noteTypes.detail.none", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
@@ -148,6 +130,38 @@ public struct NoteTypesView: View {
             .accessibilityIdentifier("noteTypes.list.save")
         }
     }
+    #endif
+}
+
+/// The selected note type's detail: D1's row when it changed elsewhere, then
+/// the Fields or Cards tab; a progress indicator while it reads.
+struct NoteTypeDetailContent: View {
+    let model: NoteTypesModel
+    let id: Int64
+    let cards: (Int64) -> AnyView
+
+    var body: some View {
+        if model.draft(id) != nil {
+            VStack(spacing: .zero) {
+                if model.changedElsewhere.contains(id) {
+                    ChangedElsewhereRow(model: model, id: id)
+                    Divider()
+                }
+                switch model.tab {
+                case .fields: NoteTypeFieldsTab(model: model, id: id)
+                case .cards: cards(id)
+                }
+            }
+        } else if model.recordFailed.contains(id) {
+            ContentUnavailableView {
+                Label { Text("noteTypes.detail.failed.title", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
+            } actions: {
+                Button { model.reload(id) } label: { Text("noteTypes.tryAgain", bundle: .module) }
+            }
+        } else {
+            DelayedProgress()
+        }
+    }
 }
 
 /// The Cards tab until U282 builds it.
@@ -164,7 +178,7 @@ public struct CardsPlaceholder: View {
 }
 
 /// D5 step 5: "Updating 212 of 412 notes", shown once a save has run for a moment.
-private struct SaveProgressView: View {
+struct SaveProgressView: View {
     let progress: NoteTypesModel.Progress
     @Environment(\.locale) private var locale
     @State private var visible = false
@@ -204,7 +218,7 @@ struct DelayedProgress: View {
 }
 
 /// D1: the note type changed elsewhere while its draft is open.
-private struct ChangedElsewhereRow: View {
+struct ChangedElsewhereRow: View {
     let model: NoteTypesModel
     let id: Int64
 
@@ -277,7 +291,7 @@ private struct NoteTypeListColumn: View {
     }
 }
 
-private struct NoteTypeListRow: View {
+struct NoteTypeListRow: View {
     let item: NoteTypesModel.Item
     let edited: Bool
 

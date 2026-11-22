@@ -757,9 +757,9 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The newest of a kind of count job: calls take a ticket when they enter,
-/// in call order, and the job of the newest ticket cancels every older one,
-/// whichever reaches the engine first.
+/// The newest of a kind of count job (or of a sheet's previews): calls take
+/// a ticket when they enter, in call order, and the job of the newest
+/// ticket cancels every older one, whichever reaches the engine first.
 #[derive(Debug, Default)]
 pub struct Newest {
     issued: std::sync::atomic::AtomicU64,
@@ -777,14 +777,21 @@ impl Newest {
     }
 
     /// A call's place in call order; take it before preparing the call.
-    fn ticket(&self) -> u64 {
+    pub(crate) fn ticket(&self) -> u64 {
         self.issued.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    }
+
+    /// Cancels the newest job, if one runs; a later call still starts.
+    pub(crate) fn cancel_running(&self) {
+        if let Some(running) = &lock(&self.running).1 {
+            running.cancel();
+        }
     }
 
     /// Starts `start` for `ticket` after cancelling an older job; a call
     /// older than one that already reached here is refused `Cancelled`, so
     /// it never cancels a newer job, even when that one failed to start.
-    fn start(
+    pub(crate) fn start(
         &self,
         ticket: u64,
         start: impl FnOnce() -> Result<meguri_engine::JobHandle, CoreError>,

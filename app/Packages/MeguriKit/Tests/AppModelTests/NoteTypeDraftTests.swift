@@ -48,6 +48,25 @@ import Testing
         #expect(draft.undoStep == .restoreField)
     }
 
+    @Test func restoreWaitsWhileAnotherFieldHasTheName() {
+        var draft = NoteTypeDraft(Self.record())
+        _ = draft.delete(2)
+        let added = draft.addField()
+        _ = draft.rename(added, to: "extra")
+        #expect(!draft.canRestore(2))
+        let refused = draft.restore(2)
+        #expect(!refused && draft.row(2)?.deleted == true)
+        _ = draft.rename(added, to: "Other")
+        let restored = draft.restore(2)
+        #expect(restored)
+        // Unicode case folding: `ſc` and `sc` are one name.
+        var unicode = NoteTypeDraft(Self.record(fields: ["Front", "sc"]))
+        _ = unicode.delete(1)
+        let other = unicode.addField()
+        _ = unicode.rename(other, to: "ſc")
+        #expect(!unicode.canRestore(1))
+    }
+
     /// W3: Delete is disabled for the last remaining field and for a protected one, with the reason.
     @Test func deleteIsBlockedForTheLastAndForProtectedFields() {
         var draft = NoteTypeDraft(Self.record(fields: ["Text", "Back Extra"], protectedFields: ["Text"]))

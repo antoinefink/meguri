@@ -2505,6 +2505,7 @@ enum OpenFailureDiagnostic {
         case .mediaCommitPending: return "mediaCommitPending"
         case .commitCompleted: return "commitCompleted"
         case .browse: return "browse"
+        case .findReplaceRefused: return "findReplaceRefused"
         }
     }
 
