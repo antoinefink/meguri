@@ -609,7 +609,7 @@ runs:
       sched/day, sched/fsrs, sched/fuzz, sched/labels,
       sched/leech, sched/loadbalancer, sched/memory, sched/ops,
       sched/options, sched/queue, sched/revlog, sched/session,
-      sched/steps, sched/unbury-on-rollover, search, smoke/fsrs-new-card, stats/card-info,
+      sched/steps, sched/unbury-on-rollover, search, smoke/fsrs-new-card,
       smoke/fuzz-table-small, smoke/handoff-round-trip, smoke/ids-frozen-collision, smoke/runner-empty,
       smoke/sm2-new-card, smoke/timing-advance, smoke/timing-tz-asia-kathmandu, smoke/timing-tz-utc,
       stats, storage, tags, text, undo
