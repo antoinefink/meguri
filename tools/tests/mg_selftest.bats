@@ -2333,7 +2333,8 @@ lint_first_sandbox() {
   mkdir -p "$SB/app"
   cp "$REPO_ROOT/app/.swiftlint.yml" "$SB/app/"
   # The real allowlist names app files this sandbox lacks: keep its comments only.
-  grep '^#' "$REPO_ROOT/tools/lint-ui/allowlist.tsv" >"$SB/tools/lint-ui/allowlist.tsv"
+  local allow="$SB/tools/lint-ui/allowlist.tsv"
+  { grep '^#' "$allow" || true; } >"$allow.tmp" && mv "$allow.tmp" "$allow"
   write_file app/Packages/MeguriKit/Package.swift '// swift-tools-version: 6.2'
   write_file app/Packages/MeguriKit/Sources/CardRendering/CardFace.swift 'import SwiftUI
 
@@ -2438,6 +2439,7 @@ lint/glass-outside-chrome" ]
   printf 'raw-color\tapp/Packages/MeguriKit/Sources/Missing.swift\tA reason.\n' >>"$SB/tools/lint-ui/allowlist.tsv"
   lint_first_sandbox
   export STUB_SWIFTLINT_REPORT="$BATS_TEST_TMPDIR/clean.json"
+  ! grep -q Missing.swift "$SB/tools/lint-ui/allowlist.tsv"
   mg build-app --platform mac --config Debug
   [ "$(failure_ids)" = xcframework ] || { echo "$(failure_ids); stderr: $stderr"; return 1; }
   [ "$(jq -r .status "$(field '.artifacts[] | select(.kind == "lint-ui") | .path')")" = pass ]
