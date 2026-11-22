@@ -2,8 +2,9 @@ import Foundation
 
 /// What Browse keeps on this device across launches (`browser/config-keys`
 /// K11; never in the collection, never synced): the query's run text for a
-/// relaunch (`search/filter-tokens` T14), the sidebar's folded sections and
-/// the Tags section's Show All choice (`browser/workspace` V6).
+/// relaunch (`search/filter-tokens` T14), the sidebar's folded sections,
+/// the Tags section's Show All choice (`browser/workspace` V6) and the
+/// suggestions accepted (T12.3).
 nonisolated public struct BrowseDeviceState: Codable, Equatable, Sendable {
     /// T4's run text of the query Browse had when the app last saw it; nil
     /// before Browse first opens on this device (or this collection).
@@ -12,6 +13,9 @@ nonisolated public struct BrowseDeviceState: Codable, Equatable, Sendable {
     public var notesMode: Bool?
     public var folded: Set<BrowseSidebarSection>
     public var showsAllTags: Bool
+    /// The suggestions accepted, newest first (`search/editing-services`
+    /// D6.5 step 4); nil before the first.
+    public var recentSuggestions: [String]?
 
     public init(runText: String? = nil, notesMode: Bool? = nil, folded: Set<BrowseSidebarSection> = BrowseSidebarSection.foldedByDefault,
                 showsAllTags: Bool = false) {

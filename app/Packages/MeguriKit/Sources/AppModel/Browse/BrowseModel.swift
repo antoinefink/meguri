@@ -30,7 +30,7 @@ public final class BrowseModel {
     // MARK: State
 
     /// What the search field holds (T1); the sidebar is a view of it.
-    public private(set) var query = FilterQuery()
+    public internal(set) var query = FilterQuery()
     /// Cards or Notes (V2.1): rows and counts are of this mode (T11).
     public private(set) var mode: BrowseMode = .cards
     /// Browse has opened in this launch (T14's first open has run).
@@ -72,7 +72,7 @@ public final class BrowseModel {
     }
     @ObservationIgnored private var tagsRevision: UInt64 = 0
     @ObservationIgnored private var filteredTagsCache: (text: String, revision: UInt64, nodes: [BrowseSidebarFilter.Node<TagNode>])?
-    private var visible = false
+    var visible = false
     private var stale = true
     /// The names or counts of the latest reload have not all arrived.
     private var readsPending = false
@@ -81,17 +81,47 @@ public final class BrowseModel {
     private var openInFlight = false
     /// Raised by every change of the query: a reading started before it
     /// (a saved search, the first open) gives way to the newer query.
-    private var queryRevision: UInt64 = 0
+    var queryRevision: UInt64 = 0
     /// Raised when the collection goes: work started before must not land.
-    private var epoch: UInt64 = 0
+    var epoch: UInt64 = 0
     private var namesToken: UInt64 = 0
     private var countsToken: UInt64 = 0
     @ObservationIgnored private var namesTask: Task<Void, Never>?
     @ObservationIgnored private var countsTask: Task<Void, Never>?
-    @ObservationIgnored private var device: BrowseDeviceState
+    @ObservationIgnored var device: BrowseDeviceState
 
     /// The results table (U270a): the query's rows in the mode.
     public let results: BrowseResults
+
+    // MARK: The search field (U271)
+
+    /// The suggestions under the field (T12), in the core's order, while
+    /// the field has the focus.
+    public internal(set) var suggestions: [FilterSuggestion] = []
+    /// The kind whose value list the suggestions show (T12.1: Filter By,
+    /// Add Another…, Show All), or nil.
+    public internal(set) var suggestionScope: FilterSection?
+    /// A Field suggestion accepted: the suggestions show its three tests (T12.1).
+    public internal(set) var suggestedField: SuggestedField?
+    /// The field has the focus, so the suggestions are read.
+    public internal(set) var fieldFocused = false
+    /// Raised by Find… (⌘F), Add Another… and Edit: the field takes the focus (T10).
+    public internal(set) var focusRequests: UInt64 = 0
+    /// The values each value token's menu offers after its own (T10), by kind.
+    public internal(set) var tokenOffers: [FilterKind: [FilterValue]] = [:]
+    /// Counts of values the sidebar has no row for (the day values, Any
+    /// Flag, Untagged, Current Deck), for the suggestions (T12.3 step 4).
+    public internal(set) var valueCounts: [FilterValue: UInt64] = [:]
+    /// Save Search… is asking for a name (T13).
+    public var savingSearch: SavingSearch?
+    /// A Field token's (or Field suggestion's) Contains… is asking for its text (T10).
+    public var editingContains: EditingContains?
+    /// Saved searches' suggestions read again after a Save Search.
+    @ObservationIgnored var suggestionsToken: UInt64 = 0
+    @ObservationIgnored var offersToken: UInt64 = 0
+    @ObservationIgnored var liveRun: Task<Void, Never>?
+    /// The text a commit left, which D5's incomplete rule no longer holds (T8).
+    @ObservationIgnored var committedText: String?
 
     // MARK: Seams
 
@@ -102,7 +132,7 @@ public final class BrowseModel {
         didSet { let ready = ready; results.ready = { ready() } }
     }
     /// A handed search whose reading failed, tried again on the next appear.
-    private var pendingSearch: String?
+    var pendingSearch: String?
     /// A search handed to Browse (a deep link, R319), taken once: T14's
     /// "with a search" replaces the query by its reading.
     @ObservationIgnored public var takeEntrySearch: @MainActor () -> String? = { nil }
@@ -161,6 +191,7 @@ public final class BrowseModel {
             if notes != (mode == .notes) {
                 mode = notes ? .notes : .cards
                 counts = [:]
+                valueCounts = [:]
                 refreshCounts()
                 // A query chosen meanwhile is shown in the restored mode.
                 if revision != queryRevision { showResults() }
@@ -186,15 +217,19 @@ public final class BrowseModel {
 
     // MARK: The query
 
-    private func setQuery(_ next: FilterQuery) {
+    func setQuery(_ next: FilterQuery) {
         queryRevision &+= 1
+        liveRun?.cancel()
+        let tokensChanged = next.tokens != query.tokens
         if next != query { query = next }
         keepRunText()
         showResults()
+        if tokensChanged { refreshTokenOffers() }
+        if fieldFocused { refreshSuggestions() }
     }
 
     /// The results show the query in the mode.
-    private func showResults() {
+    func showResults() {
         results.run(query, mode: mode)
     }
 
@@ -213,6 +248,7 @@ public final class BrowseModel {
         device.notesMode = next == .notes
         saveDevice()
         counts = [:]
+        valueCounts = [:]
         refreshCounts()
         results.setMode(next, query: query)
         writeMode(next)
@@ -241,7 +277,7 @@ public final class BrowseModel {
     }
 
     /// The device keeps the query's run text for a relaunch (T14).
-    private func keepRunText() {
+    func keepRunText() {
         let revision = queryRevision, epoch = epoch, query = query
         Task {
             guard let text = try? await backend.runText(query), self.epoch == epoch, revision == queryRevision else { return }
@@ -252,7 +288,7 @@ public final class BrowseModel {
 
     /// T14 "with a search", and T9's saved searches: the whole query
     /// becomes T7's reading of `text`, unless the query changed meanwhile.
-    private func replace(byReading text: String, handed: Bool = false) {
+    func replace(byReading text: String, handed: Bool = false) {
         queryRevision &+= 1
         let revision = queryRevision, epoch = epoch
         // A handed search is kept until it is applied: a failed read, or one the
@@ -419,6 +455,9 @@ public final class BrowseModel {
         queryRevision &+= 1
         savedSearches = []; deckValues = [:]; notetypes = []; tags = []; flagNames = []
         counts = [:]; tagNotes = [:]; tagExpansion = [:]; tagWrites = [:]; filter = ""
+        liveRun?.cancel()
+        suggestions = []; suggestionScope = nil; suggestedField = nil; tokenOffers = [:]; valueCounts = [:]
+        savingSearch = nil; editingContains = nil; committedText = nil
         stale = true
         device.runText = nil
         device.notesMode = nil
@@ -456,10 +495,20 @@ public final class BrowseModel {
             if let notetypeList { self.notetypes = notetypeList }
             if let tagTree { self.tags = tagTree; tagExpansion = [:] }
             if let flagList { flagNames = flagList }
+            // The names the field's menus and suggestions offer may have changed.
+            refreshTokenOffers()
+            if fieldFocused { refreshSuggestions() }
             // Hidden meanwhile: the counts are read when Browse shows again.
             if visible { refreshCounts() } else { stale = true }
         }
     }
+
+    /// The values the suggestions offer that no sidebar row counts (T12.3
+    /// step 4), counted in the same read so the first suggestion screen's
+    /// counts come with the sidebar's (T12.4's budget).
+    static let suggestedValues: [FilterValue] = [.currentDeck, .untagged, .anyFlag]
+        + FilterDue.allCases.map { .due($0) }
+        + FilterPeriod.allCases.flatMap { [FilterValue.added($0), .edited($0), .studied($0)] }
 
     /// Every row the sidebar can show, with what it counts.
     private var countedRows: [(BrowseSidebarTag, FilterCountItem)] {
@@ -491,10 +540,17 @@ public final class BrowseModel {
         let rows = countedRows
         let topTags = tags.count > Self.tagsShownWhole ? tags.map(\.fullName) : []
         countsTask = Task(priority: .utility) {
-            // The last item is the whole collection: V11's total.
-            guard var values = try? await backend.counts(mode, rows.map(\.1) + [.query(FilterQuery())]), !Task.isCancelled,
-                  token == countsToken, self.epoch == epoch else { return }
+            // Then the values only the suggestions show; the last item is the whole collection: V11's total.
+            let extra = Self.suggestedValues
+            guard var values = try? await backend.counts(mode, rows.map(\.1) + extra.map { .value($0) } + [.query(FilterQuery())]),
+                  !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
             results.setTotal(values.popLast() ?? nil, mode: mode)
+            var extraCounts: [FilterValue: UInt64] = [:]
+            for (value, count) in zip(extra, values.suffix(extra.count)) {
+                if let count { extraCounts[value] = count }
+            }
+            values.removeLast(min(extra.count, values.count))
+            valueCounts = extraCounts
             var next: [BrowseSidebarTag: UInt64] = [:]
             for (row, value) in zip(rows.map(\.0), values) {
                 if let value { next[row] = value }
@@ -588,7 +644,7 @@ public final class BrowseModel {
 
     // MARK: Device state
 
-    private func saveDevice() {
+    func saveDevice() {
         device.folded = folded
         device.showsAllTags = showsAllTags
         store.save(device)

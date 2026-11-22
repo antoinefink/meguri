@@ -545,8 +545,31 @@ import Testing
     func runText(_ query: FilterQuery) async throws -> String {
         runTexts += 1
         if let runTextDelay { try? await Task.sleep(for: runTextDelay) }
-        return query.isEmpty ? "" : "run:\(query.tokens.count)"
+        if query.isEmpty { return "" }
+        return query.text.isEmpty ? "run:\(query.tokens.count)" : "run:\(query.tokens.count):\(query.text)"
     }
+    // The search field (U271).
+    var commits: [FilterQuery] = []
+    var committed: [FilterQuery: FilterQuery] = [:]
+    func commit(_ query: FilterQuery) async throws -> FilterQuery {
+        commits.append(query)
+        return committed[query] ?? query
+    }
+    var incomplete: Set<String> = []
+    var incompleteChecks: [String] = []
+    func isIncomplete(_ text: String, caret: Int) async throws -> Bool {
+        incompleteChecks.append(text)
+        return incomplete.contains(text)
+    }
+    var suggestionCalls: [(FilterQuery, Int, FilterSection?, [String])] = []
+    var suggestionRows: [FilterSection?: [FilterSuggestion]] = [:]
+    func suggestions(for query: FilterQuery, caret: Int, scope: FilterSection?, recent: [String]) async throws
+        -> [FilterSuggestion] {
+        suggestionCalls.append((query, caret, scope, recent))
+        return suggestionRows[scope] ?? []
+    }
+    var savedSearchWrites: [(String, String)] = []
+    func saveSearch(name: String, text: String) async throws { savedSearchWrites.append((name, text)) }
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
         switch section {
         case .savedSearches:
