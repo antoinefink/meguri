@@ -28,6 +28,12 @@ extension TestHooks {
     /// - `notetypes/first-run`: the shell with no collection on this device
     ///   (N18.3): Today's welcome, no deck, and no Note Types row; the route
     ///   asks for Note Types, and the shell keeps Today.
+    /// - `notetypes/cards/typical`: Vocabulary's Cards tab, Recognition's
+    ///   front, no draft: W8's yellow line for Production.
+    /// - `notetypes/cards/issues`: a draft whose Production front names a
+    ///   field that does not exist and whose Recognition back leaves a
+    ///   section open: two red issues with their fixes, Save held.
+    /// - `notetypes/cards/styling`: the shared styling with its colour swatches.
     enum NoteTypesRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.registerShell("notetypes/fields/typical") { _ in launch(.typical) }
@@ -39,6 +45,9 @@ extension TestHooks {
             registry.registerShell("notetypes/save/meguri-not-set-up") { _ in launch(.question(.meguriSync), sync: .init(state: .notSetUp)) }
             registry.registerShell("notetypes/save/uploading") { _ in launch(.progress(.uploading)) }
             registry.registerShell("notetypes/first-run") { _ in firstRun() }
+            registry.registerShell("notetypes/cards/typical") { _ in launch(.cards(.typical)) }
+            registry.registerShell("notetypes/cards/issues") { _ in launch(.cards(.issues)) }
+            registry.registerShell("notetypes/cards/styling") { _ in launch(.cards(.styling)) }
         }
 
         /// No collection: only Today (and, on iPad, Settings) is offered.
@@ -73,7 +82,11 @@ extension TestHooks {
             case question(NoteTypeSaveService)
             /// Save and Upload running at this stage of its job.
             case progress(NoteTypeSyncStage)
+            /// The Cards tab (U282).
+            case cards(Cards)
         }
+
+        enum Cards { case typical, issues, styling }
 
         @MainActor static func launch(_ state: State, sync: SampleMeguriSync = .init()) -> ShellLaunch {
             let backend = SampleNoteTypesBackend()
@@ -111,6 +124,22 @@ extension TestHooks {
                     if case .list = state {} else { navigation.push(.noteType(id)) }
                     #endif
                     switch state {
+                    case .cards(let cards):
+                        model.tab = .cards
+                        model.selectedCard[id] = 0
+                        switch cards {
+                        case .typical:
+                            model.cardPart = .front
+                        case .issues:
+                            model.stage(id) { draft in
+                                draft.setText(1, .front, "<div class=\"meaning\">{{Meaning}}</div>\n<div class=\"pos\">{{Part of Speech}}</div>\n{{Wrod}}")
+                                draft.setText(0, .back, "{{FrontSide}}\n<hr id=\"answer\">\n<div class=\"meaning\">{{Meaning}}</div>\n{{#Example Sentence}}\n  <div class=\"example\">{{Example Sentence}}</div>")
+                            }
+                            model.cardPart = .back
+                        case .styling:
+                            model.cardPart = .styling
+                        }
+                        await model.settleForTestHooks()
                     case .list, .typical:
                         model.selectedField[id] = 1
                     case .edited, .question, .progress:
@@ -170,6 +199,26 @@ extension TestHooks {
         private static let productionFront = "<div class=\"meaning\">{{Meaning}}</div>\n<div class=\"pos\">{{Part of Speech}}</div>"
         private static let productionBack = "{{FrontSide}}\n<hr id=\"answer\">\n{{Word}}\n<div class=\"example\">{{Example Sentence}}</div>\n{{Translation}}\n{{#Notes}}{{Notes}}{{/Notes}}\n{{Variants}}"
 
+        private static let css = """
+            .card {
+              font-family: system-ui;
+              font-size: 20px;
+              text-align: center;
+              color: #1d1d1f;
+              background-color: white;
+            }
+
+            .card.nightMode {
+              color: #f5f5f7;
+              background-color: rgb(28 28 30);
+            }
+
+            /* The word, larger. */
+            .word { font-size: 32px; color: teal; }
+
+            """
+        private let core = CoreNotetypeService()
+
         func list() async throws -> [NotetypeName] {
             Self.names.enumerated().map { NotetypeName(id: 1_700_000_100_001 + Int64($0.offset), name: $0.element.0) }
         }
@@ -183,7 +232,7 @@ extension TestHooks {
                 ? [("Recognition", Self.recognitionFront, Self.recognitionBack), ("Production", Self.productionFront, Self.productionBack)]
                 : [("Card 1", "{{Front}}", "{{FrontSide}}\n<hr id=answer>\n{{Back}}")]
             return NotetypeRecord(
-                id: id, name: name, kind: 0, sortField: 0, css: ".card {\n  font-family: system-ui;\n}\n", base: [UInt8(truncatingIfNeeded: id)],
+                id: id, name: name, kind: 0, sortField: 0, css: Self.css, base: [UInt8(truncatingIfNeeded: id)],
                 fields: fields.enumerated().map { ord, field in
                     NotetypeField(ord: UInt32(ord), id: nil, name: field, sticky: false, rtl: false, fontName: "Arial", fontSize: 20,
                                   description: "", plainText: false, collapsed: field == "Reading", excludeFromSearch: false)
@@ -218,6 +267,50 @@ extension TestHooks {
         func checkFieldName(_ typed: String, fields: [String], renaming: UInt32?) async throws -> NotetypeFieldNameCheck {
             let name = typed.replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespaces)
             return name.isEmpty ? .ignored : .accepted(name)
+        }
+        func templateCardCounts(_ id: Int64) async throws -> [UInt64] { id == Self.vocabulary ? [412, 374] : [0] }
+        /// V4 for the sample's texts: a name that is no field, and a section left open.
+        func templateIssues(_ draft: NotetypeStructureDraft) async throws -> [NotetypeTemplateIssue] {
+            let fields = draft.fields.map(\.name)
+            var issues: [NotetypeTemplateIssue] = []
+            for (at, template) in draft.templates.enumerated() {
+                for (part, text) in [(NotetypeTemplatePart.front, template.front), (.back, template.back)] {
+                    let lines = text.components(separatedBy: "\n")
+                    for (number, line) in lines.enumerated() {
+                        for match in line.matches(of: /\{\{([^#^\/{}][^{}]*)\}\}/) {
+                            let name = String(match.1).split(separator: ":").last.map(String.init) ?? ""
+                            guard !fields.contains(name), !NoteTypeTemplateEditing.specialFields.contains(name) else { continue }
+                            let near = try? await core.notetypeNearFieldName(name, fields: fields)
+                            issues.append(NotetypeTemplateIssue(template: UInt32(at), part: part, line: UInt32(number + 1),
+                                                                kind: .unknownField(name: name, suggestion: near ?? nil)))
+                        }
+                    }
+                    let opens = text.matches(of: /\{\{#([^}]*)\}\}/).map { String($0.1) }
+                    for key in opens where !text.contains("{{/\(key)}}") {
+                        let line = lines.firstIndex { $0.contains("{{#\(key)}}") }.map { UInt32($0 + 1) }
+                        issues.append(NotetypeTemplateIssue(template: UInt32(at), part: part, line: line,
+                                                            kind: .unclosedSection(tag: "{{#\(key)}}", close: "{{/\(key)}}")))
+                    }
+                }
+            }
+            return issues
+        }
+        /// W8: Production's front is blank where Meaning is empty.
+        func notesWithoutCard(_ draft: NotetypeStructureDraft) async throws -> [NotetypeBlankFront] {
+            guard draft.notetypeId == Self.vocabulary else { return draft.templates.map { _ in NotetypeBlankFront(noteIds: [], field: nil) } }
+            let meaning = draft.fields.firstIndex { $0.name == "Meaning" }.map(UInt32.init)
+            return draft.templates.map { template in
+                template.front.contains("{{Meaning}}") && !template.front.contains("{{Word}}")
+                    ? NotetypeBlankFront(noteIds: (1...38).map { 1_700_000_200_000 + Int64($0) }, field: meaning)
+                    : NotetypeBlankFront(noteIds: [], field: nil)
+            }
+        }
+        func replaceFieldReferences(_ text: String, from: String, to: String) async throws -> String {
+            try await core.notetypeReplaceFieldReferences(text, from: from, to: to)
+        }
+        /// The core's own colouring: a pure read of the text.
+        func syntax(_ text: String, styling: Bool) async throws -> [NotetypeSyntaxSpan] {
+            styling ? try await core.notetypeStylingSyntax(text) : try await core.notetypeTemplateSyntax(text)
         }
         func fieldReferences(_ texts: [String]) async throws -> [[String]] {
             texts.map { text in

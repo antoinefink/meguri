@@ -18,6 +18,37 @@ public nonisolated struct NoteTypeFieldRow: Identifiable, Hashable, Sendable {
     public var origin: UInt32? { field.origin }
 }
 
+/// One row of the Cards tab's card types list (W5): a draft card type, or
+/// a base one marked deleted, crossed out until Save. Its texts are kept
+/// apart (`NoteTypeDraft.texts(_:)`): typing is the text view's own undo,
+/// not a draft step (W13).
+public nonisolated struct NoteTypeCardTypeRow: Identifiable, Hashable, Sendable {
+    /// Stable for the draft's life: a base card type's ordinal, or a
+    /// negative number for one the draft adds.
+    public let id: Int
+    /// The base ordinal; nil for a card type the draft adds.
+    public let origin: UInt32?
+    public var name: String
+    public var deleted: Bool
+}
+
+/// One card type's texts in the draft: what the template editor edits, and
+/// what the save carries unchanged (browser appearance, A12).
+public nonisolated struct NoteTypeCardTexts: Hashable, Sendable {
+    public var front: String
+    public var back: String
+    public var browserFront: String
+    public var browserBack: String
+    public var targetDeckId: Int64
+    public var browserFontName: String
+    public var browserFontSize: UInt32
+}
+
+/// The template editor's three parts (W6, ⌘1 to ⌘3).
+public nonisolated enum NoteTypeTemplatePart: String, Sendable, Hashable, CaseIterable {
+    case front, back, styling
+}
+
 /// The draft changes the editor's own undo steps back through (W13), by
 /// the name Edit › Undo shows ("Undo Delete Field").
 public nonisolated enum NoteTypeDraftStep: String, Sendable, Hashable, CaseIterable {
@@ -29,6 +60,21 @@ public nonisolated enum NoteTypeDraftStep: String, Sendable, Hashable, CaseItera
     case renameField = "Rename Field"
     case changeSortField = "Change Sort Field"
     case changeOption = "Change Option"
+    case addCardType = "Add Card Type"
+    case deleteCardType = "Delete Card Type"
+    /// Restore in a crossed-out card type's context menu (W5).
+    case restoreCardType = "Restore Card Type"
+    case moveCardType = "Move Card Type"
+    case renameCardType = "Rename Card Type"
+}
+
+/// Why Add, Duplicate or Delete is disabled in the card types list (W5),
+/// shown as the control's help text.
+public nonisolated enum NoteTypeCardTypeBlock: Sendable, Hashable {
+    /// Delete: the last card type that is not crossed out.
+    case lastCardType
+    /// A cloze or Image Occlusion note type has one card type.
+    case cloze
 }
 
 /// Why Delete is disabled for a row (W3), shown as its help text.
@@ -40,14 +86,15 @@ public nonisolated enum NoteTypeFieldDeleteBlock: Sendable, Hashable {
 }
 
 /// One note type's draft (`notetypes/draft-save` D1): every unsaved change
-/// to its fields, field options and sort field, with the base it was made
-/// from (its token goes to the save) and the editor's own undo steps (W13).
-/// Card types, texts and styling are carried unchanged until the Cards tab
-/// edits them (U282). A value type: the model keeps one per note type.
+/// to its fields, field options, sort field, card types, texts and styling,
+/// with the base it was made from (its token goes to the save) and the
+/// editor's own undo steps (W13). A value type: the model keeps one per
+/// note type.
 public nonisolated struct NoteTypeDraft: Sendable, Hashable {
     private struct State: Sendable, Hashable {
         var rows: [NoteTypeFieldRow]
         var sortRow: Int
+        var cards: [NoteTypeCardTypeRow]
     }
     private struct Entry: Sendable, Hashable {
         let step: NoteTypeDraftStep
@@ -59,7 +106,10 @@ public nonisolated struct NoteTypeDraft: Sendable, Hashable {
     private var undoStack: [Entry] = []
     private var redoStack: [Entry] = []
     private var nextNewID = -1
-    public var templates: [StructureDraftTemplate]
+    private var nextNewCardID = -1
+    /// Each card type's texts by row id, crossed-out and undone rows' too,
+    /// so undoing a card type step never takes back what was typed.
+    private var cardTexts: [Int: NoteTypeCardTexts]
     public var css: String
     public var name: String
 
@@ -68,10 +118,44 @@ public nonisolated struct NoteTypeDraft: Sendable, Hashable {
         let rows = base.fields.map {
             NoteTypeFieldRow(id: Int($0.ord), field: StructureDraftField($0), baseName: $0.name, protected: $0.preventDeletion, deleted: false)
         }
-        state = State(rows: rows, sortRow: Int(base.sortField))
-        templates = base.templates.map(StructureDraftTemplate.init)
+        let cards = base.templates.map { NoteTypeCardTypeRow(id: Int($0.ord), origin: $0.ord, name: $0.name, deleted: false) }
+        state = State(rows: rows, sortRow: Int(base.sortField), cards: cards)
+        cardTexts = Dictionary(uniqueKeysWithValues: base.templates.map { template in
+            (Int(template.ord), NoteTypeCardTexts(front: template.front, back: template.back, browserFront: template.qFormatBrowser,
+                                                  browserBack: template.aFormatBrowser, targetDeckId: template.targetDeckId,
+                                                  browserFontName: template.browserFontName, browserFontSize: template.browserFontSize))
+        })
         css = base.css
         name = base.name
+    }
+
+    /// Cloze and Image Occlusion note types (stored kind 1) have one card type.
+    public var isCloze: Bool { base.kind == 1 }
+
+    /// Every card type row in draft order, crossed-out ones included (W5).
+    public var cardRows: [NoteTypeCardTypeRow] { state.cards }
+    public func cardRow(_ id: Int) -> NoteTypeCardTypeRow? { state.cards.first { $0.id == id } }
+    /// The card types that stay after Save.
+    public var keptCardRows: [NoteTypeCardTypeRow] { state.cards.filter { !$0.deleted } }
+    public func texts(_ card: Int) -> NoteTypeCardTexts? { cardTexts[card] }
+
+    /// A part's text: a card type's front or back, or the shared styling.
+    public func text(_ card: Int, _ part: NoteTypeTemplatePart) -> String? {
+        switch part {
+        case .front: cardTexts[card]?.front
+        case .back: cardTexts[card]?.back
+        case .styling: css
+        }
+    }
+
+    /// The kept card types as the save takes them (S1.1), in draft order.
+    public var templates: [StructureDraftTemplate] {
+        keptCardRows.compactMap { row in
+            guard let texts = cardTexts[row.id] else { return nil }
+            return StructureDraftTemplate(origin: row.origin, name: row.name, front: texts.front, back: texts.back,
+                                          browserFront: texts.browserFront, browserBack: texts.browserBack, targetDeckId: texts.targetDeckId,
+                                          browserFontName: texts.browserFontName, browserFontSize: texts.browserFontSize)
+        }
     }
 
     // MARK: Reading
@@ -90,12 +174,13 @@ public nonisolated struct NoteTypeDraft: Sendable, Hashable {
             || !fieldsOnly || name != base.name
     }
 
-    /// The field changes the save classifies as structural (S2): a field
-    /// added, removed or moved, or another sort field. Renames and options
-    /// are not.
+    /// The changes the save classifies as structural (S2): a field or card
+    /// type added, removed or moved, or another sort field. Renames, options
+    /// and texts are not.
     public var changesStructure: Bool {
         let kept = keptRows.map(\.origin)
         return kept != base.fields.map { Optional($0.ord) } || effectiveSortPosition != base.sortField
+            || keptCardRows.map(\.origin) != base.templates.map { Optional($0.ord) }
     }
 
     /// The draft leaves the templates and styling as they are: the save is
@@ -214,6 +299,105 @@ public nonisolated struct NoteTypeDraft: Sendable, Hashable {
         return true
     }
 
+    // MARK: Card types (W5) and texts (W6)
+
+    /// Why Add and Duplicate are disabled (W5): a cloze kind has one card type.
+    public var addCardTypeBlock: NoteTypeCardTypeBlock? { isCloze ? .cloze : nil }
+
+    /// Why Delete is disabled for a card type (W5), nil when it can go.
+    public func cardDeleteBlock(_ id: Int) -> NoteTypeCardTypeBlock? {
+        guard let row = cardRow(id), !row.deleted else { return nil }
+        if isCloze { return .cloze }
+        if keptCardRows.count <= 1 { return .lastCardType }
+        return nil
+    }
+
+    /// `editor/editing-strings` E10's name for a card type added now:
+    /// `Card N`, N one more than the card types that stay, raised while one
+    /// of them has exactly that name.
+    public var newCardTypeName: String {
+        let taken = Set(keptCardRows.map(\.name))
+        var number = keptCardRows.count + 1
+        while taken.contains("Card \(number)") { number += 1 }
+        return "Card \(number)"
+    }
+
+    /// Add (+) and Duplicate (`notetypes/editor-actions` A6): a new card type
+    /// after the last, with `source`'s front and back exactly and nothing
+    /// else (no browser texts, no deck override). Returns its row.
+    @discardableResult public mutating func addCardType(copying source: Int) -> Int? {
+        guard addCardTypeBlock == nil, let copied = cardTexts[source] else { return nil }
+        let id = nextNewCardID
+        nextNewCardID -= 1
+        let name = newCardTypeName
+        cardTexts[id] = NoteTypeCardTexts(front: copied.front, back: copied.back, browserFront: "", browserBack: "", targetDeckId: 0,
+                                          browserFontName: "", browserFontSize: 0)
+        record(.addCardType) { $0.cards.append(NoteTypeCardTypeRow(id: id, origin: nil, name: name, deleted: false)) }
+        return id
+    }
+
+    /// − or ⌫ (A7 as changed by round 9): the card type is crossed out until Save.
+    @discardableResult public mutating func deleteCardType(_ id: Int) -> Bool {
+        guard cardDeleteBlock(id) == nil, let at = cardIndex(id), !state.cards[at].deleted else { return false }
+        record(.deleteCardType) { $0.cards[at].deleted = true }
+        return true
+    }
+
+    /// Takes a crossed-out card type back (its context menu's Restore).
+    @discardableResult public mutating func restoreCardType(_ id: Int) -> Bool {
+        guard let at = cardIndex(id), state.cards[at].deleted else { return false }
+        record(.restoreCardType) { $0.cards[at].deleted = false }
+        return true
+    }
+
+    /// A8: every `"` is removed; a blank result, or the same name, changes
+    /// nothing. The result is not trimmed (the save makes names unique, N4).
+    @discardableResult public mutating func renameCardType(_ id: Int, to typed: String) -> Bool {
+        let name = typed.replacingOccurrences(of: "\"", with: "")
+        guard let at = cardIndex(id), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, state.cards[at].name != name else {
+            return false
+        }
+        record(.renameCardType) { $0.cards[at].name = name }
+        return true
+    }
+
+    /// A drag in the card types list (`onMove`'s convention).
+    @discardableResult public mutating func moveCardTypes(fromOffsets offsets: IndexSet, toOffset destination: Int) -> Bool {
+        var moved = state.cards
+        moved.move(fromOffsets: offsets, toOffset: destination)
+        guard moved != state.cards else { return false }
+        record(.moveCardType) { $0.cards = moved }
+        return true
+    }
+
+    /// Move Up (−1) and Move Down (+1), over every row of the list.
+    public func canMoveCardType(_ id: Int, by delta: Int) -> Bool {
+        guard let at = cardIndex(id) else { return false }
+        return state.cards.indices.contains(at + delta)
+    }
+
+    @discardableResult public mutating func moveCardType(_ id: Int, by delta: Int) -> Bool {
+        guard canMoveCardType(id, by: delta), let at = cardIndex(id) else { return false }
+        return moveCardTypes(fromOffsets: IndexSet(integer: at), toOffset: delta > 0 ? at + delta + 1 : at + delta)
+    }
+
+    /// Typing in the template editor: a front, a back, or the shared
+    /// styling. Not a draft step: the text view keeps its own undo (W13).
+    @discardableResult public mutating func setText(_ card: Int, _ part: NoteTypeTemplatePart, _ text: String) -> Bool {
+        switch part {
+        case .styling:
+            guard css != text else { return false }
+            css = text
+        case .front:
+            guard cardTexts[card] != nil, cardTexts[card]?.front != text else { return false }
+            cardTexts[card]?.front = text
+        case .back:
+            guard cardTexts[card] != nil, cardTexts[card]?.back != text else { return false }
+            cardTexts[card]?.back = text
+        }
+        return true
+    }
+
     /// The editor's own undo (W13).
     @discardableResult public mutating func undo() -> NoteTypeDraftStep? {
         guard let entry = undoStack.popLast() else { return nil }
@@ -230,6 +414,7 @@ public nonisolated struct NoteTypeDraft: Sendable, Hashable {
     }
 
     private func index(_ id: Int) -> Int? { state.rows.firstIndex { $0.id == id } }
+    private func cardIndex(_ id: Int) -> Int? { state.cards.firstIndex { $0.id == id } }
 
     private mutating func record(_ step: NoteTypeDraftStep, _ change: (inout State) -> Void) {
         undoStack.append(Entry(step: step, state: state))

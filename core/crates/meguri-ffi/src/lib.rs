@@ -45,6 +45,7 @@ pub mod media;
 pub mod mutations;
 pub mod notes;
 pub mod notetype_card_text;
+pub mod notetype_cards;
 pub mod notetype_change;
 pub mod notetype_fields;
 pub mod notetype_reads;

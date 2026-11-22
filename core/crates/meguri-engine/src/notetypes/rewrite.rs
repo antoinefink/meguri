@@ -121,6 +121,46 @@ fn section_tag(map: &Map<'_>, key: &str, open: &str, marker: &str, close: &str) 
     })
 }
 
+/// W7's "Use “<name>”" (`notetypes/workspace` W7) on one text: every
+/// reference to the field `from` (replacements, and section opens and closes
+/// whose key is not a card number, T11.1; comments excluded) names `to`
+/// instead. Only the key's characters change; filters, spacing and every
+/// other byte stay as written.
+pub(crate) fn replace_key(text: &str, from: &str, to: &str) -> String {
+    let parsed = ParsedTemplate::parse(text);
+    let (open, close) = (parsed.delimiters().open(), parsed.delimiters().close());
+    let mut output = String::with_capacity(text.len());
+    let mut through = 0;
+    for node in parsed.nodes() {
+        let key = match &node.kind {
+            NodeKind::Replacement { key, .. } => key,
+            NodeKind::Open { key, .. } | NodeKind::Close { key } if !is_card_number(key) => key,
+            _ => continue,
+        };
+        if key != from {
+            continue;
+        }
+        // The key is the last piece of the trimmed tag content (T4, T5), so
+        // it ends where that content's trailing white space starts.
+        let inner = node.span.start + open.len()..node.span.end - close.len();
+        let Some(content) = text.get(inner.clone()) else { continue };
+        let end = inner.start + content.trim_end().len();
+        let Some(start) = end.checked_sub(key.len()).filter(|s| text.get(*s..end) == Some(key.as_str())) else {
+            continue;
+        };
+        output.push_str(&text[through..start]);
+        output.push_str(to);
+        through = end;
+    }
+    output.push_str(&text[through..]);
+    output
+}
+
+/// T11.1's card number section key: `c` and a u32.
+pub(crate) fn is_card_number(key: &str) -> bool {
+    key.strip_prefix('c').is_some_and(|n| n.parse::<u32>().is_ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

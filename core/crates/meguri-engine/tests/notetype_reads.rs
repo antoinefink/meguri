@@ -659,3 +659,93 @@ fn a_pass_cancelled_midway_stops() {
     let (cancel, progress) = midway();
     assert_eq!(removal_counts(&h.collection, id, &cancel, &progress), Err(EngineError::Cancelled));
 }
+
+/// W5: each card type's cards, by stored ordinal, on one snapshot; and
+/// the read writes nothing.
+#[test]
+fn template_card_counts_are_by_stored_ordinal() {
+    let h = common::fresh();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    add(&h, id, &["a", "", ""]);
+    add(&h, id, &["a", "b", "c"]);
+    let before = everything(&h);
+    let read = counts::template_card_counts(&h.collection, id, &CancelToken::new(), &ProgressSink::new()).unwrap();
+    assert_eq!(read, vec![3, 2]);
+    assert_eq!(everything(&h), before);
+    let empty = new_type(&h, "Lone", &["Front"], &[("Only", "{{Front}}")]);
+    assert_eq!(
+        counts::template_card_counts(&h.collection, empty, &CancelToken::new(), &ProgressSink::new()).unwrap(),
+        vec![0]
+    );
+    assert!(matches!(
+        counts::template_card_counts(&h.collection, NotetypeId(42), &CancelToken::new(), &ProgressSink::new()),
+        Err(EngineError::NotFound { .. })
+    ));
+}
+
+/// W7: the red issues are V4's on the draft as the save would store it
+/// (field renames applied first), with the line of the draft's own text
+/// each failing tag starts on and what each fix needs; the read writes
+/// nothing.
+#[test]
+fn template_issues_read_the_draft_as_saved() {
+    use meguri_engine::notetypes::TemplateSide;
+    use meguri_engine::notetypes::issues::{IssueKind, ParseIssue, TemplateIssue, template_issues};
+
+    let h = common::fresh();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    let before = everything(&h);
+    let mut d = draft(&h, id);
+    d.skip_checks = false;
+    // Renamed in the draft: the texts still say {{Front}}, which is not unknown.
+    d.fields[0].name = "Prompt".into();
+    d.templates[0].front = "<div>\n{{Front}}\n{{Bakc}}</div>".into();
+    d.templates[1].back = "{{FrontSide}}\r\n\n{{#Extra}}x".into();
+    assert_eq!(
+        template_issues(&h.collection, &d).unwrap(),
+        vec![
+            TemplateIssue {
+                template: 0,
+                side: Some(TemplateSide::Front),
+                line: Some(3),
+                kind: IssueKind::UnknownField {
+                    name: "Bakc".into(),
+                    suggestion: Some(1)
+                },
+            },
+            TemplateIssue {
+                template: 1,
+                side: Some(TemplateSide::Back),
+                line: Some(3),
+                kind: IssueKind::Parse(ParseIssue::Unclosed {
+                    tag: "{{#Extra}}".into(),
+                    close: "{{/Extra}}".into()
+                }),
+            },
+        ]
+    );
+    // A copied card type repeats a front; a front with no field names its part.
+    let mut d = draft(&h, id);
+    d.templates.push(template("Card 3", "{{Back}}"));
+    d.templates[0].front = "plain".into();
+    let found = template_issues(&h.collection, &d).unwrap();
+    assert_eq!(
+        found.iter().map(|i| (i.template, i.line, i.kind.clone())).collect::<Vec<_>>(),
+        vec![(2, None, IssueKind::DuplicateFront { earlier: 1 }), (0, None, IssueKind::NoFrontField)]
+    );
+    // No near name: none suggested.
+    let mut d = draft(&h, id);
+    d.templates[1].front = "{{Zzzzzz}}".into();
+    assert!(matches!(
+        &template_issues(&h.collection, &d).unwrap()[..],
+        [TemplateIssue { kind: IssueKind::UnknownField { suggestion: None, .. }, line: Some(1), .. }]
+    ));
+    assert!(template_issues(&h.collection, &draft(&h, id)).unwrap().is_empty());
+    assert_eq!(everything(&h), before);
+    // A draft of an older version is refused as planning refuses it.
+    let mut stale = draft(&h, id);
+    stale.base = meguri_engine::notetypes::AggregateDigest([0; 32]);
+    assert!(matches!(template_issues(&h.collection, &stale), Err(EngineError::Stale { .. })));
+}

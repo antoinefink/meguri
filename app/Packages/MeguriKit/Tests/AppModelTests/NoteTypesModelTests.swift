@@ -54,6 +54,25 @@ import Testing
     func fieldReferences(_ texts: [String]) async throws -> [[String]] {
         texts.map { text in text.matches(of: /\{\{[#^\/]?([^}:]*)\}\}/).map { String($0.1) } }
     }
+    var cardCounts: [UInt64] = [20, 11]
+    /// Every issues read returns this; it records the drafts it was asked about.
+    var issues: [NotetypeTemplateIssue] = []
+    private(set) var issueReads: [NotetypeStructureDraft] = []
+    var blankFronts: [NotetypeBlankFront] = []
+    private(set) var blankReads = 0
+    func templateCardCounts(_ id: Int64) async throws -> [UInt64] { cardCounts }
+    func templateIssues(_ draft: NotetypeStructureDraft) async throws -> [NotetypeTemplateIssue] {
+        issueReads.append(draft)
+        return issues
+    }
+    func notesWithoutCard(_ draft: NotetypeStructureDraft) async throws -> [NotetypeBlankFront] {
+        blankReads += 1
+        return blankFronts
+    }
+    func replaceFieldReferences(_ text: String, from: String, to: String) async throws -> String {
+        text.replacingOccurrences(of: "{{\(from)}}", with: "{{\(to)}}")
+    }
+    func syntax(_ text: String, styling: Bool) async throws -> [NotetypeSyntaxSpan] { [] }
 }
 
 /// `notetypes/workspace` W2, W3, W13 and `notetypes/draft-save` D1, D3, D5, D8 through the section's model.
@@ -696,5 +715,141 @@ private extension ChangeSet {
         ChangeSet(wholeCollection: false, source: .syncIncoming, cards: [], notes: [], notetypes: ids.map { .init(id: $0, change: .updated, schemaChanged: false) },
                   decks: [], deckConfigs: [], configKeys: [], tags: [], revlogAdded: [], revlogRemoved: [], mediaAdded: [], mediaRemoved: [],
                   skippedIncomingCards: [], skippedIncomingNotes: [], skippedIncomingDecks: [], collectionRow: false)
+    }
+}
+
+/// `notetypes/workspace` W5, W7 and W8 through the section's model.
+extension NoteTypesModelTests {
+    // MARK: The Cards tab (W5, W7, W8)
+
+    private static let twoCards = NoteTypeCardsTests.record()
+
+    @Test func cardCountsFollowTheBaseOrdinalAndNewCardTypesShowZero() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        let (model, _) = await open(backend)
+        let draft = model.draft(7)!
+        #expect(draft.cardRows.map { model.cardCount(7, row: $0) } == [20, 11])
+        model.addCardType(7)
+        let added = model.draft(7)!.cardRows.last!
+        #expect(model.cardCount(7, row: added) == 0 && model.renamingCard == added.id && model.shownCard(7) == added.id)
+        #expect(model.undoStep == .addCardType)
+    }
+
+    @Test func redIssuesBlockACheckedSaveAndShowAtOnce() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        let (model, _) = await open(backend)
+        // A stored issue does not hold a Fields tab edit (an unchecked save).
+        backend.issues = [NotetypeTemplateIssue(template: 1, part: .front, line: 1, kind: .unknownField(name: "Bakc", suggestion: 1))]
+        model.deleteField(7, row: 2)
+        await model.settle()
+        #expect(model.redIssueCount(7) == 1 && !model.issuesBlockSave(7) && model.canSave(7))
+        // Typing in a template makes the save checked: the red issue holds it.
+        model.setText(7, card: 1, part: .front, "{{Bakc}}")
+        await model.settle()
+        #expect(model.issuesBlockSave(7) && !model.canSave(7))
+        let line = model.liveIssues(7).first
+        #expect(line?.cardName == "Reverse" && line?.fix == .useField(from: "Bakc", to: "Back"))
+        // The fix goes through the editor, so it joins the text view's undo.
+        model.applyFix(7, line!)
+        await model.settle()
+        #expect(model.editorRequest?.command == .replaceAll("{{Back}}") && model.selectedCard[7] == 1 && model.cardPart == .front)
+    }
+
+    @Test func saveReadsTheIssuesFirstAndStopsOnARedOne() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        let (model, _) = await open(backend)
+        model.setText(7, card: 0, part: .back, "{{#Extra}}")
+        // Save before the pause's read lands: the save reads the issues itself.
+        backend.issues = [NotetypeTemplateIssue(template: 0, part: .back, line: 1, kind: .unclosedSection(tag: "{{#Extra}}", close: "{{/Extra}}"))]
+        model.save()
+        await model.settle()
+        #expect(backend.saved.isEmpty && model.question == nil && model.redIssueCount(7) == 1)
+        #expect(model.liveIssues(7).first?.fix == .addClose("{{/Extra}}"))
+        // The fix applies only to the text the issue was read on: an earlier
+        // close elsewhere does not block it, a text changed since does.
+        model.applyFix(7, model.liveIssues(7)[0])
+        #expect(model.editorRequest?.command == .append("{{/Extra}}"))
+        model.consumeEditorRequest(model.editorRequest!.token)
+        model.setText(7, card: 0, part: .back, "{{#Extra}}{{/Extra}}")
+        model.applyFix(7, model.liveIssues(7)[0])
+        #expect(model.editorRequest == nil)
+        backend.issues = []
+        model.setText(7, card: 0, part: .back, "{{#Extra}}{{/Extra}}")
+        await model.settle()
+        model.save()
+        await model.settle()
+        #expect(backend.saved.count == 1 && backend.saved[0].templates[0].back == "{{#Extra}}{{/Extra}}" && !backend.saved[0].skipChecks)
+    }
+
+    @Test func w8ReadsAgainOnlyWhenAFrontOrTheFieldsChange() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        backend.blankFronts = [NotetypeBlankFront(noteIds: [], field: nil), NotetypeBlankFront(noteIds: [3, 4, 5], field: 1)]
+        let (model, _) = await open(backend)
+        // W8 reads the notes only for the Cards tab, which shows it.
+        #expect(backend.blankReads == 0)
+        model.tab = .cards
+        await model.settle()
+        let first = backend.blankReads
+        #expect(first == 1 && model.liveIssues(7).map(\.kind) == [.blankFront(notes: 3, field: "Back")])
+        model.setText(7, card: 0, part: .back, "changed back")
+        model.setText(7, card: 0, part: .styling, ".card { color: red }")
+        await model.settle()
+        #expect(backend.blankReads == first, "a back or the styling changes no front")
+        model.setText(7, card: 0, part: .front, "{{Front}}{{Extra}}")
+        await model.settle()
+        #expect(backend.blankReads == first + 1)
+        // Show Notes is offered only once Browse can take the notes (U287).
+        #expect(model.showNotes == nil)
+    }
+
+    @Test func reorderingIdenticalCardTypesReadsUsedOnAgain() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = NoteTypeCardsTests.record(templates: [("One", "{{Front}}", "{{Back}}"), ("Two", "{{Front}}", "{{Back}}")])
+        let (model, _) = await open(backend)
+        #expect(model.usedOn(7) != nil)
+        model.moveCardTypes(7, fromOffsets: IndexSet(integer: 0), toOffset: 2)
+        await model.settle()
+        #expect(model.usedOn(7) == [0: [0, 1], 1: [0, 1], 2: []], "the same texts in another order read again")
+    }
+
+    @Test func flipThenSaveCarriesBothTexts() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        let (model, _) = await open(backend)
+        model.flip(7, card: 0)
+        model.save()
+        await model.settle()
+        #expect(backend.saved.first?.templates[0].front == "{{Back}}")
+        #expect(backend.saved.first?.templates[0].back == "{{FrontSide}}\n\n<hr id=answer>\n\n{{Front}}")
+    }
+
+    @Test func addCloseIgnoresAnEarlierCloseOfTheSameSection() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        let (model, _) = await open(backend)
+        backend.issues = [NotetypeTemplateIssue(template: 0, part: .back, line: 1, kind: .unclosedSection(tag: "{{#Extra}}", close: "{{/Extra}}"))]
+        model.setText(7, card: 0, part: .back, "{{#Extra}}{{/Extra}}{{#Extra}}")
+        await model.settle()
+        model.applyFix(7, model.liveIssues(7)[0])
+        #expect(model.editorRequest?.command == .append("{{/Extra}}"))
+    }
+
+    @Test func aCancelledW8TaskNeverHidesTheNewerRead() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        backend.blankFronts = [NotetypeBlankFront(noteIds: [1], field: 0), NotetypeBlankFront(noteIds: [], field: nil)]
+        let (model, _) = await open(backend)
+        model.tab = .cards
+        await model.settle()
+        model.summaryDelay = .milliseconds(20)
+        // A, then B, then A again before the first task wakes.
+        model.setText(7, card: 0, part: .front, "{{Front}} B")
+        model.setText(7, card: 0, part: .front, "{{Front}}")
+        await model.settle()
+        #expect(model.liveIssues(7).contains { $0.kind == .blankFront(notes: 1, field: "Front") })
     }
 }

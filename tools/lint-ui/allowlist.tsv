@@ -1,3 +1,4 @@
 # UI lint allowlist (tools/lint-ui/path-rules.sh): rule<TAB>path<TAB>reason, one entry per line.
 # path is a file, or a directory ending in /, relative to the repository root. Every entry needs a
 # reason; glass outside DesignSystem/Chrome/ is allowed only for the control layer (R1996).
+raw-color	app/Packages/MeguriKit/Sources/Features/NoteTypes/SwatchColour.swift	The template editor's colour swatches show colour values of the person's card styling (notetypes/workspace W6): card data drawn as written, not interface colours.

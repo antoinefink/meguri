@@ -10,11 +10,13 @@
 //! or edits it.
 
 mod colour;
+mod highlight;
 mod keywords;
 mod tokens;
 
 use std::ops::Range;
 
+pub use highlight::{CssHighlight, css_highlights};
 use tokens::{Kind, Token, tokenize};
 
 /// An 8-bit sRGB colour with alpha.

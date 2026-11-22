@@ -109,7 +109,7 @@ public struct TodayView: View {
             activity: collection.activity, widths: collection.navigation.activityRowWidths)
             .activityLoading(collection.activity, scope: .collection, active: collection.heatmapRefreshes,
                              widths: collection.navigation.activityRowWidths, page: .today)
-            .modifier(TodayTitle(enabled: besideDeckList, subtitle: HomeHeading.todaySubtitle(totals, locale: locale)))
+            .modifier(TodayTitle(enabled: besideDeckList))
             // Study starts the walk's first deck: its first card waits beneath (N16.8).
             .modifier(StudyActionTarget(collection: collection, deckID: collection.studyAllDecks.first?.id))
     }
@@ -146,17 +146,6 @@ struct TodaySummaryContent: View {
 
     var body: some View {
         List {
-            #if !os(macOS)
-            // The Mac shows the totals as the window's subtitle; both hide while nothing waits (N14.4).
-            if totals.waiting > 0 {
-                Section {
-                    Text(verbatim: totals.summary(locale: locale))
-                        .foregroundStyle(.token(.textSecondary))
-                        .listRowBackground(Color.clear)
-                        .accessibilityIdentifier("home.today.totals")
-                }
-            }
-            #endif
             Section {
                 if summary.nothingWaiting { nothingWaiting } else { studyGroup }
             }
@@ -178,6 +167,9 @@ struct TodaySummaryContent: View {
         #if !os(macOS)
         // N24.5: the deck page's inset grouped list (N14.3).
         .listStyle(.insetGrouped)
+        // N26.2: the totals are the large title's subtitle, as the Mac's toolbar shows them
+        // (N14.4, set by the page there); no subtitle at all while nothing waits.
+        .modifier(TodaySubtitle(text: HomeHeading.todaySubtitle(totals, locale: locale)))
         #endif
     }
 
@@ -308,16 +300,22 @@ struct TodaySummaryContent: View {
     }
 }
 
+#if !os(macOS)
+/// N26.2: the totals under the large title; none while nothing waits, so no empty line shows.
+private struct TodaySubtitle: ViewModifier {
+    let text: String
+    func body(content: Content) -> some View {
+        if text.isEmpty { content } else { content.navigationSubtitle(Text(verbatim: text)) }
+    }
+}
+#endif
+
 private struct TodayTitle: ViewModifier {
     let enabled: Bool
-    let subtitle: String
     func body(content: Content) -> some View {
         if enabled {
             content
                 .navigationTitle(Text("Today", bundle: .module))
-                #if os(macOS)
-                .navigationSubtitle(Text(verbatim: subtitle))
-                #endif
         } else {
             content
         }
