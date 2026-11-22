@@ -546,7 +546,7 @@ fn d5_1_the_bind_deletes_the_files_no_row_names() {
 }
 
 #[test]
-fn g9_3_a_file_that_no_longer_matches_its_row_is_rebuilt_at_the_next_persist() {
+fn g9_3_a_file_that_no_longer_matches_its_row_is_rebuilt() {
     let f = Fixture::new();
     f.write(|scope| {
         scope.put(&card(100, LANG))?;
