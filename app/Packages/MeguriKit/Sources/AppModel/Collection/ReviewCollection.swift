@@ -384,6 +384,43 @@ public final class ReviewCollection: ChangeFanoutSink {
         return current == generation
     }
 
+    private var noteTypesOwner: NoteTypesModel?
+    /// The Note Types section (U281): its list, drafts and Save, above the layout switch.
+    public var noteTypes: NoteTypesModel {
+        if let noteTypesOwner { return noteTypesOwner }
+        let value = NoteTypesModel(backend: CoreNoteTypesBackend())
+        value.service = { [weak self] in self?.noteTypeSaveService ?? .other }
+        value.writable = { [weak self] in self?.noteTypeWriteAllowed ?? false }
+        value.presentQuestion = { [weak self] in
+            guard let self, self.navigation.sheet == nil || self.navigation.sheet == .noteTypeSave else { return false }
+            self.navigation.present(.noteTypeSave)
+            return true
+        }
+        value.dismissQuestion = { [weak self] in
+            if self?.navigation.sheet == .noteTypeSave { self?.navigation.dismissSheet() }
+        }
+        noteTypesOwner = value
+        return value
+    }
+    /// `notetypes/draft-save` D3 counts Meguri Sync only with a ready binding.
+    /// Whether the binding is ready is read in the background and can be
+    /// unknown for a moment, so any Meguri Sync selection counts here: a
+    /// structural save then waits for U269's job and never runs on this
+    /// device alone while the server may hold the collection.
+    var noteTypeSaveService: NoteTypeSaveService {
+        sync.providerState?.selection == .meguri ? .meguriSync : .other
+    }
+    /// A note type save may start: the collection is open and ready, with no
+    /// review, entry, export or provider handoff holding it.
+    var noteTypeWriteAllowed: Bool {
+        guard foreground, !resuming, !closed, !closing, !opening, state == .ready,
+              case .ready(let current) = lifecycle, current == generation,
+              !sync.providerHandoffInProgress, !sync.meguriCollectionWorkHeld,
+              review == nil, navigation.review == nil, undoOwner?.busy != true,
+              entryOwner?.busy != true, exportOwner?.busy != true, manualOwner?.busy != true else { return false }
+        return true
+    }
+
     private var deckDeletionOwner: DeckDeletionModel?
     public var deckDeletion: DeckDeletionModel {
         if let deckDeletionOwner { return deckDeletionOwner }
@@ -1061,6 +1098,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             if candidateActive {
                 navigation.collectionReplaced()
                 browseCollectionReplaced()
+                noteTypesOwner?.invalidate()
                 previousRecord = nil; recoveryDrops.removeAll(); dropWalk()
                 try await records.remove()
                 try await completeOpenedHost(loadRecord: false)
@@ -1174,6 +1212,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             if event.generation == generation { undoOwner?.scheduleRefresh() }
             if event.generation == generation { deckOptionsOwner?.changesCommitted(changes, generation: event.generation) }
             if event.generation == generation { browseOwner?.changesCommitted(changes) }
+            if event.generation == generation { noteTypesOwner?.changesCommitted(changes) }
             if event.generation == generation,
                changes.wholeCollection || !changes.notetypes.isEmpty || !changes.decks.isEmpty {
                 addFlowOwner?.selectionChanged(generation: event.generation)
@@ -1198,6 +1237,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             invalidateDeckActions()
             addFlowOwner?.generationEnded()
             editFlowOwner?.generationEnded()
+            noteTypesOwner?.invalidate()
             generation = next; day?.pause()
             invalidateMedia()
             review?.generationEnded(); review = nil; navigation.endReview()
@@ -1257,6 +1297,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             if generation != next {
                 addFlowOwner?.generationEnded()
                 editFlowOwner?.generationEnded()
+                noteTypesOwner?.invalidate()
                 invalidateDeckActions(); invalidateMedia(); exportOwner?.generationChanged()
             }
             generation = next
@@ -1272,7 +1313,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         case .opening, .upgrading: invalidateDeckActions(); state = .loading
         case .exclusiveBusy: invalidateDeckActions(); state = .unavailable; review?.requestRefresh()
         case .failed(let reason): invalidateDeckActions(); state = .failed(Self.explanation(reason))
-        case .noCollection: invalidateDeckActions(); activity.generationChanged(to: nil); state = releasedManualHostState ?? .unopened
+        case .noCollection:
+            invalidateDeckActions(); noteTypesOwner?.invalidate()
+            activity.generationChanged(to: nil); state = releasedManualHostState ?? .unopened
         }
     }
 
@@ -2112,7 +2155,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             await previous?.value
             if !active {
                 await meguriSignInPreparationTask?.value
-                await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
+                await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await noteTypesOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
             }
             await openTask?.value
             guard !closed, state != .unopened else { resuming = false; return }
@@ -2236,6 +2279,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         invalidateDeckActions()
         await deckNamesOwner?.cancelAndDrain()
         await deckOptionsOwner?.cancelAndDrain()
+        await noteTypesOwner?.cancelAndDrain()
         await deckDeletionOwner?.cancelAndDrain()
         _ = await selectionTask?.value
         await collapseTask?.value

@@ -587,6 +587,23 @@ public struct BrowseSelectionCounts: Sendable, Hashable {
     }
 }
 
+/// What Find Duplicates found (V10).
+public struct FindDuplicatesResult: Sendable, Hashable {
+    /// Each group: two or more note ids with equal keys, ascending; the
+    /// groups by their first note. Empty: "No duplicates found."
+    public let groups: [[Int64]]
+    /// Every grouped note, ascending: the Duplicates token's note ids
+    /// (`FilterValue.duplicates`).
+    public let noteIds: [Int64]
+    /// The target notes read: those whose note type has the field.
+    public let considered: UInt64
+    public init(groups: [[Int64]], noteIds: [Int64], considered: UInt64) {
+        self.groups = groups
+        self.noteIds = noteIds
+        self.considered = considered
+    }
+}
+
 /// A started Browse read: its progress and cancel, and its value once it
 /// ends.
 public final class CoreBrowseReadJob<Value: Sendable>: Sendable {
@@ -716,6 +733,28 @@ public enum CoreBrowseQuery {
                 try result.result().map {
                     BrowseSelectionCounts(cards: $0.cards, notes: $0.notes, suspended: $0.suspended, buried: $0.buried,
                                           decks: $0.decks, deck: $0.deck, notetypes: $0.notetypes)
+                }
+            }
+        }
+    }
+
+    /// V10's Find: the notes whose values of the field named exactly
+    /// `field` have equal keys, grouped, among every note (`found` nil: All
+    /// Notes) or the notes of `found`'s rows (All Found: a selection of
+    /// every row of the results), as a job with progress and Cancel. It
+    /// never writes. It holds a search reader until it ends: cancel it when
+    /// the sheet goes away. When the selection itself is refused, `value()`
+    /// throws that `BridgeError.browse` failure.
+    public static func startFindDuplicates(field: String, in found: BrowseSelection?) async throws(BridgeError)
+        -> CoreBrowseReadJob<FindDuplicatesResult> {
+        try await CoreEventStream.shared.start()
+        let raw = found?.raw
+        return try await MaintenanceLane.shared.call(.startFindDuplicates) {
+            let start = try MeguriCoreBindings.startFindDuplicates(field: field, found: raw)
+            let result = start.result
+            return CoreBrowseReadJob(job: try Jobs.track(start.handle), resultCall: .findDuplicatesJobResult) {
+                try result.result().map {
+                    FindDuplicatesResult(groups: $0.groups, noteIds: $0.noteIds, considered: $0.considered)
                 }
             }
         }

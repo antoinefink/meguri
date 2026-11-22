@@ -389,6 +389,11 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let notetypeRemovalCountsJobResult = BridgeCall("NotetypeRemovalCountsJob.result")
     public static let notetypeNearFieldName = BridgeCall("notetype_near_field_name")
 
+    public static let startNotetypeStructureSave = BridgeCall("start_notetype_structure_save")
+    public static let notetypeStructureJobResult = BridgeCall("NotetypeStructureJob.result")
+    public static let notetypeCheckFieldName = BridgeCall("notetype_check_field_name")
+    public static let templateFieldReferences = BridgeCall("template_field_references")
+
     public static let openSearchSession = BridgeCall("open_search_session")
     public static let browseStartSearch = BridgeCall("BrowseSearchSession.start_search")
     public static let browseResort = BridgeCall("BrowseSearchSession.resort")
@@ -419,6 +424,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let startBrowseSelectionCounts = BridgeCall("start_browse_selection_counts")
     public static let browseSelectionCountsJobResult = BridgeCall("BrowseSelectionCountsJob.result")
     public static let browseOpening = BridgeCall("browse_opening")
+    public static let startFindDuplicates = BridgeCall("start_find_duplicates")
+    public static let findDuplicatesJobResult = BridgeCall("FindDuplicatesJob.result")
 
     public static let startCreateBackup = BridgeCall("start_create_backup")
     public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
@@ -724,7 +731,9 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
+        startNotetypeStructureSave, notetypeStructureJobResult, notetypeCheckFieldName, templateFieldReferences,
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
         filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
+        startFindDuplicates, findDuplicatesJobResult,
     ]
 }

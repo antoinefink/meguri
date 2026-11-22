@@ -4,6 +4,7 @@ import DeckOptions
 import DesignSystem
 import Editor
 import Home
+import NoteTypes
 import Review
 import Settings
 import SwiftUI
@@ -93,9 +94,10 @@ struct ShellFeatures {
         features.today = { _ in AnyView(TodayView(collection: collection, besideDeckList: true)) }
         #if os(macOS)
         features.nativeMacWorkspace = true
-        // N21.1: Today, then Browse. The iPad's Browse row waits for its own layout (U278).
-        features.availableSections = [.home, .browse]
+        // N21.1: Today, then Browse; Note Types under them (N22.1). The iPad's rows wait for its own layout.
+        features.availableSections = [.home, .browse, .noteTypes]
         #else
+        // W14's iPad row waits for the iPad regular layout (follow-up "U281 iPad"); the view code stays.
         features.availableSections = [.home, .settings]
         #endif
         features.sectionRoot = { section, _ in
@@ -104,6 +106,7 @@ struct ShellFeatures {
             #if os(macOS)
             case .browse: AnyView(BrowseView(model: collection.browse))
             #endif
+            case .noteTypes: AnyView(NoteTypesView(model: collection.noteTypes))
             default: AnyView(HomeView(collection: collection))
             }
         }
@@ -150,6 +153,7 @@ struct ShellFeatures {
             case .cloudSync(let entry): AnyView(CloudConnectionView(collection: collection, entry: entry))
             case .accountSync: AnyView(AccountSyncSheet(collection: collection))
             case .add: AnyView(AddNoteView(collection: collection))
+            case .noteTypeSave: AnyView(NoteTypeSaveSheet(model: collection.noteTypes))
             }
         }
         features.deckExists = { collection.deck($0.rawValue) != nil }
@@ -246,7 +250,8 @@ extension AppSection {
         case .home: "house"
         case .browse: "magnifyingglass"
         case .stats: "chart.bar.xaxis"
-        case .noteTypes: "list.bullet.rectangle"
+        // W14: a system symbol, like Today and Browse.
+        case .noteTypes: "rectangle.stack"
         case .settings: "gearshape"
         }
     }

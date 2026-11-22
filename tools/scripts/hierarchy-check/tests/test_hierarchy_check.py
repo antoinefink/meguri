@@ -869,6 +869,28 @@ class IdentifierFormat(unittest.TestCase):
             el("outline", label="Sidebar", f=(0, 82, 144, 548), children=[el("tableColumn", "ListColumn", f=(10, 82, 124, 548))])]))
         self.assertEqual(hierarchy_check.check(tree), [])
 
+    def test_a_mac_table_names_its_columns_and_headers(self):
+        # Seen in a SwiftUI Table's export (U281): generated column ids, and
+        # unlabelled header buttons at each column's x and width.
+        columns = [("8F4D7F23-581A-4144-BABE-CA39D6A01371", 431, 153.5), ("741A6E0A-75AE-44AA-BCF2-13CA347718F1", 584.5, 97.5)]
+        tree = doc(el("outline", "noteTypes.fields.table", f=(420, 81, 581, 701), children=[
+            *[el("tableColumn", ident, f=(x, 110, w, 671)) for ident, x, w in columns],
+            el("group", f=(421, 82, 579, 28), children=[el("button", f=(x, 82, w, 28)) for _, x, w in columns])]))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_table_header_lookalikes_are_still_reported(self):
+        column = "8F4D7F23-581A-4144-BABE-CA39D6A01371"
+        # A button that matches no column, a labelled one, a body button at a column's x and width,
+        # and a column id outside a table.
+        tree = doc(el("outline", "sample.screen.table", f=(0, 0, 400, 400), children=[
+            el("tableColumn", column, f=(10, 30, 100, 300)),
+            el("group", f=(0, 100, 400, 28), children=[el("button", f=(10, 100, 100, 28))]),
+            el("group", f=(0, 0, 400, 28), children=[el("button", f=(10, 0, 100, 28)), el("button", f=(110, 0, 90, 28))]),
+            el("group", f=(0, 0, 400, 28), children=[el("button", label="Name", f=(10, 0, 100, 28))])]),
+            el("tableColumn", column, f=(0, 500, 100, 100)))
+        self.assertEqual(kinds(hierarchy_check.check(tree)),
+                         ["bad-identifier", "missing-identifier", "missing-identifier", "missing-identifier", "missing-identifier"])
+
     def test_those_names_on_other_elements_are_still_reported(self):
         tree = doc(el("group", "main, SidebarNavigationSplitView", f=(0, 30, 800, 600)), el("button", "ListColumn", f=(0, 0, 40, 40)))
         self.assertEqual(kinds(hierarchy_check.check(tree)), ["bad-identifier", "bad-identifier"])

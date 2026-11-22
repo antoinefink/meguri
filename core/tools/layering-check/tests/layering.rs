@@ -133,7 +133,7 @@ impl Fixture {
     }
 
     fn run(&self) -> Run {
-        let out = Command::new(env!("CARGO_BIN_EXE_layering-check"))
+        let out = Command::new(crate::bin_exe())
             .arg("--manifest-path")
             .arg(self.path("ws/Cargo.toml"))
             .arg("--edges")
@@ -543,7 +543,7 @@ fn the_storage_builder_named_in_the_engine_or_the_ffi_fails() {
 fn human_output_names_each_violation_and_exits_non_zero() {
     let fx = Fixture::new();
     fx.depend("meguri-sched", "meguri-engine");
-    let out = Command::new(env!("CARGO_BIN_EXE_layering-check"))
+    let out = Command::new(crate::bin_exe())
         .arg("--manifest-path")
         .arg(fx.path("ws/Cargo.toml"))
         .arg("--edges")

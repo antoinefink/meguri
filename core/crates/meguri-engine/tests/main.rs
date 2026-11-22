@@ -64,6 +64,8 @@ pub mod executor_ordering;
 pub mod external_change;
 #[path = "filter_counts.rs"]
 pub mod filter_counts;
+#[path = "find_duplicates.rs"]
+pub mod find_duplicates;
 #[path = "find_replace.rs"]
 pub mod find_replace;
 #[path = "flags.rs"]

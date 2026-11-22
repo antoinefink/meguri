@@ -1,7 +1,8 @@
 //! U264a's Browse query model and reads through their real exports on an
 //! opened collection: T7's reading and T4's run text, T8's commit and
 //! incomplete text, a sidebar deck value, the suggestions, the filter
-//! counts as a job, the column sets, and the counts of a selection.
+//! counts as a job, the column sets, the counts of a selection, and Find
+//! Duplicates as a job.
 use meguri_ffi::{
     CoreEvent, CoreEventKind, CoreEventListener, JobOutcome,
     browse_query::*,
@@ -369,6 +370,53 @@ fn the_query_model_suggestions_counts_columns_and_selection_counts_run_through_t
         .selection(handle, 7, vec![BrowseIndexRange { start: 0, end: 1 }])
         .unwrap();
     let job = start_browse_selection_counts(stale).unwrap();
+    assert_eq!(finish(&core, job.handle.id), JobOutcome::Succeeded);
+    assert_eq!(
+        job.result.result(),
+        Err(meguri_ffi::CoreError::Browse {
+            failure: BrowseFailure::StaleRevision { current: 0 }
+        })
+    );
+
+    // V10: a third note whose Front differs from the first only in case,
+    // markup and spaces. All Notes finds the pair; the handle's rows hold
+    // only the first two notes, so All Found finds none.
+    let third = add_note(AddNoteRequest {
+        notetype_id: notetype,
+        fields: vec!["<i>ALPHA</i> ".into(), "three".into()],
+        tags: Vec::new(),
+        deck_id: 1,
+        guid: None,
+        update_add_defaults: false,
+    })
+    .unwrap()
+    .id;
+    let job = start_find_duplicates("Front".into(), None).unwrap();
+    assert_eq!(finish(&core, job.handle.id), JobOutcome::Succeeded);
+    let mut pair = vec![notes[0], third];
+    pair.sort_unstable();
+    assert_eq!(
+        job.result.result().unwrap(),
+        Some(FindDuplicatesResult {
+            groups: vec![pair.clone()],
+            note_ids: pair,
+            considered: 3,
+        })
+    );
+    let job = start_find_duplicates("Front".into(), Some(Arc::clone(&every))).unwrap();
+    assert_eq!(finish(&core, job.handle.id), JobOutcome::Succeeded);
+    assert_eq!(
+        job.result.result().unwrap(),
+        Some(FindDuplicatesResult {
+            groups: Vec::new(),
+            note_ids: Vec::new(),
+            considered: 2,
+        })
+    );
+    let stale = session
+        .selection(handle, 7, vec![BrowseIndexRange { start: 0, end: 1 }])
+        .unwrap();
+    let job = start_find_duplicates("Front".into(), Some(stale)).unwrap();
     assert_eq!(finish(&core, job.handle.id), JobOutcome::Succeeded);
     assert_eq!(
         job.result.result(),

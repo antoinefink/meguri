@@ -91,6 +91,10 @@ pub struct NotetypeField {
     pub plain_text: bool,
     pub collapsed: bool,
     pub exclude_from_search: bool,
+    /// Protected from deletion (Cloze and Image Occlusion fields): the
+    /// Fields tab disables Delete for it (`notetypes/structure-changes`
+    /// S1.2 item 3).
+    pub prevent_deletion: bool,
 }
 impl From<&meguri_model::notetype::NotetypeField> for NotetypeField {
     fn from(field: &meguri_model::notetype::NotetypeField) -> Self {
@@ -107,6 +111,7 @@ impl From<&meguri_model::notetype::NotetypeField> for NotetypeField {
             plain_text: options.plain_text,
             collapsed: options.collapsed,
             exclude_from_search: options.exclude_from_search,
+            prevent_deletion: options.prevent_deletion,
         }
     }
 }

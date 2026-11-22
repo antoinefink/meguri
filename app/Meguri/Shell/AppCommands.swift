@@ -116,6 +116,35 @@ struct NativeCommandContext {
         collection.navigation.select(.section(.browse))
     }
 
+    /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review
+    /// and with no sheet over the window.
+    var canShowNoteTypes: Bool {
+        host == .main && layout == .sidebar && collection.navigation.sheet == nil
+            && collection.review == nil && collection.navigation.review == nil
+    }
+    func showNoteTypes() {
+        guard canShowNoteTypes else { return }
+        collection.navigation.select(.section(.noteTypes))
+    }
+
+    /// D3: File › Save (⌘S) saves the shown note type's draft, as the toolbar's Save does.
+    var noteTypeSaveShown: Bool {
+        host == .main && collection.navigation.section == .noteTypes && collection.navigation.sheet == nil
+            && collection.review == nil && collection.navigation.review == nil
+    }
+    var canSaveNoteType: Bool {
+        guard noteTypeSaveShown, let id = collection.noteTypes.selection else { return false }
+        return collection.noteTypes.canSave(id)
+    }
+    var noteTypeSaveAsks: Bool {
+        guard noteTypeSaveShown, let id = collection.noteTypes.selection else { return false }
+        return collection.noteTypes.saveAsks(id)
+    }
+    func saveNoteType() {
+        guard canSaveNoteType else { return }
+        collection.noteTypes.save()
+    }
+
     // MARK: Card
 
     var review: ReviewCoordinator? {
@@ -160,6 +189,11 @@ struct NativeCommandContext {
             let available = redo ? review.canRedo : review.canUndo
             inputs.reviewStep = available ? CollectionUndoModel.stepName(redo ? review.redoStatus : review.undoStatus) : nil
         }
+        // W13: while Note Types shows, its draft's own steps come before the collection's.
+        if !inputs.reviewShown, !inputs.textOwnsUndo, collection.navigation.section == .noteTypes {
+            let draft = collection.noteTypes
+            inputs.draftStep = (redo ? draft.redoStep : draft.undoStep)?.rawValue
+        }
         let history = collection.collectionUndo
         inputs.collectionStep = (redo ? history.canRedo : history.canUndo) ? (redo ? history.redoName : history.undoName) : nil
         return EditUndoRouting.route(inputs)
@@ -176,6 +210,8 @@ struct NativeCommandContext {
         case .review:
             guard reviewInputAvailable else { return }
             review?.restore(redo: redo)
+        case .draft:
+            if redo { collection.noteTypes.redo() } else { collection.noteTypes.undo() }
         case .collection:
             if redo { collection.collectionUndo.redo() } else { collection.collectionUndo.undo() }
         }
@@ -204,6 +240,11 @@ struct AppCommands: Commands {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(context?.canNewDeck != true)
         }
+        CommandGroup(replacing: .saveItem) {
+            Button(LocalizedStringKey(context?.noteTypeSaveAsks == true ? "Save…" : "Save")) { context?.saveNoteType() }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(context?.canSaveNoteType != true)
+        }
         CommandGroup(replacing: .importExport) {
             Button("Import Collection…") { context?.present(.collectionEntry) }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
@@ -228,15 +269,19 @@ struct AppCommands: Commands {
         // The system's Find, Spelling, Substitutions and other text groups stay;
         // Find… comes first, so ⌘F reaches it while the deck workspace shows and
         // the text inputs' own Find otherwise (when it is disabled).
-        #if os(macOS)
-        // N21.8: View › Browse; the iPad's Browse row waits for its own layout (U278).
+        // N21.8: View › Browse (the Mac only: the iPad's Browse row waits for its own layout);
+        // W14: View › Note Types; ⇧⌘N stays New Deck… (N22.1).
         CommandGroup(before: .sidebar) {
+            #if os(macOS)
             Button("Browse") { context?.showBrowse() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
                 .disabled(context?.canShowBrowse != true)
+            #endif
+            Button("Note Types") { context?.showNoteTypes() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .disabled(context?.canShowNoteTypes != true)
             Divider()
         }
-        #endif
         CommandGroup(before: .textEditing) {
             Button("Find…") { context?.find() }
                 .keyboardShortcut("f", modifiers: .command)

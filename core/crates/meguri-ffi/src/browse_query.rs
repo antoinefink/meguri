@@ -2,8 +2,9 @@
 //! query (`search/filter-tokens` T1 to T7) with its run text (T4), T7's
 //! reading of Anki text and T8's commit; D5's incomplete text at the caret
 //! (T8); the suggestions (T12); the filter counts (T12.4) as a job at
-//! utility QoS; the column sets (`browser/workspace` V2.2 to V2.4); and the
-//! counts of a selection (V7, V8.1's "shown when") as a job.
+//! utility QoS; the column sets (`browser/workspace` V2.2 to V2.4); the
+//! counts of a selection (V7, V8.1's "shown when") as a job; and Find
+//! Duplicates (V10) as a job.
 //!
 //! The query and suggestion calls read only the open collection's name
 //! index (`search/editing-services` D6.7), never the collection. Offsets
@@ -1113,9 +1114,112 @@ pub fn start_browse_selection_counts(
     })
 }
 
+// --------------------------------------------------------- find duplicates
+
+/// What Find Duplicates found (V10).
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct FindDuplicatesResult {
+    /// Each group: two or more note ids with equal keys, ascending; the
+    /// groups by their first note. Empty: "No duplicates found."
+    pub groups: Vec<Vec<i64>>,
+    /// Every grouped note, ascending: the Duplicates token's note ids
+    /// (`search/filter-tokens` T3).
+    pub note_ids: Vec<i64>,
+    /// The target notes read: those whose note type has the field.
+    pub considered: u64,
+}
+
+impl From<browse::Duplicates> for FindDuplicatesResult {
+    fn from(found: browse::Duplicates) -> FindDuplicatesResult {
+        FindDuplicatesResult {
+            note_ids: found.note_ids().into_iter().map(|id| id.0).collect(),
+            groups: found
+                .groups
+                .into_iter()
+                .map(|group| group.into_iter().map(|id| id.0).collect())
+                .collect(),
+            considered: found.considered,
+        }
+    }
+}
+
+#[derive(Debug, uniffi::Object)]
+pub struct FindDuplicatesJob {
+    result: Arc<Mutex<Option<Result<FindDuplicatesResult, CoreError>>>>,
+}
+
+#[uniffi::export]
+impl FindDuplicatesJob {
+    /// `None` until the job ends; then what it found, or the selection's
+    /// refusal (`UnknownHandle`, `StaleRevision`, `OutOfRange`).
+    pub fn result(&self) -> Result<Option<FindDuplicatesResult>, CoreError> {
+        callback::enter("FindDuplicatesJob::result");
+        lock(&self.result).clone().transpose()
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct FindDuplicatesJobStart {
+    pub handle: JobHandle,
+    pub result: Arc<FindDuplicatesJob>,
+}
+
+/// V10's Find: the notes whose values of the field named exactly `field`
+/// have equal keys, grouped, among every note of the collection (All Notes,
+/// `found` none) or the notes of `found`'s rows (All Found: a selection of
+/// every row of the current results). A job reading one snapshot of a
+/// search worker's reader, with progress (notes read, of a known total)
+/// and Cancel; a replacement, a suspend or a close cancels it. It never
+/// writes. It holds one of the search readers until it ends, so a caller
+/// whose sheet goes away cancels it. A refusal of the selection itself ends
+/// the job successfully and `result` returns it.
+#[uniffi::export]
+pub fn start_find_duplicates(
+    field: String,
+    found: Option<Arc<BrowseSelection>>,
+) -> Result<FindDuplicatesJobStart, CoreError> {
+    callback::enter("start_find_duplicates");
+    let engine = runtime::engine()?;
+    let result = Arc::new(Mutex::new(None));
+    let out = Arc::clone(&result);
+    let handle = engine.start_job(meguri_engine::JobKind::BulkOp, move |job| {
+        let target = match &found {
+            Some(selection) => browse::DuplicatesTarget::Found(selection.engine_selection()),
+            None => browse::DuplicatesTarget::AllNotes(engine),
+        };
+        let found = match browse::find_duplicates(target, &field, &job.cancel, &job.progress) {
+            Ok(found) => Ok(found.into()),
+            Err(BrowseError::Engine(error)) => return Err(error),
+            Err(refusal) => Err(CoreError::from(refusal)),
+        };
+        *lock(&out) = Some(found);
+        Ok(())
+    })?;
+    Ok(FindDuplicatesJobStart {
+        handle: crate::jobs::wrap(handle),
+        result: Arc::new(FindDuplicatesJob { result }),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn found_duplicates_cross_with_their_note_ids_ascending() {
+        let found = browse::Duplicates {
+            groups: vec![vec![NoteId(2), NoteId(9)], vec![NoteId(4), NoteId(5), NoteId(7)]],
+            considered: 12,
+        };
+        assert_eq!(
+            FindDuplicatesResult::from(found),
+            FindDuplicatesResult {
+                groups: vec![vec![2, 9], vec![4, 5, 7]],
+                note_ids: vec![2, 4, 5, 7, 9],
+                considered: 12,
+            }
+        );
+    }
 
     #[test]
     fn an_older_call_never_starts_after_a_newer_one_reached_the_slot() {
