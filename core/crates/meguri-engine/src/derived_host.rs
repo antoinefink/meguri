@@ -250,7 +250,6 @@ trait Erased: Send + Sync {
     fn catch_up(&self, source: &Snapshot<'_>, since: EpochMillis, sink: &mut BuildSink)
     -> Result<CatchUp, EngineError>;
     fn capture_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Capture<AnyDelta>;
-    fn deferred_until(&self) -> Option<&'static str>;
     fn persist(&self, store: &mut ComponentStore<'_>) -> Result<(), EngineError>;
     fn release(&self);
 }
@@ -292,10 +291,6 @@ impl<C: DerivedComponent> Erased for Adapter<C> {
             Capture::Delta(delta) => Capture::Delta(Box::new(delta)),
             Capture::Rebuild => Capture::Rebuild,
         }
-    }
-
-    fn deferred_until(&self) -> Option<&'static str> {
-        self.0.deferred_until()
     }
 
     fn persist(&self, store: &mut ComponentStore<'_>) -> Result<(), EngineError> {
@@ -402,6 +397,8 @@ struct Shared {
     threads: ThreadRegistry,
     registry: Registry,
     components: Vec<Arc<dyn Erased>>,
+    /// Each component's `deferred until` (D4), read at registration.
+    deferred: Vec<Option<&'static str>>,
     /// The seq of the last commit the observer sent to the derived writer.
     sent: Arc<AtomicU64>,
     state: Mutex<SharedState>,
@@ -449,19 +446,30 @@ pub struct DerivedHostBuilder {
     engine: Engine,
     schemas: Vec<ComponentSchema>,
     components: Vec<Arc<dyn Erased>>,
+    /// Each component's `deferred until`, read at registration.
+    deferred: Vec<Result<Option<&'static str>, ()>>,
 }
 
 impl DerivedHostBuilder {
     pub fn component<C: DerivedComponent>(mut self, component: C) -> DerivedHostBuilder {
         self.schemas.push(component.schema());
+        // Read once, here: the writer never runs this component code (a
+        // panic would stop it); a panicking component is refused at start.
+        self.deferred
+            .push(panic::catch_unwind(AssertUnwindSafe(|| component.deferred_until())).map_err(|_| ()));
         self.components.push(Arc::new(Adapter(component)));
         self
     }
 
     /// Checks the components (D4) and starts the derived writer.
     pub fn start(self) -> Result<DerivedHost, EngineError> {
-        for component in &self.components {
-            if let Some(signal) = component.deferred_until() {
+        let mut deferred = Vec::with_capacity(self.deferred.len());
+        for read in self.deferred {
+            let Ok(read) = read else {
+                return Err(EngineError::internal("a derived component's deferred-until signal panicked"));
+            };
+            deferred.push(read);
+            if let Some(signal) = read {
                 let mut chars = signal.chars();
                 let valid = chars.next().is_some_and(|c| c.is_ascii_lowercase())
                     && chars.all(|c| c.is_ascii_alphanumeric());
@@ -490,6 +498,7 @@ impl DerivedHostBuilder {
             threads: self.engine.threads().clone(),
             registry,
             components: self.components,
+            deferred,
             sent: Arc::default(),
             state: Mutex::new(SharedState {
                 bound: None,
@@ -545,6 +554,7 @@ impl DerivedHost {
             engine: engine.clone(),
             schemas: Vec::new(),
             components: Vec::new(),
+            deferred: Vec::new(),
         }
     }
 
@@ -1181,7 +1191,7 @@ impl Worker {
             Msg::Signal(name) => {
                 if self.collection.is_some() {
                     for slot in 0..self.slots.len() {
-                        if self.shared.components[slot].deferred_until() == Some(name.as_str()) {
+                        if self.shared.deferred[slot] == Some(name.as_str()) {
                             self.holds[slot] = false;
                         }
                     }
@@ -1304,7 +1314,7 @@ impl Worker {
         // and a later replacement that opens it rebuilds held (D4).
         if hold {
             for slot in 0..self.slots.len() {
-                self.holds[slot] = self.shared.components[slot].deferred_until().is_some();
+                self.holds[slot] = self.shared.deferred[slot].is_some();
             }
         }
         let Some(verdicts) = self.open_file(&collection, mark, seq) else {

@@ -1,24 +1,31 @@
-//! The buttons part's record (`stats/graphs-revlog` V6). Its members and its computation
-//! are U99's; until they land, a request naming this graph fails with
-//! [`NotBuilt`] rather than return made-up values.
+//! The `buttons` record (`stats/graphs-revlog` V6): U99 gives it its members, fills
+//! [`build`] from the scope and writes its encoding. Until then a request
+//! naming it gets [`NotBuilt`], never invented values.
 
-use super::{GraphInput, NotBuilt};
+use super::{GraphInput, GraphRecord, NotBuilt};
 use crate::graphs::encoding::Encoder;
 use crate::graphs::records::Graph;
 
-/// The record (`stats/graphs-revlog` V6).
+/// `stats/graphs-revlog` V6.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct AnswerButtonsRecord {}
 
-pub(crate) fn compute(input: &GraphInput<'_>) -> Result<AnswerButtonsRecord, NotBuilt> {
+pub(crate) fn build(input: &GraphInput<'_>) -> Result<AnswerButtonsRecord, NotBuilt> {
     let _ = input;
     Err(NotBuilt(Graph::AnswerButtons))
 }
 
-impl AnswerButtonsRecord {
-    /// Its G6 encoding.
-    pub fn encode(&self, out: &mut Encoder) {
+impl GraphRecord for AnswerButtonsRecord {
+    fn graph(&self) -> Graph {
+        Graph::AnswerButtons
+    }
+
+    fn encode(&self, out: &mut Encoder) {
         let _ = out;
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }

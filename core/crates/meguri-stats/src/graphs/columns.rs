@@ -396,6 +396,11 @@ impl RevlogTable {
         self.columns[R_ID].get(index)
     }
 
+    /// The card slot of the row at `index`, none for a deleted card's row.
+    pub(crate) fn slot(&self, index: usize) -> Option<usize> {
+        usize::try_from(self.columns[R_SLOT].get(index)).ok()
+    }
+
     pub(crate) fn get(&self, index: usize) -> SlottedRow {
         let get = |column: usize| self.columns[column].get(index);
         let slot = get(R_SLOT);

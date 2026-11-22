@@ -132,8 +132,9 @@ pub fn write_new(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, Storag
         return Err(io_error("writing", &path, &error));
     }
     // The new name reaches the disk with the directory.
-    if let Ok(directory) = fs::File::open(dir) {
-        let _ = directory.sync_all();
+    if let Err(error) = fs::File::open(dir).and_then(|directory| directory.sync_all()) {
+        let _ = fs::remove_file(&path);
+        return Err(io_error("flushing", dir, &error));
     }
     Ok(path)
 }
@@ -164,7 +165,15 @@ impl std::fmt::Debug for MappedFile {
 
 impl MappedFile {
     /// Maps the whole file at `path`.
-    pub fn open(path: &Path) -> Result<MappedFile, StorageError> {
+    ///
+    /// # Safety
+    ///
+    /// The file must not be written or truncated while the map, or a slice
+    /// [`MappedFile::bytes`] gave, is alive: its bytes would change under a
+    /// shared borrow, and a read past a truncated end raises SIGBUS. A file
+    /// [`write_new`] created satisfies this as long as nothing opens it for
+    /// writing again (deleting it is fine).
+    pub unsafe fn open(path: &Path) -> Result<MappedFile, StorageError> {
         let file = fs::File::open(path).map_err(|e| io_error("opening", path, &e))?;
         let len = file.metadata().map_err(|e| io_error("reading", path, &e))?.len();
         let len = usize::try_from(len).map_err(|_| StorageError::Io {

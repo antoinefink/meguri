@@ -291,11 +291,16 @@ impl Iterator for Rows<'_> {
                 (None, None) => return None,
                 (Some(base), Some(patched)) if patched < base => self.take_patched()?,
                 (None, Some(_)) => self.take_patched()?,
-                (Some(_), _) => {
-                    let slotted = revlog.get(self.next);
+                (Some(id), _) => {
+                    let index = self.next;
                     self.next += 1;
-                    let card = data.view.base_row_card(slotted.row.id, slotted.slot);
-                    (Some(slotted.row), card)
+                    // The card first: a row outside the scope is never
+                    // decoded.
+                    let card = data.view.base_row_card(id, revlog.slot(index));
+                    if !data.row_counts(card) {
+                        continue;
+                    }
+                    (Some(revlog.get(index).row), card)
                 }
             };
             if let Some(row) = row

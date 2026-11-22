@@ -1,42 +1,45 @@
-//! The graphs (`stats/graphs-common` G5) and their records (G6): one
-//! variant per graph, in Anki's order, each record in its own file so the
-//! units that build them (U99 the review-log graphs, U101 the card graphs)
-//! never edit one another's. A record holds aggregates at the finest
-//! resolution and the extras its graph spec lists, nothing per card or row.
+//! The graphs a request can name (`stats/graphs-common` G5) and the records
+//! they give (G6). Each record lives in its own file, so the units that
+//! build them (U99 for the review-log ones, U101 for the card ones) never
+//! touch the same file; this one only lists them. A record holds
+//! aggregates at the finest resolution plus its graph spec's extras, never
+//! a value per card or per row.
 
-pub mod today;
-pub mod future_due;
-pub mod calendar;
-pub mod reviews;
-pub mod card_counts;
-pub mod intervals;
-pub mod stability;
-pub mod difficulty;
-pub mod retrievability;
-pub mod retention;
-pub mod hourly;
-pub mod answer_buttons;
+use std::sync::Arc;
+
 pub mod added;
+pub mod answer_buttons;
+pub mod calendar;
+pub mod card_counts;
+pub mod difficulty;
+pub mod future_due;
+pub mod hourly;
+pub mod intervals;
+pub mod retention;
+pub mod retrievability;
+pub mod reviews;
+pub mod stability;
+pub mod today;
 
-pub use today::TodayRecord;
-pub use future_due::FutureDueRecord;
-pub use calendar::CalendarRecord;
-pub use reviews::ReviewsRecord;
-pub use card_counts::CardCountsRecord;
-pub use intervals::IntervalsRecord;
-pub use stability::StabilityRecord;
-pub use difficulty::DifficultyRecord;
-pub use retrievability::RetrievabilityRecord;
-pub use retention::RetentionRecord;
-pub use hourly::HourlyRecord;
-pub use answer_buttons::AnswerButtonsRecord;
 pub use added::AddedRecord;
+pub use answer_buttons::AnswerButtonsRecord;
+pub use calendar::CalendarRecord;
+pub use card_counts::CardCountsRecord;
+pub use difficulty::DifficultyRecord;
+pub use future_due::FutureDueRecord;
+pub use hourly::HourlyRecord;
+pub use intervals::IntervalsRecord;
+pub use retention::RetentionRecord;
+pub use retrievability::RetrievabilityRecord;
+pub use reviews::ReviewsRecord;
+pub use stability::StabilityRecord;
+pub use today::TodayRecord;
 
 use super::context::{Context, Preferences};
 use super::encoding::Encoder;
 use super::scope::{History, ScopeData};
 
-/// A graph of the set (G5), in Anki's order (R1357). Card Ease is not one
+/// One graph, listed in the order of G5 (R1357); Card Ease is absent
 /// (R1360).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Graph {
@@ -55,88 +58,58 @@ pub enum Graph {
     Added,
 }
 
+/// What every record offers the bridge and the observation.
+pub trait GraphRecord: std::fmt::Debug + Send + Sync {
+    fn graph(&self) -> Graph;
+    /// The G6 bytes U103 carries.
+    fn encode(&self, out: &mut Encoder);
+    /// For a caller that reads one graph's members.
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
+/// A computed record, shared by the result and its clones.
+pub type Record = Arc<dyn GraphRecord>;
+
+type Builder = fn(&GraphInput<'_>) -> Result<Record, NotBuilt>;
+
+fn boxed<T: GraphRecord + 'static>(record: T) -> Record {
+    Arc::new(record)
+}
+
+/// Each graph with its `stats` observation part name (G14,
+/// `stats/graphs-revlog` V8, `stats/graphs-cards` C12) and its builder.
+const GRAPHS: [(Graph, &str, Builder); 13] = [
+    (Graph::Today, "today", |input| today::build(input).map(boxed)),
+    (Graph::FutureDue, "future_due", |input| future_due::build(input).map(boxed)),
+    (Graph::Calendar, "calendar", |input| calendar::build(input).map(boxed)),
+    (Graph::Reviews, "reviews", |input| reviews::build(input).map(boxed)),
+    (Graph::CardCounts, "card_counts", |input| card_counts::build(input).map(boxed)),
+    (Graph::Intervals, "intervals", |input| intervals::build(input).map(boxed)),
+    (Graph::Stability, "stability", |input| stability::build(input).map(boxed)),
+    (Graph::Difficulty, "difficulty", |input| difficulty::build(input).map(boxed)),
+    (Graph::Retrievability, "retrievability", |input| retrievability::build(input).map(boxed)),
+    (Graph::Retention, "true_retention", |input| retention::build(input).map(boxed)),
+    (Graph::Hourly, "hours", |input| hourly::build(input).map(boxed)),
+    (Graph::AnswerButtons, "buttons", |input| answer_buttons::build(input).map(boxed)),
+    (Graph::Added, "added", |input| added::build(input).map(boxed)),
+];
+
 impl Graph {
-    pub const ALL: [Graph; 13] = [Graph::Today, Graph::FutureDue, Graph::Calendar, Graph::Reviews, Graph::CardCounts, Graph::Intervals, Graph::Stability, Graph::Difficulty, Graph::Retrievability, Graph::Retention, Graph::Hourly, Graph::AnswerButtons, Graph::Added];
+    /// Every graph, in G5's order.
+    pub fn all() -> impl Iterator<Item = Graph> {
+        GRAPHS.iter().map(|(graph, _, _)| *graph)
+    }
 
-    /// Its part name in the `stats` observation (G14, `stats/graphs-revlog`
-    /// V8, `stats/graphs-cards` C12).
+    /// Its part name in the `stats` observation.
     pub fn part(self) -> &'static str {
-        match self {
-            Graph::Today => "today",
-            Graph::FutureDue => "future_due",
-            Graph::Calendar => "calendar",
-            Graph::Reviews => "reviews",
-            Graph::CardCounts => "card_counts",
-            Graph::Intervals => "intervals",
-            Graph::Stability => "stability",
-            Graph::Difficulty => "difficulty",
-            Graph::Retrievability => "retrievability",
-            Graph::Retention => "true_retention",
-            Graph::Hourly => "hours",
-            Graph::AnswerButtons => "buttons",
-            Graph::Added => "added",
-        }
+        GRAPHS
+            .iter()
+            .find(|(graph, _, _)| *graph == self)
+            .map_or("", |(_, part, _)| part)
     }
 }
 
-/// A graph's record (G6).
-#[derive(Clone, Debug, PartialEq)]
-pub enum Record {
-    Today(TodayRecord),
-    FutureDue(FutureDueRecord),
-    Calendar(CalendarRecord),
-    Reviews(ReviewsRecord),
-    CardCounts(CardCountsRecord),
-    Intervals(IntervalsRecord),
-    Stability(StabilityRecord),
-    Difficulty(DifficultyRecord),
-    Retrievability(RetrievabilityRecord),
-    Retention(RetentionRecord),
-    Hourly(HourlyRecord),
-    AnswerButtons(AnswerButtonsRecord),
-    Added(AddedRecord),
-}
-
-impl Record {
-    pub fn graph(&self) -> Graph {
-        match self {
-            Record::Today(_) => Graph::Today,
-            Record::FutureDue(_) => Graph::FutureDue,
-            Record::Calendar(_) => Graph::Calendar,
-            Record::Reviews(_) => Graph::Reviews,
-            Record::CardCounts(_) => Graph::CardCounts,
-            Record::Intervals(_) => Graph::Intervals,
-            Record::Stability(_) => Graph::Stability,
-            Record::Difficulty(_) => Graph::Difficulty,
-            Record::Retrievability(_) => Graph::Retrievability,
-            Record::Retention(_) => Graph::Retention,
-            Record::Hourly(_) => Graph::Hourly,
-            Record::AnswerButtons(_) => Graph::AnswerButtons,
-            Record::Added(_) => Graph::Added,
-        }
-    }
-
-    /// The G6 encoding U103's bridge carries.
-    pub fn encode(&self, out: &mut Encoder) {
-        match self {
-            Record::Today(record) => record.encode(out),
-            Record::FutureDue(record) => record.encode(out),
-            Record::Calendar(record) => record.encode(out),
-            Record::Reviews(record) => record.encode(out),
-            Record::CardCounts(record) => record.encode(out),
-            Record::Intervals(record) => record.encode(out),
-            Record::Stability(record) => record.encode(out),
-            Record::Difficulty(record) => record.encode(out),
-            Record::Retrievability(record) => record.encode(out),
-            Record::Retention(record) => record.encode(out),
-            Record::Hourly(record) => record.encode(out),
-            Record::AnswerButtons(record) => record.encode(out),
-            Record::Added(record) => record.encode(out),
-        }
-    }
-}
-
-/// What a graph computes from: the resolved scope and the request's
+/// What a record is computed from: the resolved scope, and the request's
 /// context, preferences and history.
 #[derive(Clone, Copy, Debug)]
 pub struct GraphInput<'a> {
@@ -146,25 +119,15 @@ pub struct GraphInput<'a> {
     pub history: History,
 }
 
-/// A graph whose record is not built yet (its unit has not landed).
+/// A graph whose record's unit has not landed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NotBuilt(pub Graph);
 
-/// The record of `graph`.
+/// The record of `graph` over `input`.
 pub(crate) fn compute(graph: Graph, input: &GraphInput<'_>) -> Result<Record, NotBuilt> {
-    Ok(match graph {
-        Graph::Today => Record::Today(today::compute(input)?),
-        Graph::FutureDue => Record::FutureDue(future_due::compute(input)?),
-        Graph::Calendar => Record::Calendar(calendar::compute(input)?),
-        Graph::Reviews => Record::Reviews(reviews::compute(input)?),
-        Graph::CardCounts => Record::CardCounts(card_counts::compute(input)?),
-        Graph::Intervals => Record::Intervals(intervals::compute(input)?),
-        Graph::Stability => Record::Stability(stability::compute(input)?),
-        Graph::Difficulty => Record::Difficulty(difficulty::compute(input)?),
-        Graph::Retrievability => Record::Retrievability(retrievability::compute(input)?),
-        Graph::Retention => Record::Retention(retention::compute(input)?),
-        Graph::Hourly => Record::Hourly(hourly::compute(input)?),
-        Graph::AnswerButtons => Record::AnswerButtons(answer_buttons::compute(input)?),
-        Graph::Added => Record::Added(added::compute(input)?),
-    })
+    let (_, _, build) = GRAPHS
+        .iter()
+        .find(|(listed, _, _)| *listed == graph)
+        .ok_or(NotBuilt(graph))?;
+    build(input)
 }

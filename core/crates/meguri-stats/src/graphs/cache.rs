@@ -103,6 +103,11 @@ struct State {
     written: HashMap<String, (u64, u64)>,
     cards: HashMap<String, Arc<CardTable>>,
     revlog: HashMap<String, Arc<RevlogTable>>,
+    /// Advanced by each release: a map begun before it is not kept.
+    epoch: u64,
+    /// A file the live rows name did not load: the next commit's capture
+    /// asks for a rebuild (G9.3).
+    rebuild: bool,
     next_name: u64,
 }
 
@@ -120,26 +125,40 @@ impl Shared {
     /// Maps the file a record names, checking its length and checksum
     /// (G9.3), or takes the map already held.
     fn card_table(&self, dir: &Path, record: &FileRecord) -> Result<Arc<CardTable>, EngineError> {
-        if let Some(table) = self.lock().cards.get(&record.name) {
-            return Ok(Arc::clone(table));
-        }
+        let epoch = {
+            let state = self.lock();
+            if let Some(table) = state.cards.get(&record.name) {
+                return Ok(Arc::clone(table));
+            }
+            state.epoch
+        };
         let table = Arc::new(
             CardTable::open(Backing::Mapped(Arc::new(map(dir, record)?)))
                 .map_err(|e| internal(format!("the card copy {}: {}", record.name, e.0)))?,
         );
-        self.lock().cards.insert(record.name.clone(), Arc::clone(&table));
+        let mut state = self.lock();
+        if state.epoch == epoch {
+            state.cards.insert(record.name.clone(), Arc::clone(&table));
+        }
         Ok(table)
     }
 
     fn revlog_table(&self, dir: &Path, record: &FileRecord) -> Result<Arc<RevlogTable>, EngineError> {
-        if let Some(table) = self.lock().revlog.get(&record.name) {
-            return Ok(Arc::clone(table));
-        }
+        let epoch = {
+            let state = self.lock();
+            if let Some(table) = state.revlog.get(&record.name) {
+                return Ok(Arc::clone(table));
+            }
+            state.epoch
+        };
         let table = Arc::new(
             RevlogTable::open(Backing::Mapped(Arc::new(map(dir, record)?)))
                 .map_err(|e| internal(format!("the review-log copy {}: {}", record.name, e.0)))?,
         );
-        self.lock().revlog.insert(record.name.clone(), Arc::clone(&table));
+        let mut state = self.lock();
+        if state.epoch == epoch {
+            state.revlog.insert(record.name.clone(), Arc::clone(&table));
+        }
         Ok(table)
     }
 
@@ -195,7 +214,11 @@ impl Shared {
         let (cards, revlog) = match tables {
             Ok(tables) => tables,
             Err(error) => {
+                // The rows this current snapshot reads name the live base: it
+                // is damaged, which is a rebuild (G9.3), asked by the next
+                // commit's capture or the next persist.
                 tracing::warn!(%error, "mapping the stats column files");
+                self.lock().rebuild = true;
                 return None;
             }
         };
@@ -261,7 +284,9 @@ impl Shared {
 }
 
 fn map(dir: &Path, record: &FileRecord) -> Result<MappedFile, EngineError> {
-    let file = MappedFile::open(&dir.join(&record.name))?;
+    // SAFETY: column files are written whole once (`write_new`, a new name
+    // each time) and only ever read or deleted after that (G9.3).
+    let file = unsafe { MappedFile::open(&dir.join(&record.name)) }?;
     let bytes = file.bytes();
     if i64::try_from(bytes.len()).ok() != Some(record.length) || checksum(bytes) != record.checksum {
         return Err(internal(format!(
@@ -438,8 +463,9 @@ impl DerivedComponent for StatsColumns {
     fn apply(&self, _tables: &ComponentTables<'_>, ColumnsDelta(delta): ColumnsDelta) -> Result<(), EngineError> {
         let mut state = self.shared.lock();
         // Entries of an older generation can no longer be read.
+        // The overlay holds one generation: its last entry says which.
         let generation = delta.generation;
-        if state.entries.iter().any(|entry| entry.generation != generation) {
+        if state.entries.last().is_some_and(|entry| entry.generation != generation) {
             state.entries.retain(|entry| entry.generation == generation);
         }
         state.entries.push(delta);
@@ -582,11 +608,15 @@ impl DerivedComponent for StatsColumns {
         state.entries.clear();
         state.cards.clear();
         state.revlog.clear();
+        state.epoch += 1;
     }
 }
 
 impl StatsColumns {
     fn capture_rows(&self, commit: &ObservedCommit<'_>, rows: Option<&ObserverRows<'_>>) -> Capture<ColumnsDelta> {
+        if std::mem::take(&mut self.shared.lock().rebuild) {
+            return Capture::Rebuild;
+        }
         let changes = commit.changes;
         if changes.cards.is_empty() && changes.revlog_added.is_empty() && changes.revlog_removed.is_empty() {
             return Capture::Nothing;

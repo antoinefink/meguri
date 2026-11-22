@@ -36,7 +36,7 @@ use meguri_storage::{Cell, ReadRows, ReaderRole};
 pub use browse::BrowseScope;
 pub use cache::{COMPONENT, HOME_IDLE, StatsColumns};
 pub use context::{Context, ContextToken, Preferences};
-pub use records::{Graph, GraphInput, NotBuilt, Record};
+pub use records::{Graph, GraphInput, GraphRecord, NotBuilt, Record};
 pub use rows::{StatsCard, StatsRow};
 pub use scope::{History, Scope, ScopeData, ScopeRow, Unreadable};
 
@@ -340,7 +340,12 @@ impl StatsCaches {
         // when that request returns, whatever it gives (G8.3).
         let memo = {
             let mut held = self.memo.lock().unwrap_or_else(PoisonError::into_inner);
-            if held.as_ref().is_some_and(|memo| memo.key == key) { held.take() } else { None }
+            // A Snapshot request computes afresh, whatever the memo holds.
+            if request.columns == Columns::Cached && held.as_ref().is_some_and(|memo| memo.key == key) {
+                held.take()
+            } else {
+                None
+            }
         };
         let (data, browse) = match memo {
             Some(memo) => (memo.data, memo.browse),

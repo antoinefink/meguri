@@ -157,6 +157,10 @@ impl<'a> Decoder<'a> {
         for shift in (0..64).step_by(7) {
             let byte = *self.bytes.get(self.at).ok_or(DecodeError("truncated"))?;
             self.at += 1;
+            // The tenth byte holds the 64th bit only.
+            if shift == 63 && byte & 0x7f > 1 {
+                return Err(DecodeError("a varint over 64 bits"));
+            }
             value |= u64::from(byte & 0x7f) << shift;
             if byte & 0x80 == 0 {
                 return Ok(value);
@@ -186,8 +190,9 @@ impl<'a> Decoder<'a> {
 
     pub fn text(&mut self) -> Result<String, DecodeError> {
         let len = usize::try_from(self.unsigned()?).map_err(|_| DecodeError("a text length"))?;
-        let bytes = self.bytes.get(self.at..self.at + len).ok_or(DecodeError("truncated"))?;
-        self.at += len;
+        let end = self.at.checked_add(len).ok_or(DecodeError("a text length"))?;
+        let bytes = self.bytes.get(self.at..end).ok_or(DecodeError("truncated"))?;
+        self.at = end;
         String::from_utf8(bytes.to_vec()).map_err(|_| DecodeError("a text that is not UTF-8"))
     }
 
@@ -254,6 +259,19 @@ mod tests {
         let mut encoder = Encoder::new();
         encoder.integer(value);
         encoder.len()
+    }
+
+    #[test]
+    fn a_varint_beyond_64_bits_or_a_huge_text_does_not_decode() {
+        let mut over = vec![0x80u8; 9];
+        over.push(0x02);
+        assert!(Decoder::new(&over).unsigned().is_err());
+        let mut max = vec![0xffu8; 9];
+        max.push(0x01);
+        assert_eq!(Decoder::new(&max).unsigned().unwrap(), u64::MAX);
+        let mut huge = Encoder::new();
+        huge.unsigned(u64::MAX);
+        assert!(Decoder::new(&huge.into_bytes()).text().is_err());
     }
 
     #[test]
