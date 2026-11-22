@@ -163,7 +163,12 @@ struct SyncServiceRows: View {
         .disabled(changing || sync.providerState?.phase == .handoffRecovery || collection.meguriSignInPreparing || sync.meguriBusy)
         .accessibilityIdentifier("settings.sync.service")
         // Synthetic examples only: open the confirmation the example names.
-        .task { if let request = sync.renderServiceSwitch { choose(request.destination) } }
+        .task {
+            guard let request = sync.renderServiceSwitch else { return }
+            // The window must be on screen before an alert can attach to it.
+            try? await Task.sleep(for: .milliseconds(800))
+            choose(request.destination)
+        }
         .modifier(ServiceSwitchQuestion(collection: collection, destination: $destination, source: switchSource) { value, shown in
             change(value, shown: shown)
         })

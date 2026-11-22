@@ -35,11 +35,12 @@ extension SyncCoordinator {
         guard source == .meguri else { return .init(changes: .unknown, acceptanceUnknown: acceptanceUnknown) }
         var media: UInt64?
         // This device's side only (T18.6): files waiting to upload or excluded from it.
-        if let report = meguriRoundReport?.media, case .media(let facts) = report.outcome,
-           let excluded = facts.excluded, let pending = facts.pending {
-            media = Self.sum(excluded, pending)
-        } else if let accounting = meguriAccounting {
+        // A setup's accounting is newer than a retained round report: a round clears it.
+        if let accounting = meguriAccounting {
             media = UInt64(accounting.files.filter { $0.state != .transferred }.count)
+        } else if let report = meguriRoundReport?.media, case .media(let facts) = report.outcome,
+                  let excluded = facts.excluded, let pending = facts.pending {
+            media = Self.sum(excluded, pending)
         }
         return .init(changes: meguriRoutine == .pending ? .some : .unknown, media: media,
                      acceptanceUnknown: acceptanceUnknown)
