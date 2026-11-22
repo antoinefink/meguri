@@ -271,8 +271,8 @@ Changed 2026-11-22 (round 11): Future Due's Meguri extras add `future_due_young`
 
 | Graph (G5) | Part (C12) | Anki's members | Meguri extras |
 |---|---|---|---|
-| Future Due | `future_due` | `future_due`, `have_backlog`, `daily_load` | due tomorrow |
-| Card Counts | `card_counts` | `including_inactive`, `excluding_inactive` | notes, label texts |
+| Future Due | `future_due` | `future_due`, `have_backlog`, `daily_load` | due tomorrow, `future_due_young` (round 11) |
+| Card Counts | `card_counts` | `including_inactive`, `excluding_inactive` | notes, label texts, `suspended_by_state` (round 11) |
 | Intervals | `intervals` | `intervals` | none |
 | Stability | `stability` | `intervals` | left out |
 | Difficulty | `difficulty` | `eases`, `average` | left out |
