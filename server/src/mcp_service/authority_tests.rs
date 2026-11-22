@@ -10,6 +10,9 @@ use serde_json::json;
 use sha2::Digest as _;
 use std::collections::BTreeMap;
 
+#[path = "search_tests.rs"]
+mod search_tests;
+
 const ORIGIN: &str = "https://mcp-generated.example.test";
 struct Fixture { _temp: tempfile::TempDir, service: Arc<Service>, token: String, path: PathBuf }
 impl Fixture {
@@ -407,7 +410,7 @@ async fn media_blob_durability_failure_rolls_back_note_before_metadata_commit() 
     let result=f.service.metadata.files(move |_| {
         let pin=root.pin_collection(&path)?;
         let publication=path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_owned();
-        let context=Context {account:original.account_id().to_owned(),publication};
+        let context=Context {account:original.account_id().to_owned(),publication:original.publication_context(&publication)};
         let held=Arc::new(HeldPublication {root:root.clone(),path:path.clone(),_pin:pin,_barrier:barrier,_guard:guard});
         let authority=CollectionAuthority {original,context,held,sessions,write:true,probe:None};
         let mut install=||crate::test_hooks::storage_failure("media_before_blob_durability",||media::install_insert(&root,&authority.original,&mut prepared));

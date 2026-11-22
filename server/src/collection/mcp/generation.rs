@@ -9,14 +9,17 @@ use regex::Regex;
 
 const MAX_SIBLINGS: usize = 2048;
 pub(super) struct Sibling { pub ord: u16, pub home: i64, pub new_position: Option<i64> }
-pub(super) fn siblings(c: &Connection, id: i64) -> Result<Vec<Sibling>> {
+pub(super) fn prepare_siblings(c: &Connection) -> Result<rusqlite::Statement<'_>> {
     // A row LIMIT does not bound a table scan. Require the intended single-key
     // nid index, then force it so missing/partial/wrong indexes refuse safely.
     // Never repair uploaded schema in a request.
     let indexed: bool = c.query_row("SELECT count(*)=1 AND min(name)='nid' AND min(coll)='BINARY' FROM pragma_index_xinfo('ix_cards_nid') WHERE key=1", [], |r|r.get::<_,Option<bool>>(0))
         .map_err(sql_error)?.unwrap_or(false);
     if !indexed { return Err(unsupported()); }
-    let mut q=c.prepare("SELECT ord,did,odid,type,due,odue FROM cards INDEXED BY ix_cards_nid WHERE nid=?1 ORDER BY id LIMIT ?2").map_err(sql_error)?;
+    c.prepare("SELECT ord,did,odid,type,due,odue FROM cards INDEXED BY ix_cards_nid WHERE nid=?1 ORDER BY id LIMIT ?2").map_err(sql_error)
+}
+pub(super) fn siblings(c: &Connection, id: i64) -> Result<Vec<Sibling>> {
+    let mut q=prepare_siblings(c)?;
     let sql_limit=i64::try_from(MAX_SIBLINGS+1).map_err(|_|too_large())?;
     let mut rows=q.query(params![id,sql_limit]).map_err(sql_error)?;
     let mut result=Vec::new();
