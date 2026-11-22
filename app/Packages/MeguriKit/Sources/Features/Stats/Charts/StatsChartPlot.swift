@@ -1,0 +1,475 @@
+import AppModel
+import Charts
+import DesignSystem
+import SwiftUI
+
+/// A chart's selection (S8.3): the bin under the pointer or the finger, and
+/// whether a click, a touch or the keyboard pinned it. A caller that shares one
+/// selection between plots (Time of Day's two panels) or clears it (a switch, the
+/// period, a click outside) holds it; otherwise the plot keeps its own.
+public struct StatsChartSelection: Hashable, Sendable {
+    public var bin: Int?
+    public var pinned: Bool
+
+    public init(bin: Int? = nil, pinned: Bool = false) {
+        self.bin = bin
+        self.pinned = pinned
+    }
+
+    public static let none = StatsChartSelection()
+}
+
+/// How tall a box's plot is (N25.4: a fixed height per box size). The plot
+/// keeps it at every text size (S15).
+public enum StatsPlotSize: Hashable, Sendable {
+    /// A section's lead box, which spans its row.
+    case lead
+    /// The other boxes.
+    case regular
+    /// A chart's own page (N25.5's taller plot).
+    case page
+
+    var height: CGFloat {
+        switch self {
+        case .lead: 200
+        case .regular: 150
+        case .page: 320
+        }
+    }
+
+    /// About how many axis labels fit under it.
+    var axisLabels: Int {
+        switch self {
+        case .lead, .page: 7
+        case .regular: 4
+        }
+    }
+}
+
+/// What a plot shows besides its marks.
+enum StatsPlotPhase: Hashable {
+    case ready
+    /// S10.3: the system's small progress indicator, determinate with a fraction.
+    case loading(Double?)
+    /// S8.5: one line that says why.
+    case message(String)
+}
+
+/// The plot of a box (N25.4 part 3): Swift Charts, the y axis on the trailing
+/// side, one axis only (S8.2), the selection and its callout (S8.3), the plot
+/// keys (S14), the accessibility elements (S15) and the system legend under it.
+struct StatsChartPlot: View {
+    let data: StatsChartData
+    let phase: StatsPlotPhase
+    let size: StatsPlotSize
+    /// The box's sentence: the chart element's label (S15).
+    let summary: String
+    @Binding var selection: StatsChartSelection
+    /// Runs Show in Browse for a bin; nil when the caller offers none.
+    let showInBrowse: ((Int) -> Void)?
+    /// Draws stacked series apart; nil follows Differentiate Without Colour.
+    var separatesSeries: Bool?
+
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.locale) private var locale
+    @Environment(\.calendar) private var calendar
+    @Environment(\.appClock) private var clock
+    @FocusState private var focused: Bool
+
+    private var format: StatsChartFormat { StatsChartFormat(locale: locale, calendar: calendar, now: clock.now()) }
+    private var isReady: Bool { phase == .ready && !data.bins.isEmpty }
+    private var separated: Bool { separatesSeries ?? differentiateWithoutColor }
+    private var domain: ClosedRange<Double> { isReady ? data.yDomain : 0...1 }
+
+    /// The gap between two stacked segments, in data units: about 1.5 points
+    /// of the plot's fixed height.
+    private var segmentGap: Double { (domain.upperBound - domain.lowerBound) * 1.5 / size.height }
+
+    var body: some View {
+        chart
+            .chartPlotStyle { $0.frame(height: size.height) }
+            .chartYScale(domain: domain)
+            .chartXScale(domain: binIDs)
+            .chartForegroundStyleScale(domain: data.legendNames, range: legendColors)
+            .chartLegend(position: .bottom, alignment: .leading)
+            .chartXAxis { xAxis }
+            .chartYAxis { yAxis }
+            .chartOverlay { proxy in overlay(proxy) }
+            .focusable(isReady)
+            .focused($focused)
+            .onKeyPress(.leftArrow) { move(-1) }
+            .onKeyPress(.rightArrow) { move(1) }
+            .onKeyPress(.escape) { clear() }
+            .onKeyPress(.return) { browseSelected() }
+            .onChange(of: data.bins.count) {
+                // A refresh in place keeps the selection (S10.2); a bin that is
+                // gone clears it. Switches and the period clear it in the caller.
+                if let bin = selection.bin, bin >= data.bins.count { selection = .none }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(summary)
+            .accessibilityChartDescriptor(StatsAudioGraph(data: isReady ? data : data.skeleton(), format: format, summary: summary))
+    }
+
+    // MARK: Marks
+
+    /// Bin ids: categories, so bars sit in bands and lines join their centres.
+    private var binIDs: [String] {
+        isReady ? data.bins.indices.map(Self.id) : [Self.placeholderID]
+    }
+
+    private static let placeholderID = " "
+    static func id(_ bin: Int) -> String { "b\(bin)" }
+    static func bin(_ id: String) -> Int? { id.hasPrefix("b") ? Int(id.dropFirst()) : nil }
+
+    private var legendColors: [Color] {
+        data.series.map(\.color.color) + data.rules.map(\.color.color)
+    }
+
+    private var fadedOpacity: Double { contrast == .increased ? 0.5 : 0.3 }
+
+    private func opacity(at bin: Int) -> Double {
+        guard let selected = selection.bin else { return 1 }
+        return selected == bin ? 1 : fadedOpacity
+    }
+
+    private var chart: some View {
+        Chart {
+            if isReady {
+                stacked
+                singles
+                rules
+                selectionRule
+            } else {
+                // No values yet: one invisible mark per legend entry keeps the
+                // system legend and the axes in place (S10.3).
+                ForEach(data.legendNames, id: \.self) { name in
+                    PointMark(x: .value("Period", Self.placeholderID), y: .value("Value", 0))
+                        .foregroundStyle(by: .value("Series", name))
+                        .opacity(0)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+    }
+
+    @ChartContentBuilder private var stacked: some ChartContent {
+        let segments = data.stackedSegments()
+        let topmost = Dictionary(grouping: segments.filter { $0.upper > $0.lower }, by: \.bin).mapValues { $0.map(\.series).max() ?? 0 }
+        ForEach(segments.filter { $0.upper > $0.lower }, id: \.self) { segment in
+            let series = data.series[segment.series]
+            let gap = (separated || series.mark == .stackedArea) && topmost[segment.bin] != segment.series ? segmentGap : 0
+            switch series.mark {
+            case .stackedArea:
+                AreaMark(
+                    x: .value("Period", Self.id(segment.bin)),
+                    yStart: .value("From", segment.lower),
+                    yEnd: .value("To", max(segment.lower, segment.upper - gap)),
+                    series: .value("Series", series.name)
+                )
+                .foregroundStyle(by: .value("Series", series.name))
+                .opacity(opacity(at: segment.bin) == 1 ? 1 : 0.85)
+                .accessibilityHidden(true)
+            default:
+                BarMark(
+                    x: .value("Period", Self.id(segment.bin)),
+                    yStart: .value("From", segment.lower),
+                    yEnd: .value("To", max(segment.lower, segment.upper - gap)),
+                    width: barWidth
+                )
+                .foregroundStyle(by: .value("Series", series.name))
+                .opacity(opacity(at: segment.bin))
+                .accessibilityHidden(true)
+            }
+        }
+    }
+
+    @ChartContentBuilder private var singles: some ChartContent {
+        ForEach(data.series.filter { $0.mark == .bar }) { series in
+            ForEach(Array(series.values.enumerated()).filter { $0.element != nil }, id: \.offset) { bin, value in
+                BarMark(x: .value("Period", Self.id(bin)), y: .value("Value", value ?? 0), width: barWidth)
+                    .foregroundStyle(by: .value("Series", series.name))
+                    .opacity(opacity(at: bin))
+                    .accessibilityHidden(true)
+            }
+        }
+        ForEach(data.series.filter(\.isLine)) { series in
+            if case let .line(dashed, points) = series.mark {
+                lineContent(series, dashed: dashed, points: points || data.isSparse)
+            }
+        }
+    }
+
+    /// A line: a nil value breaks it; an open point is drawn as a ring and left out (S7.2).
+    @ChartContentBuilder private func lineContent(_ series: StatsSeries, dashed: Bool, points: Bool) -> some ChartContent {
+        let pieces = Self.linePieces(series)
+        ForEach(pieces, id: \.self) { piece in
+            ForEach(piece.bins, id: \.self) { bin in
+                LineMark(
+                    x: .value("Period", Self.id(bin)),
+                    y: .value("Value", series.values[bin] ?? 0),
+                    series: .value("Piece", "\(series.id)#\(piece.index)")
+                )
+                .foregroundStyle(by: .value("Series", series.name))
+                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round, dash: dashed ? [4, 3] : []))
+                .accessibilityHidden(true)
+                if points || piece.bins.count == 1 {
+                    PointMark(x: .value("Period", Self.id(bin)), y: .value("Value", series.values[bin] ?? 0))
+                        .foregroundStyle(by: .value("Series", series.name))
+                        .symbolSize(30)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        ForEach(Array(series.openPoints).filter { series.values.indices.contains($0) && series.values[$0] != nil }, id: \.self) { bin in
+            PointMark(x: .value("Period", Self.id(bin)), y: .value("Value", series.values[bin] ?? 0))
+                .symbol { StatsOpenPoint(color: series.color.color) }
+                .accessibilityHidden(true)
+        }
+    }
+
+    struct LinePiece: Hashable {
+        var index: Int
+        var bins: [Int]
+    }
+
+    /// The runs of a line between the bins with no value; open points are left
+    /// out without breaking the line.
+    static func linePieces(_ series: StatsSeries) -> [LinePiece] {
+        var pieces: [LinePiece] = []
+        var current: [Int] = []
+        for (bin, value) in series.values.enumerated() {
+            if value == nil {
+                if !current.isEmpty { pieces.append(LinePiece(index: pieces.count, bins: current)) }
+                current = []
+            } else if !series.openPoints.contains(bin) {
+                current.append(bin)
+            }
+        }
+        if !current.isEmpty { pieces.append(LinePiece(index: pieces.count, bins: current)) }
+        return pieces
+    }
+
+    @ChartContentBuilder private var rules: some ChartContent {
+        ForEach(data.rules) { rule in
+            RuleMark(y: .value("Value", rule.value))
+                .foregroundStyle(by: .value("Series", rule.name))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ChartContentBuilder private var selectionRule: some ChartContent {
+        if let bin = selection.bin, data.bins.indices.contains(bin) {
+            RuleMark(x: .value("Period", Self.id(bin)))
+                .foregroundStyle(Color.secondary)
+                .lineStyle(StrokeStyle(lineWidth: 1))
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// Bars fill their band; with fewer than three bins holding data they keep a
+    /// fixed width instead (S8.5).
+    private var barWidth: MarkDimension {
+        data.isSparse ? .fixed(18) : .ratio(0.8)
+    }
+
+    // MARK: Axes
+
+    @AxisContentBuilder private var xAxis: some AxisContent {
+        if isReady {
+            let labels = format.labelledBins(data.bins, maximum: size.axisLabels)
+            AxisMarks(values: labels.keys.sorted().map(Self.id)) { value in
+                AxisValueLabel {
+                    if let id = value.as(String.self), let bin = Self.bin(id), let label = labels[bin] {
+                        Text(verbatim: label)
+                    }
+                }
+            }
+        } else {
+            // A blank label keeps the axis row's height (S8.5: the box keeps its size).
+            AxisMarks(values: [Self.placeholderID]) { _ in
+                AxisValueLabel { Text(verbatim: " ") }
+            }
+        }
+    }
+
+    @AxisContentBuilder private var yAxis: some AxisContent {
+        if isReady {
+            AxisMarks(position: .trailing, values: .automatic(desiredCount: size == .regular ? 3 : 4)) { value in
+                AxisGridLine()
+                AxisValueLabel {
+                    if let number = value.as(Double.self) {
+                        Text(verbatim: format.axisValue(number, unit: data.unit))
+                    }
+                }
+            }
+        } else {
+            AxisMarks(position: .trailing, values: [0.0]) { _ in
+                AxisValueLabel { Text(verbatim: " ") }
+            }
+        }
+    }
+
+    // MARK: Selection and the callout
+
+    @ViewBuilder private func overlay(_ proxy: ChartProxy) -> some View {
+        GeometryReader { geometry in
+            if let anchor = proxy.plotFrame {
+                let plot = geometry[anchor]
+                ZStack(alignment: .topLeading) {
+                    if isReady {
+                        interactionLayer(proxy, plot: plot)
+                        StatsAccessibilityBins(data: data, format: format, browse: showInBrowse)
+                            .frame(width: plot.width, height: plot.height)
+                            .offset(x: plot.minX, y: plot.minY)
+                        callout(proxy, plot: plot, in: geometry.size)
+                    } else {
+                        phaseView
+                            .frame(width: plot.width, height: plot.height)
+                            .offset(x: plot.minX, y: plot.minY)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var phaseView: some View {
+        switch phase {
+        case let .loading(fraction):
+            Group {
+                if let fraction {
+                    ProgressView(value: min(max(fraction, 0), 1))
+                        .frame(maxWidth: 160)
+                } else {
+                    ProgressView()
+                }
+            }
+            .controlSize(.small)
+        case let .message(text):
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, Spacing.medium)
+        case .ready:
+            // Ready with no bins: nothing to draw yet.
+            EmptyView()
+        }
+    }
+
+    private func bin(at x: CGFloat, proxy: ChartProxy, plot: CGRect) -> Int? {
+        guard let id: String = proxy.value(atX: min(max(x, plot.minX), plot.maxX - 1) - plot.minX, as: String.self) else { return nil }
+        return Self.bin(id)
+    }
+
+    private func interactionLayer(_ proxy: ChartProxy, plot: CGRect) -> some View {
+        Rectangle()
+            .fill(.clear)
+            .contentShape(Rectangle())
+            .frame(width: plot.width, height: plot.height)
+            .offset(x: plot.minX, y: plot.minY)
+            #if os(macOS)
+            // Mac: the pointer shows the callout; a click pins it; a double-click
+            // runs Show in Browse (S8.3, S8.4).
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                guard !selection.pinned else { return }
+                switch phase {
+                case let .active(location):
+                    selection.bin = bin(at: location.x + plot.minX, proxy: proxy, plot: plot)
+                case .ended:
+                    selection.bin = nil
+                }
+            }
+            .gesture(SpatialTapGesture(count: 2, coordinateSpace: .local).onEnded { value in
+                guard let bin = bin(at: value.location.x + plot.minX, proxy: proxy, plot: plot) else { return }
+                selection = StatsChartSelection(bin: bin, pinned: true)
+                browse(bin)
+            })
+            .simultaneousGesture(SpatialTapGesture(coordinateSpace: .local).onEnded { value in
+                selection = StatsChartSelection(bin: bin(at: value.location.x + plot.minX, proxy: proxy, plot: plot), pinned: true)
+                focused = true
+            })
+            #else
+            // Touch: hold, then drag along the plot; a plain swipe still
+            // scrolls the page. The selection stays after the finger lifts, so
+            // the callout's button can be tapped; a short tap clears it.
+            .gesture(
+                LongPressGesture(minimumDuration: 0.25)
+                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                    .onChanged { value in
+                        if case let .second(true, drag) = value, let drag {
+                            selection = StatsChartSelection(bin: bin(at: drag.location.x + plot.minX, proxy: proxy, plot: plot), pinned: true)
+                        }
+                    }
+                    .exclusively(before: TapGesture().onEnded { selection = .none })
+            )
+            #endif
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private func callout(_ proxy: ChartProxy, plot: CGRect, in size: CGSize) -> some View {
+        if let bin = selection.bin, data.bins.indices.contains(bin), let x = proxy.position(forX: Self.id(bin)) {
+            let ruleX = plot.minX + x
+            let leading = ruleX > plot.midX
+            StatsChartCallout(
+                title: format.name(data.bins[bin]),
+                rows: format.calloutRows(data, bin: bin),
+                showInBrowse: data.browsable.contains(bin) && showInBrowse != nil && selection.pinned ? { browse(bin) } : nil
+            )
+            .fixedSize()
+            .alignmentGuide(.leading) { dimensions in
+                // Beside the rule, never over it: to its right in the left half,
+                // to its left in the right half, kept inside the chart.
+                let width = dimensions.width
+                let gap = Spacing.xSmall
+                let origin = leading ? ruleX - gap - width : ruleX + gap
+                return -min(max(origin, 0), max(0, size.width - width))
+            }
+            .alignmentGuide(.top) { _ in -plot.minY }
+            // A hovering pointer passes through, so the callout never takes the
+            // hover from the plot under it; a pinned one takes its button's click.
+            .allowsHitTesting(selection.pinned)
+            .accessibilityHidden(true)
+        }
+    }
+
+    // MARK: Keys
+
+    private func move(_ step: Int) -> KeyPress.Result {
+        guard isReady else { return .ignored }
+        let last = data.bins.count - 1
+        let next = selection.bin.map { $0 + step } ?? (step > 0 ? 0 : last)
+        selection = StatsChartSelection(bin: min(max(next, 0), last), pinned: true)
+        return .handled
+    }
+
+    private func clear() -> KeyPress.Result {
+        guard selection != .none else { return .ignored }
+        selection = .none
+        return .handled
+    }
+
+    private func browseSelected() -> KeyPress.Result {
+        guard let bin = selection.bin, data.browsable.contains(bin), showInBrowse != nil else { return .ignored }
+        browse(bin)
+        return .handled
+    }
+
+    private func browse(_ bin: Int) {
+        guard data.browsable.contains(bin) else { return }
+        showInBrowse?(bin)
+    }
+}
+
+/// An open point (S7.2): a ring in the series' colour on the box's background.
+struct StatsOpenPoint: View {
+    let color: Color
+
+    var body: some View {
+        Circle()
+            .strokeBorder(color, lineWidth: 1.5)
+            .frame(width: 7, height: 7)
+    }
+}
