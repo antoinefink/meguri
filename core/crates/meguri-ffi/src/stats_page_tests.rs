@@ -13,6 +13,10 @@ use meguri_model::clock::{StepClock, UtcOffset};
 use meguri_stats::graphs::encoding::{Decoder, Encoder, MemberKind};
 use meguri_stats::graphs::{Columns, Graph, History, Scope, ScopeError, StatsError, Unreadable};
 use meguri_stats::history::{CardStatesOverTime, KnowledgeOverTime, KnowledgeSample, Progress, StartedPart, StateCounts};
+use meguri_stats::parts::activity::ActivityDaysPart;
+use meguri_stats::parts::by_deck::{ByDeckPart, DeckRow, DeckValues, DeckWindows};
+use meguri_stats::parts::retention_by_day::{RetentionByDayPart, RetentionDay};
+use meguri_stats::parts::studied_today::StudiedTodayPart;
 use meguri_stats::page::{
     self, ByAnswerPart, OldestDay, PageEnd, PageHeader, PageMessage, PageRequest, Part, PartFailure, PartMessage,
     PartOutcome, PartValue, Period,
@@ -213,6 +217,105 @@ fn decode_knowledge(bytes: &[u8]) -> KnowledgeOverTime {
     }
 }
 
+fn decode_studied_today(bytes: &[u8]) -> StudiedTodayPart {
+    let mut decoder = Decoder::new(bytes);
+    let part = StudiedTodayPart {
+        answers: u64::try_from(decoder.integer().unwrap()).unwrap(),
+        cards: u64::try_from(decoder.integer().unwrap()).unwrap(),
+        time_ms: decoder.integer().unwrap(),
+    };
+    assert!(decoder.is_done());
+    part
+}
+
+fn decode_retention_by_day(bytes: &[u8]) -> RetentionByDayPart {
+    let mut decoder = Decoder::new(bytes);
+    let map = decoder.sparse_map(&[MemberKind::Integers; 5]).unwrap();
+    let sums = decoder.list(|decoder| decoder.f64()).unwrap();
+    assert_eq!(sums.len(), map.keys.len(), "one sum per day");
+    let retentions = decoder.list(|decoder| decoder.f32()).unwrap();
+    let several = match decoder.integer().unwrap() {
+        0 => false,
+        1 => true,
+        other => panic!("several {other}"),
+    };
+    assert!(decoder.is_done());
+    let count = |member: usize, at: usize| u64::try_from(map.integers[member][at]).unwrap();
+    RetentionByDayPart {
+        days: map
+            .keys
+            .iter()
+            .enumerate()
+            .map(|(at, key)| {
+                (i32::try_from(*key).unwrap(), RetentionDay {
+                    young_passed: count(0, at),
+                    young_failed: count(1, at),
+                    mature_passed: count(2, at),
+                    mature_failed: count(3, at),
+                    desired_sum: sums[at],
+                    desired_rows: count(4, at),
+                })
+            })
+            .collect(),
+        retentions,
+        several,
+    }
+}
+
+fn decode_deck_values(decoder: &mut Decoder<'_>) -> Result<DeckValues, meguri_stats::graphs::encoding::DecodeError> {
+    Ok(DeckValues {
+        reviews: u64::try_from(decoder.integer()?).unwrap(),
+        time_ms: decoder.integer()?,
+        passed: u64::try_from(decoder.integer()?).unwrap(),
+        failed: u64::try_from(decoder.integer()?).unwrap(),
+    })
+}
+
+fn decode_by_deck(bytes: &[u8]) -> ByDeckPart {
+    let mut decoder = Decoder::new(bytes);
+    let rows = decoder
+        .list(|decoder| {
+            let deck = meguri_model::ids::DeckId(decoder.integer()?);
+            let own_cards = decoder.integer()? == 1;
+            let cards = u64::try_from(decoder.integer()?).unwrap();
+            let one_month = decode_deck_values(decoder)?;
+            let three_months = decode_deck_values(decoder)?;
+            let six_months = decode_deck_values(decoder)?;
+            let one_year = decode_deck_values(decoder)?;
+            let all_time = decoder.list(decode_deck_values)?;
+            assert!(all_time.len() <= 1);
+            Ok(DeckRow {
+                deck,
+                own_cards,
+                cards,
+                windows: DeckWindows {
+                    one_month,
+                    three_months,
+                    six_months,
+                    one_year,
+                    all_time: all_time.into_iter().next(),
+                },
+            })
+        })
+        .unwrap();
+    assert!(decoder.is_done());
+    ByDeckPart { rows }
+}
+
+fn decode_activity_days(bytes: &[u8]) -> ActivityDaysPart {
+    let mut decoder = Decoder::new(bytes);
+    let map = decoder.sparse_map(&[MemberKind::Integers]).unwrap();
+    assert!(decoder.is_done());
+    ActivityDaysPart {
+        days: map
+            .keys
+            .iter()
+            .zip(&map.integers[0])
+            .map(|(key, count)| (i32::try_from(*key).unwrap(), u64::try_from(*count).unwrap()))
+            .collect(),
+    }
+}
+
 fn first_header(core: &[PageMessage]) -> Arc<PageHeader> {
     core.iter()
         .find_map(|message| match message {
@@ -286,6 +389,10 @@ fn every_value_crosses_as_g6_bytes_after_one_header_and_before_the_end() {
                     PartValue::CardStates(states) => assert_eq!(&decode_card_states(bytes), states),
                     PartValue::Started(started) => assert_eq!(&decode_started(bytes), started),
                     PartValue::Knowledge(knowledge) => assert_eq!(&decode_knowledge(bytes), knowledge),
+                    PartValue::StudiedToday(part) => assert_eq!(&decode_studied_today(bytes), part),
+                    PartValue::RetentionByDay(part) => assert_eq!(&decode_retention_by_day(bytes), part),
+                    PartValue::ByDeck(part) => assert_eq!(&decode_by_deck(bytes), part),
+                    PartValue::ActivityDays(part) => assert_eq!(&decode_activity_days(bytes), part),
                 },
                 (PartOutcome::Failed(failure), StatsPartOutcome::Failed { failure: sent }) => {
                     assert_eq!(sent, &StatsPartFailure::from(failure), "{part:?}");
@@ -307,6 +414,15 @@ fn every_value_crosses_as_g6_bytes_after_one_header_and_before_the_end() {
         assert!(started.first_day.is_some(), "{started:?}");
         let PartValue::Knowledge(knowledge) = value(Part::KnowledgeOverTime) else { panic!() };
         assert!(!knowledge.samples.is_empty(), "{knowledge:?}");
+        let PartValue::RetentionByDay(retention) = value(Part::RetentionByDay) else { panic!() };
+        assert!(!retention.days.is_empty() && !retention.retentions.is_empty(), "{retention:?}");
+        let PartValue::ByDeck(decks) = value(Part::ByDeck) else { panic!() };
+        assert!(!decks.rows.is_empty(), "{decks:?}");
+        let PartValue::ActivityDays(activity) = value(Part::ActivityDays) else { panic!() };
+        assert!(!activity.days.is_empty(), "{activity:?}");
+        assert!(matches!(value(Part::StudiedToday), PartValue::StudiedToday(_)));
+        // H9's oldest day arrives as a day.
+        assert!(matches!(sent.oldest_day, StatsOldestDay::Day { .. }), "{:?}", sent.oldest_day);
     }
 }
 
@@ -551,21 +667,4 @@ fn the_exports_need_an_open_collection() {
         start_stats_page(request, Arc::new(Nobody)),
         Err(CoreError::Unavailable { .. })
     ));
-}
-
-#[test]
-fn by_answer_pairs_each_time_with_its_own_day() {
-    let mut part = ByAnswerPart {
-        unrated: 3,
-        ..ByAnswerPart::default()
-    };
-    part.count_by_answer.insert(-2, [1, 0, 0, 0]);
-    part.count_by_answer.insert(-1, [0, 2, 0, 0]);
-    // A time map missing a day (never built so) still pairs by key.
-    part.time_by_answer.insert(-1, [0, 900, 0, 0]);
-    let decoded = decode_by_answer(&encode(&PartValue::ByAnswer(part.clone())));
-    assert_eq!(decoded.count_by_answer, part.count_by_answer);
-    assert_eq!(decoded.time_by_answer.get(&-2), Some(&[0, 0, 0, 0]));
-    assert_eq!(decoded.time_by_answer.get(&-1), Some(&[0, 900, 0, 0]));
-    assert_eq!(decoded.unrated, 3);
 }

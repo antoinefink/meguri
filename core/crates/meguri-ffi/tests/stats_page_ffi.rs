@@ -305,6 +305,46 @@ fn g8_3_a_commit_while_a_part_waits_ends_the_request_with_context_changed() {
     assert_eq!(finished(&events, handle.id), JobOutcome::Succeeded);
 }
 
+/// The review card of the fixture that the day test answers.
+const REVIEW_CARD: i64 = 1_788_249_600_238;
+
+#[test]
+fn h13_the_cards_behind_a_day_cross_with_every_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let two_days_ago = NOW_MS - 2 * DAY_MS;
+    let events = open(&dir, &[format!(
+        "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES ({two_days_ago}, \
+         {REVIEW_CARD}, -1, 1, 3, 30, 2500, 4000, 1)"
+    )]);
+    let (messages, rx) = listener(None);
+    let handle = start_stats_page(request(StatsScope::AllDecks, StatsPeriod::OneMonth), messages).unwrap();
+    let got = until_end(&rx);
+    assert_eq!(finished(&events, handle.id), JobOutcome::Succeeded);
+    let StatsPageMessage::Header { header } = &got[0].0 else { panic!() };
+    let context = header.context.clone();
+    let cards = |scope: StatsScope, day: i32, kind: StatsDayKind| {
+        stats_day_cards(scope, context.clone(), day, kind, None).unwrap()
+    };
+    for kind in [StatsDayKind::Reviewed, StatsDayKind::Answered, StatsDayKind::Forgotten] {
+        assert_eq!(cards(StatsScope::AllDecks, -2, kind), StatsDayCards::Cards { ids: vec![REVIEW_CARD] }, "{kind:?}");
+        assert_eq!(cards(StatsScope::Deck { id: LANG }, -2, kind), StatsDayCards::Cards { ids: vec![REVIEW_CARD] });
+    }
+    assert_eq!(cards(StatsScope::AllDecks, -3, StatsDayKind::Reviewed), StatsDayCards::NoCards);
+    assert_eq!(cards(StatsScope::Search { text: "deck:*".into() }, -2, StatsDayKind::Reviewed), StatsDayCards::UnsupportedScope);
+    assert_eq!(cards(StatsScope::Deck { id: 42 }, -2, StatsDayKind::Reviewed), StatsDayCards::ScopeError {
+        error: StatsScopeError::UnknownDeck
+    });
+    // A commit since the result on screen does not refuse the read.
+    meguri_ffi::decks::add_deck("Elsewhere".into()).unwrap();
+    assert_eq!(cards(StatsScope::AllDecks, -2, StatsDayKind::Answered), StatsDayCards::Cards { ids: vec![REVIEW_CARD] });
+    let cancel = meguri_ffi::CancelToken::new().unwrap();
+    cancel.cancel().unwrap();
+    assert_eq!(
+        stats_day_cards(StatsScope::AllDecks, context, -2, StatsDayKind::Reviewed, Some(cancel)).unwrap(),
+        StatsDayCards::Cancelled
+    );
+}
+
 #[test]
 fn a_request_with_no_collection_open_is_refused_before_it_starts() {
     struct Nobody;

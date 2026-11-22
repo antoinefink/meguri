@@ -25,8 +25,13 @@ use meguri_model::ids::DeckId;
 use meguri_stats::graphs::encoding::{Encoder, Member};
 use meguri_stats::graphs::{BrowseScope, Columns, Context, History, Preferences, Scope, ScopeError, StatsError, Unreadable};
 use meguri_stats::history::{CardStatesOverTime, KnowledgeOverTime, Progress, StartedPart, StateCounts};
+use meguri_stats::parts::activity::ActivityDaysPart;
+use meguri_stats::parts::by_deck::{ByDeckPart, DeckValues};
+use meguri_stats::parts::day_cards::{self, DayCards, DayCardsRequest, DayKind};
+use meguri_stats::parts::retention_by_day::RetentionByDayPart;
+use meguri_stats::parts::studied_today::StudiedTodayPart;
 use meguri_stats::page::{
-    self, ByAnswerPart, OldestDay, PageEnd, PageHeader, PageMessage, PageRequest, Part, PartFailure, PartOutcome,
+    self, OldestDay, PageEnd, PageHeader, PageMessage, PageRequest, Part, PartFailure, PartOutcome,
     PartValue, Period,
 };
 
@@ -539,7 +544,11 @@ pub(crate) fn stats_error(error: StatsError) -> CoreError {
 ///
 /// | Part | Members, in order |
 /// |---|---|
-/// | `by_answer` | one sparse map keyed by day index (V2's, unfolded) with eight integer members: the counts of Again, Hard, Good and Easy, then their summed times in milliseconds in the same order; then `unrated` |
+/// | `by_answer` | its own `encode` (`parts::by_answer`): one sparse map keyed by day index (V2's, unfolded) with eight integer members, the counts of Again, Hard, Good and Easy, then their summed times in milliseconds in the same order; then `unrated` |
+/// | `studied_today` | `answers`, `cards`, `time_ms` |
+/// | `retention_by_day` | one sparse map keyed by day (H1) with five integer members: `young_passed`, `young_failed`, `mature_passed`, `mature_failed`, `desired_rows`; then `desired_sum` as a list of binary64, one per key in key order; then `retentions` as a list of binary32; then `several` as 0 or 1 |
+/// | `by_deck` | `rows` as a list in the deck tree's order, each: the deck id, `own_cards` as 0 or 1, `cards`, then the windows `one_month`, `three_months`, `six_months`, `one_year`, each `reviews`, `time_ms`, `passed`, `failed`, then `all_time` as an optional value of the same four |
+/// | `activity_days` | one sparse map keyed by day (H1) with one integer member (rows) |
 /// | `card_states_over_time` | `start`: five integers, New, Learning, Relearning, Young, Mature; `deltas`: one sparse map keyed by day (H1) with five integer members in the same order; `left_out`; `first_day` as an optional integer |
 /// | `started` | one sparse map keyed by day (H1) with one integer member (cards); `first_day` as an optional integer |
 /// | `knowledge_over_time` | `samples`: a list, ascending by instant with today's point last, each item `day` (H1), `instant_ms`, `knowledge` as binary64, `studied`; then `failed`; then `left_out` |
@@ -547,30 +556,16 @@ pub(crate) fn encode(value: &PartValue) -> Vec<u8> {
     let mut out = Encoder::new();
     match value {
         PartValue::Record(record) => record.encode(&mut out),
-        PartValue::ByAnswer(part) => by_answer(&mut out, part),
+        PartValue::ByAnswer(part) => part.encode(&mut out),
+        PartValue::StudiedToday(part) => studied_today(&mut out, part),
+        PartValue::RetentionByDay(part) => retention_by_day(&mut out, part),
+        PartValue::ByDeck(part) => by_deck(&mut out, part),
+        PartValue::ActivityDays(part) => activity_days(&mut out, part),
         PartValue::CardStates(states) => card_states(&mut out, states),
         PartValue::Started(started) => started_part(&mut out, started),
         PartValue::Knowledge(knowledge) => knowledge_part(&mut out, knowledge),
     }
     out.into_bytes()
-}
-
-fn by_answer(out: &mut Encoder, part: &ByAnswerPart) {
-    let keys: Vec<i64> = part.count_by_answer.keys().map(|day| i64::from(*day)).collect();
-    // Each day's times by its own key, so the columns stay as long as the
-    // keys and paired with their days whatever the maps hold.
-    let times: Vec<[i64; 4]> = part
-        .count_by_answer
-        .keys()
-        .map(|day| part.time_by_answer.get(day).copied().unwrap_or_default())
-        .collect();
-    let columns: Vec<Vec<i64>> = (0..4)
-        .map(|at| part.count_by_answer.values().map(|day| day[at]).collect())
-        .chain((0..4).map(|at| times.iter().map(|day| day[at]).collect()))
-        .collect();
-    let members: Vec<Member<'_>> = columns.iter().map(|values| Member::Integers(values)).collect();
-    out.sparse_map(&keys, &members);
-    out.integer(part.unrated as i64);
 }
 
 fn state_values(counts: &StateCounts) -> [i64; 5] {
@@ -602,6 +597,58 @@ fn started_part(out: &mut Encoder, started: &StartedPart) {
     optional(out, started.first_day);
 }
 
+fn studied_today(out: &mut Encoder, part: &StudiedTodayPart) {
+    out.integer(part.answers as i64);
+    out.integer(part.cards as i64);
+    out.integer(part.time_ms);
+}
+
+fn retention_by_day(out: &mut Encoder, part: &RetentionByDayPart) {
+    let keys: Vec<i64> = part.days.keys().map(|day| i64::from(*day)).collect();
+    let column = |value: fn(&meguri_stats::parts::retention_by_day::RetentionDay) -> u64| -> Vec<i64> {
+        part.days.values().map(|day| value(day) as i64).collect()
+    };
+    let columns = [
+        column(|day| day.young_passed),
+        column(|day| day.young_failed),
+        column(|day| day.mature_passed),
+        column(|day| day.mature_failed),
+        column(|day| day.desired_rows),
+    ];
+    let members: Vec<Member<'_>> = columns.iter().map(|values| Member::Integers(values)).collect();
+    out.sparse_map(&keys, &members);
+    let sums: Vec<f64> = part.days.values().map(|day| day.desired_sum).collect();
+    out.list(&sums, |out, sum| out.f64(*sum));
+    out.list(&part.retentions, |out, retention| out.f32(*retention));
+    out.integer(i64::from(part.several));
+}
+
+fn deck_values(out: &mut Encoder, values: &DeckValues) {
+    out.integer(values.reviews as i64);
+    out.integer(values.time_ms);
+    out.integer(values.passed as i64);
+    out.integer(values.failed as i64);
+}
+
+fn by_deck(out: &mut Encoder, part: &ByDeckPart) {
+    out.list(&part.rows, |out, row| {
+        out.integer(row.deck.0);
+        out.integer(i64::from(row.own_cards));
+        out.integer(row.cards as i64);
+        let windows = &row.windows;
+        for values in [&windows.one_month, &windows.three_months, &windows.six_months, &windows.one_year] {
+            deck_values(out, values);
+        }
+        out.list(windows.all_time.as_slice(), deck_values);
+    });
+}
+
+fn activity_days(out: &mut Encoder, part: &ActivityDaysPart) {
+    let keys: Vec<i64> = part.days.keys().map(|day| i64::from(*day)).collect();
+    let counts: Vec<i64> = part.days.values().map(|count| *count as i64).collect();
+    out.sparse_map(&keys, &[Member::Integers(&counts)]);
+}
+
 fn knowledge_part(out: &mut Encoder, knowledge: &KnowledgeOverTime) {
     out.list(&knowledge.samples, |out, sample| {
         out.integer(i64::from(sample.day));
@@ -611,6 +658,77 @@ fn knowledge_part(out: &mut Encoder, knowledge: &KnowledgeOverTime) {
     });
     out.integer(knowledge.failed as i64);
     out.integer(knowledge.left_out as i64);
+}
+
+/// H13's row kinds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum StatsDayKind {
+    /// The rows Reviews Over Time counts.
+    Reviewed,
+    /// Activity's rows.
+    Answered,
+    /// Forgotten's rows (answered Again).
+    Forgotten,
+}
+
+impl From<StatsDayKind> for DayKind {
+    fn from(kind: StatsDayKind) -> DayKind {
+        match kind {
+            StatsDayKind::Reviewed => DayKind::Reviewed,
+            StatsDayKind::Answered => DayKind::Answered,
+            StatsDayKind::Forgotten => DayKind::Forgotten,
+        }
+    }
+}
+
+/// What H13 gives.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum StatsDayCards {
+    /// The existing cards with such a row on the day, ascending; never empty.
+    Cards { ids: Vec<i64> },
+    NoCards,
+    /// A Search scope (H18).
+    UnsupportedScope,
+    ScopeError { error: StatsScopeError },
+    UnreadableRow { row: StatsUnreadable },
+    Cancelled,
+}
+
+/// H13: the cards behind one day of the result on screen, for Show in
+/// Browse. `context` is that result's header context: its `N` places the
+/// day, so a commit since never refuses the read. A short read on the
+/// query reader (under 50 ms, H19); `cancel` stops it. Writes nothing.
+#[uniffi::export]
+pub fn stats_day_cards(
+    scope: StatsScope,
+    context: StatsContext,
+    day: i32,
+    kind: StatsDayKind,
+    cancel: Option<Arc<crate::cancel::CancelToken>>,
+) -> Result<StatsDayCards, CoreError> {
+    callback::enter("stats_day_cards");
+    let host = runtime::host()?;
+    let collection = host.collection()?;
+    let scope = Scope::from(scope);
+    let request = DayCardsRequest {
+        scope: scope.clone(),
+        context: context.into(),
+        day,
+        kind: kind.into(),
+        cancel: cancel.map_or_else(meguri_engine::CancelToken::new, |token| Arc::clone(token.engine_token())),
+        columns: Columns::Cached,
+    };
+    let cards = day_cards::stats_day_cards(host.stats(), &collection, host.derived(), &request).map_err(stats_error)?;
+    Ok(match cards {
+        DayCards::Cards(ids) => StatsDayCards::Cards { ids },
+        DayCards::NoCards => StatsDayCards::NoCards,
+        DayCards::UnsupportedScope => StatsDayCards::UnsupportedScope,
+        DayCards::ScopeError(error) => StatsDayCards::ScopeError {
+            error: scope_error(&error, &scope),
+        },
+        DayCards::UnreadableRow(bad) => StatsDayCards::UnreadableRow { row: (&bad).into() },
+        DayCards::Cancelled => StatsDayCards::Cancelled,
+    })
 }
 
 /// G9.5 and H14.4: the memory warning, as a job. Drops the memo and releases
