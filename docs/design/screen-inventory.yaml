@@ -1225,7 +1225,8 @@ screens:
       width) is the status panel: one status line (N23.2's shape and the title), the one sentence, a
       progress bar while the work runs with the files left under it, a count line with issues, and
       Sync Settings then the state's one action, trailing (N23.3). Symbols: N23.2's five shapes, the
-      icloud symbols for iCloud only and the drawn cloud shapes for Meguri Sync and Off (N23.4).
+      icloud symbols for iCloud only and unrestricted system symbols for Meguri Sync and Off (N23.4;
+      changed 2026-11-22: no drawn cloud shapes).
       States: empty, Sync Off (Sync Settings alone); typical, Up to Date; loading, Syncing… or a
       setup transfer with its bar; error, a needs you sentence with its action; overflow, the
       largest text sizes (the sheet scrolls, the buttons stack). Identifiers: sync.status.button,

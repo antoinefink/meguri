@@ -709,6 +709,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsShee
   2. Import a Collection File (`folder`): "Open a .colpkg file exported from Meguri or Anki." It opens the file picker (N17.2; `home.collection.import`).
   3. Start Empty (`plus`): "Begin with no decks and add your own notes." (`home.collection.startEmpty`).
 - A row is disabled only where its button was: Set Up Sync and Import while another sheet or flow owns the window, Start Empty while it cannot start. A disabled row stays visible.
+- Changed 2026-11-22 (Antoine: "when the app is not focused some of the text of the homepage is greyed out but not consistently"). The app's and the window's focus never disable a row: in an inactive window the three rows look as they do in the key window, as the platform's rows do. Start Empty's "cannot start" means a flow, a sheet or sync work holds the collection, not focus; a press while the app is not active still does nothing until it is. While Start Empty waits for sync work (a service change not finished, or Meguri Sync working), which nothing else on the page shows, its explanation is replaced by "Unavailable while sync is busy. Set Up Sync shows why." in secondary text, not dimmed, and VoiceOver reads it as the hint; the symbol, title and chevron are dimmed. Route `home/deck-list/start-empty-waits`.
 - The rows are buttons in a grouped form, at least the minimum target high. The chevron is drawn, because a row that acts in place gets none from the system. Title and explanation wrap at every text size. At the accessibility sizes the symbol and the chevron are left out and the text takes the row, as the state views leave out their symbols: a label there wraps each text around its symbol. VoiceOver reads the title as the row's label and the explanation as its hint; the title of the screen is a header.
 - Compact width: the title and line lead the list as its header, at the top of the page. In the tab layout the navigation bar has no title here: the welcome's own title is the page's header.
 - iPad and Mac: the same list in a centred column of the readable width in the detail area, from the top. The page is still titled "Today" where the sidebar's first row says so (N14.1).
@@ -1084,21 +1085,24 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, row `sync.statusPopove
 
 ### N23.2 One cloud family
 
-The toolbar button, the panel's status line and the Sync section's status row use the same symbol, one of five shapes, for both services. Shape first: only needs you has a colour, the system orange on the whole symbol. This extends the decision's "in the toolbar" to the panel and the Sync section, so the three never disagree.
+The toolbar button, the panel's status line and the Sync section's status row use the same symbol, one of five states, for both services. Each is one system SF Symbol, drawn by the system at the size and weight of its place; nothing is drawn over or inside a symbol. Only needs you has a colour, the system orange on the whole symbol; in the toolbar Sync Off is in the secondary colour. This extends the decision's "in the toolbar" to the panel and the Sync section, so the three never disagree.
 
-Apple reserves the `icloud` symbols (`icloud`, `checkmark.icloud`, `arrow.trianglehead.2.clockwise.rotate.90.icloud`, `exclamationmark.icloud`, `icloud.slash`) for Apple's iCloud service: the SF Symbols metadata says they "may only be used to refer to Apple's iCloud service" and "may not be modified". So iCloud uses them, and Meguri Sync and Sync Off use the same five shapes drawn from the unrestricted `cloud` symbol with an unrestricted symbol inside it (N23.4, the exception).
+Apple reserves every `icloud` symbol (`icloud`, `checkmark.icloud`, `arrow.trianglehead.2.clockwise.rotate.90.icloud`, `exclamationmark.icloud`, `icloud.slash`, their fills and the others) for Apple's iCloud service: the SF Symbols metadata says they "may only be used to refer to Apple's iCloud service" and "may not be modified". SF Symbols has no unrestricted cloud with a check, arrows, an alert or a slash. So iCloud uses the `icloud` symbols, and Meguri Sync and Sync Off use unrestricted symbols for the same five states (N23.4).
 
-| Shape | Means | iCloud | Meguri Sync and Off | iCloud states (`sync/policy#P14.2`, T19.4) | Meguri Sync states (T19.5) |
+Changed 2026-11-22 (Antoine's feedback on the Mac toolbar: the alert symbol inside the cloud "looks strange. Not aligned", and for syncing "the loop inside the cloud is not very well aligned"; he offered to "fix or go with another icon"; decided by Claude (coordinator) under his delegation; `decisions.md`, row `sync.status` of 2026-11-22). Before, Meguri Sync and Off drew the `cloud` symbol with a smaller symbol set within it by our own view; that placement sat low and off centre at the toolbar's size.
+
+| State | Means | iCloud | Meguri Sync and Off | iCloud states (`sync/policy#P14.2`, T19.4) | Meguri Sync states (T19.5) |
 |---|---|---|---|---|---|
-| cloud with a check | up to date | `checkmark.icloud` | `cloud` with `checkmark` | `upToDate` | round idle, Sync Automatically on |
-| cloud with two arrows | something moves | `arrow.trianglehead.2.clockwise.rotate.90.icloud` | `cloud` with `arrow.trianglehead.2.clockwise.rotate.90` | the state shown (T19.4 rule 2) is `syncingCollection` or `syncingMedia` | signing in, preparing, transferring the collection or media, round exchanging |
-| cloud | waiting, or not sent yet | `icloud` | `cloud` | `changesPending`, `offline`, `paused{automaticOff}`, `iCloudUnavailable{temporary}`, a waiting row of T19.4, no status yet | setup required before preparation, the keep-collection sheet open, round pending, waiting or cancelled, Sync Automatically off, a waiting row, media blocked, any other title |
-| alert cloud | needs you | `exclamationmark.icloud` | `cloud` with `exclamationmark` | every needs you row (T19.4) | every needs you row (T19.5) |
-| cloud with a slash | sync off | — | `cloud` with a slash | no service selected: the Service control reads Off, and an iCloud projection then reports `localOnly` (with iCloud selected, `localOnly` is T19.4 row 16, needs you) | |
+| done | up to date | `checkmark.icloud` | `checkmark.circle` | `upToDate` | round idle, Sync Automatically on |
+| moving | something moves | `arrow.trianglehead.2.clockwise.rotate.90.icloud` | `arrow.trianglehead.2.clockwise.rotate.90` | the state shown (T19.4 rule 2) is `syncingCollection` or `syncingMedia` | signing in, preparing, transferring the collection or media, round exchanging |
+| waiting | waiting, or not sent yet | `icloud` | `cloud` | `changesPending`, `offline`, `paused{automaticOff}`, `iCloudUnavailable{temporary}`, a waiting row of T19.4, no status yet | setup required before preparation, the keep-collection sheet open, round pending, waiting or cancelled, Sync Automatically off, a waiting row, media blocked, any other title |
+| needs you | needs you | `exclamationmark.icloud` | `exclamationmark.arrow.trianglehead.2.clockwise.rotate.90` | every needs you row (T19.4) | every needs you row (T19.5) |
+| off | sync off | — | `cloud`, in the secondary colour in the toolbar | no service selected: the Service control reads Off, and an iCloud projection then reports `localOnly` (with iCloud selected, `localOnly` is T19.4 row 16, needs you) | |
 
-- The two-arrows shape turns with the system rotate symbol effect, the arrows only, exactly while the panel's bar shows; with Reduce Motion on it does not turn.
+- The moving symbol turns with the system rotate symbol effect (`symbolEffect(.rotate)`), exactly while the panel's bar shows; with Reduce Motion on it does not turn.
+- Off and waiting are both `cloud` for Meguri Sync; in the toolbar off is in the secondary colour, and the accessibility value and help tag name the state (below).
 - An issues row keeps the symbol of the state underneath (N15.4).
-- N16.2's rule for showing the button during review is unchanged and separate: Meguri Sync signed in with setup not continued shows the button with the plain cloud, since T19.5 gives those rows no kind, or waiting. Only needs you rows use the alert cloud.
+- N16.2's rule for showing the button during review is unchanged and separate: Meguri Sync signed in with setup not continued shows the button with the waiting symbol, since T19.5 gives those rows no kind, or waiting. Only needs you rows use the needs you symbol.
 - The button's accessibility label is the service's name (`sync.button.label`, `sync.meguri.button.label`), and with no service `sync.button.label.off` (T20.2); its value is the status title without its "…"; on Mac its help tag is the title and the detail. The state is never given by the symbol alone.
 
 ### N23.3 The action
@@ -1123,13 +1127,14 @@ The first row that applies decides, in this order.
 - Copy Debug Info is in the panel only where it is the status action: iCloud's `setupNeeded` state and Meguri Sync's blocked provider, the two states of the decision; Meguri Sync's collection it cannot use (`localUnusable`, added 2026-11-20); and iCloud's damaged-collection row (T19.4 row 1), where, until the damaged-collection screen is built, the built action is Copy Debug Info in place of Show Repair Options. Everywhere else Copy Debug Info is in Troubleshooting (N15.5 row 6). While it copies it is disabled, as in the Sync section.
 - Sync Settings opens the Sync section: the Settings window on Mac, the Sync section of Settings on iPad and iPhone, and during a review on iPhone and iPad a sheet over the review (N15.4).
 
-### N23.4 The exception: Meguri Sync's cloud shapes
+### N23.4 Meguri Sync's symbols
 
-- Need: compatibility with Apple's terms for SF Symbols (above). No unrestricted SF Symbol puts a check, two arrows, an alert or a slash inside a cloud.
-- What is drawn: the view `CloudShapeSymbol` (`DesignSystem`, in the component gallery) shows the unrestricted `cloud` symbol with `checkmark`, `arrow.trianglehead.2.clockwise.rotate.90` or `exclamationmark` inside it, or a drawn slash across it, in the style of the `icloud` shapes. Apple's symbols are drawn as they are, and `icloud` symbols refer to iCloud only.
-- The inner symbol has a fixed weight and about 0.42 of the cloud's size, which matches the `icloud` shapes at their usual size. It does not follow a weight set by its place; none of the three places sets one.
-- Why a view and not a custom symbol: Apple's way is a custom symbol made in the SF Symbols app, which this project cannot run unattended, and the system draws symbols only as images, so no outline can be taken from them to build a template. The view keeps the font, weight, foreground and rotate effect of its place (the effect turns the inner arrows only); it does not get a custom symbol's rendering modes or variable values, which these places do not use. A custom symbol made from the same unrestricted symbols replaces it when one is made.
-- Verification: the built app in the test VM, each shape beside its `icloud` counterpart, light and dark, regular and the largest text size, on Mac, iPad and iPhone (the pull request's captures).
+Changed 2026-11-22 (N23.2). This section was the exception for Meguri Sync's drawn cloud shapes (the view `CloudShapeSymbol`, a `cloud` with a check, arrows or an alert set within it, or a drawn slash). That exception is withdrawn and the view removed: no symbol is composed or drawn.
+
+- Why not the `icloud` symbols: Apple restricts every one of them to Apple's iCloud service (N23.2), and Meguri Sync is not iCloud.
+- Why not a cloud with a badge: SF Symbols has no unrestricted one, and our own placement of a badge inside `cloud` did not match the system's alignment at the toolbar's size (Antoine, 2026-11-22). A custom symbol made in the SF Symbols app could restore a cloud family for Meguri Sync later; it needs Antoine's agreement and the app, which this project cannot run unattended.
+- What is used: the unrestricted system symbols of N23.2's table, drawn as they are. `exclamationmark.arrow.trianglehead.2.clockwise.rotate.90` is the system's own symbol for a sync that needs attention.
+- Verification: the built app in the test VM, each state for both services, light and dark, on Mac, iPad and iPhone (the pull request's captures).
 
 ### N23.5 What this replaces
 
