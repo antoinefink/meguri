@@ -432,6 +432,11 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let browseOpening = BridgeCall("browse_opening")
     public static let startFindDuplicates = BridgeCall("start_find_duplicates")
     public static let findDuplicatesJobResult = BridgeCall("FindDuplicatesJob.result")
+    public static let findReplacePreviewsNew = BridgeCall("FindReplacePreviews.new")
+    public static let findReplacePreviewsStart = BridgeCall("FindReplacePreviews.start")
+    public static let findReplacePreviewJobResult = BridgeCall("FindReplacePreviewJob.result")
+    public static let startFindReplace = BridgeCall("start_find_replace")
+    public static let bulkActionJobResult = BridgeCall("BulkActionJob.result")
 
     public static let startCreateBackup = BridgeCall("start_create_backup")
     public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
@@ -743,5 +748,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
         filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
         startFindDuplicates, findDuplicatesJobResult,
+        findReplacePreviewsNew, findReplacePreviewsStart, findReplacePreviewJobResult, startFindReplace, bulkActionJobResult,
     ]
 }

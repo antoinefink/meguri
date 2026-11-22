@@ -27,6 +27,16 @@ public enum HomeDeckListPreview: PreviewStates {
             .accessibilityIdentifier("home.collection.screen")
         } }
     }
+    /// The welcome while Start Empty waits for sync work (N18.3): its row disabled,
+    /// with the reason in place of its explanation (route `home/deck-list/start-empty-waits`).
+    public static func welcomeWaitingForSync() -> some View {
+        HomeWelcome(sync: .init(), importFile: .init(),
+            startEmpty: .init(enabled: false, unavailableReason: WelcomeChoice.waitsForSyncReason))
+            .background(.token(.backgroundPrimary))
+            .navigationTitle(Text("Decks", bundle: .module))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("home.collection.screen")
+    }
     /// The typical tree as it shows beside the detail (N14.10): Today first, and the
     /// selected row marked. `deck` nil selects Today.
     public static func besideDetail(deck: Int64?) -> some View {

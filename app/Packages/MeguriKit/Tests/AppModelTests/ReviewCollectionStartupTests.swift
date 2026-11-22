@@ -942,6 +942,52 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
         }
     }
 
+    /// N18.3: focus alone never changes how the welcome shows Start Empty; it
+    /// only decides whether a press runs now.
+    @Test(.timeLimit(.minutes(1)))
+    func startEmptyLooksAvailableInAnInactiveWindowButRunsOnlyWhenActive() async throws {
+        try await withNativeMeguriNoFileOwner { app in
+            try #require(app.owner.canStartEmpty)
+            #expect(!app.owner.startEmptyWaitsForSync)
+            app.owner.setApplicationActive(false)
+            #expect(app.owner.startEmptyAvailable && !app.owner.canStartEmpty)
+            app.owner.setSceneActive(false)
+            #expect(app.owner.startEmptyAvailable && !app.owner.canStartEmpty)
+            await app.owner.startEmpty()
+            #expect(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
+            app.owner.setApplicationActive(true)
+            app.owner.setSceneActive(true)
+            #expect(app.owner.canStartEmpty)
+        }
+    }
+
+    /// N18.3: the click that activates an inactive window starts the collection:
+    /// the press waits for the activity that arrives just after it.
+    @Test(.timeLimit(.minutes(1)))
+    func startEmptyPressWaitsForTheActivationItsClickCauses() async throws {
+        try await withNativeMeguriNoFileOwner { app in
+            app.owner.setApplicationActive(false)
+            app.owner.setSceneActive(false)
+            let press = Task { await app.owner.startEmptyFromPress() }
+            await Task.yield()
+            app.owner.setApplicationActive(true)
+            app.owner.setSceneActive(true)
+            await press.value
+            try #require(app.owner.state == .ready, "\(app.owner.error ?? "Start Empty did not run")")
+            #expect(app.owner.decks.first?.name == "Default")
+        }
+    }
+
+    /// A press that no activation follows is dropped after the wait, as before.
+    @Test(.timeLimit(.minutes(1)))
+    func startEmptyPressWithoutActivationDoesNothing() async throws {
+        try await withNativeMeguriNoFileOwner { app in
+            app.owner.setApplicationActive(false)
+            await app.owner.startEmptyFromPress(activationWait: .milliseconds(50))
+            #expect(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
+        }
+    }
+
     @Test(arguments: [false, true])
     func startEmptyOpensRealDefaultDeckWithoutProviderTransfer(coldSelected: Bool) async throws {
         try await withNativeMeguriNoFileOwner(coldSelected: coldSelected) { app in
@@ -1347,6 +1393,7 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
             case .mediaCommitPending: "bridge.mediaCommitPending"
             case .commitCompleted: "bridge.commitCompleted"
             case .browse: "bridge.browse"
+            case .findReplaceRefused: "bridge.findReplaceRefused"
             }
         }
         return "unknown"

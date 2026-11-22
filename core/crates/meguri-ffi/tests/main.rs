@@ -39,6 +39,8 @@ pub mod cold_job_finished;
 pub mod collection_export_memory;
 #[path = "deck_options_ffi.rs"]
 pub mod deck_options_ffi;
+#[path = "find_replace_ffi.rs"]
+pub mod find_replace_ffi;
 #[path = "headless_parity.rs"]
 pub mod headless_parity;
 #[path = "notetype_reads_ffi.rs"]

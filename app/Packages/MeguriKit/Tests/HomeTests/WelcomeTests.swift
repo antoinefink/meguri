@@ -13,6 +13,8 @@ import Testing
             "Open a .colpkg file exported from Meguri or Anki.",
             "Begin with no decks and add your own notes.",
         ])
+        // A row that waits for sync says why, in place of its explanation.
+        #expect(WelcomeChoice.waitsForSyncReason == "Unavailable while sync is busy. Set Up Sync shows why.")
     }
 
     @Test func onlyAnIPhoneAtRegularWidthHeldWideSetsTheTwoSidesApart() {
