@@ -94,7 +94,7 @@ final class SyncButtonPlacementTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1"),
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false,
-            extra: ["-MeguriSyncRender", state]).arguments
+            extra: ["-MeguriSizeClass", "compact", "-MeguriSyncRender", state]).arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
         return app
