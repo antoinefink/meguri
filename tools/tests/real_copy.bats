@@ -263,7 +263,7 @@ EOF
 
 @test "the real copy builds Release with installed profiles only, packs it and forgets the built app" {
   real_copy
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .status)" = pass ]
   called '^xcodebuild -showBuildSettings -json .* -target Meguri -target MeguriWidget -configuration Release -sdk macosx -arch arm64 MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_MAC_AGENT_PROFILE_STYLE=Manual MEGURI_MAC_AGENT_PROFILE_SPECIFIER=11111111-2222-3333-4444-555555555555$'
   called '^xcodebuild build .* -configuration Release -destination platform=macOS,arch=arm64 -derivedDataPath build/app/RealCopyDerivedData .* MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_MAC_AGENT_PROFILE_STYLE=Manual MEGURI_MAC_AGENT_PROFILE_SPECIFIER=11111111-2222-3333-4444-555555555555$'
@@ -425,7 +425,7 @@ EOF
 @test "the real copy installs into Applications only when asked, never while Meguri runs, never over a test copy" {
   mkdir -p "$FX/Applications"
   real_copy --install
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .details.real_copy_installed.launched)" = false ]
   [ "$(jq -r .CFBundleIdentifier "$FX/Applications/Meguri.app/Contents/Info.plist")" = com.antoinefink.meguri ]
   # Staged outside Applications, on its volume; then only the installed path is registered.
@@ -512,7 +512,7 @@ PY
   # A killed install left its staging folder with a daily-id app in it.
   mkdir -p "$SB/build/app/real-copy/.meguri-install.Ef34Gh/Meguri.app/Contents"
   FX_AUTO_REGISTER=1 real_copy --install
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .status)" = pass ]
   called "^lsregister -u $FX/Applications/\.meguri-install\.Ab12Cd/Meguri.app$"
   called "^pluginkit -r $FX/Applications/\.meguri-install\.Ab12Cd/Meguri.app/Contents/PlugIns/MeguriWidget.appex$"
@@ -547,7 +547,7 @@ PY
 @test "the install stages beside the target only when its folder is on another volume" {
   mkdir -p "$FX/Applications"
   FX_OTHER_VOLUME=1 FX_AUTO_REGISTER=1 real_copy --install
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   called "^ditto -x -k $SB/build/app/real-copy/Meguri.zip $FX/Applications/\.meguri-install\.[^/]+/$"
   called "^lsregister -u $FX/Applications/\.meguri-install\.[^/]+/Meguri.app$"
   [ -z "$(ls -A "$FX/Applications" | grep '^\.meguri-install')" ]
@@ -612,7 +612,7 @@ PY
   echo stale >"$dd/stale-icon"
   : >"$STUB_LOG"
   real_copy
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .details.derived_data_cleaned.reason)" = stale-product ]
   [ "$(grep -c '^xcodebuild build ' "$STUB_LOG")" -eq 2 ]
   [ ! -e "$dd/stale-icon" ]

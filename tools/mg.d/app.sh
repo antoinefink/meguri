@@ -411,7 +411,17 @@ mg_app_dd_identity() {
     mg_status error
     return 1
   }
-  if [ -d "$dd" ] || [ -L "$dd" ]; then
+  # Never read, write or remove through a link (out of the checkout, say).
+  local path="$dd"
+  while [ "$path" != "$MG_ROOT" ] && [ -n "$path" ] && [ "$path" != / ]; do
+    if [ -L "$path" ]; then
+      mg_failure derived-data "refusing to use $MG_APP_DD through a symbolic link ($path); nothing was built"
+      mg_status error
+      return 1
+    fi
+    path="${path%/*}"
+  done
+  if [ -d "$dd" ]; then
     recorded="$(jq -cS . "$dd/$MG_APP_DD_RECORD" 2>/dev/null)" || recorded=""
     if [ -z "$recorded" ]; then
       mg_app_dd_clean no-identity-record "$app" || return 1

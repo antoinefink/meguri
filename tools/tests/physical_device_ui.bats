@@ -652,7 +652,7 @@ PY
     else
       mg build-app --personal-preview --platform mac
     fi
-    [ "$status" -eq 0 ] || cat "$STUB_LOG"
+    [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
     [ "$status" -eq 0 ]
     [ "$(field .status)" = pass ]
     called '^xcodebuild -showBuildSettings .* -configuration Release .* MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development$'
@@ -3938,7 +3938,7 @@ mg_run__real_copy_drive() { echo "drive $1 $2" >>"$STUB_LOG"; }
 mg_app_real_copy_device_check() { echo "device-check $2" >>"$STUB_LOG"; [ "${FX_DEVICE_CHECK_RC:-0}" -eq 0 ]; }
 FAKE
   mg run --real-copy --owner-requested --platform iphone --physical-device "$PHONE"
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .status)" = pass ]
   [ "$(field .details.launched)" = false ]
   [ "$(field .details.real_copy_profiles.app)" = AAAAAAAA-1111-2222-3333-444444444444 ]
@@ -4057,7 +4057,7 @@ FAKE
   local dd="$SB/build/app/RealCopyDeviceDerivedData"
   mkdir -p "$dd/Build/Intermediates.noindex"; echo stale >"$dd/Build/Intermediates.noindex/AppIcon.icns"
   real_copy_phone
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .details.derived_data_cleaned.reason)" = no-identity-record ]
   [ ! -e "$dd/Build/Intermediates.noindex/AppIcon.icns" ]
   [ -f "$dd/meguri-build-identity.json" ]
@@ -4077,7 +4077,7 @@ FAKE
   mkdir -p "$dd/Build/Products/Release/Meguri.app/Contents/Resources"
   echo daily >"$dd/Build/Products/Release/Meguri.app/Contents/Resources/AppIcon.icns"
   mg build-app --personal-preview --platform mac
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .details.derived_data_cleaned.reason)" = no-identity-record ]
   [ ! -e "$dd/Build/Products/Release/Meguri.app/Contents/Resources/AppIcon.icns" ]
   [ "$(jq -r '.targets[0].PRODUCT_BUNDLE_IDENTIFIER' "$dd/meguri-build-identity.json")" = com.antoinefink.meguri.dev ]
@@ -4087,7 +4087,7 @@ FAKE
   echo stale >"$dd/stale-icon"
   : >"$STUB_LOG"
   mg build-app --personal-preview --platform mac
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .details.derived_data_cleaned.reason)" = stale-product ]
   [ "$(grep -c '^xcodebuild build ' "$STUB_LOG")" -eq 2 ]
   [ ! -e "$dd/stale-icon" ]
@@ -4098,4 +4098,18 @@ FAKE
   [ "$(field '.failures[0].id')" = personal-preview-identity ]
   [[ "$(field '.failures[0].message')" == *"also when built from an empty build/app/PersonalPreviewDerivedData"* ]]
   [ "$(grep -c '^xcodebuild build ' "$STUB_LOG")" -eq 2 ]
+}
+
+@test "the derived data guard never reads, writes or removes through a linked build folder" {
+  personal_facts
+  local outside="$BATS_TEST_TMPDIR/outside"
+  mkdir -p "$outside/PersonalPreviewDerivedData" "$SB/build"
+  echo keep >"$outside/PersonalPreviewDerivedData/marker"
+  ln -s "$outside" "$SB/build/app"
+  mg build-app --personal-preview --platform mac
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = derived-data ]
+  [ -f "$outside/PersonalPreviewDerivedData/marker" ]
+  [ ! -e "$outside/PersonalPreviewDerivedData/meguri-build-identity.json" ]
+  not_called '^xcodebuild build '
 }
