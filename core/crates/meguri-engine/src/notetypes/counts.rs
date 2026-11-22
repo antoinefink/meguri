@@ -1,9 +1,9 @@
 //! The reads the Note Types screens make (U267): the list's order and note
 //! counts (`notetypes/editor-actions` A2), the notes with content of each
 //! field (`notetypes/workspace` W3.1), the near name of an unknown field
-//! (W7.1), the notes a draft's fronts give no card (W8) and the delete
-//! question's counts (W12). The draft save's summary (`notetypes/draft-save`
-//! D2) is [`super::structure::draft_summary`].
+//! (W7.1), each card type's cards (W5), the notes a draft's fronts give no
+//! card (W8) and the delete question's counts (W12). The draft save's
+//! summary (`notetypes/draft-save` D2) is [`super::structure::draft_summary`].
 //!
 //! Each read takes one snapshot and writes nothing. The passes over a
 //! type's notes check their cancel token and report progress (notes read
@@ -137,6 +137,51 @@ pub fn removal_counts(
     let snapshot = lease.snapshot()?;
     let (notes, cards, _) = super::remove::census(&*snapshot, id, cancel, progress)?.ok_or_else(|| not_found(id))?;
     Ok(RemovalCounts { notes, cards })
+}
+
+/// `notetypes/workspace` W5's counts on one snapshot: for each stored
+/// template ordinal of the note type, the cards that exist for it. A card
+/// whose ordinal is past the last template (a damaged collection) is
+/// counted at its own ordinal, so the list never hides cards. `NotFound`
+/// for an unknown note type.
+pub fn template_card_counts(
+    collection: &Collection,
+    id: NotetypeId,
+    cancel: &CancelToken,
+    progress: &ProgressSink,
+) -> Result<Vec<u64>, EngineError> {
+    let lease = collection.reader(ReaderRole::Query)?;
+    let snapshot = lease.snapshot()?;
+    template_card_counts_on(&*snapshot, id, cancel, progress)
+}
+
+/// [`template_card_counts`] on `reader`'s rows.
+pub fn template_card_counts_on(
+    reader: &impl ReadRows,
+    id: NotetypeId,
+    cancel: &CancelToken,
+    progress: &ProgressSink,
+) -> Result<Vec<u64>, EngineError> {
+    let notetype = reader.notetype(id)?.ok_or_else(|| not_found(id))?;
+    let mut counts = vec![0u64; notetype.templates.len()];
+    let mut done = 0u64;
+    let mut after = None;
+    loop {
+        cancel.check()?;
+        let page = reader.card_ordinals_of_notetype_page(id, after)?;
+        let Some(last) = page.last() else { break };
+        after = Some(last.0);
+        for (_, ord) in &page {
+            let ord = usize::from(*ord);
+            if ord >= counts.len() {
+                counts.resize(ord + 1, 0);
+            }
+            counts[ord] += 1;
+        }
+        done += page.len() as u64;
+        progress.report(done, None);
+    }
+    Ok(counts)
 }
 
 /// W7.1: the position in `fields` of the name suggested for the unknown

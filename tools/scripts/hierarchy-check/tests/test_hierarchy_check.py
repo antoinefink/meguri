@@ -1204,6 +1204,30 @@ class NativeMacToolbarTitlePair(unittest.TestCase):
         self.assertIn("text-overlap", kinds(hierarchy_check.check(tree)))
 
 
+class NativeNavigationBarTitlePair(unittest.TestCase):
+    """The iPad's Today (N26.2): the large title and its navigationSubtitle, whose
+    line boxes share about two points inside the navigation bar."""
+
+    def tree(self, subtitle_frame=(340, 131.25, 178, 13.5), title_label="Today", extra=()):
+        title = el("staticText", "", title_label, f=(340, 92.5, 95.5, 41))
+        subtitle = el("staticText", "", "24 new · 3 learning · 75 to review", f=subtitle_frame)
+        return doc(el("navigationBar", "Today", f=(214, 24, 850, 130), children=[title, subtitle, *extra]),
+                   window=(0, 0, 1064, 800))
+
+    def test_the_title_and_its_subtitle_do_not_overlap(self):
+        self.assertEqual(hierarchy_check.check(self.tree()), [])
+
+    def test_other_overlaps_still_count(self):
+        # Not on the title's leading edge, overlapping by more than a line box's share,
+        # a title that is not the bar's name, and two texts under the title.
+        self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(subtitle_frame=(360, 131.25, 178, 13.5)))))
+        self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(subtitle_frame=(340, 120, 178, 13.5)))))
+        self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(title_label="Decks"))))
+        second = el("staticText", "", "Another", f=(340, 131.25, 120, 13.5))
+        # Both texts under the title keep their overlaps with it, besides their own.
+        self.assertEqual(kinds(hierarchy_check.check(self.tree(extra=[second]))), ["text-overlap"] * 3)
+
+
 class NativeSidebarSearchField(unittest.TestCase):
     """The field `searchable(placement: .sidebar)` puts above a Mac sidebar
     (seen in Browse's export, U270): no identifier, in an unnamed group

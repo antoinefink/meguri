@@ -11,14 +11,11 @@ import SwiftUI
 /// root in the sidebar layout (Mac, iPad); the model outlives it.
 public struct NoteTypesView: View {
     @Bindable private var model: NoteTypesModel
-    /// The Cards tab, until U282 builds it.
-    private let cards: (Int64) -> AnyView
     @Environment(\.locale) private var locale
     @State private var jobShown = SaveJobShown()
 
-    public init(model: NoteTypesModel, cards: @escaping (Int64) -> AnyView = { _ in AnyView(CardsPlaceholder()) }) {
+    public init(model: NoteTypesModel) {
         self.model = model
-        self.cards = cards
     }
 
     public var body: some View {
@@ -26,7 +23,7 @@ public struct NoteTypesView: View {
         macBody
         #else
         // iPad: the list is the section's root and a note type is a navigation step (N22.7).
-        NoteTypesTouchRoot(model: model, cards: cards)
+        NoteTypesTouchRoot(model: model)
         #endif
     }
 
@@ -72,7 +69,7 @@ public struct NoteTypesView: View {
 
     @ViewBuilder private var detail: some View {
         if let id = model.selection {
-            NoteTypeDetailContent(model: model, id: id, cards: cards)
+            NoteTypeDetailContent(model: model, id: id)
         } else if model.phase == .ready {
             ContentUnavailableView {
                 Label { Text("noteTypes.detail.none", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
@@ -194,7 +191,6 @@ struct SaveJobShown: Equatable {
 struct NoteTypeDetailContent: View {
     let model: NoteTypesModel
     let id: Int64
-    let cards: (Int64) -> AnyView
 
     var body: some View {
         if model.draft(id) != nil {
@@ -205,7 +201,7 @@ struct NoteTypeDetailContent: View {
                 }
                 switch model.tab {
                 case .fields: NoteTypeFieldsTab(model: model, id: id)
-                case .cards: cards(id)
+                case .cards: NoteTypeCardsTab(model: model, id: id)
                 }
             }
         } else if model.recordFailed.contains(id) {
@@ -217,19 +213,6 @@ struct NoteTypeDetailContent: View {
         } else {
             DelayedProgress()
         }
-    }
-}
-
-/// The Cards tab until U282 builds it.
-public struct CardsPlaceholder: View {
-    public init() {}
-    public var body: some View {
-        ContentUnavailableView {
-            Label { Text("noteTypes.cards.title", bundle: .module) } icon: { Image(systemName: "rectangle.on.rectangle") }
-        } description: {
-            Text("noteTypes.cards.message", bundle: .module)
-        }
-        .accessibilityIdentifier("noteTypes.templates.placeholder")
     }
 }
 

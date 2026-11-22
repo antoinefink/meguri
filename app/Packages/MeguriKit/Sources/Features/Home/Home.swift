@@ -63,7 +63,7 @@ public struct HomeView: View {
         // N14.4: the Mac names the page in the toolbar, with what is waiting under it.
         .navigationSubtitle(pageSubtitle)
         #else
-        .modifier(HomeDeckSearch(enabled: showsDeckSearch, collection: collection, search: search))
+        .modifier(HomeDeckSearch(enabled: showsDeckSearch, alwaysShown: todayBesideDeckList, collection: collection, search: search))
         // The deck page carries its own title in the content: no empty large-title band above it.
         // The tab layout's deck list shares its bar's row with the title (N14.8).
         .toolbarTitleDisplayMode(deckID != nil ? .inline : shellLayout == .compact ? .inlineLarge : .automatic)
@@ -71,7 +71,7 @@ public struct HomeView: View {
         .toolbar {
             #if !os(macOS)
             ToolbarItem(placement: .primaryAction) {
-                if showsDeckSearch {
+                if showsSearchButton {
                     // N14.2: the list's deck search; the system field appears when asked for.
                     Button { search.presented = true } label: {
                         Label { Text("Search", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
@@ -183,6 +183,8 @@ public struct HomeView: View {
     }
     #if !os(macOS)
     private var showsDeckSearch: Bool { deckID == nil && shellLayout == .compact && showsRootDeckList }
+    /// N26.4: beside the detail the column shows the search field itself, so no button repeats it.
+    private var showsSearchButton: Bool { showsDeckSearch && !todayBesideDeckList }
     /// Held by the navigation, not the view: a fold, an unfold or a layout switch keeps the query.
     private var search: DeckListSearch { DeckSearchFocus.search(collection.navigation) }
     private var activeSearch: String? { showsDeckSearch ? search.query : nil }
@@ -211,6 +213,9 @@ public struct HomeView: View {
             #if !os(macOS)
             // N18.3: the welcome names itself in the content; the tab layout's bar repeats nothing over it.
             if collection.state == .noFile, shellLayout == .compact { return "" }
+            // N26.3: beside Today the column is the app's library, as Music's and Podcasts'
+            // sidebars name theirs; its decks sit under their own "Decks" header.
+            if todayBesideDeckList { return "Meguri" }
             #endif
             return HomeHeading.rootTitle(showsToday: showsToday)
         }
@@ -511,12 +516,14 @@ public struct HomeView: View {
 /// The deck list's search field (N14.2), only where the list is the root.
 private struct HomeDeckSearch: ViewModifier {
     let enabled: Bool
+    /// N26.4: beside Today the field is the column's only way into search, so it always shows.
+    let alwaysShown: Bool
     let collection: ReviewCollection
     @Bindable var search: DeckListSearch
     func body(content: Content) -> some View {
         if enabled {
             // Out of the way until the toolbar's search button presents it, so the large title stays.
-            content.searchable(text: $search.text, isPresented: $search.presented, placement: .navigationBarDrawer(displayMode: .automatic))
+            content.searchable(text: $search.text, isPresented: $search.presented, placement: .navigationBarDrawer(displayMode: alwaysShown ? .always : .automatic))
                 // N20.5: Return opens the first row, deck or create row, as in the sidebar layouts.
                 .onSubmit(of: .search) {
                     guard let query = search.query,
@@ -549,6 +556,8 @@ public struct HomeDeckTree: View {
     @State private var rowFrames: [Int64: CGRect] = [:]
     @State private var restoring: Int64?
     @State private var tracking = false
+    /// A row the list selected itself (keys) while its page opens: shown until the detail follows.
+    @State private var pendingRow: HomeListRow?
 
     public init(nodes: [CountedDeckNode], navigation: AppNavigation? = nil, collection: ReviewCollection? = nil,
                 previousAnswerCount: Int? = nil, error: String? = nil,
@@ -567,13 +576,33 @@ public struct HomeDeckTree: View {
     }
 
     public var body: some View {
+        // Read here, not only in the binding: expanding or collapsing a deck moves the mark.
+        let marked = today.flatMap { markedRow($0.selection) }
         GeometryReader { viewport in
             ScrollViewReader { proxy in
-                List {
+                // N26.1: beside Today the list draws its selection itself, as the iPad sidebar
+                // does. A tap runs the row's button; a selection the list makes itself (keys)
+                // takes the same path, and shows at once while the page opens. Otherwise the
+                // binding reads where the detail is.
+                List(selection: today.map { today in
+                    Binding(get: { pendingRow ?? marked }, set: { row in
+                        guard let row, row != (pendingRow ?? marked) else { return }
+                        pendingRow = row
+                        switch row {
+                        case .today: today.open()
+                        case .deck(let id): select(id)
+                        }
+                    })
+                }) {
                     if let today {
-                        // N14.10: Today in its own group, then the decks in theirs.
+                        // N14.10, N26.3: Today in its own section, then the decks under "Decks".
                         Section { HomeTodayRowView(row: today).id(InfoAnchor.today) }
-                        Section { branches }
+                        Section {
+                            branches
+                        } header: {
+                            Text("Decks", bundle: .module)
+                                .accessibilityIdentifier("home.collection.decksHeader")
+                        }
                     } else {
                         branches
                     }
@@ -602,6 +631,8 @@ public struct HomeDeckTree: View {
                     }
                 }
                 .coordinateSpace(name: "home.deck.list")
+                // The detail followed (or went elsewhere): the navigation's mark is the selection again.
+                .onChange(of: marked) { _, _ in pendingRow = nil }
                 .activityLoading(activity, scope: .collection, active: activityActive,
                                  widths: navigation?.activityRowWidths, page: .deckList)
                 // List does not use the ScrollView target-layout modifier.
@@ -661,6 +692,22 @@ public struct HomeDeckTree: View {
     }
 
     private enum InfoAnchor: Hashable { case today, previousSession, error }
+
+    /// The row the list beside Today selects (N14.10): Today, the deck whose page shows,
+    /// or the outermost collapsed deck that hides it.
+    private func markedRow(_ selection: DeckListSelection) -> HomeListRow? {
+        guard let deck = selection.deck else { return .today }
+        func visible(in nodes: [CountedDeckNode]) -> Int64? {
+            for node in nodes {
+                if node.id == deck { return node.id }
+                if selection.marks(node, expanded: false) {
+                    return (isExpanded?(node.id) ?? !node.studyCollapsed) ? visible(in: node.children) : node.id
+                }
+            }
+            return nil
+        }
+        return visible(in: nodes).map(HomeListRow.deck)
+    }
     private func recordFrame(_ id: Int64, _ frame: CGRect?) { rowFrames[id] = frame }
     private func contains(_ id: Int64, in nodes: [CountedDeckNode]) -> Bool {
         nodes.contains { node in
@@ -736,7 +783,7 @@ private struct HomeDeckBranch: View {
                 row
             }
             .padding(.leading, CGFloat(depth) * Spacing.medium)
-            .homeRowSelection(selected)
+            .tag(HomeListRow.deck(node.id))
             if expanded.wrappedValue {
                 ForEach(node.children, id: \.id) { child in
                     childBranch(child)
@@ -861,7 +908,7 @@ private struct HomeDeckBranch: View {
             if !stacks { Spacer() }
             if node.counts.waiting > 0 {
                 Text(node.counts.waiting, format: .number)
-                    // Primary on the selection's grey, where the secondary token falls short of 4.5:1.
+                    // Primary on the selection's highlight, where the secondary token falls short of 4.5:1.
                     .foregroundStyle(.token(selected ? .textPrimary : .textSecondary))
                     .monospacedDigit()
                     // A number never splits across lines.
@@ -922,7 +969,7 @@ private struct HomeTodayRowView: View {
         .accessibilityValue(Text("\(row.waiting) cards waiting", bundle: .module))
         .accessibilityAddTraits(row.selected ? .isSelected : [])
         .accessibilityIdentifier("home.today.row")
-        .homeRowSelection(row.selected)
+        .tag(HomeListRow.today)
     }
 
     private var stacks: Bool {
@@ -959,18 +1006,10 @@ private struct HomeTodayRowView: View {
     }
 }
 
-private extension View {
-    /// The selected row's grey in the list beside Today (N14.10): the system's fill for a
-    /// selected cell, since these rows are buttons and the list has no selection of its own.
-    /// One view whether or not it is selected: a branch here would give the row a new
-    /// identity on selection, which drops its recorded frame and cuts the tap's highlight.
-    func homeRowSelection(_ selected: Bool) -> some View {
-        #if os(macOS)
-        self
-        #else
-        listRowBackground(selected ? Color(uiColor: .systemGray5) : nil)
-        #endif
-    }
+/// A row of the deck list, as its selection names it (N14.10).
+enum HomeListRow: Hashable {
+    case today
+    case deck(Int64)
 }
 
 public struct HomeSidebarDecks: View {
