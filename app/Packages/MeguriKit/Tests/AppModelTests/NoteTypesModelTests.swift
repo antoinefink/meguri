@@ -887,6 +887,17 @@ extension NoteTypesModelTests {
         #expect(model.shownSelection == 8 && model.draft(8) != nil)
     }
 
+    @Test func aReadAheadInFlightDuringAChangeElsewhereIsDropped() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[9] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        backend.readWait = .milliseconds(40)
+        model.warm(9)
+        model.changesCommitted(.notetypes([9]))
+        await model.settle()
+        #expect(model.records[9] == nil, "the version read before the change is never kept")
+    }
+
     @Test func aRenameBegunOnTheShownNoteTypeEndsWhenTheDetailSwaps() async throws {
         let backend = FakeNoteTypesBackend()
         backend.records[9] = NoteTypeCardsTests.record()

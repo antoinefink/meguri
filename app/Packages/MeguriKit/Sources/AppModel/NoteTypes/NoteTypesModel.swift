@@ -1139,6 +1139,14 @@ public final class NoteTypesModel {
         } else {
             refreshCounts()
         }
+        // A read ahead still in flight may hold the version from before the change:
+        // it is dropped, and read again at once if its note type is selected.
+        for id in Array(warming) where changes.wholeCollection || changes.notetypes.contains(where: { $0.id == id }) {
+            detailTasks[id]?.cancel()
+            detailTasks[id] = nil
+            warming.remove(id)
+            if selection == id { loadDetail(id) }
+        }
         // A record only read ahead goes, to be read again when it is needed.
         for id in records.keys where !loaded.contains(id) && !warming.contains(id)
             && (changes.wholeCollection || changes.notetypes.contains(where: { $0.id == id })) {
