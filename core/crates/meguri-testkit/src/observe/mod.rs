@@ -3,6 +3,7 @@
 //! overlay goldens (`overlay`, float-determinism.md F7-F9).
 
 pub mod overlay;
+pub mod stats;
 
 use std::collections::BTreeMap;
 

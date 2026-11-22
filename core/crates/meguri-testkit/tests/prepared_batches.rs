@@ -397,7 +397,7 @@ fn new_observations() -> Vec<(&'static str, Value)> {
     ]
 }
 #[test]
-fn new_observations_and_stats_are_language_only_with_pure_search_d8() {
+fn new_observations_and_stats_parse_with_pure_search_d8() {
     let executor = MeguriExecutor::default();
     let caps = executor.capabilities();
     assert_eq!(ObservationKind::ALL.len(), 65);
@@ -411,9 +411,9 @@ fn new_observations_and_stats_are_language_only_with_pure_search_d8() {
         let value = json!({kind:args});
         let parsed = request(value.clone()).unwrap();
         let before = parsed.needs();
-        // U88a runs `search_build` (S6) and U92 `card_stats` (stats-ops
-        // H9); the others are still language only.
-        let implemented = matches!(kind, "search_build" | "card_stats");
+        // U88a runs `search_build` (S6), U92 `card_stats` (stats-ops H9)
+        // and U104 `stats` (H10); the others are still language only.
+        let implemented = matches!(kind, "search_build" | "card_stats" | "stats");
         assert_eq!(executor.missing(&before).observations.contains(kind), !implemented, "{kind}");
         assert_eq!(before, parsed.needs());
         assert_eq!(caps, executor.capabilities());
