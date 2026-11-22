@@ -68,16 +68,22 @@ private struct SettingsToolbarStyle: NSViewRepresentable {
             if !window.styleMask.contains(.resizable) { window.styleMask.insert(.resizable) }
             guard !sized else { return }
             sized = true
-            let key = "meguri.settingsWindow.defaultHeightApplied"
-            guard !UserDefaults.standard.bool(forKey: key), let screen = window.screen ?? NSScreen.main else { return }
-            UserDefaults.standard.set(true, forKey: key)
-            let chrome = window.frame.height - window.contentLayoutRect.height
-            let height = min(SettingsWindowSize.defaultHeight, screen.visibleFrame.height - chrome)
-            guard height > window.contentLayoutRect.height else { return }
-            var frame = window.frame
-            frame.origin.y -= height - window.contentLayoutRect.height
-            frame.size.height = height + chrome
-            window.setFrame(frame, display: true)
+            let key = "meguri.settingsWindow.defaultHeight"
+            guard !UserDefaults.standard.bool(forKey: key) else { return }
+            // After SwiftUI has sized and restored the window: done earlier, it puts the old frame back.
+            Task { @MainActor [weak window] in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard let window, let screen = window.screen ?? NSScreen.main else { return }
+                UserDefaults.standard.set(true, forKey: key)
+                let content = window.contentRect(forFrameRect: window.frame).height
+                let chrome = window.frame.height - content
+                let height = min(SettingsWindowSize.defaultHeight, screen.visibleFrame.height - chrome)
+                guard height > content else { return }
+                var frame = window.frame
+                frame.origin.y -= height - content
+                frame.size.height = height + chrome
+                window.setFrame(frame, display: true)
+            }
         }
     }
 }
