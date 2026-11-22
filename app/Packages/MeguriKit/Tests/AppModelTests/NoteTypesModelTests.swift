@@ -805,4 +805,51 @@ extension NoteTypesModelTests {
         // Show Notes is offered only once Browse can take the notes (U287).
         #expect(model.showNotes == nil)
     }
+
+    @Test func reorderingIdenticalCardTypesReadsUsedOnAgain() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = NoteTypeCardsTests.record(templates: [("One", "{{Front}}", "{{Back}}"), ("Two", "{{Front}}", "{{Back}}")])
+        let (model, _) = await open(backend)
+        #expect(model.usedOn(7) != nil)
+        model.moveCardTypes(7, fromOffsets: IndexSet(integer: 0), toOffset: 2)
+        await model.settle()
+        #expect(model.usedOn(7) == [0: [0, 1], 1: [0, 1], 2: []], "the same texts in another order read again")
+    }
+
+    @Test func flipThenSaveCarriesBothTexts() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        let (model, _) = await open(backend)
+        model.flip(7, card: 0)
+        model.save()
+        await model.settle()
+        #expect(backend.saved.first?.templates[0].front == "{{Back}}")
+        #expect(backend.saved.first?.templates[0].back == "{{FrontSide}}\n\n<hr id=answer>\n\n{{Front}}")
+    }
+
+    @Test func addCloseIgnoresAnEarlierCloseOfTheSameSection() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        let (model, _) = await open(backend)
+        backend.issues = [NotetypeTemplateIssue(template: 0, part: .back, line: 1, kind: .unclosedSection(tag: "{{#Extra}}", close: "{{/Extra}}"))]
+        model.setText(7, card: 0, part: .back, "{{#Extra}}{{/Extra}}{{#Extra}}")
+        await model.settle()
+        model.applyFix(7, model.liveIssues(7)[0])
+        #expect(model.editorRequest?.command == .append("{{/Extra}}"))
+    }
+
+    @Test func aCancelledW8TaskNeverHidesTheNewerRead() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = Self.twoCards
+        backend.blankFronts = [NotetypeBlankFront(noteIds: [1], field: 0), NotetypeBlankFront(noteIds: [], field: nil)]
+        let (model, _) = await open(backend)
+        model.tab = .cards
+        await model.settle()
+        model.summaryDelay = .milliseconds(20)
+        // A, then B, then A again before the first task wakes.
+        model.setText(7, card: 0, part: .front, "{{Front}} B")
+        model.setText(7, card: 0, part: .front, "{{Front}}")
+        await model.settle()
+        #expect(model.liveIssues(7).contains { $0.kind == .blankFront(notes: 1, field: "Front") })
+    }
 }
