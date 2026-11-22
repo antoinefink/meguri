@@ -2,71 +2,50 @@ import AppModel
 import CoreBridge
 import SwiftUI
 
-struct SyncServiceSwitchSheet: View {
+/// T21.1, N15.7: the service change confirmation, in the platform's form for a
+/// destructive choice, as Delete Deck asks: an alert on the Mac's Settings
+/// window; on touch the system confirmation dialog from the Service control.
+/// Cancel has the cancel role (Esc); the destructive button is never the
+/// default, so Return confirms nothing. Choosing it closes the question; the
+/// change's progress and failure show under the Service control.
+struct ServiceSwitchQuestion: ViewModifier {
     let collection: ReviewCollection
-    let source: SyncProviderSelection
-    let destination: String
-    let changing: Bool
-    let failed: Bool
-    let cancel: () -> Void
-    let confirm: () -> Void
+    @Binding var destination: String?
+    let source: SyncProviderSelection?
+    let confirm: (_ destination: String, _ shown: SyncProviderSelection) -> Void
     private var sync: SyncCoordinator { collection.sync }
-    private var oldService: String {
-        SyncText.value(source == .meguri ? "sync.service.meguri" : "sync.service.iCloud")
+    private var question: (confirmation: ServiceSwitchConfirmation, source: SyncProviderSelection)? {
+        guard let destination, let source else { return nil }
+        return (ServiceSwitchConfirmation(source: source, destination: destination,
+                                          facts: sync.serviceSwitchFacts(source: source)), source)
     }
-    /// T19.2: the destination's setup follows with no Connect step.
-    private var nextKey: String {
-        switch destination {
-        case "iCloud": "sync.switch.next.iCloud.setup"
-        case "meguri": "sync.switch.next.meguri.setup"
-        default: "sync.switch.next.localOnly"
-        }
+    func body(content: Content) -> some View {
+        let question = question
+        let title = Text(verbatim: question.map { SyncText.value($0.confirmation.titleKey) } ?? "")
+        let message = Text(verbatim: question.map { $0.confirmation.message(source: $0.source) } ?? "")
+        let presented = Binding(get: { destination != nil }, set: { if !$0 { destination = nil } })
+        #if os(macOS)
+        content.alert(title, isPresented: presented) {
+            Button(SyncText.value("sync.service.cancel"), role: .cancel) { destination = nil }
+                .accessibilityIdentifier("sync.serviceSwitch.cancel")
+            confirmButton(question)
+        } message: { message }
+        #else
+        content.confirmationDialog(title, isPresented: presented, titleVisibility: .visible) {
+            confirmButton(question)
+            Button(SyncText.value("sync.service.cancel"), role: .cancel) { destination = nil }
+                .accessibilityIdentifier("sync.serviceSwitch.cancel")
+        } message: { message }
+        #endif
     }
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    let facts = sync.serviceSwitchFacts(source: source)
-                    switch facts.changes {
-                    case .count(let pending):
-                        if pending > 0 { Text(SyncText.format("sync.switch.pending", Int64(clamping: pending), oldService)) }
-                        if let held = facts.heldBack, held > 0 { Text(SyncText.format("sync.switch.heldBack", Int64(clamping: held), oldService)) }
-                        if pending == 0, facts.heldBack == 0 { Text(SyncText.format("sync.switch.pending.none", oldService)) }
-                        else if pending == 0, facts.heldBack == nil { Text(SyncText.format("sync.switch.pending.unknown", oldService)) }
-                    case .some: Text(SyncText.format("sync.switch.pending.some", oldService))
-                    case .unknown: Text(SyncText.format("sync.switch.pending.unknown", oldService))
-                    }
-                    if let files = facts.media {
-                        if files > 0 { Text(SyncText.format("sync.switch.media", Int64(clamping: files), oldService)) }
-                    } else { Text(SyncText.format("sync.switch.media.unknown", oldService)) }
-                    if facts.acceptanceUnknown {
-                        Text(SyncText.value("sync.switch.acceptanceUnknown"))
-                    }
-                    Text(SyncText.format("sync.switch.kept", oldService))
-                    if destination != "localOnly" { Text(SyncText.value("sync.switch.otherDevices")) }
-                    if source == .meguri && !failed { Text(SyncText.value("sync.switch.signOut")) }
-                    Text(SyncText.value(nextKey))
-                    if !changing && !sync.serviceChangeAvailable { Text(SyncText.value(sync.serviceChangeBusyKey)) }
-                    if changing { ProgressView(SyncText.value("sync.service.changing")) }
-                    if failed { Text(SyncText.value("sync.service.changeFailed")) }
-                }
-            }
-            .formStyle(.grouped)
-            .navigationTitle(SyncText.value(destination == "localOnly" ? "sync.switch.title.off" : "sync.switch.title.\(destination)"))
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(SyncText.value("sync.service.cancel"), role: .cancel, action: cancel)
-                        .disabled(changing).accessibilityIdentifier("sync.serviceSwitch.cancel")
-                }
-                ToolbarItem(placement: .destructiveAction) {
-                    Button(SyncText.value(destination == "localOnly" ? "sync.switch.confirm.off" : "sync.switch.confirm.\(destination)"),
-                           role: .destructive, action: confirm)
-                        .disabled(changing || !sync.serviceChangeAvailable)
-                        .accessibilityIdentifier("sync.serviceSwitch.confirm")
-                }
-            }
-            .interactiveDismissDisabled(changing)
+    private func confirmButton(_ question: (confirmation: ServiceSwitchConfirmation, source: SyncProviderSelection)?) -> some View {
+        Button(question.map { SyncText.value($0.confirmation.confirmKey) } ?? "", role: .destructive) {
+            guard let destination, let source else { return }
+            self.destination = nil
+            confirm(destination, source)
         }
+        .disabled(!sync.serviceChangeAvailable)
+        .accessibilityIdentifier("sync.serviceSwitch.confirm")
     }
 }
 

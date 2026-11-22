@@ -156,12 +156,14 @@ final class MacHomeHierarchyTests: XCTestCase {
         XCTAssertEqual(settings.sheets.count, 0)
         meguriForm()
         try choose("iCloud (Beta)")
-        let sheets = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.serviceSwitch.cancel"))
+        // T21.1: a system alert on the Settings window; its buttons carry no identifiers.
+        let sheets = settings.sheets
         let sheet = sheets.element(boundBy: 0)
         XCTAssertTrue(sheet.waitForExistence(timeout: 10))
         XCTAssertEqual(sheets.count, 1)
-        let cancel = unique(sheet, "sync.serviceSwitch.cancel")
-        let confirm = unique(sheet, "sync.serviceSwitch.confirm")
+        let cancel = sheet.buttons["Cancel"]
+        let confirm = sheet.buttons["Switch to iCloud"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
         XCTAssertEqual(cancel.elementType, .button)
         XCTAssertEqual(confirm.elementType, .button)
         actionable(cancel)
@@ -335,14 +337,14 @@ final class MacHomeHierarchyTests: XCTestCase {
             // V27.5, T19.2: Off is the one way out. It asks once, names the removed
             // sign-in, and its destructive button is not the default.
             try choose("Off")
-            let offSheets = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.serviceSwitch.confirm"))
+            // T21.1: a system alert; its buttons are found by label.
+            let offSheets = settings.sheets
             let offSheet = offSheets.element(boundBy: 0)
             XCTAssertTrue(offSheet.waitForExistence(timeout: 10))
             XCTAssertEqual(offSheets.count, 1)
-            XCTAssertEqual(settings.sheets.count, 1)
-            let offConfirm = unique(offSheet, "sync.serviceSwitch.confirm")
+            let offConfirm = offSheet.buttons["Turn Off Sync"]
+            XCTAssertTrue(offConfirm.waitForExistence(timeout: 10))
             XCTAssertEqual(offConfirm.elementType, .button)
-            XCTAssertTrue(offConfirm.label == "Turn Off Sync" || offConfirm.title == "Turn Off Sync")
             try app.bringToFront(bundleIdentifier: bundle)
             offSheet.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
             XCTAssertTrue(offSheet.exists, "Return must not turn sync off")

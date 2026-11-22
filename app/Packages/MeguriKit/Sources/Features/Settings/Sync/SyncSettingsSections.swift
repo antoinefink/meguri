@@ -140,12 +140,9 @@ struct SyncServiceRows: View {
         .accessibilityIdentifier("settings.sync.service")
         // Synthetic examples only: open the confirmation the example names.
         .task { if let request = sync.renderServiceSwitch { choose(request.destination) } }
-        .sheet(isPresented: Binding(get: { destination != nil }, set: { if !$0 && !changing { destination = nil } })) {
-            if let destination, let switchSource {
-                SyncServiceSwitchSheet(collection: collection, source: switchSource, destination: destination, changing: changing,
-                    failed: failed, cancel: { self.destination = nil }, confirm: { change(destination, shown: switchSource) })
-            }
-        }
+        .modifier(ServiceSwitchQuestion(collection: collection, destination: $destination, source: switchSource) { value, shown in
+            change(value, shown: shown)
+        })
         if changing {
             ProgressView(SyncText.value("sync.service.changing"))
                 .accessibilityIdentifier("settings.sync.serviceChanging")
@@ -172,11 +169,15 @@ struct SyncServiceRows: View {
         guard !collection.meguriSignInPreparing, !sync.meguriBusy, value != selected else { return }
         refusedForOp = false
         if opBlocksChange { refusedForOp = true; return }
-        if selected != "localOnly" { switchSource = sync.providerState?.selection; destination = value }
+        if selected != "localOnly" {
+            // T21.1: the question opens only while the change can run; the reason shows under the control.
+            guard sync.serviceChangeAvailable else { return }
+            switchSource = sync.providerState?.selection; destination = value
+        }
         else { change(value) }
     }
-    /// `shown`: the service the confirmation sheet named. When the selection is
-    /// no longer that one, the sheet closes and nothing changes.
+    /// `shown`: the service the confirmation named. When the selection is
+    /// no longer that one, nothing changes.
     private func change(_ value: String, shown: SyncProviderSelection? = nil) {
         let source = sync.providerState?.selection
         if let shown, shown != source { destination = nil; return }
