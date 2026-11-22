@@ -2332,6 +2332,8 @@ lint_first_sandbox() {
   : >"$STUB_LOG"
   mkdir -p "$SB/app"
   cp "$REPO_ROOT/app/.swiftlint.yml" "$SB/app/"
+  # The real allowlist names app files this sandbox lacks: keep its comments only.
+  grep '^#' "$REPO_ROOT/tools/lint-ui/allowlist.tsv" >"$SB/tools/lint-ui/allowlist.tsv"
   write_file app/Packages/MeguriKit/Package.swift '// swift-tools-version: 6.2'
   write_file app/Packages/MeguriKit/Sources/CardRendering/CardFace.swift 'import SwiftUI
 
@@ -2430,6 +2432,15 @@ lint/glass-outside-chrome" ]
     [ "$(stub_calls)" = "$expected" ] || { echo "$job: $(stub_calls)"; return 1; }
     [ "$(jq -r .status "$(field '.artifacts[] | select(.kind == "lint-ui") | .path')")" = pass ]
   done
+}
+
+@test "a real allowlist entry for an app file does not leak into the lint-first sandbox" {
+  printf 'raw-color\tapp/Packages/MeguriKit/Sources/Missing.swift\tA reason.\n' >>"$SB/tools/lint-ui/allowlist.tsv"
+  lint_first_sandbox
+  export STUB_SWIFTLINT_REPORT="$BATS_TEST_TMPDIR/clean.json"
+  mg build-app --platform mac --config Debug
+  [ "$(failure_ids)" = xcframework ] || { echo "$(failure_ids); stderr: $stderr"; return 1; }
+  [ "$(jq -r .status "$(field '.artifacts[] | select(.kind == "lint-ui") | .path')")" = pass ]
 }
 
 @test "build-app forwards its configuration to the core build after lint-ui and stops on core failure" {
