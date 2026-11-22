@@ -78,8 +78,10 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     /// the toolbar, while no sheet shows (`CloudSyncPanelMeasure`).
     public var panelSheetHeight: Double?
     public var panelPopoverHeight: Double?
-    /// Test hooks: the button holds the moment after a success (`-MeguriSyncRender …+justFinished`).
-    public var buttonAccentHeld = false
+    /// N23.6: the one sync button that presents the panel: the last one that
+    /// appeared (the screen on top) or was tapped. A stack keeps the buttons of
+    /// the screens under it, so only this one presents.
+    public var statusPresenter: UUID?
     public init() {}
 }
 

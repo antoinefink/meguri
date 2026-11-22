@@ -45,13 +45,18 @@ public enum SyncButton {
     /// Follows one sync the person started from the button, from the tap to
     /// the end of the work it started. Presentation only.
     public struct Feedback: Equatable, Sendable {
-        enum Phase: Equatable, Sendable { case idle, requested(Date), running }
+        enum Phase: Equatable, Sendable { case idle, requested(Date), running(Date) }
         private(set) var phase: Phase = .idle
         /// The check is in the accent colour (after `Outcome.succeeded`).
         public private(set) var accented = false
         /// A request the status never shows moving for this long is dropped:
         /// the work was refused or ended before it showed.
         static let requestTimeout: TimeInterval = 20
+        /// A sync followed for longer than this is let go without feedback: its
+        /// end was not seen (the button was off screen when it ended).
+        static let runningLimit: TimeInterval = 15 * 60
+        /// Test hooks: the accent stays for a capture.
+        private var held = false
 
         public init() {}
 
@@ -71,11 +76,12 @@ public enum SyncButton {
                 // Expired first: a later round the person did not start must not
                 // take over a request whose own work never showed.
                 if now.timeIntervalSince(at) > Self.requestTimeout { phase = .idle; return nil }
-                if moving { phase = .running; return nil }
+                if moving { phase = .running(now); return nil }
                 // A request refused at once (a sign-in that expired) ends in needs you.
                 if needsYou { phase = .idle; return .ended }
                 return nil
-            case .running:
+            case .running(let since):
+                if now.timeIntervalSince(since) > Self.runningLimit { phase = .idle; return nil }
                 guard !moving else { return nil }
                 phase = .idle
                 if upToDate, !needsYou {
@@ -86,10 +92,16 @@ public enum SyncButton {
             }
         }
 
+        /// A button appeared: when nothing moves, a sync it was following ended
+        /// out of its sight, so it is let go without feedback.
+        public mutating func appeared(moving: Bool) {
+            if !moving, phase != .idle { phase = .idle }
+        }
+
         /// The moment after a success is over.
-        public mutating func endAccent() { accented = false }
+        public mutating func endAccent() { if !held { accented = false } }
 
         /// Test hooks: the moment after a success, held for a capture.
-        @_spi(MeguriTestHooks) public mutating func showAccentForTestHooks() { accented = true }
+        @_spi(MeguriTestHooks) public mutating func holdAccentForTestHooks() { accented = true; held = true }
     }
 }

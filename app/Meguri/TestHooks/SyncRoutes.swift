@@ -18,7 +18,7 @@ extension TestHooks {
             Task { @MainActor in
                 while collection.state != .ready { try? await Task.sleep(for: .milliseconds(100)) }
                 collection.showSyncRenderFixtureForTestHooks(.renderFixture(render.state, clock: clock))
-                collection.syncPresentation.buttonAccentHeld = render.justFinished
+                if render.justFinished { collection.syncPresentation.buttonFeedback.holdAccentForTestHooks() }
             }
         }
 
@@ -28,8 +28,11 @@ extension TestHooks {
                                          configuration: LaunchConfiguration) {
             let collection = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
                 sync: .renderFixture(render.state, clock: configuration.clock))
-            collection.syncPresentation.buttonAccentHeld = render.justFinished
+            if render.justFinished { collection.syncPresentation.buttonFeedback.holdAccentForTestHooks() }
             features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
+            #if os(iOS)
+            features.syncPanelMeasure = { AnyView(CloudSyncPanelMeasure(collection: collection)) }
+            #endif
         }
 
         static func register(in registry: inout RouteRegistry) {

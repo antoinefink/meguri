@@ -119,4 +119,25 @@ import Testing
         #expect(feedback.observe(moving: false, upToDate: true, needsYou: false, now: start + 41) == nil)
         #expect(!feedback.accented)
     }
+
+    @Test func t22_1ASyncEndingOutOfSightGivesNothing() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        var feedback = SyncButton.Feedback()
+        // Running, then the button left the screen (a review, another section) and
+        // came back after the end: let go, no feedback for the next round.
+        feedback.requested(at: start)
+        _ = feedback.observe(moving: true, upToDate: false, needsYou: false, now: start)
+        feedback.appeared(moving: false)
+        #expect(feedback.observe(moving: true, upToDate: false, needsYou: false, now: start + 60) == nil)
+        #expect(feedback.observe(moving: false, upToDate: true, needsYou: false, now: start + 61) == nil)
+        // A button that appears while the sync still moves keeps following it.
+        feedback.requested(at: start)
+        _ = feedback.observe(moving: true, upToDate: false, needsYou: false, now: start)
+        feedback.appeared(moving: true)
+        #expect(feedback.observe(moving: false, upToDate: true, needsYou: false, now: start + 5) == .succeeded)
+        // One followed past its limit is let go.
+        feedback.requested(at: start)
+        _ = feedback.observe(moving: true, upToDate: false, needsYou: false, now: start)
+        #expect(feedback.observe(moving: false, upToDate: true, needsYou: false, now: start + 16 * 60) == nil)
+    }
 }

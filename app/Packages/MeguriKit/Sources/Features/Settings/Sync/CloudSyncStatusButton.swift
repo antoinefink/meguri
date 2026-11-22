@@ -11,6 +11,9 @@ public struct CloudSyncStatusButton: View {
     let collection: ReviewCollection
     @Environment(\.appClock) private var clock
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// This button's own identity: a stack keeps the buttons of the screens under
+    /// the top one, and only one of them presents the panel (N23.6).
+    @State private var presenterID = UUID()
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var nativeCompactStatusID: UUID?
@@ -37,8 +40,12 @@ public struct CloudSyncStatusButton: View {
     private var main: SyncMainStatus { collection.sync.mainStatus }
     private var titleKey: String { main.titleKey }
     private var presented: Binding<Bool> {
-        Binding(get: { collection.navigation.sheet == nil && collection.syncPresentation.statusPresented },
-            set: { collection.syncPresentation.statusPresented = $0 })
+        let presentation = collection.syncPresentation
+        let id = presenterID
+        return Binding(get: {
+            collection.navigation.sheet == nil && presentation.statusPresented
+                && (presentation.statusPresenter == nil || presentation.statusPresenter == id)
+        }, set: { presentation.statusPresented = $0 })
     }
     private var compact: Bool {
         #if os(iOS)
@@ -58,18 +65,12 @@ public struct CloudSyncStatusButton: View {
         // the status line, Sync Now and Sync Settings. No text beside it and
         // no view around it, so the system draws it as one item of its group.
         Menu {
-            Section(statusLine) {
-                Button(SyncText.value("sync.now.command")) { syncNowFromMenu() }
-                    .disabled(!syncNowEnabled)
-                    .accessibilityIdentifier("sync.status.menu.syncNow")
-                Button(SyncText.value("sync.status.openSettings")) { openSettingsFromMenu() }
-                    .accessibilityIdentifier("sync.status.menu.settings")
-            }
+            menuItems
         } label: {
             // N23.2: the moving symbol turns exactly while the panel's bar shows.
             SyncStatusSymbol(status: main, iCloud: collection.sync.symbolsAreICloud,
                 turning: !reduceMotion && collection.sync.panelProgress != nil,
-                accented: feedback.accented || collection.syncPresentation.buttonAccentHeld)
+                accented: feedback.accented)
         } primaryAction: {
             tap()
         }
@@ -80,6 +81,10 @@ public struct CloudSyncStatusButton: View {
         .help([SyncText.value(titleKey), SyncStatusCopy.detail(collection.sync, now: clock.now())]
             .compactMap { $0 }.joined(separator: "\n"))
         .accessibilityIdentifier("sync.status.button")
+        #if os(macOS)
+        // A secondary click shows the same menu as a long press (N23.6).
+        .contextMenu { menuItems }
+        #endif
         .disabled(collection.syncPresentation.statusHandoffPending)
         .popover(isPresented: presented(compact: false)) {
             // N23.1: 320 points wide, as tall as its content.
@@ -125,6 +130,17 @@ public struct CloudSyncStatusButton: View {
         }
         #endif
         .onChange(of: observed) { _, now in observe(now) }
+        .onAppear {
+            // The screen on top presents the panel; a sync followed while no
+            // button was on screen and that ended meanwhile is let go.
+            collection.syncPresentation.statusPresenter = presenterID
+            collection.syncPresentation.buttonFeedback.appeared(moving: moving)
+        }
+        .onDisappear {
+            if collection.syncPresentation.statusPresenter == presenterID {
+                collection.syncPresentation.statusPresenter = nil
+            }
+        }
         // The check keeps the accent colour for a moment after a success, then
         // returns to the default colour.
         .task(id: feedback.accented) {
@@ -135,6 +151,19 @@ public struct CloudSyncStatusButton: View {
         }
     }
     private var feedback: SyncButton.Feedback { collection.syncPresentation.buttonFeedback }
+    /// The long-press menu: the status line, then Sync Now where the panel has it
+    /// (enabled as the panel's), then Sync Settings.
+    @ViewBuilder private var menuItems: some View {
+        Section(statusLine) {
+            if SyncStatusPanel.slot(collection) == .syncNow {
+                Button(SyncText.value("sync.now.command")) { syncNowFromMenu() }
+                    .disabled(!syncNowEnabled)
+                    .accessibilityIdentifier("sync.status.menu.syncNow")
+            }
+            Button(SyncText.value("sync.status.openSettings")) { openSettingsFromMenu() }
+                .accessibilityIdentifier("sync.status.menu.settings")
+        }
+    }
     private var moving: Bool { collection.sync.panelProgress != nil }
     private var syncNowAvailable: Bool {
         SyncNowButton.available(collection) && collection.navigation.sheet == nil
@@ -160,7 +189,9 @@ public struct CloudSyncStatusButton: View {
     private func tap() {
         switch tapDecision {
         case .syncNow: startSync()
-        case .openPanel: presented.wrappedValue.toggle()
+        case .openPanel:
+            collection.syncPresentation.statusPresenter = presenterID
+            presented.wrappedValue.toggle()
         case .nothing: break
         }
     }
@@ -239,20 +270,27 @@ public struct CloudSyncStatusButton: View {
 /// its root, never in the toolbar: the toolbar item is the symbol alone (N23.6).
 public struct CloudSyncPanelMeasure: View {
     let collection: ReviewCollection
-    @Environment(\.horizontalSizeClass) private var sizeClass
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
-        let presentation = collection.syncPresentation
-        let kind: SheetMetrics.Kind? = sizeClass == .compact ? .sheet
-            : UIDevice.current.userInterfaceIdiom == .phone ? .popover : nil
-        if let kind, !presentation.statusPresented, let width = SheetMetrics.contentWidth(kind) {
+        // Both presentations an iPhone can use: a column of a split view can be
+        // compact (the sheet) while the window is regular (the popover's sheet).
+        if UIDevice.current.userInterfaceIdiom == .phone, !collection.syncPresentation.statusPresented {
+            ZStack {
+                measure(.sheet)
+                measure(.popover)
+            }
+            .hidden()
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+        }
+    }
+    @ViewBuilder private func measure(_ kind: SheetMetrics.Kind) -> some View {
+        if let width = SheetMetrics.contentWidth(kind) {
+            let presentation = collection.syncPresentation
             SyncStatusPanel(collection: collection, openEntry: { _, _ in }, showSettings: { _ in })
                 .padding()
                 .frame(width: width)
                 .fixedSize(horizontal: false, vertical: true)
-                .hidden()
-                .accessibilityHidden(true)
-                .allowsHitTesting(false)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { needed in
                     switch kind {
                     case .sheet: presentation.panelSheetHeight = Double(needed)
