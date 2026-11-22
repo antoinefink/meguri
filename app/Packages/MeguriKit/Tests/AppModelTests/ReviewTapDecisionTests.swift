@@ -249,11 +249,50 @@ struct ReviewTapDecisionTests {
         // later, meets the second's late observation: the clocks disagree.
         _ = pairing.add(Self.gesture(x: 300, down: 11.6), at: 11.7)
         #expect(pairing.add(Self.observation(at: 101.0), point: CGPoint(x: 300, y: 200), at: 11.71) == nil)
-        // The clocks agree again on the next pair.
+        // That tap's own report may still come and the baseline is gone: a
+        // tap soon after is refused too; one well after pairs again.
         _ = pairing.add(Self.gesture(x: 300, down: 12.6), at: 12.7)
-        #expect(pairing.add(Self.observation(at: 102.6), point: CGPoint(x: 300, y: 200), at: 12.71) != nil)
+        #expect(pairing.add(Self.observation(at: 102.6), point: CGPoint(x: 300, y: 200), at: 12.71) == nil)
+        _ = pairing.add(Self.gesture(x: 300, down: 14.5), at: 14.6)
+        #expect(pairing.add(Self.observation(at: 104.5), point: CGPoint(x: 300, y: 200), at: 14.61) != nil)
         // Another page has its own clock.
-        _ = pairing.add(Self.gesture(x: 300, down: 13.6), at: 13.7)
-        #expect(pairing.add(Self.observation(at: 5.0, page: 2), point: CGPoint(x: 300, y: 200), at: 13.71) != nil)
+        _ = pairing.add(Self.gesture(x: 300, down: 16.6), at: 16.7)
+        #expect(pairing.add(Self.observation(at: 5.0, page: 2), point: CGPoint(x: 300, y: 200), at: 16.71) != nil)
+    }
+
+    @Test func aTouchConsumedByARefusedPairStaysUnmatched() {
+        // No baseline yet. The first touch is refused with a stray report at
+        // another point; its own report then comes after a second touch lifted.
+        var pairing = ReviewTapPairing()
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 100, down: 10), at: 10.1)
+        #expect(pairing.add(Self.observation(at: 50), point: CGPoint(x: 160, y: 200), at: 10.12) == nil)
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 100, down: 10.4), at: 10.5)
+        #expect(pairing.add(Self.observation(at: 50.1), point: CGPoint(x: 100, y: 200), at: 10.51) == nil,
+                "The first touch's late report never takes the second touch")
+    }
+
+    @Test func withABaselineALateReportOfACloseEarlierTapIsRefused() {
+        var pairing = ReviewTapPairing()
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 300, down: 10), at: 10.1)
+        #expect(pairing.add(Self.observation(at: 100.0), point: CGPoint(x: 300, y: 200), at: 10.11) != nil)
+        // A tap whose report is late, then another 0.12 s later at the same
+        // point: the clock difference fits the drift, but the lifts are too
+        // close to tell the two reports apart.
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 300, down: 11), at: 11.1)
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 300, down: 11.12), at: 11.21)
+        #expect(pairing.add(Self.observation(at: 101.0), point: CGPoint(x: 300, y: 200), at: 11.22) == nil)
+        // A scroll leaves nothing unmatched: well after, a tap pairs.
+        pairing.touchDown()
+        var scroll = Self.gesture(x: 300, down: 13)
+        scroll.movement = 40
+        _ = pairing.add(scroll, at: 13.3)
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 300, down: 15), at: 15.1)
+        #expect(pairing.add(Self.observation(at: 105.0), point: CGPoint(x: 300, y: 200), at: 15.11) != nil)
     }
 }
