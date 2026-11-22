@@ -126,6 +126,15 @@ mg_lint_ui() {
 # lint could not run) and returns 1, so the job stops before it builds.
 mg_lint_ui_first() {
   local result status f
+  # CI only: GitHub's macOS runners have no Docker, so SwiftLint cannot run
+  # there. MEGURI_CI_LINT_UI_ELSEWHERE names the hosted check that lints the
+  # same commit on Linux (Linux · checks); the receipt records the hand-off.
+  if [ "${GITHUB_ACTIONS:-}" = true ] && [ -n "${MEGURI_CI_LINT_UI_ELSEWHERE:-}" ] &&
+     ! command -v docker >/dev/null 2>&1; then
+    echo "tools/mg: $MG_JOB leaves lint-ui to $MEGURI_CI_LINT_UI_ELSEWHERE (no Docker on this runner)" >&2
+    mg_detail lint_ui "$(jq -nc --arg by "$MEGURI_CI_LINT_UI_ELSEWHERE" '{ran: false, left_to: $by, reason: "no Docker on this hosted runner"}')"
+    return 0
+  fi
   echo "tools/mg: $MG_JOB runs lint-ui first" >&2
   result="$("$MG_TOOLS/mg" lint-ui </dev/null)"
   result="${result##*$'\n'}"
