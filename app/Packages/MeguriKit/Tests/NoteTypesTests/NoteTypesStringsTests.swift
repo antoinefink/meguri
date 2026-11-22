@@ -61,6 +61,8 @@ import Testing
             "noteTypes.notUploaded.title": "Changes Not Uploaded",
             "noteTypes.failed.syncMessage": "Nothing was changed, because Meguri couldn’t sync with Meguri Sync first. The sync status shows why.",
             "noteTypes.list.noCollection.title": "No Collection",
+            "noteTypes.save.syncBusy": "Save and Upload is available once Meguri Sync finishes setting up.",
+            "noteTypes.failed.unconfirmedMessage": "Meguri couldn’t confirm whether the changes were saved. Check the note type before you save again.",
             "noteTypes.fields.fieldOrder": "Show in Field Order",
         ]
         for (key, value) in expected {

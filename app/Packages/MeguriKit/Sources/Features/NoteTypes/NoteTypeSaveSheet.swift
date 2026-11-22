@@ -83,7 +83,8 @@ public struct NoteTypeSaveSheet: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if question.decision.syncParagraph {
+            // What Save and Upload does, while it can run; otherwise only what to do first.
+            if question.decision.syncParagraph, model.meguriSyncState == .ready {
                 VStack(alignment: .leading, spacing: Spacing.xSmall) {
                     if model.meguriUnreachable {
                         // D4's unreachable case: the save runs now, the upload waits.
@@ -118,6 +119,7 @@ public struct NoteTypeSaveSheet: View {
         switch model.meguriSyncState {
         case .ready: return nil
         case .notSetUp: return NoteTypesStrings.text("noteTypes.save.notSetUp", locale: locale)
+        case .busy: return NoteTypesStrings.text("noteTypes.save.syncBusy", locale: locale)
         case .uploadPending: return NoteTypesStrings.text("noteTypes.save.uploadPending", locale: locale)
         }
     }

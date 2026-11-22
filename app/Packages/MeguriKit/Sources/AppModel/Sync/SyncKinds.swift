@@ -320,6 +320,12 @@ public enum SyncKinds {
         }
         // MP7: the job's own title says what moves.
         if facts.structureStage != nil { return .init(nil, nil) }
+        // MP7 step 5: in place of MP6.3's choice for this binding, also while
+        // its upload holds the binding (setup required, nothing retained); a
+        // collection choice that Upload… found needed, and other setup steps, come first.
+        if facts.structureUploadPending, facts.routine != .authentication, facts.stage == nil || facts.stage == .required {
+            return .init(.needsYou, "sync.needsYou.meguri.structureUpload", .meguriUploadStructure)
+        }
         if let stage = facts.stage {
             switch stage {
             case .required: return .init(nil, "sync.service.settingUp")
@@ -371,10 +377,6 @@ public enum SyncKinds {
                     return .init(.needsYou, "sync.needsYou.meguri.setupFailed", .meguriTryAgain)
                 }
             }
-        }
-        // MP7 step 5: in place of MP6.3's choice for this binding; a refused sign-in is asked for first.
-        if facts.structureUploadPending, facts.routine != .authentication {
-            return .init(.needsYou, "sync.needsYou.meguri.structureUpload", .meguriUploadStructure)
         }
         guard let routine = facts.routine else { return .init(.waiting, "sync.meguri.status.setupUnavailable") }
         switch routine {

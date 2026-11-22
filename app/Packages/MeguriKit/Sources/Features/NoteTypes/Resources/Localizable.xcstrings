@@ -223,6 +223,16 @@
         }
       }
     },
+    "noteTypes.failed.unconfirmedMessage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri couldn’t confirm whether the changes were saved. Check the note type before you save again."
+          }
+        }
+      }
+    },
     "noteTypes.fields.add": {
       "localizations": {
         "en": {
@@ -969,6 +979,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Meguri Sync will be replaced."
+          }
+        }
+      }
+    },
+    "noteTypes.save.syncBusy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save and Upload is available once Meguri Sync finishes setting up."
           }
         }
       }

@@ -11,12 +11,19 @@ private actor FakeStructureJobs: MeguriStructureJobService {
     var pending = false
     var pendingAfter: Bool?
     var stages: [MeguriStructureStage] = [.round, .save, .upload]
+    /// The pending read fails (the state cannot be known).
+    var pendingFails = false
+    /// The round runs until the job is cancelled, then stops.
+    var roundUntilCancelled = false
     private(set) var reachable: [Bool] = []
     private(set) var uploads = 0
     private(set) var pendingReads = 0
 
     func set(save: Result<MeguriStructureOutcome, any Error>? = nil, upload: Result<MeguriStructureOutcome, any Error>? = nil,
-             pending: Bool? = nil, pendingAfter: Bool?? = nil, stages: [MeguriStructureStage]? = nil) {
+             pending: Bool? = nil, pendingAfter: Bool?? = nil, stages: [MeguriStructureStage]? = nil,
+             pendingFails: Bool? = nil, roundUntilCancelled: Bool? = nil) {
+        if let pendingFails { self.pendingFails = pendingFails }
+        if let roundUntilCancelled { self.roundUntilCancelled = roundUntilCancelled }
         if let save { saveAnswer = save }
         if let upload { uploadAnswer = upload }
         if let pending { self.pending = pending }
@@ -27,6 +34,11 @@ private actor FakeStructureJobs: MeguriStructureJobService {
                                onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
         async throws -> MeguriStructureOutcome {
         self.reachable.append(reachable)
+        if roundUntilCancelled {
+            onStage(.round, nil)
+            while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
+            return .roundStopped(.init(outcome: .refused(.interrupted), finalization: nil, trackingFailure: nil))
+        }
         for stage in stages { onStage(stage, nil) }
         if let pendingAfter { pending = pendingAfter }
         return try saveAnswer.get()
@@ -38,7 +50,11 @@ private actor FakeStructureJobs: MeguriStructureJobService {
         if let pendingAfter { pending = pendingAfter }
         return try uploadAnswer.get()
     }
-    func structureUploadPending() async throws -> Bool { pendingReads += 1; return pending }
+    func structureUploadPending() async throws -> Bool {
+        pendingReads += 1
+        if pendingFails { throw BridgeError.unavailable(reason: "unreadable") }
+        return pending
+    }
 }
 
 @MainActor private final class StageLog { var stages: [NoteTypeSyncStage] = [] }
@@ -188,12 +204,49 @@ private let draft = NotetypeStructureDraft(notetypeId: 7, base: [1], name: "Samp
         #expect(other.meguriRoutine == .waiting && !other.meguriStructureUploadPending)
     }
 
-    @Test func aCancelBeforeTheJobStartsSavesNothing() async throws {
+    /// A cancel belongs to the save it was asked for: an earlier one does not stop the next save.
+    @Test func anEarlierCancelDoesNotStopTheNextSave() async throws {
         let jobs = FakeStructureJobs()
         let sync = coordinator(jobs)
         sync.cancelNotetypeStructureSave()
-        // A cancel belongs to the save it was asked for; a new save starts clean.
         #expect(try await sync.saveNotetypeStructure(draft, reachable: true) { _, _, _ in } == .saved(uploaded: true))
+    }
+
+    /// Leaving the app during the round stops it: a cancel, not "couldn't sync".
+    @Test func aCancelDuringTheRoundIsACancelNotASyncFailure() async throws {
+        let jobs = FakeStructureJobs()
+        await jobs.set(roundUntilCancelled: true)
+        let sync = coordinator(jobs)
+        let save = Task { try await sync.saveNotetypeStructure(draft, reachable: true) { _, _, _ in } }
+        for _ in 0..<500 where sync.meguriStructureStage != .round { await Task.yield() }
+        #expect(sync.meguriStructureStage == .round)
+        sync.cancelNotetypeStructureSave()
+        #expect(try await save.value == .cancelled)
+        #expect(sync.meguriStructureStage == nil && !sync.meguriBusy)
+    }
+
+    /// An error whose save cannot be known is neither "saved" (the draft would go) nor "nothing was changed".
+    @Test func anErrorWithAnUnreadablePendingStateIsUnconfirmed() async throws {
+        let jobs = FakeStructureJobs()
+        await jobs.set(save: .failure(BridgeError.internal("lane")), pendingFails: true)
+        let sync = coordinator(jobs)
+        #expect(try await sync.saveNotetypeStructure(draft, reachable: true) { _, _, _ in } == .unconfirmed)
+    }
+
+    /// Undoing the save withdraws the line; redoing it brings it back.
+    @Test func noteTypeChangesReadThePendingStateAgain() async {
+        let jobs = FakeStructureJobs()
+        await jobs.set(pending: true)
+        let sync = coordinator(jobs)
+        await sync.refreshMeguriStructurePending()
+        await jobs.set(pending: false)
+        sync.notetypesChanged()
+        for _ in 0..<200 where sync.meguriStructureUploadPending { await Task.yield() }
+        #expect(!sync.meguriStructureUploadPending, "undo")
+        await jobs.set(pending: true)
+        sync.notetypesChanged()
+        for _ in 0..<200 where !sync.meguriStructureUploadPending { await Task.yield() }
+        #expect(sync.meguriStructureUploadPending, "redo")
     }
 
     /// The status while the job runs: what moves, no needs-you, Sync Now off.
@@ -210,15 +263,21 @@ private let draft = NotetypeStructureDraft(notetypeId: 7, base: [1], name: "Samp
         #expect(running.route == .disabled(nil) && running.isBusy && !running.needsUser)
         // A refused sign-in is asked for before Upload….
         #expect(SyncKinds.meguriRow(MeguriKindFacts(routine: .authentication, structureUploadPending: true)).action == .meguriSignIn)
+        // While its upload holds the binding (setup required after a relaunch), the line still shows.
+        #expect(SyncKinds.meguriRow(MeguriKindFacts(stage: .required, structureUploadPending: true)).action == .meguriUploadStructure)
+        #expect(MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: .required, routine: nil,
+                                             structureUploadPending: true).needsUser)
         // A setup step (the collection choice after Upload…) comes before the line.
         #expect(SyncKinds.meguriRow(MeguriKindFacts(stage: .failed, failureKey: MeguriSetupSequence.fullSyncKey,
                                                     structureUploadPending: true)).action == .chooseCollection)
     }
 
-    /// Any Meguri Sync selection counts; without a ready binding the sheet says to set it up.
-    @Test func meguriSyncChosenButNotSetUpIsNotReady() {
+    /// Any Meguri Sync selection counts; without a ready binding the sheet says why: set it up, or wait for setup.
+    @Test func meguriSyncChosenButNotReadySaysWhy() {
         #expect(SyncCoordinator.renderFixture(.meguriSignIn).noteTypeSyncState == .notSetUp)
-        #expect(SyncCoordinator.renderFixture(.meguriConnected).noteTypeSyncState == .notSetUp)
+        #expect(SyncCoordinator.renderFixture(.meguriSetupMedia).noteTypeSyncState == .busy)
+        #expect(SyncCoordinator.renderFixture(.meguriConnected).noteTypeSyncState == .busy, "binding not read yet")
         #expect(SyncCoordinator.renderFixture(.off).noteTypeSyncState == .notSetUp)
+        #expect(SyncCoordinator.renderFixture(.meguriStructureUploadPending).noteTypeSyncState == .uploadPending)
     }
 }

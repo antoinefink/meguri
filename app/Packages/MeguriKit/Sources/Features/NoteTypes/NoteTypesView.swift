@@ -222,6 +222,8 @@ struct SaveOutcomeAlerts: ViewModifier {
             } message: {
                 if model.failure == .syncStopped {
                     Text("noteTypes.failed.syncMessage", bundle: .module)
+                } else if model.failure == .unconfirmed {
+                    Text("noteTypes.failed.unconfirmedMessage", bundle: .module)
                 } else {
                     Text("noteTypes.failed.message", bundle: .module)
                 }

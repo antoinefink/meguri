@@ -11,6 +11,8 @@ import Testing
     /// Each summary read takes the first of these; the last one stays.
     var summaries: [NotetypeDraftSummary] = []
     var saveErrors: [any Error] = []
+    /// Each summary read waits this long first.
+    var summaryWait: Duration?
     /// Each list read throws the first of these.
     var listErrors: [any Error] = []
     private(set) var listReads = 0
@@ -31,6 +33,7 @@ import Testing
     func fieldContentCounts(_ id: Int64) async throws -> NotetypeFieldContentCounts { contentCounts }
     func summary(_ draft: NotetypeStructureDraft) async throws -> NotetypeDraftSummary {
         summaryReads += 1
+        if let summaryWait { try? await Task.sleep(for: summaryWait) }
         guard let first = summaries.first else { return NotetypeDraftSummary(reasons: [], changes: [], losesContent: false) }
         if summaries.count > 1 { summaries.removeFirst() }
         return first
@@ -585,6 +588,31 @@ extension NoteTypesModelTests {
         model.confirm()
         await model.settle()
         #expect(sync.saves.count == 3 && sync.saves.last?.draft.confirmed.fields[1] == 12 && !model.isEdited(7))
+    }
+
+    /// Leaving while Save and Upload reads D5 step 4's summary: no job starts, so leaving does not wait for one.
+    @Test func leavingBeforeTheJobStartsStartsNone() async {
+        let backend = FakeNoteTypesBackend()
+        backend.summaries = [NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldAdded(name: "Field 1")], losesContent: false)]
+        let (model, _) = await open(backend)
+        let sync = FakeMeguriSync()
+        model.service = { .meguriSync }
+        model.meguriSync = sync
+        model.addField(7)
+        model.cancelRename()
+        model.save()
+        await model.settle()
+        backend.summaryWait = .milliseconds(100)
+        model.confirm()
+        await model.cancelAndDrain()
+        #expect(sync.saves.isEmpty && model.isEdited(7) && model.progress == nil && model.editable(7))
+    }
+
+    @Test func anUnconfirmedSaveKeepsTheDraftAndSaysSo() async {
+        let sync = FakeMeguriSync()
+        sync.results = [.unconfirmed]
+        let (model, _) = await confirmWithMeguriSync(sync)
+        #expect(model.isEdited(7) && model.failure == .unconfirmed && model.editable(7))
     }
 
     /// Leaving (the background, a close) asks the job to stop where MP7 allows, so it never waits for a whole upload.

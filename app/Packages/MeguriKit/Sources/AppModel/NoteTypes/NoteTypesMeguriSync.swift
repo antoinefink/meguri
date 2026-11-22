@@ -8,9 +8,12 @@ import Foundation
 public nonisolated enum NoteTypeSyncState: Sendable, Hashable {
     /// The binding is ready: Save and Upload runs MP7's job.
     case ready
-    /// Meguri Sync is chosen but not set up, or its binding is not read yet:
-    /// the sheet says to set it up.
+    /// Meguri Sync is chosen but not set up (signed out, no collection chosen
+    /// yet): the sheet says to set it up.
     case notSetUp
+    /// Setup is under way (a transfer, its media, a step to settle), or the
+    /// binding is not read yet: Save and Upload waits for it.
+    case busy
     /// An earlier structure save waits for Upload… (MP7 step 5), which comes first.
     case uploadPending
 }
@@ -38,6 +41,9 @@ public nonisolated enum NoteTypeSyncSaveResult: Sendable, Hashable {
     case cancelled
     /// Nothing was saved: the job could not run.
     case notSaved
+    /// The job ended with an error and whether the save committed could not
+    /// be read: the draft stays, and the person is told to check before saving again.
+    case unconfirmed
 }
 
 /// Meguri Sync's side of a note type save, the sync coordinator in the app.

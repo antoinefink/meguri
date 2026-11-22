@@ -49,6 +49,9 @@ public final class NoteTypesModel {
         /// Meguri Sync stopped before the save (D6 step 1): nothing was
         /// changed, and the sync status says why.
         case syncStopped
+        /// Meguri Sync's job ended with an error and whether it saved could
+        /// not be read: the draft stays, to be checked before saving again.
+        case unconfirmed
     }
 
     /// Said once a save has ended, when the person must know more than "saved".
@@ -149,6 +152,9 @@ public final class NoteTypesModel {
     @ObservationIgnored private var reachabilityTask: Task<Void, Never>?
     /// Meguri Sync's job is running for a Save (its cancellation reaches the job).
     @ObservationIgnored private var syncJobRunning = false
+    /// The app is leaving (background, close): a Save that reaches its
+    /// submission now starts no Meguri Sync job.
+    @ObservationIgnored private var leaving = false
     /// Text a view holds but has not committed (a rename field, the
     /// inspector's Name or Placeholder), committed before Save reads the draft.
     /// Each returns false when the text was refused (V5), and Save stops.
@@ -642,6 +648,8 @@ public final class NoteTypesModel {
             return
         }
         guard writable() else { failure = .notSaved; return }
+        // Leaving waits for this Save: a job started now would make it wait for a whole round and upload.
+        if route == .meguriSync, leaving { return }
         // D5 step 3's deck creations: the Fields tab sets no deck override.
         let epoch = epoch
         progress = Progress(notetypeId: id, stage: route == .local ? nil : (reachable ? .syncing : .saving))
@@ -672,6 +680,7 @@ public final class NoteTypesModel {
                 case .syncStopped: failure = .syncStopped
                 case .cancelled: break
                 case .notSaved: failure = .notSaved
+                case .unconfirmed: failure = .unconfirmed
                 }
                 return
             }
@@ -804,6 +813,8 @@ public final class NoteTypesModel {
     /// is saved; after it the upload is left pending), so leaving never waits
     /// for a whole upload.
     public func cancelAndDrain() async {
+        leaving = true
+        defer { leaving = false }
         if syncJobRunning { meguriSync?.cancelNotetypeStructureSave() }
         await saveTask?.value
     }
