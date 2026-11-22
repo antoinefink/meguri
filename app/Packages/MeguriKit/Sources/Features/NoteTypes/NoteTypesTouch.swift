@@ -11,6 +11,8 @@ import SwiftUI
 /// a popover, and Edit gives drag handles and delete buttons.
 struct NoteTypesTouchRoot: View {
     @Bindable var model: NoteTypesModel
+    /// The sync button (N23.6), in the list's trailing place.
+    @Environment(\.syncStatusItem) private var syncStatusItem
 
     var body: some View {
         List {
@@ -51,6 +53,9 @@ struct NoteTypesTouchRoot: View {
         }
         .accessibilityIdentifier("noteTypes.list.table")
         .navigationTitle(Text("noteTypes.title", bundle: .module))
+        .toolbar {
+            if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
+        }
         .searchable(text: $model.filter, prompt: Text("noteTypes.list.filter", bundle: .module))
         .onAppear { model.appear() }
     }
@@ -63,6 +68,8 @@ public struct NoteTypePage: View {
     private let id: Int64
     @Environment(\.locale) private var locale
     @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The sync button (N23.6): after Fields | Cards, before Save, as on the Mac.
+    @Environment(\.syncStatusItem) private var syncStatusItem
     @State private var jobShown = SaveJobShown()
     private var jobRuns: Bool { model.progress?.notetypeId == id && jobShown.shown(for: id) }
 
@@ -105,6 +112,10 @@ public struct NoteTypePage: View {
                     .accessibilityIdentifier("noteTypes.list.tabs")
                 }
                 .sharedBackgroundVisibility(.hidden)
+                if let syncStatusItem {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                    ToolbarItem(placement: .topBarTrailing) { syncStatusItem }
+                }
                 if let progress = model.progress, progress.notetypeId == id, jobRuns, sizeClass == .compact {
                     // N22.5 at compact width, where the tab bar takes the bottom bar's
                     // middle: the spinner takes Save's place and the stage text the

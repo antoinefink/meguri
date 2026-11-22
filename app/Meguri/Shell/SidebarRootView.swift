@@ -65,6 +65,9 @@ struct SidebarRootView: View {
                             #endif
                             .navigationDestination(for: Destination.self) { destination in
                                 SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+                                    // A pushed page (a note type's on iPad) does not get the value set on
+                                    // the stack below: it gets it here.
+                                    .environment(\.syncStatusItem, sectionPlacesSyncItem ? features.syncStatus?() : nil)
                                     #if !os(macOS)
                                     // A page pushed in those sections (a note type's) keeps it too.
                                     .toolbar {
@@ -87,34 +90,23 @@ struct SidebarRootView: View {
             }
             .detailColumnChrome()
         }
-        #if os(macOS)
-        // N23.6: an item declared here comes before a screen's own items, so on a
-        // screen with a principal control it sits between the title and that
-        // control. Screens therefore place it themselves (`syncStatusItem`); only
-        // Note Types, whose toolbar does not read it yet, gets it from here.
-        .toolbar {
-            if navigation.review == nil, navigation.section == .noteTypes, let syncStatus = features.syncStatus {
-                ToolbarItem(placement: .primaryAction) { syncStatus() }
-            }
-        }
-        #endif
     }
 
     /// The sections whose screens put the sync button in their own trailing group.
     private var sectionPlacesSyncItem: Bool {
         #if os(macOS)
-        navigation.section == .home || navigation.section == .browse
+        navigation.section == .home || navigation.section == .browse || navigation.section == .noteTypes
         #else
-        navigation.section == .home
+        navigation.section == .home || navigation.section == .noteTypes
         #endif
     }
 
     #if !os(macOS)
     /// iPad: the sections whose own toolbar does not carry the sync button. Home's
-    /// pages carry it in their group; Settings holds the Sync section itself.
+    /// and Note Types' pages carry it in their group; Settings holds the Sync section itself.
     private var sectionTakesSyncItem: Bool {
         guard features.sectionShown(navigation.section) else { return false }
-        return navigation.section != .home && navigation.section != .settings
+        return navigation.section != .home && navigation.section != .settings && navigation.section != .noteTypes
     }
     #endif
 

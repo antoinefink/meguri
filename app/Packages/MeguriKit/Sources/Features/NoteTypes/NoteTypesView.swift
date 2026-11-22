@@ -12,6 +12,8 @@ import SwiftUI
 public struct NoteTypesView: View {
     @Bindable private var model: NoteTypesModel
     @Environment(\.locale) private var locale
+    /// The sync button (N23.6), first of the trailing group.
+    @Environment(\.syncStatusItem) private var syncStatusItem
     @State private var jobShown = SaveJobShown()
 
     public init(model: NoteTypesModel) {
@@ -87,15 +89,17 @@ public struct NoteTypesView: View {
         }
     }
 
+    /// The title and its counts change together, once the selected note type's
+    /// counts are read: never a title over a blank subtitle (`headerSelection`).
     private var title: Text {
-        guard let id = model.selection, let name = model.draft(id)?.name ?? model.item(id)?.name else {
+        guard let id = model.headerSelection, let name = model.draft(id)?.name ?? model.item(id)?.name else {
             return Text("noteTypes.title", bundle: .module)
         }
         return Text(verbatim: name)
     }
 
     private var subtitle: String {
-        guard let id = model.selection, let counts = model.typeCounts[id] else { return "" }
+        guard model.headerSelection != nil, let counts = model.headerCounts else { return "" }
         return NoteTypesStrings.subtitle(notes: counts.notes, cards: counts.cards, locale: locale)
     }
 
@@ -117,7 +121,9 @@ public struct NoteTypesView: View {
         // Revert and Save trail the detail's toolbar. On the Fields tab its
         // inspector's toolbar holds them with its toggle, at the window's
         // trailing end, shown or hidden (`NoteTypeFieldsTab`).
+        // The sync button first, then Revert and Save: [sync] [Revert] [Save].
         if !inspectorHoldsSave {
+            if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
             NoteTypeSaveToolbar(model: model, running: jobShown.running(in: model))
         }
     }
