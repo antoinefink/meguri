@@ -111,6 +111,26 @@ nonisolated struct SyncCommandResult: Sendable {
     }
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }
+
+/// The sync owner of an installation whose build cannot use iCloud. It carries
+/// the provider facade, so Off and Meguri Sync work as they do beside an idle
+/// iCloud owner. It owns no CloudKit object, issues no command and reads no account.
+@MainActor final class ProviderOnlySyncBackend: SyncCoordinatorBackend {
+    let providerService: CoreProviderService?
+    var connection: CoreCloudConnectionService? { nil }
+    var own: CloudOwnExecutor? { nil }
+    init(provider: CoreProviderService) { providerService = provider }
+    func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput { .commands([]) }
+    func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
+        .init(outputs: [], error: BridgeError.cloudConnection(.notOffered), deferred: false)
+    }
+    func beginAccountRead(transition: Bool) async throws -> UInt64 { throw BridgeError.cloudConnection(.notOffered) }
+    func readAccount(_ read: UInt64) async -> SyncCommandResult {
+        .init(outputs: [], error: BridgeError.cloudConnection(.notOffered), deferred: false)
+    }
+    func quiesce() async throws {}
+    func close() async throws {}
+}
 enum MeguriSignInLocalFailure: Error { case busy, attachment, credentialStore }
 /// T19.3's `sync.setup.done.*` lines for Meguri Sync.
 public enum MeguriSetupDone: Sendable, Equatable { case uploaded, downloaded(backup: Bool) }
@@ -255,7 +275,20 @@ public final class CloudPublicationConfirmation {
 @Observable @MainActor
 public final class SyncCoordinator {
     public enum SetupState: Equatable { case configurationUnavailable, prepared, attached, failed }
-    public private(set) var setupState: SetupState = .configurationUnavailable
+    /// What iCloud can use on this installation. An installation whose build
+    /// cannot use iCloud keeps `configurationUnavailable` here for its whole
+    /// life, while its sync owner still attaches for Off and Meguri Sync.
+    public var setupState: SetupState { cloudConfigured ? ownerState : .configurationUnavailable }
+    /// The sync owner's own preparation and attachment.
+    private var ownerState: SetupState = .configurationUnavailable
+    /// False when the build has no verified iCloud container and schema.
+    @ObservationIgnored private let cloudConfigured: Bool
+    /// Known from the build alone, before any preparation: iCloud is never
+    /// offered a Host, a preview or the selection on this installation.
+    public var iCloudUnsupported: Bool { !cloudConfigured }
+    /// Why the Service control's last change did not finish; nil after a change that did.
+    public private(set) var serviceChangeFailure: SyncServiceChangeFailure?
+    @ObservationIgnored private var providerChangeReason: ProviderFailureReason = .other
     public private(set) var status: CloudPolicyStatus?
     /// P25.1: `media` is true in every value this coordinator holds or sends.
     public private(set) var settings: CloudPolicyDeviceSettings {
@@ -293,7 +326,12 @@ public final class SyncCoordinator {
     public var connectionOperationActive: Bool { (ownTask != nil && !readingPreview) || initialAdoptionEnabledBefore != nil }
     public var initialAdoptionActive: Bool { initialAdoptionEnabledBefore != nil }
     public var connectionActivationActive: Bool { activatingInitialAdoption }
-    public var connectionService: CoreCloudConnectionService? { setupState == .attached && !replacing ? backend?.connection : nil }
+    public var connectionService: CoreCloudConnectionService? { ownerState == .attached && !replacing ? backend?.connection : nil }
+    /// The retained Host has an attached sync owner. With iCloud configured that
+    /// owner has a connection service; without, it is the provider alone.
+    var syncOwnerAttached: Bool {
+        connectionService != nil || (!cloudConfigured && ownerState == .attached && !replacing && backend != nil && provider != nil)
+    }
 
     private enum Input {
         case policy(CloudPolicyEvent)
@@ -507,7 +545,7 @@ public final class SyncCoordinator {
     private var memoryAutomatic = true
     fileprivate func applyRenderFixture(_ state: RenderState) {
         let recent = Int64(clock.now().timeIntervalSince1970 * 1_000) - 240_000
-        setupState = .attached
+        ownerState = .attached
         switch state {
         case .off:
             providerState = .renderFixture(selection: .localOnly, phase: .localOnly)
@@ -662,6 +700,9 @@ public final class SyncCoordinator {
     private func migrateRound2Settings(_ retained: Result<CloudRecoveryStatus?, any Error>) async {
         if let pending = providerSettingsTask { await pending.value }
         guard let defaults, round2MigrationPending else { return }
+        // No op can be read where iCloud is unusable; with iCloud stored as the
+        // service it is not proved absent, so nothing opens (P25.2).
+        guard cloudConfigured || providerState?.selection != .iCloud else { return }
         let operation = retainedOperationForMigration?() ?? retained.map { $0 != nil }
         var next = settings
         // P25.3: an off the person chose under the earlier build belongs to the
@@ -779,7 +820,8 @@ public final class SyncCoordinator {
             blockedSource: providerBlockedCause?.source, blockedReason: providerBlockedCause?.reason,
             meguriConnection: providerState?.selection == .meguri ? "\(connection)" : nil,
             meguriSetupStage: meguriStage.map { "\($0)" }, meguriRoutine: meguriRoutine.map { "\($0)" },
-            statusTitleKey: status.titleKey, statusDetailKey: status.detailKey)
+            statusTitleKey: status.titleKey, statusDetailKey: status.detailKey,
+            iCloudConfigured: cloudConfigured ? nil : false, serviceChangeFailure: serviceChangeFailure)
     }
     /// MP6.5: blocked metadata stops network work, including the work already
     /// running. Nothing is discarded: a stopped media step or round keeps its
@@ -1108,7 +1150,7 @@ public final class SyncCoordinator {
             && !providerActionInProgress && !providerHandoffInProgress
             && providerState?.selection == .meguri && !providerNeedsAttention
     }
-    var meguriSignInAttached: Bool { provider != nil && setupState == .attached && !backendRetired }
+    var meguriSignInAttached: Bool { provider != nil && ownerState == .attached && !backendRetired }
     func failMeguriSignInPreparation(_ failure: MeguriSignInLocalFailure) {
         meguriLastError = failure
         meguriSignInErrorKey = Self.meguriAuthenticationKey(failure)
@@ -1323,14 +1365,14 @@ public final class SyncCoordinator {
     // Host, before allowing the entry owner to refresh local setup authority.
     func validateRetainedMeguriAttachment(generation expected: UInt64) async throws -> Bool {
         guard generation == expected, !closing, !replacing, !suspended, !drained,
-              retainedHostAdmitted, !backendRetired, setupState == .attached,
+              retainedHostAdmitted, !backendRetired, ownerState == .attached,
               let backend, let provider else { return false }
         let revision = hostRevision
         do {
             let state = try await provider.refresh()
             guard generation == expected, revision == hostRevision, self.backend === backend,
                   self.provider === provider, !closing, !replacing, !suspended, !drained,
-                  !backendRetired, setupState == .attached else { return false }
+                  !backendRetired, ownerState == .attached else { return false }
             return state.selection == .meguri && state.phase != .blocked && state.phase != .handoffRecovery
         } catch { meguriLastError = error; throw error }
     }
@@ -2346,7 +2388,7 @@ public final class SyncCoordinator {
         if providerDirectory != nil { providerDirectory = directory }
     }
     private var providerAllowsAccountRead: Bool {
-        desiredProviderSettings?.paused != true
+        cloudConfigured && desiredProviderSettings?.paused != true
             && (providerDirectory == nil || providerDiscovery != nil || providerState?.permitsICloudStartup == true)
     }
 
@@ -2373,7 +2415,9 @@ public final class SyncCoordinator {
         }
         let successor = SyncCoordinator(bootstrap: bootstrap, makeBackend: makeBackend,
             defaults: defaults, clock: clock, directory: directory, observeSignals: observeSignals,
-            providerDirectory: providerDirectory, meguriCredentialStore: meguriCredentialStore, recordDiagnostic: recordDiagnostic)
+            providerDirectory: providerDirectory, meguriCredentialStore: meguriCredentialStore,
+            cloudConfigured: cloudConfigured, recordDiagnostic: recordDiagnostic)
+        successor.serviceChangeFailure = serviceChangeFailure
         // The original already joined its native owners above. The successor
         // needs an attachment retry, not a strong chain of drained owners.
         successor.providerAttachmentPending = true
@@ -2406,20 +2450,26 @@ public final class SyncCoordinator {
 
     public convenience init(directory: URL, clock: AppClock = .system,
                             configuration: CloudBuildConfiguration? = .fromBundle, defaults: UserDefaults? = .standard,
+                            meguriCredentialStore: (any MeguriProviderCredentialStore)? = nil,
                             recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
         let providerDirectory = CoreBridge.CollectionLocation(collectionDirectory: directory,
             backupsDirectory: directory, appGroupSnapshot: directory).manualTransferDirectory
+        // iCloud needs a verified container and schema (R2065). Without them the
+        // owner is the provider alone: Off and Meguri Sync work, and nothing here
+        // constructs a CloudKit object or configures Core's cloud platform.
+        let cloudConfigured = configuration.map {
+            $0.schemaConfigured && !$0.container.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } ?? false
         self.init(bootstrap: {
-            guard let configuration, configuration.schemaConfigured,
-                  !configuration.container.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw SyncOwnerFailure.configurationUnavailable
-            }
+            guard cloudConfigured, let configuration else { return }
             // No potentially network-bound account lookup precedes local open.
             // CouldNotDetermine maps to Rust's ReadFailed, never signed-out.
             try await CoreCloudWorkflowService.configurePlatform(container: configuration.container,
                 environment: configuration.environment, status: .couldNotDetermine, identity: nil)
         }, makeBackend: { persisted in
-            guard let configuration else { throw SyncOwnerFailure.configurationUnavailable }
+            guard cloudConfigured, let configuration else {
+                return ProviderOnlySyncBackend(provider: try await CoreProviderService.attached())
+            }
             #if canImport(CloudKit)
             return try await NativeCollectionCloudBackend.make(configuration: configuration,
                 directory: directory, persisted: persisted)
@@ -2427,15 +2477,18 @@ public final class SyncCoordinator {
             throw SyncOwnerFailure.configurationUnavailable
             #endif
         }, defaults: defaults, clock: clock, directory: directory, observeSignals: true,
-           providerDirectory: providerDirectory, recordDiagnostic: recordDiagnostic)
+           providerDirectory: providerDirectory, meguriCredentialStore: meguriCredentialStore,
+           cloudConfigured: cloudConfigured, recordDiagnostic: recordDiagnostic)
     }
 
     init(bootstrap: @escaping @MainActor () async throws -> Void,
          makeBackend: @escaping @MainActor (@escaping @Sendable () async -> Void) async throws -> any SyncCoordinatorBackend,
          defaults: UserDefaults?, clock: AppClock = .system, directory: URL? = nil, observeSignals: Bool = false,
          providerDirectory: URL? = nil, meguriCredentialStore: (any MeguriProviderCredentialStore)? = nil,
+         cloudConfigured: Bool = true,
          recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
         self.recordDiagnostic = recordDiagnostic
+        self.cloudConfigured = cloudConfigured
         self.bootstrap = bootstrap; self.makeBackend = makeBackend; self.defaults = defaults
         self.clock = clock; self.directory = directory
         self.providerDirectory = providerDirectory
@@ -2458,13 +2511,13 @@ public final class SyncCoordinator {
             do { state = try await prepared.owner.state() }
             catch {
                 guard providerPlatform?.owner === prepared.owner, hostRevision == revision else { return }
-                setupState = .failed; operationFailed = true
+                ownerState = .failed; operationFailed = true
                 return
             }
             guard providerAttachmentPending, providerPlatform?.owner === prepared.owner,
                   generation == prepared.generation, hostRevision == revision,
                   !entryActivationHeld, !replacing, !closing || drained else {
-                setupState = .failed; operationFailed = true
+                ownerState = .failed; operationFailed = true
                 return
             }
             providerState = state
@@ -2472,7 +2525,7 @@ public final class SyncCoordinator {
             // Reuse actual successful setup on this same open Host. Backend
             // construction and provider refresh still run on every attachment.
             platformPrepared = true
-            setupState = .prepared
+            ownerState = .prepared
         }
         if drained { closing = false; drained = false }
         guard !platformPrepared else { return }
@@ -2485,13 +2538,13 @@ public final class SyncCoordinator {
                     if let migrated = providerState?.settings { settings = migrated }
                 } catch { markProviderBlocked(.migration, error); operationFailed = true }
             }
-            do { try await bootstrap(); platformPrepared = true; setupState = .prepared }
-            catch SyncOwnerFailure.configurationUnavailable { setupState = .configurationUnavailable }
+            do { try await bootstrap(); platformPrepared = true; ownerState = .prepared }
+            catch SyncOwnerFailure.configurationUnavailable { ownerState = .configurationUnavailable }
             catch {
                 #if DEBUG
                 DebugCloudDiagnostics.record(.platformBootstrap, error: error)
                 #endif
-                setupState = .failed; operationFailed = true
+                ownerState = .failed; operationFailed = true
             }
         }
         platformTask = task
@@ -2539,7 +2592,7 @@ public final class SyncCoordinator {
                 guard !closing, !Task.isCancelled, !replacing,
                       revision == hostRevision, generation == self.generation else { return }
                 drained = false
-                setupState = .attached
+                ownerState = .attached
                 providerAttachmentPending = false
                 providerPlatform = nil
                 attachmentFailure = nil; connectionFailure = nil
@@ -2564,7 +2617,7 @@ public final class SyncCoordinator {
                 guard revision == hostRevision, generation == self.generation else { return }
                 attachmentFailure = error
                 recordConnectionFailure(error)
-                setupState = .failed
+                ownerState = .failed
             }
         }
         attachmentTask = task
@@ -2572,7 +2625,7 @@ public final class SyncCoordinator {
     }
 
     func requireProviderAttachment() throws {
-        guard setupState == .attached else {
+        guard ownerState == .attached else {
             throw attachmentFailure ?? BridgeError.unavailable(reason: "Provider attachment unavailable")
         }
     }
@@ -2582,7 +2635,7 @@ public final class SyncCoordinator {
         // Preserve the factory/refresh failure from the actual attachment.
         if attachmentFailure == nil { attachmentFailure = error }
         recordConnectionFailure(attachmentFailure ?? error)
-        setupState = .failed
+        ownerState = .failed
     }
 
     private func readRetainedRecovery(_ original: any SyncCoordinatorBackend) async -> Result<CloudRecoveryStatus?, any Error> {
@@ -2617,7 +2670,7 @@ public final class SyncCoordinator {
         guard let pending = retainedRecoveryStart, pending.backend === original,
               pending.generation == expected, pending.revision == revision,
               backend === original, expected == generation, revision == hostRevision,
-              !closing, !suspended, !replacing, !drained, !backendRetired, setupState == .attached,
+              !closing, !suspended, !replacing, !drained, !backendRetired, ownerState == .attached,
               settings.enabled, !settings.paused, accountTask?.isCancelled == false,
               !awaitingResumeProof, !awaitingInitialOwnProof, initialOwnDrain == nil,
               !initialActivationReturned, initialAdoptionEnabledBefore == nil, ownTask == nil,
@@ -2736,7 +2789,7 @@ public final class SyncCoordinator {
         saveSettings(.init(enabled: enabled ?? settings.enabled, paused: paused, automatic: automatic, media: true))
         if wasPaused, !paused, settings.enabled, let pending = retainedRecoveryStart,
            pending.backend === backend, pending.generation == generation, pending.revision == hostRevision,
-           !closing, !suspended, !replacing, !drained, !backendRetired, setupState == .attached,
+           !closing, !suspended, !replacing, !drained, !backendRetired, ownerState == .attached,
            initialAdoptionEnabledBefore == nil {
             // Revisit this attachment through a new ordered read. The proof
             // that returned while paused grants no authority to this attempt.
@@ -2805,7 +2858,7 @@ public final class SyncCoordinator {
     /// Discovery is read-only. Only Rust's explicit no-file directive transfers
     /// the ready authority to a separate, app-owned adoption operation.
     public func beginConnectionPreview() {
-        guard !closing, !suspended, !replacing, !settings.paused, setupState == .attached, initialAdoptionEnabledBefore == nil, ownTask == nil, preview == nil, let backend, let own = backend.own else { return }
+        guard !closing, !suspended, !replacing, !settings.paused, ownerState == .attached, initialAdoptionEnabledBefore == nil, ownTask == nil, preview == nil, let backend, let own = backend.own else { return }
         let expected = generation, revision = hostRevision
         connectionFailure = nil
         readingPreview = true
@@ -2914,11 +2967,20 @@ public final class SyncCoordinator {
     /// MP-E can present these typed commands later. No service picker or
     /// transfer producer is introduced here.
     @discardableResult public func changeProvider(to destination: SyncProviderSelection, removeMeguriCredentials: Bool = false) async -> Bool {
+        // iCloud is never made the service of an installation that cannot use it.
+        // A stored iCloud selection there keeps its binding and any op: nothing
+        // here can read or stop them (V27.5), so leaving it stays refused too.
+        guard cloudConfigured || (destination != .iCloud && providerState?.selection != .iCloud) else {
+            providerChangeReason = .unsupported; return false
+        }
         guard providerChangeAllowed(), let provider, !suspended, !replacing,
               !providerActionInProgress, !entryActivationHeld,
               !closing || providerHandoff != nil else {
+            providerChangeReason = self.provider == nil ? .unavailable : .busy
             connectionFailure = .busy; return false
         }
+        // A return below that names no reason was superseded by another owner.
+        providerChangeReason = .cancelled
         providerActionInProgress = true
         defer { providerActionInProgress = false; replayMeguriMediaResume() }
         let expected = generation, revision = hostRevision
@@ -2969,6 +3031,7 @@ public final class SyncCoordinator {
             guard (self.provider === provider || self.provider == nil && drained && closing),
                   expected == generation, !replacing else { return false }
             operationFailed = true
+            providerChangeReason = ProviderFailureReason(error)
             do { providerState = try await provider.state() }
             catch { meguriLastError = error }
             recordConnectionFailure(error)
@@ -2976,6 +3039,10 @@ public final class SyncCoordinator {
             return false
         }
     }
+    /// The reason of the last `changeProvider` that returned false.
+    var providerChangeFailureReason: ProviderFailureReason { providerChangeReason }
+    func serviceChangeBegan() { serviceChangeFailure = nil }
+    func serviceChangeFailed(_ failure: SyncServiceChangeFailure) { serviceChangeFailure = failure }
     public func meguriConnection() async throws -> MeguriProviderConnectionOwner {
         guard !replacing else { throw BridgeError.busy(runningOperation: "collection replacement") }
         if let meguriConnectionOwner { return meguriConnectionOwner }
@@ -3079,7 +3146,7 @@ public final class SyncCoordinator {
     /// only refreshes typed recovery; explicit recovery has a separate action.
     public func retryProviderAuthority() async {
         if providerAttachmentPending {
-            guard setupState == .failed, !retryingProviderAttachment, !suspended, !replacing,
+            guard ownerState == .failed, !retryingProviderAttachment, !suspended, !replacing,
                   providerChangeAllowed(), let retryProviderAttachment else { return }
             retryingProviderAttachment = true
             defer { retryingProviderAttachment = false }
@@ -3112,7 +3179,7 @@ public final class SyncCoordinator {
                 return
             }
         }
-        guard !closing, !suspended, !replacing, setupState == .attached,
+        guard !closing, !suspended, !replacing, ownerState == .attached,
               initialAdoptionEnabledBefore == nil,
               let backend, let connection = backend.connection else { return }
         guard ownTask == nil, !cancellingConnectionOperation else { connectionFailure = .busy; return }
@@ -3404,7 +3471,7 @@ public final class SyncCoordinator {
     }
     /// V27.5's rows for Off with iCloud selected. Writes nothing when refused.
     @discardableResult public func turnOffICloud() async -> Bool {
-        guard providerState?.selection == .iCloud, !serviceChangeRefusedForOperation else { return false }
+        guard providerState?.selection == .iCloud, cloudConfigured, !serviceChangeRefusedForOperation else { return false }
         if Self.offStopsBinding(bindingActive: status?.controls.bindingActive, operationPresent: recovery != nil) {
             await stopUsingICloud()
         } else { await keepLocalOnly() }
@@ -3808,7 +3875,8 @@ public final class SyncCoordinator {
     func quitAfterLocalFlush(completion: @escaping @MainActor () -> Void) async {
         cancelOwnEditorDecision()
         cancelMeguriEditorDecision(meguriAction?.id)
-        guard backend != nil else { completion(); return }
+        // A provider-only owner has no policy to answer the quit request.
+        guard backend != nil, cloudConfigured else { completion(); return }
         quitCompletion = completion
         receive(.quitRequested)
         await waitForInputs()
@@ -4265,7 +4333,7 @@ public final class SyncCoordinator {
             acknowledged?.resume()
             retryAccountCompletion()
         case .replaced(let next):
-            guard next > generation || (next == generation && setupState == .failed) else { return }
+            guard next > generation || (next == generation && ownerState == .failed) else { return }
             providerPlatform = nil
             if desiredVisibleMedia?.generation != next { desiredVisibleMedia = nil }
             deliveredVisibleMedia = nil
@@ -4725,7 +4793,7 @@ public final class SyncCoordinator {
                     backend = nil
                     continue
                 }
-                setupState = .attached
+                ownerState = .attached
                 try await attachProvider(to: successor)
                 guard !closing, expected == generation, revision == hostRevision else {
                     try await successor.close()
@@ -4747,7 +4815,7 @@ public final class SyncCoordinator {
             #if DEBUG
             DebugCloudDiagnostics.record(.backendReplacement, error: error)
             #endif
-            replacing = true; operationFailed = true; setupState = .failed
+            replacing = true; operationFailed = true; ownerState = .failed
         }
     }
     private static func requiredDuringClose(_ action: CloudPolicyAction) -> Bool {
@@ -4865,7 +4933,7 @@ public final class SyncCoordinator {
         guard drained, closeTask == nil else { throw BridgeError.busy(runningOperation: "iCloud drain") }
         entryActivationHeld = false
         closing = false; drained = false; replacing = false
-        if platformPrepared { setupState = .prepared }
+        if platformPrepared { ownerState = .prepared }
         return true
     }
 
