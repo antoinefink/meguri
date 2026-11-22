@@ -63,7 +63,7 @@ public struct HomeView: View {
         // N14.4: the Mac names the page in the toolbar, with what is waiting under it.
         .navigationSubtitle(pageSubtitle)
         #else
-        .modifier(HomeDeckSearch(enabled: showsDeckSearch, collection: collection, search: search))
+        .modifier(HomeDeckSearch(enabled: showsDeckSearch, alwaysShown: todayBesideDeckList, collection: collection, search: search))
         // The deck page carries its own title in the content: no empty large-title band above it.
         // The tab layout's deck list shares its bar's row with the title (N14.8).
         .toolbarTitleDisplayMode(deckID != nil ? .inline : shellLayout == .compact ? .inlineLarge : .automatic)
@@ -516,12 +516,14 @@ public struct HomeView: View {
 /// The deck list's search field (N14.2), only where the list is the root.
 private struct HomeDeckSearch: ViewModifier {
     let enabled: Bool
+    /// N26.4: beside Today the field is the column's only way into search, so it always shows.
+    let alwaysShown: Bool
     let collection: ReviewCollection
     @Bindable var search: DeckListSearch
     func body(content: Content) -> some View {
         if enabled {
             // Out of the way until the toolbar's search button presents it, so the large title stays.
-            content.searchable(text: $search.text, isPresented: $search.presented, placement: .navigationBarDrawer(displayMode: .automatic))
+            content.searchable(text: $search.text, isPresented: $search.presented, placement: .navigationBarDrawer(displayMode: alwaysShown ? .always : .automatic))
                 // N20.5: Return opens the first row, deck or create row, as in the sidebar layouts.
                 .onSubmit(of: .search) {
                     guard let query = search.query,

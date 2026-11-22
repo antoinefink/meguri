@@ -1322,7 +1322,7 @@ Antoine, 2026-11-22: the Statistics page "is a bit of an exception", "it's under
 
 ## N26. The home screen on the Duo, opened and folded (2026-11-22)
 
-From Antoine's annotations on a capture of his opened iPhone Duo (`decisions.md`, row `home.deckList` of 2026-11-22): "Why squared not round?", "Too much white space" and "Should we have a delimiter between the top links and the deck?". Status: built in PR #122 for his review; N26.3's choice is pending Antoine. Where earlier text differs, this section wins.
+From Antoine's annotations on a capture of his opened iPhone Duo (`decisions.md`, row `home.deckList` of 2026-11-22): "Why squared not round?", "Too much white space" and "Should we have a delimiter between the top links and the deck?". Status: built in PR #122. N26.3's variant A was chosen by the coordinator under Antoine's delegation (2026-11-22); variant B stays the alternative he may still pick. Where earlier text differs, this section wins.
 
 ### N26.1 The selection in the list beside Today
 
@@ -1336,12 +1336,12 @@ From Antoine's annotations on a capture of his opened iPhone Duo (`decisions.md`
 - Cause of the space: the totals were a section of their own in the inset grouped list, with a clear background: a row inset from the group's edge, with a section gap above and below.
 - Replaces, on touch, N14.1's and N24.2's "the title and the totals line" as a list row; `home.today.totals` is gone (the subtitle is the navigation bar's text).
 
-### N26.3 Top destinations and the decks (pending Antoine)
+### N26.3 Top destinations and the decks
 
-- Built (variant A, recommended): Today is a section of its own, then the decks in a section with the system header "Decks", as the iPad sidebar has (N14.6). The column's large title, which would repeat "Decks", is "Meguri", as Music's and Podcasts' sidebars carry the app's name over their library. The tab is still called Decks.
+- Built (variant A, chosen): Today is a section of its own, then the decks in a section with the system header "Decks", as the iPad sidebar has (N14.6). The column's large title, which would repeat "Decks", is "Meguri", as Music's and Podcasts' sidebars carry the app's name over their library. The tab is still called Decks.
 - Variant B: the same two sections with the system's section spacing only, no header, and the title "Decks".
 - Recommendation and reason: Apple's sidebars with fixed destinations above the person's own list put a header over that list: Mail (Favorites, then each account), Notes (the account's folders under its name), Reminders ("My Lists" under the smart lists), Files (Locations, Favorites, Tags). A header also matches the iPad, so the Duo opened and the iPad read the same.
 
 ### N26.4 Search beside Today
 
-- Beside Today, the column shows the system search field under its title, so the toolbar's Search button (N14.2), which only presented that field, is not drawn there. The compact deck list (an iPhone, the Duo folded or held tall) keeps the button, since its field stays out of the way until asked for.
+- Beside Today, the column always shows the system search field under its title (the navigation bar drawer's `.always` display mode), so the toolbar's Search button (N14.2), which only presented that field, is not drawn there. The compact deck list (an iPhone, the Duo folded or held tall) keeps the button, since its field stays out of the way until asked for.
