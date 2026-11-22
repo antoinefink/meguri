@@ -15,7 +15,7 @@ extension NativeCardBehaviorPresenter {
         let panel = CardPDFPanel(contentRect: window.contentLayoutRect,
             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false
-        let pdf = PDFView(frame: .zero)
+        let pdf = CardPDFView(frame: .zero)
         pdf.autoScales = true
         pdf.document = document
         panel.contentView = pdf
@@ -35,6 +35,25 @@ extension NativeCardBehaviorPresenter {
     }
 }
 
+/// Attachments are offline readers. PDFKit's delegate is weak, so each view
+/// retains its policy for the entire presentation, including interactive dismissal.
+final class CardPDFView: PDFView {
+    private let offlineDelegate = CardPDFDelegate()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delegate = offlineDelegate
+    }
+    required init?(coder: NSCoder) { return nil }
+}
+
+private final class CardPDFDelegate: NSObject, PDFViewDelegate {
+    // Implementing these callbacks replaces PDFKit's default external opens.
+    // Local page destinations continue to use PDFKit's normal navigation.
+    func pdfViewWillClick(onLink sender: PDFView, with url: URL) {}
+    func pdfViewOpenPDF(_ sender: PDFView, forRemoteGoToAction action: PDFActionRemoteGoTo) {}
+}
+
 #if os(macOS)
 private final class CardPDFPanel: NSPanel {
     override func close() {
@@ -46,7 +65,7 @@ private final class CardPDFPanel: NSPanel {
 }
 #else
 private final class CardPDFController: UIViewController {
-    let pdf = PDFView(frame: .zero)
+    let pdf = CardPDFView(frame: .zero)
     init(document: PDFDocument) {
         super.init(nibName: nil, bundle: nil)
         pdf.autoScales = true

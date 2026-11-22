@@ -1,11 +1,50 @@
 @testable import CardRendering
 import Foundation
+import PDFKit
 import Testing
 import WebKit
 
 extension WebKitSuites {
     @Suite struct CardAttachmentPDFTests {
         static let name = "meguri-" + String(repeating: "7b", count: 32) + ".pdf"
+
+        @Test func nativePDFRetainsOfflinePolicyAndPreservesLocalDestinations() throws {
+            weak var policy: (any PDFViewDelegate)?
+            let pdf = autoreleasepool {
+                let view = CardPDFView(frame: CGRect(x: 0, y: 0, width: 600, height: 800))
+                policy = view.delegate
+                return view
+            }
+            // Only the view owns the delegate after the creating scope has ended.
+            #expect(policy != nil)
+            #expect(pdf.delegate === policy)
+            try #require(pdf.delegate?.responds(to: #selector(PDFViewDelegate.pdfViewWillClick(onLink:with:))) == true)
+            try #require(pdf.delegate?.responds(to: #selector(PDFViewDelegate.pdfViewOpenPDF(_:forRemoteGoToAction:))) == true)
+
+            let document = PDFDocument()
+            let first = PDFPage()
+            let second = PDFPage()
+            for (index, page) in [first, second].enumerated() {
+                page.setBounds(CGRect(x: 0, y: 0, width: 600, height: 800), for: .mediaBox)
+                document.insert(page, at: index)
+            }
+            pdf.document = document
+            pdf.go(to: first)
+            for address in ["https://example.invalid/", "mailto:reader@example.invalid",
+                            "meguri://review", "file:///meguri-pdf-policy-test.pdf"] {
+                let url = try #require(URL(string: address))
+                pdf.perform(PDFActionURL(url: url))
+                #expect(pdf.document === document && pdf.currentPage === first)
+            }
+            let remote = try #require(URL(string: "file:///meguri-pdf-policy-remote.pdf"))
+            pdf.perform(PDFActionRemoteGoTo(pageIndex: 0, at: .zero, fileURL: remote))
+            #expect(pdf.document === document && pdf.currentPage === first)
+
+            pdf.perform(PDFActionGoTo(destination: PDFDestination(page: second, at: .zero)))
+            #expect(pdf.currentPage === second)
+            pdf.document = nil
+            #expect(policy != nil && pdf.delegate === policy)
+        }
 
         @Test func exactNameAndNavigationRefusal() throws {
             #expect(CardAttachmentPDF.accepts(Self.name))
