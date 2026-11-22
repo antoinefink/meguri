@@ -22,7 +22,7 @@ public enum StatsSeriesColor: String, CaseIterable, Hashable, Sendable {
     case remembered
     /// Knowledge's Studied line: grey, drawn dashed.
     case reference
-    /// A reference rule such as the desired retention: the label colour, drawn dashed.
+    /// A reference rule such as the desired retention: the label colour (S7.2), drawn dashed.
     case rule
 
     /// The colour family a series belongs to. A chart draws one family, never
@@ -54,7 +54,7 @@ public enum StatsSeriesColor: String, CaseIterable, Hashable, Sendable {
         case .buried, .reference: .gray
         case .filtered: .purple
         case .measure: .indigo
-        case .rule: .secondary
+        case .rule: .primary
         }
     }
 

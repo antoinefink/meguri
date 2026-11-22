@@ -10,8 +10,9 @@ public enum StatsBoxPhase: Hashable, Sendable {
     /// Not read yet: the system's small progress indicator in the plot area,
     /// determinate when the core reports a fraction (S10.3).
     case loading(fraction: Double?)
-    /// No data: one line in the plot area that says why (S8.5).
-    case empty(String)
+    /// No data: one line in the plot area that says why (S8.5), and an
+    /// optional second line ("This fills in as you study.", S7.1).
+    case empty(String, detail: String? = nil)
     /// The box's part failed alone (S12.8): "Couldn't load this chart."
     case failed
 }
@@ -55,7 +56,7 @@ public struct StatsChartBox<Accessory: View>: View {
     private let size: StatsPlotSize
     private let figures: [StatsSmallFigure]
     private let footnote: String?
-    private let reservesFootnote: Bool
+    private let footnoteLines: Int
     private let separatesSeries: Bool?
     private let externalSelection: Binding<StatsChartSelection>?
     private let open: () -> Void
@@ -68,6 +69,7 @@ public struct StatsChartBox<Accessory: View>: View {
     @Environment(\.locale) private var locale
     @Environment(\.calendar) private var calendar
     @Environment(\.appClock) private var clock
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     /// - Parameters:
     ///   - box: the box's id in `stats.box.<box>` (S15), e.g. `reviewsOverTime`.
@@ -80,7 +82,7 @@ public struct StatsChartBox<Accessory: View>: View {
     public init(
         box: String, title: String, figure: StatsBoxFigure?, data: StatsChartData,
         phase: StatsBoxPhase = .ready, size: StatsPlotSize = .regular,
-        figures: [StatsSmallFigure] = [], footnote: String? = nil, reservesFootnote: Bool = false,
+        figures: [StatsSmallFigure] = [], footnote: String? = nil, footnoteLines: Int = 0,
         separatesSeries: Bool? = nil, selection: Binding<StatsChartSelection>? = nil,
         open: @escaping () -> Void, showInBrowse: ((Int) -> Void)? = nil,
         @ViewBuilder accessory: () -> Accessory
@@ -94,7 +96,7 @@ public struct StatsChartBox<Accessory: View>: View {
         self.size = size
         self.figures = figures
         self.footnote = footnote
-        self.reservesFootnote = reservesFootnote || footnote != nil
+        self.footnoteLines = max(footnoteLines, footnote == nil ? 0 : 1)
         self.separatesSeries = separatesSeries
         self.externalSelection = selection
         self.open = open
@@ -109,8 +111,8 @@ public struct StatsChartBox<Accessory: View>: View {
         switch phase {
         case .ready: .ready
         case let .loading(fraction): .loading(fraction)
-        case let .empty(message): .message(message)
-        case .failed: .message(String(localized: "stats.chart.failed", bundle: .module))
+        case let .empty(message, detail): .message(message, detail)
+        case .failed: .message(String(localized: "stats.chart.failed", bundle: .module), nil)
         }
     }
 
@@ -118,11 +120,19 @@ public struct StatsChartBox<Accessory: View>: View {
         container {
             VStack(alignment: .leading, spacing: Spacing.small) {
                 header
+                #if os(macOS)
                 figureView
                 plot
                     .contextMenu { if isReady { exportMenu } }
+                #else
+                // On touch a hold on the plot selects (S8.3), so Copy Image
+                // and Copy Values are on a hold of the figure instead.
+                figureView
+                    .contextMenu { if isReady { exportMenu } }
+                plot
+                #endif
                 if !figures.isEmpty { figuresView }
-                if reservesFootnote { footnoteView }
+                if footnoteLines > 0 { footnoteView }
             }
         }
         .accessibilityElement(children: .contain)
@@ -173,7 +183,8 @@ public struct StatsChartBox<Accessory: View>: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(stacks ? 4 : 2, reservesSpace: true)
         }
-        .accessibilityElement(children: .combine)
+        // The chart element reads the figure and its sentence (S15).
+        .accessibilityHidden(true)
     }
 
     private var plot: some View {
@@ -201,6 +212,8 @@ public struct StatsChartBox<Accessory: View>: View {
                     Text(verbatim: isReady ? item.value ?? "—" : "—")
                         .font(.subheadline.weight(.medium))
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .foregroundStyle(isReady && item.value != nil ? .primary : .secondary)
                 }
                 .frame(maxWidth: stacks ? nil : .infinity, alignment: .leading)
@@ -213,7 +226,7 @@ public struct StatsChartBox<Accessory: View>: View {
         Text(verbatim: isReady ? footnote ?? " " : " ")
             .font(.footnote)
             .foregroundStyle(.secondary)
-            .lineLimit(stacks ? 3 : 1, reservesSpace: true)
+            .lineLimit(stacks ? footnoteLines * 3 : footnoteLines, reservesSpace: true)
     }
 
     @ViewBuilder private var exportMenu: some View {
@@ -239,21 +252,28 @@ public struct StatsChartBox<Accessory: View>: View {
 
     // MARK: Container
 
-    /// N25.3: the system group box on the Mac. On iPhone and iPad the box is a
-    /// grouped cell on the grouped background, as inset grouped lists draw
-    /// their sections (N25.6).
+    /// N25.3: the system group box on the Mac and the iPad at regular width. At
+    /// compact width (iPhone, the folded Duo, a narrow iPad) the box is a
+    /// section-like group on the grouped background, as inset grouped lists
+    /// draw their sections (N25.6).
     @ViewBuilder private func container(@ViewBuilder _ content: () -> some View) -> some View {
         #if os(macOS)
         GroupBox {
             content()
-                .padding(Spacing.xxSmall)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         #else
-        content()
-            .padding(Spacing.medium)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemGroupedBackground), in: Radius.rounded(Radius.large))
+        if horizontalSizeClass == .regular {
+            GroupBox {
+                content()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            content()
+                .padding(Spacing.medium)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: Radius.rounded(Radius.large))
+        }
         #endif
     }
 }
@@ -263,13 +283,13 @@ extension StatsChartBox where Accessory == EmptyView {
     public init(
         box: String, title: String, figure: StatsBoxFigure?, data: StatsChartData,
         phase: StatsBoxPhase = .ready, size: StatsPlotSize = .regular,
-        figures: [StatsSmallFigure] = [], footnote: String? = nil, reservesFootnote: Bool = false,
+        figures: [StatsSmallFigure] = [], footnote: String? = nil, footnoteLines: Int = 0,
         separatesSeries: Bool? = nil, selection: Binding<StatsChartSelection>? = nil,
         open: @escaping () -> Void, showInBrowse: ((Int) -> Void)? = nil
     ) {
         self.init(
             box: box, title: title, figure: figure, data: data, phase: phase, size: size,
-            figures: figures, footnote: footnote, reservesFootnote: reservesFootnote,
+            figures: figures, footnote: footnote, footnoteLines: footnoteLines,
             separatesSeries: separatesSeries, selection: selection, open: open, showInBrowse: showInBrowse
         ) { EmptyView() }
     }

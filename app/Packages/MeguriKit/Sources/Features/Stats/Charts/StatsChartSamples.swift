@@ -127,7 +127,11 @@ public struct StatsChartSamples: Sendable {
             series: [StatsSeries(id: "retention", name: "Retention", color: .remembered, mark: .line(points: true), values: values, openPoints: open)],
             rules: [StatsRule(id: "desired", name: "Desired retention", value: 0.9)],
             unit: .fraction,
-            yScale: .fraction(lower: 0.7)
+            yScale: .fraction(lower: 0.7),
+            calloutLines: [
+                StatsCalloutLine(id: "remembered", name: "Remembered", values: (0..<n).map { i in values[i].map { ($0 * 1_200).rounded() } }, unit: .count),
+                StatsCalloutLine(id: "forgotten", name: "Forgotten", values: (0..<n).map { i in values[i].map { ((1 - $0) * 1_200).rounded() } }, unit: .count),
+            ]
         )
     }
 

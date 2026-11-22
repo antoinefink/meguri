@@ -7,10 +7,12 @@ import SwiftUI
 /// until the page exists (U296). Not a screen of the app.
 public struct StatsChartGallery: View {
     public enum Page: String, CaseIterable, Sendable {
-        /// Bars: stacked by state, a single measure, Reviews Due with Overdue and Later.
+        /// Bars: stacked by state with working switches, single measures, bars and a line.
         case bars
-        /// Lines and areas: Knowledge, Retention with open points, Cards Over Time, Added and Started.
+        /// Lines: Knowledge, Retention with open points and its rule, Added and Started.
         case lines
+        /// A stacked area and Reviews Due with Overdue and Later.
+        case areas
         /// Loading (determinate and not), empty, and series drawn apart.
         case states
         /// A failed part and a sparse chart.
@@ -24,6 +26,7 @@ public struct StatsChartGallery: View {
     @Environment(\.calendar) private var calendar
     @Environment(\.appClock) private var clock
     @State private var width: CGFloat = 0
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     public init(page: Page, period: StatsSamplePeriod = .all) {
         self.page = page
@@ -49,7 +52,9 @@ public struct StatsChartGallery: View {
         }
         .accessibilityIdentifier("stats.charts.gallery")
         #if os(iOS)
-        .background(Color(uiColor: .systemGroupedBackground))
+        // Compact: grouped cells on the grouped background (N25.6); regular:
+        // group boxes on the system background (N25.3).
+        .background(sizeClass == .regular ? Color(uiColor: .systemBackground) : Color(uiColor: .systemGroupedBackground))
         #endif
         .navigationTitle(Text(verbatim: "Chart System"))
     }
@@ -60,15 +65,19 @@ public struct StatsChartGallery: View {
             [
                 .lead { StatsGalleryReviewsBox(samples: samples) },
                 .regular { forgotten() },
-                .lead { reviewsDue() },
                 .regular { stability() },
+                .regular { addedAndStarted(sparse: false) },
             ]
         case .lines:
             [
                 .lead { knowledge() },
                 .regular { retention() },
-                .lead { cardsOverTime() },
                 .regular { addedAndStarted(sparse: false) },
+            ]
+        case .areas:
+            [
+                .lead { cardsOverTime() },
+                .lead { reviewsDue() },
             ]
         case .states:
             [
@@ -77,27 +86,27 @@ public struct StatsChartGallery: View {
                         box: "reviewsOverTime", title: "Reviews Over Time", figure: nil,
                         data: samples.reviewsByType(browsable: false), phase: .loading(fraction: 0.4), size: .lead,
                         figures: reviewFigures(nil), open: {}
-                    ) { StatsGallerySwitch(options: ["By Type", "By Answer"]) }
+                    ) { StatsGallerySwitch(id: "loadingKind", options: ["By Type", "By Answer"]) }
                 },
                 .regular {
                     StatsChartBox(
                         box: "retention", title: "Retention", figure: nil, data: samples.retention, phase: .loading(fraction: nil),
                         figures: retentionFigures(nil), open: {}
-                    ) { StatsGallerySwitch(options: ["All", "Young", "Mature"]) }
-                },
-                .lead {
-                    StatsChartBox(
-                        box: "reviewsByAnswer", title: "Reviews Over Time",
-                        figure: StatsBoxFigure(value: "41,233 reviews", sentence: "Differentiate Without Colour: segments drawn apart"),
-                        data: samples.reviewsByAnswer, size: .lead, figures: reviewFigures(""),
-                        separatesSeries: true, open: {}
-                    ) { StatsGallerySwitch(options: ["By Type", "By Answer"], selected: 1) }
+                    ) { StatsGallerySwitch(id: "loadingRetention", options: ["All", "Young", "Mature"]) }
                 },
                 .regular {
                     StatsChartBox(
                         box: "forgotten", title: "Forgotten", figure: nil, data: samples.forgotten,
                         phase: .empty(StatsEmptyReason.noReviews(in: period.span ?? .lastMonth, deck: nil).text),
                         figures: [.init(label: "Young", value: nil), .init(label: "Mature", value: nil)], open: {}
+                    )
+                },
+                .regular {
+                    StatsChartBox(
+                        box: "reviewsByAnswer", title: "Reviews Over Time",
+                        figure: StatsBoxFigure(value: "41,233 reviews", sentence: "Differentiate Without Colour: segments drawn apart"),
+                        data: samples.reviewsByAnswer, figures: Array(reviewFigures("").prefix(2)),
+                        separatesSeries: true, open: {}
                     )
                 },
             ]
@@ -107,16 +116,16 @@ public struct StatsChartGallery: View {
                     StatsChartBox(
                         box: "stability", title: "Stability", figure: nil, data: StatsChartSamples.stability, phase: .failed,
                         figures: [.init(label: "Median Interval", value: nil), .init(label: "Over 1 Year", value: nil)],
-                        reservesFootnote: true, open: {}
+                        footnoteLines: 1, open: {}
                     ) { StatsBoxMarker.now }
                 },
                 .regular { addedAndStarted(sparse: true) },
                 .regular {
                     StatsChartBox(
                         box: "knowledgeOverTime", title: "Knowledge Over Time", figure: nil, data: samples.knowledge,
-                        phase: .empty(StatsEmptyReason.noReviewsYet.text),
+                        phase: .empty(StatsEmptyReason.noReviewsYet.text, detail: "This fills in as you study."),
                         figures: [.init(label: "Studied", value: nil), .init(label: "Likely Forgotten", value: nil)],
-                        reservesFootnote: true, open: {}
+                        footnoteLines: 2, open: {}
                     ) { StatsBoxMarker.estimated }
                 },
                 .regular {
@@ -154,7 +163,7 @@ public struct StatsChartGallery: View {
             box: "retention", title: "Retention",
             figure: StatsBoxFigure(value: "90.4%", sentence: "Desired retention 90%"),
             data: samples.retention, figures: retentionFigures(true), selection: selection, open: {}
-        ) { StatsGallerySwitch(options: ["All", "Young", "Mature"]) }
+        ) { StatsGallerySwitch(id: "retention", options: ["All", "Young", "Mature"]) }
     }
 
     private func forgotten(selection: Binding<StatsChartSelection>? = nil) -> some View {
@@ -219,8 +228,7 @@ public struct StatsChartGallery: View {
 }
 
 /// A gallery cell: a lead box spans its row (N25.3), the others share one.
-struct StatsGalleryItem: Identifiable {
-    let id = UUID()
+struct StatsGalleryItem {
     let lead: Bool
     let view: AnyView
 
@@ -229,31 +237,26 @@ struct StatsGalleryItem: Identifiable {
 }
 
 /// N25.3's grid for the gallery: one column under about 560 points, two up to
-/// about 1,250, three beyond, where a lead box takes two columns and the next
-/// box the third.
+/// about 1,250, three beyond; a lead box spans its row.
 struct StatsGalleryGrid: View {
     let width: CGFloat
     let items: [StatsGalleryItem]
 
     private var columns: Int { width < 560 ? 1 : width < 1_250 ? 2 : 3 }
 
-    private var rows: [[StatsGalleryItem]] {
-        var rows: [[StatsGalleryItem]] = []
-        var row: [StatsGalleryItem] = []
-        var used = 0
-        for item in items {
-            let span = item.lead ? min(columns, max(2, columns - 1)) : 1
-            if used + span > columns, !row.isEmpty {
-                rows.append(row)
+    /// Rows of item indices: a lead box alone, the others side by side.
+    private var rows: [[Int]] {
+        var rows: [[Int]] = []
+        var row: [Int] = []
+        for (index, item) in items.enumerated() {
+            if item.lead || row.count == columns {
+                if !row.isEmpty { rows.append(row) }
                 row = []
-                used = 0
             }
-            row.append(item)
-            used += span
-            if used >= columns || (item.lead && columns < 3) {
-                rows.append(row)
-                row = []
-                used = 0
+            if item.lead {
+                rows.append([index])
+            } else {
+                row.append(index)
             }
         }
         if !row.isEmpty { rows.append(row) }
@@ -262,11 +265,11 @@ struct StatsGalleryGrid: View {
 
     var body: some View {
         Grid(alignment: .topLeading, horizontalSpacing: Spacing.medium, verticalSpacing: Spacing.medium) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+            ForEach(rows, id: \.self) { row in
                 GridRow(alignment: .top) {
-                    ForEach(row) { item in
-                        item.view
-                            .gridCellColumns(item.lead ? min(columns, max(2, columns - 1)) : 1)
+                    ForEach(row, id: \.self) { index in
+                        items[index].view
+                            .gridCellColumns(items[index].lead ? columns : 1)
                     }
                 }
             }
@@ -304,13 +307,19 @@ private struct StatsGalleryReviewsBox: View {
             HStack(spacing: Spacing.xSmall) {
                 Picker(selection: $byAnswer) {
                     Text(verbatim: "By Type").tag(false)
+                        .accessibilityIdentifier("stats.charts.gallery.kind.byType")
                     Text(verbatim: "By Answer").tag(true)
+                        .accessibilityIdentifier("stats.charts.gallery.kind.byAnswer")
                 } label: { Text(verbatim: "Kind") }
+                .accessibilityIdentifier("stats.charts.gallery.kind")
                 #if os(macOS)
                 Picker(selection: $time) {
                     Text(verbatim: "Count").tag(false)
+                        .accessibilityIdentifier("stats.charts.gallery.measure.count")
                     Text(verbatim: "Time").tag(true)
+                        .accessibilityIdentifier("stats.charts.gallery.measure.time")
                 } label: { Text(verbatim: "Measure") }
+                .accessibilityIdentifier("stats.charts.gallery.measure")
                 #endif
             }
             .pickerStyle(.segmented)
@@ -324,10 +333,12 @@ private struct StatsGalleryReviewsBox: View {
 
 /// A small segmented switch for the gallery's headers.
 private struct StatsGallerySwitch: View {
+    let id: String
     let options: [String]
     @State var selected = 0
 
-    init(options: [String], selected: Int = 0) {
+    init(id: String, options: [String], selected: Int = 0) {
+        self.id = id
         self.options = options
         _selected = State(initialValue: selected)
     }
@@ -336,11 +347,13 @@ private struct StatsGallerySwitch: View {
         Picker(selection: $selected) {
             ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                 Text(verbatim: option).tag(index)
+                    .accessibilityIdentifier("stats.charts.gallery.\(id).\(index)")
             }
         } label: { Text(verbatim: "Show") }
         .pickerStyle(.segmented)
         .labelsHidden()
         .fixedSize()
+        .accessibilityIdentifier("stats.charts.gallery.\(id)")
     }
 }
 
@@ -384,11 +397,11 @@ private struct StatsGallerySelection: View {
                         selection: $retention, open: {}
                     )
                 },
-                .lead {
+                .regular {
                     StatsChartBox(
                         box: "reviewsDue", title: "Reviews Due",
                         figure: StatsBoxFigure(value: "2,904", sentence: "128 remaining today · 96 tomorrow"),
-                        data: samples.reviewsDue, size: .lead,
+                        data: samples.reviewsDue,
                         figures: [.init(label: "Overdue", value: "42"), .init(label: "Due Tomorrow", value: "96")],
                         selection: $due, open: {}, showInBrowse: { _ in }
                     )

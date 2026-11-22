@@ -60,7 +60,7 @@ struct StatsAudioGraph: AXChartDescriptorRepresentable {
         let unit = data.unit
         let format = format
         let yAxis = AXNumericDataAxisDescriptor(
-            title: Self.unitName(unit),
+            title: data.unitName ?? Self.unitName(unit),
             range: domain,
             gridlinePositions: []
         ) { value in format.value(value, unit: unit) }

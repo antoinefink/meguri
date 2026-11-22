@@ -153,6 +153,28 @@ import Testing
         #expect(Set(labels.values) == ["2023", "2024", "2025", "2026"])
     }
 
+    @Test func aShortRunOfMonthsWithoutJanuariesStillHasLabels() {
+        let first = Self.date(2026, 2, 1)
+        let bins = (0..<10).map { StatsPeriod.month(Self.calendar.date(byAdding: .month, value: $0, to: first)!) }
+        let labels = Self.format.labelledBins(bins, maximum: 4)
+        #expect(!labels.isEmpty && labels.count <= 4)
+        #expect(labels[9] == "Nov")
+    }
+
+    @Test func aCalloutLineWritesItsOwnUnit() {
+        let data = StatsChartData(
+            bins: [.day(Self.date(2026, 11, 17))],
+            series: [StatsSeries(id: "r", name: "Retention", color: .remembered, mark: .line(), values: [0.9])],
+            unit: .fraction,
+            calloutLines: [StatsCalloutLine(id: "f", name: "Forgotten", values: [12], unit: .count)]
+        )
+        #expect(Self.format.calloutText(data, bin: 0) == "17 Nov, Retention 90.0%, Forgotten 12")
+    }
+
+    @Test func aSmallCountAxisEndsOnAWholeNumber() {
+        #expect(Self.stack([[2, 1, 0]]).yDomain.upperBound == 2)
+    }
+
     @Test func overdueAndLaterAreAlwaysLabelled() {
         let bins: [StatsPeriod] = [.overdue] + (1...24).map { _ in .bucket("x") } + [.later]
         let labels = Self.format.labelledBins(bins, maximum: 4)
@@ -229,7 +251,7 @@ import Testing
                 figure: StatsBoxFigure(value: "41,233 reviews", sentence: "23 days in a row"),
                 data: samples.reviewsByType(browsable: false), phase: phase, size: size,
                 figures: [.init(label: "Days Studied", value: "318 of 330"), .init(label: "Average a Day", value: "125")],
-                reservesFootnote: true, open: {}
+                footnoteLines: 1, open: {}
             )
             .frame(width: 520)
             .environment(\.locale, Self.locale)

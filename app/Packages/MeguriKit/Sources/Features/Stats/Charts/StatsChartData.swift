@@ -122,11 +122,15 @@ public struct StatsCalloutLine: Identifiable, Hashable, Sendable {
     public var id: String
     public var name: String
     public var values: [Double?]
+    /// The line's own unit when it differs from the chart's (Retention's
+    /// remembered and forgotten counts on a percentage chart); nil for the chart's.
+    public var unit: StatsValueUnit?
 
-    public init(id: String, name: String, values: [Double?]) {
+    public init(id: String, name: String, values: [Double?], unit: StatsValueUnit? = nil) {
         self.id = id
         self.name = name
         self.values = values
+        self.unit = unit
     }
 }
 
@@ -141,11 +145,14 @@ public struct StatsChartData: Hashable, Sendable {
     public var calloutLines: [StatsCalloutLine]
     /// Bins that offer Show in Browse (S8.4); the box's caller runs it.
     public var browsable: IndexSet
+    /// The Audio Graph's name for the y axis (P18.3: cards, reviews, minutes,
+    /// percent); nil names it by the unit.
+    public var unitName: String?
 
     public init(
         bins: [StatsPeriod], series: [StatsSeries], rules: [StatsRule] = [],
         unit: StatsValueUnit = .count, yScale: StatsYScale = .zero,
-        calloutLines: [StatsCalloutLine] = [], browsable: IndexSet = []
+        calloutLines: [StatsCalloutLine] = [], browsable: IndexSet = [], unitName: String? = nil
     ) {
         self.bins = bins
         self.series = series
@@ -154,6 +161,7 @@ public struct StatsChartData: Hashable, Sendable {
         self.yScale = yScale
         self.calloutLines = calloutLines
         self.browsable = browsable
+        self.unitName = unitName
     }
 
     /// The series' definitions with no values: what a box draws while its data

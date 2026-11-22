@@ -51,8 +51,8 @@ enum StatsPlotPhase: Hashable {
     case ready
     /// S10.3: the system's small progress indicator, determinate with a fraction.
     case loading(Double?)
-    /// S8.5: one line that says why.
-    case message(String)
+    /// S8.5: one line that says why, and an optional second one.
+    case message(String, String?)
 }
 
 /// The plot of a box (N25.4 part 3): Swift Charts, the y axis on the trailing
@@ -68,7 +68,35 @@ struct StatsChartPlot: View {
     /// Runs Show in Browse for a bin; nil when the caller offers none.
     let showInBrowse: ((Int) -> Void)?
     /// Draws stacked series apart; nil follows Differentiate Without Colour.
-    var separatesSeries: Bool?
+    let separatesSeries: Bool?
+    /// Worked out once per data, not on every pointer move.
+    private let isReady: Bool
+    private let domain: ClosedRange<Double>
+    private let segments: [StatsSegment]
+    /// Per bin, the last stacked series with a value: the bar's top segment.
+    private let topBarSeries: [Int: Int]
+    /// The last stacked series: the top band of an area.
+    private let topSeries: Int?
+
+    init(
+        data: StatsChartData, phase: StatsPlotPhase, size: StatsPlotSize, summary: String,
+        selection: Binding<StatsChartSelection>, showInBrowse: ((Int) -> Void)?, separatesSeries: Bool?
+    ) {
+        self.data = data
+        self.phase = phase
+        self.size = size
+        self.summary = summary
+        _selection = selection
+        self.showInBrowse = showInBrowse
+        self.separatesSeries = separatesSeries
+        let ready = phase == .ready && !data.bins.isEmpty
+        isReady = ready
+        domain = ready ? data.yDomain : 0...1
+        let segments = ready ? data.stackedSegments() : []
+        self.segments = segments
+        topBarSeries = Dictionary(grouping: segments.filter { $0.upper > $0.lower }, by: \.bin).mapValues { $0.map(\.series).max() ?? 0 }
+        topSeries = data.series.indices.last { data.series[$0].isStacked }
+    }
 
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @Environment(\.colorSchemeContrast) private var contrast
@@ -78,9 +106,7 @@ struct StatsChartPlot: View {
     @FocusState private var focused: Bool
 
     private var format: StatsChartFormat { StatsChartFormat(locale: locale, calendar: calendar, now: clock.now()) }
-    private var isReady: Bool { phase == .ready && !data.bins.isEmpty }
     private var separated: Bool { separatesSeries ?? differentiateWithoutColor }
-    private var domain: ClosedRange<Double> { isReady ? data.yDomain : 0...1 }
 
     /// The gap between two stacked segments, in data units: about 1.5 points
     /// of the plot's fixed height.
@@ -102,11 +128,17 @@ struct StatsChartPlot: View {
             .onKeyPress(.rightArrow) { move(1) }
             .onKeyPress(.escape) { clear() }
             .onKeyPress(.return) { browseSelected() }
-            .onChange(of: data.bins.count) {
-                // A refresh in place keeps the selection (S10.2); a bin that is
-                // gone clears it. Switches and the period clear it in the caller.
-                if let bin = selection.bin, bin >= data.bins.count { selection = .none }
+            .onChange(of: data.bins) {
+                // A refresh in place keeps the same bins and the selection
+                // (S10.2); other bins (a period change, a new day) clear it.
+                selection = .none
             }
+            #if os(macOS)
+            .onChange(of: focused) {
+                // A click elsewhere that takes the focus unpins (S8.3).
+                if !focused, selection.pinned { selection = .none }
+            }
+            #endif
             .accessibilityElement(children: .contain)
             .accessibilityLabel(summary)
             .accessibilityChartDescriptor(StatsAudioGraph(data: isReady ? data : data.skeleton(), format: format, summary: summary))
@@ -155,13 +187,13 @@ struct StatsChartPlot: View {
     }
 
     @ChartContentBuilder private var stacked: some ChartContent {
-        let segments = data.stackedSegments()
-        let topmost = Dictionary(grouping: segments.filter { $0.upper > $0.lower }, by: \.bin).mapValues { $0.map(\.series).max() ?? 0 }
-        ForEach(segments.filter { $0.upper > $0.lower }, id: \.self) { segment in
+        ForEach(segments, id: \.self) { segment in
             let series = data.series[segment.series]
-            let gap = (separated || series.mark == .stackedArea) && topmost[segment.bin] != segment.series ? segmentGap : 0
             switch series.mark {
             case .stackedArea:
+                // Every bin, zeros included, so a band never joins across a
+                // zero; each band but the top keeps a gap above it.
+                let gap = segment.series != topSeries ? segmentGap : 0
                 AreaMark(
                     x: .value("Period", Self.id(segment.bin)),
                     yStart: .value("From", segment.lower),
@@ -169,19 +201,32 @@ struct StatsChartPlot: View {
                     series: .value("Series", series.name)
                 )
                 .foregroundStyle(by: .value("Series", series.name))
-                .opacity(opacity(at: segment.bin) == 1 ? 1 : 0.85)
                 .accessibilityHidden(true)
             default:
-                BarMark(
-                    x: .value("Period", Self.id(segment.bin)),
-                    yStart: .value("From", segment.lower),
-                    yEnd: .value("To", max(segment.lower, segment.upper - gap)),
-                    width: barWidth
-                )
-                .foregroundStyle(by: .value("Series", series.name))
-                .opacity(opacity(at: segment.bin))
-                .accessibilityHidden(true)
+                if segment.upper > segment.lower {
+                    let gap = separated && topBarSeries[segment.bin] != segment.series ? segmentGap : 0
+                    BarMark(
+                        x: .value("Period", Self.id(segment.bin)),
+                        yStart: .value("From", segment.lower),
+                        yEnd: .value("To", max(segment.lower, segment.upper - gap)),
+                        width: barWidth
+                    )
+                    .foregroundStyle(by: .value("Series", series.name))
+                    .opacity(opacity(at: segment.bin))
+                    .accessibilityHidden(true)
+                }
             }
+        }
+        // Reviews Due's Overdue bar is labelled on the plot with its count (S7.9).
+        ForEach(data.bins.indices.filter { data.bins[$0] == .overdue && data.stackTotal(at: $0) > 0 }, id: \.self) { bin in
+            RuleMark(x: .value("Period", Self.id(bin)), yStart: .value("From", 0), yEnd: .value("To", data.stackTotal(at: bin)))
+                .opacity(0)
+                .annotation(position: .top, spacing: Spacing.xxSmall) {
+                    Text(verbatim: format.count(data.stackTotal(at: bin)))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityHidden(true)
         }
     }
 
@@ -297,7 +342,7 @@ struct StatsChartPlot: View {
 
     @AxisContentBuilder private var yAxis: some AxisContent {
         if isReady {
-            AxisMarks(position: .trailing, values: .automatic(desiredCount: size == .regular ? 3 : 4)) { value in
+            AxisMarks(position: .trailing, values: yAxisValues) { value in
                 AxisGridLine()
                 AxisValueLabel {
                     if let number = value.as(Double.self) {
@@ -310,6 +355,16 @@ struct StatsChartPlot: View {
                 AxisValueLabel { Text(verbatim: " ") }
             }
         }
+    }
+
+    /// About four values (three in a small box); whole numbers on a small
+    /// count axis, never "0.5 reviews".
+    private var yAxisValues: AxisMarkValues {
+        if data.unit == .count, domain.upperBound <= 10 {
+            let step = domain.upperBound <= 5 ? 1.0 : 2.0
+            return .stride(by: step)
+        }
+        return .automatic(desiredCount: size == .regular ? 3 : 4)
     }
 
     // MARK: Selection and the callout
@@ -347,12 +402,18 @@ struct StatsChartPlot: View {
                 }
             }
             .controlSize(.small)
-        case let .message(text):
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, Spacing.medium)
+        case let .message(text, detail):
+            VStack(spacing: Spacing.xxSmall) {
+                Text(text)
+                    .font(.subheadline)
+                if let detail {
+                    Text(detail)
+                        .font(.footnote)
+                }
+            }
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Spacing.medium)
         case .ready:
             // Ready with no bins: nothing to draw yet.
             EmptyView()
@@ -377,9 +438,10 @@ struct StatsChartPlot: View {
                 guard !selection.pinned else { return }
                 switch phase {
                 case let .active(location):
-                    selection.bin = bin(at: location.x + plot.minX, proxy: proxy, plot: plot)
+                    let hovered = bin(at: location.x + plot.minX, proxy: proxy, plot: plot)
+                    if hovered != selection.bin { selection.bin = hovered }
                 case .ended:
-                    selection.bin = nil
+                    if selection.bin != nil { selection.bin = nil }
                 }
             }
             .gesture(SpatialTapGesture(count: 2, coordinateSpace: .local).onEnded { value in

@@ -15,7 +15,7 @@ enum StatsChartExport {
         let renderer = ImageRenderer(content: content
             .frame(width: width)
             .padding(Spacing.medium)
-            .background(Color.clear)
+            .background(Self.background)
             .environment(\.colorScheme, colorScheme))
         renderer.scale = scale
         #if os(macOS)
@@ -25,6 +25,15 @@ enum StatsChartExport {
         #else
         guard let image = renderer.uiImage else { return }
         UIPasteboard.general.image = image
+        #endif
+    }
+
+    /// The window's background, so a copy reads on any page it is pasted into.
+    private static var background: Color {
+        #if os(macOS)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color(uiColor: .systemBackground)
         #endif
     }
 

@@ -28,13 +28,24 @@ public struct StatsChartFormat: Sendable {
     /// once there is a minute.
     public func duration(seconds: Double) -> String {
         let seconds = max(0, seconds.rounded())
+        let formatter = Self.durationFormatter(seconds < 60 ? [.second] : [.hour, .minute], calendar: calendar)
+        return formatter.string(from: seconds < 60 ? seconds : (seconds / 60).rounded() * 60) ?? ""
+    }
+
+    // Formatters cost more to make than to use: the plot writes a label per
+    // bin on every redraw, so each kind is made once per locale.
+    private static var durationFormatters: [String: DateComponentsFormatter] = [:]
+    private static var dateFormatters: [String: DateFormatter] = [:]
+
+    private static func durationFormatter(_ units: NSCalendar.Unit, calendar: Calendar) -> DateComponentsFormatter {
+        let key = "\(calendar.locale?.identifier ?? "")|\(units.rawValue)"
+        if let formatter = durationFormatters[key] { return formatter }
         let formatter = DateComponentsFormatter()
         formatter.unitsStyle = .short
-        formatter.allowedUnits = seconds < 60 ? [.second] : [.hour, .minute]
-        var calendar = calendar
-        calendar.locale = locale
+        formatter.allowedUnits = units
         formatter.calendar = calendar
-        return formatter.string(from: seconds < 60 ? seconds : (seconds / 60).rounded() * 60) ?? ""
+        durationFormatters[key] = formatter
+        return formatter
     }
 
     /// A percentage with one decimal ("91.4%") from a fraction.
@@ -75,11 +86,18 @@ public struct StatsChartFormat: Sendable {
     /// A date written from a template of date fields ("dMMM": "17 Nov"), in
     /// the locale's own order.
     private func formatted(_ date: Date, template: String) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.setLocalizedDateFormatFromTemplate(template)
+        let key = "\(locale.identifier)|\(calendar.identifier)|\(calendar.timeZone.identifier)|\(template)"
+        let formatter: DateFormatter
+        if let cached = Self.dateFormatters[key] {
+            formatter = cached
+        } else {
+            formatter = DateFormatter()
+            formatter.locale = locale
+            formatter.calendar = calendar
+            formatter.timeZone = calendar.timeZone
+            formatter.setLocalizedDateFormatFromTemplate(template)
+            Self.dateFormatters[key] = formatter
+        }
         return formatter.string(from: date)
     }
 
@@ -93,7 +111,9 @@ public struct StatsChartFormat: Sendable {
     }
 
     private func hour(_ hour: Int) -> String {
-        let date = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: now) ?? now
+        // A fixed winter day, so no clock change ever drops the hour.
+        let reference = calendar.date(from: DateComponents(year: 2001, month: 1, day: 15)) ?? now
+        let date = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: reference) ?? reference
         return date.formatted(Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).hour())
     }
 
@@ -149,11 +169,11 @@ public struct StatsChartFormat: Sendable {
             labels[index] = axisLabel(bins[index], monthsShowYear: false)
         }
         let months = regular.allSatisfy { if case .month = bins[$0] { true } else { false } }
-        if months, regular.count > maximum {
-            // Many months: the years, at each January.
-            let januaries = regular.filter {
-                if case let .month(date) = bins[$0] { calendar.component(.month, from: date) == 1 } else { false }
-            }
+        let januaries = regular.filter {
+            if case let .month(date) = bins[$0] { calendar.component(.month, from: date) == 1 } else { false }
+        }
+        if months, regular.count > maximum, januaries.count >= 3 {
+            // Many years of months: the years, at each January.
             let step = max(1, Int((Double(januaries.count) / Double(maximum)).rounded(.up)))
             for (n, index) in januaries.reversed().enumerated() where n % step == 0 {
                 labels[index] = axisLabel(bins[index], monthsShowYear: true)
@@ -192,7 +212,7 @@ public struct StatsChartFormat: Sendable {
         }
         for line in data.calloutLines {
             guard line.values.indices.contains(bin), let value = line.values[bin] else { continue }
-            rows.append((line.name, self.value(value, unit: data.unit), nil))
+            rows.append((line.name, self.value(value, unit: line.unit ?? data.unit), nil))
         }
         return rows
     }
@@ -226,7 +246,7 @@ public struct StatsChartFormat: Sendable {
         let rows = data.bins.indices.map { bin in
             let values = data.series.map { series in data.value(series, at: bin).map { value($0, unit: data.unit) } ?? "" }
             let extras = data.calloutLines.map { line in
-                line.values.indices.contains(bin) ? line.values[bin].map { value($0, unit: data.unit) } ?? "" : ""
+                line.values.indices.contains(bin) ? line.values[bin].map { value($0, unit: line.unit ?? data.unit) } ?? "" : ""
             }
             return ([name(data.bins[bin])] + values + extras).joined(separator: "\t")
         }
