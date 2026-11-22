@@ -16,4 +16,6 @@ First review: nothing blocking. Should fix, fixed: this log was cited before it 
 
 Re-review: nothing blocking; one should fix, fixed: the T19.5 sign-in clause read as a first-match exclusion, which would fall through to "setup required"; it is now an override of this row's text and action, as built. Nits taken.
 
+CodeRabbit: three threads, fixed. The decisions row quotes Antoine's permission of 2026-11-20. V15 says what a collection-scope day whose rows all belong to deleted cards does (it stays a link and opens nothing). The T19.5 row shows acceptance unknown before Upload…, as MP7 step 5 says. As built, a round's acceptance unknown with an upload pending shows Upload… (`SyncKinds.meguriRow` excepts only a refused sign-in); for the coordinator to check whether that state can occur.
+
 Left for the plan owner: the plan's §0 gate, §7.4 and §8 still say "awaiting approval".
