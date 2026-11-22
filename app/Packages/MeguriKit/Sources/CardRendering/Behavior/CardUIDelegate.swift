@@ -74,8 +74,8 @@ public final class CardPageBehavior: NSObject, WKUIDelegate {
               let update = page.update, let resolver = page.mediaResolver,
               let presenter, presenter.isAvailable, attachmentRead == nil else { return }
         let epoch = epoch
-        weak var window = page.webView.window
-        attachmentRead = Task { [weak self, weak page, weak presenter] in
+        let window = page.webView.window
+        attachmentRead = Task { [weak self, weak page, weak presenter, weak window] in
             defer { if self?.epoch == epoch { self?.attachmentRead = nil } }
             do {
                 let file = try await resolver.openAttachmentPDF(name)
