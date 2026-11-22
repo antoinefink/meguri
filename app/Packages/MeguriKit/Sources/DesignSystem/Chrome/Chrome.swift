@@ -66,6 +66,21 @@ private struct FloatingChrome<ChromeShape: Shape>: ViewModifier {
     }
 }
 
+/// A small panel of transient information over content, such as a chart's
+/// selection callout (contract N25.4): the system's regular material, or the
+/// grouped background under flat chrome. A panel, not a control: no glass.
+private struct MaterialPanel<PanelShape: Shape>: ViewModifier {
+    @Environment(\.chromeGlass) private var chromeGlass
+    let shape: PanelShape
+
+    func body(content: Content) -> some View {
+        switch chromeGlass {
+        case .liquid: content.background(.regularMaterial, in: shape)
+        case .flat: content.background(.token(.backgroundSecondary), in: shape)
+        }
+    }
+}
+
 /// A glass button, or a bordered one under flat chrome.
 private struct ChromeButton: ViewModifier {
     @Environment(\.chromeGlass) private var chromeGlass
@@ -132,6 +147,12 @@ extension View {
     /// A floating control or message over content, in `shape`.
     public func floatingChrome(in shape: some Shape) -> some View {
         modifier(FloatingChrome(shape: shape))
+    }
+
+    /// A small panel of transient information over content (a chart's
+    /// callout): the regular material in `shape`.
+    public func materialPanel(in shape: some Shape) -> some View {
+        modifier(MaterialPanel(shape: shape))
     }
 
     /// A glass button for the control layer; `prominent` for the primary
