@@ -20,7 +20,8 @@ use meguri_stats::graphs::records::retention::{RetentionCounts, RetentionRecord}
 use meguri_stats::graphs::records::reviews::{ReviewKinds, ReviewsRecord};
 use meguri_stats::graphs::{Columns, Graph, GraphRecord, GraphRequest, GraphResult, History, Scope};
 use meguri_testkit::bench::fixtures::CoreHost;
-use serde_json::{Map, Value, json};
+use meguri_testkit::observe::stats::graph_part;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use crate::graphs_common::{LANG, fixture_path, insert_card};
@@ -715,92 +716,9 @@ fn g6_a_record_past_the_limit_is_returned_whole() {
 // `creationOffset` and reopen, and observes Collection, Deck `Lang` or
 // Search `deck:Lang` requests. `reviews/time-wrap` is left out: its golden
 // is Anki's wrapped sum, which Meguri does not reproduce (V9,
-// `review_time_sums_no_wrap`).
-
-fn kinds_json(kinds: &ReviewKinds) -> Value {
-    let named = [
-        ("learn", kinds.learn),
-        ("relearn", kinds.relearn),
-        ("young", kinds.young),
-        ("mature", kinds.mature),
-        ("filtered", kinds.filtered),
-    ];
-    Value::Object(named.into_iter().filter(|(_, v)| *v != 0).map(|(k, v)| (k.to_owned(), json!(v))).collect())
-}
-
-fn reviews_json(record: &ReviewsRecord) -> Value {
-    if record.count.is_empty() {
-        return json!({});
-    }
-    let map = |days: &BTreeMap<i32, ReviewKinds>| -> Value {
-        Value::Object(days.iter().map(|(day, kinds)| (day.to_string(), kinds_json(kinds))).collect())
-    };
-    json!({"count": map(&record.count), "time": map(&record.time)})
-}
-
-fn retention_json(record: &RetentionRecord) -> Value {
-    let period = |c: &RetentionCounts| -> Value {
-        let named = [
-            ("young_passed", c.young_passed),
-            ("young_failed", c.young_failed),
-            ("mature_passed", c.mature_passed),
-            ("mature_failed", c.mature_failed),
-        ];
-        Value::Object(named.into_iter().filter(|(_, v)| *v != 0).map(|(k, v)| (k.to_owned(), json!(v))).collect())
-    };
-    let mut out = Map::new();
-    for (name, counts) in [
-        ("today", &record.today),
-        ("yesterday", &record.yesterday),
-        ("week", &record.week),
-        ("month", &record.month),
-        ("year", &record.year),
-    ] {
-        out.insert(name.into(), period(counts));
-    }
-    if let Some(all) = &record.all_time {
-        out.insert("all_time".into(), period(all));
-    }
-    Value::Object(out)
-}
-
-fn hourly_json(record: &HourlyRecord) -> Value {
-    let range = |hours: &Hours| -> Value {
-        hours
-            .iter()
-            .map(|h| {
-                let mut cell = Map::new();
-                if h.total != 0 {
-                    cell.insert("total".into(), json!(h.total));
-                }
-                if h.correct != 0 {
-                    cell.insert("correct".into(), json!(h.correct));
-                }
-                Value::Object(cell)
-            })
-            .collect()
-    };
-    let mut out = Map::new();
-    out.insert("one_month".into(), range(&record.one_month));
-    out.insert("three_months".into(), range(&record.three_months));
-    out.insert("one_year".into(), range(&record.one_year));
-    if let Some(all) = &record.all_time {
-        out.insert("all_time".into(), range(all));
-    }
-    Value::Object(out)
-}
-
-fn buttons_json(record: &AnswerButtonsRecord) -> Value {
-    let range = |b: &ButtonCounts| json!({"learning": b.learning, "young": b.young, "mature": b.mature});
-    let mut out = Map::new();
-    out.insert("one_month".into(), range(&record.one_month));
-    out.insert("three_months".into(), range(&record.three_months));
-    out.insert("one_year".into(), range(&record.one_year));
-    if let Some(all) = &record.all_time {
-        out.insert("all_time".into(), range(all));
-    }
-    Value::Object(out)
-}
+// `review_time_sums_no_wrap`). The parts are written by the testkit's
+// `stats` observation (`conformance/stats-ops` H10), which the conformance
+// runner also uses for these scenarios.
 
 /// The UTC offset at each scenario clock's start.
 fn offset_at(zone: &str, start: &str) -> i32 {
@@ -899,10 +817,10 @@ fn check_golden(name: &str) {
         assert_eq!(keys, wanted, "{name} {request}");
         for part in names {
             let mine = match part {
-                "reviews" => reviews_json(&parts.reviews),
-                "true_retention" => retention_json(&parts.retention),
-                "hours" => hourly_json(&parts.hourly),
-                "buttons" => buttons_json(&parts.buttons),
+                "reviews" => graph_part(&parts.reviews).unwrap(),
+                "true_retention" => graph_part(&parts.retention).unwrap(),
+                "hours" => graph_part(&parts.hourly).unwrap(),
+                "buttons" => graph_part(&parts.buttons).unwrap(),
                 other => panic!("{other}"),
             };
             assert_eq!(mine, expected[part], "{name} {request} {part}");

@@ -193,6 +193,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "schema_objects",
             "search",
             "search_build",
+            "stats",
             "tag_tree",
             "template",
             "template.card",
@@ -210,7 +211,6 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "search_join",
         "search_replace",
         "tag_complete",
-        "stats",
     ] {
         assert!(
             json["language"]["observations"]

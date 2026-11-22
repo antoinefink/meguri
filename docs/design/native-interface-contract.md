@@ -1036,15 +1036,28 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` ro
 - View › Note Types ⇧⌘T; File › New Note Type… (no key). ⇧⌘N stays New Deck…. R282's and R915's ⇧⌘N for Note Types are superseded.
 - iPhone and the Duo folded: Settings › Collection › Note Types and the Filters menu of Browse push the list; no tab.
 - Under about 1,100 points the sidebar hides itself while the Cards tab shows, as Mail and Xcode do with their navigators.
+- Nothing flashes (added 2026-11-22, after Antoine's report from the Mac app; decided by Claude (coordinator) under his delegation): choosing another note type keeps the shown one on screen until the new one's fields can draw, then the detail changes in one step; the title changes at once. A wait longer than about half a second shows a progress indicator over the old content, never an empty page. After Save or Reload the version shown stays, read-only, until the note type is read again. The rows beside the selection, and on iPad the rows on screen, are read ahead with pure reads. The issues list says "No issues" only once its reads have answered.
 - Changed 2026-11-22 (U281 iPad): on iPad the note type list is the section's root (large title, the system search field as its filter) and a note type opens as a navigation step with its own page (N22.7), instead of the list beside the detail. Accepted by Claude (coordinator) under Antoine's delegation, after the built app was compared in landscape and portrait.
 
 ### N22.2 Fields tab (2B)
 
 A native `Table` (Name, Sort, Used On, Notes with a share indicator) with drag reordering, + and − under it, and an inspector beside it holding Name, Collapsed in Editor, Right-to-Left and Placeholder (`notetypes/workspace` W4). No Advanced group in this version. A deleted field is crossed out until Save.
 
+Changed 2026-11-22 (Antoine's annotation on the Mac toolbar with the inspector open; decided by Claude (coordinator) under his delegation): the inspector's toggle is the last item of the window's toolbar, at its trailing end, as in Pages and Xcode. While the inspector shows, Revert and Save and then the toggle sit in the toolbar above the inspector; while it is hidden they trail the detail's toolbar, which then reaches the window's edge. Fields | Cards stays the detail's centred control. The order at the trailing end is the sync status (when it is there), Revert and Save, then the toggle.
+
 ### N22.3 Cards tab (4B, 5A)
 
 Three columns: the card types list (with counts and an issue dot) over the Fields list; the code editor with Front | Back | Styling and the Insert menu in its bar and the issues list under it; the live preview with its note menu, Question | Answer, Light | Dark (sun and moon), and the Cloze Number menu for cloze types. No device or size picker.
+
+Changed 2026-11-22 (Antoine's annotations on the captures of PR #114; decided by Claude (coordinator) under his delegation; `decisions.md`, rows `noteTypes` of 2026-11-22):
+
+- Column hierarchy, as Mail, Notes and Xcode draw theirs: only the app's navigation sidebar uses sidebar material. On the Mac the note types list is a content list on the window's own background with the system selection, under its filter field; the card types column belongs to the editor's side of the window, on the same background as the editor's bar and issues, not a third sidebar. No custom greys or materials.
+- The card types column is one list with two sections: the card types, with + and − under them (borderless, the list's own controls on its background), then Fields under a section header. No separate strips or bands between them.
+- Each column of the Cards tab starts with a bar of one height (the layout with the lists shown; N22.7's hiding of the lists while a card type is open waits for the preview, U283): "Card Types" over the list, Front | Back | Styling and Insert over the editor; their hairlines make one line across the tab. On iPad a hairline also marks the navigation bar's edge across the full width (the Fields tab has the same), and both columns and their divider run to the bottom edge, under the home indicator; the lists are plain, edge to edge in their column, with standard separators and touch-sized rows (no inset rounded groups).
+- Front | Back | Styling stays the system's segmented control, unstyled. On this macOS a segmented control in content draws its selected segment in the accent colour, with every AppKit segment style, while the toolbar draws its own grey selection (checked in the test VM on 2026-11-22); both are the system's, so neither is restyled to match the other. On iPad the Fields | Cards control has no toolbar glass of its own around it (one capsule, not a capsule inside another), which replaces N22.5's "own glass shapes" for that control; Save keeps its own glass and the job status keeps N22.5's places.
+- The styling's colour swatches sit on their value's line, centred on its capitals and inside its ascender and descender, so at any text size they touch neither neighbouring line. Exception (functional): on the Mac every style of the system colour well draws larger than a line of code (checked in the test VM), so the swatch is a circle Meguri draws in the value's colour with a hairline, sized to the capitals, that opens the system colour panel; on iPad the system colour well stays and is scaled into the same size.
+- An issue's fix button follows its message when both fit on one line; otherwise it goes on its own line below the message, so the message keeps the full width.
+- Flip (A15) is one step of the Back's own undo ("Undo Flip") that puts back both texts; a front edited after the flip is kept, and only the Back is put back.
 
 ### N22.4 Styling (6B)
 

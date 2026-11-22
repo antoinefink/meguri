@@ -54,6 +54,146 @@ impl Fixture {
     }
 }
 
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn overlapping_same_account_read_only_searches_wait_and_both_return_the_note() {
+    let f=Fixture::new(false).await;
+    let authority=f.service.mcp_authority(&f.token,false).await.unwrap();
+    let gate=f.service.mcp_publication_barrier(&authority).await.unwrap();
+    let (admitted,admission)=tokio::sync::oneshot::channel();
+    let (release,released)=std::sync::mpsc::sync_channel(1);
+    let admitted=std::sync::Mutex::new(Some(admitted));
+    let released=std::sync::Mutex::new(released);
+    let first_bridge=McpService::new(f.service.clone()).with_test_probe(Arc::new(move |boundary| {
+        if boundary==TestBoundary::Admitted {
+            admitted.lock().unwrap().take().unwrap().send(()).unwrap();
+            // Dropping the sender on any failure also unblocks this worker.
+            released.lock().unwrap().recv_timeout(Duration::from_secs(10))
+                .expect("first search must be released");
+        }
+    }));
+    let first_authority=authority.clone();
+    let first=tokio::spawn(async move {
+        first_bridge.search_notes(first_authority,SearchInput {note_id:Some("1".into()),..Default::default()}).await
+    });
+    tokio::time::timeout(Duration::from_secs(5),admission).await
+        .expect("first search must reach admission").unwrap();
+
+    let second_bridge=McpService::new(f.service.clone());
+    let second=second_bridge.search_notes(authority,SearchInput {note_id:Some("1".into()),..Default::default()});
+    tokio::pin!(second);
+    // The baseline completes with busy. A waiting implementation must actually
+    // poll the shared lock before we release the first search; no start sleeps.
+    let observed=tokio::time::timeout(Duration::from_secs(5),async {
+        tokio::select! {
+            result=&mut second => Some(result),
+            _=gate.waiter_pending() => None,
+        }
+    }).await;
+    // Release before inspecting any outcome, including an ordering timeout.
+    release.send(()).unwrap();
+    let first=tokio::time::timeout(Duration::from_secs(5),first).await
+        .expect("first search must finish after release").unwrap().unwrap();
+    let second=match observed.expect("second search must complete or join the lock wait") {
+        Some(result)=>result,
+        None=>tokio::time::timeout(Duration::from_secs(5),&mut second).await
+            .expect("second search must finish after release"),
+    }.expect("overlapping read-only search must wait instead of returning busy");
+    for result in [first,second] {
+        assert_eq!(result.notes.len(),1);
+        assert_eq!(result.notes[0].note_id,"1");
+        assert_eq!(result.notes[0].fields["Front"],"original");
+    }
+}
+
+#[tokio::test]
+async fn held_gate_bounds_reads_but_writes_refuse_immediately() {
+    use transport::Backend as _;
+    // A write-capable grant still receives read-oriented busy for a read call.
+    let f=Fixture::new(true).await;
+    let bridge=McpService::new(f.service.clone());
+    let authority=f.service.mcp_authority(&f.token,true).await.unwrap();
+    let gate=f.service.mcp_publication_barrier(&authority).await.unwrap();
+    let held=gate.enter().await;
+    for (name,args,write) in [
+        ("search_notes",json!({"note_id":"1"}),false),
+        ("list_decks_and_note_types",json!({}),false),
+        ("edit_note",json!({"note_id":"1","revision":"stale","fields":{"Front":"changed"}}),true),
+    ] {
+        let call=transport::inputs::parse(name,args.as_object().unwrap().clone()).unwrap();
+        let start=std::time::Instant::now();
+        let result=bridge.dispatch(authority.clone(),call);
+        #[cfg(feature="test-hooks")]
+        let result=async {
+            if write {
+                tokio::select! {
+                    result=result => result,
+                    _=gate.waiter_pending() => panic!("writes must never join the read wait"),
+                }
+            } else {
+                tokio::pin!(result);
+                tokio::select! {
+                    _=&mut result => panic!("held-gate read must wait before timing out"),
+                    _=gate.waiter_pending() => {},
+                }
+                result.await
+            }
+        };
+        let result=tokio::time::timeout(Duration::from_secs(5),result).await.unwrap();
+        assert!(matches!(result,Err(transport::DispatchFailure::Diagnosed {
+            failure:transport::ToolFailure::Busy,detail:Detail::PublicationGate
+        })));
+        if !write { assert!(start.elapsed()>=Duration::from_millis(500)); }
+        assert!(gate.try_enter().is_none(),"independent holder must remain held");
+    }
+    drop(held);
+    assert_eq!(f.snapshot().0,"original");
+}
+
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn queued_reads_release_worker_capacity_and_recheck_authorities() {
+    use transport::Backend as _;
+    for name in ["search_notes","list_decks_and_note_types"] {
+        for mutation in [None,Some("UPDATE oauth_grants SET revoked=1"),Some("UPDATE oauth_tokens SET expires_at=1")] {
+            let f=Fixture::new(false).await;
+            let bridge=McpService::new(f.service.clone());
+            let authority=f.service.mcp_authority(&f.token,false).await.unwrap();
+            let gate=f.service.mcp_publication_barrier(&authority).await.unwrap();
+            let held=gate.enter().await;
+            let args=if name=="search_notes" {json!({"note_id":"1"})} else {json!({})};
+            let call=transport::inputs::parse(name,args.as_object().unwrap().clone()).unwrap();
+            let queued=bridge.dispatch(authority,call);
+            tokio::pin!(queued);
+            tokio::time::timeout(Duration::from_secs(5),async {
+                tokio::select! {
+                    _=&mut queued => panic!("read must join the held gate"),
+                    _=gate.waiter_pending() => {},
+                }
+            }).await.unwrap();
+            // All metadata/files permits are available during the gate wait.
+            let capacity=f.service.metadata.test_hold_capacity();
+            drop(capacity);
+            if let Some(sql)=mutation {
+                // Deliberate boundary invalidation, as in the existing late
+                // revocation fixtures; production invalidation takes the gate.
+                f.service.metadata.run(move |c| { c.execute(sql,[])?;Ok(()) }).await.unwrap();
+            }
+            drop(held);
+            let result=tokio::time::timeout(Duration::from_secs(5),&mut queued).await.unwrap();
+            if mutation.is_some() {
+                assert!(matches!(result,Err(transport::DispatchFailure::Challenge(_))));
+            } else {
+                match result.ok().expect("queued read must succeed after release") {
+                    transport::ToolOutput::Notes {notes,..} => assert_eq!(notes[0].fields["Front"],"original"),
+                    transport::ToolOutput::Catalog {note_types,..} => assert_eq!(note_types[0].note_type_id,"10"),
+                    _ => panic!("unexpected read result"),
+                }
+            }
+        }
+    }
+}
+
 struct Admission {
     bridge: Arc<McpService>,
     invalidate: Option<&'static str>,

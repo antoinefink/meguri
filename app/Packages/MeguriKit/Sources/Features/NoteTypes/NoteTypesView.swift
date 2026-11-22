@@ -68,8 +68,16 @@ public struct NoteTypesView: View {
     private static let listMaximum: CGFloat = 320
 
     @ViewBuilder private var detail: some View {
-        if let id = model.selection {
+        // The note type shown stays until the newly selected one can draw,
+        // then the detail swaps in one step: never an empty page. A wait of
+        // more than half a second shows a progress indicator over it.
+        if let id = model.shownSelection {
             NoteTypeDetailContent(model: model, id: id)
+                // Shown in the new one's place for a moment: it looks the same, takes no edits.
+                .allowsHitTesting(model.selection == id)
+                .overlay {
+                    if model.selection != id { DelayedProgress() }
+                }
         } else if model.phase == .ready {
             ContentUnavailableView {
                 Label { Text("noteTypes.detail.none", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
@@ -106,54 +114,95 @@ public struct NoteTypesView: View {
             .disabled(model.selection == nil)
             .accessibilityIdentifier("noteTypes.list.tabs")
         }
-        // N22.5: while a save job runs, one status item takes Revert and
-        // Save's place; they return when it ends. A plain status, not a control,
-        // so it has no glass of its own. One item either way, so the toolbar
-        // keeps its other items as the job starts and ends.
-        let running = runningProgress
-        ToolbarItem(placement: .primaryAction) {
+        // Revert and Save trail the detail's toolbar. On the Fields tab its
+        // inspector's toolbar holds them with its toggle, at the window's
+        // trailing end, shown or hidden (`NoteTypeFieldsTab`).
+        if !inspectorHoldsSave {
+            NoteTypeSaveToolbar(model: model, running: jobShown.running(in: model))
+        }
+    }
+
+    /// The Fields tab is on screen: its inspector's toolbar holds Revert, Save and the toggle.
+    private var inspectorHoldsSave: Bool {
+        model.tab == .fields && model.selection != nil && model.shownSelection.flatMap(model.draft) != nil
+    }
+    #endif
+}
+
+/// Revert and Save (N22.5), or while a save job runs, one status item in
+/// their place; they return when it ends. A plain status, not a control,
+/// so it has no glass of its own. One item either way, so the toolbar
+/// keeps its other items as the job starts and ends.
+struct NoteTypeSaveToolbar: ToolbarContent {
+    let model: NoteTypesModel
+    /// The selected note type's save job, once the toolbar shows it.
+    let running: (id: Int64, progress: NoteTypesModel.Progress)?
+    /// The detail's trailing edge, or (`.automatic`) the inspector's own part of the toolbar.
+    var placement: ToolbarItemPlacement = .primaryAction
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: placement) {
             if let running {
                 SaveStatusView(progress: running.progress, notes: model.typeCounts[running.id]?.notes)
             } else {
-                // One control group: Revert and Save read as one pair in one shape.
-                // Save is not prominent: it is disabled until there is a draft, and
-                // a tinted disabled button reads as broken.
-                ControlGroup {
-                    Button {
-                        model.confirmingRevert = true
-                    } label: {
-                        Text("noteTypes.revert", bundle: .module)
-                    }
-                    .disabled(model.selection.map { !(model.isEdited($0) && model.editable($0)) } ?? true)
-                    .accessibilityIdentifier("noteTypes.list.revert")
-                    Button {
-                        model.save()
-                    } label: {
-                        if let id = model.selection, model.saveAsks(id) {
-                            Text("noteTypes.saveAsks", bundle: .module)
-                        } else {
-                            Text("noteTypes.save", bundle: .module)
-                        }
-                    }
-                    // ⌘S is File › Save's (N4).
-                    .disabled(model.selection.map { !model.canSave($0) } ?? true)
-                    .accessibilityIdentifier("noteTypes.list.save")
-                } label: {
-                    // The group's title where the toolbar folds it into its overflow menu.
-                    Text("noteTypes.save", bundle: .module)
-                }
+                NoteTypeSaveGroup(model: model)
             }
         }
         .sharedBackgroundVisibility(running == nil ? .automatic : .hidden)
     }
+}
 
-    /// The selected note type's save job, once the toolbar shows it.
-    private var runningProgress: (id: Int64, progress: NoteTypesModel.Progress)? {
-        guard let id = model.selection, let progress = model.progress, progress.notetypeId == id,
-              jobShown.shown(for: id) else { return nil }
-        return (id, progress)
+/// Revert and Save as one control group: they read as one pair in one shape.
+/// Save is not prominent: it is disabled until there is a draft, and a
+/// tinted disabled button reads as broken. A view of its own, so the draft's
+/// changes reach it.
+private struct NoteTypeSaveGroup: View {
+    let model: NoteTypesModel
+
+    var body: some View {
+        ControlGroup {
+            Button {
+                model.confirmingRevert = true
+            } label: {
+                Text("noteTypes.revert", bundle: .module)
+            }
+            .disabled(model.selection.map { !(model.isEdited($0) && model.editable($0)) } ?? true)
+            .accessibilityIdentifier("noteTypes.list.revert")
+            Button {
+                model.save()
+            } label: {
+                if let id = model.selection, model.saveAsks(id) {
+                    Text("noteTypes.saveAsks", bundle: .module)
+                } else {
+                    Text("noteTypes.save", bundle: .module)
+                }
+            }
+            // ⌘S is File › Save's (N4).
+            .disabled(model.selection.map { !model.canSave($0) } ?? true)
+            .accessibilityIdentifier("noteTypes.list.save")
+        } label: {
+            // The group's title where the toolbar folds it into its overflow menu.
+            Text("noteTypes.save", bundle: .module)
+        }
     }
-    #endif
+}
+
+/// The Fields tab's inspector toggle, last in the window's toolbar, as in
+/// Apple's apps: above the inspector while it shows, at the toolbar's
+/// trailing end while it is hidden.
+struct InspectorToggle: View {
+    @Bindable var model: NoteTypesModel
+
+    var body: some View {
+        let key: LocalizedStringKey = model.inspectorShown ? "noteTypes.inspector.hide" : "noteTypes.inspector.show"
+        Button {
+            model.inspectorShown.toggle()
+        } label: {
+            Label { Text(key, bundle: .module) } icon: { Image(systemName: "sidebar.trailing") }
+        }
+        .help(Text(key, bundle: .module))
+        .accessibilityIdentifier("noteTypes.fields.inspectorToggle")
+    }
 }
 
 /// When the toolbar shows a running save job (N22.5): half a second after it
@@ -163,6 +212,12 @@ struct SaveJobShown: Equatable {
     private var id: Int64?
 
     func shown(for notetypeId: Int64) -> Bool { id == notetypeId }
+
+    /// The selected note type's save job, once the toolbar shows it.
+    @MainActor func running(in model: NoteTypesModel) -> (id: Int64, progress: NoteTypesModel.Progress)? {
+        guard let id = model.selection, let progress = model.progress, progress.notetypeId == id, shown(for: id) else { return nil }
+        return (id, progress)
+    }
 
     /// The job whose status has shown already: a view that appears while it
     /// runs (the iPad page pushed again) shows the status at once.
@@ -369,11 +424,15 @@ private struct NoteTypeListColumn: View {
                     .tag(item.id)
             }
         }
+        // A content list beside the app's sidebar (N22.1): the window's own
+        // background, as the filter field above it, with the system selection.
+        // Only the app's navigation sidebar uses sidebar material.
         #if os(macOS)
-        .listStyle(.sidebar)
+        .listStyle(.inset)
         #else
         .listStyle(.plain)
         #endif
+        .scrollContentBackground(.hidden)
         .accessibilityIdentifier("noteTypes.list.table")
         .overlay {
             switch model.phase {
