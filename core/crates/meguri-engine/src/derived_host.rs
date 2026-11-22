@@ -679,15 +679,17 @@ impl DerivedHost {
     }
 
     /// Whether `component` is `Stale` with no refresh to come before the
-    /// next bind or invalidation: its refresh failed twice in a row (D7), or
-    /// the store let go of its file (D6). A consumer then reads without it.
+    /// next bind or invalidation: its refresh failed twice in a row (D7),
+    /// the store let go of its file or could not open it (D5, D6), or the
+    /// store closed (D11). A consumer then reads without it.
     pub fn has_failed(&self, component: &str) -> bool {
         let state = self.shared.lock();
-        state
-            .slots
-            .iter()
-            .find(|slot| slot.name == component)
-            .is_some_and(|slot| slot.failed)
+        state.closed
+            || state
+                .slots
+                .iter()
+                .find(|slot| slot.name == component)
+                .is_some_and(|slot| slot.failed)
     }
 
     /// Whether `component` is `Ready` for `generation`: it follows the
@@ -1468,6 +1470,7 @@ impl Worker {
                 }
             };
             state.slots[slot].failed = false;
+            self.failures[slot] = 0;
             self.shared.set_readiness(&mut state, slot, generation, readiness, None);
         }
     }
@@ -2156,6 +2159,8 @@ impl Worker {
                 kind: Kind::Rebuild,
                 cause,
             });
+            // A new recovery: one retry again (D7).
+            self.failures[slot] = 0;
             state.slots[slot].failed = false;
             self.shared
                 .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);

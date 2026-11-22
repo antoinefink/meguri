@@ -108,7 +108,8 @@ fn one_state(series: &CardStatesOverTime, day: i32) -> Option<S> {
         (counts.young, S::Young),
         (counts.mature, S::Mature),
     ];
-    assert!(counts.total() <= 1, "day {day}: {counts:?}");
+    let all = [counts.new, counts.learning, counts.relearning, counts.young, counts.mature];
+    assert!(all.iter().all(|c| *c == 0 || *c == 1) && counts.total() <= 1, "day {day}: {counts:?}");
     states.iter().find(|(count, _)| *count == 1).map(|(_, state)| *state)
 }
 
@@ -1314,6 +1315,7 @@ fn h16_a_cancelled_read_returns_within_50_ms_and_the_build_goes_on() {
     let host = Arc::new(big.host);
     let cancel = CancelToken::new();
     let waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (release, go) = std::sync::mpsc::channel::<()>();
     let reader = {
         let (host, cancel, waiting) = (Arc::clone(&host), Arc::clone(&cancel), Arc::clone(&waiting));
         std::thread::spawn(move || {
@@ -1323,8 +1325,14 @@ fn h16_a_cancelled_read_returns_within_50_ms_and_the_build_goes_on() {
                 history: History::AllHistory,
                 cancel,
             };
+            // The first report holds the read until the test has cancelled
+            // it, so it is still waiting then.
+            let mut held = Some(go);
             let result = history::card_states(host.stats(), &collection, host.derived(), &request, &mut |_| {
-                waiting.store(true, std::sync::atomic::Ordering::SeqCst)
+                waiting.store(true, std::sync::atomic::Ordering::SeqCst);
+                if let Some(go) = held.take() {
+                    go.recv().unwrap();
+                }
             })
             .unwrap();
             (result, meguri_engine::monotonic::now())
@@ -1337,6 +1345,7 @@ fn h16_a_cancelled_read_returns_within_50_ms_and_the_build_goes_on() {
     }
     let cancelled_at = meguri_engine::monotonic::now();
     cancel.cancel();
+    release.send(()).unwrap();
     let (result, returned_at) = reader.join().unwrap();
     assert_eq!(result, HistoryResult::Cancelled);
     let took = returned_at.saturating_sub(cancelled_at);
@@ -1385,4 +1394,47 @@ fn h18_a_store_that_cannot_be_written_leaves_the_parts_to_the_snapshot() {
     let got = warm(&f, Scope::Collection, History::AllHistory);
     assert!(!got.from_component);
     assert_eq!(got.card_states.on(0).total(), expected.card_states.on(0).total());
+}
+
+#[test]
+fn h14_4_commits_during_a_build_are_kept_and_applied_after_the_swap() {
+    let big = big(30_000, 240_000);
+    let host = &big.host;
+    assert!(data(read(host, Scope::Collection, History::AllHistory)).from_component);
+    let collection = host.collection().unwrap();
+    let card = NOW_MS - 900 * DAY * 1_000 + 7;
+    host.derived().invalidate(Invalidation::CheckDatabase);
+    // Building with rows done: its snapshot is taken and it has not swapped.
+    let deadline = meguri_engine::monotonic::now() + WAIT;
+    while !matches!(
+        host.derived().readiness(HISTORY_COMPONENT).unwrap().readiness,
+        Readiness::Building { completed, .. } if completed > 0
+    ) {
+        assert!(meguri_engine::monotonic::now() < deadline, "the build never started");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    collection
+        .run(meguri_engine::OpSpec::named("answer", meguri_model::changes::OpSource::UserUndoable), move |ctx| {
+            let mut c = meguri_storage::ReadRows::card(&*ctx.scope(), CardId(card))?.unwrap();
+            c.card_type = CardType::Relearning;
+            ctx.scope().put(&c)?;
+            ctx.scope().insert_revlog(&row(NOW_MS - 1_000, card, 1, -600, 2500, RevlogKind::Relearning))?;
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        matches!(host.derived().readiness(HISTORY_COMPONENT).unwrap().readiness, Readiness::Building { .. }),
+        "the commit landed after the swap: this run does not test kept deltas"
+    );
+    for history in [History::AllHistory, History::Last12Months] {
+        let request = request(Scope::Collection, history);
+        let context = history::page_context(&collection, host.derived()).unwrap();
+        let warm = data(history::card_states_in(host.stats(), &collection, host.derived(), &context, &request, &mut |_| {}).unwrap());
+        assert!(warm.from_component);
+        let cold = data(history::card_states_cold(&collection, &context, &request).unwrap());
+        assert_eq!(warm.card_states, cold.card_states, "{history:?}");
+        assert_eq!(warm.started, cold.started, "{history:?}");
+        assert_eq!(warm.card_states.on(0).relearning, cold.card_states.on(0).relearning);
+        assert!(warm.card_states.on(0).relearning >= 1);
+    }
 }

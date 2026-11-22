@@ -308,7 +308,7 @@ pub fn card_states_in(
         if cancelled() {
             return Ok(HistoryResult::Cancelled);
         }
-        {
+        let other_grid = {
             let lease = collection.reader(ReaderRole::Query)?;
             let snapshot = lease.snapshot()?;
             if snapshot.generation().0 != context.generation || snapshot.seq().0 != context.seq {
@@ -329,14 +329,16 @@ pub fn card_states_in(
                 let read = read_cold(&snapshot, context, grid, request.history, selection, &cancelled);
                 return finish(read, context, false, &cancelled);
             }
-            if current {
-                // Kept for another phase of `N` (H14.3): rebuilt on this
-                // request's grid. The flush lets the writer mark it stale.
-                shared.rebuild();
-                derived.flush()?;
-                if cancelled() {
-                    return Ok(HistoryResult::Cancelled);
-                }
+            current
+        };
+        if other_grid {
+            // Kept for another phase of `N` (H14.3): rebuilt on this
+            // request's grid, the reader let go first. The flush lets the
+            // writer mark it stale.
+            shared.rebuild();
+            derived.flush()?;
+            if cancelled() {
+                return Ok(HistoryResult::Cancelled);
             }
         }
         derived.request_refresh(HISTORY_COMPONENT);
