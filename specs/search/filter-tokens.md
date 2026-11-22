@@ -246,7 +246,7 @@ The list under the field while it has focus (Mac, iPad: under the field; iPhone 
 | Is, Is Not, Add Another %@…, Remove Filter, Edit | token menu; %@ the kind's label in lower case ("Add Another tag…") |
 | Show All %@ | a cut-short section; %@ the section label |
 | Save Search…, Due Today, Added in Last 7 Days, Leeches | saved searches |
-| Studied on %@, Forgotten on %@ | Studied On token labels (V15 and, changed 2026-11-22 (round 11), `stats/browse-queries` Q9); %@ the date |
+| Changed 2026-11-22 (round 11): Studied on %@, Forgotten on %@ | Studied On token labels (V15 and `stats/browse-queries` Q9); %@ the date |
 | Save Search, Name, Save, Cancel, A saved search named “%@” already exists. Replace it?, Replace | the Save Search sheet and its question |
 | in %@, in %lld note types | Field and Card Type suggestion detail (plural) |
 

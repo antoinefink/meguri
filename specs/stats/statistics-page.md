@@ -24,7 +24,7 @@ On this page a review is remembered when `stats/graphs-revlog` V4.1 counts it an
 ### S3.1 Deck
 
 - A pop-up button showing "All Decks" or the deck's name. Its menu: All Decks first, then the deck tree indented in the deck list's order, filtered decks last.
-- A deck includes its subdecks, as study does (`stats/graphs-common` G2.1). The subtitle says so: "<n> cards in <m> decks" (Card Counts' total for the scope, and the deck with its subdecks; "1 deck" for one), S10.4.
+- A deck includes its subdecks, as study does (`stats/graphs-common` G2.1). The subtitle says so: "<n> cards in <m> decks" (Card Counts' total for the scope, and the decks of the scope, the deck with its subdecks or, for All Decks, every deck, filtered decks included; "1 deck" for one), S10.4.
 - Choosing a deck here never changes the current deck or what Study uses (R1353): it writes nothing (S17).
 - A row of By Deck (S7.15) also sets it.
 
@@ -32,7 +32,7 @@ On this page a review is remembered when `stats/graphs-revlog` V4.1 counts it an
 
 - One segmented control: 1M, 3M, 6M, 1Y, All (accessibility labels "1 Month", "3 Months", "6 Months", "1 Year", "All").
 - It sets every chart of the past, Reviews Due's distance ahead (S4.2) and the windows of the charts with no time axis (S4.3). Charts of the present and Activity do not change.
-- 1M to 1Y use G3's `last12Months` history, All uses `allHistory`. Changing among 1M to 1Y re-bins in Swift, except Knowledge Over Time, whose samples are already there for every day of the year (`stats/history-reads` H3.2); a change to or from All is a new refresh (R1838).
+- 1M to 1Y use G3's `last12Months` history, All uses `allHistory`. Changing among 1M to 1Y re-bins in Swift with no core call, Knowledge Over Time included (its samples are already there for every day of the year, `stats/history-reads` H3.2); a change to or from All is a new refresh (R1838).
 
 ### S3.3 Where the state is kept
 
@@ -56,16 +56,17 @@ On this page a review is remembered when `stats/graphs-revlog` V4.1 counts it an
 | 3M | 13 | one week: the current week (its days up to day 0) and the 12 before it |
 | 6M | 26 | one week |
 | 1Y | 52 | one week |
-| All | one per calendar month, from the month of the scope's oldest data to the current month | one month |
+| All | one per calendar month, from the first month (below) to the current month | one month |
 
 - A week is seven consecutive dates starting on the system calendar's first weekday for the app's locale. Weeks and months group days by the date of each day (`stats/history-reads` H1). The current week and month end at day 0.
-- "The scope's oldest data" is H9's `oldest_day` for review-log charts, and the earliest of it and `first_day` (H2.4) for Cards Over Time and Added and Started. With none, All shows the current month only.
+- **All's first month** is the month of H9's `oldest_day` (the scope's oldest review) for every chart of the past, Knowledge Over Time, Cards Over Time and Added and Started included, so the charts of a section share one axis. With no review, it is the month of the oldest creation day of a scope card, but not before January of the year ten years before the current one (card ids written in seconds, or negative ids, would otherwise give centuries of empty months). Counts dated before the first month go into the first bar, and levels (Cards Over Time) start from their value at its start.
+- **Rows after today.** A row or card whose day is 1 or more (clock skew, `stats/day-buckets` B3) counts in today's bar in every chart, Reviews Over Time and Added included, as `stats/history-reads` H1 folds the new reads.
 - A bar's value is the sum over its days (counts, times, retention counts), or the value at its end for levels (Cards Over Time, Knowledge Over Time): the end of its last day, and for the current bar the value now.
 - At most 52 bars except All, which can have more on an old collection; their width follows the plot.
 
 ### S4.2 Reviews Due, ahead
 
-Overdue cards (`future_due` keys below 0) are one bar on the left, labelled "Overdue", shown only when there are some. Then, from today: 30 days for 1M; 13, 26 or 52 weeks starting with the current week for 3M, 6M and 1Y; for All, months from the current one, as many as All shows back and at least 12, ending at the last month with a card due. Each bar sums `future_due` over its days (k = 0 is today).
+Overdue cards (`future_due` keys below 0) are one bar on the left, labelled "Overdue", shown only when there are some. Then, from today: 30 days for 1M; 13, 26 or 52 weeks starting with the current week for 3M, 6M and 1Y; for All, months from the current one to the last month with a card due, at least 12 and at most 24; cards due after the 24th month go into a last bar labelled "Later". Each bar sums `future_due` over its days (k = 0 is today).
 
 ### S4.3 Windows of the charts with no time axis
 
@@ -112,18 +113,18 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 - Data: `knowledge_over_time` (H3), sampled at each bar's end (S4.1).
 - Plot: two lines on one count axis, no fill: Known (the knowledge sum, green) and Studied (grey, dashed). The y axis starts near the lowest value, so a year's change is visible; because it does not start at zero nothing is filled.
 - Header: the title with "Estimated" in secondary text.
-- Figure: Known now, "<K> cards" (rounded to the nearest card); sentence: "<p>% of the <S> cards you have studied" and, for a period with a first sample, "up <n> since <date>" or "down <n> since <date>".
-- Figures: Studied, Likely Forgotten (S − K, with its share), Change in Period.
+- Figure: Known now, "<K> cards" (the replay at now, rounded to the nearest card); sentence: "<p>% of the <S> cards with an estimate" and "up <n> since <date>" or "down <n> since <date>", from the end of the day before the first bar. It is not Retrievability's Estimated total knowledge, which sums the stored memory states of every card (S7.12); the chart's page says how the two differ.
+- Figures: Studied, Likely Forgotten (S − K, with its share), Change in Period (since the end of the day before the first bar).
 - Callout: the period, Known, Studied, and the gap as "Likely forgotten <n> (<p>%)".
 - No Show in Browse: a past state cannot be listed.
-- Empty: no review ever, "No reviews yet" and "This fills in as you study."
-- A footnote when H3's `left_out` or `failed` is above 0: "<n> suspended or buried cards are not included." and "<n> cards could not be estimated."
+- Empty: no review ever, "No reviews yet" and "This fills in as you study."; reviews but no card with an estimate, "No cards with a memory estimate".
+- A footnote when H3's `left_out` or `failed` is above 0: "<n> suspended cards are not included." and "<n> cards could not be estimated."
 
 ### S7.2 Retention
 
 - Data: `retention_by_day` (H4), summed per bar; the switch All, Young or Mature picks the counts.
 - Plot: a line with points (green), and a dashed rule at the desired retention (H3.4) in the label colour, named in the legend "Desired retention". The axis runs from 70% to 100% and extends down when a bar is lower; its labels show the range.
-- A bar with fewer than 20 counted reviews is a open point, left out of the line ("A open point has too few reviews to trust", in the chart's page); a bar with none breaks the line.
+- A bar with fewer than 20 counted reviews is an open point, left out of the line ("An open point has too few reviews to trust", in the chart's page); a bar with none breaks the line.
 - Figure: the period's retention (one decimal); sentence: "Desired retention <d>%" ("Average desired retention" when `several`).
 - Figures: Remembered, Forgotten, Young, Mature (the last two as retention).
 - Callout: the period, retention, remembered and forgotten counts, the desired retention.
@@ -156,6 +157,7 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 - Beside the grid: Current Streak, Longest Streak, Days Studied This Year, and each year's total ("2025: 41,233 reviews").
 - **Streaks** (Meguri's own; `stats/heatmap-addon`'s streak rules are not used): a day is studied when its H11 count is above 0. The current streak is the number of consecutive studied days ending today, or ending yesterday while today has none yet (a day not yet studied does not break it). The longest is the longest such run in all history. Days follow Anki's day (`stats/history-reads` H1, the collection's rollover hour), so a review just after midnight before the rollover counts for the day before, and travel across time zones can move a day.
 - Selection: a day shows its date and count; Show in Browse for a day with reviews, "Cards Reviewed on <date>" (H13 `answered`).
+- On the iPhone and the folded Duo the year blocks are one horizontal strip of weeks that swipes back through time (N25.6), not stacked blocks.
 - No streak and no grid appear on the Today page (round 10 kept them off; round 11's 7A puts them here only).
 
 ### S7.6 Cards Over Time (lead)
@@ -163,8 +165,8 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 - Data: `card_states_over_time` (H2): each bar's end value.
 - Plot: a stacked area from zero with a thin separating line between bands, from the baseline Mature, Young, Relearning, Learning, New.
 - Figure: the cards now (the five states' total); sentence: "<m> mature, up <n> in the period".
-- Figures: New, Learning (Learning and Relearning), Young, Mature, each with its change in the period.
-- Footnote when `left_out` is above 0: "<n> suspended or buried cards are not shown." The last bar equals Card Counts' five study rows.
+- Figures: New, Learning (Learning and Relearning), Young, Mature, each with its change since the end of the day before the first bar.
+- Footnote when `left_out` is above 0: "<n> suspended cards are not shown." Buried cards are shown in their state. The last bar equals Card Counts' study rows with the buried cards added back by state (`stats/history-reads` H2.2).
 - Callout: the date, the five states and the total.
 - No Show in Browse for the past; today's states open from Card Counts.
 
@@ -172,7 +174,7 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 
 - Data: `card_counts`' `excluding_inactive` set (C4.1), always: suspended and buried are always their own rows.
 - Plot: one horizontal bar divided by state (no donut), then the table: a row per state, Mature, Young, Relearning, Learning, New, Suspended, Buried, each with its swatch, name, count and share of the total; a row with 0 stays, in grey. Then Total and Notes (C4.2).
-- Figure: "<n> cards in <m> notes".
+- Figure: "<n> cards in <m> notes". On the iPhone and the folded Duo a figure Mature ("<n> of <total>") is added, since the strip has four tiles there (S6).
 - Each state row is a button that opens Browse on that state (`stats/browse-queries` Q4.1's text for the row, Q9).
 - It always shows its table, zeros included.
 
@@ -212,7 +214,7 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 ### S7.12 Retrievability
 
 - Data: `retrievability` (C9): bars of 5% from the 1% keys (keys of 100 and above in the last bar), green, with a dashed rule at the desired retention.
-- Figure: Average retrievability (C9.4, whole percent); sentence: "Estimated total knowledge <c> cards, <n> notes" (C9.4's sums, rounded).
+- Figure: Average retrievability (C9.4, whole percent); sentence: "Estimated total knowledge <c> cards, <n> notes" (C9.4's sums over the stored memory states, rounded; not Knowledge Over Time's replay, S7.1).
 - Figures: Below Desired Retention (cards), Cards with a Memory State.
 - Every bar opens its cards (Q9). Header "Now". Footnote: C6.2's left-out count (`stats/graph-presentation` P19's footnote).
 
@@ -271,7 +273,7 @@ No chart has a second y axis. A running total is in the callout (Reviews Due's "
 ### S8.5 Empty and sparse
 
 - A box keeps its place and its size in every state.
-- With no data it shows its title and one line in the plot area that says why: "No reviews yet" (no review ever in the scope), or "No reviews in the last month" with the period ("the last 3 months", "the last 6 months", "the last year"), "No reviews in <deck> in the last month" with a deck filter, "No cards due" (Reviews Due), "No cards with a memory state" (Memory boxes).
+- With no data it shows its title and one line in the plot area that says why: "No reviews yet" (no review ever in the scope), or "No reviews in the last month" with the period ("the last 3 months", "the last 6 months", "the last year"), "No reviews in <deck> in the last month" with a deck filter, "No cards due" (Reviews Due), "No cards with a memory state" (Memory boxes), "No cards with a memory estimate" (Knowledge Over Time).
 - With fewer than three bars holding data, bars keep a fixed width instead of filling the plot, and a line shows its points.
 - Replaces `stats/graph-presentation` P16.5's "No Data" state for this page.
 
@@ -298,9 +300,11 @@ Decided 2026-11-22 (Antoine: the Statistics page "is a bit of an exception … i
 
 One refresh asks for every part at once (`stats/history-reads` H5, H15); the core returns them in three tiers and the page fills each box as its parts arrive:
 
-1. the present state: the strip, Card Counts, Reviews Due, Retrievability, Stability, Difficulty;
+1. the present state: the strip's Studied Today, Remaining Today and Mature, Card Counts, Reviews Due, Retrievability, Stability, Difficulty;
 2. the review log: Reviews Over Time, Activity, Retention, Forgotten, Cards Over Time, Added and Started, Answers, Time of Day, By Deck;
 3. knowledge: Knowledge Over Time, last.
+
+The strip's Retention Today and Streak come with tier 2 (`stats/history-reads` H5: `retention`, `activity_days`); until then they show the small progress indicator in place of their value.
 
 ### S10.2 Kept results
 
@@ -312,7 +316,7 @@ One refresh asks for every part at once (`stats/history-reads` H5, H15); the cor
 
 On a first open, a deck or period never viewed, or after the collection was replaced: every box is drawn at its final size with its title and legend, and a box whose data is not ready shows the system's small progress indicator inside its plot area, determinate when the core reports a fraction for its part (H15: the log pass, the knowledge replay), indeterminate otherwise. Boxes fill in as each tier completes. No full-page spinner, no skeleton or shimmer, no overlay.
 
-- With All and nothing kept, the page first asks for the last 12 months and draws them in All's monthly bars, with the older months empty and the review-log boxes' indicators still showing; the axis already spans from the oldest month (H9). It then asks for all history and fills the older months in place.
+- With All and nothing kept, the page makes two refreshes in a row: first one with `last12Months`, whose boxes it draws in All's monthly bars, with the older months empty and the review-log boxes' indicators still showing (the axis already spans from the first month, H9); then one with `allHistory`, a new refresh with its own context (`stats/graphs-common` G8.3), whose parts replace every box in place as they arrive. Each refresh is one request.
 
 ### S10.4 The status in the subtitle
 
@@ -349,7 +353,7 @@ Cards but no review (an imported deck before its first study): the charts of the
 
 ### S12.4 Sparse
 
-A few days of study: bars keep their fixed width, a line of one point is a point, a rate from fewer than 20 reviews is a open point (S7.2), and Time of Day shows bars without points (S8.5).
+A few days of study: bars keep their fixed width, a line of one point is a point, a rate from fewer than 20 reviews is an open point (S7.2), and Time of Day shows bars without points (S8.5).
 
 ### S12.5 A deck filter
 
@@ -413,7 +417,7 @@ Meguri's own, in the String Catalog; `<…>` marks a value. Anki's strings that 
 | Series | `Known`, `Studied`, `Desired retention`, `Average desired retention`, `Remembered`, `Forgotten`, `New`, `Learning`, `Relearning`, `Young`, `Mature`, `Suspended`, `Buried`, `Filtered`, `Again`, `Hard`, `Good`, `Easy`, `Added`, `Started`, `Overdue`, `Total by then`, `Reviews` |
 | Markers | `Estimated`, `Now` |
 | Figures | S7's figure labels and sentences |
-| Empty and states | `No reviews yet`, `This fills in as you study.`, `No reviews in the last month`, `… the last 3 months`, `… the last 6 months`, `… the last year`, `No reviews in <deck> in <span>`, `No cards due`, `No cards with a memory state`, `No Collection`, `Statistics appear once a collection is open.`, `No Cards`, `Add notes or import a collection to see statistics.`, `This deck no longer exists.`, `Show All Decks`, `This deck has no subdecks`, `A filtered deck shows the cards it holds now. Their reviews also count in their home decks.`, `Statistics Unavailable`, `A review or card record can't be read. Check Database can repair it.`, `Couldn't load this chart.`, `<n> suspended or buried cards are not shown.`, `<n> suspended or buried cards are not included.`, `<n> cards could not be estimated.`, `A open point has too few reviews to trust` |
+| Empty and states | `No reviews yet`, `This fills in as you study.`, `No reviews in the last month`, `… the last 3 months`, `… the last 6 months`, `… the last year`, `No reviews in <deck> in <span>`, `No cards due`, `No cards with a memory state`, `No cards with a memory estimate`, `Later`, `No Collection`, `Statistics appear once a collection is open.`, `No Cards`, `Add notes or import a collection to see statistics.`, `This deck no longer exists.`, `Show All Decks`, `This deck has no subdecks`, `A filtered deck shows the cards it holds now. Their reviews also count in their home decks.`, `Statistics Unavailable`, `A review or card record can't be read. Check Database can repair it.`, `Couldn't load this chart.`, `<n> suspended or buried cards are not shown.`, `<n> suspended or buried cards are not included.`, `<n> cards could not be estimated.`, `An open point has too few reviews to trust` |
 | Actions | `Show in Browse`, `Cards Reviewed on <date>`, `Cards Forgotten on <date>`, `About This Chart`, `Copy Image`, `Copy Values` |
 
 `Show in Browse` replaces P19's `Show in Browser`, as the section is named Browse.
@@ -429,7 +433,7 @@ Viewing statistics writes nothing to the collection (R1295, `stats/graphs-common
 - In `stats/studied-today`: T3 and T4's Today section on the Stats screen (the strip replaces it; T12 is unchanged).
 - In `stats/pdf-export`: not in the first version (9A).
 - In `docs/design/screen-inventory.yaml`: the earlier text of `stats.overview` (the scope picker, the history picker, the thirteen boxes in Anki's order, the heatmap and streaks "not here").
-- Plan requirements, each with its note in the parent plan: R1350 (one deck pop-up; no Collection or Search scope in this version), R1352 (default All), R1354 (kept deck and period), R1355 (one request per refresh, parts in tiers), R1357 to R1359 (sections and the parts of a box), R1361 (S8.5), R1362 (the page's own bins, not Anki's), R1364, R1366, R1367 (one period), R1369 to R1372 (the strip), R1375, R1376, R1377 (Reviews Due), R1379 to R1383 (Activity), R1386 to R1389 (Reviews Over Time), R1391, R1392 (Card Counts), R1394 to R1396 (no Review Intervals box), R1399 to R1401 (Stability and Difficulty bins and colours), R1410, R1412 (Time of Day), R1414 (Answers), R1415, R1416 (Added and Started), R1421 (later, 9A). R1363's colour list changes as S8.1 says.
+- Plan requirements, each with its note in the parent plan: R1350 (one deck pop-up; no Collection or Search scope in this version), R1352 (default All), R1354 (kept deck and period), R1355 (one request per refresh, parts in tiers), R1838 in part (every part is asked for at once, not only those scrolled into view; its 300 ms holds), R1357 to R1359 (sections and the parts of a box), R1361 (S8.5), R1362 (the page's own bins, not Anki's), R1364, R1366, R1367 (one period), R1369 to R1372 (the strip), R1375, R1376, R1377 (Reviews Due), R1379 to R1383 (Activity), R1386 to R1389 (Reviews Over Time), R1391, R1392 (Card Counts), R1394 to R1396 (no Review Intervals box), R1399 to R1401 (Stability and Difficulty bins and colours), R1410, R1412 (Time of Day), R1414 (Answers), R1415, R1416 (Added and Started), R1421 (later, 9A). R1363's colour list changes as S8.1 says.
 
 ## S19. Speed
 
@@ -443,7 +447,7 @@ Targets to measure, not gates that shape the design (decided 2026-11-22): S10's 
 | A deck or period change, caches current | under 300 ms to the last tier-2 box (R1838) | `stats.scopeChange` |
 | A cold pass (nothing kept, caches not built, 1.2 million rows) | a few seconds on an iPhone, determinate progress shown, every box filling as it completes | `stats.coldOpen`, device run |
 | Scrolling and the controls during any read | no hitch above 5 ms/s (as R1829); a control responds in one frame | `stats.scrollDuringRead` |
-| Selection, switches, period changes within the year | one frame, no core call except Knowledge's sampling (S3.2) | `stats.selection` |
+| Selection, switches, period changes within the year | one frame, no core call (S3.2) | `stats.selection` |
 | Show in Browse | Browse's first page within its own budget (`browser/workspace` V17) plus H13's 50 ms | `stats.showInBrowse` |
 
 The rows' Product Contract ids are the plan owner's to assign (the plan's §3).

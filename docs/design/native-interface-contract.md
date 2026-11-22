@@ -1275,7 +1275,7 @@ Colours: `stats/statistics-page` S8.1 (system colours only; the state family and
 
 ### N25.7 The Duo opened (5A)
 
-- The inner display (951 × 669 points, the fold down the middle, the side tab bar on the left) shows one page in two halves: each section is one screenful, its lead box on the left half and the other boxes on the right half; a section with one box (Coming Up, Decks) puts the lead box on the left and the next box's other boxes… no: puts its figures and table rows that do not fit on the right.
+- The inner display (951 × 669 points, the fold down the middle, the side tab bar on the left) shows one page in two halves: each section is one screenful, its lead box on the left half and the other boxes on the right half; a section with one box (Coming Up, Decks) gives the plot the left half and its figures, footnote and table rows the right half.
 - The deck pop-up is at the top of the left half, the period control at the top of the right. The two halves scroll together, section by section.
 - Nothing interactive sits on the fold: no box, control or plot crosses it. The lead charts get the half's width (about 430 points): a year in weeks fits; All is drawn in months.
 

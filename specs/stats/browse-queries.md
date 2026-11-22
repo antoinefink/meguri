@@ -119,7 +119,6 @@ With X = ` AND -("is:buried" OR "is:suspended")` when `cardCountsSeparateInactiv
 
 Changed 2026-11-22 (round 11): the Statistics page opens Browse as Q9 says; its action is "Show in Browse" (`stats/statistics-page` S8.4), and the rest of this section applies.
 
-
 - The joined text goes to the `open(search:)` route on AppNavigation (R1417, U210; the plan's U225 calls the same route U150's `openBrowser(search:)`, `browser/entry-points` E1). The Browser opens in the same window (sidebar Browse on Mac and iPad, the Browse tab on iPhone), shows exactly that text in its search field, and runs it in its current cards or notes mode, as Anki's Browser does with a search handed to it.
 - On touch, the item's tooltip shows "Show in Browser" first; on Mac a click opens at once (R1418, U226).
 - Coming back restores the Stats screen as it was (R1419, U225).
@@ -168,7 +167,7 @@ Changed 2026-11-22 (round 11; `stats/statistics-page` S8.4). The Statistics page
 | Reviews Due, a bar of days `a` to `b` (0 ≤ `a` ≤ `b`) | the cards due then | `"prop:due=<a>"` when `a` = `b`, else `"prop:due>=<a>" AND "prop:due<=<b>"` |
 | Reviews Due, the Overdue bar | the overdue cards | `"prop:due<=-1"` |
 | Added and Started, an Added bar of days `a` to `b` (`a` ≤ `b` ≤ 0) | the cards added then | `"added:<1 − a>"` when `b` = 0, else `"added:<1 − a>" AND -"added:<−b>"` |
-| Stability, a bar of keys [`a`, `b`) | its cards | `"prop:s<0.5"` for the first bar (`a` = 0, negative stabilities included), `"prop:s>=729.5"` for the last ([730, ∞)), else `"prop:s>=<a − 0.5>" "prop:s<<b − 0.5>"` |
+| Stability, a bar of keys [`a`, `b`) | its cards | `"prop:s<0.5"` for the first bar (`a` = 0, negative stabilities included), `"prop:s>=729.5"` for the last ([730, ∞)), else `"prop:s>=<a − 0.5>" AND "prop:s<<b − 0.5>"` |
 | Difficulty, a bar [`a`, `a` + 10) of percent keys | its cards | `"prop:d<0.1"` for the first, `"prop:d>=0.9"` for the last (keys of 100 and above included), else `"prop:d>=<a ÷ 100>" AND "prop:d<<(a + 10) ÷ 100>"` |
 | Retrievability, a bar [`a`, `a` + 5) | its cards | `"prop:r<0.05"`, `"prop:r>=0.95"`, else `"prop:r>=<a ÷ 100>" AND "prop:r<<(a + 5) ÷ 100>"` |
 | Reviews Over Time, a day bar | Cards Reviewed on <date> | card ids, H13 `reviewed`; Studied On token labelled "Studied on <date>" |
@@ -176,6 +175,6 @@ Changed 2026-11-22 (round 11; `stats/statistics-page` S8.4). The Statistics page
 | Forgotten, a day bar | Cards Forgotten on <date> | card ids, H13 `forgotten`; Studied On token labelled "Forgotten on <date>" |
 
 - Numbers are written as `stats/graph-presentation` P4.7 writes them (shortest decimal, no grouping).
-- As in Anki and P6 and P10 to P11, a `prop:` query uses the search's own rules, which can differ from what the bar counts: `prop:due` never matches buried cards, which Future Due counts for k ≥ 1 (`stats/graphs-cards` C3.6), and `prop:r` reads retrievability by X5's elapsed rule, not C9.1's (C9.6). The card-ids items find exactly the cards the bar's rows belong to.
+- As in Anki and P6 and P10 to P11, a `prop:` query uses the search's own rules, which can differ from what the bar counts: `prop:due` never matches buried cards, which Future Due counts for k ≥ 1 (`stats/graphs-cards` C3.6), `prop:r` reads retrievability by X5's elapsed rule, not C9.1's (C9.6), `prop:d` compares the decimal difficulty while the bars use C8.1's f32 keys (d 2.08 and 4.6 fall one key low), and `prop:s` at exactly a half (s = 2.5) can sit on the other side of a bar edge from the key's rounding. The card-ids items find exactly the existing cards the bar's rows belong to; in All Decks a bar also counts deleted cards' rows, which have no card to list.
 - A day item's date is the day's date (`stats/history-reads` H1). An empty day is not a link (the card-ids item refuses an empty list).
 - Tests (Meguri-only): each item text parses (Q6) and, on the fixture, finds the cards Q9 says for Deck and All Decks; the two card-ids tokens carry their labels; Back returns to the page's scroll position and selection (`stats/statistics-page` S20).

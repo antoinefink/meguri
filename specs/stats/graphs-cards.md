@@ -117,6 +117,8 @@ The record holds the item text of each shown label for both settings, as `stats/
 
 ### C4.4 Record
 
+Changed 2026-11-22 (round 11): the record also carries the Meguri extra `suspended_by_state` of `stats/history-reads` H8 (the suspended cards by type bucket), not observed (C12).
+
 `including_inactive` and `excluding_inactive` (C4.1), the notes count (C4.2) and the label texts (C4.3).
 
 ## C5. Intervals
@@ -265,7 +267,7 @@ A card last reviewed 400 days ago with no `lrt` (H = `today` − 400 + `ivl`) me
 
 ## C11. Records
 
-Changed 2026-11-22 (round 11): Future Due's Meguri extras add `future_due_young` (`stats/history-reads` H8). The Statistics page reads `intervals` only for its median (`stats/statistics-page` S7.13).
+Changed 2026-11-22 (round 11): Future Due's Meguri extras add `future_due_young` and Card Counts' add `suspended_by_state` (`stats/history-reads` H8). The Statistics page reads `intervals` only for its median (`stats/statistics-page` S7.13).
 
 | Graph (G5) | Part (C12) | Anki's members | Meguri extras |
 |---|---|---|---|

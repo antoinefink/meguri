@@ -84,7 +84,7 @@ Rows are read by their typed values (`model/row-records` R1), with the tolerance
 
 ## G5. Graphs
 
-Changed 2026-11-22 (round 11): the Statistics page also asks for the Meguri parts of `stats/history-reads` H5 (`card_states_over_time`, `started`, `knowledge_over_time`, `retention_by_day`, `by_deck`, `activity_days`, `studied_today`), which run on this machinery with the scopes Collection and Deck only, and for the extras H6 to H9 inside Anki's records. It does not ask for `calendar` or `today`.
+Changed 2026-11-22 (round 11): the Statistics page also asks for the Meguri parts of `stats/history-reads` H5 (`card_states_over_time`, `started`, `knowledge_over_time`, `retention_by_day`, `by_deck`, `activity_days`, `studied_today`), which run on this machinery with the scopes Collection and Deck only, and for the extras H6 to H8 inside Anki's records; every Data result of a page request also carries H9's `oldest_day`. It does not ask for `calendar` or `today`.
 
 The graph set, in Anki's order (R1357): Today, Future Due, Calendar, Reviews, Card Counts, Intervals, Stability, Difficulty, Retrievability, Retention, Hourly Breakdown, Answer Buttons, Added.
 
