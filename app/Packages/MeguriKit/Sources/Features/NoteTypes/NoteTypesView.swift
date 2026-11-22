@@ -54,9 +54,16 @@ public struct NoteTypesView: View {
             NoteTypeListColumn(model: model)
                 .frame(minWidth: Self.listMinimum, idealWidth: Self.listIdeal, maxWidth: Self.listMaximum)
             detail
-                .frame(minWidth: ContentWidth.primaryAction, maxWidth: .infinity, maxHeight: .infinity)
+                // The detail asks for all the room whatever has loaded, so the list
+                // opens at its minimum on every launch; with its content's own width
+                // the list opened at its minimum or its maximum depending on whether
+                // the fields had loaded by the split view's first layout.
+                .frame(minWidth: ContentWidth.primaryAction, idealWidth: Self.detailIdeal, maxWidth: .infinity, maxHeight: .infinity)
         }
     }
+
+    /// Wider than any window: the split view gives the list only its minimum at first.
+    private static let detailIdeal: CGFloat = 10_000
 
     /// The list column fits the longest stock name with its count (N22.1).
     private static let listMinimum: CGFloat = 200
@@ -160,11 +167,24 @@ struct SaveJobShown: Equatable {
 
     func shown(for notetypeId: Int64) -> Bool { id == notetypeId }
 
+    /// The job whose status has shown already: a view that appears while it
+    /// runs (the iPad page pushed again) shows the status at once.
+    @MainActor private static var shownJob: Int64?
+
     /// Follows the job of `notetypeId` (nil: none runs) for as long as the task lives.
-    static func follow(_ notetypeId: Int64?, into state: Binding<SaveJobShown>) async {
+    @MainActor static func follow(_ notetypeId: Int64?, into state: Binding<SaveJobShown>) async {
+        guard let notetypeId else {
+            shownJob = nil
+            state.wrappedValue = SaveJobShown()
+            return
+        }
+        if shownJob == notetypeId {
+            state.wrappedValue = SaveJobShown(id: notetypeId)
+            return
+        }
         state.wrappedValue = SaveJobShown()
-        guard let notetypeId else { return }
         guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { return }
+        shownJob = notetypeId
         state.wrappedValue = SaveJobShown(id: notetypeId)
     }
 }
