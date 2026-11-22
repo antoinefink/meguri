@@ -1,7 +1,7 @@
 # Statistics page: history reads
 
 Spec: stats/history-reads
-Requirements: R1289, R1291, R1292, R1294, R1295, R1446 (for the Anki parts it extends), R1837, R1838; Meguri reads for round 11 (`docs/design/decisions.md`, 2026-11-22, `stats.overview`)
+Requirements: R1289, R1291, R1292, R1294, R1295, R1446 (for the Anki parts it extends), R1837, R1838, R2067 to R2075; Meguri reads for round 11 (`docs/design/decisions.md`, 2026-11-22, `stats.overview`)
 Anki: none for H2 to H5, H9 to H12 (Meguri statistics with no Anki counterpart; tests by construction, H20). The extras of H6 to H8 sit beside Anki's records and change none of their values (`stats/graphs-revlog`, `stats/graphs-cards`, R1446).
 Scenarios: none; tests named in H20
 Status: Approved 2026-11-22 (R1357). Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22).
@@ -260,21 +260,21 @@ Every read here, the component's builds and updates included, writes nothing to 
 
 ## H19. Speed (the 150k fixture, `tools/mg fixtures 150k`: 150,000 cards, 1,200,000 review-log rows)
 
-Targets to measure, on the reference devices of R1802 in a Release build, not gates that shape the design (decided 2026-11-22): the page tiers its reads, keeps its results and shows honest progress (`stats/statistics-page` S10), so a slow read is never a blank or frozen page. Each row names its benchmark; the numbers are estimates until the unit that builds the read measures them and records the result. The Product Contract ids for the new rows are the plan owner's to assign (`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` §3 and §7).
+Targets to measure, on the reference devices of R1802 in a Release build, not gates that shape the design (decided 2026-11-22): the page tiers its reads, keeps its results and shows honest progress (`stats/statistics-page` S10), so a slow read is never a blank or frozen page. Each row names its benchmark and its Product Contract requirement; the numbers are estimates until the unit that builds the read measures them and records the result. Changed 2026-11-22: the plan owner assigned R2067 to R2075 to the new rows (the parent plan's Performance requirements, "the Statistics page"); before, this sentence left them to assign.
 
-| Read | Target | Where measured |
-|---|---|---|
-| Present-state parts (Card Counts, Reviews Due with H8, Retrievability, Stability, Difficulty, Intervals' median, the strip's H12) for any page scope | well under 100 ms together (R1290's 50 ms for graphs is the aim) | `bench stats_present` |
-| Review-log parts for `last12Months` with G9's columns current (Reviews with H6, Retention with H4, Answers and Time of Day with H7, Added, H9, H10, H11) | under 300 ms together (R1838) | `bench stats_log_year` |
-| The same for `allHistory` | under 1 s | `bench stats_log_all` |
-| H2 and H3 parts with `stats_history` current, any page scope and history | under 50 ms (sums over deck keys) | `bench stats_history_warm` |
-| Cold build of `stats_history`'s H2 replay (one pass over 1.2 million rows) | a few seconds on an iPhone; target 2 s, under 1 s on the Mac | `bench stats_history_build`, device run |
-| Cold H3 knowledge (the FSRS replay of every card and about 400 samples) | a few seconds on an iPhone after the H2 pass; target 4 s; parallel across cores | `bench stats_knowledge_build`, device run |
-| Incremental update for a change set of up to 10 cards (an answer, an undo) | under 5 ms on the derived writer | `bench stats_history_apply` |
-| Incremental update after a sync of 1,000 rows | under 100 ms | `bench stats_history_apply` |
-| H13 card ids for a day | under 50 ms | `bench stats_day_cards` |
-| Cancellation | the reader interrupted within 50 ms (H16) | core test |
-| Memory | `stats_history` under 32 MB on disk and resident (H14.4) | bench peak memory |
+| Read | Target | Where measured | Requirement |
+|---|---|---|---|
+| Present-state parts (Card Counts, Reviews Due with H8, Retrievability, Stability, Difficulty, Intervals' median, the strip's H12) for any page scope | well under 100 ms together (R1290's 50 ms for graphs is the aim) | `bench stats_present` | R2067 |
+| Review-log parts for `last12Months` with G9's columns current (Reviews with H6, Retention with H4, Answers and Time of Day with H7, Added, H9, H10, H11) | under 300 ms together (R1838) | `bench stats_log_year` | R1838 |
+| The same for `allHistory` | under 1 s | `bench stats_log_all` | R2068 |
+| H2 and H3 parts with `stats_history` current, any page scope and history | under 50 ms (sums over deck keys) | `bench stats_history_warm` | R2069 |
+| Cold build of `stats_history`'s H2 replay (one pass over 1.2 million rows) | a few seconds on an iPhone; target 2 s, under 1 s on the Mac | `bench stats_history_build`, device run | R2070 |
+| Cold H3 knowledge (the FSRS replay of every card and about 400 samples) | a few seconds on an iPhone after the H2 pass; target 4 s; parallel across cores | `bench stats_knowledge_build`, device run | R2071 |
+| Incremental update for a change set of up to 10 cards (an answer, an undo) | under 5 ms on the derived writer | `bench stats_history_apply` | R2072 |
+| Incremental update after a sync of 1,000 rows | under 100 ms | `bench stats_history_apply` | R2072 |
+| H13 card ids for a day | under 50 ms | `bench stats_day_cards` | R2073 |
+| Cancellation | the reader interrupted within 50 ms (H16) | core test | R2074 |
+| Memory | `stats_history` under 32 MB on disk and resident (H14.4) | bench peak memory | R2075 |
 
 The main thread never waits on any of these (R1291): the page stays scrollable and its controls respond throughout (`stats/statistics-page` S19).
 
