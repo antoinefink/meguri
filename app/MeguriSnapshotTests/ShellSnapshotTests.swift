@@ -96,7 +96,7 @@ import AppKit
         #expect(!titles.contains("Show Tab Bar") && !titles.contains("Show All Tabs"), "\(titles)")
         // The one main window never joins a tab group (R6); fixture windows of other suites are not it.
         let main = NSApp.windows.filter { $0.identifier?.rawValue.hasPrefix(WindowMetrics.mainWindowID) == true }
-        #expect(!NSWindow.allowsAutomaticWindowTabbing || main.allSatisfy { $0.tabbingMode == .disallowed },
+        #expect(!NSWindow.allowsAutomaticWindowTabbing || (!main.isEmpty && main.allSatisfy { $0.tabbingMode == .disallowed }),
                 "\(main.map { "\($0.identifier?.rawValue ?? "-"): \($0.tabbingMode.rawValue)" })")
     }
 
