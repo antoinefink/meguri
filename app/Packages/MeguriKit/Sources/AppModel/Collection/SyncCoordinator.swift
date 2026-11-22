@@ -537,6 +537,8 @@ public final class SyncCoordinator {
     private static let round2Key = "meguri.sync.round2Migrated"
     /// Rendering fixtures only: no binding stands behind this value.
     private var renderConnected: Bool?
+    /// Synthetic examples only: the confirmation to open, and its facts.
+    public internal(set) var renderServiceSwitch: RenderServiceSwitch?
     private var renderChoice = false
     private var renderRetryMedia = false
     /// P25.3: on with no stored value. Written only when the person changes
@@ -560,7 +562,12 @@ public final class SyncCoordinator {
             renderChoice = state == .meguriNeedsYou
         case .meguriSignIn:
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
-            meguriPhase = .signedOut; meguriEndpoint = "https://sync.example.test/"
+            // Signed in earlier, then signed out: T21.2's needs-you case.
+            meguriPhase = .setupRequired; meguriPhase = .signedOut; meguriEndpoint = "https://sync.example.test/"
+            renderConnected = false
+        case .meguriNeverSignedIn:
+            providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+            meguriPhase = .unconfigured; meguriEndpoint = ""
             renderConnected = false
         case .iCloudSelected:
             providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
@@ -900,7 +907,8 @@ public final class SyncCoordinator {
     public var needsUser: Bool {
         if providerNeedsAttention { return true }
         return switch providerState?.selection {
-        case .meguri: meguriStatus.needsUser
+        // T21.2: an unfinished setup is not a problem; nothing waits on the person yet.
+        case .meguri: meguriStatus.needsUser && !meguriSetupNotFinished
         case .iCloud: SyncStatusPresentation.needsUser(mainStatus)
         case .localOnly, nil: false
         }
@@ -945,7 +953,8 @@ public final class SyncCoordinator {
             connection: meguriAuthenticating ? .authenticating : meguriPhase, stage: meguriStage, routine: meguriRoutine,
             failureKey: meguriFailureKey, finishOffered: meguriCanFinish, automatic: settings.automatic && storedAutomatic,
             mediaFilesLeft: meguriSetupMediaLeft, mediaListKnown: (meguriAffectedFileCount ?? 0) > 0,
-            structureStage: meguriStructureStage, structureUploadPending: meguriStructureUploadPending)
+            structureStage: meguriStructureStage, structureUploadPending: meguriStructureUploadPending,
+            signedInBefore: meguriSignedInBefore, signInRefused: meguriFirstSignInRefused)
     }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
     private var providerDiscovery: ProviderDiscoveryOwnership?
@@ -968,7 +977,28 @@ public final class SyncCoordinator {
     private var meguriConnectionOwner: MeguriProviderConnectionOwner? {
         didSet { if meguriConnectionOwner !== oldValue { meguriLastExchange = nil } }
     }
-    public private(set) var meguriPhase: MeguriProviderConnectionPhase = .unconfigured
+    public private(set) var meguriPhase: MeguriProviderConnectionPhase = .unconfigured {
+        // T21.2: a sign-in on this connection makes a later sign-out a problem;
+        // a removed connection starts over as setup.
+        didSet {
+            if meguriPhase == .setupRequired { meguriSignedInBefore = true; meguriFirstSignInRefused = false }
+            else if meguriPhase == .unconfigured { meguriSignedInBefore = false; meguriFirstSignInRefused = false }
+        }
+    }
+    /// Kept in this device's defaults, so a relaunch gives the same answer; the
+    /// service change that deletes the sign-in clears it (T21.2).
+    private var meguriSignedInBefore = false {
+        didSet { if meguriSignedInBefore != oldValue { defaults?.set(meguriSignedInBefore, forKey: Self.signedInBeforeKey) } }
+    }
+    private static let signedInBeforeKey = "meguri.sync.signedInBefore"
+    /// A first Sign In from the fields failed (T21.2). Kept apart from the
+    /// error text, which an edit of the address clears.
+    private var meguriFirstSignInRefused = false
+    /// T21.2: Meguri Sync is selected and has not been signed in yet; the Sync
+    /// section shows the sign-in form alone and the status stays quiet.
+    public var meguriSetupNotFinished: Bool {
+        providerState?.selection == .meguri && SyncKinds.meguriSetupNotFinished(meguriKindFacts)
+    }
     public private(set) var meguriEndpoint = ""
     /// The signed-in account's name (N15.2 row 2); nil while signed out.
     public private(set) var meguriUsername: String?
@@ -1156,6 +1186,10 @@ public final class SyncCoordinator {
         meguriSignInErrorKey = Self.meguriAuthenticationKey(failure)
     }
     func clearMeguriSignInPreparationError() { meguriSignInErrorKey = nil }
+    /// Tests only: the state a refused first Sign In leaves (T21.2).
+    func renderFirstSignInRefusedForTests() {
+        meguriPhase = .blocked; meguriSignInErrorKey = "sync.meguri.error.credentials"; meguriFirstSignInRefused = true
+    }
     public func meguriAddressEdited() {
         meguriAddressEditRevision &+= 1
         meguriAddressDirty = true; meguriReady = false; meguriRoutine = nil; meguriSignInErrorKey = nil
@@ -1352,6 +1386,7 @@ public final class SyncCoordinator {
                 self.meguriLastError = error
                 if self.generation == expected, self.hostRevision == revision, editRevision == self.meguriAddressEditRevision {
                     if self.meguriSignInErrorKey == nil { self.meguriSignInErrorKey = Self.meguriAuthenticationKey(error) }
+                    if !self.meguriSignedInBefore { self.meguriFirstSignInRefused = true }
                     if let owner = self.meguriConnectionOwner {
                         self.meguriPhase = await owner.phase
                         self.meguriUsername = await owner.username
@@ -2303,6 +2338,8 @@ public final class SyncCoordinator {
              MeguriProviderCredentialFailure.wrongConnection: phase = .blocked
         default: return false
         }
+        // A round runs only on a signed-in connection: its sign-out needs the person (T21.2).
+        meguriSignedInBefore = true
         meguriPhase = phase
         if phase == .signedOut { meguriUsername = nil }
         // Reopen only through explicit sign-in or a checked local load. Keep
@@ -2490,6 +2527,7 @@ public final class SyncCoordinator {
         self.recordDiagnostic = recordDiagnostic
         self.cloudConfigured = cloudConfigured
         self.bootstrap = bootstrap; self.makeBackend = makeBackend; self.defaults = defaults
+        meguriSignedInBefore = defaults?.bool(forKey: Self.signedInBeforeKey) ?? false
         self.clock = clock; self.directory = directory
         self.providerDirectory = providerDirectory
         self.meguriCredentialStore = meguriCredentialStore
@@ -3012,6 +3050,8 @@ public final class SyncCoordinator {
             if providerState?.removalPending == true {
                 let credentials = try await meguriConnection()
                 try await credentials.deleteCredentialsAfterDrain()
+                // The sign-in is gone: choosing Meguri Sync again is setup again (T21.2).
+                meguriSignedInBefore = false
                 guard current(joinedRevision) else { return false }
             }
             let committed = try await provider.finishHandoff(providerHandoff)
@@ -5072,15 +5112,26 @@ extension SyncCoordinator {
         case meguriSetupMediaPaused, meguriSetupMediaStopped
         /// MP7 step 5: a note type structure save waits for Upload….
         case meguriStructureUploadPending
+        /// Meguri Sync chosen and never signed in on this device: no address, no account.
+        case meguriNeverSignedIn
     }
     /// Builds synthetic Sync section examples. The coordinator is never
     /// attached: it owns no collection, account, binding or server, and its
     /// actions find nothing to act on.
-    public static func renderFixture(_ state: RenderState, clock: AppClock = .system) -> SyncCoordinator {
+    public static func renderFixture(_ state: RenderState, clock: AppClock = .system,
+                                     serviceSwitch: RenderServiceSwitch? = nil) -> SyncCoordinator {
         let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in throw SyncOwnerFailure.configurationUnavailable },
             defaults: nil, clock: clock)
         sync.applyRenderFixture(state)
+        sync.renderServiceSwitch = serviceSwitch
         return sync
+    }
+    /// A synthetic example asks the Service control to open its confirmation
+    /// for `destination` ("localOnly", "meguri", "iCloud"), with invented facts.
+    public struct RenderServiceSwitch: Sendable, Equatable {
+        public let destination: String
+        public let facts: ServiceSwitchFacts
+        public init(destination: String, facts: ServiceSwitchFacts) { self.destination = destination; self.facts = facts }
     }
 }
 

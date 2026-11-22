@@ -13,10 +13,21 @@ import Testing
         ("sync.service.none.footer", "Choose a service to sync this collection."),
         ("sync.service.settingUp", "Setting Up…"),
         ("sync.service.opFirst", "Finish or cancel the collection replacement before you change the service."),
-        ("sync.switch.title.off", "Turn Off Sync"),
-        ("sync.switch.next.iCloud.setup", "Next, Meguri sets up iCloud. It asks before it replaces a collection with your cards."),
-        ("sync.switch.next.meguri.setup", "Next, sign in to your Meguri Sync server. Meguri asks before it replaces a collection with your cards."),
-        ("sync.switch.confirm.off", "Turn Off Sync"),
+        // T21.1 (2026-11-22): the service change confirmation.
+        ("sync.switch.title.off", "Turn Off Sync?"), ("sync.switch.title.meguri", "Switch to Meguri Sync?"),
+        ("sync.switch.title.iCloud", "Switch to iCloud?"),
+        ("sync.switch.confirm.off", "Turn Off Sync"), ("sync.switch.confirm.meguri", "Switch to Meguri Sync"),
+        ("sync.switch.confirm.iCloud", "Switch to iCloud"),
+        ("sync.switch.message.off.meguri", "This collection stays on this device and stops syncing. You’ll be signed out of Meguri Sync. Nothing on your server is deleted."),
+        ("sync.switch.message.off.iCloud", "This collection stays on this device and stops syncing. Nothing in iCloud is deleted."),
+        ("sync.switch.message.meguri", "Next, sign in to your Meguri Sync server. Meguri asks before it replaces a collection with your cards. Nothing in iCloud is deleted, and your other devices keep using iCloud until you change them."),
+        ("sync.switch.message.iCloud", "Next, Meguri sets up iCloud and asks before it replaces a collection with your cards. You’ll be signed out of Meguri Sync. Nothing on your server is deleted, and your other devices keep using Meguri Sync until you change them."),
+        ("sync.switch.unsent.item", "• %@"),
+        ("sync.switch.unsent.heading", "Not yet sent to %@:"), ("sync.switch.unsent.some", "Some changes"),
+        ("sync.switch.unsent.kept", "These stay only on this device."),
+        ("sync.switch.unsent.none", "Everything on this device has been sent to %@."),
+        ("sync.switch.unknown", "Meguri couldn’t check whether everything on this device has been sent to %@. Anything not sent stays only on this device."),
+        ("sync.switch.unknown.more", "Meguri couldn’t check whether anything else is waiting. Anything not sent stays only on this device."),
         ("sync.meguri.signIn.footer.setup", "After you sign in, Meguri sets up syncing with this server, then syncs automatically. It asks before it replaces a collection with your cards."),
         ("sync.meguri.signIn.footer.setup.manual", "After you sign in, Meguri sets up syncing with this server. It asks before it replaces a collection with your cards."),
         ("sync.setup.done.uploaded.iCloud", "This device’s collection was uploaded to iCloud."),
@@ -139,7 +150,12 @@ import Testing
         "sync.meguri.pause", "sync.meguri.resume", "sync.meguri.now.chooseCollection",
         // Changed 2026-11-21 (resume fix): one explanation in the status row.
         "sync.meguri.setup.collectionDone", "sync.meguri.media.unverified", "sync.meguri.media.setupWaits",
-        "sync.meguri.media.study"
+        "sync.meguri.media.study",
+        // T21.1 (2026-11-22): the lines of the service change sheet it replaces.
+        "sync.switch.pending", "sync.switch.pending.some", "sync.switch.heldBack", "sync.switch.pending.none",
+        "sync.switch.pending.unknown", "sync.switch.media", "sync.switch.media.unknown", "sync.switch.kept",
+        "sync.switch.otherDevices", "sync.switch.signOut", "sync.switch.next.localOnly",
+        "sync.switch.next.iCloud.setup", "sync.switch.next.meguri.setup"
     ]
     /// "every `sync.connect.two.*`", "every `sync.connect.continue.*`", "every `sync.keepLocal.*`".
     private static let unusedPrefixes = ["sync.connect.two.", "sync.connect.continue.", "sync.keepLocal."]
@@ -229,6 +245,13 @@ import Testing
     @Test func everyT19KeyHasItsEnglishValue() {
         for (key, english) in Self.t19 + Self.needsYou { #expect(SyncText.value(key) == english, "\(key)") }
         #expect(SyncText.format("sync.issues.row", Int64(1)) == "1 sync issue")
+        // T21.1's plural lines.
+        #expect(SyncText.format("sync.switch.unsent.changes", Int64(1)) == "1 change")
+        #expect(SyncText.format("sync.switch.unsent.changes", Int64(12)) == "12 changes")
+        #expect(SyncText.format("sync.switch.unsent.heldBack", Int64(1)) == "1 review answer")
+        #expect(SyncText.format("sync.switch.unsent.heldBack", Int64(3)) == "3 review answers")
+        #expect(SyncText.format("sync.switch.unsent.media", Int64(1)) == "1 media file")
+        #expect(SyncText.format("sync.switch.unsent.media", Int64(2)) == "2 media files")
         #expect(SyncText.format("sync.issues.row", Int64(3)) == "3 sync issues")
         #expect(SyncText.format("sync.meguri.media.left", Int64(1)) == "1 media file is left. Syncing starts when it finishes.")
         #expect(SyncText.format("sync.meguri.media.left", Int64(12)) == "12 media files are left. Syncing starts when they finish.")
