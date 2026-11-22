@@ -578,7 +578,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 ### N16.3 Show Answer and the answer row
 
 - Show Answer is centred in the answer row on touch, as wide as two answer buttons. At the accessibility text sizes it keeps the full row.
-- With a fold through the row (iPhone Duo held wide) it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9).
+- With a fold through the row (iPhone Duo held wide) it keeps the size it has there, one column of the split row, and is centred in the row, under the card, across the fold. Exception to R9, decided by Antoine on 2026-11-22 ("Not aligned", and a much wider button would look odd to him (his words were relayed by the coordinator)): the button's label sits on the fold. Accepted because the card's own content is already centred there and tap zones make the button secondary. After reveal the four answers still split at the fold. Replaced (2026-11-19 text): "it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9)".
 - The answer buttons' group is centred: on touch it is at most `ContentWidth.readable` wide and spans the full width when a fold crosses it; on Mac the four standard buttons are centred in the window, as is Show Answer.
 - Replaces: N13.3's trailing-half Show Answer where no fold crosses the row.
 

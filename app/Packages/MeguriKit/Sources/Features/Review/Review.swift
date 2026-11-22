@@ -601,11 +601,9 @@ public struct ReviewAnswerBar: View {
                 }
                 if phase == .question {
                     if fold.acrossWidth != nil {
-                        // A centred button would sit on the fold (R9): it keeps the trailing side.
-                        FoldAvoidingRow(fold: fold.acrossWidth, spacing: Spacing.xSmall) {
-                            Color.clear.frame(height: 0)
-                            revealButton
-                        }
+                        // Under the card's centre at its half-row size, across the
+                        // fold: an exception to R9 (N16.3, 2026-11-22).
+                        FoldCentredRow(fold: fold.acrossWidth, spacing: Spacing.xSmall) { revealButton }
                     } else if dynamicTypeSize.isAccessibilitySize {
                         revealButton
                     } else {

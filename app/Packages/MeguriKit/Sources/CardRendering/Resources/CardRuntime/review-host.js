@@ -86,6 +86,8 @@
   let lastBackgroundRequest = 0;
   let lastResourcesRequest = 0;
   let disposed = false;
+  let gesture = null;
+  let inputSerial = 0;
 
   function exact(value, names) {
     if (!value || typeof value !== "object" || array(value)) return false;
@@ -116,6 +118,7 @@
   }
   function clear() {
     context = null;
+    gesture = null; inputSerial = 0; lastTouchStart = null; composingNow = false;
     stop(background); stop(resources);
   }
   function current(request) {
@@ -317,6 +320,267 @@
   }
   const relList = getter(HTMLLinkElement.prototype, "relList");
   const relContains = DOMTokenList.prototype.contains;
+
+  // Review taps (U180; R404–R408, R412, R415). One observation per finished
+  // single-pointer gesture on the presented side, sent after the page's own
+  // handlers for that gesture have run. WebKit on iOS need not dispatch a
+  // click for a tap on plain content, so the observation closes the pointer
+  // sequence (with a click, when one follows within it). Native owns movement, duration,
+  // finger count, the zones and every decision; this only observes.
+  const EXEMPT = "a,button,input,select,textarea,label,summary,details,audio,video," +
+    "[onclick],[contenteditable],[role=button],.tappable,.replay-button,#typeans";
+  const QUERY = "meguri:query";
+  // How long a gesture waits for the click a card handler could see (ms).
+  const CLICK_WAIT = 350;
+  const matches = Element.prototype.matches;
+  const parentNodeOf = getter(Node.prototype, "parentNode");
+  const shadowHostOf = getter(ShadowRoot.prototype, "host");
+  const shadowRootOf = getter(Element.prototype, "shadowRoot");
+  const shadowActiveOf = getter(ShadowRoot.prototype, "activeElement");
+  const connectedOf = getter(Node.prototype, "isConnected");
+  const composedPath = Event.prototype.composedPath;
+  const prevented = getter(Event.prototype, "defaultPrevented");
+  const stamp = getter(Event.prototype, "timeStamp");
+  const pointerIdOf = getter(PointerEvent.prototype, "pointerId");
+  const pointerTypeOf = getter(PointerEvent.prototype, "pointerType");
+  const primaryOf = getter(PointerEvent.prototype, "isPrimary");
+  const clientXOf = getter(MouseEvent.prototype, "clientX");
+  const clientYOf = getter(MouseEvent.prototype, "clientY");
+  const buttonOf = getter(MouseEvent.prototype, "button");
+  const TouchClass = window.TouchEvent;
+  const touchesOf = TouchClass ? getter(TouchClass.prototype, "touches") : null;
+  const touchCount = window.TouchList ? getter(TouchList.prototype, "length") : null;
+  const activeOf = getter(Document.prototype, "activeElement");
+  const rootOf = getter(Document.prototype, "documentElement");
+  const editableOf = getter(HTMLElement.prototype, "isContentEditable");
+  const idOf = getter(Element.prototype, "id");
+  const localNameOf = getter(Element.prototype, "localName");
+  const selectionOf = Document.prototype.getSelection;
+  const collapsedOf = getter(Selection.prototype, "isCollapsed");
+  const rangesOf = getter(Selection.prototype, "rangeCount");
+  const ViewportClass = window.VisualViewport;
+  const viewportOf = getter(Window.prototype, "visualViewport") || getter(window, "visualViewport");
+  const viewportWidth = ViewportClass && getter(ViewportClass.prototype, "width");
+  const viewportHeight = ViewportClass && getter(ViewportClass.prototype, "height");
+  const viewportLeft = ViewportClass && getter(ViewportClass.prototype, "offsetLeft");
+  const viewportTop = ViewportClass && getter(ViewportClass.prototype, "offsetTop");
+  const viewportScale = ViewportClass && getter(ViewportClass.prototype, "scale");
+  const dispatch = EventTarget.prototype.dispatchEvent;
+  const CustomEventClass = CustomEvent;
+  const ElementClass = Element;
+  const NodeClass = Node;
+  const ShadowRootClass = ShadowRoot;
+  const push = Array.prototype.push;
+  let composingNow = false;
+  let lastTouchStart = null;
+  let layoutRevision = 0;
+  let lastGeometry = null;
+
+  function trusted(event) {
+    return eventTrusted ? call(eventTrusted, event) === true : event.isTrusted === true;
+  }
+  // Fails closed: an unreadable state never lets a tap act.
+  function hasSelection() {
+    try {
+      const selection = call(selectionOf, document);
+      return !!selection && call(rangesOf, selection) > 0 && !call(collapsedOf, selection);
+    } catch (_) { return true; }
+  }
+  function focusState() {
+    try {
+      let active = call(activeOf, document);
+      // Focus inside an open shadow root: the focused element itself.
+      for (let depth = 0; active && depth < 32; depth++) {
+        const root = active instanceof ElementClass ? call(shadowRootOf, active) : null;
+        const inner = root ? call(shadowActiveOf, root) : null;
+        if (!inner) break;
+        active = inner;
+      }
+      if (!active || active === call(bodyGetter, document) || active === call(rootOf, document)) {
+        return { editable: false, typeans: false };
+      }
+      const name = call(localNameOf, active);
+      const editable = name === "input" || name === "textarea" || name === "select" ||
+        (active instanceof HTMLElement && call(editableOf, active) === true);
+      return { editable: editable, typeans: editable && call(idOf, active) === "typeans" };
+    } catch (_) { return { editable: true, typeans: false }; }
+  }
+  function parentOf(node) {
+    const parent = call(parentNodeOf, node);
+    if (parent) return parent;
+    return node instanceof ShadowRootClass ? call(shadowHostOf, node) : null;
+  }
+  // R405's targets and their descendants; below <body>, an element styled as
+  // clickable (`cursor: pointer`) or one with its own tap listener (C13's
+  // registry, asked through the runtime) is the card's control too.
+  function exempt(target) {
+    try {
+      if (!(target instanceof NodeClass)) return true;
+      const body = call(bodyGetter, document);
+      let belowBody = true;
+      for (let node = target; node; node = parentOf(node)) {
+        if (!(node instanceof ElementClass)) continue;
+        if (node === body) belowBody = false;
+        if (call(matches, node, EXEMPT)) return true;
+        if (belowBody && call(styleProperty, computed(node), "cursor") === "pointer") return true;
+      }
+      const query = new CustomEventClass(QUERY, { detail: "tapTarget", bubbles: true, cancelable: true, composed: true });
+      // Not cancelled: a card listener could see the tap, or no one answered.
+      return call(dispatch, target, query) !== false;
+    } catch (_) { return true; }
+  }
+  function geometry() {
+    try {
+      const viewport = viewportOf ? call(viewportOf, window) : null;
+      if (!viewport || !viewportWidth) return null;
+      const next = { width: call(viewportWidth, viewport), height: call(viewportHeight, viewport),
+        offsetX: call(viewportLeft, viewport), offsetY: call(viewportTop, viewport), scale: call(viewportScale, viewport) };
+      if (!positive(next.width, LIMIT) || !positive(next.height, LIMIT) || !positive(next.scale, 1000) ||
+          !finite(next.offsetX) || !finite(next.offsetY) ||
+          next.offsetX > 1e9 || next.offsetX < -1e9 || next.offsetY > 1e9 || next.offsetY < -1e9) return null;
+      const last = lastGeometry;
+      if (!last || last.width !== next.width || last.height !== next.height || last.offsetX !== next.offsetX ||
+          last.offsetY !== next.offsetY || last.scale !== next.scale || layoutRevision === 0) {
+        if (layoutRevision >= 9007199254740991) return null;
+        layoutRevision += 1;
+        lastGeometry = next;
+      }
+      return { width: next.width, height: next.height, offsetX: next.offsetX, offsetY: next.offsetY,
+        scale: next.scale, layoutRevision: layoutRevision };
+    } catch (_) { return null; }
+  }
+  function remember(event) {
+    if (gesture && !gesture.done) call(push, gesture.events, event);
+  }
+  function pointerDown(event) {
+    if (disposed || !trusted(event)) return;
+    const time = call(stamp, event);
+    // A second pointer joins the gesture; a primary one starts a new gesture
+    // (no other pointer is down then), so a lost end never blocks the next tap.
+    if (!call(primaryOf, event)) { if (gesture && !gesture.done) gesture.multi = true; return; }
+    gesture = null;
+    if (!context || context.visibility !== "presented") return;
+    const focus = focusState();
+    gesture = { context: context, id: call(pointerIdOf, event), start: time, events: [event],
+      selection: hasSelection(), editable: focus.editable, typeans: focus.typeans, composing: composingNow,
+      multi: false, done: false, end: null, target: null, exempt: true, x: 0, y: 0, awaitClick: false, timer: 0,
+      clickSeen: false, clickBubbled: false };
+    if (lastTouchStart && time - call(stamp, lastTouchStart) < 100) call(push, gesture.events, lastTouchStart);
+  }
+  function touchStart(event) {
+    if (disposed || !trusted(event)) return;
+    lastTouchStart = event;
+    if (!gesture || gesture.done) return;
+    remember(event);
+    if (touchesOf && touchCount && call(touchCount, call(touchesOf, event)) > 1) gesture.multi = true;
+  }
+  // Scrolling, pinching or a long-press selection: the gesture is WebKit's.
+  function cancelled(event) {
+    if (trusted(event) && gesture && !gesture.done) gesture = null;
+  }
+  // Whether a card listener anywhere on the target's path could still handle
+  // the click that may follow (C13's question, window and document included).
+  function clickListened(target) {
+    const kinds = ["click", "mousedown", "mouseup"];
+    for (let i = 0; i < kinds.length; i++) {
+      const query = new CustomEventClass(QUERY, { detail: kinds[i], bubbles: true, cancelable: true, composed: true });
+      if (call(dispatch, target, query) !== false) return true;
+    }
+    return false;
+  }
+  function pointerUp(event) {
+    if (disposed || !trusted(event) || !gesture || gesture.done) return;
+    if (call(pointerIdOf, event) !== gesture.id) { gesture.multi = true; return; }
+    const g = gesture;
+    g.done = true;
+    call(push, g.events, event);
+    g.end = event;
+    try {
+      const path = call(composedPath, event);
+      g.target = path.length > 0 ? path[0] : call(eventTarget, event);
+      g.x = call(clientXOf, event); g.y = call(clientYOf, event);
+      g.exempt = exempt(g.target);
+      // On iOS a click comes later, from a separate commit of the tap. When a
+      // card handler could see it, wait for it (bounded), so its
+      // preventDefault counts; otherwise close after this dispatch.
+      g.awaitClick = !g.exempt && clickListened(g.target);
+    } catch (_) { g.exempt = true; g.awaitClick = false; }
+    g.timer = later(function () { finish(g); }, g.awaitClick ? CLICK_WAIT : 0);
+  }
+  function lateEvent(event) {
+    if (!trusted(event)) return;
+    // touchend and a click after pointerup belong to the closing gesture.
+    if (gesture && gesture.done && gesture.end) call(push, gesture.events, event);
+    else remember(event);
+  }
+  // Clicks are taken first (capture, before any card handler) and seen again
+  // on the way back to the window: one that never returns was stopped by a
+  // card handler, which then owns the tap.
+  function clickCaptured(event) {
+    if (!trusted(event)) return;
+    const g = gesture;
+    if (!g || !g.done || !g.end) { remember(event); return; }
+    call(push, g.events, event);
+    g.clickSeen = true;
+    if (g.awaitClick) {
+      g.awaitClick = false;
+      cancelTimer(g.timer);
+      g.timer = later(function () { finish(g); }, 0);
+    }
+  }
+  function clickBubbled(event) {
+    if (trusted(event) && gesture && gesture.clickSeen) gesture.clickBubbled = true;
+  }
+  function finish(g) {
+    if (gesture !== g) return;
+    gesture = null;
+    const start = g.context;
+    // R415: a gesture belongs to the side presented when it began.
+    if (disposed || !post || g.multi || context !== start) return;
+    let defaultPrevented = false;
+    for (let i = 0; i < g.events.length; i++) {
+      if (call(prevented, g.events[i])) defaultPrevented = true;
+    }
+    let isExempt = g.exempt;
+    try { if (!call(connectedOf, g.target)) isExempt = true; } catch (_) { isExempt = true; }
+    if (g.clickSeen && !g.clickBubbled) isExempt = true;
+    const view = geometry();
+    if (!view) return;
+    const x = g.x - view.offsetX, y = g.y - view.offsetY;
+    if (!finite(x) || !finite(y)) return;
+    const type = call(pointerTypeOf, g.end);
+    let button = call(buttonOf, g.end);
+    if (!safeInteger(button) || button < 0 || button > 4) button = 0;
+    const time = call(stamp, g.end);
+    if (inputSerial >= 9007199254740991) return;
+    inputSerial += 1;
+    try {
+      const reply = call(post, handler, {
+        signal: "hostInput", version: 1, card: start.card, generation: start.generation,
+        side: start.side, viewRevision: start.viewRevision, serial: inputSerial,
+        payload: { kind: "click", timeMs: finite(time) && time > 0 ? time : 0, defaultPrevented: defaultPrevented,
+          exempt: isExempt, selection: g.selection || hasSelection(), editable: g.editable,
+          typeans: g.editable && g.typeans, composing: g.composing, geometry: view,
+          x: x < 0 ? 0 : x > view.width ? view.width : x, y: y < 0 ? 0 : y > view.height ? view.height : y,
+          button: button, pointer: type === "touch" || type === "mouse" || type === "pen" ? type : "unknown" }
+      });
+      if (reply) call(then, reply, undefined, function () {});
+    } catch (_) {}
+  }
+  function noop() {}
+  // R408: CSS :active styles need a touch listener on the document. Every
+  // listener here is passive: it never cancels, so it never holds up scrolling.
+  call(add, document, "touchstart", noop, { passive: true });
+  call(add, window, "pointerdown", pointerDown, { capture: true, passive: true });
+  call(add, window, "touchstart", touchStart, { capture: true, passive: true });
+  call(add, window, "pointercancel", cancelled, { capture: true, passive: true });
+  call(add, window, "touchcancel", cancelled, { capture: true, passive: true });
+  call(add, window, "pointerup", pointerUp, { passive: true });
+  call(add, window, "touchend", lateEvent, { passive: true });
+  call(add, window, "click", clickCaptured, { capture: true, passive: true });
+  call(add, window, "click", clickBubbled, { passive: true });
+  call(add, window, "compositionstart", function (event) { if (trusted(event)) composingNow = true; }, true);
+  call(add, window, "compositionend", function (event) { if (trusted(event)) composingNow = false; }, true);
 
   function receive(message) {
     try { return receiveMessage(message); } catch (_) { return false; }
