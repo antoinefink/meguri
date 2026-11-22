@@ -4,7 +4,8 @@ import Foundation
 /// The core reads Browse's shell uses (U270). Production is
 /// `CoreBrowseBackend`; tests and the test hooks' routes pass their own.
 /// Every call reads and writes nothing, except `setTagsCollapsed`, a
-/// person's own toggle of a tag's disclosure.
+/// person's own toggle of a tag's disclosure, `saveSearch` (Save Search…)
+/// and the column set and mode writes.
 @MainActor public protocol BrowseBackend: AnyObject, Sendable {
     /// T14: the default search and the mode a first open reads.
     func opening() async throws -> BrowseOpening
@@ -12,6 +13,16 @@ import Foundation
     func read(_ text: String) async throws -> FilterQuery
     /// T4: the run text the device keeps for a relaunch.
     func runText(_ query: FilterQuery) async throws -> String
+    /// T8's commit: syntax in the text becomes tokens after the query's own.
+    func commit(_ query: FilterQuery) async throws -> FilterQuery
+    /// T8: the text is incomplete at the UTF-16 offset `caret` (D5).
+    func isIncomplete(_ text: String, caret: Int) async throws -> Bool
+    /// T12: the suggestions for `query` with the caret at `caret` of its
+    /// text, or `scope`'s value list; `recent` holds accepted rows' keys.
+    func suggestions(for query: FilterQuery, caret: Int, scope: FilterSection?, recent: [String]) async throws
+        -> [FilterSuggestion]
+    /// T13: Save Search… with the query's run text; one undoable step.
+    func saveSearch(name: String, text: String) async throws
     /// The rows of one kind as the core offers them (T12.1's value list):
     /// the saved searches, every deck's value, the note types' values.
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow]
@@ -50,6 +61,17 @@ import Foundation
     public func opening() async throws -> BrowseOpening { try await CoreBrowseQuery.opening() }
     public func read(_ text: String) async throws -> FilterQuery { try await CoreBrowseQuery.read(text) }
     public func runText(_ query: FilterQuery) async throws -> String { try await CoreBrowseQuery.runText(query) }
+    public func commit(_ query: FilterQuery) async throws -> FilterQuery { try await CoreBrowseQuery.commit(query) }
+    public func isIncomplete(_ text: String, caret: Int) async throws -> Bool {
+        try await CoreBrowseQuery.isIncomplete(text, caret: caret)
+    }
+    public func suggestions(for query: FilterQuery, caret: Int, scope: FilterSection?, recent: [String]) async throws
+        -> [FilterSuggestion] {
+        try await CoreBrowseQuery.suggestions(for: query, caret: caret, scope: scope, recent: recent, labels: labels)
+    }
+    public func saveSearch(name: String, text: String) async throws {
+        _ = try await CoreBrowseQuery.saveSearch(name: name, search: text)
+    }
     public func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
         try await CoreBrowseQuery.suggestions(for: FilterQuery(), caret: 0, scope: section, labels: labels).map(\.row)
     }

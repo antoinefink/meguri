@@ -417,10 +417,10 @@ import Testing
         try await until { results.list?.revision == 1 }
         #expect(results.list?.count == 3 && results.selection == [2] && results.currentIndex == 2)
         #expect(session.invalidations.first?.changes.map(\.seq) == [9])
-        // Row 0 was read again in the new revision; the moved rows kept their place.
-        try await until { results.row(at: 0) != nil }
+        // Row 0 is read again in the new revision (the old row shows until then,
+        // so its presence alone says nothing); the moved rows kept their place.
+        try await until { session.rowCalls.last?.revision == 1 && results.row(at: 0) != nil }
         #expect(results.row(at: 1)?.id == 3 && results.row(at: 2)?.id == 4)
-        #expect(session.rowCalls.last?.revision == 1)
     }
 
     @Test func aRemovalKeepsOnlyPagesWhoseRowsAreAllKnown() async throws {
