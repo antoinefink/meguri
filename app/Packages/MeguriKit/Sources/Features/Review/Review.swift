@@ -396,6 +396,9 @@ struct ReviewLayout<Card: View>: View {
             ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
             if showsProgress { ReviewProgressBar(progress: progress).allowsHitTesting(false) }
         }
+        // A bar: a touch between or beside its buttons stays in it, so it
+        // reaches neither the card's page nor its tap zones (N16.9).
+        .contentShape(Rectangle())
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { answerAreaTop = $0 }
     }
 }

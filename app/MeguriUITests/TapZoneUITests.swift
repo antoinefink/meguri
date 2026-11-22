@@ -106,7 +106,7 @@ final class TapZoneUITests: XCTestCase {
         let y = card.frame.minY + (bar - Self.answerAreaPadding - card.frame.minY) * 0.85
         card.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: card.frame.width * x, dy: y - card.frame.minY)).tap()
     }
-    /// The answer area's padding above its buttons.
+    /// A margin above the answer area's buttons (its padding there is 12 pt).
     private static let answerAreaPadding: CGFloat = 16
 
     func testATapBesideTheAnswerButtonsDoesNothing() throws {
@@ -119,6 +119,12 @@ final class TapZoneUITests: XCTestCase {
         let card = element(app, "review.session.card")
         XCTAssertTrue(card.waitForExistence(timeout: 20))
         XCTAssertTrue(waitForQuestion(app))
+        // Level with Show Answer, beside it: no reveal.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        let reveal = element(app, "review.session.reveal").frame
+        app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: max(8, reveal.minX / 2), dy: reveal.midY)).tap()
+        XCTAssertFalse(waitForAnswer(app, timeout: 2), "A tap beside Show Answer does not reveal")
         tap(card, x: 0.5)
         XCTAssertTrue(waitForAnswer(app))
         // Between Hard and Good, level with the buttons: the card shows there

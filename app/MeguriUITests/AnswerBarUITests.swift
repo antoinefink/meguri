@@ -22,6 +22,15 @@ final class AnswerBarUITests: XCTestCase {
         capture(app, "long-light-answer-bottom")
     }
 
+    /// About one screen long: its last lines would sit under the answers at rest.
+    func testMediumCardScrollsClearOfTheAnswersLight() throws {
+        let app = try open("Bar Medium", dark: false)
+        try reveal(app)
+        capture(app, "medium-light-answer-top")
+        try scrollToLastLine(app, element(app, "review.session.card"))
+        capture(app, "medium-light-answer-bottom")
+    }
+
     func testShortCardIsNotCoveredLight() throws {
         let app = try open("Bar Short", dark: false)
         try reveal(app)

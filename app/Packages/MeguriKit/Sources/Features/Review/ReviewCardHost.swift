@@ -180,6 +180,36 @@ extension ReviewCardHost: UIViewControllerRepresentable {
             return super.canPerformAction(action, withSender: sender)
         }
         var canHandle: ((UIKeyCommand) -> Bool)?
+        /// N16.9: the answer area floats over the card's bottom. These views
+        /// stand where it does, one per page, so each page's scroll view
+        /// draws the system's bottom edge effect under it. They take no input.
+        private var edges: [UIView] = []
+        var covered: CGFloat = 0 { didSet { if oldValue != covered { view.setNeedsLayout() } } }
+        func edgeEffect(for scrollViews: [UIScrollView]) {
+            while edges.count < scrollViews.count {
+                let edge = UIView()
+                edge.isUserInteractionEnabled = false
+                edge.isAccessibilityElement = false
+                edge.addInteraction(UIScrollEdgeElementContainerInteraction())
+                view.addSubview(edge)
+                edges.append(edge)
+            }
+            for (edge, scrollView) in zip(edges, scrollViews) {
+                guard let interaction = edge.interactions.first as? UIScrollEdgeElementContainerInteraction else { continue }
+                if interaction.scrollView !== scrollView { interaction.scrollView = scrollView }
+                interaction.edge = .bottom
+                view.bringSubviewToFront(edge)
+            }
+            view.setNeedsLayout()
+        }
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            let height = min(view.bounds.height, max(0, covered))
+            for edge in edges {
+                edge.frame = CGRect(x: 0, y: view.bounds.maxY - height, width: view.bounds.width, height: height)
+                edge.isHidden = height == 0
+            }
+        }
     }
     func makeUIViewController(context: Context) -> Host {
         let host = Host()
@@ -207,6 +237,8 @@ extension ReviewCardHost: UIViewControllerRepresentable {
         (model.surface as? ReviewPages)?.presenter.host = host
         (model.surface as? ReviewPages)?.establishInitialFocus()
         if pair.obscuredBottom != obscuredBottom { pair.obscuredBottom = obscuredBottom }
+        host.covered = obscuredBottom
+        host.edgeEffect(for: pair.pages.map(\.webView.scrollView))
     }
 }
 #endif

@@ -36,9 +36,8 @@ open class CardNativeWebView: WKWebView {
         else { rect.origin.y += min(rect.height, obscuredBottom); rect.size.height -= min(rect.height, obscuredBottom) }
         return rect
         #else
-        var rect = bounds.inset(by: scrollView.adjustedContentInset)
-        rect.size.height -= min(rect.height, obscuredBottom)
-        return rect
+        // The scroll view's bottom inset is the covered part (below).
+        return bounds.inset(by: scrollView.adjustedContentInset)
         #endif
     }
     /// Covered by the review's answer area at the bottom (N16.9): WebKit's
@@ -49,6 +48,12 @@ open class CardNativeWebView: WKWebView {
             var insets = obscuredContentInsets
             insets.bottom = obscuredBottom
             obscuredContentInsets = insets
+            #if !os(macOS)
+            // WebKit's own insets keep fixed elements clear; the scroll
+            // range comes from the scroll view's own inset, as on iOS bars.
+            scrollView.contentInset.bottom = obscuredBottom
+            scrollView.verticalScrollIndicatorInsets.bottom = obscuredBottom
+            #endif
             onHostGeometryChange?()
         }
     }
