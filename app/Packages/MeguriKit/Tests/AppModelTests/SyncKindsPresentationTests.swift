@@ -157,6 +157,37 @@ import Testing
         #expect(SyncText.format("sync.trouble.conflictCopies", Int64(1)) == "1 conflict copy is saved on this device.")
     }
 
+    /// T21.2: the quiet "setup not finished" status, and the rows that stay needs you.
+    @Test func meguriBeforeTheFirstSignInIsQuiet() {
+        typealias Facts = MeguriKindFacts
+        let notSetUp = SyncKinds.meguri(Facts(connection: .unconfigured))
+        #expect(notSetUp.kind == nil && notSetUp.symbol == SyncSymbol.off)
+        #expect(notSetUp.titleKey == "sync.meguri.status.notSetUp.title" && notSetUp.action == .meguriSignIn)
+        #expect(SyncText.value("sync.meguri.status.notSetUp.title") == "Not Set Up")
+        #expect(SyncText.value("sync.meguri.status.notSetUp.detail") == "Sign in to your Meguri Sync server to finish setting up.")
+        #expect(SyncText.value("sync.meguri.address.prompt") == "https://sync.example.com")
+        #expect(SyncText.value("sync.meguri.required.prompt") == "Required")
+        for facts in [Facts(connection: .signedOut, signedInBefore: false), Facts(connection: .cancelled, signedInBefore: false)] {
+            #expect(SyncKinds.meguriSetupNotFinished(facts) && SyncKinds.meguri(facts).symbol == SyncSymbol.off)
+        }
+        // Something that worked and now needs the person keeps the needs-you symbol.
+        for facts in [Facts(connection: .signedOut), Facts(routine: .authentication),
+                      Facts(stage: .failed, failureKey: "sync.meguri.setup.error.identityChanged")] {
+            #expect(!SyncKinds.meguriSetupNotFinished(facts))
+            #expect(SyncKinds.meguri(facts).kind == .needsYou && SyncKinds.meguri(facts).symbol == SyncKinds.needsYouSymbol)
+        }
+        // The provider's own problems come first.
+        #expect(!SyncKinds.meguriSetupNotFinished(Facts(providerBlocked: true, connection: .unconfigured)))
+        #expect(!SyncKinds.meguriSetupNotFinished(Facts(handoffRecovery: true, connection: .unconfigured)))
+        // The coordinator: never signed in is quiet; signed in and then signed out needs the person.
+        let never = SyncCoordinator.renderFixture(.meguriNeverSignedIn)
+        #expect(never.meguriSetupNotFinished && never.mainStatus.kind == nil)
+        let signedOut = SyncCoordinator.renderFixture(.meguriSignIn)
+        #expect(!signedOut.meguriSetupNotFinished && signedOut.mainStatus.kind == .needsYou)
+        #expect(!SyncCoordinator.renderFixture(.meguriConnected).meguriSetupNotFinished)
+        #expect(!SyncCoordinator.renderFixture(.off).meguriSetupNotFinished)
+    }
+
     @Test func meguriRowsFollowT18Order() {
         typealias Facts = MeguriKindFacts
         let rows: [(Facts, Row)] = [
@@ -164,7 +195,10 @@ import Testing
              Row(.needsYou, "sync.needsYou.switchUnfinished", .serviceRecovery)),
             (Facts(providerBlocked: true, connection: .blocked), Row(.needsYou, "sync.needsYou.blocked", .copyDebugInfo)),
             (Facts(connection: .blocked, stage: .failed), Row(.needsYou, "sync.needsYou.meguri.signInStore", .meguriConnectionRetry)),
-            (Facts(connection: .unconfigured), Row(.needsYou, "sync.meguri.status.signedOut.detail", .meguriSignIn)),
+            // T21.2 (2026-11-22): before any sign-in, setup is unfinished, not a problem.
+            (Facts(connection: .unconfigured), Row(nil, "sync.meguri.status.notSetUp.detail", .meguriSignIn)),
+            (Facts(connection: .signedOut, signedInBefore: false), Row(nil, "sync.meguri.status.notSetUp.detail", .meguriSignIn)),
+            (Facts(connection: .cancelled, signedInBefore: false), Row(nil, "sync.meguri.status.notSetUp.detail", .meguriSignIn)),
             (Facts(connection: .signedOut), Row(.needsYou, "sync.meguri.status.signedOut.detail", .meguriSignIn)),
             (Facts(connection: .cancelled), Row(.needsYou, "sync.meguri.status.signedOut.detail", .meguriSignIn)),
             (Facts(connection: .authenticating), Row(nil, nil)),

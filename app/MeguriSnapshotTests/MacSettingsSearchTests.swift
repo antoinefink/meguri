@@ -82,12 +82,12 @@ import Testing
                 let securePassword = try nativeAccountString(in: password,
                     selector: #selector(NSAccessibilityProtocol.accessibilitySubrole)) == NSAccessibility.Subrole.secureTextField.rawValue
                 #expect(securePassword)
-                // P25.3: selected and not yet connected, Sync Automatically shows and is disabled.
-                let automaticElementResult = try accountGraph.element("settings.sync.automatic")
-                _ = try #require(automaticElementResult)
-                #expect(!collection.sync.automaticSwitchAvailable && collection.sync.automaticSwitchValue)
-                // T19.6: no media toggle, Pause, Sign Out, Stop Using or Connect; no iCloud footer.
-                for id in ["settings.sync.media", "settings.sync.pause", "settings.sync.stop", "settings.sync.connect",
+                // T21.2: before the first sign-in the section is the form alone: no status,
+                // Sync Automatically or Sync Now. T19.6: no media toggle, Pause, Sign Out,
+                // Stop Using or Connect; no iCloud footer.
+                #expect(collection.sync.meguriSetupNotFinished)
+                for id in ["settings.sync.status", "settings.sync.automatic", "settings.sync.syncNow",
+                           "settings.sync.media", "settings.sync.pause", "settings.sync.stop", "settings.sync.connect",
                            "settings.sync.meguri.signOut", "settings.sync.privacyFooter"] {
                     let absent = try accountGraph.element(id) == nil
                     #expect(absent)

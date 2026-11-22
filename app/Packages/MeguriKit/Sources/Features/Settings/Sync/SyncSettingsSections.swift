@@ -19,6 +19,42 @@ struct SyncSettingsSections: View {
         }
     }
     var body: some View {
+        if sync.meguriSetupNotFinished { setupForm } else { sections }
+    }
+    /// N15.7: Meguri Sync before its first sign-in is a setup form. The status,
+    /// Sync Automatically and Sync Now appear once a sign-in succeeds.
+    @ViewBuilder private var setupForm: some View {
+        Section {
+            SyncServiceRows(collection: collection, host: host)
+        } header: { heading }
+        Section {
+            MeguriAccountRows(collection: collection, draft: draft, footnoteInRows: false)
+        } footer: {
+            Text(SyncText.value(sync.storedAutomatic ? "sync.meguri.signIn.footer.setup" : "sync.meguri.signIn.footer.setup.manual"))
+                .accessibilityIdentifier("settings.sync.meguri.signInFooter")
+        }
+        troubleshooting
+    }
+    @ViewBuilder private var heading: some View {
+        if showsHeading {
+            Text(SyncText.value("sync.settings.sync.section"))
+                .accessibilityIdentifier("settings.sync.heading")
+        }
+    }
+    @ViewBuilder private var troubleshooting: some View {
+        Section {
+            NavigationLink {
+                SyncTroubleshootingPage(collection: collection, host: host)
+            } label: { Text(SyncText.value("sync.settings.troubleshooting")) }
+                .accessibilityIdentifier("settings.sync.troubleshooting")
+        } footer: {
+            if selection == .iCloud {
+                Text(SyncText.value("sync.settings.privacy"))
+                    .accessibilityIdentifier("settings.sync.privacyFooter")
+            }
+        }
+    }
+    @ViewBuilder private var sections: some View {
         Section {
             SyncServiceRows(collection: collection, host: host)
             if selection == .meguri { MeguriAccountRows(collection: collection, draft: draft) }
@@ -42,28 +78,11 @@ struct SyncSettingsSections: View {
                 SyncNowButton(collection: collection, identifier: "settings.sync.syncNow",
                     showsUnavailableReason: sync.serviceConnected)
             }
-        } header: {
-            if showsHeading {
-                Text(SyncText.value("sync.settings.sync.section"))
-                    .accessibilityIdentifier("settings.sync.heading")
-            }
-        } footer: {
+        } header: { heading } footer: {
             Text(SyncText.value(selection == nil ? "sync.service.none.footer" : "sync.settings.automatic.footer"))
                 .accessibilityIdentifier("settings.sync.footer")
         }
-        if selection != nil {
-            Section {
-                NavigationLink {
-                    SyncTroubleshootingPage(collection: collection, host: host)
-                } label: { Text(SyncText.value("sync.settings.troubleshooting")) }
-                    .accessibilityIdentifier("settings.sync.troubleshooting")
-            } footer: {
-                if selection == .iCloud {
-                    Text(SyncText.value("sync.settings.privacy"))
-                        .accessibilityIdentifier("settings.sync.privacyFooter")
-                }
-            }
-        }
+        if selection != nil { troubleshooting }
     }
 }
 
@@ -200,6 +219,10 @@ struct SyncServiceRows: View {
 struct MeguriAccountRows: View {
     let collection: ReviewCollection
     let draft: MeguriSignInDraft
+    /// The setup footnote is a row here, or the group's footer (N15.7).
+    var footnoteInRows = true
+    private enum Field: Hashable { case address, username, password }
+    @FocusState private var focus: Field?
     /// A Sign In made here continues into setup (MP6.3). Setup that was left
     /// unfinished earlier continues only from a user action.
     private var setupAfterSignIn: Bool {
@@ -221,7 +244,10 @@ struct MeguriAccountRows: View {
                         TextField(SyncText.value("sync.meguri.address"), text: Binding(get: { address }, set: {
                             guard !processing else { return }
                             address = $0; password = ""; sync.meguriAddressEdited()
-                        }), prompt: fieldPrompt)
+                        }), prompt: Text(SyncText.value("sync.meguri.address.prompt")))
+                            .textContentType(.URL)
+                            .focused($focus, equals: .address)
+                            .onSubmit { focus = .username }
                             #if os(iOS)
                             .keyboardType(.URL)
                             .textInputAutocapitalization(.never)
@@ -232,8 +258,10 @@ struct MeguriAccountRows: View {
                     field("sync.meguri.username") {
                         TextField(SyncText.value("sync.meguri.username"), text: Binding(get: { username }, set: {
                             if !processing { username = $0 }
-                        }), prompt: fieldPrompt)
+                        }), prompt: Text(SyncText.value("sync.meguri.required.prompt")))
                             .textContentType(.username)
+                            .focused($focus, equals: .username)
+                            .onSubmit { focus = .password }
                             #if os(iOS)
                             .textInputAutocapitalization(.never)
                             #endif
@@ -243,20 +271,20 @@ struct MeguriAccountRows: View {
                     field("sync.meguri.password") {
                         SecureField(SyncText.value("sync.meguri.password"), text: Binding(get: { password }, set: {
                             if !processing { password = $0 }
-                        }), prompt: fieldPrompt)
+                        }), prompt: Text(SyncText.value("sync.meguri.required.prompt")))
                             .textContentType(.password)
+                            .focused($focus, equals: .password)
                             .onSubmit(signIn)
                             .accessibilityIdentifier("settings.sync.meguri.password")
                     }
                 }
                 .disabled(processing || changing)
-                Button(SyncText.value("sync.meguri.signIn"), action: signIn)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(processing || changing || address.isEmpty || username.isEmpty || password.isEmpty)
-                    .accessibilityIdentifier("settings.sync.meguri.signIn")
-                Text(SyncText.value(sync.storedAutomatic ? "sync.meguri.signIn.footer.setup" : "sync.meguri.signIn.footer.setup.manual"))
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("settings.sync.meguri.signInFooter")
+                signInButton
+                if footnoteInRows {
+                    Text(SyncText.value(sync.storedAutomatic ? "sync.meguri.signIn.footer.setup" : "sync.meguri.signIn.footer.setup.manual"))
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("settings.sync.meguri.signInFooter")
+                }
                 if let key = sync.meguriSignInErrorKey {
                     Label(SyncText.value(key), systemImage: "exclamationmark.circle")
                         .accessibilityIdentifier("settings.sync.meguri.signInError")
@@ -289,7 +317,15 @@ struct MeguriAccountRows: View {
                     .accessibilityIdentifier("settings.sync.meguri.signInProgress")
             }
         }
-        .onAppear { if address.isEmpty { address = sync.meguriEndpoint }; startSetupIfAsked() }
+        .onAppear {
+            if address.isEmpty { address = sync.meguriEndpoint }
+            startSetupIfAsked()
+            #if os(macOS)
+            // N15.7: the form starts in its first empty field (the Settings window; on
+            // touch the page also holds Collection, and a keyboard would cover it).
+            if showsFields { focus = address.isEmpty ? .address : username.isEmpty ? .username : .password }
+            #endif
+        }
         .onChange(of: sync.meguriEndpoint) { _, endpoint in address = endpoint; password = "" }
         .onChange(of: sync.meguriCanChoose) { _, _ in startSetupIfAsked() }
         .onChange(of: sync.meguriCanSettle) { _, _ in startSetupIfAsked() }
@@ -305,14 +341,23 @@ struct MeguriAccountRows: View {
             if let preview = sync.meguriPreview { MeguriSetupPreviewSheet(collection: collection, preview: preview) }
         }
     }
-    /// MP2's labelled fields: the label leading and the value trailing, as the
-    /// system's Settings forms have. A Mac form already draws a field's title that way.
-    /// The leading label names the field, so the field repeats no placeholder.
-    private var fieldPrompt: Text? {
+    private var canSignIn: Bool {
+        !processing && !changing && !address.isEmpty && !username.isEmpty && !password.isEmpty
+    }
+    /// N15.7: never a disabled prominent button. On the Mac it sits at the row's
+    /// trailing edge, prominent only once it can sign in; on touch it is a
+    /// button row of the form, as the system's sign-in forms have.
+    @ViewBuilder private var signInButton: some View {
+        let button = Button(SyncText.value("sync.meguri.signIn"), action: signIn)
+            .disabled(!canSignIn)
+            .accessibilityIdentifier("settings.sync.meguri.signIn")
         #if os(macOS)
-        nil
+        HStack {
+            Spacer()
+            if canSignIn { button.buttonStyle(.borderedProminent) } else { button.buttonStyle(.bordered) }
+        }
         #else
-        Text(verbatim: "")
+        button
         #endif
     }
     @ViewBuilder private func field(_ key: String, @ViewBuilder content: () -> some View) -> some View {

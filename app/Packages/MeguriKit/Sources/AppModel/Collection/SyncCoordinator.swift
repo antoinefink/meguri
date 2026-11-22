@@ -562,7 +562,8 @@ public final class SyncCoordinator {
             renderChoice = state == .meguriNeedsYou
         case .meguriSignIn:
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
-            meguriPhase = .signedOut; meguriEndpoint = "https://sync.example.test/"
+            // Signed in earlier, then signed out: T21.2's needs-you case.
+            meguriPhase = .setupRequired; meguriPhase = .signedOut; meguriEndpoint = "https://sync.example.test/"
             renderConnected = false
         case .meguriNeverSignedIn:
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
@@ -951,7 +952,8 @@ public final class SyncCoordinator {
             connection: meguriAuthenticating ? .authenticating : meguriPhase, stage: meguriStage, routine: meguriRoutine,
             failureKey: meguriFailureKey, finishOffered: meguriCanFinish, automatic: settings.automatic && storedAutomatic,
             mediaFilesLeft: meguriSetupMediaLeft, mediaListKnown: (meguriAffectedFileCount ?? 0) > 0,
-            structureStage: meguriStructureStage, structureUploadPending: meguriStructureUploadPending)
+            structureStage: meguriStructureStage, structureUploadPending: meguriStructureUploadPending,
+            signedInBefore: meguriSignedInBefore)
     }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
     private var providerDiscovery: ProviderDiscoveryOwnership?
@@ -974,7 +976,20 @@ public final class SyncCoordinator {
     private var meguriConnectionOwner: MeguriProviderConnectionOwner? {
         didSet { if meguriConnectionOwner !== oldValue { meguriLastExchange = nil } }
     }
-    public private(set) var meguriPhase: MeguriProviderConnectionPhase = .unconfigured
+    public private(set) var meguriPhase: MeguriProviderConnectionPhase = .unconfigured {
+        // T21.2: a sign-in on this connection makes a later sign-out a problem;
+        // a removed connection starts over as setup.
+        didSet {
+            if meguriPhase == .setupRequired { meguriSignedInBefore = true }
+            else if meguriPhase == .unconfigured { meguriSignedInBefore = false }
+        }
+    }
+    private var meguriSignedInBefore = false
+    /// T21.2: Meguri Sync is selected and has not been signed in yet; the Sync
+    /// section shows the sign-in form alone and the status stays quiet.
+    public var meguriSetupNotFinished: Bool {
+        providerState?.selection == .meguri && SyncKinds.meguriSetupNotFinished(meguriKindFacts)
+    }
     public private(set) var meguriEndpoint = ""
     /// The signed-in account's name (N15.2 row 2); nil while signed out.
     public private(set) var meguriUsername: String?
@@ -2309,6 +2324,8 @@ public final class SyncCoordinator {
              MeguriProviderCredentialFailure.wrongConnection: phase = .blocked
         default: return false
         }
+        // A round runs only on a signed-in connection: its sign-out needs the person (T21.2).
+        meguriSignedInBefore = true
         meguriPhase = phase
         if phase == .signedOut { meguriUsername = nil }
         // Reopen only through explicit sign-in or a checked local load. Keep

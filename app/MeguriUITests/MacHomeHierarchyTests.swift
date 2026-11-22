@@ -142,11 +142,10 @@ final class MacHomeHierarchyTests: XCTestCase {
             let signIn = unique(settings, "settings.sync.meguri.signIn")
             XCTAssertEqual(signIn.elementType, .button)
             XCTAssertFalse(signIn.isEnabled, "The empty setup form cannot sign in")
-            // P25.3: selected but not connected, the switch shows its stored value and is disabled.
-            let automatic = unique(settings, "settings.sync.automatic")
-            XCTAssertFalse(automatic.isEnabled, "Sync Automatically has no effect before the service is connected")
-            // T19.6: no media toggle, Pause, Sign Out, Stop Using or Connect.
-            for id in ["settings.sync.media", "settings.sync.pause", "settings.sync.stop", "settings.sync.connect",
+            // T21.2: before the first sign-in the section is the form alone: no status,
+            // Sync Automatically or Sync Now. T19.6: no media toggle, Pause, Sign Out, Stop Using or Connect.
+            for id in ["settings.sync.status", "settings.sync.automatic", "settings.sync.syncNow",
+                       "settings.sync.media", "settings.sync.pause", "settings.sync.stop", "settings.sync.connect",
                        "settings.sync.meguri.signOut", "settings.sync.privacyFooter"] {
                 XCTAssertEqual(count(id), 0, id)
             }

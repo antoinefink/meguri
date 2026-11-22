@@ -2718,12 +2718,12 @@
       }
     },
     "sync.meguri.status.notSetUp.detail": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
+      "comment": "Approved sync/status-strings T21; shown only for the corresponding local or typed Core fact.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enter your server address and sign in to start."
+            "value": "Sign in to your Meguri Sync server to finish setting up."
           }
         }
       }
@@ -4944,6 +4944,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Meguri couldn’t check whether anything else is waiting. Anything not sent stays only on this device."
+          }
+        }
+      }
+    },
+    "sync.meguri.address.prompt": {
+      "comment": "Approved sync/status-strings T21; shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "https://sync.example.com"
+          }
+        }
+      }
+    },
+    "sync.meguri.required.prompt": {
+      "comment": "Approved sync/status-strings T21; shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Required"
           }
         }
       }
