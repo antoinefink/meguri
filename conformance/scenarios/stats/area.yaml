@@ -1,8 +1,9 @@
 # specs/conformance/dsl.md D9.1. Active scenarios pass T0 on Meguri's executor.
 # card-info/ runs the card_stats observation (stats-ops H9) through U92's
 # executor (stats/card-info C13.2); damaged/ is a run error, not a golden.
-# graphs/ and browse-queries/ run the stats observation (stats-ops H10,
-# stats/graphs-common G14) through the product's graph request (U104);
+# graphs/ and browse-queries/ (all but parse-all and special-deck-names,
+# which observe search kinds only) run the stats observation (stats-ops
+# H10, stats/graphs-common G14) through the product's graph request (U104);
 # reviews/time-wrap passes under deviation stats-review-time-no-wrap.
 # graphs/scope/read-only stays inactive: its whole-collection db_dump holds
 # the new collection's stock note types, which are Meguri's own (R1959), so

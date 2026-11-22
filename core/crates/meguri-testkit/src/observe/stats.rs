@@ -57,7 +57,9 @@ impl Members {
     }
 
     /// A 32-bit float, as its shortest decimal with a fraction: left out
-    /// at 0.
+    /// at 0. A NaN or infinite value has no JSON form and fails the
+    /// observation as a run error; no scenario stores the cards that give
+    /// one.
     fn float(mut self, name: &str, value: f32) -> Result<Self, FormatError> {
         if value != 0.0 {
             self.0.insert(name.to_owned(), f32_value(value)?);
