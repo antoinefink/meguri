@@ -304,6 +304,18 @@ private struct WelcomeRow: View {
         .accessibilityIdentifier(choice.identifier)
     }
 
+    /// In a button the symbol takes the button's colour. An unavailable row is not a
+    /// button, and on touch the list would still tint its symbol: it dims with the title.
+    @ViewBuilder private var symbol: some View {
+        if action.enabled {
+            Image(systemName: choice.systemImage)
+        } else {
+            Image(systemName: choice.systemImage)
+                .foregroundStyle(.token(.textPrimary))
+                .opacity(dimming)
+        }
+    }
+
     private var content: some View {
         HStack(spacing: Spacing.small) {
             // At the accessibility text sizes the text takes the row: a label there wraps
@@ -311,9 +323,7 @@ private struct WelcomeRow: View {
             if decorated {
                 Label { text } icon: {
                     // The title names the row; the symbol is decoration.
-                    Image(systemName: choice.systemImage)
-                        .opacity(dimming)
-                        .accessibilityHidden(true)
+                    symbol.accessibilityHidden(true)
                 }
             } else {
                 text
