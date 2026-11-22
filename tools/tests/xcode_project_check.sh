@@ -128,6 +128,8 @@ CONFIGS="Debug Profile Release AppStore"
 POOL="$REPO/tools/scripts/sim-pool.sh"
 # shellcheck source=../scripts/mac-vm-lib.sh
 . "$REPO/tools/scripts/mac-vm-lib.sh"
+# shellcheck source=/dev/null
+. "$REPO/tools/scripts/host-build.sh"
 # Host builds never resolve a simulator destination against a host device.
 sim_dest() { echo "generic/platform=iOS Simulator"; }
 
@@ -497,7 +499,7 @@ build() {
   local name="$1" config="$2" dest="$3" result="$WORK/$1.xcresult" counts
   shift 3
   rm -rf "$result"
-  xcodebuild build ${MEGURI_BUILD_JOBS:+-jobs "$MEGURI_BUILD_JOBS"} -project "$PROJECT" -scheme Meguri -configuration "$config" -destination "$dest" \
+  mg_host_build xcodebuild build -project "$PROJECT" -scheme Meguri -configuration "$config" -destination "$dest" \
     -derivedDataPath "$DD" -resultBundlePath "$result" ${1+"$@"} >"$LOGS/$name.log" 2>&1
   local rc=$?
   counts="$(xcrun xcresulttool get build-results --path "$result" 2>/dev/null |
@@ -950,7 +952,7 @@ test_in_vm() {
     VM_PRODUCTS_BLOCKED="unchecked Profile/Performance products from $name; see $log"
     profile_cache begin >>"$log" 2>&1 || return 70
   fi
-  if ! xcodebuild build-for-testing ${MEGURI_BUILD_JOBS:+-jobs "$MEGURI_BUILD_JOBS"} -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
+  if ! mg_host_build xcodebuild build-for-testing -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
     -destination "$build_dest" -derivedDataPath "$DD_TESTS" ${signing_args[0]+"${signing_args[@]}"} >>"$log" 2>&1; then
     echo "xcode_project_check: the build for testing failed" >>"$log"
     return 70

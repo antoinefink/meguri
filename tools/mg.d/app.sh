@@ -17,6 +17,9 @@ mg_job build-app host mg_build_app \
 mg_job run host mg_run \
   "Install and launch: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile]; physical requires Debug, or --personal-preview for manual team Release without test hooks, or --real-copy --owner-requested (only on Antoine's request) to install, never launch, the daily-driver Release from installed profiles; physical launches have no overrides; simulator/Mac also accept --route, --window-size, --seconds and -- launch args"
 
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../scripts/host-build.sh"
+
 MG_APP_DD=build/app/DerivedData
 MG_APP_DEV_ID=com.antoinefink.meguri.dev
 

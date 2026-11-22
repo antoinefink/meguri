@@ -65,7 +65,7 @@ mg_xcode_check() {
   if [ "${1:-}" = --settings-only ]; then
     # Settings resolution only: no product, no Release Mac app to register,
     # no VM lease.
-    mg_host_build /bin/bash tools/tests/xcode_project_check.sh build/xcode-check --phase builds --settings-only | tee "$tap"
+    /bin/bash tools/tests/xcode_project_check.sh build/xcode-check --phase builds --settings-only | tee "$tap"
     rc=${PIPESTATUS[0]}
     mg_artifact tap "$tap"
     mg_tap_report "$tap" "$rc" ""
@@ -82,7 +82,7 @@ mg_xcode_check() {
   esac
   rc=0
   if [ "$focused" -eq 0 ]; then
-    mg_host_build /bin/bash tools/tests/xcode_project_check.sh build/xcode-check --phase builds ${1+"$@"} | tee "$tap"
+    /bin/bash tools/tests/xcode_project_check.sh build/xcode-check --phase builds ${1+"$@"} | tee "$tap"
     rc=${PIPESTATUS[0]}
   else
     : >"$tap"
@@ -130,7 +130,7 @@ mg_xcode_check() {
   # (mg__mac_vm_stop_orphans). A run whose SSH session was lost the script
   # stops itself.
   [ "$MG_SIM_RUNNER" != vm ] || MG_MAC_VM_TESTING=1
-  mg_host_build /bin/bash tools/tests/xcode_project_check.sh build/xcode-check --phase devices \
+  /bin/bash tools/tests/xcode_project_check.sh build/xcode-check --phase devices \
     --continue-from "$(grep -cE '^(not )?ok ' "$tap")" ${sims[0]+"${sims[@]}"} ${1+"$@"} | tee -a "$tap"
   devices_rc=${PIPESTATUS[0]}
   # A script that ended abnormally may have left a remote app or test alive.
