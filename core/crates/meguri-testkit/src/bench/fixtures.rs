@@ -127,6 +127,10 @@ pub fn open(path: &Path) -> Result<OpenedCollection, OpenError> {
     open_collection(path, &OpenOptions::new(&clock, &random))
 }
 
+/// The production host, for crates below it whose tests open collections
+/// through it.
+pub use meguri_host::CoreHost;
+
 /// Open an isolated generated engine collection through the production host.
 /// Sync tests use this instead of naming the engine's raw open entry point.
 pub fn open_engine_collection(
