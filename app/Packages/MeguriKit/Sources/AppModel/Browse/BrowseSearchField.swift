@@ -164,6 +164,9 @@ extension BrowseModel {
             acceptedThisTurn = true
             Task { acceptedThisTurn = false }
         }
+        // A row read for another text or scope stays on screen until the new
+        // rows land (no flash), but it is inert.
+        if !suggestionsCurrent { accepted = [] }
         if kept != query.tokens {
             pendingSearch = nil
             setQuery(FilterQuery(tokens: kept, text: query.text))
@@ -301,6 +304,7 @@ extension BrowseModel {
             // A failed read leaves no rows of an older text behind.
             suggestions = rows ?? []
             suggestionsText = rows == nil ? nil : query.text
+            suggestionsReadScope = scope
         }
     }
 
@@ -368,11 +372,17 @@ extension BrowseModel {
         setQuery(query.droppingWord().adding(.field(field.name, test)))
     }
 
+    /// The suggestions shown were read for the text and the scope the field
+    /// holds now.
+    var suggestionsCurrent: Bool {
+        suggestionsText == query.text && suggestionsReadScope == suggestionScope
+    }
+
     /// D6: a syntax candidate's text put in place; one that completes commits.
     private func acceptSyntax(_ candidate: SyntaxCandidate) {
         // Its range is an offset into the text it was made for; once the text
         // changed, the row is not applied.
-        guard suggestionsText == query.text else { return }
+        guard suggestionsCurrent else { return }
         guard let insert = candidate.insert else {
             if candidate.kind == .asTyped { commitText() }
             return

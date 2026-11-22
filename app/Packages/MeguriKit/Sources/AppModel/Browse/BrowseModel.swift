@@ -118,8 +118,9 @@ public final class BrowseModel {
     public var editingContains: EditingContains?
     /// Saved searches' suggestions read again after a Save Search.
     @ObservationIgnored var suggestionsToken: UInt64 = 0
-    /// The text the suggestions shown were read for.
+    /// The text and the scope the suggestions shown were read for.
     @ObservationIgnored var suggestionsText: String?
+    @ObservationIgnored var suggestionsReadScope: FilterSection?
     @ObservationIgnored var offersToken: UInt64 = 0
     @ObservationIgnored var liveRun: Task<Void, Never>?
     /// The query the results last ran.

@@ -283,8 +283,11 @@ import Testing
     @Test func theTextSurvivesTheFieldEmptyingItWhenItTakesASuggestion() async {
         let (model, core) = await makeModel()
         let contains = FilterSuggestion(section: nil, row: .contains("plimb"), key: nil)
+        core.suggestionRows[nil] = [contains]
+        model.setFieldFocused(true)
         // The field empties the text, then hands over the suggestion.
         type(model, "plimb")
+        await until { model.suggestionsCurrent }
         model.editText("")
         model.setFieldTokens(model.fieldTokens + [.suggestion(contains)])
         #expect(model.query.text == "plimb")
@@ -292,6 +295,7 @@ import Testing
         // The other order: the suggestion first, then the emptied text.
         await until { !model.acceptedThisTurn && model.clearedThisTurn == nil }
         type(model, " zindro")
+        await until { model.suggestionsCurrent }
         model.setFieldTokens(model.fieldTokens + [.suggestion(FilterSuggestion(section: nil, row: .contains("zindro"), key: nil))])
         model.editText("")
         #expect(model.query.text == "plimb zindro")
@@ -299,6 +303,30 @@ import Testing
         await until { !model.acceptedThisTurn }
         model.editText("")
         #expect(model.query.text.isEmpty)
+    }
+
+    @Test func rowsReadForAnotherScopeOrTextAreInertUntilTheNewOnesLand() async {
+        let (model, core) = await makeModel()
+        let old = FilterSuggestion(section: .decks, row: .value(Self.spanish), key: nil)
+        core.suggestionRows[nil] = [old]
+        model.setFieldFocused(true)
+        type(model, "plimb sp")
+        await until { model.suggestions == [old] && model.suggestionsCurrent }
+        // Add Another tag… changes the scope; the deck row still shows until the
+        // tags' rows land, and accepting it changes nothing.
+        model.activate(.tag("brask"))
+        model.addAnother(to: 0)
+        #expect(model.suggestions == [old] && !model.suggestionsCurrent)
+        let before = model.query
+        model.setFieldTokens(model.fieldTokens + [.suggestion(old)])
+        #expect(model.query == before)
+        // Once the scope's rows land, a row of them is accepted.
+        let tag = FilterSuggestion(section: .tags, row: .value(.tag("zindro")), key: nil)
+        core.suggestionRows[.tags] = [tag]
+        model.addAnother(to: 0)
+        await until { model.suggestions == [tag] && model.suggestionsCurrent }
+        model.setFieldTokens(model.fieldTokens + [.suggestion(tag)])
+        #expect(model.query.tokens == [token(.tag("brask"), .tag("zindro"))])
     }
 
     // MARK: T13
