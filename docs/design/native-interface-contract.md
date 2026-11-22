@@ -1366,3 +1366,10 @@ From Antoine's annotations on a capture of his opened iPhone Duo (`decisions.md`
 ### N26.4 Search beside Today
 
 - Beside Today, the column always shows the system search field under its title (the navigation bar drawer's `.always` display mode), so the toolbar's Search button (N14.2), which only presented that field, is not drawn there. The compact deck list (an iPhone, the Duo folded or held tall) keeps the button, since its field stays out of the way until asked for.
+
+### N26.5 Deck rows are one height (Antoine, 2026-11-22)
+
+- Every touch deck row is as tall as a row without subdecks (52 points at the default text size), with or without the leading disclosure (N14.7), in the tab layout's list, beside Today and in a deck page's Subdecks; the Today row beside the list too. The row's button keeps its 44-point minimum as the row's content, and the list's vertical padding around it is `Spacing.xxSmall`, scaled with the text (`listRowInsets(.vertical, …)`); the horizontal insets stay the system's. The disclosure's 44 × 44 target is unchanged and still reserves no layout.
+- Cause of the mismatch: the 44-point minimum sat on rows with a disclosure only, and the list added its own vertical padding around it, so those rows were about 73 points against 52.
+- iPad and Mac sidebars draw the system's own rows, which already share one height; unchanged.
+- Checked by UI tests in the test VM.
