@@ -20,6 +20,19 @@ public struct StatsChartSelection: Hashable, Sendable {
     }
 
     public static let none = StatsChartSelection()
+
+    /// The selection carried from the last ready bins to new ones (S10.2):
+    /// kept while the selected period is still there (at its new index),
+    /// cleared when it is gone; never out of range. Empty new bins (a loading
+    /// phase) change nothing.
+    public func carried(from old: [StatsPeriod], to new: [StatsPeriod]) -> StatsChartSelection {
+        guard !new.isEmpty, let bin else { return self }
+        if old.isEmpty || old == new {
+            return new.indices.contains(bin) ? self : .none
+        }
+        guard old.indices.contains(bin), let moved = new.firstIndex(of: old[bin]) else { return .none }
+        return StatsChartSelection(bin: moved, pinned: pinned)
+    }
 }
 
 /// How tall a box's plot is (N25.4: a fixed height per box size). The plot
@@ -111,6 +124,8 @@ struct StatsChartPlot: View {
     @Environment(\.calendar) private var calendar
     @Environment(\.appClock) private var clock
     @FocusState private var focused: Bool
+    /// The bins of the last ready data, kept across a loading phase.
+    @State private var lastReadyBins: [StatsPeriod] = []
 
     private var format: StatsChartFormat { StatsChartFormat(locale: locale, calendar: calendar, now: clock.now()) }
     private var separated: Bool { separatesSeries ?? differentiateWithoutColor }
@@ -135,12 +150,16 @@ struct StatsChartPlot: View {
             .onKeyPress(.rightArrow) { move(1) }
             .onKeyPress(.escape) { clear() }
             .onKeyPress(.return) { browseSelected() }
-            .onChange(of: data.bins) { old, new in
-                // A refresh in place keeps the same bins and the selection
-                // (S10.2); other bins (a period change, a new day) clear it. A
-                // phase with no bins in between (loading) changes nothing.
-                if !old.isEmpty, !new.isEmpty, old != new { selection = .none }
+            .onChange(of: data.bins) { _, new in
+                // Compared with the last ready bins, not a loading phase's
+                // empty ones: the selected period is kept where it still
+                // exists and cleared where it does not (S10.2).
+                guard !new.isEmpty else { return }
+                let carried = selection.carried(from: lastReadyBins, to: new)
+                if carried != selection { selection = carried }
+                lastReadyBins = new
             }
+            .onAppear { if !data.bins.isEmpty { lastReadyBins = data.bins } }
             #if os(macOS)
             .onChange(of: focused) {
                 // A click elsewhere that takes the focus unpins (S8.3).

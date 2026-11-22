@@ -226,6 +226,30 @@ import Testing
         #expect(Self.format.calloutText(data, bin: 0) == "17 Nov, Mature 70, Total by then 1,204")
     }
 
+    @Test func aSelectionSurvivesALoadingPhaseWithUnchangedBins() {
+        let bins: [StatsPeriod] = [.bucket("a"), .bucket("b"), .bucket("c")]
+        let pinned = StatsChartSelection(bin: 2, pinned: true)
+        // Loading: empty bins change nothing.
+        #expect(pinned.carried(from: bins, to: []) == pinned)
+        // The same bins come back.
+        #expect(pinned.carried(from: bins, to: bins) == pinned)
+    }
+
+    @Test func aSelectionFollowsItsPeriodToChangedBins() {
+        let old: [StatsPeriod] = [.bucket("a"), .bucket("b"), .bucket("c")]
+        let new: [StatsPeriod] = [.bucket("b"), .bucket("c"), .bucket("d"), .bucket("e")]
+        #expect(StatsChartSelection(bin: 2, pinned: true).carried(from: old, to: new) == StatsChartSelection(bin: 1, pinned: true))
+        // Its period is gone: cleared.
+        #expect(StatsChartSelection(bin: 0, pinned: true).carried(from: old, to: new) == .none)
+    }
+
+    @Test func aSelectionIsNeverLeftOutOfRange() {
+        let bins: [StatsPeriod] = [.bucket("a"), .bucket("b")]
+        #expect(StatsChartSelection(bin: 5, pinned: true).carried(from: [], to: bins) == .none)
+        #expect(StatsChartSelection(bin: 5, pinned: true).carried(from: bins, to: bins) == .none)
+        #expect(StatsChartSelection.none.carried(from: bins, to: [.bucket("z")]) == .none)
+    }
+
     @Test func copyValuesIsATabSeparatedRowPerBin() {
         let data = StatsChartData(
             bins: [.bucket("a"), .bucket("b")],
