@@ -710,12 +710,15 @@ fn read_kept_knowledge(
     store::visit_kept_samples(snapshot, cancelled, &mut |key, day, values| totals.add_day(key, day, values))?;
     let presets = store::kept_presets(snapshot)?;
     let mut later = Vec::new();
-    store::visit_kept_now(snapshot, &presets, cancelled, &mut |card| match today(card, context) {
+    store::visit_kept_now(snapshot, &presets, cancelled, &mut |card| match today(card, context) && totals.counts(card) {
         true => later.push(*card),
         false => totals.add_now(card, context.now_ms),
     })?;
     let grid = Grid::of(context.next_day_at);
     for card in &later {
+        if cancelled() {
+            return Err(store::interrupted());
+        }
         let preset = card.preset.and_then(|id| presets.get(&id));
         totals.add_now(&store::now_at(&**snapshot, grid, card, preset, context.next_day_at)?, context.now_ms);
     }
@@ -750,7 +753,10 @@ fn read_cold_knowledge(
     let mut totals = KnowledgeTotals::new(selection);
     totals.add_sums(&replayed.sums);
     for card in &replayed.now {
-        if today(card, context) {
+        if today(card, context) && totals.counts(card) {
+            if cancelled() {
+                return Err(store::interrupted());
+            }
             let preset = card.preset.and_then(|id| replayed.presets.get(&id));
             totals.add_now(&store::now_at(&**snapshot, grid, card, preset, context.next_day_at)?, context.now_ms);
         } else {

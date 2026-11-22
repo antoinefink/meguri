@@ -333,6 +333,12 @@ impl KnowledgeTotals {
         }
     }
 
+    /// Whether `card` can count in today's point: unsuspended and in the
+    /// scope.
+    pub(crate) fn counts(&mut self, card: &NowInputs) -> bool {
+        !card.suspended && self.selects(card.key)
+    }
+
     /// One card's part of today's point at `now_ms` (H3.1: the same replay
     /// at now, from the card's record).
     pub(crate) fn add_now(&mut self, card: &NowInputs, now_ms: i64) {

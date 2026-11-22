@@ -571,13 +571,16 @@ pub(crate) fn replay_cards(
             }
         };
         let read = each_card(source, cancel, &mut |input| {
-            batch.push(input);
-            if batch.len() >= WORK {
-                let full = std::mem::replace(&mut batch, Vec::with_capacity(WORK));
-                if let Some((sums, results)) = inline.as_mut() {
-                    let _ = results.send(process(&full, sums));
-                } else if inputs.send(full).is_err() {
-                    return false;
+            if let Some((sums, results)) = inline.as_mut() {
+                // Card by card, so the cancel below is seen after each.
+                let _ = results.send(process(std::slice::from_ref(&input), sums));
+            } else {
+                batch.push(input);
+                if batch.len() >= WORK {
+                    let full = std::mem::replace(&mut batch, Vec::with_capacity(WORK));
+                    if inputs.send(full).is_err() {
+                        return false;
+                    }
                 }
             }
             forward(&done, &mut stopped);
@@ -619,16 +622,20 @@ pub(crate) fn replay_cards(
         read?;
         // A replay that stopped early is never returned as a whole one.
         if cancel() || stopped || stop.load(Ordering::Relaxed) {
-            // SQLITE_INTERRUPT, as a cancelled read reports it.
-            return Err(StorageError::Sqlite {
-                code: 9,
-                extended_code: 9,
-                message: "the history replay was cancelled".into(),
-            });
+            return Err(interrupted());
         }
         sums.prune();
         Ok(sums)
     })
+}
+
+/// SQLITE_INTERRUPT, as a cancelled read reports it.
+pub(crate) fn interrupted() -> StorageError {
+    StorageError::Sqlite {
+        code: 9,
+        extended_code: 9,
+        message: "the history replay was cancelled".into(),
+    }
 }
 
 /// The grid and frame the target's content is kept on.
