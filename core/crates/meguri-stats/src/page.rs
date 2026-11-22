@@ -38,7 +38,10 @@ use crate::graphs::{
     BrowseScope, Columns, Context, ContextToken, GraphResult, History, Preferences, Scope, ScopeData, ScopeError,
     StatsCaches, StatsError, Unreadable,
 };
-use crate::history::{self, CardStatesOverTime, HistoryRequest, HistoryResult, Progress, StartedPart};
+use crate::history::{
+    self, CardStatesOverTime, HistoryRequest, HistoryResult, KnowledgeOverTime, KnowledgeRequest, KnowledgeResult, Progress,
+    StartedPart,
+};
 use crate::parts::activity::{self, ActivityDaysPart};
 use crate::parts::by_deck::ByDeckPart;
 use crate::parts::decks::{self, DeckEntry, Retentions};
@@ -257,6 +260,8 @@ pub enum PartValue {
     ActivityDays(ActivityDaysPart),
     CardStates(CardStatesOverTime),
     Started(StartedPart),
+    /// H3.3's estimate, with its `failed` cards in it.
+    Knowledge(KnowledgeOverTime),
 }
 
 /// Why one part has no value; the request's other parts still return.
@@ -493,11 +498,10 @@ fn run(
                     };
                     history_outcome(part, read)
                 }
-                // U290 (H3) plugs in here: its read on `header.context`, as
-                // `read_history` calls H2's, with progress for this part
-                // (the build's, then the replay's), mapped onto one
-                // outcome; its `failed` count stays in its value.
-                Source::Knowledge => PartOutcome::Failed(PartFailure::NotBuilt),
+                Source::Knowledge => match read_knowledge(caches, collection, derived, &header, request, part, &mut out) {
+                    Err(end) => return Ok(end),
+                    Ok(outcome) => outcome,
+                },
                 Source::Pending(_unit) => PartOutcome::Failed(PartFailure::NotBuilt),
             }
         };
@@ -685,6 +689,51 @@ fn read_history(
         Err(error) => {
             tracing::warn!(%error, "the page's history parts failed");
             Ok(Err(PartFailure::Failed(error.to_string())))
+        }
+    }
+}
+
+/// H3's read on the request's context, with progress for its part (the
+/// build's): one outcome, its `failed` cards kept in the value. `Err` ends
+/// the request.
+fn read_knowledge(
+    caches: &StatsCaches,
+    collection: &Collection,
+    derived: &DerivedHost,
+    header: &PageHeader,
+    request: &PageRequest,
+    part: Part,
+    out: &mut Sink<'_>,
+) -> Result<PartOutcome, PageEnd> {
+    let read = KnowledgeRequest {
+        scope: request.scope.clone(),
+        history: request.history,
+        // H3.2's months reach back to H9's day when it is known; the part
+        // never stops short of its oldest sample with an estimate.
+        oldest_day: match header.oldest_day {
+            OldestDay::Day(day) => Some(day),
+            _ => None,
+        },
+        cancel: Arc::clone(&request.cancel),
+    };
+    let context = &header.context;
+    let result = match request.columns {
+        Columns::Cached => history::knowledge_in(caches, collection, derived, context, &read, &mut |progress| {
+            out.send(PageMessage::Progress { part, progress });
+        }),
+        Columns::Snapshot => history::knowledge_cold(collection, context, &read),
+    };
+    match result {
+        _ if request.cancel.is_cancelled() => Err(PageEnd::Cancelled),
+        Ok(KnowledgeResult::Data(data)) => Ok(PartOutcome::Data(PartValue::Knowledge(data.knowledge))),
+        Ok(KnowledgeResult::UnreadableRow(bad)) => Ok(PartOutcome::Failed(PartFailure::UnreadableRow(bad))),
+        Ok(KnowledgeResult::UnsupportedScope) => Ok(PartOutcome::Failed(PartFailure::UnsupportedScope)),
+        Ok(KnowledgeResult::UnknownDeck) => Err(PageEnd::ScopeError(ScopeError::UnknownDeck)),
+        Ok(KnowledgeResult::ContextChanged) => Err(PageEnd::ContextChanged),
+        Ok(KnowledgeResult::Cancelled) => Err(PageEnd::Cancelled),
+        Err(error) => {
+            tracing::warn!(%error, "the page's knowledge part failed");
+            Ok(PartOutcome::Failed(PartFailure::Failed(error.to_string())))
         }
     }
 }

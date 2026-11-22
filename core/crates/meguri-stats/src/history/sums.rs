@@ -4,8 +4,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use super::knowledge::{Frame, Knowledge, Memory, in_cards};
 use super::replay::{BadCard, Contribution, Grid, Key};
-use super::{CardStatesOverTime, StartedPart, StateCounts};
+use super::{CardStatesOverTime, KnowledgeOverTime, KnowledgeSample, StartedPart, StateCounts};
 use crate::graphs::History;
 use crate::graphs::scope::Unreadable;
 
@@ -14,6 +15,9 @@ use crate::graphs::scope::Unreadable;
 pub(crate) type DayValues = [i64; 6];
 /// Where the started count sits in [`DayValues`].
 pub(crate) const STARTED: usize = 5;
+/// The knowledge of one key at one sample day (H14.1): its cards' summed
+/// recall probabilities in 2^-40 cards, then its studied cards.
+pub(crate) type SampleValues = [i64; 2];
 
 /// The sums of a set of cards per key: what the component's tables hold,
 /// or the change one commit makes to them.
@@ -22,6 +26,8 @@ pub(crate) struct Sums {
     pub days: HashMap<(Key, i64), DayValues>,
     /// Suspended cards per key (H2.1's `left_out`).
     pub left_out: HashMap<Key, i64>,
+    /// H3's kept samples per key and sample day.
+    pub knowledge: HashMap<(Key, i64), SampleValues>,
 }
 
 impl Sums {
@@ -49,10 +55,38 @@ impl Sums {
         }
     }
 
+    /// Adds `sign` times what a card of `key` adds to the kept samples.
+    pub(crate) fn add_knowledge(&mut self, key: Key, knowledge: &Knowledge, sign: i64) {
+        for (day, recall) in &knowledge.points {
+            let values = self.knowledge.entry((key, *day)).or_default();
+            values[0] += sign * recall;
+            values[1] += sign;
+        }
+    }
+
+    /// Adds every sum of `other`.
+    pub(crate) fn merge(&mut self, other: Sums) {
+        for (at, values) in other.days {
+            let sum = self.days.entry(at).or_default();
+            for (total, value) in sum.iter_mut().zip(values) {
+                *total += value;
+            }
+        }
+        for (key, count) in other.left_out {
+            *self.left_out.entry(key).or_default() += count;
+        }
+        for (at, values) in other.knowledge {
+            let sum = self.knowledge.entry(at).or_default();
+            sum[0] += values[0];
+            sum[1] += values[1];
+        }
+    }
+
     /// Drops the entries that sum to nothing.
     pub(crate) fn prune(&mut self) {
         self.days.retain(|_, values| values.iter().any(|v| *v != 0));
         self.left_out.retain(|_, count| *count != 0);
+        self.knowledge.retain(|_, values| values.iter().any(|v| *v != 0));
     }
 }
 
@@ -224,5 +258,150 @@ impl Totals {
                 first_day: self.first_started_day,
             },
         )
+    }
+}
+
+/// One card's record as today's point reads it (H3.1): its key, whether it
+/// is suspended, its home preset's decay and cutoff, and its memory over
+/// every row with and without that cutoff.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NowInputs {
+    pub id: i64,
+    pub key: Key,
+    pub suspended: bool,
+    /// Its home preset's id, decay and cutoff, when it has one.
+    pub preset: Option<i64>,
+    pub decay: Option<f64>,
+    pub cutoff: Option<i64>,
+    pub cut: Memory,
+    pub free: Memory,
+    pub failed_at: Option<i64>,
+    /// The id of its newest row: a row after a request's `N` makes
+    /// today's point replay the card against that `N` (I4).
+    pub newest_row: Option<i64>,
+}
+
+/// H3.3's part, summed from the selected keys' kept samples and records.
+#[derive(Debug)]
+pub(crate) struct KnowledgeTotals {
+    selection: Selection,
+    selected: HashMap<Key, bool>,
+    days: HashMap<i64, [i128; 2]>,
+    now: [i128; 2],
+    failed: u64,
+    left_out: i64,
+}
+
+impl KnowledgeTotals {
+    pub(crate) fn new(selection: Selection) -> KnowledgeTotals {
+        KnowledgeTotals {
+            selection,
+            selected: HashMap::new(),
+            days: HashMap::new(),
+            now: [0; 2],
+            failed: 0,
+            left_out: 0,
+        }
+    }
+
+    fn selects(&mut self, key: Key) -> bool {
+        let selection = &self.selection;
+        *self.selected.entry(key).or_insert_with(|| selection.holds_key(key))
+    }
+
+    /// One key's kept sample on one absolute day.
+    pub(crate) fn add_day(&mut self, key: Key, day: i64, values: &SampleValues) {
+        if self.selects(key) {
+            let sum = self.days.entry(day).or_default();
+            sum[0] += i128::from(values[0]);
+            sum[1] += i128::from(values[1]);
+        }
+    }
+
+    pub(crate) fn add_left_out(&mut self, key: Key, count: i64) {
+        if self.selects(key) {
+            self.left_out += count;
+        }
+    }
+
+    pub(crate) fn add_sums(&mut self, sums: &Sums) {
+        for ((key, day), values) in &sums.knowledge {
+            self.add_day(*key, *day, values);
+        }
+        for (key, count) in &sums.left_out {
+            self.add_left_out(*key, *count);
+        }
+    }
+
+    /// Whether `card` can count in today's point: unsuspended and in the
+    /// scope.
+    pub(crate) fn counts(&mut self, card: &NowInputs) -> bool {
+        !card.suspended && self.selects(card.key)
+    }
+
+    /// One card's part of today's point at `now_ms` (H3.1: the same replay
+    /// at now, from the card's record).
+    pub(crate) fn add_now(&mut self, card: &NowInputs, now_ms: i64) {
+        if card.suspended || !self.selects(card.key) {
+            return;
+        }
+        match (Knowledge::now(card.cut, card.free, card.failed_at, card.cutoff, now_ms), card.decay) {
+            // A state with no kept preset cannot be: never a recall of 1.
+            (Memory::Failed, _) | (Memory::State { .. }, None) => self.failed += 1,
+            (memory, decay) => {
+                if let Some(recall) = memory.recall_at(now_ms.div_euclid(1_000), decay.unwrap_or(0.0)) {
+                    self.now[0] += i128::from(recall);
+                    self.now[1] += 1;
+                }
+            }
+        }
+    }
+
+    /// The part for a request on `frame` (its `N` is `next_day_at`, its now
+    /// `now_ms`), with month samples back to the month of the absolute day
+    /// `oldest` when `months` (H3.2).
+    pub(crate) fn finish(self, grid: Grid, frame: Frame, now_ms: i64, months: bool, oldest: Option<i64>) -> KnowledgeOverTime {
+        let today = frame.latest + 1;
+        // Never fewer months than the kept samples hold: the earliest kept
+        // day of the selection bounds them too.
+        let first = frame.first_daily();
+        let earliest = self
+            .days
+            .iter()
+            .filter(|(day, values)| values[1] != 0 && (frame.is_month_end(**day) || **day >= first) && **day <= frame.latest)
+            .map(|(day, _)| *day)
+            .min();
+        let from = match (oldest, earliest) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        let days = frame.sample_days(if months { from } else { None });
+        let mut samples: Vec<KnowledgeSample> = days
+            .into_iter()
+            .map(|day| {
+                let values = self.days.get(&day).copied().unwrap_or_default();
+                KnowledgeSample {
+                    day: i32::try_from(day - today).unwrap_or(i32::MIN),
+                    instant_ms: grid.end(day).saturating_mul(1_000),
+                    knowledge: in_cards(values[0]),
+                    studied: u64::try_from(values[1]).unwrap_or(0),
+                }
+            })
+            .collect();
+        samples.push(KnowledgeSample {
+            day: 0,
+            instant_ms: now_ms,
+            knowledge: in_cards(self.now[0]),
+            studied: u64::try_from(self.now[1]).unwrap_or(0),
+        });
+        // H3.1's no estimate: no card of the scope gives an item anywhere.
+        if samples.iter().all(|sample| sample.studied == 0) {
+            samples.clear();
+        }
+        KnowledgeOverTime {
+            samples,
+            failed: self.failed,
+            left_out: u64::try_from(self.left_out).unwrap_or(0),
+        }
     }
 }

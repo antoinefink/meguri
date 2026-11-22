@@ -32,8 +32,8 @@ const DAY: i64 = 86_400;
 const DAY_MS: i64 = DAY * 1_000;
 const WAIT: Duration = Duration::from_secs(120);
 
-/// The parts whose units have not landed (U290).
-const PENDING: [Part; 1] = [Part::KnowledgeOverTime];
+/// The parts whose units have not landed: none now.
+const PENDING: [Part; 0] = [];
 
 fn every_part() -> Vec<Part> {
     Part::all().collect()
@@ -253,6 +253,22 @@ fn h15_parts_equal_the_engine_and_the_history_read_for_their_context() {
                 }
                 other => panic!("{other:?}"),
             }
+            // H3's part is the knowledge read's for the header's context.
+            let cold = history::knowledge_cold(
+                &collection,
+                &header.context,
+                &history::KnowledgeRequest {
+                    scope: scope.clone(),
+                    history,
+                    oldest_day: None,
+                    cancel: CancelToken::new(),
+                },
+            )
+            .unwrap();
+            match (cold, value(&cached, Part::KnowledgeOverTime)) {
+                (history::KnowledgeResult::Data(cold), PartValue::Knowledge(mine)) => assert_eq!(*mine, cold.knowledge),
+                other => panic!("{other:?}"),
+            }
         }
     }
 }
@@ -367,7 +383,9 @@ fn h15_an_unreadable_row_in_the_window_fails_every_part_outside_only_the_history
     assert_eq!(end, PageEnd::Complete);
     // H18: the parts that read all history fail alone (H2, H11), and the
     // header carries no `oldest_day` (H9).
-    let all_history = |part: Part| matches!(part, Part::CardStatesOverTime | Part::Started | Part::ActivityDays);
+    let all_history = |part: Part| {
+        matches!(part, Part::CardStatesOverTime | Part::Started | Part::ActivityDays | Part::KnowledgeOverTime)
+    };
     for part in Part::all().filter(|p| !PENDING.contains(p)) {
         match outcome(&messages, part) {
             PartOutcome::Failed(PartFailure::UnreadableRow(row)) => {

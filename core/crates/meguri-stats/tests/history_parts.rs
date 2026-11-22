@@ -1141,3 +1141,45 @@ fn h13_an_unreadable_row_on_the_day_is_reported_and_one_on_another_day_is_not() 
         ));
     }
 }
+
+// H9 into H3.2: Knowledge's month samples reach back to the oldest day.
+
+#[test]
+fn h9_knowledge_month_samples_reach_back_to_the_headers_oldest_day() {
+    use meguri_stats::history::{self, KnowledgeRequest, KnowledgeResult};
+    let f = empty();
+    let n = f.next_day_at();
+    put_deck_cards(&f, &[(1, LANG, 0, 2, 2, 30)]);
+    // The scope's oldest row is unrated (no memory item), 700 days ago; the
+    // first graded review comes 300 days later.
+    put_rows_on(&f, 1, &[
+        row(at_second(n - 700 * DAY - 3_600)).ease(0).kind(4),
+        row(at_second(n - 400 * DAY - 3_600)).kind(0).last(-600),
+        row(at_second(n - 390 * DAY - 3_600)),
+    ]);
+    let (outcomes, header) = page_parts(&f, Scope::Deck(DeckId(LANG)), History::AllHistory, &[Part::KnowledgeOverTime]);
+    assert_eq!(header.oldest_day, OldestDay::Day(-700));
+    let PartOutcome::Data(PartValue::Knowledge(part)) = &outcomes[&Part::KnowledgeOverTime] else {
+        panic!("{outcomes:?}");
+    };
+    let cold = |oldest_day: Option<i32>| {
+        let request = KnowledgeRequest {
+            scope: Scope::Deck(DeckId(LANG)),
+            history: History::AllHistory,
+            oldest_day,
+            cancel: CancelToken::new(),
+        };
+        match history::knowledge_cold(&f.collection(), &header.context, &request).unwrap() {
+            KnowledgeResult::Data(data) => data.knowledge,
+            other => panic!("{other:?}"),
+        }
+    };
+    // The page passes H9's day: its samples are a cold read's with it.
+    assert_eq!(*part, cold(Some(-700)));
+    // The first sample is the end of the oldest day's month, before any
+    // estimate; without the day the leading empty months are dropped.
+    let first = part.samples[0].day;
+    assert!((-700..-669).contains(&first), "{first}");
+    assert_eq!(part.samples[0].studied, 0);
+    assert!(cold(None).samples[0].day > first);
+}
