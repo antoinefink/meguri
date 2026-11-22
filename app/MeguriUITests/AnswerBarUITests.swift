@@ -47,9 +47,12 @@ final class AnswerBarUITests: XCTestCase {
         settle(1.5)
         let after = (progress.value as? String) ?? ""
         capture(app, "new-light-after-tap-beside-easy")
-        if after.hasPrefix("1 ") {
-            XCTAssertEqual(Int(after.split(separator: " ").last ?? ""), total, "Answered Easy (the button), not Good (a zone): \(after)")
-        }
+        let answered = Int(after.split(separator: " ").first ?? ""), totalAfter = Int(after.split(separator: " ").last ?? "")
+        XCTAssertNotNil(total, "The progress before: \(String(describing: progress.value))")
+        XCTAssertNotNil(answered, "The progress after: \(after)")
+        // Either the area kept the tap (nothing answered), or Easy's own hit
+        // region took it (the card leaves: same total). Never a zone's Good.
+        XCTAssertTrue(answered == 0 || (answered == 1 && totalAfter == total), "Not Good from a zone: \(after)")
     }
 
     func testShortCardIsNotCoveredDark() throws {
