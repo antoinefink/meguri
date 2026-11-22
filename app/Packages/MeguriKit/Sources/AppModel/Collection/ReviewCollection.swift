@@ -391,6 +391,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         let value = NoteTypesModel(backend: CoreNoteTypesBackend())
         value.service = { [weak self] in self?.noteTypeSaveService ?? .other }
         value.writable = { [weak self] in self?.noteTypeWriteAllowed ?? false }
+        value.hasCollection = { [weak self] in self?.hasCollection ?? false }
         value.presentQuestion = { [weak self] in
             guard let self, self.navigation.sheet == nil || self.navigation.sheet == .noteTypeSave else { return false }
             self.navigation.present(.noteTypeSave)
@@ -402,6 +403,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         noteTypesOwner = value
         return value
     }
+    /// A collection exists on this device: false on first run, while Today
+    /// shows the welcome (N18.3). The sections that read a collection (Browse,
+    /// Note Types) are not offered until one is created, imported or synced.
+    public var hasCollection: Bool { state != .noFile }
     /// `notetypes/draft-save` D3 counts Meguri Sync only with a ready binding.
     /// Whether the binding is ready is read in the background and can be
     /// unknown for a moment, so any Meguri Sync selection counts here: a

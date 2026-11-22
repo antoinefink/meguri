@@ -36,7 +36,7 @@ struct SidebarView: View {
     /// The section rows at the top (N21.1: Today and Browse, each with its
     /// symbol), each tagged for the list it is in.
     private func sectionRows<Tag: Hashable>(tag: @escaping (AppSection) -> Tag) -> some View {
-        ForEach(features.availableSections, id: \.self) { section in
+        ForEach(features.availableSections.filter(features.sectionShown), id: \.self) { section in
             Button {
                 navigation.select(.section(section))
             } label: {

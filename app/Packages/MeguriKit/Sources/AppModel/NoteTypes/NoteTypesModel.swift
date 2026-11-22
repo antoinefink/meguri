@@ -11,7 +11,9 @@ import Observation
 @Observable @MainActor
 public final class NoteTypesModel {
     public nonisolated enum Tab: String, Sendable, Hashable, CaseIterable { case fields, cards }
-    public nonisolated enum Phase: Sendable, Hashable { case idle, loading, ready, failed }
+    /// `noCollection`: there is no collection to read (first run); nothing
+    /// failed, and nothing is offered to try again.
+    public nonisolated enum Phase: Sendable, Hashable { case idle, loading, ready, failed, noCollection }
 
     /// One row of the list (W2).
     public nonisolated struct Item: Identifiable, Sendable, Hashable {
@@ -107,6 +109,9 @@ public final class NoteTypesModel {
     @ObservationIgnored let backend: any NoteTypesBackend
     /// D3: the service and its binding, read at Save (and for the button's title).
     @ObservationIgnored public var service: @MainActor () -> NoteTypeSaveService = { .other }
+    /// Whether a collection exists to read: false on first run, before one
+    /// is created, imported or synced (N18.3).
+    @ObservationIgnored public var hasCollection: @MainActor () -> Bool = { true }
     /// Whether the collection takes a write now (no review, ready, not closing).
     @ObservationIgnored public var writable: @MainActor () -> Bool = { true }
     /// Shows the Save sheet (`SheetRoute.noteTypeSave`); false when another
@@ -155,13 +160,15 @@ public final class NoteTypesModel {
     /// refresh it from the change events.
     public func appear() {
         appeared = true
-        guard phase == .idle || phase == .failed else { return }
+        guard phase == .idle || phase == .failed || phase == .noCollection else { return }
         reloadList()
     }
 
     public func reloadList() {
         listToken &+= 1
         let token = listToken
+        // No collection: nothing to read and nothing failed.
+        guard hasCollection() else { items = []; selection = nil; phase = .noCollection; return }
         if items.isEmpty { phase = .loading }
         Task {
             do {
@@ -174,6 +181,9 @@ public final class NoteTypesModel {
                 refreshCounts()
             } catch {
                 guard token == listToken else { return }
+                // A collection that went while the list was read is not a failure,
+                // and its rows go with it.
+                guard hasCollection() else { items = []; selection = nil; phase = .noCollection; return }
                 phase = items.isEmpty ? .failed : .ready
             }
         }
