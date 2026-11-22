@@ -65,6 +65,9 @@ struct SidebarRootView: View {
                             #endif
                             .navigationDestination(for: Destination.self) { destination in
                                 SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+                                    // A pushed page (a note type's on iPad) does not get the value set on
+                                    // the stack below: it gets it here.
+                                    .environment(\.syncStatusItem, sectionPlacesSyncItem ? features.syncStatus?() : nil)
                                     #if !os(macOS)
                                     // A page pushed in those sections (a note type's) keeps it too.
                                     .toolbar {
