@@ -86,6 +86,10 @@ pub struct ComponentSchema {
     pub version: u32,
     pub tables: Vec<TableDef>,
     pub indexes: Vec<IndexDef>,
+    /// The record table naming the files the component owns beside the
+    /// store (D1), by its `name` column; `None` for a component without
+    /// files.
+    pub files: Option<String>,
 }
 
 impl ComponentSchema {
@@ -95,6 +99,7 @@ impl ComponentSchema {
             version,
             tables: Vec::new(),
             indexes: Vec::new(),
+            files: None,
         }
     }
 
@@ -105,6 +110,14 @@ impl ComponentSchema {
 
     pub fn index(mut self, index: IndexDef) -> ComponentSchema {
         self.indexes.push(index);
+        self
+    }
+
+    /// The component owns files beside the store, named by the `name`
+    /// column of its table `table` (D1): a file is live only while a row of
+    /// that table names it.
+    pub fn files(mut self, table: impl Into<String>) -> ComponentSchema {
+        self.files = Some(table.into());
         self
     }
 
@@ -176,6 +189,14 @@ impl ComponentSchema {
                     self.name, index.name, index.table
                 )));
             }
+        }
+        if let Some(files) = &self.files
+            && !tables.contains(files.as_str())
+        {
+            return Err(refused(format!(
+                "component {}: its file records name no table of it ({files})",
+                self.name
+            )));
         }
         Ok(())
     }

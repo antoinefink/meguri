@@ -195,6 +195,33 @@ fn names(conn: &Connection, table: &str) -> Result<Vec<(i64, Option<String>)>, S
     Ok(out)
 }
 
+/// A read-only statement of storage's own whose rows are handed to `visit`
+/// as cells (one buffer, refilled per row); cancelled as [`visit`] is.
+pub(crate) fn visit_cells(
+    conn: &Connection,
+    sql: &str,
+    params: &[Cell],
+    cancel: &dyn Fn() -> bool,
+    visit: &mut dyn FnMut(&[Cell]) -> bool,
+) -> Result<(), StorageError> {
+    with_cancel(conn, cancel, || {
+        let mut statement = conn.prepare_cached(sql)?;
+        let columns = statement.column_count();
+        let mut rows = statement.query(params_from_iter(params))?;
+        let mut cells: Vec<Cell> = Vec::with_capacity(columns);
+        while let Some(row) = rows.next()? {
+            cells.clear();
+            for index in 0..columns {
+                cells.push(Cell::from_ref(row.get_ref(index)?));
+            }
+            if !visit(&cells) {
+                break;
+            }
+        }
+        Ok(())
+    })
+}
+
 /// Runs `work` under the progress handler that stops SQLite once `cancel`
 /// says so; a cancel seen before it starts is the interrupt too.
 fn with_cancel<T>(

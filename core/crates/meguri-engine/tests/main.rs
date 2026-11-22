@@ -54,6 +54,8 @@ pub mod deck_delete_losses;
 pub mod deck_options;
 #[path = "decks.rs"]
 pub mod decks;
+#[path = "derived_deferred.rs"]
+pub mod derived_deferred;
 #[path = "editor_services.rs"]
 pub mod editor_services;
 #[path = "exclusive.rs"]
