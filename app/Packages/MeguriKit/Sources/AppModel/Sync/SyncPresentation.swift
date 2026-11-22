@@ -282,14 +282,15 @@ extension ReviewCollection {
     /// preserves the collection's subscription and platform-configuration order.
     public func prepareCloudConnectionPreview(allowDuringReview: Bool = false) async throws {
         guard review == nil || allowDuringReview else { throw BridgeError.sessionActive }
+        // Refused before any write or Host: this installation cannot use iCloud.
+        guard !sync.iCloudUnsupported else { throw BridgeError.unavailable(reason: "configuration") }
         // A recovery call the person starts clears the update hold first (P25.2).
         guard await sync.clearUpdateHold() else { throw BridgeError.unavailable(reason: "paused") }
-        // Refused before any Host is prepared for it: this installation cannot use iCloud.
+        try await prepareCloudConnectionHost()
+        try Task.checkCancellation()
         guard sync.setupState != .configurationUnavailable else {
             throw BridgeError.unavailable(reason: "configuration")
         }
-        try await prepareCloudConnectionHost()
-        try Task.checkCancellation()
         guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         guard !sync.settings.paused else { throw BridgeError.unavailable(reason: "paused") }
         sync.beginConnectionPreview()
@@ -312,8 +313,11 @@ extension ReviewCollection {
             return .failed
         }
         sync.serviceChangeBegan()
-        // An installation that cannot use iCloud never makes it the service.
-        if target == .iCloud, sync.setupState == .configurationUnavailable { return failed(.preparation, .iCloudSetupNeeded) }
+        // An installation that cannot use iCloud never makes it the service. One
+        // that has it stored cannot read or stop its binding, so it stays as it is.
+        if sync.iCloudUnsupported, target == .iCloud || source == .iCloud || sync.providerState?.selection == .iCloud {
+            return failed(.preparation, .iCloudSetupNeeded)
+        }
         do { try await prepareSyncServiceSelection() }
         catch { return failed(.preparation, .init(ProviderFailureReason(error))) }
         let current = sync

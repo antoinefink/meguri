@@ -283,6 +283,9 @@ public final class SyncCoordinator {
     private var ownerState: SetupState = .configurationUnavailable
     /// False when the build has no verified iCloud container and schema.
     @ObservationIgnored private let cloudConfigured: Bool
+    /// Known from the build alone, before any preparation: iCloud is never
+    /// offered a Host, a preview or the selection on this installation.
+    public var iCloudUnsupported: Bool { !cloudConfigured }
     /// Why the Service control's last change did not finish; nil after a change that did.
     public private(set) var serviceChangeFailure: SyncServiceChangeFailure?
     @ObservationIgnored private var providerChangeReason: ProviderFailureReason = .other
@@ -691,6 +694,9 @@ public final class SyncCoordinator {
     private func migrateRound2Settings(_ retained: Result<CloudRecoveryStatus?, any Error>) async {
         if let pending = providerSettingsTask { await pending.value }
         guard let defaults, round2MigrationPending else { return }
+        // No op can be read where iCloud is unusable; with iCloud stored as the
+        // service it is not proved absent, so nothing opens (P25.2).
+        guard cloudConfigured || providerState?.selection != .iCloud else { return }
         let operation = retainedOperationForMigration?() ?? retained.map { $0 != nil }
         var next = settings
         // P25.3: an off the person chose under the earlier build belongs to the
@@ -2917,8 +2923,12 @@ public final class SyncCoordinator {
     /// MP-E can present these typed commands later. No service picker or
     /// transfer producer is introduced here.
     @discardableResult public func changeProvider(to destination: SyncProviderSelection, removeMeguriCredentials: Bool = false) async -> Bool {
-        // iCloud is never the committed service of an installation that cannot use it.
-        guard destination != .iCloud || cloudConfigured else { providerChangeReason = .unsupported; return false }
+        // iCloud is never made the service of an installation that cannot use it.
+        // A stored iCloud selection there keeps its binding and any op: nothing
+        // here can read or stop them (V27.5), so leaving it stays refused too.
+        guard cloudConfigured || (destination != .iCloud && providerState?.selection != .iCloud) else {
+            providerChangeReason = .unsupported; return false
+        }
         guard providerChangeAllowed(), let provider, !suspended, !replacing,
               !providerActionInProgress, !entryActivationHeld,
               !closing || providerHandoff != nil else {
@@ -3417,7 +3427,7 @@ public final class SyncCoordinator {
     }
     /// V27.5's rows for Off with iCloud selected. Writes nothing when refused.
     @discardableResult public func turnOffICloud() async -> Bool {
-        guard providerState?.selection == .iCloud, !serviceChangeRefusedForOperation else { return false }
+        guard providerState?.selection == .iCloud, cloudConfigured, !serviceChangeRefusedForOperation else { return false }
         if Self.offStopsBinding(bindingActive: status?.controls.bindingActive, operationPresent: recovery != nil) {
             await stopUsingICloud()
         } else { await keepLocalOnly() }
@@ -3821,7 +3831,8 @@ public final class SyncCoordinator {
     func quitAfterLocalFlush(completion: @escaping @MainActor () -> Void) async {
         cancelOwnEditorDecision()
         cancelMeguriEditorDecision(meguriAction?.id)
-        guard backend != nil else { completion(); return }
+        // A provider-only owner has no policy to answer the quit request.
+        guard backend != nil, cloudConfigured else { completion(); return }
         quitCompletion = completion
         receive(.quitRequested)
         await waitForInputs()

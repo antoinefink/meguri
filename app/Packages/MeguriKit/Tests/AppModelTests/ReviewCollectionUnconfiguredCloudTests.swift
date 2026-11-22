@@ -50,13 +50,13 @@ extension ReviewCollectionStartupTests {
         try await withUnconfiguredCloudInstallation { root, suite, store in
             let app = UnconfiguredCloudApp(root: root, suite: suite, store: store)
             do {
-                // First launch ever: no collection file, nothing selected.
-                await app.owner.start()
-                try #require(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
-                try #require((app.sync.providerState?.selection ?? .localOnly) == .localOnly)
-                #expect(app.sync.setupState == .configurationUnavailable && !app.sync.operationFailed)
                 let calls = Mutex<[BridgeCall]>([])
                 try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                    // First launch ever: no collection file, nothing selected.
+                    await app.owner.start()
+                    try #require(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
+                    try #require((app.sync.providerState?.selection ?? .localOnly) == .localOnly)
+                    #expect(app.sync.setupState == .configurationUnavailable && !app.sync.operationFailed)
                     // The Service control: Off to Meguri Sync.
                     let chosen = await app.owner.changeSyncService(to: .meguri, from: app.sync.providerState?.selection)
                     #expect(chosen == .changed, "\(String(describing: app.sync.serviceChangeFailure))")
@@ -103,11 +103,18 @@ extension ReviewCollectionStartupTests {
                 #expect(later.providerState?.selection == .meguri && later.meguriSignInAttached && !later.operationFailed)
                 #expect(later.setupState == .configurationUnavailable && later.connectionService == nil)
                 #expect(later.meguriEndpoint == "https://unconfigured-cloud.synthetic.example/")
+                // A background and foreground cycle leaves the owner attached and quiet.
+                relaunched.owner.setForeground(false); await relaunched.owner.waitForLifecycle()
+                relaunched.owner.setForeground(true); await relaunched.owner.waitForLifecycle()
+                await later.waitForInputs()
+                #expect(relaunched.sync === later && later.meguriSignInAttached && !later.operationFailed)
+                #expect(relaunched.owner.state == .ready)
                 // Back to Off, as the confirmation sheet asks for it.
                 #expect(await relaunched.owner.changeSyncService(to: .localOnly, from: .meguri) == .changed)
                 #expect(relaunched.sync.providerState?.selection == .localOnly && relaunched.sync.serviceChangeFailure == nil)
                 #expect(relaunched.owner.state == .ready && relaunched.owner.error == nil)
-                try #require(await relaunched.owner.close())
+                // Quit with a collection open: the provider-only owner must not hold it.
+                try #require(await relaunched.owner.closeForQuit())
             } catch { _ = await relaunched.owner.close(); throw error }
         }
     }
