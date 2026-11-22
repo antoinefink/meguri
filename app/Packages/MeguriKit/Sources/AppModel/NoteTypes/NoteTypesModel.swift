@@ -58,10 +58,6 @@ public final class NoteTypesModel {
         didSet { if selection != oldValue { selectionChanged() } }
     }
     public var tab: Tab = .fields
-    /// iPad: the note type pushed over the list (N22.7); setting it selects it.
-    public var opened: Int64? {
-        didSet { if let opened, opened != selection { selection = opened } }
-    }
     /// iPad: the field whose options show in a popover.
     public var optionsField: Int?
     public private(set) var records: [Int64: NotetypeRecord] = [:]
@@ -418,8 +414,9 @@ public final class NoteTypesModel {
 
     /// Save (⌘S): D2's summary of the draft as it is, then D3; the sheet
     /// when it asks, else the save at once with nothing confirmed.
-    public func save() {
-        guard let id = selection, canSave(id) else { return }
+    /// `id`: the note type on screen (iPad's page); the selection otherwise.
+    public func save(_ notetype: Int64? = nil) {
+        guard let id = notetype ?? selection, canSave(id) else { return }
         let epoch = epoch
         saveRunning = true
         saveTask = Task {

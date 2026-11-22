@@ -16,20 +16,10 @@ struct NoteTypesTouchRoot: View {
     var body: some View {
         List {
             ForEach(model.filteredItems) { item in
-                Button {
-                    model.opened = item.id
-                } label: {
-                    HStack(spacing: Spacing.small) {
-                        NoteTypeListRow(item: item, edited: model.isEdited(item.id))
-                        // The row opens a page, as a navigation row shows.
-                        Image(systemName: "chevron.forward")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                            .accessibilityHidden(true)
-                    }
-                    .contentShape(Rectangle())
+                // A navigation row: the page is a `Destination` of the section's stack.
+                NavigationLink(value: Destination.noteType(item.id)) {
+                    NoteTypeListRow(item: item, edited: model.isEdited(item.id))
                 }
-                .foregroundStyle(.primary)
             }
         }
         .overlay {
@@ -53,28 +43,34 @@ struct NoteTypesTouchRoot: View {
         .accessibilityIdentifier("noteTypes.list.table")
         .navigationTitle(Text("noteTypes.title", bundle: .module))
         .searchable(text: $model.filter, prompt: Text("noteTypes.list.filter", bundle: .module))
-        .navigationDestination(item: $model.opened) { id in
-            NoteTypeTouchPage(model: model, id: id, cards: cards)
-        }
         .onAppear { model.appear() }
     }
 }
 
-/// One note type's page: its name with "412 notes · 786 cards" under it,
-/// Fields | Cards, then Revert and Save.
-private struct NoteTypeTouchPage: View {
-    @Bindable var model: NoteTypesModel
-    let id: Int64
-    let cards: (Int64) -> AnyView
+/// One note type's page (iPad, N22.7): its name with "412 notes · 786 cards"
+/// under it, Fields | Cards, then Revert and Save. Leaving it keeps the draft (D1).
+public struct NoteTypePage: View {
+    @Bindable private var model: NoteTypesModel
+    private let id: Int64
+    private let cards: (Int64) -> AnyView
     @Environment(\.locale) private var locale
 
-    var body: some View {
+    public init(model: NoteTypesModel, id: Int64, cards: @escaping (Int64) -> AnyView = { _ in AnyView(CardsPlaceholder()) }) {
+        self.model = model
+        self.id = id
+        self.cards = cards
+    }
+
+    public var body: some View {
         NoteTypeDetailContent(model: model, id: id, cards: cards)
             .navigationTitle(Text(verbatim: model.draft(id)?.name ?? model.item(id)?.name ?? ""))
             .navigationSubtitle(subtitle)
             .navigationBarTitleDisplayMode(.inline)
-            // A changed draft is never left by the back gesture; Revert or Save first (D1).
-            .navigationBarBackButtonHidden(model.isEdited(id))
+            .onAppear {
+                model.optionsField = nil
+                if model.selection != id { model.selection = id }
+            }
+            .onDisappear { model.optionsField = nil }
             .toolbar {
                 if model.isEdited(id) {
                     ToolbarItem(placement: .topBarLeading) {
@@ -100,7 +96,7 @@ private struct NoteTypeTouchPage: View {
                     if let progress = model.progress, progress.notetypeId == id {
                         SaveProgressView(progress: progress)
                     }
-                    Button { model.save() } label: {
+                    Button { model.save(id) } label: {
                         model.saveAsks(id) ? Text("noteTypes.saveAsks", bundle: .module) : Text("noteTypes.save", bundle: .module)
                     }
                     .buttonStyle(.borderedProminent)
@@ -137,6 +133,11 @@ struct NoteTypeFieldsTouchList: View {
     let lines: [FieldLine]
     @Environment(\.editMode) private var editMode
     @Environment(\.locale) private var locale
+    /// The Mac table's Used On and Notes column widths, scaled with the text; Name takes the rest.
+    @ScaledMetric(relativeTo: .body) private var usedOnWidth: CGFloat = 200
+    @ScaledMetric(relativeTo: .body) private var notesWidth: CGFloat = 120
+    /// The Sort column, header and radios alike.
+    @ScaledMetric(relativeTo: .body) private var sortWidth: CGFloat = 44
 
     private var editable: Bool { model.editable(id) }
 
@@ -194,19 +195,16 @@ struct NoteTypeFieldsTouchList: View {
             Text("noteTypes.fields.name", bundle: .module)
             Spacer(minLength: Spacing.small)
             Text("noteTypes.fields.sort", bundle: .module)
-                .frame(minWidth: ControlMetrics.minimumTarget)
+                .frame(minWidth: sortWidth)
             Text("noteTypes.fields.usedOn", bundle: .module)
-                .frame(width: Self.usedOnWidth, alignment: .leading)
+                .frame(width: usedOnWidth, alignment: .leading)
             Text("noteTypes.fields.notes", bundle: .module)
-                .frame(width: Self.notesWidth, alignment: .leading)
+                .frame(width: notesWidth, alignment: .leading)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("noteTypes.fields.header")
     }
 
-    /// The Mac table's Used On and Notes column widths; Name takes the rest.
-    private static let usedOnWidth: CGFloat = 200
-    private static let notesWidth: CGFloat = 120
 
     private func row(_ line: FieldLine) -> some View {
         HStack(spacing: Spacing.small) {
@@ -214,12 +212,21 @@ struct NoteTypeFieldsTouchList: View {
                 model.selectedField[id] = line.id
                 model.optionsField = line.id
             } label: {
-                Text(verbatim: line.name)
-                    .strikethrough(line.deleted)
-                    .foregroundStyle(line.deleted ? .secondary : .primary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
-                    .contentShape(Rectangle())
+                VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                    Text(verbatim: line.name)
+                        .strikethrough(line.deleted)
+                        .foregroundStyle(line.deleted ? .secondary : .primary)
+                        .lineLimit(1)
+                    // W3: a refused name shows under its row, after the popover closed too.
+                    if let refusal = model.renameRefusal, refusal.row == line.id {
+                        Text(NoteTypesStrings.refusal(refusal.refusal, locale: locale))
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("noteTypes.fields.renameRefusal.\(line.id)")
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(line.deleted || editMode?.wrappedValue.isEditing == true)
@@ -235,7 +242,7 @@ struct NoteTypeFieldsTouchList: View {
             } label: {
                 Image(systemName: line.isSort ? "largecircle.fill.circle" : "circle")
                     .foregroundStyle(line.isSort ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                    .frame(minWidth: sortWidth, minHeight: ControlMetrics.minimumTarget)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -255,7 +262,7 @@ struct NoteTypeFieldsTouchList: View {
                 }
             }
             .lineLimit(1)
-            .frame(width: Self.usedOnWidth, alignment: .leading)
+            .frame(width: usedOnWidth, alignment: .leading)
             .accessibilityIdentifier("noteTypes.fields.usedOn.\(line.id)")
             HStack(spacing: Spacing.xSmall) {
                 if let notes = line.notes, let total = line.ofNotes {
@@ -268,7 +275,7 @@ struct NoteTypeFieldsTouchList: View {
                         .strikethrough(line.deleted)
                 }
             }
-            .frame(width: Self.notesWidth, alignment: .leading)
+            .frame(width: notesWidth, alignment: .leading)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("noteTypes.fields.notes.\(line.id)")
         }

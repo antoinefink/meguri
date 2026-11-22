@@ -50,6 +50,9 @@ extension TestHooks {
             features.sectionRoot = { section, navigation in
                 section == .noteTypes ? AnyView(NoteTypesView(model: model)) : placeholder(section, navigation)
             }
+            #if os(iOS)
+            features.noteType = { id, _ in AnyView(NoteTypePage(model: model, id: id)) }
+            #endif
             let sheets = features.sheet
             features.sheet = { route, navigation in
                 route == .noteTypeSave ? AnyView(NoteTypeSaveSheet(model: model)) : sheets(route, navigation)
@@ -62,7 +65,7 @@ extension TestHooks {
                     await model.prepareForTestHooks(select: SampleNoteTypesBackend.vocabulary)
                     let id = SampleNoteTypesBackend.vocabulary
                     #if os(iOS)
-                    if case .list = state {} else { model.opened = id }
+                    if case .list = state {} else { navigation.push(.noteType(id)) }
                     #endif
                     switch state {
                     case .list, .typical:
