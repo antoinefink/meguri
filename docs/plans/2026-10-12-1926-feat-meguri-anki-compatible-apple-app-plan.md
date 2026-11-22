@@ -624,7 +624,7 @@ flowchart TB
 **Accidental double-answer prevention**
 - R414. Once an answer is accepted, further answer inputs are ignored until the next card's answer side is presented, so no card can be answered twice.
 - R415. A touch whose touch-down started before the current card appeared never acts on that card.
-- R416. On touch input, a reveal tap arriving within the "Double Tap Prevention" window after the previous answer is ignored (setting 0–1000 ms, default 250 ms, 0 disables), while the next card itself is displayed with no delay.
+- R416. On touch input, a reveal tap arriving within the "Double Tap Prevention" window after the previous answer is ignored (setting 0–1000 ms, default 250 ms, 0 disables), while the next card itself is displayed with no delay. (Extended 2026-11-22, noted 2026-11-22: the same window also keeps an answer tap from acting right after the answer side appears; `specs/review/answer-flow.md` F9; decisions.md 2026-11-22 row `review.answer`.)
 - R417. Keyboard auto-repeat never triggers a review action; each action needs a fresh key press.
 - R418. Answer keys pressed on the question side do nothing (Anki behaviour).
 
