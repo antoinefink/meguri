@@ -3,7 +3,7 @@ import Foundation
 
 /// What the service change confirmation can say about this device's work
 /// that the old service has not received (MP3 step 1, `sync/status-strings`
-/// T19.2). Read from local state only: opening the confirmation starts no request.
+/// T21.1). Read from local state only: opening the confirmation starts no request.
 public struct ServiceSwitchFacts: Sendable, Equatable {
     /// Changes not yet sent: a count, "some" when the service reports pending
     /// work without a count, or unknown.
@@ -11,7 +11,8 @@ public struct ServiceSwitchFacts: Sendable, Equatable {
     public var changes: Changes
     /// Review answers held back (iCloud's P14.4 `heldBack`); nil when not reported.
     public var heldBack: UInt64?
-    /// Media files not yet transferred; nil when not known.
+    /// Media files on this device not yet sent; nil when not known. Files still
+    /// to download from the service are not counted: they were never this device's to send.
     public var media: UInt64?
     /// A Meguri Sync upload whose acceptance is unknown (MP3), whatever the old service.
     public var acceptanceUnknown: Bool
@@ -29,17 +30,16 @@ extension SyncCoordinator {
         let acceptanceUnknown = meguriStage == .acceptanceUnknown || meguriRoutine == .acceptanceUnknown
         if source == .iCloud, providerState?.selection == .iCloud, let status {
             return .init(changes: .count(status.pending), heldBack: status.heldBack,
-                         media: Self.sum(status.media.uploadFiles, status.media.downloadFiles),
-                         acceptanceUnknown: acceptanceUnknown)
+                         media: status.media.uploadFiles, acceptanceUnknown: acceptanceUnknown)
         }
         guard source == .meguri else { return .init(changes: .unknown, acceptanceUnknown: acceptanceUnknown) }
         var media: UInt64?
+        // This device's side only (T18.6): files waiting to upload or excluded from it.
         if let report = meguriRoundReport?.media, case .media(let facts) = report.outcome,
-           let excluded = facts.excluded, let pending = facts.pending, let awaiting = facts.awaiting,
-           let local = Self.sum(excluded, pending) {
-            media = Self.sum(local, awaiting)
+           let excluded = facts.excluded, let pending = facts.pending {
+            media = Self.sum(excluded, pending)
         } else if let accounting = meguriAccounting {
-            media = Self.sum(UInt64(accounting.files.filter { $0.state != .transferred }.count), accounting.remotePending)
+            media = UInt64(accounting.files.filter { $0.state != .transferred }.count)
         }
         return .init(changes: meguriRoutine == .pending ? .some : .unknown, media: media,
                      acceptanceUnknown: acceptanceUnknown)

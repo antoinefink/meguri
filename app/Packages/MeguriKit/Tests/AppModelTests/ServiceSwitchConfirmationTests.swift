@@ -124,6 +124,19 @@ import Testing
         #expect(acceptance.acceptanceUnknown)
     }
 
+    @Test func signedInBeforeSurvivesARelaunchAndClearsWithTheConnection() throws {
+        let suite = "meguri.tests.signedInBefore.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let first = SyncCoordinator(directory: directory, configuration: nil, defaults: defaults)
+        // A round's credential failure proves an earlier sign-in, and is kept.
+        #expect(first.applyMeguriRoundCredentialFailure(MeguriRoundAdmissionFailure.credentialsMissing))
+        #expect(defaults.bool(forKey: "meguri.sync.signedInBefore"))
+        let relaunched = SyncCoordinator(directory: directory, configuration: nil, defaults: defaults)
+        #expect(relaunched.meguriKindFacts.signedInBefore)
+    }
+
     @Test func theCoordinatorReadsICloudCountsFromItsStatus() {
         let facts = SyncCoordinator.renderFixture(.iCloudNeedsYou).serviceSwitchFacts(source: .iCloud)
         #expect(facts.changes == .count(12) && facts.heldBack == 0 && facts.media == 0)

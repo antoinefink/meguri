@@ -91,7 +91,7 @@ extension TestHooks {
             registry.register("settings/sync/window/meguri-never-signed-in") { window(.meguriNeverSignedIn, $0) }
             registry.register("settings/sync/window/meguri-sign-in") { window(.meguriSignIn, $0) }
             registry.register("settings/sync/window/icloud-connected") { window(.iCloudConnected, $0) }
-            // T19.2: the service change confirmation, opened by the Service control
+            // T21.1: the service change confirmation, opened by the Service control
             // over the Settings window (Mac) or the Settings page (touch).
             registry.register("settings/sync/window/switch-meguri-off-unknown") { window(.meguriOffUnknown, $0) }
             registry.register("settings/sync/window/switch-meguri-off-known") { window(.meguriOffKnown, $0) }

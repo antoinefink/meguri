@@ -1243,7 +1243,7 @@ The `sync.serviceSwitch` confirmation is the platform's confirmation for a destr
 | `sync.switch.unsent.changes` | `%lld change` / `%lld changes` | the old service reports pending changes above 0 |
 | `sync.switch.unsent.some` | Some changes | it reports pending changes without a count (Meguri Sync's round) |
 | `sync.switch.unsent.heldBack` | `%lld review answer` / `%lld review answers` | it reports held answers above 0 (iCloud: P14.4 `heldBack`, which pending changes do not count) |
-| `sync.switch.unsent.media` | `%lld media file` / `%lld media files` | it reports media waiting, or files not transferred (T18.6), above 0 |
+| `sync.switch.unsent.media` | `%lld media file` / `%lld media files` | it reports media files on this device not yet sent above 0: iCloud's upload files; Meguri Sync's files waiting to upload or excluded from the transfer (T18.6). Files still to download from the service are not counted: they are not this device's to send |
 | `sync.switch.unsent.kept` | These stay only on this device. | after the list, when every count is known |
 | `sync.switch.unsent.none` | Everything on this device has been sent to %@. | in place of the list: every count is known and 0 |
 | `sync.switch.unknown` | Meguri couldn’t check whether everything on this device has been sent to %@. Anything not sent stays only on this device. | in place of the list: no count is known above 0 and one or more is not known |
@@ -1254,14 +1254,15 @@ The `sync.serviceSwitch` confirmation is the platform's confirmation for a destr
 | `sync.switch.confirm.iCloud` | Switch to iCloud | destructive button, new value iCloud (value changed: T19.1's name) |
 | `sync.service.cancel` (T18.2) | Cancel | cancel button |
 
-- The counts are the old service's local status, as T18.2 reads them: for iCloud P14.4's `pending`, `heldBack` and the media files waiting; for Meguri Sync the round's pending work (no count: "Some changes") and the T18.6 media counts. A count it does not report is not known, never 0. Meguri Sync's round reports no count of held answers, so with Meguri Sync as the old service `sync.switch.unsent.none` never shows.
+- The counts are the old service's local status, as T18.2 reads them: for iCloud P14.4's `pending`, `heldBack` and the media files waiting to upload; for Meguri Sync the round's pending work (no count: "Some changes") and the T18.6 counts of this device's files not transferred. A count it does not report is not known, never 0. Meguri Sync's round reports no count of held answers, so with Meguri Sync as the old service `sync.switch.unsent.none` never shows.
 - The message is the first paragraph, then one block: the heading and the list's lines, each on a line of its own, followed by `sync.switch.unsent.kept` or `sync.switch.unknown.more`; or `sync.switch.unsent.none`; or `sync.switch.unknown`. Then `sync.switch.acceptanceUnknown` when it applies. Each text stays its own catalog entry (T1's "followed by").
-- Nothing in the confirmation names iCloud when the old and the new service are Meguri Sync and Off, and nothing names Meguri Sync when they are iCloud and Off.
+- Nothing in the confirmation names iCloud when the old and the new service are Meguri Sync and Off, and nothing names Meguri Sync when they are iCloud and Off, except `sync.switch.acceptanceUnknown`, which T18.2 shows whatever the old service because an upload of unknown acceptance holds every service.
+- The confirmation closes, changing nothing, when the change stops being possible while it is open (a review or another change starts).
 - Keys withdrawn (removed from the catalog when T21 ships, their names never reused): `sync.switch.pending`, `sync.switch.pending.some`, `sync.switch.heldBack`, `sync.switch.pending.none`, `sync.switch.pending.unknown`, `sync.switch.media`, `sync.switch.media.unknown`, `sync.switch.kept`, `sync.switch.otherDevices`, `sync.switch.signOut`, `sync.switch.next.localOnly`, `sync.switch.next.iCloud.setup`, `sync.switch.next.meguri.setup`.
 
 ### T21.2 Meguri Sync before the first sign-in
 
-"Setup not finished": Meguri Sync is the selected service and its connection is unconfigured, or it is signed out or cancelled while this device has not been signed in to that connection since Meguri opened the collection. It is not a problem: none of the three kinds (T19.1).
+"Setup not finished": Meguri Sync is the selected service, the provider is neither blocked nor in handoff recovery, and its connection is unconfigured; or it is signed out, cancelled or signing in while this device has not been signed in to it; or it is blocked right after a first Sign In from the fields failed, whose error shows under them (T18.3). "Signed in to it" is kept in this device's settings: it becomes true when a sign-in succeeds or a round reports a credential failure, and false when the connection is removed or a service change deletes the sign-in, so a relaunch gives the same answer. It is not a problem: none of the three kinds (T19.1); it does not make sync wait on the person (the review's status button, N16.2, and study preparation treat it as no service).
 
 | Key | English | Use |
 |---|---|---|
@@ -1272,7 +1273,8 @@ The `sync.serviceSwitch` confirmation is the platform's confirmation for a destr
 
 - In T19.5's table, the row "connection unconfigured, signed out or cancelled" becomes two rows, in its place: "setup not finished" (above): kind none, the text `sync.meguri.status.notSetUp.detail`, the action `sync.meguri.signIn` (the fields); then "connection signed out or cancelled, otherwise": needs you, `sync.meguri.status.signedOut.detail`, `sync.meguri.signIn`, as before. "The server didn't accept your sign-in" (`sync.needsYou.meguri.signIn`) and "identity changed" keep their needs you rows.
 - Its symbol is Sync Off's (the secondary `cloud`, `docs/design/decisions.md` 2026-11-22), never the needs-you symbol. The sync button's help tag and accessibility value are the title and the sentence (T2, T18.7). The status panel shows them with Sign In… (T20.1).
-- The Sync section in this state (N15.7) has the Service control; the sign-in fields and Sign In with `sync.meguri.signIn.footer.setup` or `.setup.manual` (T19.3) as their footer, and any sign-in error under them; and Troubleshooting. It shows no status row, no Sync Automatically and no Sync Now (and so neither `sync.settings.automatic.footer` nor a Sync Now reason); they show once a sign-in succeeds.
+- Leaving Meguri Sync in this state asks nothing, as a choice made from Off does (T18.1): nothing has been sent or signed in to lose.
+- The Sync section in this state (N15.7) has the Service control; the sign-in fields and Sign In with `sync.meguri.signIn.footer.setup` or `.setup.manual` (T19.3) as their footer, and any sign-in error under them; and Troubleshooting. It shows no status row, no Sync Automatically and no Sync Now (and so neither `sync.settings.automatic.footer` nor a Sync Now reason); they show once a sign-in succeeds. While the first sign-in runs, `sync.meguri.status.signingIn.title` shows under the fields as progress.
 
 ### T21.3 Tests
 

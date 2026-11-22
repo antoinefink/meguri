@@ -24,6 +24,10 @@ struct ServiceSwitchQuestion: ViewModifier {
         let title = Text(verbatim: question.map { SyncText.value($0.confirmation.titleKey) } ?? "")
         let message = Text(verbatim: question.map { $0.confirmation.message(source: $0.source) } ?? "")
         let presented = Binding(get: { destination != nil }, set: { if !$0 { destination = nil } })
+        // It asks only while the change can run: a review or another change starting closes it.
+        let content = content.onChange(of: sync.serviceChangeAvailable) { _, available in
+            if !available { destination = nil }
+        }
         #if os(macOS)
         content.alert(title, isPresented: presented) {
             Button(SyncText.value("sync.service.cancel"), role: .cancel) { destination = nil }

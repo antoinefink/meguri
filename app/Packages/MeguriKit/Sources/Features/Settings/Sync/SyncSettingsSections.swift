@@ -29,6 +29,11 @@ struct SyncSettingsSections: View {
         } header: { heading }
         Section {
             MeguriAccountRows(collection: collection, draft: draft, footnoteInRows: false)
+            // The first sign-in's progress: the status row is not shown in this form.
+            if sync.mainStatus.titleKey == "sync.meguri.status.signingIn.title" {
+                ProgressView(SyncText.value("sync.meguri.status.signingIn.title"))
+                    .accessibilityIdentifier("settings.sync.meguri.signingIn")
+            }
         } footer: {
             Text(SyncText.value(sync.storedAutomatic ? "sync.meguri.signIn.footer.setup" : "sync.meguri.signIn.footer.setup.manual"))
                 .accessibilityIdentifier("settings.sync.meguri.signInFooter")
@@ -188,7 +193,8 @@ struct SyncServiceRows: View {
         guard !collection.meguriSignInPreparing, !sync.meguriBusy, value != selected else { return }
         refusedForOp = false
         if opBlocksChange { refusedForOp = true; return }
-        if selected != "localOnly" {
+        // T21.2: before its first sign-in Meguri Sync holds nothing to lose, so leaving it asks nothing.
+        if selected != "localOnly", !sync.meguriSetupNotFinished {
             // T21.1: the question opens only while the change can run; the reason shows under the control.
             guard sync.serviceChangeAvailable else { return }
             switchSource = sync.providerState?.selection; destination = value

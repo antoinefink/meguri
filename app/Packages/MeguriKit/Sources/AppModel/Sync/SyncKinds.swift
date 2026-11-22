@@ -110,12 +110,15 @@ public struct MeguriKindFacts: Sendable, Equatable {
     /// a sign-out then needs the person, while before any sign-in setup is only
     /// unfinished (T21.2).
     public var signedInBefore: Bool
+    /// The last Sign In from the fields failed and its error shows under them.
+    public var signInRefused: Bool
     public init(handoffRecovery: Bool = false, providerBlocked: Bool = false,
                 connection: MeguriProviderConnectionPhase = .setupRequired, stage: MeguriSetupStage? = nil,
                 routine: MeguriRoutineState? = nil, failureKey: String? = nil, finishOffered: Bool = false,
                 automatic: Bool = true, mediaFilesLeft: UInt64? = nil, mediaListKnown: Bool = true,
                 structureStage: MeguriStructureStage? = nil, structureUploadPending: Bool = false,
-                signedInBefore: Bool = true) {
+                signedInBefore: Bool = true, signInRefused: Bool = false) {
+        self.signInRefused = signInRefused
         self.structureStage = structureStage; self.structureUploadPending = structureUploadPending
         self.signedInBefore = signedInBefore
         self.handoffRecovery = handoffRecovery; self.providerBlocked = providerBlocked; self.connection = connection
@@ -314,8 +317,11 @@ public enum SyncKinds {
         guard !facts.handoffRecovery, !facts.providerBlocked else { return false }
         switch facts.connection {
         case .unconfigured: return true
-        case .signedOut, .cancelled: return !facts.signedInBefore
-        case .authenticating, .setupRequired, .blocked: return false
+        // Signing in for the first time is still setup: the form stays until it succeeds.
+        case .signedOut, .cancelled, .authenticating: return !facts.signedInBefore
+        // A first Sign In that failed reports a blocked connection; its error is under the fields.
+        case .blocked: return !facts.signedInBefore && facts.signInRefused
+        case .setupRequired: return false
         }
     }
 
@@ -324,7 +330,9 @@ public enum SyncKinds {
         if facts.handoffRecovery { return .init(.needsYou, "sync.needsYou.switchUnfinished", .serviceRecovery) }
         if facts.providerBlocked { return .init(.needsYou, "sync.needsYou.blocked", .copyDebugInfo) }
         switch facts.connection {
-        case .blocked: return .init(.needsYou, "sync.needsYou.meguri.signInStore", .meguriConnectionRetry)
+        case .blocked:
+            if meguriSetupNotFinished(facts) { return .init(nil, "sync.meguri.status.notSetUp.detail", .meguriSignIn) }
+            return .init(.needsYou, "sync.needsYou.meguri.signInStore", .meguriConnectionRetry)
         case .unconfigured, .signedOut, .cancelled:
             // T21.2: before the first sign-in the fields are the next step, not a problem.
             if meguriSetupNotFinished(facts) { return .init(nil, "sync.meguri.status.notSetUp.detail", .meguriSignIn) }

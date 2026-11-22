@@ -22,7 +22,7 @@ public enum SyncSettingsPreview {
             sync: .renderFixture(state, clock: configuration.clock, serviceSwitch: serviceSwitch)), page: page)
     }
 
-    /// The service change confirmation's examples (T19.2): the old service's
+    /// The service change confirmation's examples (T21.1): the old service's
     /// state, the new value, and invented facts about unsent work.
     public enum ServiceSwitchExample: String, CaseIterable, Sendable {
         case meguriOffUnknown, meguriOffKnown, meguriICloudUnknown

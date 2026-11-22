@@ -176,6 +176,18 @@ import Testing
             #expect(!SyncKinds.meguriSetupNotFinished(facts))
             #expect(SyncKinds.meguri(facts).kind == .needsYou && SyncKinds.meguri(facts).symbol == SyncKinds.needsYouSymbol)
         }
+        // The first sign-in running, and a first Sign In that failed (the owner reports blocked), stay setup.
+        for facts in [Facts(connection: .authenticating, signedInBefore: false),
+                      Facts(connection: .blocked, signedInBefore: false, signInRefused: true)] {
+            #expect(SyncKinds.meguriSetupNotFinished(facts) && SyncKinds.meguri(facts).kind == nil, "\(facts)")
+        }
+        #expect(SyncKinds.meguri(Facts(connection: .authenticating, signedInBefore: false)).titleKey == "sync.meguri.status.signingIn.title")
+        // A store failure with no sign-in attempt, or after a sign-in, still needs the person.
+        #expect(SyncKinds.meguri(Facts(connection: .blocked, signedInBefore: false)).kind == .needsYou)
+        #expect(SyncKinds.meguri(Facts(connection: .blocked, signInRefused: true)).kind == .needsYou)
+        // Nothing waits on the person: the review's status button stays hidden (N16.2).
+        #expect(!SyncCoordinator.renderFixture(.meguriNeverSignedIn).needsUser)
+        #expect(SyncCoordinator.renderFixture(.meguriSignIn).needsUser)
         // The provider's own problems come first.
         #expect(!SyncKinds.meguriSetupNotFinished(Facts(providerBlocked: true, connection: .unconfigured)))
         #expect(!SyncKinds.meguriSetupNotFinished(Facts(handoffRecovery: true, connection: .unconfigured)))
