@@ -973,6 +973,8 @@ public final class SyncCoordinator {
     @ObservationIgnored private var meguriStructureRound: CoreMeguriRoundService?
     @ObservationIgnored private var meguriStructureRun: UUID?
     @ObservationIgnored private var meguriStructureCancelRequested = false
+    /// A save waits for a round or action that runs first.
+    @ObservationIgnored private var meguriStructureWaiting = false
     /// Tests only: replaces the bridge's structure jobs and the provider's pending read.
     @ObservationIgnored var meguriStructureJobsOverride: (any MeguriStructureJobService)?
     /// D7: a completed upload clears the undo history; the Edit menu reads it again.
@@ -5061,6 +5063,9 @@ extension SyncCoordinator: NoteTypesMeguriSync {
     public func cancelNotetypeStructureSave() {
         meguriStructureCancelRequested = true
         meguriStructureJob?.cancel()
+        // A save still waiting for the round before it: that round stops too,
+        // as a drain stops it, so leaving never waits for it.
+        if meguriStructureWaiting { meguriWake?.task.cancel() }
     }
 
     /// MP7 step 5's Upload…: the server's facts and the upload, no round and
@@ -5104,7 +5109,8 @@ extension SyncCoordinator: NoteTypesMeguriSync {
             @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void) async throws -> MeguriStructureOutcome)
         async throws -> NoteTypeSyncSaveResult {
         meguriStructureCancelRequested = false
-        for _ in 0..<8 {
+        meguriStructureWaiting = true
+        for _ in 0..<8 where !meguriStructureCancelRequested {
             if let wake = meguriWake {
                 meguriWakePending = false; meguriWakeManual = false
                 await wake.task.value
@@ -5112,6 +5118,7 @@ extension SyncCoordinator: NoteTypesMeguriSync {
                 await action.task.value
             } else { break }
         }
+        meguriStructureWaiting = false
         guard !meguriStructureCancelRequested else { return .cancelled }
         guard meguriWake == nil, meguriAction == nil, meguriStructureStage == nil, let jobs = meguriStructureJobs else { return .notSaved }
         let answer = MeguriStructureAnswer()
