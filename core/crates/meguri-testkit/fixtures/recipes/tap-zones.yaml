@@ -1,0 +1,15 @@
+# Review tap zones (U180): due cards whose front has a link and whose back
+# has an audio control, so taps on card controls can be told from taps on
+# the card.
+recipe: tap-zones
+description: "Six due cards with a link on the front and a sound on the back."
+now: "2030-01-15T10:00:00+01:00"
+decks:
+  - name: "Tap Zones"
+    new: 0
+    learning: 0
+    due: 6
+    later: 0
+    tags: ["tap-zones"]
+    fields: ["Word {n} <a href='#more{n}' id='more{n}'>more {n}</a>", "Meaning {n}"]
+    media: {images: 0, sounds: 1}

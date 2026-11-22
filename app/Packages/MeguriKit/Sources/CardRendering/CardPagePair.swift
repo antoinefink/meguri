@@ -448,6 +448,16 @@ public final class CardPagePair {
         guard !closed, !suspended, !lifecycleSuspended, current.behaviorAvailable, let update = current.update, let payload = current.payload else { return }
         audio.replay(payload: payload, update: update)
     }
+    /// R412: blurs the visible page's focused field, which puts the software
+    /// keyboard away. Fixed code in Meguri's world; the page keeps the focus.
+    public func dismissKeyboard() {
+        guard !closed, !suspended, !lifecycleSuspended, current.behaviorAvailable else { return }
+        let page = current
+        Task { @MainActor in
+            try? await page.run("const e = document.activeElement; if (e && e !== document.body && typeof e.blur === \"function\") e.blur();",
+                                world: CardPage.world)
+        }
+    }
     public func pauseAudio() { audio.pause() }
     public func resumeAudio() { if !closed && !suspended && !lifecycleSuspended { audio.resume() } }
     public func seekAudio(by seconds: TimeInterval) async { await audio.seek(by: seconds) }

@@ -44,6 +44,10 @@ public final class ReviewCoordinator {
     /// its first state other than loading shows with a session open. Study's
     /// review appears then, with its card (N16.8).
     @ObservationIgnored var onFirstPresentation: (() -> Void)?
+    /// Tap zones' timings (R416), on the `uptime` clock: the last accepted
+    /// answer input, and when the answer side now shown appeared.
+    @ObservationIgnored private(set) var lastAnswerUptime: TimeInterval?
+    @ObservationIgnored private(set) var answerShownUptime: TimeInterval?
     private let client: any ReviewSessionClient
     private let store: ReviewRecordStore
     private let clock: AppClock
@@ -105,6 +109,7 @@ public final class ReviewCoordinator {
             }
         }
         surface.onRecovery = { [weak self] in self?.requestRefresh(question: true) }
+        (surface as? ReviewPages)?.tapState = { [weak self] in self?.tapState() }
         surface.onWillPresent = { [weak self] in self?.firstPresentation() }
         (surface as? ReviewPages)?.onMediaReady = { [weak self] in self?.mediaPresentationReady() }
         if nativeInput != nil, let pair = surface.pair {
@@ -279,6 +284,15 @@ public final class ReviewCoordinator {
         #endif
     }
 
+    /// Tap zones (U180): the side that takes a tap now. The card view adds
+    /// its own facts (the update on screen, its width, assistive technologies).
+    func tapState() -> ReviewTapState? {
+        let side: ReviewTapState.Side? = canReveal ? .question : canRate ? .answer : nil
+        return ReviewTapState(side: side, update: nil, visibleX: 0...0,
+            doubleTapPrevention: ReviewTapRules.defaultDoubleTapPrevention,
+            lastAnswerUptime: lastAnswerUptime, answerShownUptime: answerShownUptime, assistiveTechnology: false)
+    }
+
     public func reveal() {
         guard phase == .question, !busy, !paused, !editingNote else { return }
         busy = true; phase = .transition
@@ -309,6 +323,7 @@ public final class ReviewCoordinator {
                     }
                     try Task.checkCancellation()
                     sideIsAnswer = true
+                    answerShownUptime = uptime()
                     phase = .answer
                 }
             } catch { nativeInput?.failed(error); fail(error) }
@@ -335,6 +350,7 @@ public final class ReviewCoordinator {
                         presentedKey == item.renderKey)
             } else { use = nil }
         } catch { busy = false; nativeInput?.failed(error); fail(error); return }
+        lastAnswerUptime = inputTime
         timer.pause(at: inputTime)
         let elapsed = use?.elapsed ?? timer.milliseconds(at: inputTime, capSeconds: item.homePreset.maximumAnswerSeconds)
         let answer = ReviewRecord.Answer(cardID: item.cardId, rating: Self.name(rating), kind: String(describing: item.kind),
@@ -765,6 +781,7 @@ public final class ReviewCoordinator {
         }
         try Task.checkCancellation()
         terminalPresentation = nil
+        if sideIsAnswer { answerShownUptime = uptime() }
         phase = sideIsAnswer ? .answer : .question
         firstPresentation()
         finishRestoration(intent)
