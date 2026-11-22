@@ -16,6 +16,9 @@ use super::*;
 pub struct StructureBaseline {
     pub modified: i64,
     pub schema_modified: i64,
+    /// The server's sequence number, which every commit on the server
+    /// raises; its `mod` alone can stay equal across a commit.
+    pub usn: i32,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MeguriStructureUpload {
@@ -110,6 +113,30 @@ impl Authority {
             doc.meguri_binding = None;
             doc.meguri_settings.automatic = false;
             if doc.selection == Selection::Meguri { doc.settings.automatic = false; }
+            Ok(())
+        })
+    }
+    /// The save is no longer on this device (undone) after the upload held
+    /// the binding and before anything was sent or replaced: the binding the
+    /// record names is ready again for the same collection, with the stored
+    /// Sync Automatically choice, and the record goes. Routine rounds decide
+    /// what the server needs from there.
+    pub fn restore_meguri_binding_after_structure(&self, expected: &MeguriStructureUpload,
+        generation: u64, publication: Option<Publication>) -> Result<()> {
+        let settled = publication.clone();
+        self.bootstrap_update(generation, publication, |doc| {
+            check_document(doc, &expected.binding.connection)?;
+            if doc.meguri_structure.as_ref() != Some(expected) { return Err(MeguriReadyRefusal::DocumentChanged); }
+            if doc.meguri_binding.is_some() { return Err(MeguriReadyRefusal::BindingChanged); }
+            if settled.as_ref().map(|p| p.identity) != Some(expected.binding.publication) {
+                return Err(MeguriReadyRefusal::PublicationChanged);
+            }
+            doc.meguri_binding = Some(expected.binding.clone());
+            doc.meguri_bootstrap = None;
+            doc.meguri_structure = None;
+            doc.settings.automatic = expected.automatic;
+            doc.meguri_settings.automatic = expected.automatic;
+            doc.revision = doc.revision.checked_add(1).ok_or_else(invalid)?;
             Ok(())
         })
     }

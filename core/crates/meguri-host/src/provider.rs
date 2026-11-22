@@ -457,6 +457,10 @@ impl CoreHost {
         let random = self.provider_random();
         let reference = format!("{:016x}{:016x}", random.next_u64(), random.next_u64());
         let connection = self.publish_provider_metadata(generation, |publication| {
+            // Again inside the write: a job admitted since the check above.
+            if self.meguri_structure_job_active() {
+                return Err(EngineError::Busy { running_op: "Meguri note type structure save".into() });
+            }
             Ok(self.provider.configure_meguri_for_owner(endpoint, reference, generation.0, publication)?)
         })?;
         self.refresh_provider_admission();

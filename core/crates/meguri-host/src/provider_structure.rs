@@ -170,7 +170,7 @@ impl Drop for MeguriStructureTask {
     /// result stays with the round's registry entry, as for any round.
     fn drop(&mut self) {
         let state = self.state.get_mut().unwrap_or_else(PoisonError::into_inner);
-        if let Some(Stage::Round(round)) = &state.stage { round.cancel(true); }
+        if let Some(Stage::Round(round)) = &state.stage { round.abandon(); }
     }
 }
 
@@ -233,8 +233,17 @@ impl CoreHost {
         let doc = self.provider.snapshot()?;
         let Some(record) = doc.meguri_structure else { return Ok(false) };
         if self.structure_pending(&record)? { return Ok(true); }
-        if doc.meguri_binding.is_some() && doc.handoff.is_none() && self.collection().is_ok() {
+        if doc.handoff.is_some() || self.collection().is_err() { return Ok(false); }
+        if doc.meguri_binding.is_some() {
             self.clear_structure_record(&record)?;
+        } else if self.manual_transfer_history().active().is_ok_and(|active| active.is_none()) {
+            // The upload held the binding, nothing of it is in flight, and
+            // the save is gone (undone): the binding comes back. Refused
+            // when the collection is no longer the one the record names.
+            let generation = self.cloud_connection_generation()?;
+            let restored = self.publish_provider_metadata(generation, |publication|
+                Ok(self.provider.restore_meguri_binding_after_structure(&record, generation.0, publication)))?;
+            if restored.is_ok() { self.refresh_provider_admission(); }
         }
         Ok(false)
     }
@@ -271,6 +280,11 @@ impl CoreHost {
             // No round ran: the binding is the document's, and the baseline is
             // whatever the last completed bootstrap or round left (step 4).
             let binding = self.provider.snapshot().map_err(|error| R::Engine(error.into()))?.meguri_binding.ok_or(R::NotReady)?;
+            // The caller's connection and account are the binding's, as a round's admission would require.
+            let caller = access().map_err(|_| R::NotReady)?;
+            let account = meguri_sync::provider::native_endpoint(&caller.connection().endpoint).ok()
+                .and_then(|endpoint| meguri_sync::policy::AccountRef::derive(&endpoint, caller.username()));
+            if caller.connection() != binding.connection() || account.as_ref() != Some(binding.account()) { return Err(R::NotReady); }
             let task = self.structure_task(access, collection, admission, false, Some(work), None, None);
             let next = self.arm_and_save(&task, &mut task.state.lock().unwrap_or_else(PoisonError::into_inner), &binding);
             self.install(&task, next);
@@ -396,7 +410,7 @@ impl CoreHost {
             // Proved only by a collection that synced and holds no earlier
             // structure change: its `ls` and `scm` are the server's.
             Ok(col) => ((col.last_sync.0 != 0 && !schema_gate::is_modified(&col)).then_some(StructureBaseline {
-                modified: col.last_sync.0, schema_modified: col.schema_modified.0 }), col.schema_modified.0),
+                modified: col.last_sync.0, schema_modified: col.schema_modified.0, usn: col.usn.0 }), col.schema_modified.0),
             Err(error) => return stop(MeguriStructureStop::Refused(error)),
         };
         let generation = task.generation;
@@ -435,8 +449,13 @@ impl CoreHost {
         let schema = task.collection.reader(ReaderRole::Query).and_then(|reader| Ok(reader.col()?.schema_modified.0));
         let changed = match (&schema, state.schema_before) {
             (Ok(now), Some(before)) => *now != before,
-            // Unreadable: the record stays, and the next settle decides.
-            _ => return pending(MeguriUploadPending::Storage),
+            // Unreadable: the record stays, and the next settle decides. A
+            // refusal is still reported as the refusal it is.
+            _ => return match result {
+                Some(Err(error)) => Next::Done(O::NotSaved(MeguriStructureStop::Refused(error))),
+                Some(Ok(())) => pending(MeguriUploadPending::Storage),
+                None => Next::Done(O::NotSaved(MeguriStructureStop::Cancelled)),
+            },
         };
         let record = self.structure_record().ok().flatten();
         if !changed {
@@ -555,12 +574,14 @@ impl CoreHost {
             Ok(false) => return Next::Done(O::Saved(U::NotNeeded)),
             Err(_) => return pending(MeguriUploadPending::Storage),
         }
-        let same = record.baseline().is_some_and(|baseline|
-            baseline.modified == facts.modified && baseline.schema_modified == facts.schema_modified);
+        // Every commit on the server raises its `usn`; its `mod` can stay
+        // equal across one, so all three are compared.
+        let same = record.baseline().is_some_and(|baseline| baseline.modified == facts.modified
+            && baseline.schema_modified == facts.schema_modified && baseline.usn == facts.usn);
         // Nothing is held for an upload that will not be attempted now: a
         // cancelled job, or a review in progress (no replacement runs during
         // a review, MP5), leaves the binding ready and the upload pending.
-        if same && task.is_cancelled() { return pending(MeguriUploadPending::Cancelled); }
+        if task.is_cancelled() { return pending(MeguriUploadPending::Cancelled); }
         if same && self.review().active_session().is_some() { return pending(MeguriUploadPending::Busy); }
         if let Err(reason) = self.hold_structure_binding(&record) { return pending(reason); }
         if !same { return Next::Done(O::Saved(U::ChooseCollection)); }
@@ -592,7 +613,7 @@ impl CoreHost {
         };
         // The same content under the stamps of the copy: a later Upload…
         // compares with these.
-        let baseline = StructureBaseline { modified: served.modified, schema_modified: served.schema_modified };
+        let baseline = StructureBaseline { modified: served.modified, schema_modified: served.schema_modified, usn: served.usn };
         let generation = task.generation;
         let advanced = self.publish_provider_metadata(generation, |publication|
             Ok(self.provider.advance_meguri_structure_baseline(&record, baseline, generation.0, publication)));

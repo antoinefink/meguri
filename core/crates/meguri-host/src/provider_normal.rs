@@ -74,6 +74,9 @@ pub struct MeguriRoundTask {
     owner: Arc<()>, job: JobHandle, admission: MeguriRoundAdmission,
     stage: MeguriRoundStage, finished: Mutex<Option<Subscription>>,
     state: Mutex<TaskState>,
+    /// Its owner (the structure save job) went away before reading the
+    /// result: the next reservation finalizes it.
+    abandoned: std::sync::atomic::AtomicBool,
 }
 struct TaskState { source: Source, terminal: Option<Terminal>, published: Option<Arc<MeguriRoundResult>> }
 enum Source {
@@ -86,6 +89,10 @@ enum Terminal {
 }
 impl MeguriRoundTask {
     pub fn handle(&self) -> JobHandle { self.job.clone() }
+    pub(crate) fn abandon(&self) {
+        self.abandoned.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.cancel(true);
+    }
     pub fn stage(&self) -> MeguriRoundStage { self.stage }
     pub fn cancel(&self, interrupted: bool) {
         if interrupted { self.job.cancel.interrupt(); } else { self.job.cancel.cancel(); }
@@ -140,6 +147,7 @@ fn collection_result(result: &Result<normal::Outcome, JobError>, sent: bool,
 }
 impl CoreHost {
     fn reserve_meguri_round(&self, structure: Option<&Arc<()>>) -> Result<Reservation<'_>, MeguriRoundRefusal> {
+        self.finalize_abandoned_round();
         let reservation = {
             let mut state = self.meguri_rounds.state.lock().unwrap_or_else(PoisonError::into_inner);
             let admitted = match (state.structure.upgrade(), structure) {
@@ -191,7 +199,7 @@ impl CoreHost {
                 self.meguri_rounds.memory.clone(), transport, admission.clone()).map_err(engine_refusal)?;
             let task = Arc::new(MeguriRoundTask { owner: self.meguri_rounds.owner.clone(), job: normal.handle.clone(),
                 admission, stage: MeguriRoundStage::Collection, finished: Mutex::new(Some(finished)),
-                state: Mutex::new(TaskState { source: Source::Normal(Some(normal)), terminal: None, published: None }) });
+                state: Mutex::new(TaskState { source: Source::Normal(Some(normal)), terminal: None, published: None }), abandoned: Default::default() });
             reservation.install(task.clone());
             Ok(task)
         };
@@ -229,7 +237,7 @@ impl CoreHost {
             }).map_err(engine_refusal)?;
             let task = Arc::new(MeguriRoundTask { owner: self.meguri_rounds.owner.clone(), job, admission,
                 stage: MeguriRoundStage::Media, finished: Mutex::new(Some(finished)),
-                state: Mutex::new(TaskState { source: Source::Media { terminal, service }, terminal: None, published: None }) });
+                state: Mutex::new(TaskState { source: Source::Media { terminal, service }, terminal: None, published: None }), abandoned: Default::default() });
             reservation.install(task.clone());
             Ok(task)
         };
@@ -392,11 +400,24 @@ impl CoreHost {
     }
     /// MP7 step 1. Refused while a round, a handoff or another job owns the lane.
     pub(crate) fn admit_meguri_structure_job(&self) -> Result<Arc<()>, MeguriRoundRefusal> {
+        self.finalize_abandoned_round();
         let mut state = self.meguri_rounds.state.lock().unwrap_or_else(PoisonError::into_inner);
         if state.handoff || state.active.is_some() || state.structure.strong_count() != 0 { return Err(MeguriRoundRefusal::Busy); }
         let token = Arc::new(());
         state.structure = Arc::downgrade(&token);
         Ok(token)
+    }
+    /// A round whose owner went away is finalized as its owner would have:
+    /// its entry is released unless it still runs or its finalization failed.
+    fn finalize_abandoned_round(&self) {
+        let abandoned = {
+            let state = self.meguri_rounds.state.lock().unwrap_or_else(PoisonError::into_inner);
+            match &state.active {
+                Some(Active::Task(task)) if task.abandoned.load(std::sync::atomic::Ordering::SeqCst) => Some(task.clone()),
+                _ => None,
+            }
+        };
+        if let Some(task) = abandoned { let _ = self.meguri_round_result(&task); }
     }
     pub(crate) fn meguri_rounds_owner(&self) -> Arc<()> { self.meguri_rounds.owner.clone() }
     pub(crate) fn meguri_structure_job_active(&self) -> bool {

@@ -753,8 +753,8 @@ fn execute_structure(args: &Args, fixture: &Fixture, config: &HostConfig) -> Res
     let task = host.start_meguri_structure_save(source, Box::new(move |collection, job| {
         structure::apply(collection, draft, job.cancel.clone(), job.progress.clone()).map(|_| ())
     }), true).map_err(|_| failure("structure-start", "refused"))?;
-    // Inside the job runner's own limit for one phase.
-    let deadline = timeout_clock::now() + WAIT;
+    // With the round after it, inside the job runner's limit for one phase.
+    let deadline = timeout_clock::now() + Duration::from_secs(45);
     let outcome = loop {
         let events = host.engine().stream().subscribe();
         match host.advance_meguri_structure(&task).map_err(|_| failure("structure-advance", "refused"))? {

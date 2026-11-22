@@ -151,6 +151,10 @@ fn work(op: ProviderStructureOp, host: &meguri_host::CoreHost) -> Result<(Meguri
             if current != planned { return Err(CoreError::StaleGeneration { planned, current }); }
             let request = ChangeNotetype::try_from(request)?;
             Box::new(move |collection, job| {
+                // The collection the job runs on is the one the info query read.
+                let current = collection.generation().0;
+                if current != planned { return Err(meguri_engine::EngineError::StaleGeneration {
+                    planned: meguri_engine::Generation(planned), current: meguri_engine::Generation(current) }); }
                 let changed = change::change(collection, request, job.cancel.clone(), job.progress.clone())?;
                 keep(ProviderStructureSaved::Changed { changed: NotetypeChanged {
                     summary: MutationSummary::of(&changed), notes: changed.value.notes } });

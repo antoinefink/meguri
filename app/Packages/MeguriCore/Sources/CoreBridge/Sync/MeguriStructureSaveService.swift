@@ -99,9 +99,10 @@ extension CoreMeguriRoundService {
         _ draft: NotetypeStructureDraft, reachable: Bool,
         onStage: @escaping @Sendable (MeguriStructureStage, CoreJob) -> Void = { _, _ in }
     ) async throws -> MeguriStructureOutcome {
+        let drains = drains
         let (connection, credentials) = try await admittedInputs()
         let op = MeguriCoreBindings.ProviderStructureOp.save(draft: draft.raw)
-        return try await owned {
+        return try await owned(since: drains) {
             try await CoreEventStream.shared.start()
             let started = try await MaintenanceLane.shared.call(.providerStartStructureSave) {
                 try connection.startStructureSave(credentials: credentials, op: op, reachable: reachable)
@@ -111,7 +112,9 @@ extension CoreMeguriRoundService {
     }
     /// One structure job at a time on this facade, registered so that
     /// `cancelAndDrain` and retirement stop and join it.
-    private func owned(_ work: @escaping @Sendable () async throws -> MeguriStructureOutcome) async throws -> MeguriStructureOutcome {
+    private func owned(since drains: UInt64, _ work: @escaping @Sendable () async throws -> MeguriStructureOutcome) async throws -> MeguriStructureOutcome {
+        // A drain that ran while the credentials were read: nothing starts after it.
+        guard drains == self.drains else { throw CancellationError() }
         guard structureWork == nil else { return .refused(.busy) }
         let task = Task { try await work() }
         structureWork = task
@@ -124,8 +127,9 @@ extension CoreMeguriRoundService {
     public func uploadNotetypeStructure(
         onStage: @escaping @Sendable (MeguriStructureStage, CoreJob) -> Void = { _, _ in }
     ) async throws -> MeguriStructureOutcome {
+        let drains = drains
         let (connection, credentials) = try await admittedInputs()
-        return try await owned {
+        return try await owned(since: drains) {
             try await CoreEventStream.shared.start()
             let started = try await MaintenanceLane.shared.call(.providerStartStructureUpload) {
                 try connection.startStructureUpload(credentials: credentials)

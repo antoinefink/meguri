@@ -19,7 +19,12 @@ use meguri_sync::{Method, policy::Acceptance, provider::{MeguriConnection, Megur
 use std::sync::Arc;
 
 const ROOT: &str = "MEGURI_STRUCTURE_KILL_ROOT";
-fn die() -> Box<dyn FnOnce() + Send> { Box::new(|| std::process::abort()) }
+const REACHED: &str = "reached-the-kill-point";
+/// Leaves a marker for the parent, then dies: the parent requires both.
+fn die_at(root: &std::path::Path) -> ! {
+    std::fs::write(root.join(REACHED), b"").unwrap();
+    std::process::abort()
+}
 
 /// The child: reopens the ready device, runs the job and dies at `point`.
 fn child(point: &str) {
@@ -33,18 +38,18 @@ fn child(point: &str) {
     let notetype = NotetypeId(var("NOTETYPE").parse().unwrap());
     let col = s::col(&host);
     let mut steps = s::quiet_round(&host);
-    steps.extend(s::upload_steps(&root, col.last_sync.0, col.schema_modified.0));
+    steps.extend(s::upload_steps(&root, &col));
     // Steps: 0 the round; 1 the facts; 2, 3 the server copy; 4, 5 its reads; 6 the upload; 7 the media.
     let at = match point { "round" => Some(0), "facts" => Some(1), "server-copy" => Some(3), "upload" => Some(6),
         "media" => Some(7), _ => None };
-    if let Some(at) = at { steps[at].after = Some(die()); }
+    if let Some(at) = at { let root = root.clone(); steps[at].after = Some(Box::new(move || die_at(&root))); }
     let script = r::Script::new(steps);
     let (save, _) = s::save_work(s::draft_without_back(&host, notetype, 2));
     let work: MeguriStructureWork = match point {
         // Killed after the record was written and before the op began.
-        "before-save" => Box::new(|_, _| std::process::abort()),
+        "before-save" => { let root = root.clone(); Box::new(move |_, _| die_at(&root)) }
         // Killed once the save committed, before anything of the upload.
-        "after-save" => Box::new(move |collection, job| { save(collection, job)?; std::process::abort() }),
+        "after-save" => { let root = root.clone(); Box::new(move |collection, job| { save(collection, job)?; die_at(&root) }) }
         _ => save,
     };
     let task = host.start_meguri_structure_save(s::source(&connection, &script), work, true).unwrap();
@@ -52,7 +57,7 @@ fn child(point: &str) {
     panic!("the job must die at {point}");
 }
 struct Killed { _root: tempfile::TempDir, host: CoreHost, connection: MeguriConnection, notetype: NotetypeId,
-    path: std::path::PathBuf, ls: i64, scm: i64 }
+    path: std::path::PathBuf, ls: i64, scm: i64, before: meguri_model::col::Col }
 /// Builds the ready device, kills a child in the job at the point the
 /// calling test names, and reopens the device as a relaunch does.
 fn kill(test: &str) -> Killed {
@@ -71,10 +76,11 @@ fn kill(test: &str) -> Killed {
         .status().unwrap();
     // The child died by its own abort at the named point, not by a failed setup.
     assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(6), "SIGABRT");
+    assert!(root.path().join(REACHED).exists(), "the child reached the named point before it died");
     let host = CoreHost::open(config).unwrap();
     b::settle(&host);
     Killed { path: root.path().to_owned(), _root: root, host, connection: rig.connection, notetype: rig.notetype,
-        ls: before.last_sync.0, scm: before.schema_modified.0 }
+        ls: before.last_sync.0, scm: before.schema_modified.0, before }
 }
 fn ready(host: &CoreHost) -> bool { matches!(host.meguri_readiness().unwrap(), MeguriReadiness::Ready) }
 fn record(host: &CoreHost) -> bool { host.provider_authority().snapshot().unwrap().meguri_structure.is_some() }
@@ -94,7 +100,7 @@ fn assert_nothing_saved(k: &Killed) {
     let col = s::col(&k.host);
     assert!(!meguri_engine::schema_gate::is_modified(&col));
     let mut steps = s::quiet_round(&k.host);
-    steps.extend(s::upload_steps(&k.path, col.last_sync.0, col.schema_modified.0));
+    steps.extend(s::upload_steps(&k.path, &col));
     let script = r::Script::new(steps);
     let (work, _) = s::save_work(s::draft_without_back(&k.host, k.notetype, 2));
     let task = k.host.start_meguri_structure_save(s::source(&k.connection, &script), work, true).unwrap();
@@ -137,7 +143,7 @@ fn structure_job_killed_after_its_save_leaves_the_upload_pending() {
     assert!(ready(&k.host), "the binding is held only once the upload runs");
     // The relaunch dropped the undo step; the backup of the save stays (D7).
     assert_eq!(k.host.collection().unwrap().peek_undo(UndoScope::Global).unwrap().name(), None);
-    let (outcome, script) = upload(&k, s::upload_steps(&k.path, k.ls, k.scm));
+    let (outcome, script) = upload(&k, s::upload_steps(&k.path, &k.before));
     assert!(matches!(*outcome, O::Saved(U::Uploaded { media_complete: true })));
     script.assert_done();
     assert!(ready(&k.host) && !record(&k.host) && !k.host.meguri_structure_upload_pending().unwrap());
@@ -150,7 +156,7 @@ fn structure_job_killed_while_reading_the_server_facts_leaves_the_upload_pending
     let k = kill("structure_job_killed_while_reading_the_server_facts_leaves_the_upload_pending");
     assert_saved_and_pending(&k);
     assert!(ready(&k.host));
-    let (outcome, script) = upload(&k, s::upload_steps(&k.path, k.ls, k.scm));
+    let (outcome, script) = upload(&k, s::upload_steps(&k.path, &k.before));
     assert!(matches!(*outcome, O::Saved(U::Uploaded { media_complete: true })));
     script.assert_done();
     assert!(ready(&k.host) && !record(&k.host));
@@ -166,7 +172,7 @@ fn structure_job_killed_during_the_server_copy_leaves_the_upload_pending_and_ask
     let k = kill("structure_job_killed_during_the_server_copy_leaves_the_upload_pending_and_asks");
     assert_saved_and_pending(&k);
     assert!(matches!(k.host.meguri_readiness().unwrap(), MeguriReadiness::Unbound { .. }));
-    let moved = vec![r::Step::new(Method::Meta, s::meta(k.ls + 500, k.scm, s::USN + 1, true))];
+    let moved = vec![r::Step::new(Method::Meta, s::meta(k.ls + 500, k.scm, k.before.usn.0 + 1, true))];
     let (outcome, script) = upload(&k, moved);
     assert!(matches!(*outcome, O::Saved(U::ChooseCollection)));
     script.assert_done();

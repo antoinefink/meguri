@@ -12,7 +12,7 @@ use meguri_sync::{Method, provider::MeguriConnection};
 use serde_json::{Value, json};
 use std::{fs, path::Path, sync::{Arc, Mutex}};
 
-/// The server's sequence number in every scripted answer before a job.
+/// The server's sequence number in a scripted round's answers.
 pub const USN: i32 = 9;
 /// The time the rig's clock shows once the binding is ready.
 pub const LATER: i64 = b::NOW + 60_000;
@@ -134,8 +134,8 @@ pub fn served(root: &Path, modified: i64, schema: i64, usn: i32) -> Vec<u8> {
 /// The upload leg against a server that still holds `(modified, schema)`:
 /// the read of its facts, the preparation with the retained server copy,
 /// the confirmation's read, the upload and an empty media exchange.
-pub fn upload_steps(root: &Path, modified: i64, schema: i64) -> Vec<r::Step> {
-    upload_steps_from(root, modified, schema, USN)
+pub fn upload_steps(root: &Path, held: &Col) -> Vec<r::Step> {
+    upload_steps_from(root, held.last_sync.0, held.schema_modified.0, held.usn.0)
 }
 pub fn upload_steps_from(root: &Path, modified: i64, schema: i64, usn: i32) -> Vec<r::Step> {
     let after = modified + 500;

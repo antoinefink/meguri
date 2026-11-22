@@ -47,7 +47,7 @@ fn structure_save_runs_the_round_then_the_save_then_the_upload_and_clears_the_hi
     let before = s::col(&rig.host);
     let binding = rig.host.provider_authority().snapshot().unwrap().meguri_binding.unwrap();
     let mut steps = s::quiet_round(&rig.host);
-    steps.extend(s::upload_steps(root.path(), before.last_sync.0, before.schema_modified.0));
+    steps.extend(s::upload_steps(root.path(), &before));
     // The save and the read of the facts each wait for this test, so that
     // the state between two phases can be read.
     let (save_gate, save_wait) = std::sync::mpsc::channel::<()>();
@@ -133,7 +133,7 @@ fn structure_upload_keeps_sync_automatically_off() {
     assert!(settings.automatic);
     settings.automatic = false;
     rig.host.save_provider_settings(settings).unwrap();
-    let script = r::Script::new(s::upload_steps(root.path(), before.last_sync.0, before.schema_modified.0));
+    let script = r::Script::new(s::upload_steps(root.path(), &before));
     let task = rig.host.start_meguri_structure_upload(s::source(&rig.connection, &script)).unwrap();
     assert!(matches!(*s::drive(&rig.host, &task), O::Saved(U::Uploaded { media_complete: true })));
     let doc = rig.host.provider_authority().snapshot().unwrap();
@@ -202,7 +202,7 @@ fn a_round_that_raises_a_confirmed_loss_ends_the_job_with_losses_changed() {
     // Accepting the question again is a new job with a new round.
     let before = s::col(&rig.host);
     let mut steps = s::quiet_round(&rig.host);
-    steps.extend(s::upload_steps(root.path(), before.last_sync.0, before.schema_modified.0));
+    steps.extend(s::upload_steps(root.path(), &before));
     let script = r::Script::new(steps);
     let (work, _) = s::save_work(s::draft_without_back(&rig.host, rig.notetype, 4));
     let task = rig.host.start_meguri_structure_save(s::source(&rig.connection, &script), work, true).unwrap();
@@ -327,7 +327,7 @@ fn a_failed_upload_keeps_the_save_and_leaves_a_durable_pending_upload() {
         MeguriRoundStart::Refused(MeguriRoundRefusal::NotReady)));
 
     // Upload…: the facts, the server copy, the upload; no round and no question.
-    let script = r::Script::new(s::upload_steps(root.path(), before.last_sync.0, before.schema_modified.0));
+    let script = r::Script::new(s::upload_steps(root.path(), &before));
     let task = host.start_meguri_structure_upload(s::source(&rig.connection, &script)).unwrap();
     assert!(matches!(*s::drive(&host, &task), O::Saved(U::Uploaded { media_complete: true })));
     script.assert_done();
@@ -349,7 +349,7 @@ fn changed_server_facts_stop_the_upload_before_any_transfer_and_ask_which_collec
     let rig = s::rig(root.path(), 2);
     let before = s::col(&rig.host);
     let mut steps = s::quiet_round(&rig.host);
-    steps.push(r::Step::new(Method::Meta, s::meta(before.last_sync.0 + 1, before.schema_modified.0, s::USN + 1, false)));
+    steps.push(r::Step::new(Method::Meta, s::meta(before.last_sync.0 + 1, before.schema_modified.0, before.usn.0 + 1, false)));
     let script = r::Script::new(steps);
     let (work, _) = s::save_work(s::draft_without_back(&rig.host, rig.notetype, 2));
     let task = rig.host.start_meguri_structure_save(s::source(&rig.connection, &script), work, true).unwrap();
@@ -363,7 +363,7 @@ fn changed_server_facts_stop_the_upload_before_any_transfer_and_ask_which_collec
     assert!(rig.host.manual_transfer_history().active().unwrap().is_none());
     // Upload… reads the facts again and gives the same answer while they differ.
     let again = r::Script::new(vec![r::Step::new(Method::Meta,
-        s::meta(before.last_sync.0 + 1, before.schema_modified.0, s::USN + 1, false))]);
+        s::meta(before.last_sync.0 + 1, before.schema_modified.0, before.usn.0 + 1, false))]);
     let task = rig.host.start_meguri_structure_upload(s::source(&rig.connection, &again)).unwrap();
     assert!(matches!(*s::drive(&rig.host, &task), O::Saved(U::ChooseCollection)));
     again.assert_done();
@@ -381,10 +381,11 @@ fn a_server_copy_that_moved_more_than_its_own_download_is_not_replaced() {
     let before = s::col(&rig.host);
     let (ls, scm) = (before.last_sync.0, before.schema_modified.0);
     let mut steps = s::quiet_round(&rig.host);
-    steps.extend([r::Step::new(Method::Meta, s::meta(ls, scm, s::USN, false)),
-        r::Step::new(Method::Meta, s::meta(ls + 200, scm, s::USN + 1, false)),
-        r::Step::new(Method::Download, s::served(&root.path().join("served"), ls + 500, scm, s::USN + 2)),
-        r::Step::new(Method::Meta, s::meta(ls + 500, scm, s::USN + 2, true))]);
+    let usn = before.usn.0;
+    steps.extend([r::Step::new(Method::Meta, s::meta(ls, scm, usn, false)),
+        r::Step::new(Method::Meta, s::meta(ls + 200, scm, usn + 1, false)),
+        r::Step::new(Method::Download, s::served(&root.path().join("served"), ls + 500, scm, usn + 2)),
+        r::Step::new(Method::Meta, s::meta(ls + 500, scm, usn + 2, true))]);
     let script = r::Script::new(steps);
     let (work, _) = s::save_work(s::draft_without_back(&rig.host, rig.notetype, 1));
     let task = rig.host.start_meguri_structure_save(s::source(&rig.connection, &script), work, true).unwrap();
@@ -439,7 +440,7 @@ fn upload_after_an_offline_save_uses_the_last_proved_baseline() {
     let (work, _) = s::save_work(s::draft_without_back(&rig.host, rig.notetype, 2));
     let task = rig.host.start_meguri_structure_save(s::source(&rig.connection, &silent), work, false).unwrap();
     assert!(matches!(*s::drive(&rig.host, &task), O::Saved(U::Pending(P::Unreachable))));
-    let script = r::Script::new(s::upload_steps(root.path(), before.last_sync.0, before.schema_modified.0));
+    let script = r::Script::new(s::upload_steps(root.path(), &before));
     let task = rig.host.start_meguri_structure_upload(s::source(&rig.connection, &script)).unwrap();
     assert!(matches!(*s::drive(&rig.host, &task), O::Saved(U::Uploaded { media_complete: true })));
     script.assert_done();
@@ -503,7 +504,7 @@ fn a_cancel_after_the_save_only_leaves_the_upload_pending() {
     let (entered, proceed) = (std::sync::mpsc::channel::<()>(), std::sync::mpsc::channel::<()>());
     let (entered_tx, proceed_rx) = (entered.0, std::sync::Mutex::new(proceed.1));
     let mut steps = s::quiet_round(&rig.host);
-    steps.push(r::Step::new(Method::Meta, s::meta(before.last_sync.0, before.schema_modified.0, s::USN, true))
+    steps.push(r::Step::new(Method::Meta, s::meta(before.last_sync.0, before.schema_modified.0, before.usn.0, true))
         .after(move || { entered_tx.send(()).unwrap(); proceed_rx.lock().unwrap().recv().unwrap(); }));
     let script = r::Script::new(steps);
     let (work, _) = s::save_work(s::draft_without_back(&rig.host, rig.notetype, 1));
@@ -542,7 +543,7 @@ fn a_save_stamped_behind_the_last_sync_is_still_pending() {
     assert!(matches!(rig.host.start_meguri_collection(r::access(&rig.connection, &silent)),
         MeguriRoundStart::Refused(MeguriRoundRefusal::NotReady)));
     // Upload… sends it: the server still holds the baseline.
-    let script = r::Script::new(s::upload_steps(root.path(), before.last_sync.0, before.schema_modified.0));
+    let script = r::Script::new(s::upload_steps(root.path(), &before));
     let task = rig.host.start_meguri_structure_upload(s::source(&rig.connection, &script)).unwrap();
     assert!(matches!(*s::drive(&rig.host, &task), O::Saved(U::Uploaded { media_complete: true })));
     script.assert_done();
@@ -617,7 +618,7 @@ fn a_lost_upload_acknowledgement_stays_acceptance_unknown_and_is_never_sent_twic
     let rig = s::rig(root.path(), 1);
     let before = s::col(&rig.host);
     let mut steps = s::quiet_round(&rig.host);
-    steps.extend(s::upload_steps(root.path(), before.last_sync.0, before.schema_modified.0));
+    steps.extend(s::upload_steps(root.path(), &before));
     steps.pop();
     steps.last_mut().unwrap().lost = true;
     let script = r::Script::new(steps);
@@ -637,16 +638,123 @@ fn a_lost_upload_acknowledgement_stays_acceptance_unknown_and_is_never_sent_twic
     // MP6.9 settles it: the server still holds what the copy retained, so
     // nothing was accepted, and Upload… then sends it under the same record.
     let (ls, scm) = (before.last_sync.0 + 500, before.schema_modified.0);
-    let settle = b::Script::new(vec![(Method::Meta, b::Reply::Bytes(s::meta(ls, scm, s::USN + 1, true)))]);
+    let settle = b::Script::new(vec![(Method::Meta, b::Reply::Bytes(s::meta(ls, scm, before.usn.0 + 1, true)))]);
     let events = rig.host.engine().stream().subscribe();
     let settled = b::complete(events, rig.host.settle_meguri_setup(b::access(&rig.connection, &settle)).unwrap()).unwrap();
     assert!(matches!(settled, meguri_host::MeguriSetupSettlement::NotAccepted { .. }));
     assert!(rig.host.meguri_structure_upload_pending().unwrap());
-    let script = r::Script::new(s::upload_steps_from(root.path(), ls, scm, s::USN + 1));
+    let script = r::Script::new(s::upload_steps_from(root.path(), ls, scm, before.usn.0 + 1));
     let task = rig.host.start_meguri_structure_upload(s::source(&rig.connection, &script)).unwrap();
     assert!(matches!(*s::drive(&rig.host, &task), O::Saved(U::Uploaded { media_complete: true })));
     script.assert_done();
     assert_eq!(script.bodies(Method::Upload).len(), 1);
     assert!(ready(&rig.host) && !record(&rig.host));
+    rig.host.close().unwrap();
+}
+
+/// A commit on the server can keep its `mod` (the server never moves it
+/// back, and two commits can share an instant): the sequence number, which
+/// every commit raises, is part of the baseline.
+#[test]
+fn a_server_commit_that_kept_its_modification_time_is_still_seen() {
+    let _lane = b::LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let rig = s::rig(root.path(), 1);
+    let before = s::col(&rig.host);
+    let mut steps = s::quiet_round(&rig.host);
+    steps.push(r::Step::new(Method::Meta, s::meta(before.last_sync.0, before.schema_modified.0, before.usn.0 + 1, false)));
+    let script = r::Script::new(steps);
+    let (work, _) = s::save_work(s::draft_without_back(&rig.host, rig.notetype, 1));
+    let task = rig.host.start_meguri_structure_save(s::source(&rig.connection, &script), work, true).unwrap();
+    assert!(matches!(*s::drive(&rig.host, &task), O::Saved(U::ChooseCollection)));
+    script.assert_done();
+    assert!(script.bodies(Method::Download).is_empty() && script.bodies(Method::Upload).is_empty());
+    assert!(rig.host.meguri_structure_upload_pending().unwrap());
+    rig.host.close().unwrap();
+}
+
+/// Cancelled after the upload held the binding (during the server copy),
+/// then the save undone: nothing was sent, nothing is pending, and the
+/// binding the record names is ready again with no record left (D7).
+#[test]
+fn an_undo_after_a_cancelled_server_copy_gives_the_binding_back() {
+    let _lane = b::LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let rig = s::rig(root.path(), 1);
+    let before = s::col(&rig.host);
+    let binding = rig.host.provider_authority().snapshot().unwrap().meguri_binding.unwrap();
+    let (entered, proceed) = (std::sync::mpsc::channel::<()>(), std::sync::mpsc::channel::<()>());
+    let (entered_tx, proceed_rx) = (entered.0, std::sync::Mutex::new(proceed.1));
+    let mut steps = s::quiet_round(&rig.host);
+    steps.extend(s::upload_steps(root.path(), &before));
+    steps.truncate(5);
+    // Step 3 is the download of the server copy.
+    steps[3].after = Some(Box::new(move || { entered_tx.send(()).unwrap(); proceed_rx.lock().unwrap().recv().unwrap(); }));
+    let script = r::Script::new(steps);
+    let (work, _) = s::save_work(s::draft_without_back(&rig.host, rig.notetype, 1));
+    let task = rig.host.start_meguri_structure_save(s::source(&rig.connection, &script), work, true).unwrap();
+    let driver = { let (host, task) = (rig.host.clone(), task.clone()); std::thread::spawn(move || s::drive(&host, &task)) };
+    entered.1.recv().unwrap();
+    assert!(matches!(rig.host.meguri_readiness().unwrap(), MeguriReadiness::Unbound { .. }), "held for the upload");
+    task.cancel();
+    proceed.0.send(()).unwrap();
+    assert!(matches!(*driver.join().unwrap(), O::Saved(U::Pending(P::Cancelled))));
+    assert!(script.bodies(Method::Upload).is_empty());
+    assert!(rig.host.manual_transfer_history().active().unwrap().is_none());
+    assert!(rig.host.meguri_structure_upload_pending().unwrap());
+    assert!(matches!(rig.host.meguri_readiness().unwrap(), MeguriReadiness::Unbound { .. }));
+    // Undo: nothing is pending, and the next admission restores the binding.
+    rig.host.collection().unwrap().undo(UndoScope::Global).unwrap();
+    assert_eq!(s::field_names(&rig.host, rig.notetype), ["Front", "Back"]);
+    assert!(!rig.host.meguri_structure_upload_pending().unwrap());
+    let mut lost = r::Step::new(Method::Meta, Vec::new());
+    lost.lost = true;
+    let offline = r::Script::new(vec![lost]);
+    let result = r::complete(&rig.host, &r::started(rig.host.start_meguri_collection(r::access(&rig.connection, &offline))));
+    assert_eq!(result.collection.as_ref().unwrap().state, MeguriCollectionState::Failed);
+    offline.assert_done();
+    let doc = rig.host.provider_authority().snapshot().unwrap();
+    assert_eq!(doc.meguri_binding.as_ref(), Some(&binding));
+    assert!(doc.meguri_structure.is_none() && doc.meguri_bootstrap.is_none() && doc.settings.automatic);
+    assert!(ready(&rig.host));
+    rig.host.close().unwrap();
+}
+
+/// An offline save is admitted only for the connection and account of the
+/// ready binding, and a job let go during its round does not keep the lane.
+#[test]
+fn an_offline_save_needs_the_bindings_own_connection_and_a_dropped_job_frees_the_lane() {
+    let _lane = b::LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let rig = s::rig(root.path(), 1);
+    let silent = r::Script::new(vec![]);
+    let mut other = rig.connection.clone();
+    other.reference.push('x');
+    let work: MeguriStructureWork = Box::new(|_, _| panic!("no op runs for another connection"));
+    assert!(matches!(rig.host.start_meguri_structure_save(s::source(&other, &silent), work, false),
+        Err(MeguriStructureRefusal::NotReady)));
+    assert!(!record(&rig.host));
+    // Dropped while its round waits for the server: the round is stopped,
+    // and the next reservation releases its entry.
+    let (entered, proceed) = (std::sync::mpsc::channel::<()>(), std::sync::mpsc::channel::<()>());
+    let (entered_tx, proceed_rx) = (entered.0, std::sync::Mutex::new(proceed.1));
+    let mut steps = s::quiet_round(&rig.host);
+    steps[0].after = Some(Box::new(move || { entered_tx.send(()).unwrap(); proceed_rx.lock().unwrap().recv().unwrap(); }));
+    let script = r::Script::new(steps);
+    let work: MeguriStructureWork = Box::new(|_, _| panic!("no op runs for a dropped job"));
+    let task = rig.host.start_meguri_structure_save(s::source(&rig.connection, &script), work, true).unwrap();
+    entered.1.recv().unwrap();
+    let round = match rig.host.advance_meguri_structure(&task).unwrap() {
+        meguri_host::MeguriStructureStep::Running { job, .. } => job,
+        meguri_host::MeguriStructureStep::Finished(_) => panic!("the round is the first phase"),
+    };
+    let events = rig.host.engine().stream().subscribe();
+    drop(task);
+    proceed.0.send(()).unwrap();
+    loop {
+        let event = events.recv().expect("engine stream stays open");
+        if matches!(event.kind, meguri_engine::EventKind::JobFinished { id, .. } if id == round.id) { break; }
+    }
+    assert_untouched(&rig, 2);
     rig.host.close().unwrap();
 }
