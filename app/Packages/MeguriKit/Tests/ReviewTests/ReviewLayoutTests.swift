@@ -51,6 +51,30 @@ import Testing
         #expect(measured.value == CGFloat(width))
     }
 
+    /// N16.9: the card runs on to the window's bottom edge, under the answer
+    /// area, and is told how much of it the answers cover.
+    @Test func cardRunsUnderTheAnswers() async throws {
+        var coveredBySide: [CGFloat] = []
+        for answer in [false, true] {
+            let height = Width(), covered = Width()
+            let (window, hosting) = host(layout(phase: answer ? .answer : .question) {
+                ReviewCardUnderAnswers { value in
+                    Color.clear
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height.value = $0 }
+                        .onChange(of: value, initial: true) { _, new in covered.value = new }
+                }
+            }, size: CGSize(width: 900, height: 700))
+            defer { window.close() }
+            try await settle(hosting) { height.value >= 0 && covered.value > 0 }
+            #expect(height.value == 700, "The card reaches the bottom edge")
+            // The answers' row, the spacing and the progress bar: more than a
+            // button, far less than the window.
+            #expect(covered.value > ControlMetrics.minimumTarget && covered.value < 140, "Covered: \(covered.value)")
+            coveredBySide.append(covered.value)
+        }
+        #expect(coveredBySide.first == coveredBySide.last, "Reveal moves nothing")
+    }
+
     /// N16.4, N16.6: a state's text keeps the centred readable column.
     @Test(arguments: [800.0, 1600.0]) func statesKeepTheReadableColumn(width: Double) async throws {
         let measured = Width()

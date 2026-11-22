@@ -59,7 +59,7 @@ Supporting requirements: R15, R30, R31, R35, R40–R42. Show existing features w
 - Do not infer remote freshness from a prior transfer, saved credentials or the absence of errors.
 - Keep Show Answer and the four rating actions at the bottom of the review area.
 - Reserve the action region on both sides so reveal does not move or resize card content.
-- Long card content scrolls between the corner controls and the answer region.
+- Long card content scrolls between the corner controls and the answer region, and on under the answer region (N16.9).
 - Reveal preserves the reader's scroll position. Never recreate the card pair just to change the surrounding layout.
 - Preserve the real rating labels and intervals from `ReviewCoordinator.item.nextStates`.
 - Keep waiting, finished, paused/error and transition states usable.
@@ -565,10 +565,11 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 
 ### N16.1 Session progress
 
-- One thin grey bar along the very bottom edge, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint (on the Mac a drawn bar, the exception below). No text, no counts, no accent colour.
-- Touch: the bar spans the screen's width on its bottom edge, inside the bottom safe area, so the home indicator lies over its middle. iPhone Duo: the same edge folded, held wide and held tall; held wide it runs under both halves and across the fold. It is not a control, so it may cross (R9 covers controls).
+- One thin grey bar at the bottom, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint (on the Mac a drawn bar, the exception below). No text, no counts, no accent colour.
+- Touch: the bar spans the screen's width one standard spacing (8 pt) below the answer buttons, above the home indicator's safe area (changed 2026-11-22, N16.9; it lay on the screen's very edge under the home indicator, which left a gap about one button high between it and the answers). iPhone Duo: the same place folded, held wide and held tall; held wide it runs under both halves and across the fold. It is not a control, so it may cross (R9 covers controls).
+- Mac: one standard spacing (8 pt) between the answer buttons and the bar (changed 2026-11-22, N16.9; it was 16 pt).
 - Mac: the bar is the window's last row, under the answer buttons, on the window's bottom edge and across its full width. The Mac had no bar before.
-- Mac exception (2026-11-20; need: the bottom-edge, full-width bar above, which the system indicator did not meet; Antoine reported the gap below the bar and at its leading end on 2026-11-20 and asked for the bar to sit on the edge, PR #24): the bar is drawn, not the system's linear indicator, which draws its rounded track inset in its frame. The drawn bar is a 4 pt track in the quaternary fill with the value in the secondary fill; the window's rounded bottom corners clip its ends, as they clip any content on that edge. Its accessibility below is unchanged. Verification: `ReviewLayoutTests.progressBarIsTheBottomEdge` (light and dark), and the Mac review drives in the test VM on 2026-11-20 (light and dark, 800, 1000 and 1600 pt windows), in PR #24. Touch keeps the system indicator, which lies on the screen's bottom edge.
+- Mac exception (2026-11-20; need: the bottom-edge, full-width bar above, which the system indicator did not meet; Antoine reported the gap below the bar and at its leading end on 2026-11-20 and asked for the bar to sit on the edge, PR #24): the bar is drawn, not the system's linear indicator, which draws its rounded track inset in its frame. The drawn bar is a 4 pt track in the quaternary fill with the value in the secondary fill; the window's rounded bottom corners clip its ends, as they clip any content on that edge. Its accessibility below is unchanged. Verification: `ReviewLayoutTests.progressBarIsTheBottomEdge` (light and dark), and the Mac review drives in the test VM on 2026-11-20 (light and dark, 800, 1000 and 1600 pt windows), in PR #24. Touch keeps the system indicator, under the answers above the home indicator (N16.9).
 - The bar shows on the question and answer sides and between cards. Loading, waiting, paused and finished states have none.
 - Its value is the answers given over those answers plus the cards left (new, learning and to review). Accessibility: label "Session Progress", value "12 of 40", identifier `review.session.progress`. It takes no input and is read as text, so the hit-region audit does not ask a touch target of it.
 - Replaces: N11.1's bar across the top and its device setting (R341–R345), N13.3's counts line and top bar.
@@ -631,6 +632,15 @@ Decided by Antoine on 2026-11-21 ("When you click on Study, there's a screen tha
 - Meguri keeps one set of card pages loaded while a collection is open and no review runs, beneath the window's content and never seen, and prepares in it the first card of the deck the visible Study targets (the deck page's deck; on Today, the first deck the walk starts). Media that arrives drops the prepared card, and Study's own deck selection keeps it. It reads only: no session starts, no deck is selected and no count or undo step changes until Study is clicked. No audio plays and nothing counts as shown until the card is on screen. The session uses the prepared card only when its own first card is the same card in the same state with the same content; otherwise it prepares that card as before. The pages are given up under memory pressure, in the background and when the collection closes.
 - VoiceOver lands on the review as it does today; there is no loading announcement for a screen that does not appear. Reduce Motion keeps the system's own transition.
 - Replaces: N16.6's "Loading keeps the system progress indicator with its label", and the review's loading screen with "Preparing review…".
+
+### N16.9 The card runs on under the answers
+
+Decided by the coordinator under Antoine's delegation on 2026-11-22, from his capture of a long card on the folded Duo ("there is a lot of room between the four buttons and the progress bar at the bottom… this could be reduced"; he also expected the whole card to continue behind the four buttons, which cut his last line; `decisions.md`).
+
+- The card's page reaches the window's bottom edge on every platform. The answer area (Show Answer or the four answers, then the progress bar) floats over it as a system bottom bar (`safeAreaBar`), with no opaque band of its own: the card's own background and night mode show around and under the buttons. On touch each page's scroll view draws the system's bottom edge effect under it (`UIScrollEdgeElementContainerInteraction`). The buttons keep their standard shapes and contrast.
+- The page is told how much of its bottom the answer area covers (`WKWebView.obscuredContentInsets`, and on touch the scroll view's bottom content inset), so the last line of any card scrolls fully above the buttons, and a card shorter than the window is not covered at rest. WebKit keeps a card's fixed and sticky elements clear of that part.
+- A tap or click in the answer area that misses its buttons does nothing on either side: the area takes it, so it reaches neither the card's page nor the tap zones, and no grade comes from a near miss of a button (U180). A drag that starts there does not scroll the card.
+- Replaces: the answer row's band of the page colour between the card and the bottom edge (N3's reserved region now lies over the card, still the same height on both sides, so reveal moves nothing).
 
 ## N17. Round 5 editor and file transfer decisions (2026-11-19)
 

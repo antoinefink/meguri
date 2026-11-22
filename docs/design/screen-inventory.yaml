@@ -285,7 +285,8 @@ screens:
       The card's question side in quiet corners (native-interface-contract N3, N11.1, N11.2, N16): Back
       to Decks at the upper left, touch Undo and More (N20.8) at the upper right with the sync status icon only
       while sync needs the person, the card scrolling between them, a reserved bottom action region
-      holding the centred Show Answer button and the thin grey progress bar on the bottom edge.
+      holding the centred Show Answer button and the thin grey progress bar under it, floating over the
+      card, which runs on under them (N16.9).
   - id: review.answer
     title: Review, answer side
     units: [U175, U178, U179]
