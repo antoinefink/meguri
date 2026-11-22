@@ -482,3 +482,28 @@ fn the_cards_notes_control_writes_the_notes_mode() {
     assert!(set_browser_notes_mode(false).unwrap().written);
     assert!(!browse_opening().unwrap().notes_mode);
 }
+
+/// T13 and K7.2: Save Search… stores the run text under its name, which the
+/// saved searches' value list then shows; saving the same text again writes
+/// nothing, another text replaces it, and an empty name is refused.
+#[test]
+fn save_search_stores_the_run_text_under_its_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let _core = open(&dir);
+    let saved = || {
+        filter_suggestions(FilterQuery::default(), 0, Some(FilterSection::SavedSearches), Vec::new(), labels())
+            .unwrap()
+            .into_iter()
+            .filter_map(|row| match row.row {
+                FilterSuggestionRow::SavedSearch { name, text } => Some((name, text)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(save_browser_search("Velt".into(), "tag:velt is:due".into()).unwrap().written);
+    assert_eq!(saved(), vec![("Velt".to_owned(), "tag:velt is:due".to_owned())]);
+    assert!(!save_browser_search("Velt".into(), "tag:velt is:due".into()).unwrap().written);
+    assert!(save_browser_search("Velt".into(), "is:new".into()).unwrap().written);
+    assert_eq!(saved(), vec![("Velt".to_owned(), "is:new".to_owned())]);
+    assert!(save_browser_search(String::new(), "is:new".into()).is_err());
+}
