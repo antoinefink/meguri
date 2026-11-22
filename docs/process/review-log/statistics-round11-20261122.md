@@ -33,3 +33,7 @@ Plan re-review of 143367447: the six blocking findings fixed; six should-fix poi
 CodeRabbit: twelve threads, answered and resolved (143367447, b9f2c9400): T7 for reading tokens, system formatting of tick labels, folding at read time, one end for Reviews Due's All, Today keeps its grid, a period change within the year keeps the running request, and the chart colours recorded as an exception to the rubric's count colours, with the families in the decision row.
 
 Decision: the spec lines stay `Under review (R1357)` until the coordinator approves them under Antoine's permission of 2026-11-20 to update specs.
+
+## Approval (2026-11-22)
+
+Approved 2026-11-22 (R1357) by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after the reviews above; Antoine approved the design in chat the same day. Every item of the plan's §8 is approved: the two new files, N25, Q9, P24 and the lines that begin "Changed 2026-11-22 (round 11)" with T15's row in `search/filter-tokens`. The Status lines say so (PR of branch `unit/stats-spec-approval`, `docs/process/review-log/stats-spec-approval-20261122.md`); `docs/design/decisions.md` has the row.

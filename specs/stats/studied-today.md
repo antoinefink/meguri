@@ -4,7 +4,7 @@ Spec: stats/studied-today
 Requirements: R1269, R1277, R1278, R1279, R1281, R1282, R1288, R1295, R1296, R1297, R1298, R1300, R1369, R1370, R1371, R1372, R1448, R1889, R304, R95
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/studied-today/, conformance/scenarios/stats/today/
-Status: Under review (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). Every other section is in force and unchanged.
 
 Two texts report today's answers:
 

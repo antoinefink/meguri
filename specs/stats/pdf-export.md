@@ -4,7 +4,7 @@ Spec: stats/pdf-export
 Requirements: R1421, R1295, R1357, R1360, R1361, R1838
 Anki: 26.09.3
 Scenarios: none. Anki's Save PDF lives in its desktop Statistics window, which the oracle does not run (`conformance/AGENTS.md`), and the file is not collection data. X11 lists the Meguri tests built from this file.
-Status: Under review (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). Every other section is in force and unchanged.
 
 The file the Stats screen writes when the user exports it (U236): its default name, where it goes, when it is made, what it holds and in what order, and how its pages break. Anki's Statistics window has a Save PDF button that prints its graphs page to a PDF file. R1421 asks for the same export, with Meguri's name prefix. The graphs, tables and their text are those of the screen (`stats/graph-presentation`, `stats/studied-today` T4); this file adds only what the export changes. Where the commands sit is X9's; the rest of the screen is `stats.overview` (`docs/design/screen-inventory.yaml`).
 
