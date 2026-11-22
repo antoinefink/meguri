@@ -153,9 +153,9 @@ const POLL: Duration = Duration::from_millis(10);
 /// H15: progress at most every 100 ms.
 const REPORT_EVERY: Duration = Duration::from_millis(100);
 /// A component found ready but not current, or not rebuilt for this
-/// request's grid, this many times in a row is read around (it should
-/// never happen: the read flushes first).
-const MAX_TRIES: u32 = 20;
+/// request's grid, this many times in a row (about a second) is read
+/// around.
+const MAX_TRIES: u32 = 100;
 
 /// H15's progress for one part: between 0 and 1, never decreasing, at most
 /// every 100 ms.
@@ -199,24 +199,44 @@ enum Waited {
     Cancelled,
 }
 
+/// Polls a `Ready` component this many times for the rebuild it was asked
+/// for to begin before taking it as it is (the read then asks again).
+const REBUILD_POLLS: u32 = 100;
+
 /// Waits until the component is `Ready`, or will not be (H18), or the read
-/// is cancelled; reports the build's progress meanwhile.
-fn wait(derived: &DerivedHost, cancel: &CancelToken, reporter: &mut Reporter<'_>) -> Waited {
+/// is cancelled; reports the build's progress meanwhile. It never blocks on
+/// the derived writer, so a cancel is seen within one poll (H16). With
+/// `rebuilding`, a `Ready` is taken only once the asked-for rebuild has
+/// shown, or after [`REBUILD_POLLS`].
+fn wait(derived: &DerivedHost, cancel: &CancelToken, reporter: &mut Reporter<'_>, rebuilding: bool) -> Waited {
+    let mut changed = !rebuilding;
+    let mut polls = 0;
     loop {
         if cancel.is_cancelled() {
             return Waited::Cancelled;
+        }
+        // Before the readiness: a store that closed during a build leaves it
+        // `Building` (D11).
+        if derived.has_failed(HISTORY_COMPONENT) {
+            return Waited::Failed;
         }
         let Some(readiness) = derived.readiness(HISTORY_COMPONENT) else {
             return Waited::Failed;
         };
         match readiness.readiness {
-            Readiness::Ready => return Waited::Ready,
-            Readiness::Building { completed, total } => match total {
-                Some(total) => reporter.fraction(completed, total),
-                None => reporter.unknown(),
-            },
-            Readiness::Stale if derived.has_failed(HISTORY_COMPONENT) => return Waited::Failed,
-            Readiness::Stale => reporter.unknown(),
+            Readiness::Ready if changed || polls >= REBUILD_POLLS => return Waited::Ready,
+            Readiness::Ready => polls += 1,
+            Readiness::Building { completed, total } => {
+                changed = true;
+                match total {
+                    Some(total) => reporter.fraction(completed, total),
+                    None => reporter.unknown(),
+                }
+            }
+            Readiness::Stale => {
+                changed = true;
+                reporter.unknown();
+            }
         }
         std::thread::sleep(POLL);
     }
@@ -333,21 +353,20 @@ pub fn card_states_in(
         };
         if other_grid {
             // Kept for another phase of `N` (H14.3): rebuilt on this
-            // request's grid, the reader let go first. The flush lets the
-            // writer mark it stale.
+            // request's grid, the reader let go first.
             shared.rebuild();
-            derived.flush()?;
-            if cancelled() {
-                return Ok(HistoryResult::Cancelled);
-            }
         }
         derived.request_refresh(HISTORY_COMPONENT);
-        match wait(derived, &request.cancel, &mut reporter) {
+        let waited = wait(derived, &request.cancel, &mut reporter, other_grid);
+        match waited {
             Waited::Cancelled => return Ok(HistoryResult::Cancelled),
             Waited::Ready | Waited::Failed => {}
         }
-        // The writer may be in one of a build's short batches (H16).
-        derived.flush()?;
+        if tries > 0 {
+            // Ready but not yet current: the writer applies the last
+            // commits (D8). No blocking wait on it, so a cancel stays quick.
+            std::thread::sleep(POLL);
+        }
         tries += 1;
     }
 }

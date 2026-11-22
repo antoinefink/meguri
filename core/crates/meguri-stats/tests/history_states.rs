@@ -1396,15 +1396,35 @@ fn h18_a_store_that_cannot_be_written_leaves_the_parts_to_the_snapshot() {
     assert_eq!(got.card_states.on(0).total(), expected.card_states.on(0).total());
 }
 
+/// The derived writer's gate for [`h14_4_commits_during_a_build_are_kept_and_applied_after_the_swap`]:
+/// the fault point's callback holds the writer until the test opens it.
+static WRITER_GATE: (Mutex<bool>, std::sync::Condvar) = (Mutex::new(false), std::sync::Condvar::new());
+
+fn hold_writer() {
+    let (open, changed) = &WRITER_GATE;
+    let mut open = open.lock().unwrap();
+    while !*open {
+        open = changed.wait(open).unwrap();
+    }
+}
+
+fn open_writer() {
+    let (open, changed) = &WRITER_GATE;
+    *open.lock().unwrap() = true;
+    changed.notify_all();
+}
+
 #[test]
 fn h14_4_commits_during_a_build_are_kept_and_applied_after_the_swap() {
+    use meguri_model::faultpoint::{self, Fault};
     let big = big(30_000, 240_000);
     let host = &big.host;
     assert!(data(read(host, Scope::Collection, History::AllHistory)).from_component);
     let collection = host.collection().unwrap();
     let card = NOW_MS - 900 * DAY * 1_000 + 7;
     host.derived().invalidate(Invalidation::CheckDatabase);
-    // Building with rows done: its snapshot is taken and it has not swapped.
+    // Building with cards replayed: its snapshot is taken, and it has
+    // written no batch yet (the first comes after 5,000 cards).
     let deadline = meguri_engine::monotonic::now() + WAIT;
     while !matches!(
         host.derived().readiness(HISTORY_COMPONENT).unwrap().readiness,
@@ -1413,6 +1433,11 @@ fn h14_4_commits_during_a_build_are_kept_and_applied_after_the_swap() {
         assert!(meguri_engine::monotonic::now() < deadline, "the build never started");
         std::thread::sleep(Duration::from_millis(1));
     }
+    // The commit's message keeps its delta for the running build, then
+    // holds the derived writer before its transaction (D6): the build
+    // cannot write its next batch, so it cannot swap before the test lets
+    // the writer go.
+    faultpoint::arm("engine.derived.before_apply", Fault::Callback(hold_writer));
     collection
         .run(meguri_engine::OpSpec::named("answer", meguri_model::changes::OpSource::UserUndoable), move |ctx| {
             let mut c = meguri_storage::ReadRows::card(&*ctx.scope(), CardId(card))?.unwrap();
@@ -1422,10 +1447,13 @@ fn h14_4_commits_during_a_build_are_kept_and_applied_after_the_swap() {
             Ok(())
         })
         .unwrap();
+    std::thread::sleep(Duration::from_millis(50));
     assert!(
         matches!(host.derived().readiness(HISTORY_COMPONENT).unwrap().readiness, Readiness::Building { .. }),
-        "the commit landed after the swap: this run does not test kept deltas"
+        "the build swapped before the commit reached the writer"
     );
+    faultpoint::disarm("engine.derived.before_apply");
+    open_writer();
     for history in [History::AllHistory, History::Last12Months] {
         let request = request(Scope::Collection, history);
         let context = history::page_context(&collection, host.derived()).unwrap();
@@ -1434,7 +1462,34 @@ fn h14_4_commits_during_a_build_are_kept_and_applied_after_the_swap() {
         let cold = data(history::card_states_cold(&collection, &context, &request).unwrap());
         assert_eq!(warm.card_states, cold.card_states, "{history:?}");
         assert_eq!(warm.started, cold.started, "{history:?}");
-        assert_eq!(warm.card_states.on(0).relearning, cold.card_states.on(0).relearning);
         assert!(warm.card_states.on(0).relearning >= 1);
     }
+}
+
+#[test]
+fn h18_a_store_closed_during_a_build_leaves_a_waiting_read_to_the_snapshot() {
+    let big = big(30_000, 240_000);
+    let host = Arc::new(big.host);
+    let waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reader = {
+        let (host, waiting) = (Arc::clone(&host), Arc::clone(&waiting));
+        std::thread::spawn(move || {
+            let collection = host.collection().unwrap();
+            let request = request(Scope::Collection, History::AllHistory);
+            history::card_states(host.stats(), &collection, host.derived(), &request, &mut |_| {
+                waiting.store(true, std::sync::atomic::Ordering::SeqCst)
+            })
+            .unwrap()
+        })
+    };
+    let deadline = meguri_engine::monotonic::now() + WAIT;
+    while !matches!(host.derived().readiness(HISTORY_COMPONENT).unwrap().readiness, Readiness::Building { .. }) {
+        assert!(meguri_engine::monotonic::now() < deadline, "the build never started");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    host.derived().close().unwrap();
+    // The read stops waiting and computes from the snapshot (H18).
+    let result = data(reader.join().unwrap());
+    assert!(!result.from_component);
+    assert!(waiting.load(std::sync::atomic::Ordering::SeqCst));
 }

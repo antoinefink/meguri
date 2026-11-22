@@ -8,8 +8,9 @@
 //!   new interval), then its undo (the row removed, the card back), in
 //!   turn.
 //! - `stats_history_apply.sync_1000`: a `SyncIncoming` commit of 1,000 rows
-//!   on 500 cards, the next 500 of the collection's review cards each time,
-//!   so no card's history grows sample after sample.
+//!   on 500 cards, the next 500 of the collection's review cards each time;
+//!   the rows are removed again outside the timed part, so every sample
+//!   starts from the same histories.
 //!
 //! Sizes come from `$MEGURI_BENCH_SIZES` (default `10k,150k`), made first by
 //! `tools/mg bench`.
@@ -136,12 +137,14 @@ fn main() -> ExitCode {
         let mut measurement = Measurement::start(name, Some(&size));
         criterion.bench_function(&format!("{name}/{size}"), |b| {
             b.iter_custom(|n| {
-                measurement.run(n, |_| {
+                measurement.run_timed(n, |_| {
                     let first = next + 1;
                     next += 1_000;
                     let from = turn * 500;
                     turn += 1;
                     let cards: Vec<i64> = (0..500).map(|at| cards[(from + at) % cards.len()]).collect();
+                    #[allow(clippy::disallowed_methods)]
+                    let started = std::time::Instant::now();
                     collection
                         .run(
                             OpSpec::named("sync_incoming", OpSource::SyncIncoming).stamp(StampMode::Raw),
@@ -155,6 +158,20 @@ fn main() -> ExitCode {
                         )
                         .unwrap();
                     host.derived().flush().unwrap();
+                    let took = started.elapsed();
+                    collection
+                        .run(
+                            OpSpec::named("sync_incoming", OpSource::SyncIncoming).stamp(StampMode::Raw),
+                            move |ctx| {
+                                for at in 0..1_000i64 {
+                                    ctx.scope().remove_revlog(RevlogId(first + at))?;
+                                }
+                                Ok(())
+                            },
+                        )
+                        .unwrap();
+                    host.derived().flush().unwrap();
+                    took
                 })
             })
         });
