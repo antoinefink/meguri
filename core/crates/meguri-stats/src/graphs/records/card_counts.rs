@@ -50,6 +50,11 @@ impl StateCounts {
         ]
     }
 
+    /// The count of `label`'s row.
+    pub fn count(&self, label: CountLabel) -> u32 {
+        self.values()[label as usize]
+    }
+
     fn slot(&mut self, label: CountLabel) -> &mut u32 {
         match label {
             CountLabel::New => &mut self.new,

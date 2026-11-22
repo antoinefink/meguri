@@ -503,6 +503,9 @@ fn ae60_each_label_finds_exactly_the_cards_it_counts() {
                 .map(|(_, id)| id)
                 .collect();
             assert_eq!(found, expected, "{setting} {:?}: {text}", label.label);
+            // The setting's own count set counts exactly those cards.
+            let shown = if setting { counted.excluding_inactive } else { counted.including_inactive };
+            assert_eq!(shown.count(label.label) as usize, found.len(), "{setting} {:?}", label.label);
         }
     }
 }
