@@ -612,7 +612,7 @@ runs:
       sched/steps, sched/unbury-on-rollover, search, smoke/fsrs-new-card, stats/card-info,
       smoke/fuzz-table-small, smoke/handoff-round-trip, smoke/ids-frozen-collision, smoke/runner-empty,
       smoke/sm2-new-card, smoke/timing-advance, smoke/timing-tz-asia-kathmandu, smoke/timing-tz-utc,
-      storage, tags, text, undo
+      stats, storage, tags, text, undo
     ]
     tier: T1
     placement: [host, docker:oracle]
