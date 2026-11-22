@@ -119,7 +119,7 @@ enum BrowseMetrics {
     static func trailing(_ key: String, mode: BrowseMode) -> Bool {
         // Notes mode's Cards column is a count (C8).
         if key == "template" { return mode == .notes }
-        switch key {
+        return switch key {
         case "cardDue", "cardEase", "cardIvl", "cardReps", "cardLapses", "noteCrt", "cardMod", "noteMod",
              "originalPosition", "stability", "difficulty", "retrievability":
             true
