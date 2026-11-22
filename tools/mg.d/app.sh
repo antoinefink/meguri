@@ -261,6 +261,11 @@ mg_app_build_action() {
     mg_status fail
     return 1
   fi
+  if [ "$personal" = true ] || [ "$real" = true ]; then
+    local identity_settings="$MG_RUN_DIR/personal-preview-settings.json"
+    [ "$real" != true ] || identity_settings="$MG_RUN_DIR/real-copy-settings.json"
+    mg_app_dd_identity "$identity_settings" "$(mg_app_products "$platform" "$config")/Meguri.app" || return 1
+  fi
   case "$platform" in
     mac) dest="platform=macOS,arch=arm64" ;;
     ios-device) dest="platform=iOS,id=$MG_UI_PHYSICAL_DEVICE" ;;
@@ -298,7 +303,15 @@ mg_app_build_action() {
     '{platform: $p, config: $c, app: $app, action: $action, test_plan: $plan, standalone: ($action == "build" and ($personal | not) and ($real | not)), personal_preview: $personal, real_copy: $real, derived_data: $dd} + ($counts // {})')"
   if [ "$rc" -ne 0 ]; then
     [ "$plan" != CloudAgent ] || plan_arg=" --test-plan $plan"
-    if [ "$real" = true ] && grep -Eqi 'provisioning profile|No profiles for|requires a development team|No signing certificate' "$log"; then
+    # The destination's state, when Xcode stopped at it (fixed messages; the
+    # log names the device). Developer Mode first: Xcode then also times out.
+    if [ "$platform" = ios-device ] && grep -Eqi 'Developer Mode (is )?disabled|enable Developer Mode' "$log"; then
+      mg_app_physical_device_failure developer-mode "Xcode stopped at the destination; nothing was installed"
+    elif [ "$platform" = ios-device ] && grep -Eqi 'device is locked|is passcode protected|Unlock .* to continue' "$log"; then
+      mg_app_physical_device_failure locked "Xcode stopped at the destination; nothing was installed"
+    elif [ "$platform" = ios-device ] && grep -Eqi 'Timed out waiting for all destinations' "$log"; then
+      mg_app_physical_device_failure unreachable "Xcode timed out waiting for the destination; nothing was installed"
+    elif [ "$real" = true ] && grep -Eqi 'provisioning profile|No profiles for|requires a development team|No signing certificate' "$log"; then
       # A fixed message: device signing diagnostics stay in the private log.
       mg_failure real-copy-profile "$MG_APP_REAL_COPY_PROFILE_HELP" "tools/mg doctor"
     elif [ "$platform" = ios-device ] || [ -n "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ]; then
@@ -375,6 +388,77 @@ mg_app_input_digest() {
   rm -f "$index"
   [ -n "$tree" ] || return 0
   git -C "$MG_ROOT" ls-tree -r "$tree" -- app core 2>/dev/null | grep -v "$(printf '\t')app/Snapshots/" | shasum -a 256 | cut -c1-64
+}
+
+# --- Derived data of the personal previews and real copies -----------------
+# Xcode's incremental builds keep files the current settings no longer make:
+# a folder last built as the other identity kept its AppIcon.icns in the
+# bundle (2026-11-22), and removing the product alone did not help. Each of
+# these folders records the identity settings it was built with
+# (meguri-build-identity.json); a folder without that record, or with other
+# settings, is removed before the build, once.
+MG_APP_DD_RECORD=meguri-build-identity.json
+
+# mg_app_dd_identity <resolved settings JSON> <app>: compare, clean, record.
+mg_app_dd_identity() {
+  local settings="$1" app="$2" dd="$MG_ROOT/$MG_APP_DD" identity recorded
+  identity="$(jq -cS '{version: 1, targets: ([.[] | select(.target == "Meguri" or .target == "MeguriWidget") |
+    {target} + (.buildSettings | {CONFIGURATION, PLATFORM_NAME, PRODUCT_BUNDLE_IDENTIFIER, MEGURI_BUNDLE_ID_SUFFIX,
+      MEGURI_APP_NAME, MEGURI_APP_ICON, ASSETCATALOG_COMPILER_APPICON_NAME, INFOPLIST_KEY_CFBundleDisplayName,
+      EXCLUDED_SOURCE_FILE_NAMES, MEGURI_CLOUD_CONFIGURATION, MEGURI_SIGNING, CODE_SIGN_ENTITLEMENTS})] | sort_by(.target))}' \
+    "$settings" 2>/dev/null)" && [ -n "$identity" ] || {
+    mg_failure derived-data "the identity settings of $MG_APP_DD could not be read; nothing was built"
+    mg_status error
+    return 1
+  }
+  if [ -d "$dd" ] || [ -L "$dd" ]; then
+    recorded="$(jq -cS . "$dd/$MG_APP_DD_RECORD" 2>/dev/null)" || recorded=""
+    if [ -z "$recorded" ]; then
+      mg_app_dd_clean no-identity-record "$app" || return 1
+    elif [ "$recorded" != "$identity" ]; then
+      mg_app_dd_clean identity-settings-changed "$app" || return 1
+    fi
+  fi
+  # Recorded before the build: a failed build leaves partial products of
+  # these same settings, which the next incremental build may reuse.
+  if ! mkdir -p "$dd" || ! printf '%s\n' "$identity" >"$dd/$MG_APP_DD_RECORD"; then
+    mg_failure derived-data "could not record the identity settings of $MG_APP_DD; nothing was built"
+    mg_status error
+    return 1
+  fi
+}
+
+# mg_app_dd_clean <reason> <app>: remove this route's derived data, after
+# forgetting a daily-driver product in it. Only these four folders.
+mg_app_dd_clean() {
+  local reason="$1" app="$2"
+  case "$MG_APP_DD" in
+    build/app/PersonalPreviewDerivedData | build/app/PersonalDevicePreviewDerivedData | \
+      build/app/RealCopyDerivedData | build/app/RealCopyDeviceDerivedData) ;;
+    *)
+      mg_failure derived-data "refusing to clean $MG_APP_DD: only the personal preview and real copy folders are cleaned"
+      mg_status error
+      return 1
+      ;;
+  esac
+  if [ "${MG_APP_REAL_COPY_ALLOWED:-false}" = true ] && ! mg_app_real_copy_forget "$app"; then
+    mg_failure real-copy-forget "the earlier daily-driver build in $MG_APP_DD is still on disk or registered, or LaunchServices could not be read: $app; nothing was built"
+    mg_status fail
+    return 1
+  fi
+  if ! rm -rf "${MG_ROOT:?}/$MG_APP_DD"; then
+    mg_failure derived-data "could not remove $MG_APP_DD ($reason); nothing was built"
+    mg_status error
+    return 1
+  fi
+  MG_APP_DD_CLEANED="$reason"
+  mg_detail derived_data_cleaned "$(jq -nc --arg p "$MG_APP_DD" --arg r "$reason" '{path: $p, reason: $r}')"
+  echo "$MG_JOB: removed $MG_APP_DD ($reason); building from scratch" >&2
+}
+
+# mg_app_dd_note: the clause a route's message adds when it cleaned.
+mg_app_dd_note() {
+  [ -z "${MG_APP_DD_CLEANED:-}" ] || printf '; %s was removed first (%s)' "$MG_APP_DD" "$MG_APP_DD_CLEANED"
 }
 
 # Inspect resolved settings before any native app build. The suffix must reach
@@ -920,17 +1004,38 @@ mg_app_real_copy_install_ready() {
   fi
 }
 
+# mg_app_real_copy_same_volume <a> <b>: both paths on one file system, so a
+# mv between them is a rename (atomic, and its roll-back is one too).
+mg_app_real_copy_same_volume() {
+  python3 -c 'import os, sys; sys.exit(os.stat(sys.argv[1]).st_dev != os.stat(sys.argv[2]).st_dev)' "$1" "$2" 2>/dev/null
+}
+
+# mg_app_real_copy_drop_stage <stage>: the staging folder leaves LaunchServices,
+# PlugInKit and the disk, whether its app is still in it or was moved away.
+mg_app_real_copy_drop_stage() {
+  pluginkit -r "$1/Meguri.app/Contents/PlugIns/MeguriWidget.appex" >/dev/null 2>&1
+  "$MG_LSREGISTER" -u "$1/Meguri.app" >/dev/null 2>&1
+  rm -rf "$1"
+}
+
 mg_app_real_copy_install_mac() {
-  local zip="$1" target="$MG_APP_REAL_COPY_APPLICATIONS/Meguri.app" stage old=""
+  local zip="$1" target="$MG_APP_REAL_COPY_APPLICATIONS/Meguri.app" stage stage_root old=""
   mg_app_real_copy_install_ready || { mg_status fail; return 1; }
-  # Unpack and verify beside the target (same volume), then swap.
-  stage="$(mktemp -d "$MG_APP_REAL_COPY_APPLICATIONS/.meguri-install.XXXXXX")" || {
-    mg_failure real-copy-install "could not create a staging folder in $MG_APP_REAL_COPY_APPLICATIONS; nothing was changed"
+  # Unpack and verify outside Applications, where LaunchServices registers new
+  # apps on sight (it kept such a staging path, 2026-11-22), but on its
+  # volume, so the swap stays a rename. Otherwise stage beside the target.
+  stage_root="$MG_ROOT/$(dirname "$MG_APP_REAL_COPY_ZIP")"
+  mkdir -p "$stage_root" 2>/dev/null
+  if ! mg_app_real_copy_same_volume "$stage_root" "$MG_APP_REAL_COPY_APPLICATIONS"; then
+    stage_root="$MG_APP_REAL_COPY_APPLICATIONS"
+  fi
+  stage="$(mktemp -d "$stage_root/.meguri-install.XXXXXX")" || {
+    mg_failure real-copy-install "could not create a staging folder in $stage_root; nothing was changed"
     mg_status fail; return 1
   }
   if ! ditto -x -k "$zip" "$stage/" || ! codesign --verify --deep --strict "$stage/Meguri.app" ||
       [ "$(plutil -convert json -o - "$stage/Meguri.app/Contents/Info.plist" 2>/dev/null | jq -r '.CFBundleIdentifier // empty')" != com.antoinefink.meguri ]; then
-    rm -rf "$stage"
+    mg_app_real_copy_drop_stage "$stage"
     mg_failure real-copy-install "the real copy did not unpack and verify cleanly; nothing was changed"
     mg_status fail; return 1
   fi
@@ -940,21 +1045,65 @@ mg_app_real_copy_install_mac() {
     pluginkit -r "$target/Contents/PlugIns/MeguriWidget.appex" >/dev/null 2>&1
     "$MG_LSREGISTER" -u "$target" >/dev/null 2>&1
     if [ -e "$old" ] || ! mkdir -p "$MG_APP_REAL_COPY_TRASH" || ! mv "$target" "$old"; then
-      rm -rf "$stage"
+      # It stays in place: register it again.
+      "$MG_LSREGISTER" -f "$target" >/dev/null 2>&1
+      mg_app_real_copy_drop_stage "$stage"
       mg_failure real-copy-install "could not move the earlier real copy to the Trash (Full Disk Access?); it stays at $target"
       mg_status fail; return 1
     fi
     mg_detail real_copy_previous "$(jq -nc --arg p "$old" '{moved_to: $p}')"
   fi
   if ! mv "$stage/Meguri.app" "$target"; then
-    [ -z "$old" ] || mv "$old" "$target"
-    rm -rf "$stage"
+    [ -z "$old" ] || { mv "$old" "$target" && "$MG_LSREGISTER" -f "$target" >/dev/null 2>&1; }
+    mg_app_real_copy_drop_stage "$stage"
     mg_failure real-copy-install "the new real copy could not be moved into place; the earlier one is back at $target"
     mg_status fail; return 1
   fi
-  rm -rf "$stage"
+  # The staging path leaves LaunchServices and PlugInKit; the installed path
+  # is registered in its place (never launched).
+  mg_app_real_copy_drop_stage "$stage"
+  "$MG_LSREGISTER" -f "$target" >/dev/null 2>&1
   mg_detail real_copy_installed "$(jq -nc --arg p "$target" '{path: $p, launched: false}')"
   echo "build-app: installed $target (not launched)." >&2
+  mg_app_real_copy_registration_check "$target" "$stage" || { mg_status fail; return 1; }
+}
+
+# mg_app_real_copy_registration_check <target> <stage>: LaunchServices lists
+# the installed app and no staging path (this run's or a leftover
+# .meguri-install.* of an earlier one, which it unregisters first); PlugInKit
+# lists no staging widget. Read-only but for those unregistrations.
+mg_app_real_copy_registration_check() {
+  local target="$1" stage="$2" dump records plugins stale p pass
+  for pass in 1 2; do
+    dump="$("$MG_LSREGISTER" -dump 2>/dev/null)" && grep -q '^path: ' <<<"$dump" || {
+      mg_failure real-copy-registration "LaunchServices could not be read after the install, so its registration of $target is unverified (the app is installed): run \"$MG_LSREGISTER -dump | grep -E '^path: .*Meguri.*\\.app'\""
+      return 1
+    }
+    plugins="$(pluginkit -mADvvv -i com.antoinefink.meguri.widget 2>/dev/null)" || {
+      mg_failure real-copy-registration "PlugInKit could not be read after the install, so the widget registration of $target is unverified (the app is installed)"
+      return 1
+    }
+    records="$(sed -n 's/^path: *\(.*\) (0x[0-9a-fA-F]*)$/\1/p' <<<"$dump"
+      sed -n 's/^[[:space:]]*Path = //p' <<<"$plugins")"
+    stale="$(awk -v s="$stage" -v a="$MG_APP_REAL_COPY_APPLICATIONS/.meguri-install." -v b="$MG_ROOT/$(dirname "$MG_APP_REAL_COPY_ZIP")/.meguri-install." '
+      $0 == s || index($0, s "/") == 1 || index($0, a) == 1 || index($0, b) == 1' <<<"$records" | sort -u)"
+    [ -n "$stale" ] && [ "$pass" = 1 ] || break
+    while IFS= read -r p; do
+      case "$p" in
+        *.appex) pluginkit -r "$p" >/dev/null 2>&1 ;;
+        *) "$MG_LSREGISTER" -u "$p" >/dev/null 2>&1 ;;
+      esac
+    done <<<"$stale"
+  done
+  if [ -n "$stale" ]; then
+    mg_failure real-copy-registration "LaunchServices or PlugInKit still lists a staging path after the install: $(tr '\n' ' ' <<<"$stale")(the app is installed at $target); remove each with \"$MG_LSREGISTER -u <path>\" (\"pluginkit -r <path>\" for a widget), then run \"$MG_LSREGISTER -f $target\""
+    return 1
+  fi
+  if ! grep -Fxq "$target" <<<"$records"; then
+    mg_failure real-copy-registration "LaunchServices does not list $target after the install (the app is installed there): run \"$MG_LSREGISTER -f $target\", then check \"$MG_LSREGISTER -dump | grep -E '^path: .*Meguri.*\\.app'\""
+    return 1
+  fi
+  mg_detail real_copy_registration "$(jq -nc --arg p "$target" '{installed_path_registered: true, staging_paths_registered: false, path: $p}')"
 }
 
 # What Antoine runs, read-only, once he has installed the zip.
@@ -1587,6 +1736,8 @@ mg_app_agent_freeze() {
 
 mg_build_app() {
   local platform="" config=Debug config_given=false plan=UI standalone=false personal=false real=false owner=false install=false input="" app agent_source="" agent_tree=""
+  # Set by mg_app_dd_clean: why this run removed the route's derived data.
+  local MG_APP_DD_CLEANED=""
   # Bash dynamic scope constrains this override to this CLI build and its
   # product lookup; later/nested test jobs retain the default DerivedData.
   local MG_APP_DD="$MG_APP_DD"
@@ -1663,20 +1814,26 @@ mg_build_app() {
     config=Release
     MG_APP_DD=build/app/PersonalPreviewDerivedData
     input="$(mg_app_input_digest)"
-    mg_app_build_action personal-preview "$platform" "$config" || return 0
     app="$(mg_app_products "$platform" "$config")/Meguri.app"
-    if ! printf '%s\n' "$input" | grep -Eq '^[0-9a-f]{64}$' ||
-        [ "$input" != "$(mg_app_input_digest)" ] || ! mg_app_personal_check "$app"; then
-      mg_failure personal-preview-product "personal preview validation failed: require stable source digest, valid arm64 dev app/widget signatures and provisioning, normal sandbox entitlements without fixture scope, Release core without hooks and personalRelease inspection policy; see log.txt"
-      mg_status fail
-      return 0
-    fi
-    # The test copy must never look like the daily driver: "Meguri Dev", blue icon.
-    if ! mg_app_personal_identity "$app"; then
-      mg_failure personal-preview-identity "personal preview does not show the dev identity (Meguri Dev, blue icon); see log.txt"
-      mg_status fail
-      return 0
-    fi
+    while :; do
+      mg_app_build_action personal-preview "$platform" "$config" || return 0
+      if ! printf '%s\n' "$input" | grep -Eq '^[0-9a-f]{64}$' ||
+          [ "$input" != "$(mg_app_input_digest)" ] || ! mg_app_personal_check "$app"; then
+        mg_failure personal-preview-product "personal preview validation failed: require stable source digest, valid arm64 dev app/widget signatures and provisioning, normal sandbox entitlements without fixture scope, Release core without hooks and personalRelease inspection policy; see log.txt"
+        mg_status fail
+        return 0
+      fi
+      # The test copy must never look like the daily driver: "Meguri Dev", blue icon.
+      mg_app_personal_identity "$app" && break
+      # A stale incremental product can carry the other identity's files:
+      # build once more from an empty folder, unless this build was one.
+      if [ -n "$MG_APP_DD_CLEANED" ]; then
+        mg_failure personal-preview-identity "personal preview does not show the dev identity (Meguri Dev, blue icon), also when built from an empty $MG_APP_DD; see log.txt"
+        mg_status fail
+        return 0
+      fi
+      mg_app_dd_clean stale-product "$app" || return 0
+    done
     mg_detail input "$(jq -nc --arg input "$input" '$input')"
   elif [ "$standalone" = true ]; then
     [ "$platform/$config" = mac/Debug ] || { mg_drive__usage "--standalone requires --platform mac --config Debug"; return 0; }
@@ -1699,7 +1856,7 @@ mg_build_app() {
   if [ "$plan" = CloudAgent ]; then
     mg_app_agent_freeze "$platform" "$agent_source" || return 0
   fi
-  mg_message "build-app: $platform $config built: $app"
+  mg_message "build-app: $platform $config built: $app$(mg_app_dd_note)"
   mg_status pass
 }
 
@@ -1749,13 +1906,23 @@ mg_build_app__real_copy() {
   # Whatever happens next, no built daily-driver app stays on disk or registered.
   mg_on_exit "mg_app_real_copy_forget $(mvl_q "$app") || { mg_failure real-copy-forget $(mvl_q "the built daily-driver app is still on disk or registered: $app"); mg_status fail; }"
   input="$(mg_app_input_digest)"
-  mg_app_build_action real-copy mac Release || return 0
-  if ! printf '%s\n' "$input" | grep -Eq '^[0-9a-f]{64}$' ||
-      [ "$input" != "$(mg_app_input_digest)" ] || ! mg_app_real_copy_check "$app"; then
+  while :; do
+    mg_app_build_action real-copy mac Release || return 0
+    if printf '%s\n' "$input" | grep -Eq '^[0-9a-f]{64}$' &&
+        [ "$input" = "$(mg_app_input_digest)" ] && mg_app_real_copy_check "$app"; then
+      break
+    fi
+    # A stale incremental product can carry the other identity's files: when
+    # the name and icon are wrong, build once more from an empty folder,
+    # unless this build was one.
+    if [ -z "$MG_APP_DD_CLEANED" ] && [ "$input" = "$(mg_app_input_digest)" ] && ! mg_app_real_copy_identity "$app"; then
+      mg_app_dd_clean stale-product "$app" || return 0
+      continue
+    fi
     mg_failure real-copy-product "real copy validation failed: require stable source digest, valid arm64 daily-driver app/widget signatures and installed provisioning, normal sandbox entitlements with production CloudKit and development push, Release core without hooks, and Meguri with the red icon; see log.txt"
     mg_status fail
     return 0
-  fi
+  done
   zip="$MG_ROOT/$MG_APP_REAL_COPY_ZIP"
   mkdir -p "$(dirname "$zip")" && rm -f "$zip" || { mg_failure real-copy-zip "could not prepare $MG_APP_REAL_COPY_ZIP"; mg_status error; return 0; }
   if ! ditto -c -k --keepParent "$app" "$zip"; then
@@ -1781,9 +1948,9 @@ mg_build_app__real_copy() {
     mg_app_real_copy_cleanup_checks | jq -r '.[] | "  \(.step): \(.command)" + (if .expect then "\n      expect: \(.expect)" else "" end)'
   } >&2
   if [ "$install" = true ]; then
-    mg_message "build-app: real copy installed in $MG_APP_REAL_COPY_APPLICATIONS (not launched; zip $MG_APP_REAL_COPY_ZIP; built app forgotten; clean-up checks in details.real_copy_cleanup_checks)"
+    mg_message "build-app: real copy installed in $MG_APP_REAL_COPY_APPLICATIONS (not launched; zip $MG_APP_REAL_COPY_ZIP; built app forgotten; LaunchServices lists only the installed path; clean-up checks in details.real_copy_cleanup_checks)$(mg_app_dd_note)"
   else
-    mg_message "build-app: real copy packed: $MG_APP_REAL_COPY_ZIP (built app forgotten; see the clean-up checks in details.real_copy_cleanup_checks)"
+    mg_message "build-app: real copy packed: $MG_APP_REAL_COPY_ZIP (built app forgotten; see the clean-up checks in details.real_copy_cleanup_checks)$(mg_app_dd_note)"
   fi
   mg_status pass
 }
@@ -1979,6 +2146,7 @@ mg_run__physical_personal() (
   umask 077
   local device="$1" source app
   local MG_APP_DD=build/app/PersonalDevicePreviewDerivedData MEGURI_APP_SIGNING=team
+  local MG_APP_DD_CLEANED=""
   source="$(mg_app_input_digest)"
   if ! printf '%s\n' "$source" | grep -Eq '^[0-9a-f]{64}$'; then
     mg_failure physical-source "personal preview source evidence unavailable"; mg_status fail; return 0
@@ -2006,7 +2174,7 @@ mg_run__physical_personal() (
   mg_artifact json "$MG_RUN_DIR/personal-preview/preview-launch.json" "private personal preview normal launch"
   mg_detail input "$(jq -nc --arg input "$source" '$input')"
   mg_detail normal_launch_verified true
-  mg_message "run: signed Release personal preview installed and launched normally on the selected physical device"
+  mg_message "run: signed Release personal preview installed and launched normally on the selected physical device$(mg_app_dd_note)"
   mg_status pass
 )
 
@@ -2019,11 +2187,15 @@ mg_run__physical_real_copy() (
   local device="$1" profiles missing app
   local MG_APP_DD=build/app/RealCopyDeviceDerivedData MEGURI_APP_SIGNING=team MG_APP_REAL_COPY_ALLOWED=true
   local MG_APP_REAL_COPY_APP_PROFILE="" MG_APP_REAL_COPY_WIDGET_PROFILE=""
+  local MG_APP_DD_CLEANED=""
   if ! profiles="$(python3 "$MG_TOOLS/scripts/daily-driver-profiles.py" --require ios --ios-device "$device")"; then
     missing="the profile list could not be read"
     if [ -n "$profiles" ]; then
       mg_detail daily_driver_profiles "$profiles"
       missing="app: $(jq -r '.ios.missing | join(", ")' <<<"$profiles"); widget: $(jq -r '.ios_widget.missing | join(", ")' <<<"$profiles")"
+      if jq -e '[.ios.missing[], .ios_widget.missing[]] | index("this-device")' <<<"$profiles" >/dev/null; then
+        missing="$missing; the installed iOS profiles do not list the selected device $device: add it to both development profiles (app and widget) under Devices, then Xcode › Settings › Accounts › Download Manual Profiles"
+      fi
     fi
     mg_failure real-copy-profile "$MG_APP_REAL_COPY_PROFILE_HELP; missing: $missing" "tools/mg doctor"
     mg_message "run: the real copy was not built: no authorizing iOS profiles for this device are installed (nothing was registered or installed)"
@@ -2032,6 +2204,8 @@ mg_run__physical_real_copy() (
   mg_detail daily_driver_profiles "$profiles"
   MG_APP_REAL_COPY_APP_PROFILE="$(jq -r '.ios.uuid // empty' <<<"$profiles")"
   MG_APP_REAL_COPY_WIDGET_PROFILE="$(jq -r '.ios_widget.uuid // empty' <<<"$profiles")"
+  # Before the long build: Developer Mode, pairing and lock, read-only.
+  mg_run__physical_device_ready "$device" || return 0
   # Apple silicon can register iOS products: the signed daily-id app never
   # stays in derived data, before or after this run.
   app="$(mg_app_products ios-device Release)/Meguri.app"
@@ -2045,6 +2219,65 @@ mg_run__physical_real_copy() (
     mg_status fail
   fi
 )
+
+# mg_app_physical_device_failure <developer-mode|unpaired|locked|unreachable> <what happened>:
+# a fixed failure naming the step on the selected device. Device names and
+# devicectl or Xcode diagnostics never enter it.
+mg_app_physical_device_failure() {
+  case "$1" in
+    developer-mode)
+      mg_failure physical-developer-mode "Developer Mode is off on the selected device: on it, open Settings › Privacy & Security › Developer Mode, turn it on, let it restart and confirm Turn On; then run the same command again ($2)"
+      mg_user_step device-developer-mode missing true "Turn on Developer Mode on the selected iOS device" \
+        "On the device: Settings › Privacy & Security › Developer Mode, turn it on, let it restart and confirm Turn On; then run the same command again."
+      ;;
+    unpaired)
+      mg_failure physical-device-unpaired "the selected device is not paired with this Mac: attach it to this Mac over USB, unlock it, tap Trust on it, and pair it in Xcode; then run the same command again ($2)" ;;
+    locked)
+      mg_failure physical-device-locked "the selected device is locked: unlock it and keep it unlocked until the install finishes; then run the same command again ($2)" ;;
+    *)
+      mg_failure physical-device-unreachable "this Mac could not reach the selected device: attach it to this Mac over USB, unlock it, and check that Xcode lists it as available; then run the same command again ($2)" ;;
+  esac
+}
+
+# mg_run__physical_device_ready <device>: read-only devicectl queries (device
+# details, then lock state) that tell Developer Mode off, an unpaired device
+# and a locked one apart before the long build. Xcode otherwise reports only
+# a destination time-out. Raw responses stay private: kept on failure,
+# removed on success; the receipt gets the three states only.
+mg_run__physical_device_ready() {
+  local device="$1" dir="$MG_RUN_DIR/device-preflight" state lock=unknown kind=""
+  mkdir -p "$dir" && chmod 700 "$dir" || { mg_failure physical-device-unreachable "could not prepare the private device check folder"; mg_status error; return 1; }
+  if ! xcrun devicectl device info details --device "$device" --json-output "$dir/details.json" \
+        --log-output "$dir/details.log" >/dev/null 2>&1 ||
+      ! state="$(jq -ce 'if .info.outcome == "success" and (.result | type) == "object" then .result |
+          {developer_mode: (.deviceProperties.developerModeStatus // "unknown" | tostring),
+           pairing: (.connectionProperties.pairingState // "unknown" | tostring)} else error("refused") end' "$dir/details.json" 2>/dev/null)"; then
+    kind=unreachable
+    ! grep -Eqi 'Developer Mode (is )?disabled|enable Developer Mode' "$dir/details.json" "$dir/details.log" 2>/dev/null || kind=developer-mode
+  elif [ "$(jq -r .developer_mode <<<"$state")" = disabled ]; then
+    kind=developer-mode
+  elif ! mg_word_in "$(jq -r .pairing <<<"$state")" "paired unknown"; then
+    kind=unpaired
+  else
+    # A failed lock query leaves the build to report it.
+    if xcrun devicectl device info lockState --device "$device" --json-output "$dir/lock.json" \
+          --log-output "$dir/lock.log" >/dev/null 2>&1; then
+      lock="$(jq -r 'if .info.outcome != "success" then "unknown"
+        elif .result.passcodeRequired == true or .result.unlockedSinceBoot == false then "locked"
+        elif .result.passcodeRequired == false then "unlocked" else "unknown" end' "$dir/lock.json" 2>/dev/null)" || lock=unknown
+    fi
+    [ "$lock" != locked ] || kind=locked
+  fi
+  mg_detail device_preflight "$(jq -nc --argjson s "${state:-null}" --arg lock "$lock" --arg kind "${kind:-ready}" \
+    '{developer_mode: ($s.developer_mode // "unknown"), pairing: ($s.pairing // "unknown"), lock: $lock, result: $kind}')"
+  if [ -n "$kind" ]; then
+    mg_app_physical_device_failure "$kind" "nothing was built or installed"
+    mg_message "$MG_JOB: the selected device is not ready ($kind); nothing was built or installed"
+    mg_status fail
+    return 1
+  fi
+  rm -rf "$dir"
+}
 
 # The build, checks, seal and install of mg_run__physical_real_copy. Never launches.
 mg_run__physical_real_copy_steps() {
@@ -2068,7 +2301,7 @@ mg_run__physical_real_copy_steps() {
   mg_detail input "$(jq -nc --arg input "$source" '$input')"
   mg_detail launched false
   mg_detail real_copy_profiles "$(jq -nc --arg app "$MG_APP_REAL_COPY_APP_PROFILE" --arg widget "$MG_APP_REAL_COPY_WIDGET_PROFILE" '{app: $app, widget: $widget}')"
-  mg_message "run: the real copy (Release, daily-driver ids, development push) is installed on the selected device; it was not launched"
+  mg_message "run: the real copy (Release, daily-driver ids, development push) is installed on the selected device; it was not launched$(mg_app_dd_note)"
   mg_status pass
 }
 
