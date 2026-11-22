@@ -1243,10 +1243,10 @@ screens:
       iPhone and the folded Duo it is the first item of the Decks stack's trailing group, with
       search and Add, on the deck list and every deck page; on the Mac it is one trailing item of
       the main window on every screen; on the iPad and the opened Duo it stays in the trailing
-      group of Home's pages. A tap syncs at once in the ordinary states (the symbol turns, then the
+      group of Home's pages, and the iPad's Browse and Note Types carry it as a trailing item. A tap syncs at once in the ordinary states (the symbol turns, then the
       check shows in the accent colour for about a second), opens the panel when the state needs
       the person, sync is off or not set up, or Sync Now cannot run, and does nothing while a sync
-      runs. A long press (a secondary click on the Mac) shows the status line, Sync Now and Sync
+      runs. A long press (click and hold on the Mac) shows the status line, Sync Now and Sync
       Settings. No media indicator beside it. Identifiers add sync.status.menu.syncNow and
       sync.status.menu.settings; sync.status.mediaIndicator is gone. Captures: a generated
       collection with -MeguriSyncRender <state>[+justFinished].
