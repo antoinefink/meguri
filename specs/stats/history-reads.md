@@ -4,7 +4,7 @@ Spec: stats/history-reads
 Requirements: R1289, R1291, R1292, R1294, R1295, R1446 (for the Anki parts it extends), R1837, R1838; Meguri reads for round 11 (`docs/design/decisions.md`, 2026-11-22, `stats.overview`)
 Anki: none for H2 to H5, H9 to H12 (Meguri statistics with no Anki counterpart; tests by construction, H20). The extras of H6 to H8 sit beside Anki's records and change none of their values (`stats/graphs-revlog`, `stats/graphs-cards`, R1446).
 Scenarios: none; tests named in H20
-Status: Under review (R1357). Do not implement until approved.
+Status: Approved 2026-11-22 (R1357). Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22).
 
 This file specifies what the core computes for the round 11 Statistics page (`stats/statistics-page`, `docs/design/native-interface-contract.md` N25) beyond Anki's graph data: card states per day, each card's first review, an FSRS estimate of knowledge per day, retention counts per day, answer counts per day, extra ranges for two existing records, due counts split by interval, a table per deck, the strip's numbers, the activity of every year and the card lists behind one day; and how these values are kept, how progress is reported, and how fast they should be. Anki's graphs keep their own specs (`stats/graphs-common`, `stats/graphs-revlog`, `stats/graphs-cards`); every read here runs on that machinery: the request and refresh of G8, the context of G1, the row reading of G4, the column caches of G9, staleness G10 and read only G11.
 
