@@ -119,7 +119,7 @@ import Testing
     }
     @Test func meguriToolbarSymbolsFollowTheReportedPresentationAndBusyStages() {
         // T19.5: the symbol is the main status's; busy comes from the inputs, never a title.
-        // N23.2 (round 10): one cloud family for both services.
+        // N23.2 (round 10): one symbol family for both services.
         let attention = SyncSymbol.waiting
         let busy = SyncSymbol.moving
         let needsYou = SyncKinds.needsYouSymbol
