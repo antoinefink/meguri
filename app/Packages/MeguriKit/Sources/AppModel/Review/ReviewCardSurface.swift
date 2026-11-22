@@ -104,6 +104,11 @@ public final class ReviewPages: ReviewCardSurface {
     /// the head item it was read for and the exact payload it holds.
     private var first: (item: ReviewHeadItem, payload: CardPayload, update: CardUpdate)?
     private var documentsLoaded = false
+    #if os(iOS)
+    private var tapZones: ReviewTapZones?
+    #endif
+    /// The review's side and timings for tap zones (U180); the coordinator supplies it.
+    var tapState: (() -> ReviewTapState?)?
     public var reusable: Bool { !closed && pair?.documentsAlive == true }
     public convenience init(resolver: MediaPathResolver) {
         self.init(pair: CardPagePair(resolver: resolver))
@@ -129,6 +134,23 @@ public final class ReviewPages: ReviewCardSurface {
             if signal == "composition" { composing = body["active"] as? Bool == true }
             editing = domEditable || composing
         }
+        #if os(iOS)
+        let zones = ReviewTapZones(pair: pair)
+        zones.state = { [weak self] in
+            // A card's own dialog owns the screen (N4); so do open forms and pauses.
+            guard let self, !self.closed, self.inputActive, self.presenter.isAvailable else { return nil }
+            return self.tapState?()
+        }
+        zones.onAction = { [weak self] action in
+            switch action {
+            case .reveal: self?.onAction?(.reveal)
+            case .again: self?.onAction?(.again)
+            case .good: self?.onAction?(.good)
+            case .dismissKeyboard, .none: break
+            }
+        }
+        tapZones = zones
+        #endif
     }
     public func load() async throws {
         guard !closed, let pair else { throw CancellationError() }
@@ -296,6 +318,9 @@ public final class ReviewPages: ReviewCardSurface {
         priorityHead = []; currentMediaRefs = []; visibleMediaNames = []
     }
     public func close() {
+        #if os(iOS)
+        tapZones?.close(); tapZones = nil
+        #endif
         closed = true; clearVisibleMedia()
         mediaRevision &+= 1; prepared = nil; first = nil; startTrace = nil; committedMediaUpdate = nil; pair?.close()
     }

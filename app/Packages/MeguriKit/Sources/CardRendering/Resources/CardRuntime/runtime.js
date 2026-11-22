@@ -39,6 +39,8 @@
   const inputValueSetter = describeProperty(InputCtor.prototype, "value").set;
   const textAreaValueSetter = describeProperty(TextAreaCtor.prototype, "value").set;
   const SVGElementCtor = SVGElement;
+  const BodyCtor = HTMLBodyElement;
+  const HtmlCtor = HTMLHtmlElement;
   const ShadowRootCtor = ShadowRoot;
   const mathMax = Math.max;
   const stringSlice = String.prototype.slice;
@@ -536,6 +538,17 @@
     return false;
   }
 
+  // Review taps (U180): a tap listener on the target or an ancestor below
+  // <body>. Listeners on window, document, <html> and <body> listen to the
+  // whole page and do not make one element a card control.
+  function hasElementTapListener(target) {
+    for (let node = target; node && node !== win && node !== doc; node = parentOf(node)) {
+      if (node instanceof BodyCtor || node instanceof HtmlCtor) return false;
+      if (listensOn(node, TAP_TYPES)) return true;
+    }
+    return false;
+  }
+
   // The interaction world asks by dispatching a cancelable query on the
   // element: the runtime cancels it when no card listener could see the
   // input. An incomplete response permits the event.
@@ -543,9 +556,13 @@
     call(stopImmediate, event);
     try {
       const asked = StringCtor(call(customDetail, event));
-      const types = asked === "tap" ? TAP_TYPES : asked === "key" ? KEY_TYPES : [asked];
       const path = call(composedPath, event);
       const target = path.length > 0 ? path[0] : call(eventTarget, event);
+      if (asked === "tapTarget") {
+        if (!hasElementTapListener(target)) call(preventDefault, event);
+        return;
+      }
+      const types = asked === "tap" ? TAP_TYPES : asked === "key" ? KEY_TYPES : [asked];
       if (!hasCardListener(types, target)) call(preventDefault, event);
     } catch (error) {
       // Preserve the event if the check fails.

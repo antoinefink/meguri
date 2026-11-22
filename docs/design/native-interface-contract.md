@@ -578,7 +578,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 ### N16.3 Show Answer and the answer row
 
 - Show Answer is centred in the answer row on touch, as wide as two answer buttons. At the accessibility text sizes it keeps the full row.
-- With a fold through the row (iPhone Duo held wide) it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9).
+- With a fold through the row (iPhone Duo held wide) it keeps the size it has there, one column of the split row, and is centred in the row, under the card, across the fold. Exception to R9, decided by Antoine on 2026-11-22 ("Not aligned", and a much wider button would look odd to him (his words were relayed by the coordinator)): the button's label sits on the fold. Accepted because the card's own content is already centred there and tap zones make the button secondary. After reveal the four answers still split at the fold. Replaced (2026-11-19 text): "it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9)".
 - The answer buttons' group is centred: on touch it is at most `ContentWidth.readable` wide and spans the full width when a fold crosses it; on Mac the four standard buttons are centred in the window, as is Show Answer.
 - Replaces: N13.3's trailing-half Show Answer where no fold crosses the row.
 
@@ -1219,7 +1219,7 @@ Then the collection's error line, as before (not beside the deck list, N14.1).
 
 ## N25. Round 11: the Statistics page (2026-11-22)
 
-Decided by Antoine in chat on 2026-11-22 (`decisions.md`, rows `stats.overview` of 2026-11-22; round 11 answers 1A 2A 3A 4A 5A 6A 7A 8A 9A, with All as the first period and the Forgotten chart in orange instead of red). Changed the same day by his loading decision (N25.9). Status: under review with `stats/statistics-page` (R1357); the coordinator approves it under Antoine's permission of 2026-11-20 after independent review. Behaviour is `stats/statistics-page` and `stats/history-reads`; this section is the layout. Where earlier text that N25.13 lists differs, this section wins. Sketches: the round 11 design page (`build/library/round11/`, not committed; HTML is not native approval).
+Decided by Antoine in chat on 2026-11-22 (`decisions.md`, rows `stats.overview` of 2026-11-22; round 11 answers 1A 2A 3A 4A 5A 6A 7A 8A 9A, with All as the first period and the Forgotten chart in orange instead of red). Changed the same day by his loading decision (N25.9). In force: approved 2026-11-22 (R1357) with `stats/statistics-page` by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the design in chat on 2026-11-22. Behaviour is `stats/statistics-page` and `stats/history-reads`; this section is the layout. Where earlier text that N25.13 lists differs, this section wins. Sketches: the round 11 design page (`build/library/round11/`, not committed; HTML is not native approval).
 
 ### N25.1 Where Statistics lives (8A)
 
