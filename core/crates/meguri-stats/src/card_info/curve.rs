@@ -84,13 +84,20 @@ pub struct Curve {
     pub desired_retention_text: String,
 }
 
-/// C7.4's retrievability, `x` days after a review with stability `s`.
+/// C7.4's retrievability in percent, `x` days after a review with
+/// stability `s`.
 fn retrievability(x: f64, stability: f64, decay: f64) -> f64 {
+    recall(x, stability, decay) * 100.0
+}
+
+/// C7.4's curve as a fraction: exactly 1 at `x` = 0, whatever `S` is.
+/// `stats/history-reads` H3.1 step 3 reads it too.
+pub(crate) fn recall(x: f64, stability: f64, decay: f64) -> f64 {
     if x == 0.0 {
-        return 100.0;
+        return 1.0;
     }
     let factor = 0.9f64.powf(1.0 / -decay) - 1.0;
-    (x / stability * factor + 1.0).powf(-decay) * 100.0
+    (x / stability * factor + 1.0).powf(-decay)
 }
 
 struct Points<'a> {
