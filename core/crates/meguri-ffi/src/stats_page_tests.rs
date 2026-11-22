@@ -510,7 +510,7 @@ fn periods_read_their_history_and_parts_map_one_to_one() {
 
 #[test]
 fn the_exports_need_an_open_collection() {
-    assert!(matches!(release_stats_caches(), Err(CoreError::Unavailable { .. })));
+    assert!(matches!(start_release_stats_caches(), Err(CoreError::Unavailable { .. })));
     assert!(matches!(stats_home_idle(), Err(CoreError::Unavailable { .. })));
     struct Nobody;
     impl StatsPageListener for Nobody {
@@ -526,4 +526,21 @@ fn the_exports_need_an_open_collection() {
         start_stats_page(request, Arc::new(Nobody)),
         Err(CoreError::Unavailable { .. })
     ));
+}
+
+#[test]
+fn by_answer_pairs_each_time_with_its_own_day() {
+    let mut part = ByAnswerPart {
+        unrated: 3,
+        ..ByAnswerPart::default()
+    };
+    part.count_by_answer.insert(-2, [1, 0, 0, 0]);
+    part.count_by_answer.insert(-1, [0, 2, 0, 0]);
+    // A time map missing a day (never built so) still pairs by key.
+    part.time_by_answer.insert(-1, [0, 900, 0, 0]);
+    let decoded = decode_by_answer(&encode(&PartValue::ByAnswer(part.clone())));
+    assert_eq!(decoded.count_by_answer, part.count_by_answer);
+    assert_eq!(decoded.time_by_answer.get(&-2), Some(&[0, 0, 0, 0]));
+    assert_eq!(decoded.time_by_answer.get(&-1), Some(&[0, 900, 0, 0]));
+    assert_eq!(decoded.unrated, 3);
 }

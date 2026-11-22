@@ -551,11 +551,17 @@ pub(crate) fn encode(value: &PartValue) -> Vec<u8> {
 }
 
 fn by_answer(out: &mut Encoder, part: &ByAnswerPart) {
-    debug_assert!(part.count_by_answer.keys().eq(part.time_by_answer.keys()), "H6: the same days");
     let keys: Vec<i64> = part.count_by_answer.keys().map(|day| i64::from(*day)).collect();
+    // Each day's times by its own key, so the columns stay as long as the
+    // keys and paired with their days whatever the maps hold.
+    let times: Vec<[i64; 4]> = part
+        .count_by_answer
+        .keys()
+        .map(|day| part.time_by_answer.get(day).copied().unwrap_or_default())
+        .collect();
     let columns: Vec<Vec<i64>> = (0..4)
         .map(|at| part.count_by_answer.values().map(|day| day[at]).collect())
-        .chain((0..4).map(|at| part.time_by_answer.values().map(|day| day[at]).collect()))
+        .chain((0..4).map(|at| times.iter().map(|day| day[at]).collect()))
         .collect();
     let members: Vec<Member<'_>> = columns.iter().map(|values| Member::Integers(values)).collect();
     out.sparse_map(&keys, &members);
@@ -591,17 +597,20 @@ fn started_part(out: &mut Encoder, started: &StartedPart) {
     optional(out, started.first_day);
 }
 
-/// G9.5 and H14.4: the memory warning. Drops the memo and releases the
-/// column caches and the history component (each persisted first, then
-/// unmapped); the next request reloads them. Waits on the derived writer:
-/// call it off the main thread.
+/// G9.5 and H14.4: the memory warning, as a job. Drops the memo and releases
+/// the column caches and the history component (each persisted first, then
+/// unmapped); the next request reloads them. The release waits on the
+/// derived writer, which can be busy with a build: no lane waits with it.
 #[uniffi::export]
-pub fn release_stats_caches() -> Result<(), CoreError> {
-    callback::enter("release_stats_caches");
+pub fn start_release_stats_caches() -> Result<JobHandle, CoreError> {
+    callback::enter("start_release_stats_caches");
     let host = runtime::host()?;
-    meguri_stats::graphs::release_stats_caches(host.stats(), host.derived());
-    host.derived().release(meguri_stats::history::HISTORY_COMPONENT);
-    Ok(())
+    let generation = host.collection()?.generation().0;
+    jobs::start("release_stats_caches", generation, move |_| {
+        meguri_stats::graphs::release_stats_caches(host.stats(), host.derived());
+        host.derived().release(meguri_stats::history::HISTORY_COMPONENT);
+        Ok(())
+    })
 }
 
 /// G9.2: Home has been idle for 2 s after an open. Releases the column

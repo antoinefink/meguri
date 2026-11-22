@@ -8,7 +8,9 @@
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, Weak, mpsc};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use meguri_engine::monotonic;
 
 use meguri_ffi::collection::{self, CollectionLocation, DiskCapacity, DiskSpaceProvider, HostClock};
 use meguri_ffi::stats_page::*;
@@ -120,21 +122,21 @@ fn big(cards: i64, rows: i64) -> Vec<String> {
 /// `hold_first_progress`, the first progress waits until the test lets it
 /// go, so the request is still waiting on its part then.
 struct Messages {
-    tx: Mutex<mpsc::Sender<(StatsPageMessage, Instant)>>,
+    tx: Mutex<mpsc::Sender<(StatsPageMessage, Duration)>>,
     hold_first_progress: Mutex<Option<mpsc::Receiver<()>>>,
 }
 
 impl StatsPageListener for Messages {
     fn on_message(&self, message: StatsPageMessage) {
         let progress = matches!(message, StatsPageMessage::Progress { .. });
-        let _ = self.tx.lock().unwrap().send((message, Instant::now()));
+        let _ = self.tx.lock().unwrap().send((message, monotonic::now()));
         if progress && let Some(go) = self.hold_first_progress.lock().unwrap().take() {
             go.recv().unwrap();
         }
     }
 }
 
-fn listener(hold: Option<mpsc::Receiver<()>>) -> (Arc<Messages>, mpsc::Receiver<(StatsPageMessage, Instant)>) {
+fn listener(hold: Option<mpsc::Receiver<()>>) -> (Arc<Messages>, mpsc::Receiver<(StatsPageMessage, Duration)>) {
     let (tx, rx) = mpsc::channel();
     let messages = Arc::new(Messages {
         tx: Mutex::new(tx),
@@ -177,7 +179,7 @@ fn request(scope: StatsScope, period: StatsPeriod) -> StatsPageRequest {
 }
 
 /// Every message until the `End`, then nothing more.
-fn until_end(rx: &mpsc::Receiver<(StatsPageMessage, Instant)>) -> Vec<(StatsPageMessage, Instant)> {
+fn until_end(rx: &mpsc::Receiver<(StatsPageMessage, Duration)>) -> Vec<(StatsPageMessage, Duration)> {
     let mut messages = Vec::new();
     loop {
         let (message, at) = rx.recv_timeout(WAIT).expect("the request never ended");
@@ -192,9 +194,9 @@ fn until_end(rx: &mpsc::Receiver<(StatsPageMessage, Instant)>) -> Vec<(StatsPage
 /// The listener is released once the job has ended: the request keeps
 /// nothing of the caller's.
 fn released(weak: &Weak<Messages>) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = monotonic::now() + Duration::from_secs(10);
     while weak.upgrade().is_some() {
-        assert!(Instant::now() < deadline, "the request kept its listener");
+        assert!(monotonic::now() < deadline, "the request kept its listener");
         std::thread::sleep(Duration::from_millis(5));
     }
 }
@@ -246,7 +248,8 @@ fn a_request_streams_its_parts_and_ends_before_its_job() {
     }
 
     // The two cache calls run with a collection open.
-    release_stats_caches().unwrap();
+    let release = start_release_stats_caches().unwrap();
+    assert_eq!(finished(&events, release.id), JobOutcome::Succeeded);
     stats_home_idle().unwrap();
 }
 
@@ -266,13 +269,13 @@ fn h16_a_cancel_through_the_handle_ends_the_request_within_50_ms_with_nothing_af
             break;
         }
     }
-    let cancelled_at = Instant::now();
+    let cancelled_at = monotonic::now();
     handle.cancel.cancel().unwrap();
     go.send(()).unwrap();
     let rest = until_end(&rx);
     let (StatsPageMessage::End { end }, ended_at) = rest.last().unwrap() else { unreachable!() };
     assert_eq!(end, &StatsPageEnd::Cancelled);
-    let took = ended_at.saturating_duration_since(cancelled_at);
+    let took = ended_at.saturating_sub(cancelled_at);
     assert!(took <= Duration::from_millis(50), "ended {took:?} after the cancel");
     assert_eq!(rest.len(), 1, "nothing but the End after the cancel: {:?}", rest);
     assert_eq!(finished(&events, handle.id), JobOutcome::Cancelled);
