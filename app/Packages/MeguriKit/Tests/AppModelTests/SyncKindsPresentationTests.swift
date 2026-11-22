@@ -157,6 +157,19 @@ import Testing
         #expect(SyncText.format("sync.trouble.conflictCopies", Int64(1)) == "1 conflict copy is saved on this device.")
     }
 
+    /// T19.5 (MP7 step 5): an acceptance unknown comes before Upload…, as a round's or as setup's.
+    @Test func acceptanceUnknownComesBeforeTheStructureUpload() {
+        typealias Facts = MeguriKindFacts
+        #expect(SyncKinds.meguriRow(Facts(routine: .acceptanceUnknown, structureUploadPending: true))
+            == Row(.waiting, "sync.meguri.round.acceptanceUnknown", .meguriTryAgain))
+        #expect(SyncKinds.meguriRow(Facts(stage: .acceptanceUnknown, structureUploadPending: true))
+            == Row(.waiting, "sync.meguri.setup.acceptanceUnknown", .meguriTryAgain))
+        #expect(SyncKinds.meguriRow(Facts(routine: .idle, structureUploadPending: true))
+            == Row(.needsYou, "sync.needsYou.meguri.structureUpload", .meguriUploadStructure))
+        #expect(SyncKinds.meguriRow(Facts(routine: .authentication, structureUploadPending: true))
+            == Row(.needsYou, "sync.needsYou.meguri.signIn", .meguriSignIn))
+    }
+
     /// T21.2: the quiet "setup not finished" status, and the rows that stay needs you.
     @Test func meguriBeforeTheFirstSignInIsQuiet() {
         typealias Facts = MeguriKindFacts

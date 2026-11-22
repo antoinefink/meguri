@@ -345,7 +345,9 @@ public enum SyncKinds {
         // MP7 step 5: in place of MP6.3's choice for this binding, also while
         // its upload holds the binding (setup required, nothing retained); a
         // collection choice that Upload… found needed, and other setup steps, come first.
-        if facts.structureUploadPending, facts.stage == nil || facts.stage == .required {
+        // A round's acceptance unknown is settled first (MP6.9, MP7 step 5): its row stays before Upload….
+        if facts.structureUploadPending, facts.stage == nil || facts.stage == .required,
+           facts.routine != .acceptanceUnknown {
             // The server refused the sign-in during the upload: Sign In first, then Upload….
             if facts.routine == .authentication { return .init(.needsYou, "sync.needsYou.meguri.signIn", .meguriSignIn) }
             return .init(.needsYou, "sync.needsYou.meguri.structureUpload", .meguriUploadStructure)
