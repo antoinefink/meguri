@@ -52,7 +52,7 @@ setup() {
   mkdir -p "$SB/tools/tests" "$SB/tools/scripts" "$SB/app/Meguri/App" "$SB/app/TestPlans"
   cp "$REPO_ROOT/tools/tests/xcode_project_check.sh" "$SB/tools/tests/"
   cp "$REPO_ROOT/tools/tests/cloud_build_configuration.py" "$SB/tools/tests/"
-  cp "$REPO_ROOT/tools/scripts/mac-vm-lib.sh" "$SB/tools/scripts/"
+  cp "$REPO_ROOT/tools/scripts/mac-vm-lib.sh" "$REPO_ROOT/tools/scripts/host-build.sh" "$SB/tools/scripts/"
   cp "$REPO_ROOT/tools/scripts/performance-test-policy.py" "$SB/tools/scripts/"
   cp "$REPO_ROOT/app/TestPlans/Performance.xctestplan" "$SB/app/TestPlans/"
   # Keep regression-only application usable for behavioral RED on the old
@@ -1054,10 +1054,11 @@ assert_adhoc_mac_debug_widget() {
   assert_mac_debug_sentinels
   python3 - "$STUB_LOG" "$(cd "$SB" && pwd -P)" "$XCODE_CHECK_WORK" "$REPO_ROOT/app/Config/MeguriUITests.xcconfig" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 log, repo, work, runner = sys.argv[1:]
-builds = [line for line in Path(log).read_text().splitlines() if line.startswith("xcodebuild ")]
+builds = [re.sub(r" -jobs [0-9]+", "", line) for line in Path(log).read_text().splitlines() if line.startswith("xcodebuild ")]
 snapshot = [line for line in builds if " -testPlan Snapshot " in line and " -destination platform=macOS" in line]
 expected = (f"xcodebuild build-for-testing -project {repo}/app/Meguri.xcodeproj"
             " -scheme Meguri -testPlan Snapshot -configuration Debug -destination platform=macOS,arch=arm64"
