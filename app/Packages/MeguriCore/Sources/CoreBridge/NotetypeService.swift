@@ -108,7 +108,10 @@ public struct NotetypeField: Sendable, Hashable {
     public let plainText: Bool
     public let collapsed: Bool
     public let excludeFromSearch: Bool
-    public init(ord: UInt32, id: Int64?, name: String, sticky: Bool, rtl: Bool, fontName: String, fontSize: UInt32, description: String, plainText: Bool, collapsed: Bool, excludeFromSearch: Bool) {
+    /// Protected from deletion (a Cloze or Image Occlusion field).
+    public let preventDeletion: Bool
+    public init(ord: UInt32, id: Int64?, name: String, sticky: Bool, rtl: Bool, fontName: String, fontSize: UInt32, description: String, plainText: Bool, collapsed: Bool, excludeFromSearch: Bool, preventDeletion: Bool = false) {
+        self.preventDeletion = preventDeletion
         self.ord = ord
         self.id = id
         self.name = name
@@ -133,6 +136,7 @@ public struct NotetypeField: Sendable, Hashable {
         plainText = value.plainText
         collapsed = value.collapsed
         excludeFromSearch = value.excludeFromSearch
+        preventDeletion = value.preventDeletion
     }
 }
 
