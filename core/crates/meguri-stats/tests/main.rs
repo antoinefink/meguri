@@ -12,5 +12,7 @@ pub mod graphs_common;
 pub mod graphs_common_cache;
 #[path = "graphs_revlog.rs"]
 pub mod graphs_revlog;
+#[path = "history_parts.rs"]
+pub mod history_parts;
 #[path = "history_states.rs"]
 pub mod history_states;

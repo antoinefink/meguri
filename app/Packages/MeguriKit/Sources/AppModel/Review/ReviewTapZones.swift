@@ -117,6 +117,7 @@ final class ReviewTapZones {
         state.visibleX = Self.visibleX(of: pair.container)
         state.assistiveTechnology = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
         state.keyboardShown = keyboardShown
+        if pair.obscuredBottom > 0 { state.answerAreaTop = pair.container.bounds.maxY - pair.obscuredBottom }
         let action = ReviewTapRules.decide(gesture, observation, state)
         if action == .dismissKeyboard { pair.dismissKeyboard() }
         onAction?(action)

@@ -98,8 +98,39 @@ final class TapZoneUITests: XCTestCase {
         // Double Tap Prevention (250 ms after an answer, and after the answer
         // appears) is behaviour under test elsewhere: these taps come after it.
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-        // Low on the card, below its text: plain card, not a control.
-        card.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.8)).tap()
+        // Low on the card, below its text and above the answer area that
+        // floats over the card's bottom (N16.9): plain card, not a control.
+        let app = XCUIApplication()
+        let bar = [element(app, "review.session.rate.good"), element(app, "review.session.reveal")]
+            .filter { $0.exists && !$0.frame.isEmpty }.map(\.frame.minY).min() ?? card.frame.maxY
+        let y = card.frame.minY + (bar - Self.answerAreaPadding - card.frame.minY) * 0.85
+        card.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: card.frame.width * x, dy: y - card.frame.minY)).tap()
+    }
+    /// A margin above the answer area's buttons (its padding there is 12 pt).
+    private static let answerAreaPadding: CGFloat = 16
+
+    func testATapBesideShowAnswerDoesNothing() throws {
+        let app = try launch()
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+            "home.deck.row.", "Tap Zones")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        row.tap()
+        element(app, "home.deck.study").tap()
+        let card = element(app, "review.session.card")
+        XCTAssertTrue(card.waitForExistence(timeout: 20))
+        XCTAssertTrue(waitForQuestion(app))
+        // Level with Show Answer, beside it: no reveal.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        // Frames are in screen coordinates; the offset is from the window's origin.
+        let reveal = element(app, "review.session.reveal").frame, window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: max(8, (reveal.minX - window.frame.minX) / 2), dy: reveal.midY - window.frame.minY)).tap()
+        XCTAssertFalse(waitForAnswer(app, timeout: 2), "A tap beside Show Answer does not reveal")
+        capture(app, "09-question-after-tap-beside-show-answer")
+        // On the answer side the four buttons fill the row: the system's own
+        // hit regions of those buttons reach into the area's padding, so a tap
+        // level with them belongs to the nearest button. The tap-zone rule
+        // for the area is in ReviewTapDecisionTests.
     }
 
     private func isAnswer(_ app: XCUIApplication) -> Bool {
