@@ -4,6 +4,7 @@ Spec: stats/graph-presentation
 Requirements: R1290, R1293, R1362, R1363, R1364, R1365, R1366, R1367, R1368, R1376, R1377, R1378, R1380, R1382, R1383, R1386, R1387, R1388, R1389, R1392, R1395, R1396, R1398, R1399, R1400, R1401, R1403, R1404, R1406, R1407, R1409, R1412, R1414, R1415, R1416, R1417, R1418, R1420, R1439, R1440, R1443, R1444
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/presentation/
+Status: Under review (R1357) for P24 and the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
 
 How the Stats screen turns each graph's record into bars, labels, tooltips, tables and Browser queries (U226), and how charts behave and read with VoiceOver. It is the only place that bins, ranges, quantiles and presentation text are defined (`stats/graphs-common` G12, decision 1). The records come from `stats/graphs-common` G6, `stats/graphs-cards` (Future Due, Card Counts, Intervals, Stability, Difficulty, Retrievability, Added) and `stats/graphs-revlog` (Reviews, Calendar, Retention, Hourly Breakdown, Answer Buttons). The Today section is `stats/studied-today`. The scope text and the join of a query are `stats/browse-queries` Q2 and Q3; this file gives only the item text of histogram bars.
 
@@ -33,6 +34,8 @@ Every rule reproduces Anki's graphs page at the pinned version unless P21 names 
 - `stats/graphs-common` G7 gives `firstDayOfWeek`, `cardCountsSeparateInactive` and `futureDueShowBacklog`, and the history value of the request (G3).
 
 ## P2. Writing numbers and times
+
+Changed 2026-11-22 (round 11): the Statistics page writes its numbers with the system's formatters (`stats/statistics-page` S8.7); P2's writers stay for the strings this file keeps (P12's table, P19's footnote) and the queries (P4.7). P24.
 
 All text is English (en-US). Anki's page wraps numbers in U+2068/U+2069 and puts U+200E before one percentage; Meguri writes none of these marks (`stats/studied-today` T6.3).
 
@@ -80,6 +83,8 @@ Rows that pin the unit boundaries of step 1:
 | 2,678,400 (31 days) | long, precise | `1.02 months` |
 
 ## P3. Day labels
+
+Changed 2026-11-22 (round 11): no text of the Statistics page uses these labels; its callouts name a date, a week or a month (`stats/statistics-page` S8.3). P24.
 
 D(a, b) names the days of a bin from a to b. Let big = max(|a|, |b|) and small = min(|a|, |b|).
 
@@ -184,6 +189,8 @@ Decided 2026-10-27: bar queries are written by these rules as plain text and joi
 
 ## P5. Ranges and controls
 
+Changed 2026-11-22 (round 11): replaced on the Statistics page by one period for the page (`stats/statistics-page` S3.2, S4) and the box switches of S3.3. No per-graph range, no range memory per graph (P5.2), no history following (P5.3); Backlog, Separate suspended/buried cards and the week-start menu are gone, their effects fixed (S3.4). P24.
+
 ### P5.1 Ranges
 
 | Graph | Options, in order | Default | Option needing all history |
@@ -219,6 +226,8 @@ Reviews, Hourly Breakdown and Answer Buttons follow the history control (R1367):
 1 year, not the 1-month default, is the fallback Anki uses. The plan's U226 test "falls back to the spec'd default" means this 1 year.
 
 ## P6. Future Due
+
+Changed 2026-11-22 (round 11): the Statistics page's Reviews Due (`stats/statistics-page` S7.9) bins by its period ahead, splits Young and Mature, shows overdue as one bar and puts the running total in its callout. This section's domain, bins and texts apply to no screen; its query forms are reused by `stats/browse-queries` Q9. P24.
 
 **Data.** The `future_due` map of `stats/graphs-cards` C3.6. With Backlog off, entries with a key below 0 are left out (AE57).
 
@@ -262,6 +271,8 @@ More bins: 1 year without backlog gives [0, 5) `In 0-4 days` … [360, 365) `In 
 
 ## P7. Calendar
 
+Changed 2026-11-22 (round 11): the Statistics page has no Calendar box: Activity (`stats/statistics-page` S7.5) shows every year. P24.
+
 The grid is U227's component, defined in `stats/heatmap-presentation` (its Calendar layout M6, colours M8.3, accessibility M15.6). A cell's date is the cell's own date (`stats/graphs-revlog` V3.2, V3.3, R1384): a date that two day indices share is one cell with the summed count, and no date is computed from a day index. This section gives what the Calendar adds; "today" is the record's `today_date`.
 
 Decided 2026-10-27: the Calendar box's drawing (grid, palette, colour stops, empty colour) and its `AXChartDescriptor` (P18.3) come from `stats/heatmap-presentation`, written 2026-11-10. U227's component draws them (`stats/heatmap-presentation` M6, M8.3, M15.6), U230 hosts the card and computes its series by the rules below, and U226 gives only this section's year, drawn-date, tooltip and query rules. The rules below (years, drawn dates, tooltip, query) do not wait and are tested now (P23).
@@ -274,6 +285,8 @@ Decided 2026-10-27: the Calendar box's drawing (grid, palette, colour stops, emp
 - **No data** (P16.5) when the record has no cell, whatever the year shown.
 
 ## P8. Reviews
+
+Changed 2026-11-22 (round 11): the Statistics page's Reviews Over Time (`stats/statistics-page` S7.4) bins by the page's period; this section's domain steps, day texts and table texts apply to no screen. Its table's meanings (days studied, averages, answer time) stay as S7.4's figures. P24.
 
 **Data.** The count map, or the time map (milliseconds) when Time is on (R1386). Each entry has the five kinds; a bin's value per kind is the sum of its entries', and its total is the sum over the kinds. The bin's value (P4.3 item 4, P22's `value`) is that total, from the map shown: milliseconds with Time on. It is the bar's top and what the running total adds.
 
@@ -330,6 +343,8 @@ Step 2, with the oldest entry at −403 and all (s = −403, c = 70): the step i
 
 ## P9. Card Counts
 
+Changed 2026-11-22 (round 11): no donut and no Separate toggle: one segmented bar and the table, always separating (`stats/statistics-page` S7.7). The rows' L-written counts and percentages become the system's formatting. P24.
+
 The record of `stats/graphs-cards` C4.4. The shown set is `excluding_inactive` when `cardCountsSeparateInactive` is true, else `including_inactive` (R1391).
 
 - Rows, in order: New, Learning, Relearning, Young, Mature, then Suspended and Buried only when separating. Each row: its colour swatch (P17.2), its label, the count by L, and the percentage `L(count ÷ m × 100)%`, where m = max(1, the sum of all seven counts of the shown set). So percentages have at most two decimals with trailing zeros removed (`50%`, `33.33%`); they need not add up to exactly 100.
@@ -341,6 +356,8 @@ The record of `stats/graphs-cards` C4.4. The shown set is `excluding_inactive` w
 The plan's U230 check "percentages sum to 100.00% with 2 decimals" is superseded by the L rule above. Decided 2026-10-27.
 
 ## P10. Intervals and Stability
+
+Changed 2026-11-22 (round 11): the Review Intervals box is gone; its median stays as a figure of Stability (`stats/statistics-page` S7.13), computed as this section's Median interval. Stability's bins are S7.13's doubling bins, not this section's ranges; its tooltip and running total apply to no screen. P24.
 
 **Data.** Intervals: interval → cards (`stats/graphs-cards` C5, key 0 included). Stability: rounded stability → cards (C7). n is the total count. No data when n = 0.
 
@@ -391,6 +408,8 @@ With keys 1, 2, 3, 4 (one card each), Intervals 50%: Q(0.5) = 2.5, u = 3.5, doma
 
 ## P11. Difficulty and Retrievability
 
+Changed 2026-11-22 (round 11): Difficulty is ten bars of 10% and Retrievability bars of 5% (`stats/statistics-page` S7.12, S7.14), with no quantile ranges; their medians and averages (this section's table) stay as figures. P24.
+
 **Data.** Difficulty: 1% key → cards (`stats/graphs-cards` C8.3 `eases`). Retrievability: 1% key → cards (C9.7). No data when the map is empty.
 
 **Domain.** With q = 0.75 for 50%, 0.975 for 95% and 1 for 100%:
@@ -430,6 +449,8 @@ When t has fewer than two ticks, steps 3 and 4 keep d and t as they are.
 
 ## P12. Retention
 
+Changed 2026-11-22 (round 11): this table is kept as "By Period" on the Retention chart's own page (`stats/statistics-page` S7.2, S9), with its modes, `N/A` cells and help text. P24.
+
 A table only, no chart (R1405 to R1409), from the counts of `stats/graphs-revlog` V4.3. Rows, in order: `Today`, `Yesterday`, `Last week`, `Last month`, `Last year`, and `All time` only with `allHistory` (R1406, R1367). Each row has young and mature pass and fail counts from the record.
 
 - **All** (the default) shows the summary table: columns `Young`, `Mature`, `Total`, `Count`. Young, Mature and Total are PC of passed ÷ (passed + failed) for the young counts, the mature counts and both together, or `N/A` when that sum is 0. Count is the row's pass and fail counts summed, by L.
@@ -440,6 +461,8 @@ A table only, no chart (R1405 to R1409), from the counts of `stats/graphs-revlog
 - In P22's `table`, the first row is the column-header row, its first cell the empty string: `["", "Young", "Mature", "Total", "Count"]` for All, `["", "Pass", "Fail", "Retention"]` for Young and Mature. The period rows follow in order. Examples: a period with no counted row reads `["Today", "N/A", "N/A", "N/A", "0"]` in All and `["Today", "0", "0", "N/A"]` in Young; young 3 passed and 1 failed with no mature rows reads `["Last week", "75.0%", "N/A", "75.0%", "4"]` in All and `["Last week", "3", "1", "75.0%"]` in Young.
 
 ## P13. Hourly Breakdown
+
+Changed 2026-11-22 (round 11): replaced by Time of Day's two aligned panels (`stats/statistics-page` S7.11): no right axis and no "% correct"; the upper panel uses the page's one meaning of remembered (`stats/history-reads` H7). P24.
 
 The record's 24 entries for the selected range (`stats/graphs-revlog` V5.3: 1 month `one_month`, 3 months `three_months`, 1 year `one_year`, all `all_time`), hour 0 to 23, each `{total, correct}`.
 
@@ -452,6 +475,8 @@ The record's 24 entries for the selected range (`stats/graphs-revlog` V5.3: 1 mo
 
 ## P14. Answer Buttons
 
+Changed 2026-11-22 (round 11): replaced by Answers' three full-width bars and table (`stats/statistics-page` S7.10). P24.
+
 The record's three groups for the selected range (`stats/graphs-revlog` V6.2, ranges as P13), Learning, Young and Mature, each with the counts of buttons 1 to 4.
 
 - No data when all twelve counts are 0.
@@ -463,6 +488,8 @@ The record's three groups for the selected range (`stats/graphs-revlog` V6.2, ra
 - The share is of the group's total, written `(<share>%)` with no other text. The plan's U231 test text `Times pressed: N (P% of group)` (and R1414's wording) means `Times pressed: <L(count)> (<share>%)`: there is no `of group` text.
 
 ## P15. Added
+
+Changed 2026-11-22 (round 11): the Statistics page's Added and Started (`stats/statistics-page` S7.8) bins by its period and adds the cards started; this section's query forms are reused by `stats/browse-queries` Q9. P24.
 
 **Data.** The `added` map (`stats/graphs-cards` C10). No data when the map is empty.
 
@@ -491,6 +518,8 @@ The record's three groups for the selected range (`stats/graphs-revlog` V6.2, ra
 | all | 81 | [−400, −395) `396-400 days ago`, `"added:401" AND -"added:396"` | as 1 year |
 
 ## P16. Selection, tooltips and Show in Browser
+
+Changed 2026-11-22 (round 11): on the Statistics page the selection, callout and Show in Browse are `stats/statistics-page` S8.3 and S8.4 (the action is "Show in Browse"); P16.5's "No Data" becomes S8.5's lines. P24.
 
 ### P16.1 Clickable items
 
@@ -527,6 +556,8 @@ The memory-state footnote of P10 and P11 shows whenever the left-out count is ab
 
 ## P17. Cumulative overlay and colours
 
+Changed 2026-11-22 (round 11): P17.1 and P17.2 are replaced by `stats/statistics-page` S8.2 (no second axis) and S8.1 (two colour families, indigo for single measures, Forgotten orange); P17.3's automatic axes stay, labels on the trailing side, but on the Statistics page every tick label, counts included, uses the system's formatters (`stats/statistics-page` S8.7), not L. P24.
+
 ### P17.1 Running total area
 
 Future Due, Reviews, Intervals, Stability and Added draw the running total as a translucent area behind the bars against a right axis from 0 to the total of all bins, widened by N (R1364). The area starts at 0 on the first bin's lower edge and goes up to each bin's running total at its upper edge. It is drawn only when the total is above 0. Hourly Breakdown's "% correct" line (P13) uses the same right-axis style. Difficulty and Retrievability have no area.
@@ -561,6 +592,8 @@ Semantic chart colours come from U226's `ChartColors`, built on system colours w
 Axes and their tick marks are Swift Charts' automatic ones. Count ticks are written by L; Reviews' time ticks are the short precise span capped at hours (P2.2); percentage axes read `<n>%`. Tick positions are not part of the presentation goldens.
 
 ## P18. Accessibility
+
+Changed 2026-11-22 (round 11): stays for the Statistics page with `stats/statistics-page` S15's changes (a chart's label is its sentence; bars are named by their period). P24.
 
 ### P18.1 Chart summary
 
@@ -602,6 +635,8 @@ The short name of a drawn bin [a, b), a bar or a sector, used by the run labels 
 | Calendar | `stats/heatmap-presentation` M15.6 | `Oct 12` |
 
 ## P19. Strings
+
+Changed 2026-11-22 (round 11): the titles, subtitles, range labels, toggles, tooltips and day texts of this table are not shown by the Statistics page; its strings are `stats/statistics-page` S16. Kept: the Retention rows and help, the memory-state footnote. P24.
 
 Meguri takes these texts only from this table. `<…>` marks a number or name; `(s)` the plural ending of P2.1.
 
@@ -688,6 +723,8 @@ The text differences are one pending `conformance/deviations.yaml` entry, `stats
 
 ## P22. Observation for scenarios
 
+Changed 2026-11-22 (round 11): held. No screen draws P5 to P15's bins since round 11, so the `stats_presentation` goldens would check no shipped presentation; the kind and its scenarios (P23) stay planned only as the record of Anki's page. P24.
+
 A draft observation kind, `stats_presentation` (`conformance/observations` O4, `conformance/stats-ops` H14), for the oracle-maintainer. As of 2026-11-17 its scenarios are specified (P23) but none is in the repository and none has a golden. The graphs-page image exists and reads some graphs (H14); Meguri's executor does not have the kind, so `tools/mg goldens-check` would report such a scenario as `invalid` (unknown observation kind).
 
 - **Request.** `{stats_presentation: [<request>, ...]}`, a non-empty list. A request is `{scope, history, graph, controls}`: `scope` and `history` as `stats/graphs-common` G14; `graph` one key of P1 other than `today`; `controls` an object with exactly the members its graph has:
@@ -751,3 +788,31 @@ Until then, U226, U230 and U231 test against the worked examples of P6 to P15 as
 | `empty-collection` | P16.5 | every graph at its default range, the Calendar for 2026 (its no-data state only) |
 
 Meguri-only tests (no oracle): P2's writers and spans and P3's labels from their tables; P4.1 and P4.2 from their tables; range memory and history following (P5.2, P5.3); the Calendar's year bounds, drawn cells, tooltips, future dates and the AE58 presentation (P7); selection, tooltips and the Browser hand-off (P16, U226 UI tests); the summary, element tree and actions of a 70-bar chart (P18), with the run labels and P18.5's bin names for every graph; the P21 Meguri additions, among them the memory-state footnote in the no-data state (review cards with no memory state only: No Data in Stability, Difficulty and Retrievability, each with the footnote, P16.5); every bar query parsed by the core's parser (P4.7), and the query writer on P4.7's example texts, which no recorded bin gives; the fractional Intervals edge of P10 (keys 1, 2, 3, 4, 50%: `"prop:ivl=4"`, which parses and finds interval 4); the Calendar's empty dates around one year ago and 31 December of a leap year (P7); re-binning the largest Reviews and Intervals records within 16 ms with no core call (R1290); the quantile rules computed from cumulative counts with no per-card array (R1293).
+
+## P24. Round 11: what the Statistics page keeps and replaces
+
+Changed 2026-11-22 (round 11; `docs/design/decisions.md`, `stats.overview`, 2026-11-22; `stats/statistics-page`). The Statistics page is a Meguri design that draws Anki's data in its own bins and colours, so most of this file's reproduction of Anki's graphs page applies to no screen from round 11. R1362 (Anki's bin edges) and R1366, R1367 (per-graph ranges) are superseded in part (the plan's §5).
+
+| Section | Round 11 |
+|---|---|
+| P1 | kept: the records the page reads, with `stats/history-reads` H5's parts |
+| P2, P3 | apply to the kept texts and queries only (above); the page uses system formatting |
+| P4.1 to P4.4, P4.6 | apply to no screen |
+| P4.5 | kept: Q(0.5) gives Stability's and the interval's medians |
+| P4.7 | kept: every query number on the page |
+| P5 | replaced: `stats/statistics-page` S3, S4 |
+| P6 | replaced: S4.2, S7.9; query forms kept (`stats/browse-queries` Q9) |
+| P7 | no Calendar box: S7.5 |
+| P8 | replaced: S7.4; the table's meanings kept as figures |
+| P9 | replaced: S7.7; the rows, Total and Notes kept |
+| P10 | Intervals box removed; Median interval kept as a figure; Stability replaced by S7.13 |
+| P11 | replaced: S7.12, S7.14; median and averages kept |
+| P12 | kept, on Retention's page as By Period |
+| P13, P14 | replaced: S7.11, S7.10 |
+| P15 | replaced: S7.8; query forms kept |
+| P16 | replaced by S8.3, S8.4, S8.5 on this page; the rule that a control never calls the core holds within the year (S3.2) |
+| P17 | P17.1, P17.2 replaced by S8.2, S8.1; P17.3 kept |
+| P18 | kept with S15's changes |
+| P19 | in part: S16 |
+| P20, P21 | the record of decisions about Anki's page; P21's differences matter only where a kept section applies |
+| P22, P23 | held (above) |
