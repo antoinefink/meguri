@@ -75,7 +75,7 @@ public struct BrowseView: View {
                     .accessibilityIdentifier("browse.failed.tryAgain")
             }
             .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("browse.failed")
+            .accessibilityIdentifier("browse.results.failed")
         }
     }
 
