@@ -284,14 +284,52 @@ extension ReviewCollection {
         guard review == nil || allowDuringReview else { throw BridgeError.sessionActive }
         // A recovery call the person starts clears the update hold first (P25.2).
         guard await sync.clearUpdateHold() else { throw BridgeError.unavailable(reason: "paused") }
-        try await prepareCloudConnectionHost()
-        try Task.checkCancellation()
+        // Refused before any Host is prepared for it: this installation cannot use iCloud.
         guard sync.setupState != .configurationUnavailable else {
             throw BridgeError.unavailable(reason: "configuration")
         }
+        try await prepareCloudConnectionHost()
+        try Task.checkCancellation()
         guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         guard !sync.settings.paused else { throw BridgeError.unavailable(reason: "paused") }
         sync.beginConnectionPreview()
+    }
+    public enum SyncServiceChangeOutcome: Sendable, Equatable {
+        case changed
+        /// The selection was no longer the one the person saw: nothing changed, and they choose again.
+        case superseded
+        case failed
+    }
+    /// The Service control's change (N15.2 row 1), for a destination the person
+    /// chose while `source` was the selection shown. A failure records its step
+    /// and reason for Copy Debug Info; the control stays usable, so choosing
+    /// again is the retry.
+    public func changeSyncService(to target: SyncProviderSelection, from source: SyncProviderSelection?) async -> SyncServiceChangeOutcome {
+        let destination = switch target { case .meguri: "meguri"; case .iCloud: "iCloud"; case .localOnly: "off" }
+        func failed(_ step: SyncServiceChangeFailure.Step, _ reason: SyncServiceChangeFailure.Reason) -> SyncServiceChangeOutcome {
+            // The coordinator that owns the selection now, also after a handoff replaced it.
+            sync.serviceChangeFailed(.init(destination: destination, step: step, reason: reason))
+            return .failed
+        }
+        sync.serviceChangeBegan()
+        // An installation that cannot use iCloud never makes it the service.
+        if target == .iCloud, sync.setupState == .configurationUnavailable { return failed(.preparation, .iCloudSetupNeeded) }
+        do { try await prepareSyncServiceSelection() }
+        catch { return failed(.preparation, .init(ProviderFailureReason(error))) }
+        let current = sync
+        // A choice in the Service control clears the update hold, by writing
+        // `paused: false` before the change itself is asked for (P25.2).
+        guard await current.clearUpdateHold() else { return failed(.updateHold, .refused) }
+        // The selection is not reserved across those waits: a change of it
+        // ends this switch, and the person confirms again.
+        // No state yet shows as Off, the same as `.localOnly`.
+        guard (current.providerState?.selection ?? .localOnly) == (source ?? .localOnly) else { return .superseded }
+        if target == .localOnly, source == .iCloud {
+            // V27.5's rows, through the retained operations.
+            return await current.turnOffICloud() ? .changed : failed(.handoff, .refused)
+        }
+        if await current.changeProvider(to: target, removeMeguriCredentials: source == .meguri) { return .changed }
+        return failed(.handoff, .init(current.providerChangeFailureReason))
     }
     public func presentCloudSync(_ entry: CloudSyncEntry, host: AppNavigation.SheetHost = .main) {
         syncPresentation.cancelStatusHandoff()

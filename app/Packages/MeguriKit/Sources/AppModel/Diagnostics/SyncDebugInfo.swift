@@ -27,6 +27,38 @@ public enum ProviderFailureReason: String, Codable, Sendable, Equatable {
     }
 }
 
+/// Why the Service control's last change did not finish: names only.
+public struct SyncServiceChangeFailure: Codable, Sendable, Equatable {
+    /// `preparation`: the local Host and its provider; `updateHold`: P25.2's
+    /// write; `handoff`: the change itself (MP3).
+    public enum Step: String, Codable, Sendable, Equatable { case preparation, updateHold, handoff }
+    public enum Reason: String, Codable, Sendable, Equatable {
+        /// This installation cannot use iCloud (`iCloudUnavailable{setupNeeded}`).
+        case iCloudSetupNeeded
+        /// A step answered no and named no error.
+        case refused
+        case busy, unavailable, cancelled, unsupported, invalidArgument, internalFailure, other
+        public init(_ reason: ProviderFailureReason) {
+            self = switch reason {
+            case .busy: .busy
+            case .unavailable: .unavailable
+            case .cancelled: .cancelled
+            case .unsupported: .unsupported
+            case .invalidArgument: .invalidArgument
+            case .internalFailure: .internalFailure
+            case .other: .other
+            }
+        }
+    }
+    /// `off`, `meguri` or `iCloud`.
+    public var destination: String
+    public var step: Step
+    public var reason: Reason
+    public init(destination: String, step: Step, reason: Reason) {
+        self.destination = destination; self.step = step; self.reason = reason
+    }
+}
+
 /// Content-free sync facts for Copy Debug Info: enum and key names only. No
 /// server address, account, file name or collection content.
 public struct SyncDebugFacts: Codable, Sendable, Equatable {
@@ -39,10 +71,15 @@ public struct SyncDebugFacts: Codable, Sendable, Equatable {
     public var meguriRoutine: String?
     public var statusTitleKey: String
     public var statusDetailKey: String?
+    /// Present, and false, only on an installation whose build cannot use iCloud.
+    public var iCloudConfigured: Bool?
+    public var serviceChangeFailure: SyncServiceChangeFailure?
     public init(service: String, providerPhase: String, blockedSource: ProviderBlockedSource? = nil,
                 blockedReason: ProviderFailureReason? = nil, meguriConnection: String? = nil,
                 meguriSetupStage: String? = nil, meguriRoutine: String? = nil,
-                statusTitleKey: String, statusDetailKey: String? = nil) {
+                statusTitleKey: String, statusDetailKey: String? = nil,
+                iCloudConfigured: Bool? = nil, serviceChangeFailure: SyncServiceChangeFailure? = nil) {
+        self.iCloudConfigured = iCloudConfigured; self.serviceChangeFailure = serviceChangeFailure
         self.service = service; self.providerPhase = providerPhase
         self.blockedSource = blockedSource; self.blockedReason = blockedReason
         self.meguriConnection = meguriConnection; self.meguriSetupStage = meguriSetupStage
@@ -101,6 +138,10 @@ public enum SyncDebugInfoText {
                 lines.append("Meguri: connection \(sync.meguriConnection ?? "none"), setup \(sync.meguriSetupStage ?? "none"), routine \(sync.meguriRoutine ?? "none")")
             }
             lines.append("Status: \(sync.statusTitleKey)\(sync.statusDetailKey.map { " / \($0)" } ?? "")")
+            if sync.iCloudConfigured == false { lines.append("iCloud: not configured in this build") }
+            if let failure = sync.serviceChangeFailure {
+                lines.append("Service change to \(failure.destination) failed: \(failure.step.rawValue) (\(failure.reason.rawValue))")
+            }
         } else { lines.append("Sync: unavailable") }
         let events = (timeline["events"] as? [[String: Any]] ?? []).compactMap { $0["observation"] as? [String: Any] }
         lines.append("Timeline: \(events.count) events, \(timeline["truncatedCount"] ?? 0) truncated, \(timeline["droppedCount"] ?? 0) dropped")
