@@ -39,7 +39,9 @@ public final class BrowseModel {
     /// Every deck's value as the core makes it (T3), by deck id.
     public private(set) var deckValues: [Int64: FilterValue] = [:]
     public private(set) var notetypes: [NotetypeName] = []
-    public private(set) var tags: [TagNode] = []
+    public private(set) var tags: [TagNode] = [] {
+        didSet { tagsRevision &+= 1; updateShownTags() }
+    }
     /// Flags 1 to 7's shown names (F4).
     public private(set) var flagNames: [String] = []
     /// Each row's count in the current mode (T12.3 step 4); a row without
@@ -53,7 +55,7 @@ public final class BrowseModel {
     }
     /// V6: the Tags section shows the whole tree (kept on the device).
     public var showsAllTags: Bool {
-        didSet { if showsAllTags != oldValue { saveDevice() } }
+        didSet { if showsAllTags != oldValue { saveDevice(); updateShownTags() } }
     }
     /// Raised when a selection the list made is not the query's, so the
     /// list draws the query's selection again.
@@ -62,9 +64,15 @@ public final class BrowseModel {
     /// Tag disclosures toggled in this launch, before the tree is read again.
     private var tagExpansion: [String: Bool] = [:]
     /// The top-level tags' note counts, which pick the eight Tags shows (V6).
-    private var tagNotes: [String: UInt64] = [:]
+    private var tagNotes: [String: UInt64] = [:] {
+        didSet { if tagNotes != oldValue { updateShownTags() } }
+    }
+    @ObservationIgnored private var tagsRevision: UInt64 = 0
+    @ObservationIgnored private var filteredTagsCache: (text: String, revision: UInt64, nodes: [BrowseSidebarFilter.Node<TagNode>])?
     private var visible = false
     private var stale = true
+    /// The names or counts of the latest reload have not all arrived.
+    private var readsPending = false
     /// T14's first open has started and not ended: a collection that turns
     /// ready again meanwhile makes it start over.
     private var openInFlight = false
@@ -113,6 +121,8 @@ public final class BrowseModel {
 
     public func disappear() {
         visible = false
+        // Counts or names still on their way are read again on the next appear.
+        if readsPending { stale = true }
         countsTask?.cancel()
     }
 
@@ -127,12 +137,21 @@ public final class BrowseModel {
             let opening = try? await backend.opening()
             guard self.epoch == epoch else { return }
             defer { if self.epoch == epoch { openInFlight = false } }
-            if let notes = opening?.notesMode, notes != (mode == .notes) {
+            // A failed read keeps nothing, so the next appear opens again (T14, K6.4).
+            guard let opening else {
+                opened = false
+                return
+            }
+            // T14: after a relaunch the mode kept on this device; on a first open, the collection's.
+            let notes = device.notesMode ?? opening.notesMode
+            if notes != (mode == .notes) {
                 mode = notes ? .notes : .cards
                 counts = [:]
                 refreshCounts()
             }
-            let text = kept ?? opening?.defaultSearch
+            device.notesMode = notes
+            saveDevice()
+            let text = kept ?? opening.defaultSearch
             guard let text, revision == queryRevision else {
                 if kept == nil { keepRunText() }
                 return
@@ -238,8 +257,12 @@ public final class BrowseModel {
     /// alone is a click (or ⌥-click) on it; with ⌘, each row that came or
     /// went is a ⌘-click; anything else (a ⇧ range, an empty selection)
     /// changes nothing. The list then draws the query's selection again.
-    public func listSelectionChanged(to new: Set<BrowseSidebarTag>, click: Click) -> AppSection? {
-        let old = listSelection
+    /// `shown` is the rows the list draws: a selected row it does not draw
+    /// (folded, filtered out, under a collapsed parent) is not in `new`, and
+    /// is not taken as unselected.
+    public func listSelectionChanged(to new: Set<BrowseSidebarTag>, click: Click,
+                                     shown: Set<BrowseSidebarTag>? = nil) -> AppSection? {
+        let old = shown.map { listSelection.intersection($0.union([.section(.browse)])) } ?? listSelection
         defer { selectionEcho &+= 1 }
         if case .section(let section)? = new.subtracting(old).first(where: { if case .section = $0 { true } else { false } }),
            section != .browse {
@@ -299,11 +322,13 @@ public final class BrowseModel {
         counts = [:]; tagNotes = [:]; tagExpansion = [:]; filter = ""
         stale = true
         device.runText = nil
+        device.notesMode = nil
         saveDevice()
     }
 
     private func reload() {
         stale = false
+        readsPending = true
         namesToken &+= 1
         let token = namesToken, epoch = epoch, backend = backend
         namesTask = Task {
@@ -370,6 +395,7 @@ public final class BrowseModel {
                 if let value { next[row] = value }
             }
             counts = next
+            readsPending = false
             guard !topTags.isEmpty else { return }
             if mode == .notes {
                 tagNotes = Dictionary(uniqueKeysWithValues: topTags.compactMap { name in next[.tag(name)].map { (name, $0) } })
@@ -396,14 +422,32 @@ public final class BrowseModel {
     /// the number Show All names (nil when every tag shows): with more than
     /// 12, the 8 with the most notes (descendants counted), ties in tree
     /// order; before the note counts are known, the first 8.
-    public var shownTopLevelTags: (tags: [TagNode], showAll: Int?) {
-        guard tags.count > Self.tagsShownWhole, !showsAllTags else { return (tags, nil) }
+    public private(set) var shownTopLevelTags: (tags: [TagNode], showAll: Int?) = ([], nil)
+
+    /// Kept up to date when the tags, their note counts or Show All change,
+    /// so drawing the sidebar never sorts the tags again.
+    private func updateShownTags() {
+        guard tags.count > Self.tagsShownWhole, !showsAllTags else {
+            shownTopLevelTags = (tags, nil)
+            return
+        }
         let ranked = tags.indices.sorted { a, b in
             let na = tagNotes[tags[a].fullName] ?? 0, nb = tagNotes[tags[b].fullName] ?? 0
             return na != nb ? na > nb : a < b
         }
         let kept = Set(ranked.prefix(Self.tagsShownFew))
-        return (tags.indices.filter(kept.contains).map { tags[$0] }, tags.count)
+        shownTopLevelTags = (tags.indices.filter(kept.contains).map { tags[$0] }, tags.count)
+    }
+
+    /// S6 over the tag tree, once per filter text and tree (the tree can
+    /// hold thousands of tags; a sidebar redraw must not walk it again).
+    public func filteredTags(_ filter: BrowseSidebarFilter, rootMatched: Bool) -> [BrowseSidebarFilter.Node<TagNode>] {
+        guard filter.isOn else { return [] }
+        let key = filter.text + (rootMatched ? "\u{0}root" : "")
+        if let cache = filteredTagsCache, cache.text == key, cache.revision == tagsRevision { return cache.nodes }
+        let nodes = filter.tree(tags, label: \.name, children: \.children, rootMatched: rootMatched)
+        filteredTagsCache = (key, tagsRevision, nodes)
+        return nodes
     }
 
     // MARK: Tag disclosures

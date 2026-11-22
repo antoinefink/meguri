@@ -43,9 +43,10 @@ public nonisolated struct BrowseSidebarFilter: Sendable, Hashable {
         }
     }
 
-    /// S6 over a flat section: its matching rows, or every row when the
-    /// section's own label matches.
+    /// S6 over a flat section: every row while the filter is off; else its
+    /// matching rows, or every row when the section's own label matches.
     public func rows<Item>(_ items: [Item], label: (Item) -> String, rootMatched: Bool) -> [Item] {
-        rootMatched ? items : items.filter { matches(label($0)) }
+        guard isOn, !rootMatched else { return items }
+        return items.filter { matches(label($0)) }
     }
 }

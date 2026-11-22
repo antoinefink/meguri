@@ -34,9 +34,7 @@ public struct BrowseSidebar<Header: View>: View {
     private var filter: BrowseSidebarFilter { BrowseSidebarFilter(model.filter) }
 
     public var body: some View {
-        // A selection the query did not take is drawn again from the query.
-        let _ = model.selectionEcho
-        List(selection: selection) {
+        List(selection: $selection) {
             Section { header }
             if filter.isOn && !anyMatch {
                 Text("browse.sidebar.noMatches", bundle: .module)
@@ -53,16 +51,78 @@ public struct BrowseSidebar<Header: View>: View {
         }
         .searchable(text: $model.filter, placement: .sidebar, prompt: Text("browse.sidebar.filter", bundle: .module))
         .accessibilityIdentifier("browse.sidebar.list")
-        .onAppear { model.appear() }
+        .onAppear {
+            selection = model.listSelection
+            model.appear()
+        }
         .onDisappear { model.disappear() }
+        // The query changed (a reading arrived, a saved search): the list shows its rows.
+        .onChange(of: model.listSelection) { _, rows in
+            if selection != rows { selection = rows }
+        }
+        .onChange(of: selection) { _, rows in selectionChanged(rows) }
     }
 
     // MARK: Selection (T9)
 
-    private var selection: Binding<Set<BrowseSidebarTag>> {
-        Binding(get: { model.listSelection }, set: { new in
-            if let section = model.listSelectionChanged(to: new, click: Self.click()) { navigate(section) }
-        })
+    /// The list's own selection. A click changes it, then the query (T9),
+    /// then it is set back to the query's rows after that event: the list
+    /// keeps a selection it made itself, so a binding that only computes
+    /// the query's rows left the clicked row alone selected.
+    @State private var selection: Set<BrowseSidebarTag> = []
+
+    private func selectionChanged(_ rows: Set<BrowseSidebarTag>) {
+        guard rows != model.listSelection else { return }
+        if let section = model.listSelectionChanged(to: rows, click: Self.click(), shown: shownRows) {
+            navigate(section)
+            return
+        }
+        Task { @MainActor in
+            if selection != model.listSelection { selection = model.listSelection }
+        }
+    }
+
+    /// The rows the list draws now: unfolded sections, the filter's matches,
+    /// the rows under expanded parents, the tags Tags shows.
+    private var shownRows: Set<BrowseSidebarTag> {
+        var rows = Set<BrowseSidebarTag>()
+        func open(_ kind: BrowseSidebarSection) -> Bool { filter.isOn || !model.folded.contains(kind) }
+        if open(.savedSearches) {
+            for saved in savedRows {
+                switch saved {
+                case .builtIn(let search): rows.insert(.builtIn(search))
+                case .user(let search): rows.insert(.saved(search.name))
+                }
+            }
+        }
+        if open(.cardState) { rows.formUnion(stateRows.map { .state($0) }) }
+        if open(.flags) { rows.formUnion(flagRows.map { .flag($0) }) }
+        if open(.decks) {
+            func matches(_ nodes: [BrowseSidebarFilter.Node<CountedDeckNode>]) {
+                for node in nodes { rows.insert(.deck(node.item.id)); matches(node.children) }
+            }
+            func tree(_ nodes: [CountedDeckNode]) {
+                for node in nodes {
+                    rows.insert(.deck(node.id))
+                    if deckExpanded(node.id).wrappedValue { tree(node.children) }
+                }
+            }
+            if filter.isOn { matches(deckNodes) } else { tree(decks) }
+        }
+        if open(.notetypes) { rows.formUnion(notetypeRows.map { .notetype($0.id) }) }
+        if open(.tags) {
+            func matches(_ nodes: [BrowseSidebarFilter.Node<TagNode>]) {
+                for node in nodes { rows.insert(.tag(node.item.fullName)); matches(node.children) }
+            }
+            func tree(_ nodes: [TagNode]) {
+                for node in nodes {
+                    rows.insert(.tag(node.fullName))
+                    if model.tagExpanded(node) { tree(node.children) }
+                }
+            }
+            if filter.isOn { matches(tagNodes) } else { tree(model.shownTopLevelTags.tags) }
+        }
+        return rows
     }
 
     /// The modifier keys of the click that changed the selection.
@@ -206,8 +266,7 @@ public struct BrowseSidebar<Header: View>: View {
 
     // Tags: the tag tree; with more than 12 top-level tags, the 8 with the most notes, then Show All.
     private var tagNodes: [BrowseSidebarFilter.Node<TagNode>] {
-        guard filter.isOn else { return [] }
-        return filter.tree(model.tags, label: \.name, children: \.children, rootMatched: rootMatched(.tags))
+        model.filteredTags(filter, rootMatched: rootMatched(.tags))
     }
 
     private var tags: some View {

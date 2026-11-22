@@ -105,9 +105,11 @@ struct ShellFeatures {
             default: AnyView(HomeView(collection: collection))
             }
         }
+        #if os(macOS)
         features.browseSidebar = { navigation, header in
             AnyView(BrowseSidebarHost(collection: collection, navigation: navigation, header: header))
         }
+        #endif
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
@@ -216,6 +218,10 @@ private struct BrowseSidebarHost: View {
         // Rows and counts are read once the collection can answer (a launch, a replacement).
         .onChange(of: collection.browseReadable) { _, readable in
             if readable { collection.browse.appear() }
+        }
+        // T14: a search handed to Browse while it shows (a deep link) replaces the query now.
+        .onChange(of: navigation.browseSearch) { _, search in
+            if !search.isEmpty { collection.browse.appear() }
         }
     }
 }

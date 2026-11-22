@@ -51,7 +51,7 @@ extension TestHooks {
             }
             return ShellLaunch(features: features, probe: false) { navigation in
                 navigation.select(.section(state == .today ? .home : .browse))
-                if state == .filtered { model.filter = "ver" }
+                if state == .filtered { model.filter = "voc" }
                 Task { @MainActor in
                     await model.prepareForTestHooks(query: FilterQuery(tokens: [
                         .value([SampleBrowseBackend.deck(1)], negated: false), .value([.state(.suspended)], negated: false),

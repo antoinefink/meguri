@@ -8,12 +8,15 @@ nonisolated public struct BrowseDeviceState: Codable, Equatable, Sendable {
     /// T4's run text of the query Browse had when the app last saw it; nil
     /// before Browse first opens on this device (or this collection).
     public var runText: String?
+    /// The mode Browse last showed on this device (T14); nil before.
+    public var notesMode: Bool?
     public var folded: Set<BrowseSidebarSection>
     public var showsAllTags: Bool
 
-    public init(runText: String? = nil, folded: Set<BrowseSidebarSection> = BrowseSidebarSection.foldedByDefault,
+    public init(runText: String? = nil, notesMode: Bool? = nil, folded: Set<BrowseSidebarSection> = BrowseSidebarSection.foldedByDefault,
                 showsAllTags: Bool = false) {
         self.runText = runText
+        self.notesMode = notesMode
         self.folded = folded
         self.showsAllTags = showsAllTags
     }

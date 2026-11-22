@@ -55,6 +55,15 @@ import Testing
         #expect(start.commandClicking(.flag(1)).commandClicking(.noFlag).tokens.last == token(.flag(1), .noFlag))
     }
 
+    @Test func aCommandClickOnNoFlagOrUntaggedIntoAnIsNotTokenIsAClick() {
+        let flags = FilterQuery(tokens: [token(.flag(1), negated: true)])
+        #expect(flags.commandClicking(.noFlag).tokens == [token(.noFlag)])
+        let tags = FilterQuery(tokens: [token(.tag("brask"), negated: true)])
+        #expect(tags.commandClicking(.untagged).tokens == [token(.untagged)])
+        // Into an is token they add, as any value does.
+        #expect(FilterQuery(tokens: [token(.flag(1))]).commandClicking(.noFlag).tokens == [token(.flag(1), .noFlag)])
+    }
+
     @Test func anOptionClickMakesIsNotVWithTheFlagsNormalFormAndUntaggedAsAClick() {
         let start = FilterQuery(tokens: [token(Self.spanish, Self.japanese), token(.state(.new))], text: "x")
         #expect(start.optionClicking(Self.japanese).tokens[0] == token(Self.japanese, negated: true))
@@ -109,10 +118,18 @@ import Testing
         _ = model.listSelectionChanged(to: [.state(.learning), .state(.review), .state(.suspended)], click: .plain)
         _ = model.listSelectionChanged(to: [], click: .plain)
         #expect(model.query == before && model.selectionEcho == echo &+ 2)
+        // A ⌘-click with a selected row the list does not draw (folded, filtered
+        // out): only the clicked row changes, the hidden one stays.
+        _ = model.listSelectionChanged(to: [.state(.learning)], click: .plain)
+        _ = model.listSelectionChanged(to: model.listSelection.union([.state(.new)]), click: .command)  // adds New
+        let hiddenDecks: Set<BrowseSidebarTag> = [.section(.browse), .state(.new), .state(.learning), .state(.review)]
+        _ = model.listSelectionChanged(to: [.section(.browse), .state(.learning), .state(.review)], click: .command, shown: hiddenDecks)
+        #expect(model.selectedRows == [.state(.learning), .state(.review), .deck(20)])
         // A section row navigates; the Browse row itself does nothing.
         #expect(model.listSelectionChanged(to: [.section(.home)], click: .plain) == .home)
+        let after = model.query
         #expect(model.listSelectionChanged(to: [.section(.browse)], click: .plain) == nil)
-        #expect(model.query == before)
+        #expect(model.query == after)
     }
 
     @Test func savedSearchesReplaceTheWholeQuery() async {
@@ -175,13 +192,32 @@ import Testing
         // Leaving Browse cancels the counts on their way.
         model.disappear()
         await until { core.cancelledCounts == 2 }
-        // Changes no shown row depends on do not count again.
+        // Coming back reads the counts left unfinished again.
         model.appear()
-        let calls = core.countCalls.count
+        await until { core.countCalls.count == 4 }
+        core.resumeCounts(3) { _ in 6 }
+        await until { model.counts[.deck(10)] == 6 }
+        // Changes no shown row depends on do not count again.
         model.changesCommitted(Self.changes(tags: []))
         try? await Task.sleep(for: .milliseconds(20))
-        #expect(core.countCalls.count == calls)
+        #expect(core.countCalls.count == 4)
         core.resumeCounts(2) { _ in 0 }
+    }
+
+    @Test func countsLeftUnfinishedWhenBrowseHidesAreReadAgainWhenItShows() async {
+        let (model, core) = await makeModel(holdCounts: true)
+        model.disappear()
+        await until { core.cancelledCounts == 1 }
+        model.appear()
+        await until { core.countCalls.count == 2 }
+        core.resumeCounts(1) { _ in 7 }
+        await until { model.counts[.deck(10)] == 7 }
+        core.resumeCounts(0) { _ in 0 }
+        // Finished counts are not read again on the next appear.
+        model.disappear()
+        model.appear()
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(core.countCalls.count == 2)
     }
 
     @Test func withMoreThanTwelveTopLevelTagsTagsShowsTheEightWithTheMostNotes() async {
@@ -254,6 +290,34 @@ import Testing
         await until { relaunched.query == FilterQuery(tokens: [token(Self.japanese)]) }
     }
 
+    @Test func aFailedOpeningKeepsNothingAndTheNextAppearOpensAgain() async throws {
+        let scratch = try ScratchDefaults()
+        let store = BrowseDeviceStore(defaults: scratch.defaults)
+        let core = FakeBrowseBackend()
+        core.openingFails = true
+        let model = BrowseModel(backend: core, store: store)
+        model.appear()
+        await until { core.openCalls == 1 && !model.opened }
+        #expect(store.load().runText == nil)
+        core.openingFails = false
+        core.openingValue = BrowseOpening(defaultSearch: "deck:x", notesMode: false)
+        core.reads["deck:x"] = FilterQuery(tokens: [token(Self.spanish)])
+        model.disappear()
+        model.appear()
+        await until { model.query == FilterQuery(tokens: [token(Self.spanish)]) }
+    }
+
+    @Test func theModeIsKeptOnTheDeviceAcrossARelaunch() async throws {
+        let scratch = try ScratchDefaults()
+        let store = BrowseDeviceStore(defaults: scratch.defaults)
+        let (first, _) = await makeModel(opening: BrowseOpening(defaultSearch: nil, notesMode: true), store: store)
+        await until { first.mode == .notes && store.load().notesMode == true }
+        // Another device turned the synced key off: this device keeps its own mode.
+        let (relaunched, _) = await makeModel(opening: BrowseOpening(defaultSearch: nil, notesMode: false), store: store)
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(relaunched.mode == .notes)
+    }
+
     @Test func aSearchHandedToBrowseReplacesTheQuery() async {
         let (model, core) = await makeModel()
         core.reads["deck:Japanese"] = FilterQuery(tokens: [token(Self.japanese)])
@@ -317,6 +381,8 @@ import Testing
         // White_Space only is off.
         #expect(!BrowseSidebarFilter("  ").isOn && BrowseSidebarFilter("  ").tree(tree, label: \.name, children: \.children, rootMatched: false).isEmpty)
         #expect(BrowseSidebarFilter("x").rows(["Due Today", "Leeches"], label: { $0 }, rootMatched: false).isEmpty)
+        // Off: every row shows.
+        #expect(BrowseSidebarFilter(" ").rows(["Due Today", "Leeches"], label: { $0 }, rootMatched: false) == ["Due Today", "Leeches"])
         #expect(BrowseSidebarFilter("ee").rows(["Due Today", "Leeches"], label: { $0 }, rootMatched: false) == ["Leeches"])
     }
 
@@ -381,8 +447,10 @@ import Testing
     private var heldCounts: [Int: CheckedContinuation<[UInt64?], any Error>] = [:]
     var cancelledCounts = 0
 
+    var openingFails = false
     func opening() async throws -> BrowseOpening {
         openCalls += 1
+        if openingFails { throw BridgeError.unavailable(reason: "sample") }
         return openingValue
     }
     func read(_ text: String) async throws -> FilterQuery {

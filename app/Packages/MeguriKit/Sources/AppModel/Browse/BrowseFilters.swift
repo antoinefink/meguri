@@ -81,6 +81,11 @@ extension FilterQuery {
         guard let index = tokenIndex(value.kind), case .value(var values, let negated) = tokens[index] else {
             return setting(value.kind, to: .value([value], negated: false))
         }
+        // T10: No Flag, Any Flag and Untagged never stand in an is-not token, so
+        // the token reads back the same after a relaunch: there, a click.
+        if negated, value == .noFlag || value == .anyFlag || value == .untagged {
+            return clicking(value)
+        }
         if let present = values.firstIndex(where: { $0.isSameValue(value) }) {
             values.remove(at: present)
         } else {
