@@ -558,7 +558,10 @@ impl CoreHost {
             ))
         });
         let stats = Arc::new(meguri_stats::graphs::StatsCaches::new());
-        let derived = DerivedHost::builder(&engine).component(stats.component()).start()?;
+        let derived = DerivedHost::builder(&engine)
+            .component(stats.component())
+            .component(stats.history_component())
+            .start()?;
         let media = Arc::new(MediaPort::new(config.clock.clone()));
         let queues = process.queues.clone();
         let review = process.review.clone();

@@ -169,6 +169,20 @@ harness = false
 name = "stats_present"
 harness = false
 
+# U289's card-state history (stats/history-reads H19): the cold build and
+# H18's read without it; the warm reads; the updates per answer and sync.
+[[bench]]
+name = "stats_history_build"
+harness = false
+
+[[bench]]
+name = "stats_history_warm"
+harness = false
+
+[[bench]]
+name = "stats_history_apply"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]

@@ -2,7 +2,7 @@
 #if os(macOS)
 import AppKit
 #endif
-import AppModel
+@_spi(MeguriTestHooks) import AppModel
 import Settings
 import SwiftUI
 
@@ -11,6 +11,30 @@ extension TestHooks {
     /// draws the production views over an inert coordinator: no signed build,
     /// collection, account or server, and no action reaches one.
     enum SyncRoutes {
+        /// `-MeguriSyncRender`: once the collection is open, the shell shows the
+        /// synthetic status (the real coordinator keeps running unseen).
+        @MainActor static func showRender(_ render: LaunchOptions.SyncRender, over collection: ReviewCollection,
+                                          clock: AppClock) {
+            Task { @MainActor in
+                while collection.state != .ready { try? await Task.sleep(for: .milliseconds(100)) }
+                collection.showSyncRenderFixtureForTestHooks(.renderFixture(render.state, clock: clock))
+                if render.justFinished { collection.syncPresentation.buttonFeedback.holdAccentForTestHooks() }
+            }
+        }
+
+        /// `-MeguriSyncRender` with a shell route: the shell's sync button over the
+        /// synthetic status (its own inert collection; nothing syncs).
+        @MainActor static func addRender(_ render: LaunchOptions.SyncRender, to features: inout ShellFeatures,
+                                         configuration: LaunchConfiguration) {
+            let collection = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+                sync: .renderFixture(render.state, clock: configuration.clock))
+            if render.justFinished { collection.syncPresentation.buttonFeedback.holdAccentForTestHooks() }
+            features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
+            #if os(iOS)
+            features.syncPanelMeasure = { AnyView(CloudSyncPanelMeasure(collection: collection)) }
+            #endif
+        }
+
         static func register(in registry: inout RouteRegistry) {
             registry.register("settings/sync/off") { settings(.off, $0) }
             registry.register("settings/sync/meguri-connected") { settings(.meguriConnected, $0) }

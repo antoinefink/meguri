@@ -1,9 +1,10 @@
 //! The `buttons` record (`stats/graphs-revlog` V1, V6): presses of buttons
-//! 1 to 4 per group, over Hourly Breakdown's ranges (V5.2).
+//! 1 to 4 per group, over Hourly Breakdown's ranges (V5.2) and round 11's
+//! `six_months` (`stats/history-reads` H7).
 
 use meguri_model::revlog::RevlogKind;
 
-use super::hourly::Ranges;
+use super::hourly::{ALL_TIME, Ranges};
 use super::reviews::MATURE_FROM;
 use super::{GraphInput, GraphRecord, NotBuilt};
 use crate::graphs::encoding::Encoder;
@@ -22,7 +23,8 @@ pub struct ButtonCounts {
 }
 
 /// `stats/graphs-revlog` V6.2: one entry per range of V5.2, `all_time`
-/// only with `allHistory`. The round 11 `six_months` range is U288's.
+/// only with `allHistory`. Then the Meguri extra of `stats/history-reads`
+/// H7, not observed: the `six_months` range, whatever the history.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct AnswerButtonsRecord {
@@ -30,6 +32,7 @@ pub struct AnswerButtonsRecord {
     pub three_months: ButtonCounts,
     pub one_year: ButtonCounts,
     pub all_time: Option<ButtonCounts>,
+    pub six_months: ButtonCounts,
 }
 
 /// V6.1's groups.
@@ -53,7 +56,7 @@ impl ButtonCounts {
 
 pub(crate) fn build(input: &GraphInput<'_>) -> Result<AnswerButtonsRecord, NotBuilt> {
     let ranges = Ranges::new(input);
-    let mut counts = [ButtonCounts::default(); 4];
+    let mut counts = [ButtonCounts::default(); ALL_TIME + 1];
     for scoped in input.scope.rows() {
         let row = scoped.row;
         // Only buttons 1 to 4; `ease` 0 and 5 and above are left out.
@@ -71,12 +74,13 @@ pub(crate) fn build(input: &GraphInput<'_>) -> Result<AnswerButtonsRecord, NotBu
             counts[range].press(group, button);
         }
     }
-    let [one_month, three_months, one_year, all_time] = counts;
+    let [one_month, three_months, six_months, one_year, all_time] = counts;
     Ok(AnswerButtonsRecord {
         one_month,
         three_months,
         one_year,
         all_time: (input.history == History::AllHistory).then_some(all_time),
+        six_months,
     })
 }
 
@@ -85,18 +89,21 @@ impl GraphRecord for AnswerButtonsRecord {
         Graph::AnswerButtons
     }
 
-    /// A list of the ranges present (three, or four with `all_time`), each
-    /// the learning, young and mature presses, each a list of four counts.
+    /// A list of V5.2's ranges present (three, or four with `all_time`),
+    /// each the learning, young and mature presses, each a list of four
+    /// counts. Then H7's `six_months` range, as one such entry.
     fn encode(&self, out: &mut Encoder) {
+        let write_range = |out: &mut Encoder, range: &ButtonCounts| {
+            for presses in [range.learning, range.young, range.mature] {
+                out.list(&presses, |out, count| out.integer(*count as i64));
+            }
+        };
         let present: Vec<ButtonCounts> = [self.one_month, self.three_months, self.one_year]
             .into_iter()
             .chain(self.all_time)
             .collect();
-        out.list(&present, |out, range| {
-            for presses in [range.learning, range.young, range.mature] {
-                out.list(&presses, |out, count| out.integer(*count as i64));
-            }
-        });
+        out.list(&present, write_range);
+        write_range(out, &self.six_months);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

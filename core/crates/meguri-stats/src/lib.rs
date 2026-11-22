@@ -3,6 +3,7 @@
 
 pub mod card_info;
 pub mod graphs;
+pub mod history;
 pub mod text;
 
 use meguri_engine::{Collection, EngineError};

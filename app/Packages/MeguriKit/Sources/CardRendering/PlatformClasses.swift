@@ -30,10 +30,32 @@ open class CardNativeWebView: WKWebView {
     var hostContentRect: CGRect {
         if let contentRectangle { return contentRectangle }
         #if os(macOS)
-        return bounds
+        var rect = bounds
+        // Flipped or not, the covered part is on the window's bottom side.
+        if isFlipped { rect.size.height -= min(rect.height, obscuredBottom) }
+        else { rect.origin.y += min(rect.height, obscuredBottom); rect.size.height -= min(rect.height, obscuredBottom) }
+        return rect
         #else
+        // The scroll view's bottom inset is the covered part (below).
         return bounds.inset(by: scrollView.adjustedContentInset)
         #endif
+    }
+    /// Covered by the review's answer area at the bottom (N16.9): WebKit's
+    /// layout viewport ends above it. A change is a geometry change (H5).
+    var obscuredBottom: CGFloat = 0 {
+        didSet {
+            guard oldValue != obscuredBottom else { return }
+            var insets = obscuredContentInsets
+            insets.bottom = obscuredBottom
+            obscuredContentInsets = insets
+            #if !os(macOS)
+            // WebKit's own insets keep fixed elements clear; the scroll
+            // range comes from the scroll view's own inset, as on iOS bars.
+            scrollView.contentInset.bottom = obscuredBottom
+            scrollView.verticalScrollIndicatorInsets.bottom = obscuredBottom
+            #endif
+            onHostGeometryChange?()
+        }
     }
     open override var pageZoom: CGFloat {
         didSet { if oldValue != pageZoom { onHostGeometryChange?() } }

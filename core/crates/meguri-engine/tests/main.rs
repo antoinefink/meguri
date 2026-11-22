@@ -56,6 +56,8 @@ pub mod deck_options;
 pub mod decks;
 #[path = "derived_deferred.rs"]
 pub mod derived_deferred;
+#[path = "derived_rebuild.rs"]
+pub mod derived_rebuild;
 #[path = "editor_services.rs"]
 pub mod editor_services;
 #[path = "exclusive.rs"]

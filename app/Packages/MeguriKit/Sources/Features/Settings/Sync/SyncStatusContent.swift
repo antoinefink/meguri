@@ -23,9 +23,11 @@ struct SyncNowButton: View {
         nil
         #endif
     }
-    private var available: Bool {
+    private var available: Bool { Self.available(collection) }
+    /// Whether Sync Now can run, the sheet and a moving status aside.
+    @MainActor static func available(_ collection: ReviewCollection) -> Bool {
         // Meguri Sync runs a round only once its setup has completed (MP5).
-        if meguri { return collection.sync.meguriStatus.route == .round }
+        if collection.sync.providerState?.selection == .meguri { return collection.sync.meguriStatus.route == .round }
         return collection.syncNowAvailability() == .available
     }
     var body: some View {

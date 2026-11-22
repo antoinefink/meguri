@@ -71,6 +71,17 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     public var serviceChangeFailed = false
     public var showStatusForCommands = true
     public var connectionPath: [CloudSyncEntry] = []
+    /// N23.6: the sync the person started from the toolbar button, until it ends.
+    public var buttonFeedback = SyncButton.Feedback()
+    /// N23.1: the panel's measured height in the sheet and in the popover's sheet
+    /// (iPhone), so a sheet opens at its one detent. Measured by the shell, out of
+    /// the toolbar, while no sheet shows (`CloudSyncPanelMeasure`).
+    public var panelSheetHeight: Double?
+    public var panelPopoverHeight: Double?
+    /// N23.6: the one sync button that presents the panel: the last one that
+    /// appeared (the screen on top) or was tapped. A stack keeps the buttons of
+    /// the screens under it, so only this one presents.
+    public var statusPresenter: UUID?
     public init() {}
 }
 

@@ -17,7 +17,7 @@ public nonisolated enum ReviewTapAction: Equatable, Sendable {
 /// Why a tap did nothing. For tests and diagnostics only.
 public nonisolated enum ReviewTapRefusal: Equatable, Sendable {
     case notATap, otherCard, inactive, exempt, cancelledByCard, selection,
-         doubleTapPrevention, answerJustShown, assistiveTechnology, notNearTouch
+         doubleTapPrevention, answerJustShown, assistiveTechnology, notNearTouch, answerArea
 }
 
 /// What native touch tracking saw (R404, R415).
@@ -87,6 +87,9 @@ public nonisolated struct ReviewTapState: Equatable, Sendable {
     public var assistiveTechnology: Bool
     /// The software keyboard is on screen (R412).
     public var keyboardShown = false
+    /// Where the answer area over the card begins, in the card view's points
+    /// (N16.9): a tap there that misses its buttons does nothing.
+    public var answerAreaTop: CGFloat?
 
     public init(side: Side?, update: CardUpdate?, visibleX: ClosedRange<CGFloat>, doubleTapPrevention: TimeInterval,
                 lastAnswerUptime: TimeInterval?, answerShownUptime: TimeInterval?, assistiveTechnology: Bool) {
@@ -105,6 +108,8 @@ public nonisolated enum ReviewTapRules {
     public static func decide(_ gesture: ReviewTapGesture, _ observation: ReviewTapObservation,
                               _ state: ReviewTapState) -> ReviewTapAction {
         guard gesture.isTap else { return .none(.notATap) }
+        // Beside the buttons a tap does nothing (decisions.md, N16.9).
+        if let top = state.answerAreaTop, gesture.location.y >= top { return .none(.answerArea) }
         // R415: only the side that was on screen when the finger went down.
         guard let update = state.update, gesture.downUpdate == update, observation.update == update else {
             return .none(.otherCard)
@@ -150,9 +155,15 @@ public nonisolated struct ReviewTapPairing: Sendable {
     private var gesture: (value: ReviewTapGesture, arrival: TimeInterval)?
     private var observation: (value: ReviewTapObservation, point: CGPoint, arrival: TimeInterval)?
     private var last: [Int: (up: TimeInterval, page: TimeInterval)] = [:]
-    /// A gesture went unpaired before another touch began: its report may
-    /// still come, so a pair the page's clock cannot check is refused.
-    private var unpairedBefore = false
+    /// Lifts of single-finger touches whose page report has not been matched:
+    /// such a report may still come late. A touch the page never reports
+    /// (a scroll, a second finger, a cancelled touch) is not kept.
+    private var unmatched: [TimeInterval] = []
+    /// How long after its lift an unmatched touch's report is still expected.
+    public static let unmatchedWindow: TimeInterval = 1.5
+    /// A late report can pass the clock check only when the two lifts are
+    /// close; with an unmatched touch this close, the pair is refused.
+    public static let unmatchedMargin: TimeInterval = 0.3
 
     public init() {}
 
@@ -164,34 +175,59 @@ public nonisolated struct ReviewTapPairing: Sendable {
     /// `point`: where the page saw the gesture end, in the card view's points.
     public mutating func add(_ observation: ReviewTapObservation, point: CGPoint, at arrival: TimeInterval)
         -> (ReviewTapGesture, ReviewTapObservation)? {
+        // No touch waiting while one went unmatched: the late report of that
+        // touch. It is dropped, and that touch is accounted for.
+        if gesture == nil, !unmatched.isEmpty {
+            unmatched.removeFirst()
+            self.observation = nil
+            return nil
+        }
         self.observation = (observation, point, arrival)
         return pair(now: arrival)
     }
 
-    public mutating func clear() { gesture = nil; observation = nil }
+    public mutating func clear() { gesture = nil; observation = nil; unmatched = [] }
     /// A new touch went down: nothing waiting belongs to it.
     public mutating func touchDown() {
-        if gesture != nil { unpairedBefore = true }
+        if let gesture { keepUnmatched(gesture.value) }
         gesture = nil; observation = nil
     }
 
+    private static func reported(_ gesture: ReviewTapGesture) -> Bool {
+        gesture.fingers == 1 && !gesture.interrupted && gesture.movement < ReviewTapRules.maximumMovement
+    }
+    private mutating func keepUnmatched(_ gesture: ReviewTapGesture) {
+        if Self.reported(gesture) { unmatched.append(gesture.upUptime) }
+    }
+
     private mutating func pair(now: TimeInterval) -> (ReviewTapGesture, ReviewTapObservation)? {
-        if let waiting = gesture, now - waiting.arrival > Self.maximumWait { gesture = nil }
+        if let waiting = gesture, now - waiting.arrival > Self.maximumWait {
+            keepUnmatched(waiting.value)
+            gesture = nil
+        }
         if let waiting = observation, now - waiting.arrival > Self.maximumWait { observation = nil }
         guard let gesture, let observation else { return nil }
         self.gesture = nil; self.observation = nil
-        let dx = gesture.value.location.x - observation.point.x, dy = gesture.value.location.y - observation.point.y
-        guard (dx * dx + dy * dy).squareRoot() <= Self.maximumDistance else { return nil }
         let up = gesture.value.upUptime, time = observation.value.pageTime, page = observation.value.page
-        if unpairedBefore {
-            unpairedBefore = false
-            // Fail closed: with no baseline the report could be the earlier tap's.
-            guard last[page] != nil else { return nil }
+        // A refused pair: the report was most likely an earlier touch's, and
+        // this touch's own report may still come.
+        func refuse() -> (ReviewTapGesture, ReviewTapObservation)? {
+            if !unmatched.isEmpty { unmatched.removeFirst() }
+            keepUnmatched(gesture.value)
+            return nil
+        }
+        let dx = gesture.value.location.x - observation.point.x, dy = gesture.value.location.y - observation.point.y
+        guard (dx * dx + dy * dy).squareRoot() <= Self.maximumDistance else { return refuse() }
+        unmatched.removeAll { up - $0 >= Self.unmatchedWindow }
+        if let latest = unmatched.last {
+            // Fail closed: with no baseline, or lifts too close for the clock
+            // check to tell them apart, the report could be the earlier touch's.
+            guard last[page] != nil, up - latest >= Self.unmatchedMargin else { return refuse() }
         }
         if let previous = last[page], abs((up - previous.up) - (time - previous.page)) > Self.maximumDrift {
             // Refused; the next pair starts a new baseline (a reloaded page has a new clock).
             last[page] = nil
-            return nil
+            return refuse()
         }
         last[page] = (up, time)
         return (gesture.value, observation.value)

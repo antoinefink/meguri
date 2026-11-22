@@ -1,7 +1,7 @@
 # Statistics page (round 11)
 
 Spec: stats/statistics-page
-Requirements: R1290, R1291, R1294, R1295, R1349, R1353, R1356, R1363, R1365, R1368, R1397, R1398, R1403, R1405 to R1409, R1417 to R1420, R1439 to R1445, R1837, R1838; supersedes in part R1350, R1352, R1354, R1355, R1357 to R1359, R1361, R1362, R1364, R1366, R1367, R1369 to R1372, R1375 to R1377, R1379 to R1383, R1386 to R1389, R1391, R1392, R1394 to R1396, R1399 to R1401, R1410, R1412, R1414 to R1416, R1421 (S18 and the plan's §5 list them)
+Requirements: R1290, R1291, R1294, R1295, R1349, R1353, R1356, R1363, R1365, R1368, R1397, R1398, R1403, R1405 to R1409, R1417 to R1420, R1439 to R1445, R1837, R1838, R2067, R2073, R2076 to R2079; supersedes in part R1350, R1352, R1354, R1355, R1357 to R1359, R1361, R1362, R1364, R1366, R1367, R1369 to R1372, R1375 to R1377, R1379 to R1383, R1386 to R1389, R1391, R1392, R1394 to R1396, R1399 to R1401, R1410, R1412, R1414 to R1416, R1421 (S18 and the plan's §5 list them)
 Anki: none (Meguri design, decided by Antoine on 2026-11-22, round 11: 1A 2A 3A 4A 5A 6A 7A 8A 9A, with All as the first period and Forgotten in orange; the loading rule of S10 decided the same day). The statistics it draws keep their own specs and Anki rules (`stats/graphs-revlog`, `stats/graphs-cards`, `stats/history-reads`)
 Scenarios: none; tests named in S20
 Status: Approved 2026-11-22 (R1357). Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22).
@@ -440,18 +440,18 @@ Viewing statistics writes nothing to the collection (R1295, `stats/graphs-common
 
 Targets to measure, not gates that shape the design (decided 2026-11-22): S10's tiers, kept results and progress keep a slow read visible and honest. On the reference devices (R1802), Release build, the 150k fixture:
 
-| What | Target | How measured |
-|---|---|---|
-| The page with a kept result | every box filled in the first frame after navigation; usable at once | `perf-ui` `StatsPerfTests`, interval `stats.keptOpen` |
-| The present tier (S10.1 1) | well under 100 ms from the request | `stats.presentTier`; core `stats_present` (H19) |
-| The review-log tier, caches current, 1M to 1Y | under 500 ms (R1837's all graphs) | `stats.logTier` |
-| A deck or period change, caches current | under 300 ms to the last tier-2 box (R1838) | `stats.scopeChange` |
-| A cold pass (nothing kept, caches not built, 1.2 million rows) | a few seconds on an iPhone, determinate progress shown, every box filling as it completes | `stats.coldOpen`, device run |
-| Scrolling and the controls during any read | no hitch above 5 ms/s (as R1829); a control responds in one frame | `stats.scrollDuringRead` |
-| Selection, switches, period changes within the year | one frame, no core call (S3.2) | `stats.selection` |
-| Show in Browse | Browse's first page within its own budget (`browser/workspace` V17) plus H13's 50 ms | `stats.showInBrowse` |
+| What | Target | How measured | Requirement |
+|---|---|---|---|
+| The page with a kept result | every box filled in the first frame after navigation; usable at once | `perf-ui` `StatsPerfTests`, interval `stats.keptOpen` | R2076 |
+| The present tier (S10.1 1) | well under 100 ms from the request | `stats.presentTier`; core `stats_present` (H19) | R2067 |
+| The review-log tier, caches current, 1M to 1Y | under 500 ms (R1837's all graphs) | `stats.logTier` | R1837 |
+| A deck or period change, caches current | under 300 ms to the last tier-2 box (R1838) | `stats.scopeChange` | R1838 |
+| A cold pass (nothing kept, caches not built, 1.2 million rows) | a few seconds on an iPhone, determinate progress shown, every box filling as it completes | `stats.coldOpen`, device run | R2077 |
+| Scrolling and the controls during any read | no hitch above 5 ms/s (as R1829); a control responds in one frame | `stats.scrollDuringRead` | R2078 |
+| Selection, switches, period changes within the year | one frame, no core call (S3.2) | `stats.selection` | R2079 |
+| Show in Browse | Browse's first page within its own budget (`browser/workspace` V17) plus H13's 50 ms | `stats.showInBrowse` | R2073 |
 
-The rows' Product Contract ids are the plan owner's to assign (the plan's §3).
+Changed 2026-11-22: the plan owner assigned R2076 to R2079 to the new rows, with R2067 and R2073 shared with `stats/history-reads` H19 (the parent plan's Performance requirements, "the Statistics page"); before, this sentence left the ids to assign.
 
 ## S20. Tests
 
