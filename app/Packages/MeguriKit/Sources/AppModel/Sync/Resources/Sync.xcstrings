@@ -4980,6 +4980,39 @@
           }
         }
       }
+    },
+    "sync.button.accessibilityLabel": {
+      "comment": "sync/status-strings T22.1: the sync button's accessibility label, whatever the service.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync"
+          }
+        }
+      }
+    },
+    "sync.button.hint.syncNow": {
+      "comment": "sync/status-strings T22.1: the sync button's accessibility hint while a tap syncs.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncs now."
+          }
+        }
+      }
+    },
+    "sync.button.hint.status": {
+      "comment": "sync/status-strings T22.1: the sync button's accessibility hint while a tap opens the status panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows the sync status."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

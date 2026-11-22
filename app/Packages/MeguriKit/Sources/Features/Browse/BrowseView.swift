@@ -15,6 +15,7 @@ public struct BrowseView: View {
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
     @Environment(\.appClock) private var clock
+    @Environment(\.syncStatusItem) private var syncStatusItem
 
     /// `addNote` opens Add (the empty collection's action); `editNoteType`
     /// opens Note Types on a type (V2.2, `notetypes/workspace` W14).
@@ -31,6 +32,10 @@ public struct BrowseView: View {
             .navigationTitle(Text("browse.title", bundle: .module))
             .toolbar {
                 ToolbarItem(placement: .principal) { modePicker }
+                #if os(macOS)
+                // N23.6: the shell's sync button, after the Cards / Notes control.
+                if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
+                #endif
             }
             .browseSearchField(model)
             .onChange(of: formatterKey) { setFormatter() }

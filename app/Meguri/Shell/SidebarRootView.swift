@@ -55,16 +55,30 @@ struct SidebarRootView: View {
                             #if !os(macOS)
                             // iPadOS draws only a column's own toolbar items: one on the
                             // split view itself never appears (N11.8's status button).
+                            // Home's pages put it first in their own trailing group (N23.6);
+                            // the other sections get it as their first trailing item.
                             .toolbar {
-                                if navigation.section == .home {
-                                    ToolbarItem(placement: .primaryAction) { features.syncStatus() }
+                                if let syncStatus = features.syncStatus, sectionTakesSyncItem {
+                                    ToolbarItem(placement: .primaryAction) { syncStatus() }
                                 }
                             }
                             #endif
                             .navigationDestination(for: Destination.self) { destination in
                                 SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+                                    #if !os(macOS)
+                                    // A page pushed in those sections (a note type's) keeps it too.
+                                    .toolbar {
+                                        if let syncStatus = features.syncStatus, sectionTakesSyncItem {
+                                            ToolbarItem(placement: .primaryAction) { syncStatus() }
+                                        }
+                                    }
+                                    #endif
                             }
                     }
+                    // N23.6: screens that place the sync button in their own trailing
+                    // group read it here: Home's pages (both platforms) and, on the
+                    // Mac, Browse, after its Cards / Notes control.
+                    .environment(\.syncStatusItem, sectionPlacesSyncItem ? features.syncStatus?() : nil)
                     // Each sidebar row has its own stack: a new selection
                     // starts from its root rather than animating from the
                     // last one's.
@@ -74,13 +88,35 @@ struct SidebarRootView: View {
             .detailColumnChrome()
         }
         #if os(macOS)
+        // N23.6: an item declared here comes before a screen's own items, so on a
+        // screen with a principal control it sits between the title and that
+        // control. Screens therefore place it themselves (`syncStatusItem`); only
+        // Note Types, whose toolbar does not read it yet, gets it from here.
         .toolbar {
-            if navigation.review == nil {
-                ToolbarItem(placement: .primaryAction) { features.syncStatus() }
+            if navigation.review == nil, navigation.section == .noteTypes, let syncStatus = features.syncStatus {
+                ToolbarItem(placement: .primaryAction) { syncStatus() }
             }
         }
         #endif
     }
+
+    /// The sections whose screens put the sync button in their own trailing group.
+    private var sectionPlacesSyncItem: Bool {
+        #if os(macOS)
+        navigation.section == .home || navigation.section == .browse
+        #else
+        navigation.section == .home
+        #endif
+    }
+
+    #if !os(macOS)
+    /// iPad: the sections whose own toolbar does not carry the sync button. Home's
+    /// pages carry it in their group; Settings holds the Sync section itself.
+    private var sectionTakesSyncItem: Bool {
+        guard features.sectionShown(navigation.section) else { return false }
+        return navigation.section != .home && navigation.section != .settings
+    }
+    #endif
 
     /// The deck page Home shows in the Home section, else the section's root.
     private var root: SectionDestinationView.Screen {

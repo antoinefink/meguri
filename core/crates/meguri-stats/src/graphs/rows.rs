@@ -222,6 +222,21 @@ pub(crate) const VISITED_CARD: CardColumns = CardColumns {
     data: 9,
 };
 
+/// The card columns of `ReadRows::visit_stats_histories`, which reads no
+/// `data` (`stats/history-reads` H2 needs no memory state).
+pub(crate) const HISTORY_CARD: CardColumns = CardColumns {
+    id: 0,
+    nid: 1,
+    did: 2,
+    odid: 3,
+    card_type: 4,
+    queue: 5,
+    due: 6,
+    odue: 7,
+    ivl: 8,
+    data: 9,
+};
+
 /// The `cards` table's own order (a journal image).
 pub(crate) const TABLE_CARD: CardColumns = CardColumns {
     id: 0,

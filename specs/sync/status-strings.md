@@ -1286,3 +1286,40 @@ The `sync.serviceSwitch` confirmation is the system alert on every platform (on 
 - `SyncKindsPresentationTests`: the two rows that replace "connection unconfigured, signed out or cancelled", their kinds, symbols and actions.
 - `SyncStringCatalogTests`: a row for each key of T21 and a check that no source names a key T21.1 withdraws.
 - The confirmation's seven examples (`settings/sync/window/switch-*`) and the page before the first sign-in (`settings/sync/window/meguri-never-signed-in`, `settings/sync/panel/meguri-never-signed-in`) rendered in the test VM, Mac, iPad and iPhone, light and dark.
+
+## T22. The sync button syncs (2026-11-22)
+
+Changed 2026-11-22. Antoine, on his folded iPhone Duo: a press of the button should start the sync at once, "This way nothing opens". Decided by Claude (coordinator) under Antoine's delegation, with his standing permission of 2026-11-20 to update specs (`docs/design/decisions.md`, row `sync.status` of 2026-11-22, "The sync button syncs"; `docs/design/native-interface-contract.md` N23.6). It changes what a tap on the toolbar's sync status button does and the button's accessibility text. No state, condition, availability or existing value changes: the status is still T19.4 and T19.5, Sync Now still follows T6, T18.7 and T19.7, and the panel is still T20. Where T2, T18.7 or T20.1 say the button opens the popover or panel, T22 wins.
+
+### T22.1 The tap, the menu and the text
+
+A tap follows the first row that applies.
+
+| Status | A tap |
+|---|---|
+| needs you (T19.4, T19.5), or no service selected | opens the panel (T20), as before |
+| a status with its own action that is not needs you (Cancel Setup while setup prepares, Try Again for an acceptance that is not known or a paused setup media step; N23.3 row 4) | opens the panel |
+| the status moves (the panel's bar shows, N23.1) | nothing: no second sync starts and nothing opens |
+| Sync Now can run (the panel's Sync Now would be enabled: T6's available for iCloud, T18.7's last row for Meguri Sync) | runs Sync Now, as File › Sync Now does (`sync/policy#P12.1`; MP5's normal round); nothing opens |
+| any other status (Meguri Sync before its setup finishes or with round media blocked, an unavailable Sync Now) | opens the panel, which says why |
+
+- While the sync it started runs, the button shows the moving symbol (N23.2). When it ends up to date, the check shows in the accent colour for about a second, then in the default colour. When it ends in any other state, the button shows that state's symbol (needs you in orange).
+- VoiceOver announces the end of a sync started from the button (T1): `sync.result.succeeded` ("Finished Syncing") when it ends up to date, otherwise the new status title without its "…".
+- A long press on touch, and a click and hold on the Mac, show a menu (a secondary click on a Mac toolbar is the system's own toolbar menu): its section header is the status title, then on a second line the panel's sentence (T20.1) when there is one; then `sync.now.command` (Sync Now) where the panel shows Sync Now (N23.3's Sync Now row), enabled exactly as the panel's (disabled while the status moves); then `sync.status.openSettings` (Sync Settings), which opens the Sync section as the panel's button does. The menu shows no reason line and no action of the status.
+- Accessibility: the label is `sync.button.accessibilityLabel` for every service (in place of T20.1's `sync.button.label`, `sync.meguri.button.label` and `sync.button.label.off`, which the button no longer uses; the Sync section and the panel still name the service where they did); the value is the status title without its "…"; the hint is `sync.button.hint.syncNow` when a tap syncs, `sync.button.hint.status` when a tap opens the panel, and none while the status moves. On the Mac the help tag is still the title and the sentence (T2).
+- T2's media indicator beside the button (`sync.media.filesLeft`) is withdrawn: the toolbar item is the symbol alone, so the system draws it in the group of its neighbours. iCloud's files left stay in the panel under its bar (T20.1); the key stays in the catalog.
+
+### T22.2 Keys added
+
+| Key | English | Use |
+|---|---|---|
+| `sync.button.accessibilityLabel` | Sync | the sync button's accessibility label, whatever the service |
+| `sync.button.hint.syncNow` | Syncs now. | its accessibility hint while a tap syncs |
+| `sync.button.hint.status` | Shows the sync status. | its accessibility hint while a tap opens the panel |
+
+### T22.3 Tests
+
+- `SyncStringCatalogTests`: a row for each key of T22.2.
+- `SyncButtonTests` (`app/Packages/MeguriKit/Tests/AppModelTests/`), over `SyncButton` (AppModel): each row of T22.1's table gives its tap; the feedback gives `succeeded` only for a sync that was requested, moved and ended up to date, `ended` for one that ended in another state or was refused into needs you, and nothing for a sync it did not start or a request that never moved.
+- `SyncButtonPlacementTests` (UI test, iPhone and the folded Duo): the button is in the same trailing group as search and Add, at the top and after scrolling to the bottom, on the deck list and a deck page, and no toolbar item is drawn empty.
+- The button in each state captured in the test VM over a generated collection (`-MeguriSyncRender`), on the folded Duo, iPhone, iPad and Mac, light and dark.

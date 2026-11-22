@@ -113,4 +113,28 @@ impl ReadSnapshot<'_> {
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    /// [`ReadSnapshot::derived_rows`] row by row, without keeping them:
+    /// each row's cells of `columns` go to `visit`, which returns false to
+    /// stop. Nothing is visited when no store is attached. `cancel` is
+    /// polled while SQLite works, as `ReadRows::visit_id_rows` polls it.
+    pub fn visit_derived(
+        &self,
+        component: &str,
+        table: &str,
+        columns: &str,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[Cell]) -> bool,
+    ) -> Result<(), StorageError> {
+        if self.reader().derived.is_none() {
+            return Ok(());
+        }
+        crate::search_rows::visit_cells(
+            self.conn(),
+            &format!("SELECT {columns} FROM {ATTACH_SCHEMA}.\"{component}__{table}\""),
+            &[],
+            cancel,
+            visit,
+        )
+    }
 }
