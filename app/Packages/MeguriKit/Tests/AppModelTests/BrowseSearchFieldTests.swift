@@ -351,6 +351,36 @@ import Testing
         await until { core.savedSearchWrites.count == 2 && model.savingSearch == nil }
     }
 
+    @Test func aSaveLandsOnlyOnThePresentationThatStartedIt() async {
+        let (model, core) = await makeModel()
+        model.activate(.deck(10))
+        core.holdSaves = true
+        model.startSavingSearch()
+        model.saveSearch(named: "First")
+        await until { core.runTexts > 0 && model.savingSearch?.saving == true }
+        // Cancelled while it writes; a second Save Search… starts.
+        model.cancelSavingSearch()
+        model.startSavingSearch()
+        let second = model.savingSearch
+        core.saveFails = true
+        core.releaseSaves()
+        try? await Task.sleep(for: .milliseconds(50))
+        // The first write's end neither dismisses nor fails the second sheet.
+        #expect(model.savingSearch == second && model.savingSearch?.failed == false)
+    }
+
+    @Test func countsOfAModeChangeAreReadAgainWhenBrowseHidesMeanwhile() async {
+        let (model, core) = await makeModel()
+        core.holdCounts = true
+        model.setMode(.notes)
+        await until { core.countCalls.last?.0 == .notes }
+        model.disappear()
+        await until { core.cancelledCounts == 1 }
+        let calls = core.countCalls.count
+        model.appear()
+        await until { core.countCalls.count == calls + 1 }
+    }
+
     @Test func aFailedSaveKeepsTheSheetAndItsName() async {
         let (model, core) = await makeModel()
         model.activate(.deck(10))

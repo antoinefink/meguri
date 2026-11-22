@@ -547,6 +547,9 @@ public final class BrowseModel {
     /// more than 12 top-level tags, the top-level tags' note counts follow,
     /// to pick the eight Tags shows (V6).
     private func refreshCounts() {
+        // Pending until every read of it lands, whatever started it (a reload,
+        // a mode change): leaving Browse meanwhile reads the counts again.
+        readsPending = true
         countsTask?.cancel()
         countsToken &+= 1
         let token = countsToken, epoch = epoch, mode = mode, backend = backend

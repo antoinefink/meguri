@@ -570,7 +570,11 @@ import Testing
     }
     var savedSearchWrites: [(String, String)] = []
     var saveFails = false
+    var holdSaves = false
+    private var heldSaves: [CheckedContinuation<Void, Never>] = []
+    func releaseSaves() { heldSaves.forEach { $0.resume() }; heldSaves = [] }
     func saveSearch(name: String, text: String) async throws {
+        if holdSaves { await withCheckedContinuation { heldSaves.append($0) } }
         if saveFails { throw BridgeError.unavailable(reason: "sample") }
         savedSearchWrites.append((name, text))
     }
