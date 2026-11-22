@@ -90,12 +90,17 @@ public final class BrowseModel {
     @ObservationIgnored private var countsTask: Task<Void, Never>?
     @ObservationIgnored private var device: BrowseDeviceState
 
+    /// The results table (U270a): the query's rows in the mode.
+    public let results: BrowseResults
+
     // MARK: Seams
 
     @ObservationIgnored let backend: any BrowseBackend
     @ObservationIgnored private let store: BrowseDeviceStore
     /// Whether the collection is open and ready for reads.
-    @ObservationIgnored public var ready: @MainActor () -> Bool = { true }
+    @ObservationIgnored public var ready: @MainActor () -> Bool = { true } {
+        didSet { let ready = ready; results.ready = { ready() } }
+    }
     /// A handed search whose reading failed, tried again on the next appear.
     private var pendingSearch: String?
     /// A search handed to Browse (a deep link, R319), taken once: T14's
@@ -105,6 +110,7 @@ public final class BrowseModel {
     public init(backend: any BrowseBackend, store: BrowseDeviceStore = BrowseDeviceStore(defaults: nil)) {
         self.backend = backend
         self.store = store
+        results = BrowseResults(backend: backend)
         let device = store.load()
         self.device = device
         folded = device.folded
@@ -122,6 +128,8 @@ public final class BrowseModel {
         if !opened { open() }
         takeHandedSearch()
         if stale { reload() }
+        // The rows of the query, once the first open has read it (T14).
+        if !openInFlight, !results.hasRun { showResults() }
     }
 
     public func disappear() {
@@ -145,6 +153,7 @@ public final class BrowseModel {
             // A failed read keeps nothing, so the next appear opens again (T14, K6.4).
             guard let opening else {
                 opened = false
+                showResults()
                 return
             }
             // T14: after a relaunch the mode kept on this device; on a first open, the collection's.
@@ -153,18 +162,21 @@ public final class BrowseModel {
                 mode = notes ? .notes : .cards
                 counts = [:]
                 refreshCounts()
+                // A query chosen meanwhile is shown in the restored mode.
+                if revision != queryRevision { showResults() }
             }
             device.notesMode = notes
             saveDevice()
             let text = kept ?? opening.defaultSearch
             guard let text, revision == queryRevision else {
                 if kept == nil { keepRunText() }
+                if revision == queryRevision { showResults() }
                 return
             }
             let read: FilterQuery
             do { read = try await backend.read(text) } catch {
                 // Not read: the next appear opens again, unless the query changed meanwhile.
-                if self.epoch == epoch, revision == queryRevision { opened = false }
+                if self.epoch == epoch, revision == queryRevision { opened = false; showResults() }
                 return
             }
             guard self.epoch == epoch, revision == queryRevision else { return }
@@ -178,6 +190,54 @@ public final class BrowseModel {
         queryRevision &+= 1
         if next != query { query = next }
         keepRunText()
+        showResults()
+    }
+
+    /// The results show the query in the mode.
+    private func showResults() {
+        results.run(query, mode: mode)
+    }
+
+    /// The no-results state's Clear Search: the empty query.
+    public func clearQuery() {
+        pendingSearch = nil
+        setQuery(FilterQuery())
+    }
+
+    /// V2.1: the Cards / Notes control. The query stays (T11); the rows
+    /// toggle (H11), the counts are of the new mode, and the mode is written
+    /// to the collection (K6.1) and kept on the device (T14).
+    public func setMode(_ next: BrowseMode) {
+        guard next != mode else { return }
+        mode = next
+        device.notesMode = next == .notes
+        saveDevice()
+        counts = [:]
+        refreshCounts()
+        results.setMode(next, query: query)
+        writeMode(next)
+    }
+
+    /// The mode a refused write left unwritten, written again when the
+    /// collection is ready again.
+    private var unwrittenMode: BrowseMode?
+    /// Raised only when the collection is replaced: a mode write for the
+    /// same collection survives it becoming ready again.
+    private var replacements: UInt64 = 0
+    /// Raised each time the collection becomes ready again.
+    private var readies: UInt64 = 0
+
+    private func writeMode(_ next: BrowseMode) {
+        let backend = backend, replacements = replacements, readies = readies
+        unwrittenMode = nil
+        Task {
+            do { try await backend.setNotesMode(next == .notes) } catch {
+                guard self.replacements == replacements, mode == next else { return }
+                unwrittenMode = next
+                // Refused across the collection becoming ready again: written once more now.
+                if self.readies != readies, ready() { writeMode(next) }
+            }
+        }
     }
 
     /// The device keeps the query's run text for a relaunch (T14).
@@ -305,7 +365,8 @@ public final class BrowseModel {
 
     /// The collection's rows changed (`engine/change-stream`): the names
     /// and counts are read again while Browse shows, else when it next does.
-    public func changesCommitted(_ changes: ChangeSet) {
+    public func changesCommitted(_ changes: ChangeSet, seq: UInt64) {
+        results.changesCommitted(changes, seq: seq)
         // Saved searches and flag names are config keys (K7, K8).
         let names = changes.configKeys.contains { $0.name == "savedFilters" || $0.name == "flagLabels" }
         guard changes.wholeCollection || !changes.cards.isEmpty || !changes.notes.isEmpty || !changes.decks.isEmpty
@@ -316,6 +377,7 @@ public final class BrowseModel {
 
     /// The scheduler day or the time zone changed: day values count again.
     public func dayChanged() {
+        results.dayChanged()
         stale = true
         if visible, ready() { reload() }
     }
@@ -324,6 +386,9 @@ public final class BrowseModel {
     /// counts are read again.
     public func collectionReady() {
         epoch &+= 1
+        results.collectionReady()
+        readies &+= 1
+        if let unwritten = unwrittenMode, unwritten == mode { writeMode(unwritten) }
         stale = true
         countsTask?.cancel()
         if openInFlight {
@@ -343,10 +408,13 @@ public final class BrowseModel {
     /// The collection was replaced: the next open is a first open (T14).
     public func collectionReplaced() {
         epoch &+= 1
+        results.collectionReplaced()
         countsTask?.cancel()
         opened = false
         openInFlight = false
         mode = .cards
+        unwrittenMode = nil
+        replacements &+= 1
         query = FilterQuery()
         queryRevision &+= 1
         savedSearches = []; deckValues = [:]; notetypes = []; tags = []; flagNames = []
@@ -423,8 +491,10 @@ public final class BrowseModel {
         let rows = countedRows
         let topTags = tags.count > Self.tagsShownWhole ? tags.map(\.fullName) : []
         countsTask = Task(priority: .utility) {
-            guard let values = try? await backend.counts(mode, rows.map(\.1)), !Task.isCancelled,
+            // The last item is the whole collection: V11's total.
+            guard var values = try? await backend.counts(mode, rows.map(\.1) + [.query(FilterQuery())]), !Task.isCancelled,
                   token == countsToken, self.epoch == epoch else { return }
+            results.setTotal(values.popLast() ?? nil, mode: mode)
             var next: [BrowseSidebarTag: UInt64] = [:]
             for (row, value) in zip(rows.map(\.0), values) {
                 if let value { next[row] = value }
