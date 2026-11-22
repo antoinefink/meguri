@@ -344,7 +344,9 @@ extension NoteTypesModelTests {
     @Test func saveWaitsForACommitStartedWhenFocusLeft() async {
         let (model, backend) = await open()
         model.setOption(7, row: 1) { $0.rtl = true }
-        model.trackCommit { await model.commitRename(7, row: 0, typed: "Prompt") }
+        model.trackCommit("name.0") { await model.commitRename(7, row: 0, typed: "back") }
+        // The corrected name replaces the refused one under the same key.
+        model.trackCommit("name.0") { await model.commitRename(7, row: 0, typed: "Prompt") }
         model.save()
         await model.settle()
         #expect(backend.saved.last?.fields.first?.name == "Prompt" && backend.saved.last?.fields[1].rtl == true)

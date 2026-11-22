@@ -115,7 +115,7 @@ public final class NoteTypesModel {
     @ObservationIgnored private var saveRunning = false
     /// Commits a view started (a rename still being checked after focus
     /// left), awaited by Save whatever field has the focus now.
-    @ObservationIgnored private var inflightCommits: [Task<Bool, Never>] = []
+    @ObservationIgnored private var inflightCommits: [String: Task<Bool, Never>] = [:]
     /// Save is committing typed text: text inputs wait, so nothing typed now is lost.
     public private(set) var committingForSave = false
     /// Raised when the collection goes: work started before must not land.
@@ -318,10 +318,13 @@ public final class NoteTypesModel {
         return true
     }
 
-    /// A commit a view started on its own (focus left a field): Save waits for it.
-    public func trackCommit(_ commit: @escaping @MainActor () async -> Bool) {
-        inflightCommits.removeAll { $0.isCancelled }
-        inflightCommits.append(Task { await commit() })
+    /// A commit a view started on its own (focus left a field): Save waits
+    /// for it. A newer commit under the same key replaces an older one, so a
+    /// corrected name is the one that counts.
+    public func trackCommit(_ key: String, _ commit: @escaping @MainActor () async -> Bool) {
+        let task = Task { await commit() }
+        inflightCommits[key] = task
+        Task { _ = await task.value; if inflightCommits[key] == task { inflightCommits[key] = nil } }
     }
 
     public func cancelRename() {
@@ -421,8 +424,12 @@ public final class NoteTypesModel {
             // Typed text that is not committed yet goes into the draft first; a refused name stops Save.
             committingForSave = true
             var accepted = true
-            for task in inflightCommits { accepted = await task.value && accepted }
-            inflightCommits.removeAll()
+            // Commits that start while Save waits are awaited too.
+            while !inflightCommits.isEmpty {
+                let batch = inflightCommits
+                inflightCommits.removeAll()
+                for task in batch.values { accepted = await task.value && accepted }
+            }
             for commit in pendingEdits.values where accepted { accepted = await commit() }
             committingForSave = false
             guard accepted else { return }
