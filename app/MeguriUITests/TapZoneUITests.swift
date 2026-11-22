@@ -98,8 +98,39 @@ final class TapZoneUITests: XCTestCase {
         // Double Tap Prevention (250 ms after an answer, and after the answer
         // appears) is behaviour under test elsewhere: these taps come after it.
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-        // Low on the card, below its text: plain card, not a control.
-        card.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.8)).tap()
+        // Low on the card, below its text and above the answer area that
+        // floats over the card's bottom (N16.9): plain card, not a control.
+        let app = XCUIApplication()
+        let bar = [element(app, "review.session.rate.good"), element(app, "review.session.reveal")]
+            .filter { $0.exists && !$0.frame.isEmpty }.map(\.frame.minY).min() ?? card.frame.maxY
+        let y = card.frame.minY + (bar - Self.answerAreaPadding - card.frame.minY) * 0.85
+        card.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: card.frame.width * x, dy: y - card.frame.minY)).tap()
+    }
+    /// The answer area's padding above its buttons.
+    private static let answerAreaPadding: CGFloat = 16
+
+    func testATapBesideTheAnswerButtonsDoesNothing() throws {
+        let app = try launch()
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+            "home.deck.row.", "Tap Zones")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        row.tap()
+        element(app, "home.deck.study").tap()
+        let card = element(app, "review.session.card")
+        XCTAssertTrue(card.waitForExistence(timeout: 20))
+        XCTAssertTrue(waitForQuestion(app))
+        tap(card, x: 0.5)
+        XCTAssertTrue(waitForAnswer(app))
+        // Between Hard and Good, level with the buttons: the card shows there
+        // under the answer area, but a tap there is never a grade.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        let hard = element(app, "review.session.rate.hard").frame, good = element(app, "review.session.rate.good").frame
+        let gapPoint = CGPoint(x: (hard.maxX + good.minX) / 2, y: good.midY)
+        app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: gapPoint.x, dy: gapPoint.y)).tap()
+        XCTAssertFalse(waitForAnswered(app, 1, timeout: 2), "A tap beside the buttons does not answer")
+        XCTAssertTrue(isAnswer(app))
+        capture(app, "09-answer-after-tap-beside-buttons")
     }
 
     private func isAnswer(_ app: XCUIApplication) -> Bool {

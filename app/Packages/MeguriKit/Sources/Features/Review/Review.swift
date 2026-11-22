@@ -42,11 +42,15 @@ public struct ReviewView: View {
                     // A walk's next deck brings its own pages: a new host for them, while
                     // the review around it stays (N24.3).
                     #if os(macOS)
-                    ReviewCardHost(model: model, pair: pair, close: close, actions: moreActions)
+                    ReviewCardUnderAnswers { covered in
+                        ReviewCardHost(model: model, pair: pair, close: close, actions: moreActions, obscuredBottom: covered)
+                    }
                         .opacity(model.phase == .question || model.phase == .answer || model.phase == .transition ? 1 : 0)
                         .id(ObjectIdentifier(model))
                     #else
-                    ReviewCardHost(model: model, pair: pair, close: close, actions: moreActions)
+                    ReviewCardUnderAnswers { covered in
+                        ReviewCardHost(model: model, pair: pair, close: close, actions: moreActions, obscuredBottom: covered)
+                    }
                         .accessibilityIdentifier("review.session.card")
                         .accessibilityAction(named: Text("Show Answer", bundle: .module)) { model.reveal() }
                         .accessibilityAction(.magicTap) { model.reveal() }
@@ -185,6 +189,24 @@ public struct ReviewView: View {
     private func appearance() async { try? await model.pair?.setAppearance(colorScheme == .dark ? .dark : .light) }
 }
 
+/// The card's page runs on under the answer area, to the window's bottom
+/// edge, and keeps clear the part the answers cover, so its last line can
+/// always scroll above them (N16.9).
+struct ReviewCardUnderAnswers<Content: View>: View {
+    @Environment(\.reviewAnswerAreaTop) private var answerAreaTop
+    @State private var bottom: CGFloat?
+    @ViewBuilder let content: (CGFloat) -> Content
+    var body: some View {
+        content(covered)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom = $0 }
+            .ignoresSafeArea(.container, edges: .bottom)
+    }
+    private var covered: CGFloat {
+        guard let answerAreaTop, let bottom else { return 0 }
+        return max(0, bottom - answerAreaTop)
+    }
+}
+
 struct ReviewStatusLayout<Content: View>: View {
     @ViewBuilder let content: () -> Content
     #if DEBUG
@@ -248,6 +270,7 @@ struct ReviewLayout<Card: View>: View {
     var status: AnyView? = nil
     var actions = ReviewMoreActions()
     @State private var noticeContentHeight: CGFloat?
+    @State private var answerAreaTop: CGFloat?
     @ViewBuilder let card: () -> Card
     var body: some View {
         #if os(macOS)
@@ -259,12 +282,10 @@ struct ReviewLayout<Card: View>: View {
     #if os(macOS)
     /// The window's own toolbar holds the corners (N3); the card sits between it and the answers.
     private var macBody: some View {
-        VStack(spacing: 0) {
-            cardRegion
-            ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
-            // The window has no bottom inset: the bar is its last row (N16.1).
-            if showsProgress { ReviewProgressBar(progress: progress) }
-        }
+        cardRegion
+        // The card runs on under the answers (N16.9); the window has no bottom
+        // inset, so the progress bar is the window's last row (N16.1).
+        .safeAreaBar(edge: .bottom, spacing: 0) { answerArea }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button(action: close) {
@@ -293,21 +314,12 @@ struct ReviewLayout<Card: View>: View {
     /// One container in every fold position keeps the card's page alive through a fold (R576).
     private var touchBody: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                cardRegion
-                ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
-            }
+            cardRegion
+            // The card runs on under the answers, which float over it in the
+            // system's bottom bar; the progress bar follows them, above the
+            // home indicator, in every fold position (N16.1, N16.9).
+            .safeAreaBar(edge: .bottom, spacing: 0) { answerArea }
             .background(.token(.cardPage))
-            // On the screen's bottom edge, under the home indicator, in every
-            // fold position; it is not a control, so it may cross a fold (N16.1).
-            .overlay {
-                if showsProgress {
-                    Color.clear
-                        .overlay(alignment: .bottom) { ReviewProgressBar(progress: progress) }
-                        .ignoresSafeArea(.container, edges: .bottom)
-                        .allowsHitTesting(false)
-                }
-            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     // N20.5: the xmark's name is "Back to Decks", as the sidebar layouts' button.
@@ -371,10 +383,27 @@ struct ReviewLayout<Card: View>: View {
                     .frame(height: min(noticeContentHeight ?? noticeLimit, noticeLimit))
                 }
                 card().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .environment(\.reviewAnswerAreaTop, answerAreaTop)
             }
         }
     }
     private var showsProgress: Bool { phase == .question || phase == .answer || phase == .transition }
+
+    /// The answers, then one standard spacing, then the progress bar (N16.1,
+    /// N16.9). Its top edge tells the card how much of it lies underneath.
+    private var answerArea: some View {
+        VStack(spacing: Spacing.xSmall) {
+            ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
+            if showsProgress { ReviewProgressBar(progress: progress).allowsHitTesting(false) }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { answerAreaTop = $0 }
+    }
+}
+
+extension EnvironmentValues {
+    /// Where the answer area begins, in global coordinates: the card's page
+    /// keeps that much of its bottom clear of it (N16.9).
+    @Entry var reviewAnswerAreaTop: CGFloat? = nil
 }
 
 #if os(iOS)
@@ -581,7 +610,7 @@ public struct ReviewAnswerBar: View {
                     .accessibilityIdentifier("review.session.reveal")
             }
         }
-        .padding()
+        .padding([.horizontal, .top])
         .frame(maxWidth: .infinity)
     }
     #endif
@@ -614,7 +643,7 @@ public struct ReviewAnswerBar: View {
             }
             .onGeometryChange(for: FoldGeometry.self) { FoldGeometry($0) } action: { fold = $0 }
             .padding(.horizontal)
-            .padding(.vertical, Spacing.small)
+            .padding(.top, Spacing.small)
             .frame(maxWidth: fold.acrossWidth == nil ? ContentWidth.readable : nil)
             .frame(maxWidth: .infinity)
             .fixedSize(horizontal: false, vertical: true)

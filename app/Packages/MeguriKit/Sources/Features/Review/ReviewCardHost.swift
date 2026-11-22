@@ -16,6 +16,8 @@ struct ReviewCardHost {
     /// N20.8: Edit Note, Bury Card and Suspend Card, for their keys (E, -, @)
     /// and the Mac card's context menu.
     var actions = ReviewMoreActions()
+    /// How much of the card's bottom the answer area covers (N16.9).
+    var obscuredBottom: CGFloat = 0
 
     private func key(_ input: String, command: Bool, shift: Bool, repeated: Bool = false) -> Bool {
         guard let pages = model.surface as? ReviewPages, pages.presenter.isAvailable,
@@ -104,6 +106,7 @@ extension ReviewCardHost: NSViewControllerRepresentable {
         }
         (model.surface as? ReviewPages)?.presenter.window = host.view.window
         (model.surface as? ReviewPages)?.establishInitialFocus()
+        if pair.obscuredBottom != obscuredBottom { pair.obscuredBottom = obscuredBottom }
         // N20.8: the card's context menu starts with Edit Note | Bury Card, Suspend Card.
         let actions = actions
         for page in pair.pages {
@@ -203,6 +206,7 @@ extension ReviewCardHost: UIViewControllerRepresentable {
         }
         (model.surface as? ReviewPages)?.presenter.host = host
         (model.surface as? ReviewPages)?.establishInitialFocus()
+        if pair.obscuredBottom != obscuredBottom { pair.obscuredBottom = obscuredBottom }
     }
 }
 #endif

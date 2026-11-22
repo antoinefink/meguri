@@ -143,6 +143,26 @@ struct ReviewTapDecisionTests {
         #expect(Self.decide(Self.gesture(down: 20.01), Self.observation(), off) == .good)
     }
 
+    // MARK: The answer area over the card (N16.9)
+
+    @Test func aTapInTheAnswerAreaThatMissesItsButtonsDoesNothing() {
+        // The card runs on under the answers; their area starts at y 500.
+        var a = Self.state()
+        a.answerAreaTop = 500
+        func at(_ y: CGFloat, _ g: ReviewTapGesture = Self.gesture()) -> ReviewTapGesture {
+            var g = g
+            g.location.y = y
+            return g
+        }
+        #expect(Self.decide(at(499), Self.observation(), a) == .good)
+        #expect(Self.decide(at(500), Self.observation(), a) == .none(.answerArea))
+        #expect(Self.decide(at(620, Self.gesture(x: 10)), Self.observation(), a) == .none(.answerArea))
+        var q = Self.state(.question, update: Self.question)
+        q.answerAreaTop = 500
+        #expect(Self.decide(at(510, Self.gesture(update: Self.question)), Self.observation(Self.question), q) == .none(.answerArea))
+        #expect(Self.decide(at(300, Self.gesture(update: Self.question)), Self.observation(Self.question), q) == .reveal)
+    }
+
     // MARK: Accessibility (R184, R1981)
 
     @Test func withVoiceOverOrSwitchControlTheAnswerZonesAreOff() {

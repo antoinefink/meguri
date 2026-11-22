@@ -17,7 +17,7 @@ public nonisolated enum ReviewTapAction: Equatable, Sendable {
 /// Why a tap did nothing. For tests and diagnostics only.
 public nonisolated enum ReviewTapRefusal: Equatable, Sendable {
     case notATap, otherCard, inactive, exempt, cancelledByCard, selection,
-         doubleTapPrevention, answerJustShown, assistiveTechnology, notNearTouch
+         doubleTapPrevention, answerJustShown, assistiveTechnology, notNearTouch, answerArea
 }
 
 /// What native touch tracking saw (R404, R415).
@@ -87,6 +87,9 @@ public nonisolated struct ReviewTapState: Equatable, Sendable {
     public var assistiveTechnology: Bool
     /// The software keyboard is on screen (R412).
     public var keyboardShown = false
+    /// Where the answer area over the card begins, in the card view's points
+    /// (N16.9): a tap there that misses its buttons does nothing.
+    public var answerAreaTop: CGFloat?
 
     public init(side: Side?, update: CardUpdate?, visibleX: ClosedRange<CGFloat>, doubleTapPrevention: TimeInterval,
                 lastAnswerUptime: TimeInterval?, answerShownUptime: TimeInterval?, assistiveTechnology: Bool) {
@@ -105,6 +108,8 @@ public nonisolated enum ReviewTapRules {
     public static func decide(_ gesture: ReviewTapGesture, _ observation: ReviewTapObservation,
                               _ state: ReviewTapState) -> ReviewTapAction {
         guard gesture.isTap else { return .none(.notATap) }
+        // Beside the buttons a tap does nothing (decisions.md, N16.9).
+        if let top = state.answerAreaTop, gesture.location.y >= top { return .none(.answerArea) }
         // R415: only the side that was on screen when the finger went down.
         guard let update = state.update, gesture.downUpdate == update, observation.update == update else {
             return .none(.otherCard)
