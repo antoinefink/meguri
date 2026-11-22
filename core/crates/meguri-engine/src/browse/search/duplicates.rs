@@ -168,6 +168,9 @@ pub fn find_duplicates(
             .map(|(_, count)| count)
             .sum(),
     };
+    if token.is_cancelled() {
+        return Err(cancelled());
+    }
     progress.report(0, Some(total));
     let mut groups = Groups::new();
     let stop = || token.is_cancelled();

@@ -34,9 +34,11 @@ extension EventTests {
             let added = try await types.addNotetype(.init(name: "Duo", cloze: false, fields: ["Front", "Back"],
                 templates: [.init(name: "Forward", front: "{{Front}}", back: "{{FrontSide}}", browserFront: "", browserBack: "")],
                 css: ""))
+            var firstIDs: [Int64] = []
             for (front, tag) in [("alpha", "\u{1D11E}zorb"), ("beta", "plain")] {
-                _ = try await notes.addNote(.init(notetypeId: added.id, fields: [front, "x"], tags: [tag], deckId: 1, guid: nil,
-                                                  updateAddDefaults: false))
+                let note = try await notes.addNote(.init(notetypeId: added.id, fields: [front, "x"], tags: [tag], deckId: 1,
+                                                         guid: nil, updateAddDefaults: false))
+                firstIDs.append(note.id)
             }
 
             let read = try await CoreBrowseQuery.read("-is:suspended tag:plain word")
@@ -102,8 +104,8 @@ extension EventTests {
             let third = try await notes.addNote(.init(notetypeId: added.id, fields: ["<b>ALPHA</b> ", "y"], tags: [],
                                                       deckId: 1, guid: nil, updateAddDefaults: false))
             let everyNote = try await CoreBrowseQuery.startFindDuplicates(field: "Front", in: nil).value()
-            #expect(everyNote.groups.count == 1 && everyNote.groups[0].contains(third.id))
-            #expect(everyNote.noteIds == everyNote.groups[0] && everyNote.considered == 3)
+            let pair = [firstIDs[0], third.id].sorted()
+            #expect(everyNote == FindDuplicatesResult(groups: [pair], noteIds: pair, considered: 3))
             let inFound = try await CoreBrowseQuery.startFindDuplicates(field: "Front", in: selection).value()
             #expect(inFound == FindDuplicatesResult(groups: [], noteIds: [], considered: 2))
             try await session.close()

@@ -151,7 +151,8 @@ pub(crate) fn visit_note_fields(
     })
 }
 
-/// A JSON array of `ids`, for `json_each`.
+/// A JSON array of `ids`, for `json_each` (meguri-search writes its own id
+/// lists; storage does not depend on it).
 fn json_list(ids: &[i64]) -> String {
     let mut list = String::with_capacity(ids.len() * 14 + 2);
     list.push('[');

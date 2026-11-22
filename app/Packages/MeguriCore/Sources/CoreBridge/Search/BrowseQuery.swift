@@ -742,8 +742,9 @@ public enum CoreBrowseQuery {
     /// `field` have equal keys, grouped, among every note (`found` nil: All
     /// Notes) or the notes of `found`'s rows (All Found: a selection of
     /// every row of the results), as a job with progress and Cancel. It
-    /// never writes. When the selection itself is refused, `value()` throws
-    /// that `BridgeError.browse` failure.
+    /// never writes. It holds a search reader until it ends: cancel it when
+    /// the sheet goes away. When the selection itself is refused, `value()`
+    /// throws that `BridgeError.browse` failure.
     public static func startFindDuplicates(field: String, in found: BrowseSelection?) async throws(BridgeError)
         -> CoreBrowseReadJob<FindDuplicatesResult> {
         try await CoreEventStream.shared.start()

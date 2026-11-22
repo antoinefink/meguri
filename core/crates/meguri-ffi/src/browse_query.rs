@@ -1141,7 +1141,9 @@ pub struct FindDuplicatesJobStart {
 /// `found` none) or the notes of `found`'s rows (All Found: a selection of
 /// every row of the current results). A job reading one snapshot of a
 /// search worker's reader, with progress (notes read, of a known total)
-/// and Cancel; a replacement, a suspend or a close cancels it. It never writes. A refusal of the selection itself ends
+/// and Cancel; a replacement, a suspend or a close cancels it. It never
+/// writes. It holds one of the search readers until it ends, so a caller
+/// whose sheet goes away cancels it. A refusal of the selection itself ends
 /// the job successfully and `result` returns it.
 #[uniffi::export]
 pub fn start_find_duplicates(

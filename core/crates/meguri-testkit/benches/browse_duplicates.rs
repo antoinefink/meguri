@@ -110,6 +110,7 @@ fn main() -> ExitCode {
         let session = engine.open_search_session(Arc::new(Events(Mutex::new(sender))));
         let seq = session.start_search("", SearchMode::Notes, SortSpec::new("noteCrt", SortDirection::Ascending), None);
         let (handle, count) = every_note(&events, seq);
+        #[allow(clippy::single_range_in_vec_init)]
         let found = session.selection(handle, 0, vec![0..count]);
         let targets = [
             ("all_notes", DuplicatesTarget::AllNotes(engine)),
@@ -143,11 +144,12 @@ fn main() -> ExitCode {
         .write(&report::results_dir(std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))))
         .unwrap();
     for record in suite.records() {
+        let p95 = record.percentile(Percentile::P95);
         eprintln!(
-            "{} fixture {} p95 {:?}",
+            "{} fixture {} p95 {:?} (V10's budget: 2 s over 150,000 notes read)",
             record.name,
             record.fixture.as_deref().unwrap_or("none"),
-            record.percentile(Percentile::P95)
+            p95
         );
     }
     ExitCode::SUCCESS

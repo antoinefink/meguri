@@ -196,12 +196,22 @@ fn the_key_rule_groups_notes_across_note_types_and_leaves_empty_keys_out() {
         &[SqlValue::Integer(blob.0)],
     );
 
+    // `flds` stored as an integer reads as its text.
+    let numbers = [fx.add(fx.zorvan, &["ra", "x"]), fx.add(fx.zorvan, &["ti", "x"])];
+    for note in numbers {
+        raw(
+            &fx.h.collection,
+            "UPDATE notes SET flds = 7 WHERE id = ?1",
+            &[SqlValue::Integer(note.0)],
+        );
+    }
+
     let found = fx.all("Glif");
-    let mut expected = vec![zub.to_vec(), pim.to_vec(), image.to_vec()];
+    let mut expected = vec![zub.to_vec(), pim.to_vec(), image.to_vec(), numbers.to_vec()];
     expected.sort_by_key(|group| group[0]);
     assert_eq!(found.groups, expected);
     // Every note of Zorvan and Plimet was read; Quobel's were not.
-    assert_eq!(found.considered, 14);
+    assert_eq!(found.considered, 16);
     let mut ids: Vec<NoteId> = expected.into_iter().flatten().collect();
     ids.sort_unstable();
     assert_eq!(found.note_ids(), ids);
@@ -321,4 +331,73 @@ fn it_reports_progress_and_writes_nothing() {
     // the field.
     assert_eq!(reports.0.lock().unwrap().first(), Some(&(0, Some(30))));
     assert_eq!(fx.dump(), before);
+}
+
+/// A progress clock that moves one second at every reading, so no report
+/// is held back.
+fn fake_now() -> Duration {
+    static NOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    Duration::from_secs(NOW.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+}
+
+/// Cancels `token` at the first report, which comes before the notes are
+/// read.
+struct CancelAtFirst(Arc<CancelToken>, Mutex<Vec<(u64, Option<u64>)>>);
+
+impl ProgressListener for CancelAtFirst {
+    fn on_progress(&self, progress: &Progress) {
+        self.1.lock().unwrap().push((progress.completed, progress.total));
+        self.0.cancel();
+    }
+}
+
+#[test]
+fn the_last_report_is_the_total_for_both_targets() {
+    let fx = fixture();
+    for index in 0..12 {
+        fx.add(fx.zorvan, &[&format!("q{}", index % 4), "m"]);
+    }
+    fx.add(fx.quobel, &["q1", "m"]);
+    let (handle, count) = fx.search("", SearchMode::Cards);
+    assert_eq!(count, 26);
+    let selection = fx.session.selection(handle, 0, vec![0..count]);
+    for (target, total) in [
+        (DuplicatesTarget::AllNotes(&fx.h.engine), 12),
+        // The listed notes, the Quobel note among them.
+        (DuplicatesTarget::Found(&selection), 13),
+    ] {
+        let reports = Arc::new(Reports(Mutex::new(Vec::new())));
+        let progress = ProgressSink::with_clock(fake_now);
+        progress.set_listener(reports.clone());
+        let found = find_duplicates(target, "Glif", &CancelToken::new(), &progress).unwrap();
+        assert_eq!((found.groups.len(), found.considered), (4, 12));
+        let reports = reports.0.lock().unwrap();
+        assert_eq!(reports.first(), Some(&(0, Some(total))), "{target:?}");
+        assert_eq!(reports.last(), Some(&(total, Some(total))), "{target:?}");
+    }
+}
+
+#[test]
+fn a_cancel_after_the_read_started_stops_it_for_both_targets() {
+    let fx = fixture();
+    for index in 0..30 {
+        fx.add(fx.zorvan, &[&format!("q{}", index % 3), "m"]);
+    }
+    let (handle, count) = fx.search("", SearchMode::Notes);
+    let selection = fx.session.selection(handle, 0, vec![0..count]);
+    for target in [DuplicatesTarget::AllNotes(&fx.h.engine), DuplicatesTarget::Found(&selection)] {
+        let token = CancelToken::new();
+        let listener = Arc::new(CancelAtFirst(Arc::clone(&token), Mutex::new(Vec::new())));
+        let progress = ProgressSink::with_clock(fake_now);
+        progress.set_listener(listener.clone());
+        assert_eq!(
+            find_duplicates(target, "Glif", &token, &progress),
+            Err(BrowseError::Engine(EngineError::Cancelled)),
+            "{target:?}"
+        );
+        // Cancelled at the first report: nothing more was read.
+        assert_eq!(*listener.1.lock().unwrap(), [(0, Some(30))], "{target:?}");
+    }
+    // The reader it held is free again.
+    assert_eq!(fx.all("Glif").groups.len(), 3);
 }
