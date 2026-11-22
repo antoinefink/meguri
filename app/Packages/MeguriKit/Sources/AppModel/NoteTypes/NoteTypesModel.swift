@@ -338,16 +338,17 @@ public final class NoteTypesModel {
             if let after = names(), after.names == before.names, after.at == before.at { check = answer; break }
         }
         guard let check else { return false }
+        // The rename field and its refusal belong to the shown note type: an
+        // answer for another one changes its draft only.
+        let shown = selection == id
         switch check {
         case .ignored:
-            renameRefusal = nil
-            if renaming == row { renaming = nil }
+            if shown { renameRefusal = nil; if renaming == row { renaming = nil } }
         case .accepted(let name):
-            renameRefusal = nil
-            if renaming == row { renaming = nil }
+            if shown { renameRefusal = nil; if renaming == row { renaming = nil } }
             edit(id) { $0.rename(row, to: name) }
         case .refused(let refusal):
-            renameRefusal = RenameRefusal(row: row, refusal: refusal)
+            if shown { renameRefusal = RenameRefusal(row: row, refusal: refusal) }
             return false
         }
         return true
@@ -410,6 +411,7 @@ public final class NoteTypesModel {
         records[id] = nil
         changedElsewhere.remove(id)
         stale.remove(id)
+        if selection == id { cancelRename() }
         draftChanged(id)
         loadDetail(id, force: true)
     }
@@ -637,8 +639,13 @@ public final class NoteTypesModel {
         // A note edited elsewhere can fill or empty a field: the shown type's Notes column reads again.
         if !notesMoved, changes.notetypes.isEmpty, !changes.wholeCollection, !changes.notes.isEmpty {
             if let id = selection, records[id] != nil { readCounts(id) }
-            // Other loaded note types read theirs when they are shown again.
-            for id in records.keys where id != selection { fieldCounts[id] = nil; typeCounts[id] = nil }
+            // Other loaded note types read theirs when they are shown again; reads
+            // already running are cancelled, so no pre-change count lands.
+            for id in records.keys where id != selection {
+                for task in countTasks[id] ?? [] { task.cancel() }
+                countTasks[id] = nil
+                fieldCounts[id] = nil; typeCounts[id] = nil
+            }
             return
         }
         guard changes.wholeCollection || !changes.notetypes.isEmpty || notesMoved else { return }

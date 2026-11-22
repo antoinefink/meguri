@@ -369,6 +369,18 @@ extension NoteTypesModelTests {
         #expect(model.canSave(7))
     }
 
+    @Test func aRefusalForAnotherNoteTypeNeitherShowsNorHoldsSave() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[8] = NoteTypeDraftTests.record(fields: ["Word", "Back"])
+        let (model, _) = await open(backend)
+        model.selection = 8
+        await model.settle()
+        model.setOption(8, row: 0) { $0.rtl = true }
+        // A refused rename of type 7 that ends while type 8 shows.
+        let accepted = await model.commitRename(7, row: 0, typed: "back")
+        #expect(!accepted && model.renameRefusal == nil && model.canSave(8))
+    }
+
     @Test func keepEditingThenRevertReadsTheNewerVersion() async {
         let backend = FakeNoteTypesBackend()
         let (model, _) = await open(backend)
