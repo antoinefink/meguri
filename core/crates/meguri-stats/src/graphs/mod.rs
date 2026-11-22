@@ -340,12 +340,9 @@ impl StatsCaches {
         // when that request returns, whatever it gives (G8.3).
         let memo = {
             let mut held = self.memo.lock().unwrap_or_else(PoisonError::into_inner);
-            // A Snapshot request computes afresh, whatever the memo holds.
-            if request.columns == Columns::Cached && held.as_ref().is_some_and(|memo| memo.key == key) {
-                held.take()
-            } else {
-                None
-            }
+            let taken = if held.as_ref().is_some_and(|memo| memo.key == key) { held.take() } else { None };
+            // A Snapshot request computes afresh, and the memo goes anyway.
+            taken.filter(|_| request.columns == Columns::Cached)
         };
         let (data, browse) = match memo {
             Some(memo) => (memo.data, memo.browse),
