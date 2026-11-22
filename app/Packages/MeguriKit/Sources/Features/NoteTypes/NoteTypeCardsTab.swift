@@ -147,11 +147,13 @@ struct NoteTypeCardTypesList: View {
         }
         #if os(macOS)
         .listStyle(.inset)
+        // The window's background, as the editor's bar and issues have.
+        .scrollContentBackground(.hidden)
         .onDeleteCommand { deleteSelected() }
         #else
+        // The plain list's own background: the page's, as the editor's.
         .listStyle(.plain)
         #endif
-        .scrollContentBackground(.hidden)
         .focused($listFocused)
         // Return renames the selected card type in place (W5).
         .onKeyPress(.return) {

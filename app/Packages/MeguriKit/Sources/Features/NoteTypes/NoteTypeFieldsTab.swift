@@ -76,12 +76,14 @@ struct NoteTypeFieldsTab: View {
         .inspector(isPresented: $model.inspectorShown) {
             NoteTypeFieldInspector(model: model, id: id)
                 .inspectorColumnWidth(min: Self.inspectorMinimum, ideal: Self.inspectorIdeal, max: Self.inspectorMaximum)
-                // The toolbar above the inspector, at the window's trailing end, as in
-                // Apple's apps: Revert and Save, then the toggle. Hidden, the inspector's
-                // toggle and Revert and Save trail the detail's toolbar (`NoteTypesView`).
+                // The inspector's toolbar, at the window's trailing end as in Apple's apps:
+                // Revert and Save, then the toggle; above the inspector while it shows,
+                // at the end of the window's toolbar while it is hidden.
                 .toolbar {
-                    NoteTypeSaveToolbar(model: model, running: jobShown.running(in: model))
-                    ToolbarItem(placement: .primaryAction) { InspectorToggle(model: model) }
+                    // Items of the inspector's own part of the toolbar, pushed to its end.
+                    ToolbarSpacer()
+                    NoteTypeSaveToolbar(model: model, running: jobShown.running(in: model), placement: .automatic)
+                    ToolbarItem(placement: .automatic) { InspectorToggle(model: model) }
                 }
         }
         .task(id: model.progress?.notetypeId) { await SaveJobShown.follow(model.progress?.notetypeId, into: $jobShown) }

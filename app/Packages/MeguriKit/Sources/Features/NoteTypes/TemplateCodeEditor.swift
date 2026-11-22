@@ -358,19 +358,29 @@ struct TemplateCodeEditor: NSViewRepresentable {
                 let baseline = manager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil).minY
                     + manager.location(forGlyphAt: glyphs.location).y
                 let origin = textView.textContainerOrigin, side = Self.swatch.side
-                well.frame = NSRect(x: origin.x + rect.minX - side - Spacing.xSmall / 2,
-                                    y: origin.y + baseline - Self.swatch.centre - side / 2, width: side, height: side)
-                // The well draws at its own size: its bounds take that size, so the
-                // drawing scales into the side and stays on its line.
-                let natural = well.fittingSize
-                let drawn = max(natural.width, natural.height, side)
-                well.bounds = NSRect(x: 0, y: 0, width: drawn, height: drawn)
+                // The well draws at its control size, not its frame: the largest size
+                // that fits the line, centred where the swatch goes.
+                let fitted = Self.fit(well, side: side)
+                let centre = NSPoint(x: origin.x + rect.minX - Spacing.xSmall / 2 - side / 2, y: origin.y + baseline - Self.swatch.centre)
+                well.frame = NSRect(x: centre.x - fitted.width / 2, y: centre.y - fitted.height / 2, width: fitted.width, height: fitted.height)
                 well.color = .swatch(value)
                 well.tag = index
                 well.isEnabled = textView.isEditable
                 well.isHidden = false
                 well.setAccessibilityIdentifier("noteTypes.cards.swatch.\(index)")
             }
+        }
+
+        /// The well's size for a swatch of `side`: the largest control size whose
+        /// well fits the side (the smallest one when none does).
+        private static func fit(_ well: NSColorWell, side: CGFloat) -> NSSize {
+            for size in [NSControl.ControlSize.regular, .small, .mini] {
+                well.controlSize = size
+                let natural = well.fittingSize
+                if natural.width > 0, natural.height > 0, max(natural.width, natural.height) <= side { return natural }
+            }
+            let natural = well.fittingSize
+            return natural.width > 0 && natural.height > 0 ? natural : NSSize(width: side, height: side)
         }
 
         /// A colour chosen in a well rewrites only that value's characters.

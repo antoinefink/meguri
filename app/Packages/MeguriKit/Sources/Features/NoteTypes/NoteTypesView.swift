@@ -114,20 +114,17 @@ public struct NoteTypesView: View {
             .disabled(model.selection == nil)
             .accessibilityIdentifier("noteTypes.list.tabs")
         }
-        // Revert and Save trail the detail's toolbar; with the Fields tab's
-        // inspector shown they sit above it instead, before its toggle, at
-        // the window's trailing end (`NoteTypeFieldsTab`).
+        // Revert and Save trail the detail's toolbar. On the Fields tab its
+        // inspector's toolbar holds them with its toggle, at the window's
+        // trailing end, shown or hidden (`NoteTypeFieldsTab`).
         if !inspectorHoldsSave {
             NoteTypeSaveToolbar(model: model, running: jobShown.running(in: model))
-            if model.tab == .fields, model.selection != nil, !model.inspectorShown {
-                ToolbarItem(placement: .primaryAction) { InspectorToggle(model: model) }
-            }
         }
     }
 
-    /// The Fields tab is on screen with its inspector: it holds Revert, Save and the toggle.
+    /// The Fields tab is on screen: its inspector's toolbar holds Revert, Save and the toggle.
     private var inspectorHoldsSave: Bool {
-        model.tab == .fields && model.inspectorShown && model.selection != nil && model.shownSelection.flatMap(model.draft) != nil
+        model.tab == .fields && model.selection != nil && model.shownSelection.flatMap(model.draft) != nil
     }
     #endif
 }
@@ -140,9 +137,11 @@ struct NoteTypeSaveToolbar: ToolbarContent {
     let model: NoteTypesModel
     /// The selected note type's save job, once the toolbar shows it.
     let running: (id: Int64, progress: NoteTypesModel.Progress)?
+    /// The detail's trailing edge, or (`.automatic`) the inspector's own part of the toolbar.
+    var placement: ToolbarItemPlacement = .primaryAction
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItem(placement: placement) {
             if let running {
                 SaveStatusView(progress: running.progress, notes: model.typeCounts[running.id]?.notes)
             } else {
