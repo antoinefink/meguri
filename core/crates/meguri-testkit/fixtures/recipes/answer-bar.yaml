@@ -24,3 +24,7 @@ decks:
     due: 2
     tags: ["answer-bar"]
     fields: ["<style>.card{background:#f6d365;color:#2b2b2b}</style>Colour question {n}", "<p>Line 1 of card {n}</p><p>Line 2 of card {n}</p><p>Line 3 of card {n}</p><p>Line 4 of card {n}</p><p>Line 5 of card {n}</p><p>Line 6 of card {n}</p><p>Line 7 of card {n}</p><p>Line 8 of card {n}</p><p>Line 9 of card {n}</p><p>Line 10 of card {n}</p><p>Line 11 of card {n}</p><p>Line 12 of card {n}</p><p>Line 13 of card {n}</p><p>Line 14 of card {n}</p><p>Line 15 of card {n}</p><p>Line 16 of card {n}</p><p>Line 17 of card {n}</p><p>Line 18 of card {n}</p><p>Line 19 of card {n}</p><p>Line 20 of card {n}</p><p>Line 21 of card {n}</p><p>Line 22 of card {n}</p><p>Line 23 of card {n}</p><p>Line 24 of card {n}</p><p>Line 25 of card {n}</p><p>Line 26 of card {n}</p><p>Line 27 of card {n}</p><p>Line 28 of card {n}</p><p>Line 29 of card {n}</p><p>Line 30 of card {n}</p><p id='last'>The last line {n}</p>"]
+  - name: "Bar New"
+    new: 2
+    tags: ["answer-bar"]
+    fields: ["New question {n}", "<p id='last'>The last line {n}</p>"]
