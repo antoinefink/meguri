@@ -134,6 +134,11 @@ public final class BrowseResults {
         /// (H12), and whether the list was whole then.
         var mapping: Mapping?
         var mappedWhole = false
+        /// The user's selection revision the mapping was taken at: a later
+        /// choice of rows makes it stale.
+        var mappingRevision: UInt64 = 0
+        /// The query revision it was issued for: a newer query never shows it.
+        var queryRevision: UInt64 = 0
         var seq: UInt64?
         var handle: BrowseHandle?
         var count = 0
@@ -215,6 +220,8 @@ public final class BrowseResults {
     @ObservationIgnored private var visibleIndex = 0
     @ObservationIgnored private var fetching: Set<Int> = []
     @ObservationIgnored private var qaFetching: Set<Int> = []
+    /// Failed reads tried again, by page.
+    @ObservationIgnored private var retries: [Int: Int] = [:]
 
     public init(backend: any BrowseBackend) {
         self.backend = backend
@@ -245,7 +252,14 @@ public final class BrowseResults {
                 columnSet = set
                 // The mode and a header click as they are now, not as they were when the run began.
                 let mode = lastMode
-                let sort = sortOverride.flatMap { $0.mode == mode ? $0.sort : nil } ?? set.sort(mode)
+                var sort = set.sort(mode)
+                if let override = sortOverride, override.mode == mode {
+                    // A header click made while the text was read sorts this query's set.
+                    sort = override.sort
+                    writeSort(sort, set: set.set, mode: mode)
+                    columnSet = set.sorted(sort, mode: mode)
+                    columnSets[set.notetypeKey] = columnSet
+                }
                 issue(Request(kind: .search, text: runText, mode: mode, sort: sort, columns: set.columns(mode),
                               queryIsEmpty: query.isEmpty))
             } catch {
@@ -294,14 +308,15 @@ public final class BrowseResults {
         let current = runPending ? (sortOverride.flatMap { $0.mode == mode ? $0.sort : nil } ?? columnSet?.sort(mode))
             : pending?.sort ?? list.sort
         guard let current, let sort = BrowseColumns.click(key, current: current) else { return }
+        if runPending {
+            // The set is the new query's, not known yet: it is written when its search starts.
+            sortOverride = (mode, sort)
+            return
+        }
         if let set = columnSet {
             writeSort(sort, set: set.set, mode: mode)
             columnSet = set.sorted(sort, mode: mode)
             columnSets[set.notetypeKey] = columnSet
-        }
-        if runPending {
-            sortOverride = (mode, sort)
-            return
         }
         if let pending {
             // Not shown yet: its search runs again with the new order.
@@ -329,6 +344,7 @@ public final class BrowseResults {
             shown.released = true
             list = shown
         }
+        request.queryRevision = queryRevision
         newest = request
         startProgress()
         guard !starting else {
@@ -399,7 +415,7 @@ public final class BrowseResults {
     /// A failure with rows shown keeps them, dimmed (H12, R1108); with
     /// none, the error state offers Try Again.
     private func fail() {
-        if var shown = list {
+        if var shown = list, shown.count > 0 {
             shown.released = true
             list = shown
         } else {
@@ -491,12 +507,14 @@ public final class BrowseResults {
         // The selection as it is now: rows chosen, or pruned, since the request began count.
         request.mapping = mapping()
         request.mappedWhole = request.complete
+        request.mappingRevision = selectionRevision
         let selectionAtShow = selectionRevision
         Task {
             async let rows = Self.read(session, handle, revision, first, columns, mode, presenter)
             async let mapped = mapping(request, in: session, to: handle, revision: revision)
             let (page, selected) = await (try? rows, mapped)
-            guard request === newest, !request.ended, self.epoch == epoch else { return }
+            // A query chosen since (its search not issued yet) keeps the list shown.
+            guard request === newest, !request.ended, self.epoch == epoch, request.queryRevision == queryRevision else { return }
             // Its first rows could not be read: the rows shown stay (dimmed), or Try Again.
             guard page != nil || first.isEmpty else {
                 request.ended = true
@@ -518,7 +536,13 @@ public final class BrowseResults {
             qaFetching = []
             unapplied = request.changes
             if selectionAtShow == selectionRevision { apply(selected, count: next.count, mapped: request.mapping != nil) }
-            else { selection = []; currentIndex = nil }
+            else {
+                // Rows chosen during the read: the mapping is stale, now and at completion.
+                selection = []
+                currentIndex = nil
+                request.mapping = nil
+            }
+            retries = [:]
             if let current = currentIndex, current > 0 { bringIntoView(current) }
             if request.complete { stopProgress() }
             // A list that became whole while its first rows were read maps the selection again.
@@ -531,7 +555,9 @@ public final class BrowseResults {
     /// A mapping made when the new list was not whole yet is made again once
     /// it is (H12), unless the user chose rows meanwhile.
     private func remap(_ request: Request) {
-        guard request.mapping != nil, let handle = request.handle, let session else { return }
+        // Rows the user chose since the mapping was taken stay as chosen.
+        guard request.mapping != nil, request.mappingRevision == selectionRevision, let handle = request.handle,
+              let session else { return }
         let revision = selectionRevision, epoch = epoch, listRevision = list?.revision ?? 0
         Task {
             let selected = await mapping(request, in: session, to: handle, revision: listRevision)
@@ -668,9 +694,16 @@ public final class BrowseResults {
             guard store.page(page).generation == generation else { return readNearRows() }
             guard let rows, shown.revision == list.revision, shown.columns == list.columns else {
                 // A prune or a column change came meanwhile: read again in the new revision.
-                if shown.revision != list.revision || shown.columns != list.columns { readNearRows() }
-                return
+                if shown.revision != list.revision || shown.columns != list.columns { return readNearRows() }
+                // A failed read is tried again twice, a moment later, then waits for the rows to show again.
+                let tries = retries[page, default: 0]
+                guard tries < 2 else { return }
+                retries[page] = tries + 1
+                try? await Task.sleep(for: .milliseconds(250))
+                guard self.list?.token == list.token else { return }
+                return readNearRows()
             }
+            retries[page] = nil
             store.page(page).set(rows)
             readNearRows()
         }
@@ -690,13 +723,14 @@ public final class BrowseResults {
         let presenter = presenter, epoch = epoch, columns = list.columns
         Task {
             let cells = try? await Self.readQA(session, list.handle, list.revision, range, which, columns, presenter)
-            guard self.epoch == epoch, let shown = self.list, shown.token == list.token else { return }
+            // A read for a replaced store leaves the new store's entries alone.
+            guard self.epoch == epoch, let shown = self.list, shown.token == list.token, self.store === store else { return }
             qaFetching.remove(page)
-            // Cells read for another layout or before the page changed do not land.
-            guard let cells, self.store === store, shown.revision == list.revision, shown.columns == columns,
-                  store.page(page).generation == generation, let rows = store.page(page).rows else { return }
-            store.page(page).set(zip(rows, cells).map { $0.filling($1) }, keepingStale: true)
-            store.page(page).pendingQA = false
+            // Cells read for another layout or before the page changed do not land; the page's are read again.
+            guard let cells, shown.revision == list.revision, shown.columns == columns,
+                  store.page(page).generation == generation, let rows = store.page(page).rows, rows.count == cells.count
+            else { return readNearRows() }
+            store.page(page).fill(zip(rows, cells).map { $0.filling($1) })
         }
     }
 
@@ -744,6 +778,8 @@ public final class BrowseResults {
             currentIndex = currentIndex.flatMap { Self.shifted($0, removing: indexes) }
             shown.count -= indexes.count
             store = store.removing(indexes, count: shown.count)
+            fetching = []
+            qaFetching = []
             self.list = shown
             return
         }
@@ -771,6 +807,8 @@ public final class BrowseResults {
                 self.list = shown
                 return
             } catch {
+                // Another list's queued change sets are applied to it; this list's wait for the next change.
+                if self.list?.token != list.token { again = true }
                 return
             }
             guard self.epoch == epoch, var shown = self.list, shown.token == list.token, shown.revision == list.revision
@@ -788,6 +826,8 @@ public final class BrowseResults {
                     if let current = currentIndex, selection.isEmpty { selection = [current] }
                 }
                 store = store.removing(removed, count: Int(clamping: result.count))
+                fetching = []
+                qaFetching = []
             }
             shown.revision = result.revision
             shown.count = Int(clamping: result.count)
@@ -832,8 +872,10 @@ public final class BrowseResults {
 
     private func columnSet(_ notetype: Int64?) async throws -> ColumnSetShown {
         if let set = columnSets[notetype] { return set }
+        let epoch = epoch
         let set = try await backend.columnSet(notetype: notetype)
-        columnSets[notetype] = set
+        // A read that began before the collection went does not fill the new one's cache.
+        if self.epoch == epoch { columnSets[notetype] = set }
         return set
     }
 
@@ -1075,9 +1117,19 @@ public final class BrowseRowPage {
     /// Its Question and Answer cells are still to be read.
     @ObservationIgnored var pendingQA = true
 
-    func set(_ rows: [BrowseShownRow], keepingStale: Bool = false) {
+    /// New rows: their Question and Answer are read again, and a read of
+    /// those begun before does not land.
+    func set(_ rows: [BrowseShownRow]) {
         self.rows = rows
-        if !keepingStale { stale = false }
+        stale = false
+        pendingQA = true
+        generation &+= 1
+    }
+
+    /// The same rows with their Question and Answer cells.
+    func fill(_ rows: [BrowseShownRow]) {
+        self.rows = rows
+        pendingQA = false
     }
 
     func markStale() {

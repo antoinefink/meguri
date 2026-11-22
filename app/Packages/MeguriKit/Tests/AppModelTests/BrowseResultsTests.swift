@@ -131,6 +131,17 @@ import Testing
         #expect(!results.isDimmed)
     }
 
+    @Test func aFailureAfterAnEmptyResultShowsTryAgain() async throws {
+        let session = FakeSearchSession()
+        session.results[""] = []
+        let results = results(session)
+        results.run(FilterQuery(), mode: .cards)
+        try await until { results.content == .emptyCollection }
+        session.failNext = .unavailable(reason: "sample")
+        results.run(Self.deckQuery, mode: .cards)
+        try await until { results.content == .failed }
+    }
+
     @Test func aFailureWithNoRowsShowsTryAgain() async throws {
         let session = FakeSearchSession()
         session.results[""] = [4]
@@ -394,12 +405,14 @@ import Testing
 
     // MARK: Helpers
 
+    struct TimedOut: Error {}
+
     private func until(_ condition: () -> Bool, timeout: Duration = .seconds(5)) async throws {
         let clock = ContinuousClock(), end = clock.now + timeout
         while !condition() {
             guard clock.now < end else {
                 Issue.record("timed out")
-                return
+                throw TimedOut()
             }
             try await Task.sleep(for: .milliseconds(2))
         }

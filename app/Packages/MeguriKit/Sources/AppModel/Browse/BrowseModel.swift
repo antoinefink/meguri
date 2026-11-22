@@ -221,13 +221,21 @@ public final class BrowseModel {
     /// The mode a refused write left unwritten, written again when the
     /// collection is ready again.
     private var unwrittenMode: BrowseMode?
+    /// Raised only when the collection is replaced: a mode write for the
+    /// same collection survives it becoming ready again.
+    private var replacements: UInt64 = 0
+    /// Raised each time the collection becomes ready again.
+    private var readies: UInt64 = 0
 
     private func writeMode(_ next: BrowseMode) {
-        let backend = backend, epoch = epoch
+        let backend = backend, replacements = replacements, readies = readies
         unwrittenMode = nil
         Task {
             do { try await backend.setNotesMode(next == .notes) } catch {
-                if self.epoch == epoch, mode == next { unwrittenMode = next }
+                guard self.replacements == replacements, mode == next else { return }
+                unwrittenMode = next
+                // Refused across the collection becoming ready again: written once more now.
+                if self.readies != readies, ready() { writeMode(next) }
             }
         }
     }
@@ -379,6 +387,7 @@ public final class BrowseModel {
     public func collectionReady() {
         epoch &+= 1
         results.collectionReady()
+        readies &+= 1
         if let unwritten = unwrittenMode, unwritten == mode { writeMode(unwritten) }
         stale = true
         countsTask?.cancel()
@@ -405,6 +414,7 @@ public final class BrowseModel {
         openInFlight = false
         mode = .cards
         unwrittenMode = nil
+        replacements &+= 1
         query = FilterQuery()
         queryRevision &+= 1
         savedSearches = []; deckValues = [:]; notetypes = []; tags = []; flagNames = []

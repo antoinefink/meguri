@@ -92,25 +92,32 @@ extension TestHooks {
 
         func startSearch(_ text: String, mode: BrowseMode, sort: BrowseSort) async throws -> UInt64 {
             if fails { throw BridgeError.unavailable(reason: "sample") }
-            return begin(text: text, mode: mode, descending: sort.direction == .descending)
+            return begin(text: text, mode: mode, sort: sort)
         }
 
         func resort(_ handle: BrowseHandle, sort: BrowseSort) async throws -> UInt64 {
             guard let old = state.withLock({ $0.handles[handle.rawValue] }) else { throw BridgeError.browse(.unknownHandle) }
-            return begin(text: old.text, mode: old.mode, descending: sort.direction == .descending)
+            return begin(text: old.text, mode: old.mode, sort: sort)
         }
 
         func toggle(_ handle: BrowseHandle, sort: BrowseSort) async throws -> UInt64 {
             guard let old = state.withLock({ $0.handles[handle.rawValue] }) else { throw BridgeError.browse(.unknownHandle) }
-            return begin(text: old.text, mode: old.mode == .cards ? .notes : .cards, descending: sort.direction == .descending)
+            return begin(text: old.text, mode: old.mode == .cards ? .notes : .cards, sort: sort)
         }
 
-        private func begin(text: String, mode: BrowseMode, descending: Bool) -> UInt64 {
+        private func begin(text: String, mode: BrowseMode, sort: BrowseSort) -> UInt64 {
+            let descending = sort.direction == .descending
             let (decks, states) = Self.parse(text)
             var numbers: [Int32]?
             if !decks.isEmpty || !states.isEmpty {
                 let found = (0..<cards).filter { matches($0, decks: decks, states: states) }
                 numbers = mode == .cards ? found.map { Int32($0) } : Array(Set(found.map { Int32($0 / 2) })).sorted()
+            }
+            // The Sort Field orders by its text (then number); other columns by number.
+            if sort.key == "noteFld", cards <= 10_000 {
+                let all = numbers ?? (0..<Int32(mode == .cards ? cards : (cards + 1) / 2)).map { $0 }
+                let field = { (n: Int32) in self.sortField(mode == .cards ? Int(n) / 2 * 2 : Int(n) * 2) }
+                numbers = all.sorted { (field($0), $0) < (field($1), $1) }
             }
             let count = numbers?.count ?? (mode == .cards ? cards : (cards + 1) / 2)
             let entry = Handle(numbers: numbers, count: count, mode: mode, descending: descending, text: text)
