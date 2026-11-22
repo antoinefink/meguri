@@ -427,6 +427,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let browserColumnSet = BridgeCall("browser_column_set")
     public static let changeBrowserColumnSet = BridgeCall("change_browser_column_set")
     public static let useStandardBrowserColumns = BridgeCall("use_standard_browser_columns")
+    public static let setBrowserNotesMode = BridgeCall("set_browser_notes_mode")
     public static let startBrowseSelectionCounts = BridgeCall("start_browse_selection_counts")
     public static let browseSelectionCountsJobResult = BridgeCall("BrowseSelectionCountsJob.result")
     public static let browseOpening = BridgeCall("browse_opening")
@@ -741,7 +742,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
         startNotetypeStructureSave, notetypeStructureJobResult, notetypeCheckFieldName, templateFieldReferences,
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
-        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
+        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, setBrowserNotesMode, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
         startFindDuplicates, findDuplicatesJobResult,
     ]
 }

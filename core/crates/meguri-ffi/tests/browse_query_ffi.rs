@@ -469,3 +469,16 @@ fn browse_opening_reads_a_set_default_search_and_the_notes_mode() {
         }
     );
 }
+
+/// V2.1 and K6.1: the Cards / Notes control writes the mode, which the next
+/// opening reads; writing the stored value again writes nothing.
+#[test]
+fn the_cards_notes_control_writes_the_notes_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let _core = open(&dir);
+    assert!(set_browser_notes_mode(true).unwrap().written);
+    assert!(browse_opening().unwrap().notes_mode);
+    assert!(!set_browser_notes_mode(true).unwrap().written);
+    assert!(set_browser_notes_mode(false).unwrap().written);
+    assert!(!browse_opening().unwrap().notes_mode);
+}

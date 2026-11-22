@@ -1000,6 +1000,17 @@ pub fn use_standard_browser_columns(notetype: i64) -> Result<BoolMutation, CoreE
     Ok(column_sets::use_standard(&collection, NotetypeId(notetype))?.into())
 }
 
+/// The Cards / Notes control (`browser/workspace` V2.1, `browser/config-keys`
+/// K6.1): writes `browserTableShowNotesMode`, true for notes, in that key's
+/// undo class (K10). `written` is false when the stored value stays the
+/// same.
+#[uniffi::export]
+pub fn set_browser_notes_mode(notes: bool) -> Result<BoolMutation, CoreError> {
+    callback::enter("set_browser_notes_mode");
+    let collection = runtime::host()?.collection()?;
+    Ok(meguri_engine::browser_config::set_notes_mode(&collection, notes)?.into())
+}
+
 // --------------------------------------------------------------- opening
 
 /// What Browse opens with (`search/filter-tokens` T14): the default search

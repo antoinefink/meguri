@@ -718,6 +718,14 @@ public enum CoreBrowseQuery {
         }
     }
 
+    /// The Cards / Notes control (V2.1): writes `browserTableShowNotesMode`
+    /// (K6.1), which syncs. `written` is false when nothing changed.
+    public static func setNotesMode(_ notes: Bool) async throws(BridgeError) -> BoolMutation {
+        try await InteractiveLane.shared.call(.setBrowserNotesMode) {
+            BoolMutation(try setBrowserNotesMode(notes: notes))
+        }
+    }
+
     /// V7, V8.1: the counts of a selection's target cards and notes, as a
     /// job. A newer call for a selection of the same session cancels this
     /// one. When the selection itself is refused, `value()` throws that
