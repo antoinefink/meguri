@@ -254,7 +254,10 @@ struct SaveStatusView: View {
          NoteTypesStrings.text("noteTypes.progress.saving", locale: locale), widestCount]
     }
 
-    private var current: String {
+    private var current: String { Self.text(progress, locale: locale) }
+
+    /// The job's stage text.
+    static func text(_ progress: NoteTypesModel.Progress, locale: Locale) -> String {
         switch progress.stage {
         case .syncing?: NoteTypesStrings.text("noteTypes.progress.syncing", locale: locale)
         case .uploading?: NoteTypesStrings.text("noteTypes.progress.uploading", locale: locale)

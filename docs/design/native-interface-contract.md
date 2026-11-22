@@ -1050,7 +1050,7 @@ Changed 2026-11-22 (Antoine's feedback on the captures of PR #112: on Mac "I can
 
 - While a save job runs (once it has run for half a second, D5 step 5), the toolbar shows one status item in place of Revert and Save: a small system progress indicator and the stage text ("Syncing…", "Updating 212 of 412 notes", "Uploading…"; "Saving…" until the first count arrives), with no glass of its own. Its width is the widest text the job can show, with monospaced digits, so the toolbar does not move as the text changes. Revert and Save are not shown until the job ends; the note type stays locked (W3).
 - No disabled prominent button: Revert and Save are one toolbar group in the standard style, and Save is not prominent, since it is disabled until there is a draft.
-- iPad: Fields | Cards and Save are separate items with their own glass shapes; the job's status sits in the bottom toolbar's status place, as Mail's does, so nothing wide sits in the navigation bar beside the tabs at any width.
+- iPad: Fields | Cards and Save are separate items with their own glass shapes; the job's status sits in the bottom toolbar's status place, as Mail's does, so nothing wide sits in the navigation bar beside the tabs at any width. At compact width (the iPhone and the Duo folded, where the tab bar takes the bottom bar's middle), the spinner takes Save's place and the stage text takes the subtitle's place under the note type's name.
 - This replaces the earlier toolbar, where the progress, Revert and a tinted Save were three separate shapes and, on iPad, the progress overlapped the tabs.
 
 ### N22.6 New and Duplicate (7B)

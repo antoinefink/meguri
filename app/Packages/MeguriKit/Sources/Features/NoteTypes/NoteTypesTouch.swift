@@ -62,6 +62,7 @@ public struct NoteTypePage: View {
     private let id: Int64
     private let cards: (Int64) -> AnyView
     @Environment(\.locale) private var locale
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var jobShown = SaveJobShown()
     private var jobRuns: Bool { model.progress?.notetypeId == id && jobShown.shown(for: id) }
 
@@ -102,7 +103,19 @@ public struct NoteTypePage: View {
                     .fixedSize()
                     .accessibilityIdentifier("noteTypes.list.tabs")
                 }
-                if let progress = model.progress, progress.notetypeId == id, jobRuns {
+                if let progress = model.progress, progress.notetypeId == id, jobRuns, sizeClass == .compact {
+                    // N22.5 at compact width, where the tab bar takes the bottom bar's
+                    // middle: the spinner takes Save's place and the stage text the
+                    // subtitle's, under the note type's name.
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ProgressView()
+                            .accessibilityLabel(Text("noteTypes.saving", bundle: .module))
+                            .accessibilityValue(Text(verbatim: SaveStatusView.text(progress, locale: locale)))
+                            .accessibilityIdentifier("noteTypes.list.progress")
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else if let progress = model.progress, progress.notetypeId == id, jobRuns {
                     // N22.5: the job's status takes Save's and Revert's place. It sits in the
                     // bottom toolbar's status place, as Mail's does: the top bar keeps only
                     // narrow items beside the title, so nothing there can run into the
@@ -134,6 +147,9 @@ public struct NoteTypePage: View {
     }
 
     private var subtitle: String {
+        if sizeClass == .compact, jobRuns, let progress = model.progress {
+            return SaveStatusView.text(progress, locale: locale)
+        }
         guard let counts = model.typeCounts[id] else { return "" }
         return NoteTypesStrings.subtitle(notes: counts.notes, cards: counts.cards, locale: locale)
     }
