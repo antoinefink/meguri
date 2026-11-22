@@ -42,7 +42,10 @@ extension SyncCoordinator {
                   let excluded = facts.excluded, let pending = facts.pending {
             media = Self.sum(excluded, pending)
         }
-        return .init(changes: meguriRoutine == .pending ? .some : .unknown, media: media,
+        // Meguri Sync sends review answers as changes, so it holds none back apart
+        // from them: what is known about its changes covers the answers too.
+        let changes: ServiceSwitchFacts.Changes = meguriRoutine == .pending ? .some : .unknown
+        return .init(changes: changes, heldBack: changes == .unknown ? nil : 0, media: media,
                      acceptanceUnknown: acceptanceUnknown)
     }
     private static func sum(_ first: UInt64?, _ second: UInt64?) -> UInt64? {

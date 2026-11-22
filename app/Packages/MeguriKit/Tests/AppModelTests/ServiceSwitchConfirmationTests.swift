@@ -27,22 +27,31 @@ import Testing
         let confirmation = ServiceSwitchConfirmation(source: .meguri, destination: "localOnly", facts: .init(changes: .unknown))
         #expect(confirmation.unsent.isEmpty && confirmation.closing == .unknown)
         #expect(confirmation.message(source: .meguri, locale: english) == """
-            This collection stays on this device and stops syncing. Your Meguri Sync sign-in is removed from this device, and nothing on your server is deleted.
+            This collection stays on this device and stops syncing. You’ll be signed out of Meguri Sync. Nothing on your server is deleted.
 
             Meguri couldn’t check whether everything on this device has been sent to Meguri Sync. Anything not sent stays only on this device.
             """)
     }
 
-    @Test func meguriWithPendingWorkAndKnownMediaListsThemAndSaysTheRestIsUnknown() {
+    @Test func meguriWithPendingWorkAndKnownMediaListsThem() {
+        // Meguri Sync's answers are among its changes (the coordinator reports heldBack 0 then).
         let confirmation = ServiceSwitchConfirmation(source: .meguri, destination: "localOnly",
-                                                     facts: .init(changes: .some, media: 3))
-        #expect(confirmation.unsent == [.someChanges, .media(3)])
-        // Meguri Sync reports no count of held answers: never "everything has been sent".
-        #expect(confirmation.closing == .unknownBeyond)
+                                                     facts: .init(changes: .some, heldBack: 0, media: 3))
+        #expect(confirmation.unsent == [.someChanges, .media(3)] && confirmation.closing == .listed)
         #expect(confirmation.message(source: .meguri, locale: english).hasSuffix("""
             Not yet sent to Meguri Sync:
-            Some changes
-            3 media files
+            • Some changes
+            • 3 media files
+
+            These stay only on this device.
+            """))
+        // With the media count not known, the rest is said to be unknown.
+        let partial = ServiceSwitchConfirmation(source: .meguri, destination: "localOnly",
+                                                facts: .init(changes: .some, heldBack: 0, media: nil))
+        #expect(partial.unsent == [.someChanges] && partial.closing == .unknownBeyond)
+        #expect(partial.message(source: .meguri, locale: english).hasSuffix("""
+            • Some changes
+
             Meguri couldn’t check whether anything else is waiting. Anything not sent stays only on this device.
             """))
     }
@@ -72,15 +81,16 @@ import Testing
         #expect(confirmation.unsent == [.changes(12), .heldBack(3), .media(2)] && confirmation.closing == .listed)
         #expect(confirmation.message(source: .iCloud, locale: english).hasSuffix("""
             Not yet sent to iCloud:
-            12 changes
-            3 review answers
-            2 media files
+            • 12 changes
+            • 3 review answers
+            • 2 media files
+
             These stay only on this device.
             """))
         let one = ServiceSwitchConfirmation(source: .iCloud, destination: "meguri",
                                             facts: .init(changes: .count(1), heldBack: 0, media: 1))
         #expect(one.unsent == [.changes(1), .media(1)])
-        #expect(one.message(source: .iCloud, locale: english).contains("1 change\n1 media file\n"))
+        #expect(one.message(source: .iCloud, locale: english).contains("• 1 change\n• 1 media file\n"))
     }
 
     @Test func iCloudWithUnknownMediaIsNeverAllSent() {

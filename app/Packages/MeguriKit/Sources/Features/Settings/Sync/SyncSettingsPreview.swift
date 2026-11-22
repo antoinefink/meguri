@@ -36,7 +36,8 @@ public enum SyncSettingsPreview {
         public var request: SyncCoordinator.RenderServiceSwitch {
             switch self {
             case .meguriOffUnknown: .init(destination: "localOnly", facts: .init(changes: .unknown))
-            case .meguriOffKnown: .init(destination: "localOnly", facts: .init(changes: .some, media: 3))
+            // Pending work without a count (Meguri Sync's round gives none) and a known media count.
+            case .meguriOffKnown: .init(destination: "localOnly", facts: .init(changes: .some, heldBack: 0, media: 3))
             case .meguriICloudUnknown: .init(destination: "iCloud", facts: .init(changes: .unknown))
             case .iCloudOffNone: .init(destination: "localOnly", facts: .init(changes: .count(0), heldBack: 0, media: 0))
             case .iCloudOffKnown: .init(destination: "localOnly", facts: .init(changes: .count(12), heldBack: 3, media: 2))

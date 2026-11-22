@@ -109,12 +109,13 @@ import Testing
             } catch { _ = await collection.close(); throw error }
         }
     }
-    private func waitForNativeAccountState(_ ready: () throws -> Bool) async throws {
+    private func waitForNativeAccountState(line: Int = #line, _ ready: () throws -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(20)
         while ContinuousClock.now < deadline {
             if try ready() { return }
             await Task.yield()
         }
+        Issue.record("timeout: waitForNativeAccountState from line \(line)")
         throw NativeAccountStateFailure.notSettled
     }
     private enum NativeAccountStateFailure: Error {

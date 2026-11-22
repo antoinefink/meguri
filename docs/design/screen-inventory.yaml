@@ -1562,8 +1562,8 @@ screens:
     references: [sheet-form]
     purpose: >-
       2026-11-22 (native-interface-contract N15.7; sync/status-strings T21.1): no longer a sheet.
-      The confirmation is a system alert on the Settings window on the Mac and the system
-      confirmation dialog from the Service control on iPhone and iPad: title `sync.switch.title.*`
+      The confirmation is the system alert on every platform (on the Mac attached to the Settings
+      window): title `sync.switch.title.*`
       (a question), one message (the `sync.switch.message.*` paragraph, then the "Not yet sent"
       list with its closing sentence, `sync.switch.unsent.none`, or `sync.switch.unknown`, then
       `sync.switch.acceptanceUnknown` when it applies), Cancel with the cancel role and

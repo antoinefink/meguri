@@ -4775,7 +4775,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This collection stays on this device and stops syncing. Your Meguri Sync sign-in is removed from this device, and nothing on your server is deleted."
+            "value": "This collection stays on this device and stops syncing. You’ll be signed out of Meguri Sync. Nothing on your server is deleted."
           }
         }
       }
@@ -4808,7 +4808,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Next, Meguri sets up iCloud and asks before it replaces a collection with your cards. Your Meguri Sync sign-in is removed from this device, nothing on your server is deleted, and your other devices keep using Meguri Sync until you change them."
+            "value": "Next, Meguri sets up iCloud and asks before it replaces a collection with your cards. You’ll be signed out of Meguri Sync. Nothing on your server is deleted, and your other devices keep using Meguri Sync until you change them."
           }
         }
       }
@@ -4966,6 +4966,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Required"
+          }
+        }
+      }
+    },
+    "sync.switch.unsent.item": {
+      "comment": "Approved sync/status-strings T21; shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "• %@"
           }
         }
       }

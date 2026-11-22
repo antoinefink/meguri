@@ -70,13 +70,16 @@ public struct ServiceSwitchConfirmation: Sendable, Equatable {
         if !unsent.isEmpty {
             detail.append(SyncText.format("sync.switch.unsent.heading", locale: locale, [service]))
             detail += unsent.map { line in
-                switch line {
+                let item = switch line {
                 case .changes(let count): SyncText.format("sync.switch.unsent.changes", locale: locale, [Int64(clamping: count)])
                 case .heldBack(let count): SyncText.format("sync.switch.unsent.heldBack", locale: locale, [Int64(clamping: count)])
                 case .media(let count): SyncText.format("sync.switch.unsent.media", locale: locale, [Int64(clamping: count)])
                 case .someChanges: SyncText.value("sync.switch.unsent.some")
                 }
+                return SyncText.format("sync.switch.unsent.item", locale: locale, [item])
             }
+            blocks.append(detail.joined(separator: "\n"))
+            detail = []
         }
         switch closing {
         case .allSent: detail.append(SyncText.format("sync.switch.unsent.none", locale: locale, [service]))

@@ -2,9 +2,8 @@ import AppModel
 import CoreBridge
 import SwiftUI
 
-/// T21.1, N15.7: the service change confirmation, in the platform's form for a
-/// destructive choice, as Delete Deck asks: an alert on the Mac's Settings
-/// window; on touch the system confirmation dialog from the Service control.
+/// T21.1, N15.7: the service change confirmation, the system alert on every
+/// platform (on the Mac attached to the Settings window), as Delete Deck asks on the Mac.
 /// Cancel has the cancel role (Esc); the destructive button is never the
 /// default, so Return confirms nothing. Choosing it closes the question; the
 /// change's progress and failure show under the Service control.
@@ -28,19 +27,11 @@ struct ServiceSwitchQuestion: ViewModifier {
         let content = content.onChange(of: sync.serviceChangeAvailable) { _, available in
             if !available { destination = nil }
         }
-        #if os(macOS)
         content.alert(title, isPresented: presented) {
             Button(SyncText.value("sync.service.cancel"), role: .cancel) { destination = nil }
                 .accessibilityIdentifier("sync.serviceSwitch.cancel")
             confirmButton(question)
         } message: { message }
-        #else
-        content.confirmationDialog(title, isPresented: presented, titleVisibility: .visible) {
-            confirmButton(question)
-            Button(SyncText.value("sync.service.cancel"), role: .cancel) { destination = nil }
-                .accessibilityIdentifier("sync.serviceSwitch.cancel")
-        } message: { message }
-        #endif
     }
     private func confirmButton(_ question: (confirmation: ServiceSwitchConfirmation, source: SyncProviderSelection)?) -> some View {
         Button(question.map { SyncText.value($0.confirmation.confirmKey) } ?? "", role: .destructive) {
