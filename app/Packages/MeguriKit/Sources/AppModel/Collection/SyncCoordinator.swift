@@ -2327,7 +2327,13 @@ public final class SyncCoordinator {
         wake?.task.cancel()
         await facade?.stop(.system)
         if meguriAuthenticating { await meguriConnectionOwner?.cancelAndDrain() }
+        // MP7: a structure job (a save, or an Upload… on the connection's own
+        // round service) stops where MP7 allows; a stopped upload stays pending.
+        meguriStructureCancelRequested = true
+        meguriStructureJob?.cancel()
+        if meguriStructureWaiting { meguriWake?.task.cancel() }
         await round?.cancelAndDrain()
+        if let structureRound = meguriStructureRound, structureRound !== round { await structureRound.cancelAndDrain() }
         await wake?.task.value
         await action?.task.value
         await meguriCancellation?.value
@@ -5079,6 +5085,7 @@ extension SyncCoordinator: NoteTypesMeguriSync {
     /// Upload… can run now.
     public var meguriCanUploadStructure: Bool {
         meguriStructureUploadPending && meguriStructureStage == nil && !meguriBusy && !closing && !replacing && !suspended
+            && !providerActionInProgress && !providerHandoffInProgress && !providerNeedsAttention
     }
 
     /// A note type changed (an undo or redo among them): the waiting upload is
