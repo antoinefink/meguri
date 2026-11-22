@@ -9,7 +9,7 @@
 use icu_casemap::CaseMapper;
 
 /// Each character of `text` folded.
-pub(crate) fn simple_fold(text: &str) -> String {
+pub fn simple_fold(text: &str) -> String {
     if text.is_ascii() {
         return text.to_ascii_lowercase();
     }

@@ -275,6 +275,8 @@ pub struct CoreHost {
     no_collection_identity_owner: Option<Arc<Mutex<bool>>>,
     engine: Engine,
     derived: DerivedHost,
+    /// The Stats graph engine: its column caches are a derived component.
+    stats: Arc<meguri_stats::graphs::StatsCaches>,
     media: Arc<MediaPort>,
     clock: Arc<dyn Clock>,
     backup: Arc<dyn BackupService>,
@@ -555,7 +557,8 @@ impl CoreHost {
                 inputs,
             ))
         });
-        let derived = DerivedHost::builder(&engine).start()?;
+        let stats = Arc::new(meguri_stats::graphs::StatsCaches::new());
+        let derived = DerivedHost::builder(&engine).component(stats.component()).start()?;
         let media = Arc::new(MediaPort::new(config.clock.clone()));
         let queues = process.queues.clone();
         let review = process.review.clone();
@@ -698,6 +701,7 @@ impl CoreHost {
             no_collection_identity_owner: None,
             engine,
             derived,
+            stats,
             media,
             clock: config.clock,
             backup,
@@ -767,6 +771,11 @@ impl CoreHost {
     }
     pub fn derived(&self) -> &DerivedHost {
         &self.derived
+    }
+    /// The Stats graph engine (`stats/graphs-common`): requests, the
+    /// column caches and their release.
+    pub fn stats(&self) -> &meguri_stats::graphs::StatsCaches {
+        &self.stats
     }
     pub fn media(&self) -> Result<MediaService, EngineError> {
         let media = MediaService::open(&self.collection()?, self.clock.clone())?;

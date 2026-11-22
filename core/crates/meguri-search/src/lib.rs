@@ -62,6 +62,7 @@ pub use builder::{BuiltItem, BuilderError, InvalidItem, Joiner, build, build_que
 pub use canonical::canonical_text;
 pub use context::{ContextReads, ContextValue, FoldMode, SearchContext};
 pub use error::{ErrorKind, SearchError, SearchFailure};
+pub use fold::simple_fold;
 pub use notetypes::{FieldShape, NotetypeShape, SearchNotetypes};
 pub use parser::parse;
 pub use plan::sort::{FIELD_COLUMN_PREFIX, Sort, SortColumn, SortError, SortedQuery};

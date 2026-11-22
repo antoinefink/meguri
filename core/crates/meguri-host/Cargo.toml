@@ -16,6 +16,7 @@ meguri-package.workspace = true
 meguri-sync.workspace = true
 meguri-engine.workspace = true
 meguri-model.workspace = true
+meguri-stats.workspace = true
 meguri-storage.workspace = true
 tracing.workspace = true
 

@@ -6,6 +6,7 @@
 //! the threads, the observer, readiness and generations.
 
 mod file;
+pub mod files;
 mod rebuild;
 mod registry;
 mod stamp;
@@ -13,6 +14,7 @@ mod stamp;
 use std::path::{Path, PathBuf};
 
 pub use file::{DerivedFile, DerivedTx, Found, TxSavepoint};
+pub use files::{MappedFile, component_dir, files_root};
 pub use registry::{ComponentSchema, ComponentTables, IndexDef, Registry, Synced, TableDef, Target};
 pub use stamp::{CollectionMark, ComponentRecord, RebuildReason, Stamp, Verdict, assess};
 
@@ -20,6 +22,7 @@ use rusqlite::OptionalExtension;
 
 use crate::connections::{Reader, file_uri};
 use crate::error::StorageError;
+use crate::rows::{Cell, RowImage};
 use crate::snapshot::ReadSnapshot;
 
 /// The file's name, in the collection's directory (D1).
@@ -89,5 +92,25 @@ impl ReadSnapshot<'_> {
                 |row| row.get(0),
             )
             .optional()?)
+    }
+
+    /// The rows of component `component`'s table `table` as this snapshot
+    /// reads the attached store, each with the cells of `columns` (a
+    /// comma-separated column list of that table); empty when no store is
+    /// attached. Ask [`ReadSnapshot::derived_seq`] (the engine's
+    /// `is_current`) first: the snapshot's view of the store is fixed at its
+    /// first read of `derived`.
+    pub fn derived_rows(&self, component: &str, table: &str, columns: &str) -> Result<Vec<RowImage>, StorageError> {
+        if self.reader().derived.is_none() {
+            return Ok(Vec::new());
+        }
+        let mut statement = self
+            .conn()
+            .prepare(&format!("SELECT {columns} FROM {ATTACH_SCHEMA}.\"{component}__{table}\""))?;
+        let width = statement.column_count();
+        let rows = statement.query_map([], |row| {
+            (0..width).map(|index| row.get_ref(index).map(Cell::from_ref)).collect::<rusqlite::Result<RowImage>>()
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 }
