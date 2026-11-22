@@ -5301,7 +5301,7 @@ extension SyncCoordinator: NoteTypesMeguriSync {
     /// Tests only: a coordinator with a ready Meguri Sync binding over `jobs`.
     func stageMeguriStructureForTests(_ jobs: any MeguriStructureJobService) {
         meguriStructureJobsOverride = jobs
-        setupState = .attached
+        ownerState = .attached
         providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
         meguriPhase = .setupRequired; meguriReady = true; meguriRoutine = .idle
     }
