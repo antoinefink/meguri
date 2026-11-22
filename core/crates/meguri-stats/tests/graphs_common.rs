@@ -656,7 +656,7 @@ fn g8_a_graph_not_built_yet_is_an_error_not_made_up_values() {
     let request = GraphRequest {
         scope: Scope::Collection,
         history: History::AllHistory,
-        graphs: vec![meguri_stats::graphs::Graph::Reviews],
+        graphs: vec![meguri_stats::graphs::Graph::Calendar],
         refresh: 1,
         context: None,
         cancel: CancelToken::new(),
@@ -665,7 +665,7 @@ fn g8_a_graph_not_built_yet_is_an_error_not_made_up_values() {
     let result = f.host.stats().request(&f.collection(), f.host.derived(), &request);
     assert!(matches!(
         result,
-        Err(meguri_stats::graphs::StatsError::NotBuilt(meguri_stats::graphs::Graph::Reviews))
+        Err(meguri_stats::graphs::StatsError::NotBuilt(meguri_stats::graphs::Graph::Calendar))
     ));
 }
 
@@ -760,8 +760,9 @@ fn q2_the_browse_scope_text_of_each_scope() {
     );
 }
 
-/// Q6's test-only join, built from `stats_browse_scope`'s text: Q3.
-fn join(scope: &BrowseScope, item: &str) -> Option<String> {
+/// Q6's test-only join, built from `stats_browse_scope`'s text: Q3. AE60's
+/// test (`graphs_cards`) uses it too.
+pub fn join(scope: &BrowseScope, item: &str) -> Option<String> {
     // Q3: an item with an OR at its top level (outside every group and
     // every quoted text) is grouped.
     let top_level_or = {

@@ -1018,6 +1018,18 @@ pub fn set_browser_notes_mode(notes: bool) -> Result<BoolMutation, CoreError> {
     Ok(meguri_engine::browser_config::set_notes_mode(&collection, notes)?.into())
 }
 
+/// Save Search… (`search/filter-tokens` T13, `browser/config-keys` K7.2):
+/// stores `search` (the query's run text, T4) under `name`, replacing a
+/// saved search of that name, as one undoable "Save Search" step. Asking
+/// before a replace is the caller's. `written` is false when that name
+/// already holds that text; an empty name is refused (`empty_name`).
+#[uniffi::export]
+pub fn save_browser_search(name: String, search: String) -> Result<BoolMutation, CoreError> {
+    callback::enter("save_browser_search");
+    let collection = runtime::host()?.collection()?;
+    Ok(meguri_engine::browser_config::save_search(&collection, &name, &search)?.into())
+}
+
 // --------------------------------------------------------------- opening
 
 /// What Browse opens with (`search/filter-tokens` T14): the default search

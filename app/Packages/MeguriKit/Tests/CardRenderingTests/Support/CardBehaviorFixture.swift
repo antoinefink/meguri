@@ -17,6 +17,7 @@ final class BehaviorPresenter: CardBehaviorPresenting {
     var dialogs: [CardDialog] = []
     var replies: [@MainActor (CardDialogResult) -> Void] = []
     var opens: [CardOpenRequest] = []
+    var attachments: [Data] = []
     var dismissals = 0
     func availability(of url: URL) -> CardURLAvailability {
         schemeAvailability[url.scheme?.lowercased() ?? ""] ?? (handledSchemes.contains(url.scheme?.lowercased() ?? "") ? .available : .unavailable)
@@ -27,6 +28,10 @@ final class BehaviorPresenter: CardBehaviorPresenting {
         return CardBehaviorPresentation { [weak self] in self?.dismissals += 1 }
     }
     func open(_ request: CardOpenRequest) -> CardBehaviorPresentation? { opens.append(request); return nil }
+    func openAttachmentPDF(_ bytes: Data) -> CardBehaviorPresentation? {
+        attachments.append(bytes)
+        return CardBehaviorPresentation { [weak self] in self?.dismissals += 1 }
+    }
 }
 
 final class CardBehaviorFixture {

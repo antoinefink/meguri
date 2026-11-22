@@ -68,6 +68,9 @@ fn failure(error: Error) -> ToolFailure {
         "invalid_input" => ToolFailure::InvalidInput,
         "result_too_large" => ToolFailure::ResultTooLarge,
         "busy" => ToolFailure::Busy,
+        "attachment_invalid" => ToolFailure::AttachmentInvalid,
+        "attachment_unavailable" => ToolFailure::AttachmentUnavailable,
+        "attachment_conflict" => ToolFailure::AttachmentConflict,
         "unsupported_collection" => ToolFailure::UnsupportedCollection,
         // Never reclassify unknown/storage/post-commit failures as retryable.
         _ => ToolFailure::Internal,
@@ -88,6 +91,12 @@ impl transport::Backend<oauth::Authority> for McpService {
         Box::pin(async move {
             let write = call.access() == Access::Write;
             Ok(match call {
+                ToolCall::PrepareMediaUpload => {
+                    let (upload_id, upload_url, expires) = self.prepare_media_upload(authority).await.map_err(|e|self.dispatch_failure(e,write))?;
+                    let expires_at = time::OffsetDateTime::from_unix_timestamp(expires).map_err(|_|DispatchFailure::Tool(ToolFailure::Internal))?
+                        .format(&time::format_description::well_known::Rfc3339).map_err(|_|DispatchFailure::Tool(ToolFailure::Internal))?;
+                    ToolOutput::Upload {upload_id,upload_url,expires_at}
+                }
                 ToolCall::SearchNotes(input) => {
                     let out = self.search_notes(authority, SearchInput {
                         query: input.query, deck_id: input.deck_id, tag: input.tag,
@@ -109,15 +118,19 @@ impl transport::Backend<oauth::Authority> for McpService {
                         note_types:out.note_types.into_iter().map(|n| transport::NoteType { note_type_id:n.note_type_id, name:n.name, field_names:n.field_names }).collect() }
                 }
                 ToolCall::CreateNote(input) => {
-                    let out = self.create_note(authority, CreateInput { deck_id:input.deck_id,
-                        note_type_id:input.note_type_id, fields:mcp::Fields(input.fields), tags:input.tags,
-                    }).await.map_err(|e| self.dispatch_failure(e, write))?;
+                    let plain = CreateInput { deck_id:input.deck_id, note_type_id:input.note_type_id, fields:mcp::Fields(input.fields), tags:input.tags };
+                    let out = if input.files.is_some() || input.uploads.is_some() {
+                        self.write_with_media(authority,input.files,input.file_fields,input.uploads,move |backend,path,a,refs,hook|
+                            backend.create_note_with_media(path,a,plain,&Runtime,refs,Some(hook))).await
+                    } else { self.create_note(authority,plain).await }.map_err(|e| self.dispatch_failure(e,write))?;
                     ToolOutput::Changed { note_id:out.note_id, revision:out.revision }
                 }
                 ToolCall::EditNote(input) => {
-                    let out = self.edit_note(authority, EditInput { note_id:input.note_id, revision:input.revision,
-                        fields:input.fields.map(mcp::Fields), add_tags:input.add_tags, remove_tags:input.remove_tags,
-                    }).await.map_err(|e| self.dispatch_failure(e, write))?;
+                    let plain = EditInput { note_id:input.note_id, revision:input.revision, fields:input.fields.map(mcp::Fields), add_tags:input.add_tags, remove_tags:input.remove_tags };
+                    let out = if input.files.is_some() || input.uploads.is_some() {
+                        self.write_with_media(authority,input.files,input.file_fields,input.uploads,move |backend,path,a,refs,hook|
+                            backend.edit_note_with_media(path,a,plain,&Runtime,refs,Some(hook))).await
+                    } else { self.edit_note(authority,plain).await }.map_err(|e| self.dispatch_failure(e,write))?;
                     ToolOutput::Changed { note_id:out.note_id, revision:out.revision }
                 }
             })
@@ -132,7 +145,7 @@ mod tests {
     fn busy_mapping_stays_distinct_from_storage_failure() {
         assert!(matches!(failure(mcp::busy()),ToolFailure::Busy));
         assert!(matches!(failure(Error::new("unsupported_collection")),ToolFailure::UnsupportedCollection));
-        for code in ["storage_unavailable", "generated_unknown_fault"] {
+        for code in ["storage_unavailable", "provision_unavailable", "media_integrity", "generated_unknown_fault"] {
             assert!(matches!(failure(Error::new(code)),ToolFailure::Internal));
         }
     }

@@ -4,6 +4,10 @@
 //! Handle keys are owned by Service and survive every request/router for it. Parse raw arguments with Backend::parse at the transport.
 //! Checkpoint maintenance belongs outside these bounded point operations.
 mod transport;
+pub(crate) mod attachments;
+#[cfg(test)]
+#[path = "../tests/support/attachment_formats.rs"]
+pub(crate) mod attachment_formats;
 #[cfg(test)]
 mod authority_tests;
 
@@ -22,6 +26,8 @@ pub(crate) struct McpService {
     backend: Arc<Backend>,
     #[cfg(any(test, feature = "test-hooks"))]
     probe: Option<Arc<dyn Fn(TestBoundary) + Send + Sync>>,
+    #[cfg(test)]
+    direct_fixture: Option<Arc<dyn Fn(&str) -> Result<Vec<u8>> + Send + Sync>>,
 }
 
 impl McpService {
@@ -30,6 +36,8 @@ impl McpService {
             backend: Arc::new(Backend::new(service.mcp_key)), service,
             #[cfg(any(test, feature = "test-hooks"))]
             probe: None,
+            #[cfg(test)]
+            direct_fixture: None,
         }
     }
 
@@ -64,6 +72,11 @@ impl McpService {
     async fn execute<T: Send + 'static>(&self, original: oauth::Authority, write: bool,
         operation: impl FnOnce(&Backend, &Path, &CollectionAuthority) -> Result<T> + Send + 'static,
     ) -> Result<T> {
+        self.execute_pinned(original, write, None, operation).await
+    }
+    async fn execute_pinned<T: Send + 'static>(&self, original: oauth::Authority, write: bool, pinned: Option<attachments::Pinned>,
+        operation: impl FnOnce(&Backend, &Path, &CollectionAuthority) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
         // OAuth owns account resolution and barrier identity. Do not manufacture
         // a NativeAuthority or use a tool's note/deck IDs to select storage.
         let barrier = self.service.mcp_publication_barrier(&original).await?;
@@ -79,6 +92,9 @@ impl McpService {
             let _publication = (barrier, guard);
             check_oauth(&root, &original, write)?;
             let path = root.collection_path(original.account_id())?;
+            if pinned.as_ref().is_some_and(|p|p.path != path) { return Err(Error::new("conflict")); }
+            // Move the acquisition pin into the durable worker through completion.
+            let _acquisition_pin = pinned;
             let pin = root.pin_collection(&path)?;
             let publication = path.parent().and_then(Path::file_name)
                 .and_then(|name| name.to_str()).ok_or(Error::new("storage_unavailable"))?.to_owned();
@@ -116,10 +132,11 @@ struct CollectionAuthority {
 }
 impl CollectionAuthority {
     fn check(&self) -> Result<()> {
+        check_oauth(&self.held.root, &self.original, self.write)?;
         if self.held.root.collection_path(self.original.account_id())? != self.held.path {
             return Err(Error::new("conflict"));
         }
-        check_oauth(&self.held.root, &self.original, self.write)
+        Ok(())
     }
 }
 impl mcp::Authority for CollectionAuthority {

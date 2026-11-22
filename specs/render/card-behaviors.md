@@ -112,3 +112,11 @@ Keep R523's declared setting defaults unchanged: default off, on in personal bui
 These are component obligations, not recorded test or physical-device results. Native/WebKit checks run through tools/mg in the VM. Final device and reference evidence retains its existing owners and pending status.
 
 The VoiceOver-cursor part of the reveal case follows B6's optional post-goal scope. Keep its failed tests and receipts for that follow-up. Its external-keyboard protection and all remaining required accessibility checks still apply.
+
+## B9. Open a synced PDF
+
+When a user activates a link from the current card's trusted main frame, the native host may open the PDF named by that link in a platform PDF viewer. Require the exact media origin and a single filename of the form `meguri-<64 lowercase hex digits>.pdf` with no query or fragment. Resolve it through the same media binding as the rendered card. Read at most 8 MiB from the tracked regular file. A missing, oversized, or unreadable file leaves the card in place. The card page does not navigate to the PDF, and the media endpoint refuses PDF requests for these names. Accept only an engine-trusted click observed in the isolated interaction world, with the emission card, generation and side. Script-created clicks, script navigation and nested frames cannot open the viewer.
+
+Use a native in-app PDF viewer with its ordinary close controls. Recheck the current page and update before presenting after an asynchronous read. Dismiss the viewer and cancel pending work when its card binding or owning host becomes invalid. Keep the file bytes local to the viewer and preserve the card side and review state.
+
+PDF links may navigate within the document. The viewer suppresses URL links and actions that open a different document.

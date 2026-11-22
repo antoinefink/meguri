@@ -17,3 +17,11 @@ remain unchanged.
 The static executable includes musl and compiler/standard-library runtime code;
 their full notices are under licenses/. Node, npm and test tooling are build/test
 inputs only and are absent from the runtime image.
+
+Restricted MCP attachment downloads use the exact reqwest/Rustls graph recorded
+in production-features.txt. The runtime includes a CA bundle from the pinned
+build image at trust/ca-certificates.crt and its package notice at
+licenses/ca-certificates.txt. trust-inputs.sha256 records the original inputs;
+static-packages.txt identifies the supplying package. SSL_CERT_FILE selects
+this bundle for the TLS platform verifier. No remote trust-store download or
+certificate-verification exception is used.

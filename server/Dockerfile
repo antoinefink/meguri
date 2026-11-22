@@ -52,12 +52,16 @@ RUN set -eu; \
     CC=musl-gcc RUSTFLAGS='-C linker=musl-gcc -C target-feature=+crt-static' \
       cargo build --locked --release --no-default-features --target "$target" --bin meguri-sync-server \
       --message-format json-render-diagnostics > /evidence/release.jsonl; \
-    mkdir -p /runtime/usr/local/bin /runtime/usr/share/meguri-sync/licenses/rust /runtime/data/owner; \
+    mkdir -p /runtime/usr/local/bin /runtime/usr/share/meguri-sync/licenses/rust /runtime/usr/share/meguri-sync/trust /runtime/data/owner; \
     cp "target/$target/release/meguri-sync-server" /runtime/usr/local/bin/meguri-sync-server; \
     readelf -l /runtime/usr/local/bin/meguri-sync-server > /evidence/elf.txt; \
     ! grep -q INTERP /evidence/elf.txt; \
     sha256sum /runtime/usr/local/bin/meguri-sync-server | cut -d " " -f 1 > /evidence/executable.sha256; \
     cp /usr/share/doc/musl/copyright /runtime/usr/share/meguri-sync/licenses/musl.txt; \
+    test -s /etc/ssl/certs/ca-certificates.crt; \
+    sha256sum /etc/ssl/certs/ca-certificates.crt /usr/share/doc/ca-certificates/copyright > /evidence/trust-inputs.sha256; \
+    cp /etc/ssl/certs/ca-certificates.crt /runtime/usr/share/meguri-sync/trust/ca-certificates.crt; \
+    cp /usr/share/doc/ca-certificates/copyright /runtime/usr/share/meguri-sync/licenses/ca-certificates.txt; \
     rust_docs="$(rustc --print sysroot)/share/doc/rust"; \
     sha256sum "$rust_docs/COPYRIGHT.html" "$rust_docs/COPYRIGHT-library.html" > /evidence/rust-notice-inputs.sha256; \
     cp "$rust_docs/COPYRIGHT.html" "$rust_docs/COPYRIGHT-library.html" /runtime/usr/share/meguri-sync/licenses/rust/; \
@@ -90,6 +94,7 @@ ENTRYPOINT ["node", "/smoke/package-smoke.mjs"]
 
 FROM scratch AS runtime
 COPY --from=build /runtime/ /
+ENV SSL_CERT_FILE=/usr/share/meguri-sync/trust/ca-certificates.crt
 USER 10001:10001
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/meguri-sync-server"]

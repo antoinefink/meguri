@@ -44,12 +44,28 @@ impl Temporary {
     pub fn publish(mut self) -> Result<String> {
         crate::accounts::phase("media_before_blob_durability")?;
         self.file.sync_all()?;
+        self.publish_name()
+    }
+    /// Attachment staging finishes file durability outside publication scopes.
+    /// The wrapper prevents subsequent writes before the guarded rename.
+    pub(crate) fn into_synced(self) -> Result<SyncedTemporary> {
+        self.file.sync_all()?;
+        Ok(SyncedTemporary(self))
+    }
+    fn publish_name(&mut self) -> Result<String> {
         let blob = format!("blob-{}", crypto::random_token()?);
         // Disarm before the rename: a directory-sync error can mean the rename
         // already happened. Preserve either name for exclusive startup recovery.
         let stage = self.name.take().ok_or_else(integrity)?;
         at::publish(&self.directory, &stage, &blob)?;
         Ok(blob)
+    }
+}
+pub(crate) struct SyncedTemporary(Temporary);
+impl SyncedTemporary {
+    pub(crate) fn publish(mut self) -> Result<String> {
+        crate::accounts::phase("media_before_blob_durability")?;
+        self.0.publish_name()
     }
 }
 impl Write for Temporary {
@@ -104,5 +120,35 @@ pub(crate) fn equal(root:&DataRoot, id:&str, a:&Content, b:&Content) -> Result<b
         right.read_exact(&mut y[..n])?;
         if x[..n]!=y[..n] { return Ok(false); }
         if n==0 { return Ok(true); }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn pinned_staging_never_resolves_a_recreated_media_directory() {
+    use std::{fs, num::NonZeroU64, os::unix::fs::PermissionsExt};
+    for purged in [false,true] {
+        let temp = tempfile::tempdir().unwrap();
+        let current = temp.path().join("media");
+        let retired = temp.path().join("retired");
+        fs::create_dir(&current).unwrap();
+        fs::set_permissions(&current,fs::Permissions::from_mode(0o700)).unwrap();
+        let pinned = File::open(&current).unwrap();
+        // Replace the path before even creating the stage, as a reset during
+        // acquisition can do. A purged inode must fail closed; a retained inode
+        // may receive old work, but the recreated directory must stay empty.
+        if purged { fs::remove_dir(&current).unwrap(); }
+        else { fs::rename(&current,&retired).unwrap(); }
+        fs::create_dir(&current).unwrap();
+        fs::set_permissions(&current,fs::Permissions::from_mode(0o700)).unwrap();
+        let staged = Temporary::create_in(pinned,TempBudget::new(NonZeroU64::new(8192).unwrap()));
+        if purged { assert!(staged.is_err()); }
+        else {
+            let mut staged = staged.unwrap();
+            staged.write_all(b"generated old epoch bytes").unwrap();
+            let blob = staged.into_synced().unwrap().publish().unwrap();
+            assert_eq!(fs::read(retired.join(blob)).unwrap(),b"generated old epoch bytes");
+        }
+        assert_eq!(fs::read_dir(&current).unwrap().count(),0);
     }
 }

@@ -11,6 +11,7 @@ pub mod added;
 pub mod answer_buttons;
 pub mod calendar;
 pub mod card_counts;
+mod card_rules;
 pub mod difficulty;
 pub mod future_due;
 pub mod hourly;
