@@ -102,3 +102,11 @@ The follow-up review on `2debab0eb` identified six format cases. `20261122T15343
 | `server/src/mcp_service/attachments/format/isobmff.rs` | `4f68edf97ff2d48f3092d9d1b452f5e7c47b1d406afbedc64520f493859dc183` |
 | `server/src/mcp_service/attachments/format/pdf.rs` | `055dd7f1d47ebdea107486e05a6accc6457b5bd2a64481e4a6994ba8d5501969` |
 | `server/src/mcp_service/attachments/format/tests.rs` | `184336d57672d18d9dc3f5dde15dfb796653c9d11318ca393f92b8e451e2c4ef` |
+
+The on-demand review on `b844efba7` found two additional format cases. Fixer export `20261122T160326Z-9734` requires the ER AAC extension flag and accepts table-form PDF cross-reference offsets at the whitespace immediately before the first row. Tests retain common AAC-LC, exact stream-form offset handling, and incremental revisions. The preceding complete server run passed 351 cases in `sync-server-test/20261122T154107Z-74241`. Exact packaging passed four smoke cases and 59 browser cases in `sync-server-package-test/20261122T154438Z-77681`, and the six-phase native run passed in `meguri-provider-real-server/20261122T154827Z-87128`.
+
+| Reviewed candidate | SHA-256 |
+|---|---|
+| `server/src/mcp_service/attachments/format/isobmff.rs` | `194a76940c9b0a123bb9203b591adee3e50a9c7954cff4f809e32af8c4ca78eb` |
+| `server/src/mcp_service/attachments/format/pdf.rs` | `2420851e5a4460084995d61923ff7f5faf2c5a4dde414988ef070ee8e42a7183` |
+| `server/src/mcp_service/attachments/format/tests.rs` | `62b28b28286f06f5973cc23ab806c4089dc1ab2a3fcbcf7dde9dd3608cc7ebdf` |

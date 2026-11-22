@@ -642,6 +642,36 @@ mod pdf_regressions {
     }
 
     #[test]
+    fn linearized_table_target_accepts_only_first_row_whitespace_or_start() {
+        for prefix in [b"\0\t\n\x0c\r ".as_slice(), b" \t% main row\n\0\t\n\x0c\r "] {
+            let mut pdf = linearized_document();
+            let main = pdf.windows(9).position(|v| v == b"xref\n0 1\n").unwrap();
+            let row = main + 9;
+            pdf.splice(row..row, prefix.iter().copied());
+            let row = row + prefix.len();
+            let length = pdf.len();
+            set_linearized_number(&mut pdf, b"/L ", length);
+            let whitespace = row - b"\n\0\t\n\x0c\r ".len();
+            for target in whitespace..=row {
+                set_linearized_number(&mut pdf, b"/T ", target);
+                assert_eq!(detect(&pdf), Some("pdf"), "first row prefix at {target}");
+            }
+            // Header tokens, comments and their earlier whitespace are outside
+            // the prefix, as are every field and row after the first row start.
+            let trailer = pdf.windows(7).rposition(|v| v == b"trailer").unwrap();
+            for target in (main..whitespace).chain(row + 1..=trailer) {
+                set_linearized_number(&mut pdf, b"/T ", target);
+                assert_eq!(detect(&pdf), None, "not the first row prefix at {target}");
+            }
+            set_linearized_number(&mut pdf, b"/T ", whitespace);
+            let updated = append_revision(pdf.clone(), CONTENT, CONTENT.len());
+            assert_eq!(detect(&updated), Some("pdf"));
+            assert_eq!(detect(&append_revision(updated, CONTENT, CONTENT.len())), Some("pdf"));
+            assert_eq!(detect(&append_revision(pdf, CONTENT, CONTENT.len() - 1)), None);
+        }
+    }
+
+    #[test]
     fn linearized_stream_sections_and_post_e_hints_keep_revision_bounds() {
         for first_stream in [false, true] {
             for main_stream in [false, true] {

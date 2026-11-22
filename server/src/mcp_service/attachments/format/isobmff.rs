@@ -516,6 +516,7 @@ fn aac_config(bytes: &[u8]) -> Option<()> {
     if aot == 3 && short_frame != 0 { return None; } // SSR has no 960-sample frame.
     if bits.read(1)? != 0 { bits.read(14)?; } // coreCoderDelay
     let extension = bits.read(1)?;
+    if matches!(aot, 17 | 19..=23) && extension == 0 { return None; }
     if channels == 0 { aac_program_config(&mut bits)?; }
     if matches!(aot, 6 | 20) { bits.read(3)?; } // layerNr
     if extension != 0 {
@@ -1156,7 +1157,9 @@ mod tests {
             audio_bits(&[(2, 5), (4, 4), (2, 4), (0, 1), (1, 1), (7, 14), (0, 1)]),
             audio_bits(&[(2, 5), (4, 4), (2, 4), (1, 3), (0, 1)]),
             audio_bits(&[(6, 5), (4, 4), (2, 4), (0, 3), (0, 3)]),
-            audio_bits(&[(17, 5), (4, 4), (2, 4), (0, 3), (0, 2)]),
+            // ER AAC-LC: extensionFlag, resilience flags, extensionFlag3, epConfig.
+            audio_bits(&[(17, 5), (4, 4), (2, 4), (1, 3), (0, 3), (0, 1), (0, 2)]),
+            audio_bits(&[(17, 5), (4, 4), (2, 4), (1, 3), (7, 3), (0, 1), (1, 2)]),
         ];
         for channels in [1, 3, 4, 5, 6, 7, 11, 12, 13, 14] {
             good.push(audio_bits(&[(2, 5), (4, 4), (channels, 4), (0, 3)]));
@@ -1175,8 +1178,13 @@ mod tests {
             audio_bits(&[(2, 5), (4, 4), (2, 4), (0, 1), (1, 1)]), // core delay absent
             audio_bits(&[(3, 5), (4, 4), (2, 4), (4, 3)]), // SSR short frame
             audio_bits(&[(6, 5), (4, 4), (2, 4), (0, 3)]), // scalable layer absent
-            audio_bits(&[(17, 5), (4, 4), (2, 4), (0, 3)]), // ER epConfig absent
-            audio_bits(&[(17, 5), (4, 4), (2, 4), (0, 3), (2, 2)]),
+            audio_bits(&[(17, 5), (4, 4), (2, 4), (0, 3), (0, 2)]), // ER extensionFlag clear
+            audio_bits(&[(17, 5), (4, 4), (2, 4), (1, 3)]), // resilience flags absent
+            audio_bits(&[(17, 5), (4, 4), (2, 4), (1, 3), (0, 3), (1, 1), (0, 2)]), // extensionFlag3 set
+            // ER scalable leaves only one epConfig bit after layer/resilience/extensionFlag3.
+            audio_bits(&[(20, 5), (4, 4), (2, 4), (1, 3), (0, 3), (0, 3), (0, 1)]),
+            audio_bits(&[(17, 5), (4, 4), (2, 4), (1, 3), (0, 3), (0, 1), (2, 2)]),
+            audio_bits(&[(17, 5), (4, 4), (2, 4), (1, 3), (0, 3), (0, 1), (3, 2)]),
             audio_bits(&[(2, 5), (4, 4), (2, 4), (0, 3), (0x2b7, 11), (31, 5)]),
             audio_bits(&[(2, 5), (4, 4), (2, 4), (0, 3), (0x2b7, 11), (5, 5)]),
         ];
@@ -1184,6 +1192,9 @@ mod tests {
             bad.push(audio_bits(&[(2, 5), (frequency, 4), (2, 4), (0, 3)]));
             bad.push(audio_bits(&[(5, 5), (7, 4), (2, 4), (frequency, 4), (2, 5), (0, 3)]));
             bad.push(audio_bits(&[lc.as_slice(), &[(0x2b7, 11), (5, 5), (1, 1), (frequency, 4)]].concat()));
+        }
+        for aot in [19, 20, 21, 22, 23] {
+            bad.push(audio_bits(&[(aot, 5), (4, 4), (2, 4), (0, 3), (0, 24)]));
         }
         for configuration in [&good[2], &good[7], &pce] {
             for n in 0..configuration.len() { bad.push(configuration[..n].to_vec()); }

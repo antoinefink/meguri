@@ -316,7 +316,7 @@ impl Lookup<'_> {
         let mut at = 0;
         let first = token(b, &mut at, budget)?;
         let fields;
-        // /T names the first entry in a table, but the object in a stream.
+        // Record the first row's digit offset, or the xref stream object offset.
         let mut target = offset;
         if first == b"xref" {
             loop {
@@ -443,7 +443,11 @@ impl Lookup<'_> {
         }
         let linearized = self.linearized(budget).and_then(|(first, end, entries, length)| {
             let main = sections.get(&first)?.1?;
-            (first < end && end <= main && main < length && entries == sections.get(&main)?.3
+            let target = sections.get(&main)?.3;
+            // Tables also allow /T in the contiguous PDF whitespace before
+            // the first row. Streams keep the exact object offset (target == main).
+            (first < end && end <= main && main < length && (main..=target).contains(&entries)
+                && self.file.get(entries..target)?.iter().all(|c| space(*c))
                 && entries < length
                 && sections.get(&main)?.1.is_none() && !hybrids.contains(&first)
                 && !hybrids.contains(&main)).then_some((first, main))
