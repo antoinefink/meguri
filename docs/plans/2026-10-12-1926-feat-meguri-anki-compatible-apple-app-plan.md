@@ -2690,7 +2690,7 @@ Targets to measure on the reference devices of R1802, in a Release build, with t
 - R2074. A superseded page request stops reading within 50 ms.
 - R2075. The history component stays under 32 MB on disk and resident.
 - R2076. With a kept result, the page shows every box filled in the first frame after navigation and is usable at once.
-- R2077. With nothing kept and the caches not built, the page fills every box within a few seconds on an iPhone, each box showing its progress until its data arrives.
+- R2077. With nothing kept and the caches not built, the page fills every box within a few seconds on an iPhone, each box showing its progress until its data arrives, determinate where the core reports a fraction (`specs/stats/statistics-page.md` S10.3).
 - R2078. While any read runs, scrolling the page has a hitch time ratio below 5 ms/s and each control responds within one frame.
 - R2079. Selecting a value, changing a box's switch and changing the period within the last year take one frame and make no core call.
 

@@ -447,7 +447,7 @@ The snapshot fails as a whole, with no rows, history or curve, and one typed err
 | Kind | When |
 |---|---|
 | `not_found` | the card does not exist (the view shows "(No card to display.)") |
-| `unreadable_record` | a record the snapshot reads cannot be read (`model/row-records#R1`, `#R10`, `model/protobuf-records#P9`): the card row (for example `type` 7, `queue` 9, `ivl` −1, `ord` above 65,535), one of its review-log rows (`ease` outside 0 to 255, `ivl` or `lastIvl` outside the `i32` range after the integer conversion, `factor` negative or above the `u32` range, `usn` outside `i32`), its note, note type, decks or preset. Only R4's and R5's listed tolerances (`due`, `odue`, `time`, `type` of a review-log row) read a misfit value as a default |
+| `unreadable_record` | a record the snapshot reads cannot be read (`model/row-records#R1`, `#R10`, `model/protobuf-records#P9`): the card row (for example `type` 7, `queue` 9, `ivl` −1, `ord` above 65,535), one of its review-log rows (`ease` outside 0 to 255, `ivl` or `lastIvl` outside the `i32` range after the integer conversion, `factor` negative or above the `u32` range, `usn` not an INTEGER: any INTEGER `usn` reads by its low 32 bits, `model/row-records` R1; changed 2026-11-22, it said `usn` outside `i32`), its note, note type, decks or preset. Only R4's and R5's listed tolerances (`due`, `odue`, `time`, `type` of a review-log row) read a misfit value as a default |
 | `missing_note` | its note does not exist |
 | `missing_notetype` | its note's note type does not exist |
 | `missing_template` | the note type has no template for the card: a normal note type none at the card's `ord`, a cloze note type none at all (C3.1 takes its first template) |
