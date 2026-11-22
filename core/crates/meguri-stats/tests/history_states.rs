@@ -53,7 +53,7 @@ fn warm(f: &Fixture, scope: Scope, history: History) -> Box<HistoryData> {
     data(read(&f.host, scope, history))
 }
 
-fn add_deck(f: &Fixture, native: &str) -> i64 {
+pub fn add_deck(f: &Fixture, native: &str) -> i64 {
     let deck = meguri_engine::decks::new_deck(native.to_owned());
     let (tx, rx) = std::sync::mpsc::channel();
     f.write(move |scope| {
@@ -64,7 +64,7 @@ fn add_deck(f: &Fixture, native: &str) -> i64 {
 }
 
 /// A row: `ease`, `ivl`, `factor` and kind as given.
-fn row(id: i64, card: i64, ease: u8, ivl: i32, factor: u32, kind: RevlogKind) -> RevlogEntry {
+pub fn row(id: i64, card: i64, ease: u8, ivl: i32, factor: u32, kind: RevlogKind) -> RevlogEntry {
     RevlogEntry {
         button: ease,
         interval: ivl,
@@ -74,7 +74,7 @@ fn row(id: i64, card: i64, ease: u8, ivl: i32, factor: u32, kind: RevlogKind) ->
     }
 }
 
-fn shaped(id: i64, deck: i64, card_type: CardType, queue: CardQueue, ivl: u32) -> Card {
+pub fn shaped(id: i64, deck: i64, card_type: CardType, queue: CardQueue, ivl: u32) -> Card {
     Card {
         card_type,
         queue,
@@ -85,7 +85,7 @@ fn shaped(id: i64, deck: i64, card_type: CardType, queue: CardQueue, ivl: u32) -
 
 /// A whole second of day `day` (H1) as a review-log or card id, `k`
 /// milliseconds in: an hour before the day ends.
-fn at(n: i64, day: i64, k: i64) -> i64 {
+pub fn at(n: i64, day: i64, k: i64) -> i64 {
     (n + day * DAY - 3_600) * 1_000 + k
 }
 
@@ -388,7 +388,7 @@ fn h2_4_start_holds_the_counts_before_the_window_and_first_day_is_all_history() 
 /// A seeded random collection on top of the fixture: cards in every deck,
 /// filtered ones among them, some suspended or buried, some imported
 /// without a log, with rows of every kind on random days.
-fn random_collection(f: &Fixture, seed: u64, cards: usize) -> i64 {
+pub fn random_collection(f: &Fixture, seed: u64, cards: usize) -> i64 {
     let random = SeededRandom::new(seed);
     let pick = |n: u64| random.next_u64() % n;
     let n = f.next_day_at();
@@ -442,9 +442,9 @@ fn random_collection(f: &Fixture, seed: u64, cards: usize) -> i64 {
 }
 
 /// A card as stored: `(id, did, odid, type, queue, ivl)`.
-type Stored = (i64, i64, i64, i64, i64, i64);
+pub type Stored = (i64, i64, i64, i64, i64, i64);
 /// A row as stored: `(id, ease, ivl, factor, type)`.
-type StoredRow = (i64, i64, i64, i64, i64);
+pub type StoredRow = (i64, i64, i64, i64, i64);
 
 fn integer(value: &SqlValue) -> i64 {
     match value {
@@ -453,7 +453,7 @@ fn integer(value: &SqlValue) -> i64 {
     }
 }
 
-fn stored(f: &Fixture) -> (Vec<Stored>, HashMap<i64, Vec<StoredRow>>) {
+pub fn stored(f: &Fixture) -> (Vec<Stored>, HashMap<i64, Vec<StoredRow>>) {
     let collection = f.collection();
     let lease = collection.reader(ReaderRole::Query).unwrap();
     let snapshot = lease.snapshot().unwrap();
@@ -552,7 +552,7 @@ fn counts_of(states: impl Iterator<Item = S>) -> StateCounts {
 }
 
 /// The scopes the random tests read, each with its decks (G2.1).
-fn scopes(solo: i64) -> Vec<(Scope, Option<Vec<i64>>)> {
+pub fn scopes(solo: i64) -> Vec<(Scope, Option<Vec<i64>>)> {
     vec![
         (Scope::Collection, None),
         (Scope::Deck(DeckId(LANG)), Some(vec![LANG, VERBS])),
@@ -720,22 +720,22 @@ fn compare_from(f: &Fixture, solo: i64, step: &str, kept: bool) {
 }
 
 /// One random change of H20's mix.
-struct Mix {
-    random: SeededRandom,
-    next_id: i64,
-    cards: Vec<i64>,
-    removed: Vec<i64>,
-    bad_rows: Vec<i64>,
-    decks: Vec<i64>,
-    offset_hours: i32,
+pub struct Mix {
+    pub random: SeededRandom,
+    pub next_id: i64,
+    pub cards: Vec<i64>,
+    pub removed: Vec<i64>,
+    pub bad_rows: Vec<i64>,
+    pub decks: Vec<i64>,
+    pub offset_hours: i32,
 }
 
 impl Mix {
-    fn pick(&self, n: usize) -> usize {
+    pub fn pick(&self, n: usize) -> usize {
         (self.random.next_u64() % n as u64) as usize
     }
 
-    fn some_card(&self) -> Option<i64> {
+    pub fn some_card(&self) -> Option<i64> {
         (!self.cards.is_empty()).then(|| self.cards[self.pick(self.cards.len())])
     }
 
@@ -744,7 +744,7 @@ impl Mix {
         at(f.next_day_at(), -days_back, 500 + self.next_id % 400)
     }
 
-    fn step(&mut self, f: &mut Fixture) -> &'static str {
+    pub fn step(&mut self, f: &mut Fixture) -> &'static str {
         match self.pick(25) {
             0 | 1 => {
                 // An answer: one row today, the card's new interval.
@@ -1032,7 +1032,7 @@ impl Mix {
     }
 }
 
-fn current(scope: &mut meguri_storage::WriteScope<'_>, id: i64) -> Card {
+pub fn current(scope: &mut meguri_storage::WriteScope<'_>, id: i64) -> Card {
     meguri_storage::ReadRows::card(&*scope, CardId(id))
         .unwrap()
         .unwrap_or_else(|| card(id, LANG))
@@ -1068,7 +1068,7 @@ fn mix_run(seed: u64, steps: usize) {
 }
 
 /// The steps after which the component is rebuilt or reopened.
-const REBUILDS: [&str; 5] = [
+pub const REBUILDS: [&str; 5] = [
     "rollover hour change",
     "time zone change",
     "several rollovers while closed",
@@ -1077,7 +1077,7 @@ const REBUILDS: [&str; 5] = [
 ];
 
 /// The `Stale` readiness events of the component received so far.
-fn stale_events(events: &meguri_engine::Subscription) -> usize {
+pub fn stale_events(events: &meguri_engine::Subscription) -> usize {
     std::iter::from_fn(|| events.try_recv())
         .filter(|event| match &event.kind {
             meguri_engine::EventKind::Extension(payload) => payload
@@ -1218,7 +1218,7 @@ fn h15_an_unreadable_row_outside_the_window_fails_only_its_scopes() {
 }
 
 /// Every table of the collection, row by row.
-fn dump(host: &meguri_testkit::bench::fixtures::CoreHost) -> Vec<Vec<Vec<SqlValue>>> {
+pub fn dump(host: &meguri_testkit::bench::fixtures::CoreHost) -> Vec<Vec<Vec<SqlValue>>> {
     let collection = host.collection().unwrap();
     let lease = collection.reader(ReaderRole::Query).unwrap();
     let snapshot = lease.snapshot().unwrap();
@@ -1246,12 +1246,12 @@ fn h17_builds_and_reads_write_nothing_to_the_collection() {
 
 /// A collection of `cards` cards in `Lang` with `rows` review rows spread
 /// over them, written before the host opens it.
-struct Big {
+pub struct Big {
     _dir: tempfile::TempDir,
-    host: meguri_testkit::bench::fixtures::CoreHost,
+    pub host: meguri_testkit::bench::fixtures::CoreHost,
 }
 
-fn big(cards: i64, rows: i64) -> Big {
+pub fn big(cards: i64, rows: i64) -> Big {
     let dir = tempfile::tempdir().unwrap();
     let path = crate::graphs_common::fixture_path(dir.path());
     fs::copy(

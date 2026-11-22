@@ -34,6 +34,11 @@ threads-required = "num-test-threads"
 filter = 'package(meguri-stats) and test(=history_states::h16_a_cancelled_read_returns_within_50_ms_and_the_build_goes_on)'
 threads-required = "num-test-threads"
 
+# The same bound for a cancelled knowledge read (H16, U290).
+[[profile.default.overrides]]
+filter = 'package(meguri-stats) and test(=history_knowledge::h16_a_cancelled_knowledge_read_returns_within_50_ms_and_the_build_goes_on)'
+threads-required = "num-test-threads"
+
 # stats/history-reads H16: a cancelled page request returns within 50 ms.
 [[profile.default.overrides]]
 filter = 'package(meguri-stats) and test(=history_request::h16_a_cancel_during_the_build_stops_the_request_within_50_ms_and_the_build_goes_on)'
