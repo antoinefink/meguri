@@ -942,6 +942,25 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
         }
     }
 
+    /// N18.3: focus alone never changes how the welcome shows Start Empty; it
+    /// only decides whether a press runs now.
+    @Test(.timeLimit(.minutes(1)))
+    func startEmptyLooksAvailableInAnInactiveWindowButRunsOnlyWhenActive() async throws {
+        try await withNativeMeguriNoFileOwner { app in
+            try #require(app.owner.canStartEmpty)
+            #expect(!app.owner.startEmptyWaitsForSync)
+            app.owner.setApplicationActive(false)
+            #expect(app.owner.startEmptyAvailable && !app.owner.canStartEmpty)
+            app.owner.setSceneActive(false)
+            #expect(app.owner.startEmptyAvailable && !app.owner.canStartEmpty)
+            await app.owner.startEmpty()
+            #expect(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
+            app.owner.setApplicationActive(true)
+            app.owner.setSceneActive(true)
+            #expect(app.owner.canStartEmpty)
+        }
+    }
+
     @Test(arguments: [false, true])
     func startEmptyOpensRealDefaultDeckWithoutProviderTransfer(coldSelected: Bool) async throws {
         try await withNativeMeguriNoFileOwner(coldSelected: coldSelected) { app in

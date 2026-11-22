@@ -38,6 +38,11 @@ nonisolated enum WelcomeChoice: CaseIterable, Sendable {
         case .startEmpty: String(localized: "Begin with no decks and add your own notes.", bundle: .module)
         }
     }
+    /// In place of Start Empty's explanation while it waits for sync work, which
+    /// nothing else on the page shows; Set Up Sync opens the section that says what it is.
+    static var waitsForSyncReason: String {
+        String(localized: "Unavailable while sync is busy. Set Up Sync shows why.", bundle: .module)
+    }
 }
 
 /// How the welcome screen arranges its heading and its choices (N18.3).
@@ -77,6 +82,9 @@ nonisolated enum WelcomeArrangement: Equatable, Sendable {
 struct HomeWelcome: View {
     struct Action {
         var enabled = true
+        /// Why a disabled row is unavailable, shown in place of its explanation;
+        /// nil where the reason is already on screen (a sheet or flow owns the window).
+        var unavailableReason: String? = nil
         var run: () -> Void = {}
     }
     var sync: Action? = nil
@@ -251,13 +259,24 @@ private struct WelcomeRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var decorated: Bool { !dynamicTypeSize.isAccessibilitySize }
 
+    /// A disabled row's symbol, title and chevron are dimmed; its reason line is not,
+    /// so the reason stays readable.
+    private var dimming: Double { action.enabled ? 1 : 0.5 }
+    /// The reason replaces the explanation only while the row is disabled.
+    private var secondaryLine: String {
+        action.enabled ? choice.explanation : action.unavailableReason ?? choice.explanation
+    }
+    private var showsReason: Bool { !action.enabled && action.unavailableReason != nil }
+
     private var text: some View {
         VStack(alignment: .leading, spacing: Spacing.xxSmall) {
             Text(verbatim: choice.title)
                 .foregroundStyle(.token(.textPrimary))
-            Text(verbatim: choice.explanation)
+                .opacity(dimming)
+            Text(verbatim: secondaryLine)
                 .font(.subheadline)
                 .foregroundStyle(.token(.textSecondary))
+                .opacity(showsReason ? 1 : dimming)
         }
         // Rows grow with the text size rather than cut it.
         .fixedSize(horizontal: false, vertical: true)
@@ -272,6 +291,7 @@ private struct WelcomeRow: View {
                     Label { text } icon: {
                         // The title names the row; the symbol is decoration.
                         Image(systemName: choice.systemImage)
+                            .opacity(dimming)
                             .accessibilityHidden(true)
                     }
                 } else {
@@ -283,12 +303,12 @@ private struct WelcomeRow: View {
                     Image(systemName: "chevron.forward")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(chevronStyle)
+                        .opacity(dimming)
                         .accessibilityHidden(true)
                 }
             }
             .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
             .contentShape(Rectangle())
-            .opacity(action.enabled ? 1 : 0.5)
         }
         #if os(macOS)
         .buttonStyle(.plain)
@@ -296,7 +316,7 @@ private struct WelcomeRow: View {
         .disabled(!action.enabled)
         // The title names the row; the explanation is its hint.
         .accessibilityLabel(Text(verbatim: choice.title))
-        .accessibilityHint(Text(verbatim: choice.explanation))
+        .accessibilityHint(Text(verbatim: secondaryLine))
         .accessibilityIdentifier(choice.identifier)
     }
 }

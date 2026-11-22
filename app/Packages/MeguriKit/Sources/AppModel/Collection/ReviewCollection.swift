@@ -748,16 +748,29 @@ public final class ReviewCollection: ChangeFanoutSink {
         // caller waits, so that a launch ends with the step that follows it.
         await studyPreparation.waitForJob()
     }
+    /// Start Empty can run now: what the welcome shows, while the app and its
+    /// window are active. Creation starts only then.
     public var canStartEmpty: Bool {
-        state == .noFile && lifecycle == .noCollection && foreground && sceneActive && applicationActive
+        startEmptyAvailable && foreground && sceneActive && applicationActive
+    }
+    /// What the welcome's Start Empty row shows (N18.3). It leaves out the app's
+    /// and the window's activity: they change with focus alone, which leaves the
+    /// other rows as they are and must not dim this one. On the Mac the click
+    /// that activates the window comes before the action, which `canStartEmpty`
+    /// still guards.
+    public var startEmptyAvailable: Bool {
+        state == .noFile && lifecycle == .noCollection
             && !closed && !closing && !resuming && entryAllowed
             && navigation.sheet == nil && navigation.review == nil
             && entryOwner?.preview == nil && entryOwner?.pickerPresented != true
             && entryOwner?.requiresRecovery != true
             && exportOwner?.artifact == nil && exportOwner?.providerLease == nil
             && manualOwner?.preview == nil && manualOwner?.mediaPreview == nil
-            && !sync.meguriBusy && !sync.deviceSettingsSettling
+            && !startEmptyWaitsForSync
     }
+    /// Start Empty waits for sync work (a service change not finished, Meguri
+    /// Sync working). Nothing else on the welcome shows that, so its row says so.
+    public var startEmptyWaitsForSync: Bool { sync.meguriBusy || sync.deviceSettingsSettling }
     /// Reserve synchronously before yielding, just like entry confirmation.
     /// Close/background already join openTask, including host completion.
     public func startEmpty() async {
