@@ -7,7 +7,6 @@
 use meguri_model::revlog::RevlogKind;
 
 use super::retention::outcome;
-
 use super::{GraphInput, GraphRecord, NotBuilt};
 use crate::graphs::encoding::Encoder;
 use crate::graphs::records::Graph;

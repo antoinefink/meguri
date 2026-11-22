@@ -1,5 +1,6 @@
 //! The `buttons` record (`stats/graphs-revlog` V1, V6): presses of buttons
-//! 1 to 4 per group, over Hourly Breakdown's ranges (V5.2).
+//! 1 to 4 per group, over Hourly Breakdown's ranges (V5.2) and round 11's
+//! `six_months` (`stats/history-reads` H7).
 
 use meguri_model::revlog::RevlogKind;
 

@@ -103,6 +103,12 @@ fn take<T: Clone + 'static>(data: &GraphData, at: usize) -> T {
     data.records[at].as_any().downcast_ref::<T>().expect("the record of its graph").clone()
 }
 
+/// The fixture's clock is UTC (offset 0), so a row's V5.1 hour is its
+/// second of the UTC day over 3,600.
+fn utc_hour(t: i64) -> usize {
+    (t.rem_euclid(DAY) / 3_600) as usize
+}
+
 /// The id of a row at whole second `t`.
 fn at_second(t: i64) -> i64 {
     t * 1_000
@@ -270,7 +276,7 @@ fn h7_remembered_by_hour_sums_to_the_retention_counts_of_the_same_rows() {
             let cram = r.kind == 3 && r.factor == 0;
             let long = r.last_ivl >= 1 || r.last_ivl <= -86_400;
             if r.ease >= 1 && !cram && (r.kind == 1 || long) {
-                let hour = ((r.id / 1_000).rem_euclid(DAY) / 3_600) as usize;
+                let hour = utc_hour(r.id / 1_000);
                 if r.ease == 1 {
                     expected[hour].failed += 1;
                 } else {
@@ -290,7 +296,7 @@ fn h7_remembered_by_hour_has_an_all_time_range_only_with_all_history() {
     let (year, _, _) = hourly_and_buttons(&f, History::Last12Months);
     let (all, _, _) = hourly_and_buttons(&f, History::AllHistory);
     assert_eq!(year.retention_by_hour.all_time, None);
-    let hour = (((n - 3_600).rem_euclid(DAY)) / 3_600) as usize;
+    let hour = utc_hour(n - 3_600);
     for hours in [&year.retention_by_hour.one_month, all.retention_by_hour.all_time.as_ref().unwrap()] {
         assert_eq!(hours[hour], PassFail { passed: 1, failed: 1 });
         assert_eq!(kept(hours), PassFail { passed: 1, failed: 1 });

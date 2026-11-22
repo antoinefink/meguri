@@ -261,6 +261,9 @@ fn v2_1_day_index_table_with_its_32_bit_key() {
         (20_718_344, 1),
     ]);
     assert_eq!(mature_count(&all.reviews), expected);
+    // H6's By Answer takes the same cut keys (every row is Good).
+    let good: BTreeMap<i32, i64> = all.reviews.count_by_answer.iter().map(|(day, answers)| (*day, answers[2])).collect();
+    assert_eq!(good, expected);
     let mut year = expected;
     year.insert(-366, 1);
     assert_eq!(mature_count(&study.year().reviews), year);
@@ -719,7 +722,10 @@ fn decode_reviews(bytes: &[u8]) -> ReviewsRecord {
 #[test]
 fn g6_twenty_years_of_daily_study_fit_the_limit() {
     // G6's test: 7,305 consecutive days, rows of every kind on each, 150
-    // counted rows a day, stored times of 5,000 to 60,000 ms.
+    // counted rows a day, stored times of 5,000 to 60,000 ms. Only Anki's
+    // members: with H6's By Answer maps filled the record passes the limit
+    // (about 294,000 bytes), a spec question recorded in
+    // docs/process/verification-status.md.
     let mut record = ReviewsRecord::default();
     for day in -7_304..=0 {
         let spread = i64::from(day).rem_euclid(97);
