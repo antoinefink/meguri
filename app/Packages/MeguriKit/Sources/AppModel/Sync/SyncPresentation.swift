@@ -320,6 +320,9 @@ extension ReviewCollection {
         }
         do { try await prepareSyncServiceSelection() }
         catch { return failed(.preparation, .init(ProviderFailureReason(error))) }
+        // Preparation may be what first read a stored iCloud selection: refuse
+        // again before the update hold is written.
+        if sync.iCloudUnsupported, sync.providerState?.selection == .iCloud { return failed(.preparation, .iCloudSetupNeeded) }
         let current = sync
         // A choice in the Service control clears the update hold, by writing
         // `paused: false` before the change itself is asked for (P25.2).
