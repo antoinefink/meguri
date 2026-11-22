@@ -37,6 +37,22 @@ pub(super) fn siblings(c: &Connection, id: i64) -> Result<Vec<Sibling>> {
     }
     Ok(result)
 }
+/// Membership only, after prepare_siblings has qualified the existing index.
+/// Do not decode scheduling or other card details for an unrelated note.
+pub(super) fn has_home_deck(c: &Connection, id: i64, deck: i64) -> Result<bool> {
+    let mut q=c.prepare("SELECT (CASE WHEN odid!=0 THEN odid ELSE did END)=?2
+        FROM cards INDEXED BY ix_cards_nid WHERE nid=?1 ORDER BY id LIMIT ?3").map_err(sql_error)?;
+    let sql_limit=i64::try_from(MAX_SIBLINGS+1).map_err(|_|too_large())?;
+    let mut rows=q.query(params![id,deck,sql_limit]).map_err(sql_error)?;
+    let mut inspected=0;
+    while let Some(r)=rows.next().map_err(sql_error)? {
+        // A match beyond the inspection bound cannot establish safe membership.
+        if inspected==MAX_SIBLINGS { return Err(too_large()); }
+        inspected+=1;
+        if r.get::<_,Option<bool>>(0).map_err(sql_error)?.unwrap_or(false) { return Ok(true); }
+    }
+    Ok(false)
+}
 pub(super) fn validate_type(nt: &Notetype) -> Result<()> {
     if !matches!(nt.config.kind,0|1) || nt.templates.is_empty() || nt.fields.is_empty()
         || nt.templates.iter().any(|t|t.name.is_empty() || t.name.chars().all(|c|c=='"'))

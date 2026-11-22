@@ -33,3 +33,19 @@ A bounded in-memory index also supplies candidates for tag and text filters.
   The unchanged dependency inputs passed `sync-server-deps/20261122T204122Z-89247`.
   Hosted CI and similarity are the PR gates. The full integration register
   remains open outside this unit.
+
+## PR review
+
+- CodeRabbit found a difference in which card details the deck search reads
+  when it uses the global fallback. The fallback now checks home deck first.
+  The test covers malformed scheduling data inside and outside the requested
+  deck across all three search paths. The service tests now prove cache hits
+  and cold lookups without blocking the successful byte-fit build.
+- Fixer `s-20261122T210347Z-eb412cbd` exported
+  `cleanroom/20261122T210348Z-52078`. Reviewer
+  `s-20261122T203646Z-33affc53` approved
+  `cleanroom/20261122T210745Z-65499` and classified all seven reviewed paths
+  as PUBLIC. The orchestrator verified each exact digest. The revised MCP
+  spec pin is `54f68d949b88f1d0b6bc09b5d25c98123ea20e05bcc9bc4a4cab22b7574ed03d`.
+- All 389 server tests passed in `sync-server-test/20261122T210802Z-66375`.
+  The final lint receipt is `sync-server-lint/20261122T210917Z-71151`.

@@ -212,9 +212,17 @@ impl Backend {
                     None => c.query_row("SELECT id FROM notes WHERE id>?1 ORDER BY id LIMIT 1",[position],|r|r.get(0)).optional().map_err(sql_error)?,
                 };
                 let Some(id) = id else { break; };
-                // All scanned candidates are keyed. A deck test examines at
-                // most MAX_SIBLINGS cards through the existing nid index.
-                let matches_deck = match deck_id { None => true, Some(d) => generation::siblings(c,id)?.iter().any(|s|s.home == d) };
+                // Global fallback must establish membership before decoding
+                // unrelated scheduling data. Probe only with the qualified nid
+                // index and the existing sibling bound; an invalid index still
+                // reaches the authoritative siblings error below.
+                // Selected matching notes retain the complete sibling read and
+                // validation, including cards whose home is another deck.
+                let matches_deck = match deck_id {
+                    None => true,
+                    Some(d) if scoped.is_none() && eligible && !generation::has_home_deck(c,id,d)? => false,
+                    Some(d) => generation::siblings(c,id)?.iter().any(|s|s.home == d),
+                };
                 if !matches_deck { position=id; continue; }
                 let note = stored_note(c,id)?.ok_or_else(unsupported)?;
                 let bytes = note.fields.len()+note.tags.len();

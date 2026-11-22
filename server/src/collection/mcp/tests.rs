@@ -556,12 +556,62 @@ fn empty_deck_scopes_preserve_authoritative_sibling_index_refusals() {
 }
 
 #[test]
+fn deck_drivers_validate_scheduling_only_after_home_deck_membership() {
+    use std::{sync::Arc,time::{Duration,Instant}};
+    for filtered in [false,true] {
+        let mut f=Fixture::new();
+        f.create("unrelated",vec![],1000).unwrap();
+        f.create("selected",vec![],2000).unwrap();
+        // A valid sibling index, but an unsupported new position outside the
+        // requested deck. Include saved-home membership as well as ordinary did.
+        f.db.execute("UPDATE cards SET did=?1,odid=?2,due=?3 WHERE nid=1000",
+            params![if filtered {3} else {2},if filtered {2} else {0},i64::from(i32::MAX)+1]).unwrap();
+        generation::prepare_siblings(&f.db).unwrap();
+        let budget=read::DeckBudget::install(&mut f.db).unwrap();
+        let index={
+            let tx=f.db.unchecked_transaction().unwrap();
+            Arc::new(SearchIndex::build(&tx,Instant::now()+Duration::from_secs(30)).unwrap())
+        };
+        assert_eq!(index.candidates(Some(1),None,None),Some([2000].as_slice()));
+        assert_eq!(index.candidates(Some(2),None,None),Some([1000].as_slice()));
+        for driver in ["cold","warm","global"] {
+            if driver=="global" { f.db.execute_batch("DROP INDEX ix_cards_sched").unwrap(); }
+            let scoped=read::deck_candidates(&f.db,1,0,&budget).unwrap();
+            if driver=="global" { assert!(scoped.is_none()); }
+            else { assert_eq!(scoped.unwrap(),[2000]); }
+            let request=|deck:&str|SearchInput {deck_id:Some(deck.into()),..Default::default()};
+            let page=f.backend.search_notes_with_index(&f.path,&f.access,request("1"),
+                |_|(driver=="warm").then(||index.clone())).unwrap();
+            assert_eq!(page.notes.iter().map(|n|n.note_id.as_str()).collect::<Vec<_>>(),["2000"],"{driver}, filtered={filtered}");
+            assert!(page.next_cursor.is_none());
+            assert_eq!(f.backend.search_notes_with_index(&f.path,&f.access,request("2"),
+                |_|(driver=="warm").then(||index.clone())).unwrap_err().code,"unsupported_collection","{driver}, filtered={filtered}");
+        }
+        // Selecting the other note also requires validating this malformed
+        // sibling, even though that sibling itself belongs to a different deck.
+        f.db.execute("INSERT INTO cards SELECT 3000,2000,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data FROM cards WHERE id=1000",[]).unwrap();
+        assert_eq!(f.backend.search_notes(&f.path,&f.access,SearchInput {
+            deck_id:Some("1".into()),..Default::default()
+        }).unwrap_err().code,"unsupported_collection");
+    }
+}
+
+#[test]
 fn indexed_sibling_sample_keeps_its_row_bound() {
     let f=Fixture::new();f.create("one",vec![],1000).unwrap();
     f.db.execute_batch("WITH RECURSIVE n(id) AS (VALUES(2000) UNION ALL SELECT id+1 FROM n WHERE id<4046) INSERT INTO cards SELECT n.id,c.nid,c.did,c.ord,c.mod,c.usn,c.type,c.queue,c.due,c.ivl,c.factor,c.reps,c.lapses,c.left,c.odue,c.odid,c.flags,c.data FROM n CROSS JOIN cards c WHERE c.id=1000").unwrap();
     assert_eq!(generation::siblings(&f.db,1000).unwrap().len(),2048);
+    f.db.execute_batch("DROP INDEX ix_cards_sched").unwrap();
+    let request=|deck:&str|SearchInput {deck_id:Some(deck.into()),..Default::default()};
+    let empty=f.backend.search_notes(&f.path,&f.access,request("2")).unwrap();
+    assert!(empty.notes.is_empty());assert!(empty.next_cursor.is_none());
     f.db.execute_batch("INSERT INTO cards SELECT 5000,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data FROM cards WHERE id=1000").unwrap();
     assert_eq!(generation::siblings(&f.db,1000).err().unwrap().code,"result_too_large");
+    f.db.execute("UPDATE cards SET did=2 WHERE id=5000",[]).unwrap();
+    // Neither an absent deck nor a match beyond the cap can be decided safely.
+    for deck in ["2","3"] {
+        assert_eq!(f.backend.search_notes(&f.path,&f.access,request(deck)).unwrap_err().code,"result_too_large");
+    }
 }
 
 #[test]

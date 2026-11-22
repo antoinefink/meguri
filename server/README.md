@@ -127,7 +127,9 @@ workflow does not publish, deploy, upgrade, back up or restore a service.
 MCP paged search builds an optional in-memory candidate index in a separate
 blocking job. One build and two retained snapshots are allowed per service;
 there is no queue or persisted index. Builds have a five-second cooperative
-limit; snapshots and failed-build cooldowns expire after 60 seconds. The
+limit. Snapshots have a 60-second eligibility lifetime, and failed builds have
+a 60-second cooldown. An idle repository retains this memory until the next
+lookup/cache operation removes expired entries or the service restarts. The
 index has fixed facet capacities (about 116 MiB peak requested Rust heap per
 build, excluding SQLite/allocator overhead); unavailable facets and capacity
 misses use the existing bounded search. Completed entries retain no SQLite

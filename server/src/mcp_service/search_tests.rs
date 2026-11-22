@@ -46,6 +46,19 @@ async fn cached_search(bridge: &McpService, f: &Fixture, input: SearchInput) -> 
         })
     }).await.unwrap()
 }
+// A reservation returns None even if its worker publishes before the page
+// finishes. Assert the actual driver choice without delaying the builder.
+async fn cold_search(bridge: &McpService, f: &Fixture, input: SearchInput) -> SearchResult {
+    let cache=f.service.mcp_search_cache.clone();
+    let original=f.service.mcp_authority(&f.token,false).await.unwrap();
+    bridge.execute(original,false,move |backend,path,a| {
+        backend.search_notes_with_index(path,a,input,|c| {
+            let index=cache.get_or_schedule(c,a.original.account_id(),a.original.data_epoch(),&a.held.root,path);
+            assert!(index.is_none(),"cold request must not use a cached posting");
+            index
+        })
+    }).await.unwrap()
+}
 async fn finished(completion: oneshot::Receiver<()>) {
     tokio::time::timeout(Duration::from_secs(10), completion).await
         .expect("bounded build must finish").unwrap();
@@ -213,26 +226,13 @@ async fn service_byte_fit_continues_across_old_key_cold_and_new_index_without_sk
             add_tags:None,remove_tags:None}).await.unwrap();
         assert_ne!((f.snapshot().3,f.snapshot().4),(stamp.3,stamp.4));
 
-        let (started,start)=oneshot::channel();let (ended,end)=oneshot::channel();
-        let (release,released)=std::sync::mpsc::sync_channel(1);
-        let started=Mutex::new(Some(started));let ended=Mutex::new(Some(ended));
-        let released=Mutex::new(released);
-        f.service.mcp_search_cache.test_probe(Arc::new(move |boundary| match boundary {
-            BuildBoundary::Scanning=>{
-                started.lock().unwrap().take().unwrap().send(()).unwrap();
-                released.lock().unwrap().recv_timeout(Duration::from_secs(10)).unwrap();
-            }
-            BuildBoundary::Completed=>{let _=ended.lock().unwrap().take().unwrap().send(());}
-        }));
-        // The old-key cursor resumes via cold deck SQL or global tag filtering;
-        // the new-key worker cannot publish until after this page returns.
-        let middle=search(&bridge,&f,SearchInput {cursor:first.next_cursor.clone(),..request()}).await.unwrap();
-        finished(start).await;
-        assert_eq!(f.service.mcp_search_cache.test_is_building(),Some(true));
+        let done=completion(&f);
+        // The old-key cursor resumes via cold deck SQL or global tag filtering.
+        let middle=cold_search(&bridge,&f,SearchInput {cursor:first.next_cursor.clone(),..request()}).await;
         assert_eq!(ids(&middle),["1002","1003"]);
         assert!(middle.next_cursor.is_some());
         assert!(Backend::result_json(&middle).unwrap().len()<=mcp::MAX_RESULT_BYTES);
-        release.send(()).unwrap();finished(end).await;
+        finished(done).await;
         // Replay the identical old cursor through the new service-owned index:
         // stable records and position, including the previously omitted match.
         let replay=cached_search(&bridge,&f,SearchInput {cursor:first.next_cursor.clone(),..request()}).await;
@@ -277,9 +277,9 @@ async fn cached_service_sparse_first_pages_match_production_unicode_literals_and
         (None,Some("[a.b]"),vec!["1000","1001"]),
         (Some("strasse"),Some("[a.b]"),vec!["1000","1001"]),
     ] {
-        let result = search(&bridge, &f, SearchInput { deck_id:Some("2".into()),
+        let result = cached_search(&bridge, &f, SearchInput { deck_id:Some("2".into()),
             tag:tag.map(str::to_owned), query:query.map(str::to_owned), ..Default::default()
-        }).await.unwrap();
+        }).await;
         assert_eq!(ids(&result), expected);
         assert!(result.next_cursor.is_none());
     }
@@ -512,13 +512,13 @@ async fn indexed_deck_combination_empty_progress_continues_through_cold_driver()
     let bridge=McpService::new(f.service.clone());
     warm(&bridge,&f).await;
     let input=||SearchInput {deck_id:Some("2".into()),tag:Some("strasse".into()),query:Some("[a.b]".into()),..Default::default()};
-    let first=search(&bridge,&f,input()).await.unwrap();
+    let first=cached_search(&bridge,&f,input()).await;
     assert!(first.notes.is_empty());
     assert!(first.next_cursor.is_some());
     let a=f.service.mcp_authority(&f.token,false).await.unwrap();
     f.service.mcp_search_cache.invalidate(a.account_id());
     let done=completion(&f);
-    let next=search(&bridge,&f,SearchInput {cursor:first.next_cursor,..input()}).await.unwrap();
+    let next=cold_search(&bridge,&f,SearchInput {cursor:first.next_cursor,..input()}).await;
     assert_eq!(ids(&next),["1000","1001"]);
     assert!(next.next_cursor.is_none());
     finished(done).await;
