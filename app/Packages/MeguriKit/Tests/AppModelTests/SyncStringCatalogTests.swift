@@ -64,6 +64,9 @@ import Testing
         // T20.2 (round 10): the status panel's sign-in action.
         ("sync.status.signIn", "Sign In…"), ("sync.status.openSettings", "Sync Settings"),
         ("sync.status.cancelSetup", "Cancel Setup"), ("sync.button.label.off", "Sync"),
+        // T22.1: the toolbar button's accessibility label and hints.
+        ("sync.button.accessibilityLabel", "Sync"), ("sync.button.hint.syncNow", "Syncs now."),
+        ("sync.button.hint.status", "Shows the sync status."),
         // T19.5 (changed 2026-11-21, resume fix): setup's media step paused.
         ("sync.meguri.status.downloadPaused.title", "Media Download Paused"),
         ("sync.meguri.status.transferPaused.title", "Media Transfer Paused"),

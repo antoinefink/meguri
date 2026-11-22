@@ -95,4 +95,8 @@ extension EnvironmentValues {
     @Entry public var todayBesideDeckList = false
     /// Test hooks force a layout through the size class (`-MeguriSizeClass`), on iPhone too.
     @Entry public var layoutFollowsForcedSizeClass = false
+    /// N23.6: the sync status button, from the tab layout's Decks stack. A screen of
+    /// that stack puts it first in its own trailing group (search, Add), so the
+    /// system keeps the three in one group wherever it draws them.
+    @Entry public var syncStatusItem: AnyView? = nil
 }
