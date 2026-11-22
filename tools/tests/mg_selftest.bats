@@ -2435,7 +2435,7 @@ lint/glass-outside-chrome" ]
   done
 }
 
-@test "a real allowlist entry for an app file does not leak into the lint-first sandbox" {
+@test "a real lint exemption for an app file does not leak into the lint-first sandbox" {
   printf 'raw-color\tapp/Packages/MeguriKit/Sources/Missing.swift\tA reason.\n' >>"$SB/tools/lint-ui/allowlist.tsv"
   lint_first_sandbox
   export STUB_SWIFTLINT_REPORT="$BATS_TEST_TMPDIR/clean.json"
