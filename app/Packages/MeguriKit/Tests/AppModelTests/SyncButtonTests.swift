@@ -113,5 +113,10 @@ import Testing
         #expect(feedback.observe(moving: true, upToDate: false, needsYou: false, now: start + 30) == nil)
         #expect(feedback.observe(moving: false, upToDate: true, needsYou: false, now: start + 31) == nil)
         #expect(!feedback.accented)
+        // Expired with no change seen meanwhile: the next moving status is not its work.
+        feedback.requested(at: start)
+        #expect(feedback.observe(moving: true, upToDate: false, needsYou: false, now: start + 40) == nil)
+        #expect(feedback.observe(moving: false, upToDate: true, needsYou: false, now: start + 41) == nil)
+        #expect(!feedback.accented)
     }
 }

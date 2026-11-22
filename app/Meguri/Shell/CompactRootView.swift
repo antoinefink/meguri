@@ -38,6 +38,9 @@ struct CompactRootView: View {
             }
         }
         .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width } action: { isUpright = $0 }
+        // N23.1: the status panel's sheet opens at its measured height; the panel is
+        // measured here, out of sight, not in the toolbar item (N23.6).
+        .background { features.syncPanelMeasure?() }
         .onChange(of: besideDetail, initial: true) { _, known in
             if let known { lastBesideDetail = known }
         }

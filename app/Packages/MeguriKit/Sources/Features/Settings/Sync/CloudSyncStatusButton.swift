@@ -20,8 +20,17 @@ public struct CloudSyncStatusButton: View {
     #endif
     #if os(iOS)
     /// The panel's height in each presentation, whose widths differ: it sizes the sheet.
-    @State private var popoverHeight: CGFloat?
-    @State private var sheetHeight: CGFloat?
+    private var popoverHeight: CGFloat? { collection.syncPresentation.panelPopoverHeight.map { CGFloat($0) } }
+    private var sheetHeight: CGFloat? { collection.syncPresentation.panelSheetHeight.map { CGFloat($0) } }
+    private func height(_ kind: SheetMetrics.Kind) -> Binding<CGFloat?> {
+        let presentation = collection.syncPresentation
+        return Binding(get: {
+            (kind == .sheet ? presentation.panelSheetHeight : presentation.panelPopoverHeight).map { CGFloat($0) }
+        }, set: { value in
+            let height = value.map { Double($0) }
+            if kind == .sheet { presentation.panelSheetHeight = height } else { presentation.panelPopoverHeight = height }
+        })
+    }
     #endif
     public init(collection: ReviewCollection) { self.collection = collection }
     /// N15.4: the needs-attention symbol only for needs you; otherwise the state underneath.
@@ -78,7 +87,7 @@ public struct CloudSyncStatusButton: View {
             // Where the popover becomes a sheet (an iPhone held wide, the Duo
             // opened), the sheet fits the panel and scrolls past the screen's
             // height, as at compact width; as a popover it is as tall as the panel.
-            FittedPanelScroll(height: $popoverHeight, learns: .popover) {
+            FittedPanelScroll(height: height(.popover), learns: .popover) {
                 panel.padding().frame(width: ContentWidth.primaryAction)
             }
             .frame(width: ContentWidth.primaryAction)
@@ -102,7 +111,7 @@ public struct CloudSyncStatusButton: View {
             // The same panel as the popover, in a sheet as tall as the panel
             // (N23.1): the detent grows with the text and stops at the screen's
             // height, where the panel scrolls.
-            FittedPanelScroll(height: $sheetHeight, learns: .sheet) { panel.padding() }
+            FittedPanelScroll(height: height(.sheet), learns: .sheet) { panel.padding() }
                 .presentationDetents(Self.fittedDetents(sheetHeight))
                 .onAppear {
                     if nativeCompactStatusID == nil {
@@ -224,14 +233,19 @@ public struct CloudSyncStatusButton: View {
 }
 
 #if os(iOS)
-extension CloudSyncStatusButton {
-    /// The panel laid out where its sheet would show it, hidden, so the sheet's
-    /// one detent is known before the sheet opens. Its width comes from the last
-    /// sheet shown, or before the first from the window.
-    @ViewBuilder fileprivate var sheetMeasure: some View {
-        let kind: SheetMetrics.Kind? = compact ? .sheet
+/// N23.1: the panel laid out where its sheet would show it, hidden, so the sheet's
+/// one detent is known before the sheet opens. Its width comes from the last
+/// sheet shown, or before the first from the window. The shell hosts it behind
+/// its root, never in the toolbar: the toolbar item is the symbol alone (N23.6).
+public struct CloudSyncPanelMeasure: View {
+    let collection: ReviewCollection
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    public init(collection: ReviewCollection) { self.collection = collection }
+    public var body: some View {
+        let presentation = collection.syncPresentation
+        let kind: SheetMetrics.Kind? = sizeClass == .compact ? .sheet
             : UIDevice.current.userInterfaceIdiom == .phone ? .popover : nil
-        if let kind, !presented.wrappedValue, let width = SheetMetrics.contentWidth(kind) {
+        if let kind, !presentation.statusPresented, let width = SheetMetrics.contentWidth(kind) {
             SyncStatusPanel(collection: collection, openEntry: { _, _ in }, showSettings: { _ in })
                 .padding()
                 .frame(width: width)
@@ -241,8 +255,8 @@ extension CloudSyncStatusButton {
                 .allowsHitTesting(false)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { needed in
                     switch kind {
-                    case .sheet: sheetHeight = needed
-                    case .popover: popoverHeight = needed
+                    case .sheet: presentation.panelSheetHeight = Double(needed)
+                    case .popover: presentation.panelPopoverHeight = Double(needed)
                     }
                 }
         }

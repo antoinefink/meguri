@@ -73,6 +73,11 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     public var connectionPath: [CloudSyncEntry] = []
     /// N23.6: the sync the person started from the toolbar button, until it ends.
     public var buttonFeedback = SyncButton.Feedback()
+    /// N23.1: the panel's measured height in the sheet and in the popover's sheet
+    /// (iPhone), so a sheet opens at its one detent. Measured by the shell, out of
+    /// the toolbar, while no sheet shows (`CloudSyncPanelMeasure`).
+    public var panelSheetHeight: Double?
+    public var panelPopoverHeight: Double?
     /// Test hooks: the button holds the moment after a success (`-MeguriSyncRender …+justFinished`).
     public var buttonAccentHeld = false
     public init() {}

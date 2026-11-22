@@ -68,10 +68,12 @@ public enum SyncButton {
             case .idle:
                 return nil
             case .requested(let at):
+                // Expired first: a later round the person did not start must not
+                // take over a request whose own work never showed.
+                if now.timeIntervalSince(at) > Self.requestTimeout { phase = .idle; return nil }
                 if moving { phase = .running; return nil }
                 // A request refused at once (a sign-in that expired) ends in needs you.
                 if needsYou { phase = .idle; return .ended }
-                if now.timeIntervalSince(at) > Self.requestTimeout { phase = .idle }
                 return nil
             case .running:
                 guard !moving else { return nil }

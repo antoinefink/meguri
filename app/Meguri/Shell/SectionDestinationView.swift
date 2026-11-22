@@ -60,6 +60,8 @@ struct ShellFeatures {
     /// N23.6: the toolbar's sync status button; nil (sample shells) declares no item,
     /// since an item with nothing in it would still get an empty glass.
     var syncStatus: (() -> AnyView)?
+    /// iPhone: measures the status panel for its sheet (N23.1), behind the shell's root.
+    var syncPanelMeasure: (() -> AnyView)?
     var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
     /// N20.9: the Deck Options page pushed on a deck page.
     var deckOptions: (DeckID, AppNavigation) -> AnyView = { _, _ in AnyView(EmptyView()) }
@@ -132,6 +134,9 @@ struct ShellFeatures {
         }
         #endif
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
+        #if os(iOS)
+        features.syncPanelMeasure = { AnyView(CloudSyncPanelMeasure(collection: collection)) }
+        #endif
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
         #if os(iOS)
