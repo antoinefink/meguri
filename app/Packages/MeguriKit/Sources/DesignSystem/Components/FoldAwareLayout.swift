@@ -69,3 +69,39 @@ nonisolated public struct FoldAvoidingRow: Layout {
         }
     }
 }
+
+/// One child as wide as `FoldAvoidingRow`'s trailing column, centred in the
+/// row. With a fold through the row it spans the fold: Show Answer on the
+/// iPhone Duo held wide sits under the card's centre at its half-row size
+/// (N16.3, an exception to R9 decided 2026-11-22).
+nonisolated public struct FoldCentredRow: Layout {
+    public var fold: ClosedRange<CGFloat>?
+    public var spacing: CGFloat
+
+    public init(fold: ClosedRange<CGFloat>?, spacing: CGFloat) {
+        self.fold = fold
+        self.spacing = spacing
+    }
+
+    /// The child's x range in a row `width` wide.
+    public static func span(width: CGFloat, fold: ClosedRange<CGFloat>?, spacing: CGFloat) -> ClosedRange<CGFloat> {
+        let trailing = FoldAvoidingRow.columns(width: width, fold: fold, spacing: spacing).trailing
+        let childWidth = trailing.upperBound - trailing.lowerBound
+        let start = max(0, (width - childWidth) / 2)
+        return start...(start + childWidth)
+    }
+
+    public func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        guard let width = proposal.width, width.isFinite else { return child.sizeThatFits(proposal) }
+        let span = Self.span(width: width, fold: fold, spacing: spacing)
+        let size = child.sizeThatFits(ProposedViewSize(width: span.upperBound - span.lowerBound, height: proposal.height))
+        return CGSize(width: width, height: size.height)
+    }
+
+    public func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let span = Self.span(width: bounds.width, fold: fold, spacing: spacing)
+        subviews.first?.place(at: CGPoint(x: bounds.minX + span.lowerBound, y: bounds.minY), anchor: .topLeading,
+            proposal: ProposedViewSize(width: span.upperBound - span.lowerBound, height: bounds.height))
+    }
+}

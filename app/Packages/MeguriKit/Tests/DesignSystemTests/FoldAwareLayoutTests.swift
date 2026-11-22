@@ -37,4 +37,19 @@ import DesignSystem
         #expect(columns.leading == 0...246)
         #expect(columns.trailing == 254...500)
     }
+
+    @Test func showAnswerIsCentredAcrossTheFoldAtItsHalfRowSize() {
+        // The iPhone Duo held wide, inside the row's padding: 919 points, the fold at 439...479.
+        let width: CGFloat = 919, fold: ClosedRange<CGFloat> = 439...479
+        let span = FoldCentredRow.span(width: width, fold: fold, spacing: 8)
+        let trailing = FoldAvoidingRow.columns(width: width, fold: fold, spacing: 8).trailing
+        #expect(span.upperBound - span.lowerBound == trailing.upperBound - trailing.lowerBound, "Same width as before")
+        #expect((span.lowerBound + span.upperBound) / 2 == width / 2, "Centred on the row")
+        #expect(span.lowerBound < fold.lowerBound && span.upperBound > fold.upperBound, "It spans the fold")
+    }
+
+    @Test func withoutAFoldItIsHalfTheRowCentred() {
+        let span = FoldCentredRow.span(width: 408, fold: nil, spacing: 8)
+        #expect(span == 104...304)
+    }
 }

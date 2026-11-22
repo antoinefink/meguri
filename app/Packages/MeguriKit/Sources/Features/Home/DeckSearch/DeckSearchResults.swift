@@ -230,7 +230,7 @@ public struct HomeSidebarDeckSearch<Content: View>: View {
                     }
             }
         }
-        .searchable(text: $search.text, placement: .sidebar, prompt: Text("Search or Create a Deck", bundle: .module))
+        .searchable(text: $search.text, placement: .sidebar)
         .searchFocused($focused)
         #if !os(macOS)
         .onSubmit(of: .search) {
