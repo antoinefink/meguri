@@ -4,8 +4,11 @@ Spec: stats/activity-heatmap
 Requirements: R1272, R1275, R1276, R1278, R1280, R1281, R1284, R1291, R1295
 Anki: 26.09.3 (the review-log rows of `stats/counting-rules` N1 and the scheduler day of `stats/day-buckets` B3 and `sched/day-clock`, which it reuses)
 Scenarios: none. It is a Meguri query and presentation with no Anki or add-on behaviour to compare; core unit tests check it against the tables below.
+Status: Under review (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
 
 ## AH1. What this heatmap is
+
+Changed 2026-11-22 (round 11): the Statistics page's Activity (`stats/statistics-page` S7.5) is this grid extended to every year, with streaks beside it, from the part `activity_days` (`stats/history-reads` H11): AH2's rows and AH3's days, the page's deck rule (G2.1) instead of AH4's home deck, and AH7's levels per year block. This heatmap on Today, the deck list and deck pages is unchanged and still has no streaks (round 10).
 
 The minimal heatmap on Home's Today page, the touch deck list and deck pages (`docs/design/native-interface-contract.md` N14.11). It is a Meguri design:
 

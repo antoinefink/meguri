@@ -17,6 +17,9 @@ mg_job build-app host mg_build_app \
 mg_job run host mg_run \
   "Install and launch: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile]; physical requires Debug, or --personal-preview for manual team Release without test hooks, or --real-copy --owner-requested (only on Antoine's request) to install, never launch, the daily-driver Release from installed profiles; physical launches have no overrides; simulator/Mac also accept --route, --window-size, --seconds and -- launch args"
 
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../scripts/host-build.sh"
+
 MG_APP_DD=build/app/DerivedData
 MG_APP_DEV_ID=com.antoinefink.meguri.dev
 
@@ -126,7 +129,7 @@ mg_app_build_action() {
   MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE=""
   local action="$1" standalone_arg="" plan_arg="" personal=false real=false test_args=()
   shift
-  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=() build_command=(xcodebuild)
+  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=() build_command=(mg_host_build xcodebuild)
   case "$action" in
     build)
       standalone_arg=" --standalone"

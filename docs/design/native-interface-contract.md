@@ -1216,3 +1216,98 @@ Then the collection's error line, as before (not beside the deck list, N14.1).
 - N16.5: "counts different cards answered in the session" becomes "in the walk" for a walk.
 - `stats/activity-heatmap` AH7's earlier rule.
 - Screen contracts: `home.deckList` has a new version (its badge and Today text); `home.today` is added to `screen-inventory.yaml` with the code.
+
+## N25. Round 11: the Statistics page (2026-11-22)
+
+Decided by Antoine in chat on 2026-11-22 (`decisions.md`, rows `stats.overview` of 2026-11-22; round 11 answers 1A 2A 3A 4A 5A 6A 7A 8A 9A, with All as the first period and the Forgotten chart in orange instead of red). Changed the same day by his loading decision (N25.9). Status: under review with `stats/statistics-page` (R1357); the coordinator approves it under Antoine's permission of 2026-11-20 after independent review. Behaviour is `stats/statistics-page` and `stats/history-reads`; this section is the layout. Where earlier text that N25.13 lists differs, this section wins. Sketches: the round 11 design page (`build/library/round11/`, not committed; HTML is not native approval).
+
+### N25.1 Where Statistics lives (8A)
+
+- Mac and iPad: a sidebar row "Statistics" with `chart.bar.xaxis`, second under Today: Today, Statistics, Browse, Note Types, then the decks. One window: sidebar and the page; no separate window.
+- View › Statistics ⇧⌘S (after Today's place, before Browse ⇧⌘B and Note Types ⇧⌘T). ⇧⌘S is free: Meguri has no documents.
+- iPhone and the Duo folded or held tall: a tab "Statistics" between Decks and Browse (four tabs: Decks, Statistics, Browse, Settings); on the Duo opened, the side tab bar's second item.
+- Deck Statistics (`chart.bar.xaxis`) in the deck menu (N20.2: group 1, after Browse Cards), the menu bar's Deck menu (after Deck Options…, no key) and the touch More menu; for normal and filtered decks. A deck page's Activity header is a button to the same place. T on Today and a deck page (Mac, iPad with a keyboard).
+- The section stays out of `availableSections` until its page is built (`stats/statistics-page` S13).
+
+### N25.2 The toolbar and its two controls (3A)
+
+- Mac: the window toolbar, leading to trailing: the title "Statistics" with the subtitle "1,370 cards in 4 decks" (and the status of N25.9), the deck pop-up button, the period segmented control (1M 3M 6M 1Y All), then the sync button and the Add menu as on every page. Both controls are standard toolbar items and stay put while the page scrolls.
+- iPad at regular width: the same in the navigation bar.
+- iPhone, the Duo folded, a narrow iPad window: the inline title "Statistics" with the deck pop-up beside it (a menu button with the deck's name and a chevron) and the subtitle under it; the period segmented control pinned under the navigation bar while the page scrolls; the Jump menu (`list.bullet`) as a trailing toolbar button.
+- The deck's name is visible at every scroll position on every device. A long name truncates in the middle, with the full name as help text (Mac).
+- Kept state: `stats/statistics-page` S3.3 (per window and device; first time All Decks and All).
+
+### N25.3 The Mac and iPad page (1A, 2A)
+
+- One scroll view. The strip (five figures, no box: value, unit in small text, label under), then the seven sections of S5, each a plain heading in the flow: the title in bold and its question in secondary text on the same line, wrapping under it when narrow.
+- Grid of boxes: two columns up to about 1,250 points of content width, three beyond, one under about 560. A lead box spans the row; the other boxes follow side by side and wrap. Boxes in a row share the row's height.
+- A box is the system group box (`GroupBox`, the system's grouped background): no shadow, no custom border, radius or background.
+- The iPad at regular width is this page in touch sizes, with the sidebar and two columns; in a narrow window or Slide Over it becomes N25.6's column.
+
+### N25.4 The parts of a box
+
+Top to bottom, at the box's inset:
+
+1. The header: a button with the title in the headline style and a trailing chevron (`chevron.right`), opening the chart's page (N25.5); trailing on the same line, the box's switches as small segmented controls (Reviews Over Time: By Type | By Answer and Count | Time; Retention: All | Young | Mature), or "Now" in secondary text for the charts of the present, or "Estimated" for Knowledge Over Time.
+2. One large figure (the title-2 style, tabular digits) and its sentence in secondary text.
+3. The plot (Swift Charts), at a fixed height per box size, y-axis labels on the trailing side as the system draws them, no second axis (S8.2).
+4. The legend, in stack order, each swatch with its name (the system chart legend).
+5. Two to four small figures in a row (label in secondary text over its value), stacking at accessibility sizes.
+6. A footnote in footnote secondary text when the box has one (left-out cards).
+
+Colours: `stats/statistics-page` S8.1 (system colours only; the state family and the answer family, indigo for single measures, Forgotten orange). Selection, callout and Show in Browse: S8.3, S8.4; the callout is the system chart selection's annotation, a small material panel that never covers the rule. Empty and sparse: S8.5, the line centred in the plot area in secondary text.
+
+### N25.5 A chart's own page
+
+- In the same content column, replacing the page (a navigation push in the detail): the chart at full width and a taller plot, its switches, then its table as a native `Table` (Mac, iPad) or a list (iPhone) with one row per bar, then "About This Chart" (two or three sentences in body text) and, where there is one, a link button to the setting behind it. Retention's page adds By Period (`stats/graph-presentation` P12) under its table.
+- Mac: the toolbar's back button and ⌘[ return; the deck and period controls stay in the toolbar and work. Touch: pushed, with the system back button.
+- Context menu on a chart, on both pages: Copy Image, Copy Values.
+- Screen contract `stats.chartPage`, added with its unit.
+
+### N25.6 iPhone, the folded Duo, a narrow iPad (4A)
+
+- The same sections in one column, on the grouped grey background (inset grouped style), each box a section-like group at the list's inset.
+- The strip is four tiles in a row (Studied Today, Retention Today, Remaining Today, Streak); Mature moves to Card Counts' figures.
+- Boxes keep their figures. Reviews Over Time keeps By Type | By Answer in its header; Count | Time moves into the box's menu (`ellipsis.circle` in the header).
+- The Activity grid shows the most recent weeks that fit (N24.6's touch squares) and swipes back through time, year by year.
+- The Jump menu lists the seven sections; choosing one scrolls its heading to the top.
+- The Duo held tall uses this column with the small boxes two abreast.
+
+### N25.7 The Duo opened (5A)
+
+- The inner display (951 × 669 points, the fold down the middle, the side tab bar on the left) shows one page in two halves: each section is one screenful, its lead box on the left half and the other boxes on the right half; a section with one box (Coming Up, Decks) gives the plot the left half and its figures, footnote and table rows the right half.
+- The deck pop-up is at the top of the left half, the period control at the top of the right. The two halves scroll together, section by section.
+- Nothing interactive sits on the fold: no box, control or plot crosses it. The lead charts get the half's width (about 430 points): a year in weeks fits; All is drawn in months.
+
+### N25.8 Activity with streaks (7A)
+
+The Reviews section's second box: the grid of N24.6 (the Mac's 10 pt squares, touch 16 pt, the system green, AH7's levels), one block per year under a year label, the current year first; to its trailing side (under it when narrow) the figures Current Streak, Longest Streak, Days Studied This Year and one line per year with its total. Hover (Mac) or touch shows a day's date and count. Nothing about streaks appears on Today.
+
+### N25.9 Loading, kept results and status (decided 2026-11-22)
+
+Antoine, 2026-11-22: the Statistics page "is a bit of an exception", "it's understood for users that this page can take a bit longer to generate than other pages"; it "needs to be performant", but reading hundreds of thousands of reviews cannot always be instant. Decided by Claude (coordinator) on his question whether to show a loading indicator, cache, and show that data is refreshing (`decisions.md`, 2026-11-22). Replaces round 11's "Loading: none visible" and "no spinner, nothing moves" for this page only.
+
+- Tiers: the present state first, then the review-log charts, then Knowledge Over Time (`stats/statistics-page` S10.1).
+- Kept results show at once and refresh in place, numbers changing without layout shift; while refreshing, the subtitle adds " · Updating…", then " · Updated just now" for a minute, or " · Updated 9:41" when the shown numbers are kept ones and the refresh could not finish. Never a blocking overlay.
+- With nothing kept: every box at its final size with its title; a box whose data is not ready shows the system's small progress indicator (`ProgressView`, `.controlSize(.small)`) centred in its plot area, determinate where the core reports progress. No full-page spinner, no skeleton, no shimmer.
+- No Refresh command and no pull to refresh: the page refreshes after changes by itself (S11).
+
+### N25.10 States
+
+`stats/statistics-page` S12: no collection (the shell's state, controls disabled; with no collection on the device the system's `ContentUnavailableView` "No Collection"), an empty collection ("No Cards", controls disabled), no reviews yet, sparse, a deck filter, a filtered deck (one line under the strip), a deleted deck ("This deck no longer exists." with Show All Decks), an unreadable record ("Statistics Unavailable"), a box that failed alone. Every screen unit checks first run and no collection.
+
+### N25.11 Keyboard and menus (Mac, iPad with a keyboard)
+
+- View › Statistics ⇧⌘S; View › Go to Section ▸ the seven sections (enabled while the page shows); Deck › Deck Statistics (a deck shown).
+- Tab: the toolbar's deck pop-up and period control, then box by box (header, switches, plot). In a focused plot Left and Right move the selection one bar, Return runs Show in Browse, Esc clears. ⌘[ back from a chart's page. On the Mac a double-click on a bar runs Show in Browse.
+
+### N25.12 Accessibility
+
+`stats/statistics-page` S15. Each chart one element labelled by its sentence, with an Audio Graph and one element per bar in runs of ten; Increase Contrast and Differentiate Without Colour (separating lines in stacks); Dynamic Type to the largest size, legends and figures stacking, the plot keeping its height; the strip's figures one element each; identifiers `stats.*`.
+
+### N25.13 What this replaces
+
+- N11.7: its second and third bullets (the scope picker with Deck, Collection and Search, the history picker and its labels, the compact subtitle "Japanese · Last 12 Months" and the toolbar menu): replaced by N25.2. Its first bullet (the header is the window's toolbar) and fourth (system group boxes, system animations) stay.
+- `screen-inventory.yaml` `stats.overview`: its earlier text (the scope and history header, thirteen equal boxes in Anki's order, "the heatmap and streak stats are not here", the Stats sidebar section and tab names); and in `home.deckPage` "streak stats and the Stats action (U228) are not built" (the Activity header leads to Statistics; streaks stay off the deck page).
+- N20.2's table gains Deck Statistics; N21.1's sidebar order gains Statistics second; N21.1's iPhone tabs become four.
+- Unchanged: N11.7's toolbar header principle, Today's heatmap (N14.11, N24.6), round 10's "no streak on Today", Browse (Show in Browse uses its tokens; `search/filter-tokens` T3's Studied On token is also made by the page).

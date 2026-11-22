@@ -4,10 +4,13 @@ Spec: stats/pdf-export
 Requirements: R1421, R1295, R1357, R1360, R1361, R1838
 Anki: 26.09.3
 Scenarios: none. Anki's Save PDF lives in its desktop Statistics window, which the oracle does not run (`conformance/AGENTS.md`), and the file is not collection data. X11 lists the Meguri tests built from this file.
+Status: Under review (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
 
 The file the Stats screen writes when the user exports it (U236): its default name, where it goes, when it is made, what it holds and in what order, and how its pages break. Anki's Statistics window has a Save PDF button that prints its graphs page to a PDF file. R1421 asks for the same export, with Meguri's name prefix. The graphs, tables and their text are those of the screen (`stats/graph-presentation`, `stats/studied-today` T4); this file adds only what the export changes. Where the commands sit is X9's; the rest of the screen is `stats.overview` (`docs/design/screen-inventory.yaml`).
 
 ## X1. Terms
+
+Changed 2026-11-22 (round 11): the PDF export is not in the Statistics page's first version (round 11, 9A: `stats/statistics-page` S21). When it is built, this file is rewritten for the page's strip and seven sections; its file name (X2), place (X3) and timing rules (X8) are expected to stay. Until then nothing here is implemented.
 
 - **Box**: one of the screen's thirteen graph boxes, in the order of `stats/graphs-common` G5 (R1357): Today, Future Due, Calendar, Reviews, Card Counts, Review Intervals, Card Stability, Card Difficulty, Card Retrievability, Retention, Hourly Breakdown, Answer Buttons, Added. Card Ease is never one (R1360). Meguri shows the three FSRS boxes whatever the collection's `fsrs` key says (`stats/graph-presentation` P21).
 - **Shown result**: the data the screen's model holds for its boxes, with the scope, the history and the scope's display name it was computed for. It is **complete** when the data of all thirteen boxes comes from one refresh (`stats/graphs-common` G8.3), and **partial** while a refresh's first request has returned Data and its second has not, so the boxes below the fold still hold an earlier refresh's data or none.
