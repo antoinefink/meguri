@@ -73,6 +73,8 @@ public struct NoteTypesView: View {
         // more than half a second shows a progress indicator over it.
         if let id = model.shownSelection {
             NoteTypeDetailContent(model: model, id: id)
+                // Shown in the new one's place for a moment: it looks the same, takes no edits.
+                .allowsHitTesting(model.selection == id)
                 .overlay {
                     if model.selection != id { DelayedProgress() }
                 }
@@ -117,13 +119,16 @@ public struct NoteTypesView: View {
         // the window's trailing end (`NoteTypeFieldsTab`).
         if !inspectorHoldsSave {
             NoteTypeSaveToolbar(model: model, running: jobShown.running(in: model))
-            if model.tab == .fields, model.selection != nil {
+            if model.tab == .fields, model.selection != nil, !model.inspectorShown {
                 ToolbarItem(placement: .primaryAction) { InspectorToggle(model: model) }
             }
         }
     }
 
-    private var inspectorHoldsSave: Bool { model.tab == .fields && model.inspectorShown && model.selection != nil }
+    /// The Fields tab is on screen with its inspector: it holds Revert, Save and the toggle.
+    private var inspectorHoldsSave: Bool {
+        model.tab == .fields && model.inspectorShown && model.selection != nil && model.shownSelection.flatMap(model.draft) != nil
+    }
     #endif
 }
 
@@ -141,36 +146,45 @@ struct NoteTypeSaveToolbar: ToolbarContent {
             if let running {
                 SaveStatusView(progress: running.progress, notes: model.typeCounts[running.id]?.notes)
             } else {
-                // One control group: Revert and Save read as one pair in one shape.
-                // Save is not prominent: it is disabled until there is a draft, and
-                // a tinted disabled button reads as broken.
-                ControlGroup {
-                    Button {
-                        model.confirmingRevert = true
-                    } label: {
-                        Text("noteTypes.revert", bundle: .module)
-                    }
-                    .disabled(model.selection.map { !(model.isEdited($0) && model.editable($0)) } ?? true)
-                    .accessibilityIdentifier("noteTypes.list.revert")
-                    Button {
-                        model.save()
-                    } label: {
-                        if let id = model.selection, model.saveAsks(id) {
-                            Text("noteTypes.saveAsks", bundle: .module)
-                        } else {
-                            Text("noteTypes.save", bundle: .module)
-                        }
-                    }
-                    // ⌘S is File › Save's (N4).
-                    .disabled(model.selection.map { !model.canSave($0) } ?? true)
-                    .accessibilityIdentifier("noteTypes.list.save")
-                } label: {
-                    // The group's title where the toolbar folds it into its overflow menu.
-                    Text("noteTypes.save", bundle: .module)
-                }
+                NoteTypeSaveGroup(model: model)
             }
         }
         .sharedBackgroundVisibility(running == nil ? .automatic : .hidden)
+    }
+}
+
+/// Revert and Save as one control group: they read as one pair in one shape.
+/// Save is not prominent: it is disabled until there is a draft, and a
+/// tinted disabled button reads as broken. A view of its own, so the draft's
+/// changes reach it.
+private struct NoteTypeSaveGroup: View {
+    let model: NoteTypesModel
+
+    var body: some View {
+        ControlGroup {
+            Button {
+                model.confirmingRevert = true
+            } label: {
+                Text("noteTypes.revert", bundle: .module)
+            }
+            .disabled(model.selection.map { !(model.isEdited($0) && model.editable($0)) } ?? true)
+            .accessibilityIdentifier("noteTypes.list.revert")
+            Button {
+                model.save()
+            } label: {
+                if let id = model.selection, model.saveAsks(id) {
+                    Text("noteTypes.saveAsks", bundle: .module)
+                } else {
+                    Text("noteTypes.save", bundle: .module)
+                }
+            }
+            // ⌘S is File › Save's (N4).
+            .disabled(model.selection.map { !model.canSave($0) } ?? true)
+            .accessibilityIdentifier("noteTypes.list.save")
+        } label: {
+            // The group's title where the toolbar folds it into its overflow menu.
+            Text("noteTypes.save", bundle: .module)
+        }
     }
 }
 

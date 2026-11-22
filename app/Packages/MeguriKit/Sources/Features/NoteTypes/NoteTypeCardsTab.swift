@@ -358,6 +358,8 @@ struct NoteTypeCardFieldRows: View {
                 .draggable(reference(row.name))
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction { insert(row.name) }
+                // Fields are never the list's selection: the card types are.
+                .selectionDisabled()
                 .accessibilityIdentifier("noteTypes.cards.field.\(row.id)")
         }
     }

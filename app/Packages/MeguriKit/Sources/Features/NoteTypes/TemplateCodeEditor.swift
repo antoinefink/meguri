@@ -412,8 +412,11 @@ struct TemplateCodeEditor: NSViewRepresentable {
         /// since is kept: the undo then puts back only the Back.
         private func replaceFront(_ expected: String, with text: String, manager: UndoManager) {
             guard parent?.onReplaceFront(expected, text) == true else { return }
-            manager.registerUndo(withTarget: self) { coordinator in
-                MainActor.assumeIsolated { coordinator.replaceFront(text, with: expected, manager: manager) }
+            manager.registerUndo(withTarget: self) { [weak manager] coordinator in
+                MainActor.assumeIsolated {
+                    guard let manager else { return }
+                    coordinator.replaceFront(text, with: expected, manager: manager)
+                }
             }
         }
     }
@@ -810,8 +813,11 @@ struct TemplateCodeEditor: UIViewRepresentable {
         /// since is kept: the undo then puts back only the Back.
         private func replaceFront(_ expected: String, with text: String, manager: UndoManager) {
             guard parent?.onReplaceFront(expected, text) == true else { return }
-            manager.registerUndo(withTarget: self) { coordinator in
-                MainActor.assumeIsolated { coordinator.replaceFront(text, with: expected, manager: manager) }
+            manager.registerUndo(withTarget: self) { [weak manager] coordinator in
+                MainActor.assumeIsolated {
+                    guard let manager else { return }
+                    coordinator.replaceFront(text, with: expected, manager: manager)
+                }
             }
         }
 

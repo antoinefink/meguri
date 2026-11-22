@@ -871,6 +871,31 @@ extension NoteTypesModelTests {
         await model.settle()
         #expect(backend.reads.filter { $0 == 8 }.count == 1, "read once")
         #expect(model.typeCounts[8] != nil, "selected, it reads its counts")
+        #expect(model.usedOn(8) != nil, "and its Used On")
+    }
+
+    @Test func aChangeElsewhereDropsARecordOnlyReadAheadInsteadOfCountingIt() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[8] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        #expect(model.records[8] != nil)
+        model.changesCommitted(.notetypes([8]))
+        await model.settle()
+        #expect(model.records[8] == nil && model.typeCounts[8] == nil, "read again when needed, never counted ahead")
+        model.selection = 8
+        await model.settle()
+        #expect(model.shownSelection == 8 && model.draft(8) != nil)
+    }
+
+    @Test func aRenameBegunOnTheShownNoteTypeEndsWhenTheDetailSwaps() async throws {
+        let backend = FakeNoteTypesBackend()
+        backend.records[9] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        backend.readWait = .milliseconds(40)
+        model.selection = 9
+        model.renaming = 0  // begun on the stand-in in the gap
+        await model.settle()
+        #expect(model.shownSelection == 9 && model.renaming == nil)
     }
 
     @Test func saveKeepsTheSavedVersionOnScreenUntilItIsReadAgain() async throws {

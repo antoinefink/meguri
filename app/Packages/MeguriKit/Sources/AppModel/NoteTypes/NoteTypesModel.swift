@@ -145,6 +145,10 @@ public final class NoteTypesModel {
     @ObservationIgnored private var detailTasks: [Int64: Task<Void, Never>] = [:]
     /// Records read ahead (`warm`) that are still in flight.
     @ObservationIgnored private var warming: Set<Int64> = []
+    /// Note types whose detail loaded (counts, issues, references) because
+    /// they were selected; a record only read ahead is not among them, and
+    /// changes elsewhere read nothing more for it.
+    @ObservationIgnored private var loaded: Set<Int64> = []
     @ObservationIgnored private var countTasks: [Int64: [Task<Void, Never>]] = [:]
     /// The base each note type's Notes counts were read for: counts read for
     /// another field layout are not shown on the draft's rows.
@@ -301,7 +305,12 @@ public final class NoteTypesModel {
     /// with nothing shown before, at once (the detail's own progress then).
     private func showSelectionWhenReady() {
         guard let id = selection else { shownSelection = nil; return }
-        if shownSelection == nil || draft(id) != nil || recordFailed.contains(id) { shownSelection = id }
+        guard shownSelection != id, shownSelection == nil || draft(id) != nil || recordFailed.contains(id) else { return }
+        // A rename begun on the note type shown before never carries over to this one.
+        renaming = nil
+        renameRefusal = nil
+        renamingCard = nil
+        shownSelection = id
     }
 
     /// Reads ahead, with pure reads, the records of the rows beside the
@@ -320,7 +329,7 @@ public final class NoteTypesModel {
         let epoch = epoch
         warming.insert(id)
         detailTasks[id] = Task {
-            defer { warming.remove(id) }
+            defer { if self.epoch == epoch { warming.remove(id) } }
             do {
                 let record = try await backend.read(id)
                 guard !Task.isCancelled, self.epoch == epoch, records[id] == nil else { return }
@@ -337,6 +346,11 @@ public final class NoteTypesModel {
     }
 
     private func loadDetail(_ id: Int64, force: Bool = false) {
+        // Read ahead and now selected: it loads as a selection does (counts, issues, Used On).
+        if !force, records[id] != nil, !recordFailed.contains(id), !loaded.contains(id) {
+            finishLoading(id)
+            return
+        }
         // A cached note type whose counts were dropped (its notes changed) reads them again.
         if !force, records[id] != nil, !recordFailed.contains(id), typeCounts[id] == nil || fieldCounts[id] == nil || templateCardCounts[id] == nil {
             readCounts(id)
@@ -369,10 +383,12 @@ public final class NoteTypesModel {
     /// A record just read: its counts, issues and references, and the
     /// detail swaps to it in one step if it is the selection.
     private func finishLoading(_ id: Int64) {
+        loaded.insert(id)
         if selection == id { showSelectionWhenReady() }
         readCounts(id)
         refreshIssues(id, immediately: true)
-        Task { await readReferences(id) }
+        referencesTask[id]?.cancel()
+        referencesTask[id] = Task { await readReferences(id) }
     }
 
     /// The subtitle's counts and W3.1's Notes column, read in the background.
@@ -1123,6 +1139,12 @@ public final class NoteTypesModel {
         } else {
             refreshCounts()
         }
+        // A record only read ahead goes, to be read again when it is needed.
+        for id in records.keys where !loaded.contains(id) && !warming.contains(id)
+            && (changes.wholeCollection || changes.notetypes.contains(where: { $0.id == id })) {
+            records[id] = nil
+            detailTasks[id] = nil
+        }
         let touched = changes.wholeCollection ? Set(records.keys) : Set(changes.notetypes.map(\.id))
         for id in touched where records[id] != nil {
             if notesMoved || changes.wholeCollection || changes.notetypes.contains(where: { $0.id == id }) {
@@ -1134,7 +1156,7 @@ public final class NoteTypesModel {
             recheck(id)
         }
         if notesMoved, !changes.wholeCollection {
-            for id in records.keys where !touched.contains(id) { readCounts(id) }
+            for id in records.keys where !touched.contains(id) && loaded.contains(id) { readCounts(id) }
         }
         // Notes added or removed change W8's notes: the shown type reads it again.
         if notesMoved || changes.wholeCollection {
@@ -1180,7 +1202,7 @@ public final class NoteTypesModel {
         for task in blankTasks.values { task.cancel() }
         for task in referencesTask.values { task.cancel() }
         referencesTask = [:]
-        summaryTasks = [:]; detailTasks = [:]; warming = []; countTasks = [:]; fieldCountsBase = [:]; renameTokens = [:]
+        summaryTasks = [:]; detailTasks = [:]; warming = []; loaded = []; countTasks = [:]; fieldCountsBase = [:]; renameTokens = [:]
         issueTasks = [:]; blankTasks = [:]; blankKeys = [:]; cardCountsBase = [:]
         selectedCard = [:]; renamingCard = nil; templateCardCounts = [:]; issueReads = [:]; blankReads = [:]; editorRequest = nil
         flipRefused = false
