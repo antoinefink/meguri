@@ -38,6 +38,11 @@ nonisolated enum WelcomeChoice: CaseIterable, Sendable {
         case .startEmpty: String(localized: "Begin with no decks and add your own notes.", bundle: .module)
         }
     }
+    /// In place of Start Empty's explanation while it waits for sync work, which
+    /// nothing else on the page shows; Set Up Sync opens the section that says what it is.
+    static var waitsForSyncReason: String {
+        String(localized: "Unavailable while sync is busy. Set Up Sync shows why.", bundle: .module)
+    }
 }
 
 /// How the welcome screen arranges its heading and its choices (N18.3).
@@ -77,6 +82,9 @@ nonisolated enum WelcomeArrangement: Equatable, Sendable {
 struct HomeWelcome: View {
     struct Action {
         var enabled = true
+        /// Why a disabled row is unavailable, shown in place of its explanation;
+        /// nil where the reason is already on screen (a sheet or flow owns the window).
+        var unavailableReason: String? = nil
         var run: () -> Void = {}
     }
     var sync: Action? = nil
@@ -251,53 +259,87 @@ private struct WelcomeRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var decorated: Bool { !dynamicTypeSize.isAccessibilitySize }
 
+    /// A disabled row's symbol, title and chevron are dimmed; its reason line is not,
+    /// so the reason stays readable.
+    private var dimming: Double { action.enabled ? 1 : 0.5 }
+    /// The reason replaces the explanation only while the row is disabled.
+    private var secondaryLine: String {
+        action.enabled ? choice.explanation : action.unavailableReason ?? choice.explanation
+    }
+    private var showsReason: Bool { !action.enabled && action.unavailableReason != nil }
+
     private var text: some View {
         VStack(alignment: .leading, spacing: Spacing.xxSmall) {
             Text(verbatim: choice.title)
                 .foregroundStyle(.token(.textPrimary))
-            Text(verbatim: choice.explanation)
+                .opacity(dimming)
+            Text(verbatim: secondaryLine)
                 .font(.subheadline)
                 .foregroundStyle(.token(.textSecondary))
+                .opacity(showsReason ? 1 : dimming)
         }
         // Rows grow with the text size rather than cut it.
         .fixedSize(horizontal: false, vertical: true)
     }
 
     var body: some View {
-        Button(action: action.run) {
-            HStack(spacing: Spacing.small) {
-                // At the accessibility text sizes the text takes the row: a label there wraps
-                // each text around its symbol, and the state views leave their symbols out too.
-                if decorated {
-                    Label { text } icon: {
-                        // The title names the row; the symbol is decoration.
-                        Image(systemName: choice.systemImage)
-                            .accessibilityHidden(true)
-                    }
-                } else {
-                    text
-                }
-                Spacer(minLength: 0)
-                if decorated {
-                    // Drawn: these rows act in place, so the system adds no disclosure indicator of its own.
-                    Image(systemName: "chevron.forward")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(chevronStyle)
-                        .accessibilityHidden(true)
-                }
+        Group {
+            if action.enabled {
+                Button(action: action.run) { content }
+                #if os(macOS)
+                .buttonStyle(.plain)
+                #endif
+            } else {
+                // Not a button while unavailable: the Mac's disabled button style dims all
+                // of its content, the reason line too. It is still read as a dimmed button.
+                content
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isButton)
             }
-            .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
-            .contentShape(Rectangle())
-            .opacity(action.enabled ? 1 : 0.5)
         }
-        #if os(macOS)
-        .buttonStyle(.plain)
-        #endif
         .disabled(!action.enabled)
-        // The title names the row; the explanation is its hint.
+        // The title names the row; the explanation, or the reason, is its hint.
         .accessibilityLabel(Text(verbatim: choice.title))
-        .accessibilityHint(Text(verbatim: choice.explanation))
+        .accessibilityHint(Text(verbatim: secondaryLine))
         .accessibilityIdentifier(choice.identifier)
+    }
+
+    /// In a button the symbol takes the button's colour. An unavailable row is not a
+    /// button, and on touch the list would still tint its symbol: it dims with the title.
+    @ViewBuilder private var symbol: some View {
+        if action.enabled {
+            Image(systemName: choice.systemImage)
+        } else {
+            Image(systemName: choice.systemImage)
+                .foregroundStyle(.token(.textPrimary))
+                .opacity(dimming)
+        }
+    }
+
+    private var content: some View {
+        HStack(spacing: Spacing.small) {
+            // At the accessibility text sizes the text takes the row: a label there wraps
+            // each text around its symbol, and the state views leave their symbols out too.
+            if decorated {
+                Label { text } icon: {
+                    // The title names the row; the symbol is decoration.
+                    symbol.accessibilityHidden(true)
+                }
+            } else {
+                text
+            }
+            Spacer(minLength: 0)
+            if decorated {
+                // Drawn: these rows act in place, so the system adds no disclosure indicator of its own.
+                Image(systemName: "chevron.forward")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(chevronStyle)
+                    .opacity(dimming)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 
