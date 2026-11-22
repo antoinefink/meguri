@@ -264,7 +264,9 @@ fn committed_preset(rows: &ObserverRows<'_>, key: Key, cache: &mut HashMap<i64, 
         return Ok(found.clone());
     }
     let found = match rows.row_image(Table::Decks, &RowKey::Id(deck))? {
-        Some(cells) => match Deck::from_cells(&cells).ok().as_ref().and_then(deck_preset) {
+        // An unreadable deck: a build reads none of the decks (`Presets`),
+        // so this commit is applied as one too.
+        Some(cells) => match deck_preset(&Deck::from_cells(&cells).map_err(|_| Unusable)?) {
             Some(id) => {
                 let preset = rows.row_image(Table::DeckConfig, &RowKey::Id(id))?;
                 image_inputs(id, preset.as_ref()).ok()
@@ -499,7 +501,7 @@ pub(crate) fn replay_cards(
             let (queue, stop) = (&queue, &stop);
             handles.push(scope.spawn(move || {
                 let mut sums = Sums::default();
-                loop {
+                let replayed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loop {
                     let batch = match lock(queue).recv() {
                         Ok(batch) => batch,
                         Err(_) => break,
@@ -523,8 +525,14 @@ pub(crate) fn replay_cards(
                     if results.send(Done { cards, weight }).is_err() {
                         break;
                     }
+                }));
+                if replayed.is_err() {
+                    // Nothing this replay summed is used; keep taking the
+                    // queue so the reading thread is never left blocked.
+                    stop.store(true, Ordering::Relaxed);
+                    while lock(queue).recv().is_ok() {}
                 }
-                sums
+                replayed.map(|()| sums)
             }));
         }
         drop(results);
@@ -547,7 +555,7 @@ pub(crate) fn replay_cards(
                 }
             }
             forward(&done, &mut stopped);
-            !stopped && !cancel()
+            !stopped && !stop.load(Ordering::Relaxed) && !cancel()
         });
         if read.is_ok() && !stopped && !cancel() && !batch.is_empty() {
             let _ = inputs.send(std::mem::take(&mut batch));
@@ -565,12 +573,13 @@ pub(crate) fn replay_cards(
         let mut sums = Sums::default();
         for handle in handles {
             match handle.join() {
-                Ok(part) => sums.merge(part),
-                Err(panic) => std::panic::resume_unwind(panic),
+                Ok(Ok(part)) => sums.merge(part),
+                Ok(Err(panic)) | Err(panic) => std::panic::resume_unwind(panic),
             }
         }
         read?;
-        if cancel() {
+        // A replay that stopped early is never returned as a whole one.
+        if cancel() || stopped || stop.load(Ordering::Relaxed) {
             // SQLITE_INTERRUPT, as a cancelled read reports it.
             return Err(StorageError::Sqlite {
                 code: 9,
@@ -700,9 +709,7 @@ fn params_blob(params: &[f32]) -> Vec<u8> {
 }
 
 fn blob_params(blob: &[u8]) -> Vec<f32> {
-    blob.chunks_exact(4)
-        .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-        .collect()
+    blob.as_chunks::<4>().0.iter().map(|bytes| f32::from_le_bytes(*bytes)).collect()
 }
 
 /// Writes the values of `presets` a replay used. A preset already kept with

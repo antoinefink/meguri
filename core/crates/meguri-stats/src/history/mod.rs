@@ -409,6 +409,9 @@ pub fn card_states_in(
     })
 }
 
+/// A read of one part from a snapshot, for the keys a scope selects.
+type PartRead<'a, T> = dyn Fn(&Snapshot<'_>, Selection, &dyn Fn() -> bool) -> Result<Read<T>, StorageError> + 'a;
+
 /// What [`serve`] gives a part.
 enum Served<T> {
     Data(T, bool),
@@ -433,8 +436,8 @@ fn serve<T>(
     cancel: &CancelToken,
     progress: &mut dyn FnMut(Progress),
     fits: &dyn Fn(&Snapshot<'_>) -> Result<bool, StorageError>,
-    kept: &dyn Fn(&Snapshot<'_>, Selection, &dyn Fn() -> bool) -> Result<Read<T>, StorageError>,
-    cold: &dyn Fn(&Snapshot<'_>, Selection, &dyn Fn() -> bool) -> Result<Read<T>, StorageError>,
+    kept: &PartRead<'_, T>,
+    cold: &PartRead<'_, T>,
 ) -> Result<Served<T>, StatsError> {
     let shared = caches.history_shared();
     shared.want(Grid::of(context.next_day_at), Frame::of(context));

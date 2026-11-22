@@ -183,6 +183,12 @@ harness = false
 name = "stats_history_apply"
 harness = false
 
+# U290's Knowledge Over Time (stats/history-reads H19): the cold build with
+# the FSRS replay of every card, and its read without the component.
+[[bench]]
+name = "stats_knowledge_build"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]
