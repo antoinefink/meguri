@@ -229,6 +229,7 @@ fn active_sqlite_writer_is_busy_without_retiring_or_waiting() {
     let start=std::time::Instant::now();
     let error=f.create("content",vec![],1000).unwrap_err();
     assert_eq!(error.code,"busy");assert_eq!(error.retry_after,Some(1));
+    assert_eq!(error.mcp_detail,Some(Detail::SqliteAccessBusy));
     assert!(start.elapsed()<std::time::Duration::from_millis(250));
     assert!(!f.db.is_autocommit());f.db.execute_batch("ROLLBACK").unwrap();
     assert_eq!(f.db.query_row("SELECT count(*) FROM notes",[],|r|r.get::<_,i64>(0)).unwrap(),0);
@@ -396,4 +397,26 @@ fn omitted_tag_patches_preserve_legacy_bytes_registry_and_durable_noops() {
         f.edit(&first.note_id,&original.revision,&[("Front","changed")]).unwrap();
         let after=snapshot();assert_eq!(after.0.0,legacy);assert_eq!(after.1,before.1);
     }
+}
+
+#[test]
+fn sqlite_diagnostics_distinguish_open_from_access_without_error_text() {
+    for code in [rusqlite::ErrorCode::DatabaseBusy,rusqlite::ErrorCode::DatabaseLocked] {
+        let raw=||rusqlite::Error::SqliteFailure(rusqlite::ffi::Error {
+            code,extended_code:0,
+        },Some("generated private SQLite/path/content".into()));
+        let open=sql_open_error(raw());
+        let access=sql_error(raw());
+        let config=sql_open_storage_error(raw());
+        assert_eq!((config.code,config.mcp_detail),("busy",Some(Detail::SqliteOpenBusy)));
+        assert_eq!((open.code,open.mcp_detail),("busy",Some(Detail::SqliteOpenBusy)));
+        assert_eq!((access.code,access.mcp_detail),("busy",Some(Detail::SqliteAccessBusy)));
+    }
+    let raw=||rusqlite::Error::InvalidQuery;
+    assert_eq!(sql_open_error(raw()).mcp_detail,Some(Detail::SqliteOpen));
+    assert_eq!(sql_error(raw()).mcp_detail,Some(Detail::SqliteAccess));
+    assert_eq!(sql_open_error(raw()).code,"unsupported_collection");
+    assert_eq!(sql_error(raw()).code,"unsupported_collection");
+    let config=sql_open_storage_error(raw());
+    assert_eq!((config.code,config.mcp_detail),("storage_unavailable",Some(Detail::SqliteOpen)));
 }

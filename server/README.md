@@ -134,7 +134,14 @@ the container; it is read at process startup and is not stored in the instance.
 For MCP, `off` emits nothing and `info` records failures and rejections.
 `debug` emits one `mcp_response_ready` record per prepared MCP response.
 Records contain a fixed stage, operation or tool name, HTTP status, outcome
-and reason. Debug records also include elapsed milliseconds. HTTP 200
+and reason. An optional typed `detail` field uses only these fixed labels:
+`publication_gate`, `native_writer`, `collection_path`, `collection_pin`,
+`collection_storage`, `collection_worker`, `authority_storage`, `collection_open`,
+`collection_access`, `sqlite_open`, `sqlite_open_busy`, `sqlite_access`,
+`sqlite_access_busy`. The `sqlite_*` labels identify directly observed SQLite
+failures; `*_busy` identifies BUSY/LOCKED. Phase labels for helpers that erased
+the cause make no claim about the underlying cause. Details never enter tool
+responses. Debug records also include elapsed milliseconds. HTTP 200
 success, invalid parameters, tool errors and permission requests have
 distinct outcomes. Each record describes response preparation. MCP diagnostics never include request values,
 IDs, headers, paths, credentials, collection content or internal error text.
