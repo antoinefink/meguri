@@ -2,6 +2,9 @@ import AppModel
 import Charts
 import DesignSystem
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// A chart's selection (S8.3): the bin under the pointer or the finger, and
 /// whether a click, a touch or the keyboard pinned it. A caller that shares one
@@ -103,6 +106,7 @@ struct StatsChartPlot: View {
 
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
     @Environment(\.calendar) private var calendar
     @Environment(\.appClock) private var clock
@@ -331,7 +335,8 @@ struct StatsChartPlot: View {
 
     @AxisContentBuilder private var xAxis: some AxisContent {
         if isReady {
-            let labels = format.labelledBins(data.bins, maximum: size.axisLabels)
+            // Fewer labels at the accessibility sizes, so they never collide.
+            let labels = format.labelledBins(data.bins, maximum: dynamicTypeSize.isAccessibilitySize ? max(2, size.axisLabels / 2 - 1) : size.axisLabels)
             AxisMarks(values: labels.keys.sorted().map(Self.id)) { value in
                 AxisValueLabel {
                     if let id = value.as(String.self), let bin = Self.bin(id), let label = labels[bin] {
@@ -461,19 +466,15 @@ struct StatsChartPlot: View {
                 focused = true
             })
             #else
-            // Touch: hold, then drag along the plot; a plain swipe still
-            // scrolls the page. The selection stays after the finger lifts, so
-            // the callout's button can be tapped; a short tap clears it.
-            .gesture(
-                LongPressGesture(minimumDuration: 0.25)
-                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-                    .onChanged { value in
-                        if case let .second(true, drag) = value, let drag {
-                            selection = StatsChartSelection(bin: bin(at: drag.location.x + plot.minX, proxy: proxy, plot: plot), pinned: true)
-                        }
-                    }
-                    .exclusively(before: TapGesture().onEnded { selection = .none })
-            )
+            // Touch: hold, then drag along the plot. A UIKit long press, so the
+            // scroll view's pan wins a swipe that moves first and the press
+            // wins a finger held still (S8.3: a plain swipe still scrolls).
+            // The selection stays after the finger lifts, so the callout's
+            // button can be tapped; a short tap clears it.
+            .gesture(StatsHoldGesture { location in
+                selection = StatsChartSelection(bin: bin(at: location.x + plot.minX, proxy: proxy, plot: plot), pinned: true)
+            })
+            .simultaneousGesture(TapGesture().onEnded { selection = .none })
             #endif
             .accessibilityHidden(true)
     }
@@ -532,6 +533,28 @@ struct StatsChartPlot: View {
         showInBrowse?(bin)
     }
 }
+
+#if os(iOS)
+/// A hold of 0.25 s, then every move until the finger lifts, in the plot's
+/// coordinates: UIKit's long press, which the scroll view's pan fails against
+/// a still finger and beats on a swipe.
+struct StatsHoldGesture: UIGestureRecognizerRepresentable {
+    let changed: (CGPoint) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = 0.25
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        switch recognizer.state {
+        case .began, .changed: changed(context.converter.localLocation)
+        default: break
+        }
+    }
+}
+#endif
 
 /// An open point (S7.2): a ring in the series' colour on the box's background.
 struct StatsOpenPoint: View {

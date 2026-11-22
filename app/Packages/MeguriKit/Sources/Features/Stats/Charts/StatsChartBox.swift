@@ -200,27 +200,43 @@ public struct StatsChartBox<Accessory: View>: View {
         )
     }
 
-    private var figuresView: some View {
-        let layout = stacks
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xSmall))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: Spacing.medium))
-        return layout {
-            ForEach(figures) { item in
-                VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-                    Text(verbatim: item.label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(verbatim: isReady ? item.value ?? "—" : "—")
-                        .font(.subheadline.weight(.medium))
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .foregroundStyle(isReady && item.value != nil ? .primary : .secondary)
+    /// The small figures in one row; two to a row at compact width when there
+    /// are four (decided by width class and count, never by the values, so the
+    /// box keeps its size when they arrive); one column at the accessibility sizes.
+    @ViewBuilder private var figuresView: some View {
+        if stacks {
+            VStack(alignment: .leading, spacing: Spacing.xSmall) { figureCells }
+        } else if horizontalSizeClass == .compact, figures.count > 3 {
+            Grid(alignment: .topLeading, horizontalSpacing: Spacing.medium, verticalSpacing: Spacing.xSmall) {
+                ForEach(Array(stride(from: 0, to: figures.count, by: 2)), id: \.self) { start in
+                    GridRow {
+                        ForEach(figures[start..<min(start + 2, figures.count)]) { figureCell($0) }
+                    }
                 }
-                .frame(maxWidth: stacks ? nil : .infinity, alignment: .leading)
-                .accessibilityElement(children: .combine)
             }
+        } else {
+            HStack(alignment: .top, spacing: Spacing.medium) { figureCells }
         }
+    }
+
+    private var figureCells: some View {
+        ForEach(figures) { figureCell($0) }
+    }
+
+    private func figureCell(_ item: StatsSmallFigure) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            Text(verbatim: item.label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(verbatim: isReady ? item.value ?? "—" : "—")
+                .font(.subheadline.weight(.medium))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundStyle(isReady && item.value != nil ? .primary : .secondary)
+        }
+        .frame(maxWidth: stacks ? nil : .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     private var footnoteView: some View {

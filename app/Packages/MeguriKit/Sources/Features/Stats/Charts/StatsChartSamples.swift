@@ -129,8 +129,9 @@ public struct StatsChartSamples: Sendable {
             unit: .fraction,
             yScale: .fraction(lower: 0.7),
             calloutLines: [
-                StatsCalloutLine(id: "remembered", name: "Remembered", values: (0..<n).map { i in values[i].map { ($0 * 1_200).rounded() } }, unit: .count),
-                StatsCalloutLine(id: "forgotten", name: "Forgotten", values: (0..<n).map { i in values[i].map { ((1 - $0) * 1_200).rounded() } }, unit: .count),
+                // Open bins have fewer than 20 counted reviews.
+                StatsCalloutLine(id: "remembered", name: "Remembered", values: (0..<n).map { i in values[i].map { ($0 * (open.contains(i) ? 15 : 1_200)).rounded() } }, unit: .count),
+                StatsCalloutLine(id: "forgotten", name: "Forgotten", values: (0..<n).map { i in values[i].map { ((1 - $0) * (open.contains(i) ? 15 : 1_200)).rounded() } }, unit: .count),
             ]
         )
     }
