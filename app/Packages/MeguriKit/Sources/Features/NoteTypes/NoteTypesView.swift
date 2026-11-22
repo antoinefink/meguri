@@ -42,12 +42,7 @@ public struct NoteTypesView: View {
                     .accessibilityIdentifier("noteTypes.list.discard.discard")
                 Button(role: .cancel) { model.confirmingRevert = false } label: { Text("noteTypes.discard.keepEditing", bundle: .module) }
             }
-            .alert(Text("noteTypes.failed.title", bundle: .module), isPresented: Binding(
-                get: { model.failure != nil }, set: { if !$0 { model.failure = nil } })) {
-                Button(role: .cancel) { model.failure = nil } label: { Text("noteTypes.failed.ok", bundle: .module) }
-            } message: {
-                Text("noteTypes.failed.message", bundle: .module)
-            }
+            .modifier(SaveOutcomeAlerts(model: model))
             .onAppear { model.appear() }
     }
 
@@ -177,7 +172,9 @@ public struct CardsPlaceholder: View {
     }
 }
 
-/// D5 step 5: "Updating 212 of 412 notes", shown once a save has run for a moment.
+/// D5 step 5: "Updating 212 of 412 notes", shown once a save has run for a
+/// moment; with Meguri Sync, the job's stage first ("Syncing…", then the
+/// count, then "Uploading…", D6).
 struct SaveProgressView: View {
     let progress: NoteTypesModel.Progress
     @Environment(\.locale) private var locale
@@ -186,10 +183,17 @@ struct SaveProgressView: View {
     var body: some View {
         HStack(spacing: Spacing.xSmall) {
             ProgressView().controlSize(.small)
-            if let total = progress.total {
-                Text(NoteTypesStrings.progress(completed: progress.completed, total: total, locale: locale))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            switch progress.stage {
+            case .syncing?:
+                Text("noteTypes.progress.syncing", bundle: .module).foregroundStyle(.secondary)
+            case .uploading?:
+                Text("noteTypes.progress.uploading", bundle: .module).foregroundStyle(.secondary)
+            case .saving?, nil:
+                if let total = progress.total {
+                    Text(NoteTypesStrings.progress(completed: progress.completed, total: total, locale: locale))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
             }
         }
         .opacity(visible ? 1 : 0)
@@ -200,6 +204,36 @@ struct SaveProgressView: View {
             try? await Task.sleep(for: .milliseconds(500))
             visible = true
         }
+    }
+}
+
+/// What a save that ended needs to tell: nothing was changed (D5 step 6;
+/// with Meguri Sync, D6 step 1's stop), or the changes are saved on this
+/// device but not uploaded (D6 step 4).
+struct SaveOutcomeAlerts: ViewModifier {
+    @Bindable var model: NoteTypesModel
+    @Environment(\.locale) private var locale
+
+    func body(content: Content) -> some View {
+        content
+            .alert(Text("noteTypes.failed.title", bundle: .module), isPresented: Binding(
+                get: { model.failure != nil }, set: { if !$0 { model.failure = nil } })) {
+                Button(role: .cancel) { model.failure = nil } label: { Text("noteTypes.failed.ok", bundle: .module) }
+            } message: {
+                if model.failure == .syncStopped {
+                    Text("noteTypes.failed.syncMessage", bundle: .module)
+                } else if model.failure == .unconfirmed {
+                    Text("noteTypes.failed.unconfirmedMessage", bundle: .module)
+                } else {
+                    Text("noteTypes.failed.message", bundle: .module)
+                }
+            }
+            .alert(Text("noteTypes.notUploaded.title", bundle: .module), isPresented: Binding(
+                get: { model.notice != nil && model.failure == nil }, set: { if !$0 { model.notice = nil } })) {
+                Button(role: .cancel) { model.notice = nil } label: { Text("noteTypes.failed.ok", bundle: .module) }
+            } message: {
+                Text(verbatim: NoteTypesStrings.notUploaded(device: NoteTypesStrings.device(locale: locale), locale: locale))
+            }
     }
 }
 

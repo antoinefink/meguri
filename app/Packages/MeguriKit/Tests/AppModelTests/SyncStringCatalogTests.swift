@@ -5,6 +5,8 @@ import Testing
 /// `sync/status-strings` T19.9: a row for each key of T19.
 @MainActor @Suite struct SyncStringCatalogTests {
     private static let t19: [(String, String)] = [
+        // MP7 step 5's action, named by `sync/meguri-provider` MP7 (not yet in T19.5's rows).
+        ("sync.needsYou.meguri.action.upload", "Upload…"),
         ("sync.settings.sync.section", "Sync"), ("sync.service.control", "Service"), ("sync.service.off", "Off"),
         ("sync.service.meguri", "Meguri Sync"), ("sync.service.iCloud.name", "iCloud"), ("sync.service.beta", "Beta"),
         ("sync.service.iCloud.accessibility", "iCloud, Beta"),
@@ -86,8 +88,11 @@ import Testing
         ("sync.needsYou.meguri.storage", "Meguri couldn’t save to this device, so setup stopped."),
         ("sync.needsYou.meguri.setupFailed", "Setting up Meguri Sync didn’t finish, and nothing was replaced."),
         ("sync.needsYou.meguri.chooseCollection", "Choose which collection to keep before syncing continues."),
+        // MP7 step 5, named by `sync/meguri-provider` MP7 (not yet in T19.5's rows).
+        ("sync.needsYou.meguri.structureUpload", "Upload this collection to finish your note type changes."),
         ("sync.needsYou.meguri.mediaStopped.download", "Downloading the media didn’t finish, so syncing hasn’t started."),
-        ("sync.needsYou.meguri.mediaStopped", "Transferring the media didn’t finish, so syncing hasn’t started.")
+        ("sync.needsYou.meguri.mediaStopped", "Transferring the media didn’t finish, so syncing hasn’t started."),
+        ("sync.needsYou.meguri.structureUpload", "Upload this collection to finish your note type changes.")
     ]
     /// Needs you rows whose text is an earlier section's key.
     private static let needsYouReused = ["sync.status.unavailable.noAccount", "sync.status.unavailable.restricted",

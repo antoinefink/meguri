@@ -3,11 +3,12 @@ import Foundation
 import Observation
 
 /// The Note Types section (`notetypes/workspace` W2 to W4, W13;
-/// `notetypes/draft-save` D1 to D5, D8; layout N22.1, N22.2, N22.5): the
+/// `notetypes/draft-save` D1 to D8; layout N22.1, N22.2, N22.5): the
 /// list with its counts and filter, one draft per note type that survives
 /// leaving the section, the Fields tab's edits with the editor's own undo,
-/// and Save with its one sheet. Held by `ReviewCollection` above the layout
-/// switch. Nothing here writes before Save.
+/// and Save with its one sheet, alone (D5) or as Meguri Sync's structure
+/// save job (D6, `sync/meguri-provider` MP7). Held by `ReviewCollection`
+/// above the layout switch. Nothing here writes before Save.
 @Observable @MainActor
 public final class NoteTypesModel {
     public nonisolated enum Tab: String, Sendable, Hashable, CaseIterable { case fields, cards }
@@ -32,16 +33,32 @@ public final class NoteTypesModel {
         public var rows: [NoteTypeSaveRow] { NoteTypeSaveRow.rows(summary) }
     }
 
-    /// A running save (D5 step 5): "Updating <i> of <n> notes".
+    /// A running save (D5 step 5): "Updating <i> of <n> notes"; with Meguri
+    /// Sync, the job's stage (D6).
     public nonisolated struct Progress: Sendable, Hashable {
         public let notetypeId: Int64
         public var completed: UInt64 = 0
         public var total: UInt64?
+        /// Nil for a save on this device alone.
+        public var stage: NoteTypeSyncStage?
     }
 
     public nonisolated enum Failure: Sendable, Hashable {
         /// The save wrote nothing (D5 step 6).
         case notSaved
+        /// Meguri Sync stopped before the save (D6 step 1): nothing was
+        /// changed, and the sync status says why.
+        case syncStopped
+        /// Meguri Sync's job ended with an error and whether it saved could
+        /// not be read: the draft stays, to be checked before saving again.
+        case unconfirmed
+    }
+
+    /// Said once a save has ended, when the person must know more than "saved".
+    public nonisolated enum Notice: Sendable, Hashable {
+        /// Save and Upload saved on this device, but the server does not hold
+        /// the changes yet (D6 step 4): the sync status shows what to do.
+        case notUploaded
     }
 
     /// A refusal of a typed field name (V5), shown under the row or field.
@@ -79,6 +96,11 @@ public final class NoteTypesModel {
     public private(set) var preparing: Int64?
     public private(set) var progress: Progress?
     public var failure: Failure?
+    public var notice: Notice?
+    /// D4's unreachable case: the check made as the sheet opened found that
+    /// Meguri Sync does not answer. The sheet then says so and its button
+    /// reads Save: the save runs now and the upload is left pending.
+    public private(set) var meguriUnreachable = false
     /// "Discard changes?" for Revert (D1).
     public var confirmingRevert = false
 
@@ -118,14 +140,21 @@ public final class NoteTypesModel {
     /// sheet holds the window, and then nothing is asked or saved.
     @ObservationIgnored public var presentQuestion: @MainActor () -> Bool = { true }
     @ObservationIgnored public var dismissQuestion: @MainActor () -> Void = {}
-    /// D6's Save and Upload: Meguri Sync's structure save job (U269, U285).
-    /// Not built yet: with no job, the sheet's Save and Upload is disabled
-    /// and nothing is saved on this device alone (D3: never D5's local save
-    /// for a schema-classified save with a ready binding).
-    /// The job runs with the note type locked like a local save; it returns
-    /// when the save committed and throws the save's refusal otherwise
-    /// (`LossesChanged`, `Stale`), which is handled as D5 step 6 says.
-    @ObservationIgnored public var meguriSyncSave: (@MainActor (NotetypeStructureDraft, NotetypeDraftSummary) async throws -> Void)?
+    /// D6's Save and Upload: Meguri Sync's structure save job (MP7). Without
+    /// a ready binding Save and Upload is disabled and the sheet says why;
+    /// nothing is saved on this device alone (D3: never D5's local save for
+    /// a schema-classified save while Meguri Sync is chosen). The job runs
+    /// with the note type locked like a local save; its refusals
+    /// (`LossesChanged`, `Stale`) are handled as D5 step 6 says.
+    @ObservationIgnored public var meguriSync: (any NoteTypesMeguriSync)?
+    /// The reachability check that belongs to the shown question.
+    @ObservationIgnored private var reachabilityToken: UInt64 = 0
+    @ObservationIgnored private var reachabilityTask: Task<Void, Never>?
+    /// Meguri Sync's job is running for a Save (its cancellation reaches the job).
+    @ObservationIgnored private var syncJobRunning = false
+    /// The app is leaving (background, close): a Save that reaches its
+    /// submission now starts no Meguri Sync job.
+    @ObservationIgnored private var leaving = false
     /// Text a view holds but has not committed (a rename field, the
     /// inspector's Name or Placeholder), committed before Save reads the draft.
     /// Each returns false when the text was refused (V5), and Save stops.
@@ -517,19 +546,18 @@ public final class NoteTypesModel {
                 return
             }
             preparing = nil
-            await submit(id, draft: draft, confirmed: .init(), route: decision.route, summary: summary)
+            await submit(id, draft: draft, confirmed: .init(), route: decision.route, reachable: true)
         }
     }
 
-    /// Meguri Sync's structure save job exists (U269); until it does, the
-    /// sheet says why Save and Upload is off.
-    public var canSaveWithMeguriSync: Bool { meguriSyncSave != nil }
+    /// Whether Save and Upload can run now; the sheet says why not.
+    public var meguriSyncState: NoteTypeSyncState { meguriSync?.noteTypeSyncState ?? .notSetUp }
 
-    /// The sheet's confirm button is enabled: a local save, or Meguri
-    /// Sync's job once it exists.
+    /// The sheet's confirm button is enabled: a local save, or Meguri Sync's
+    /// job with a ready binding.
     public var canConfirm: Bool {
         guard let question, !confirming else { return false }
-        return question.decision.route == .local || meguriSyncSave != nil
+        return question.decision.route == .local || (meguriSync != nil && meguriSyncState == .ready)
     }
 
     /// The sheet's confirm button: D5 step 4, then the op with the counts
@@ -557,8 +585,9 @@ public final class NoteTypesModel {
                 return
             }
             let route = NoteTypeSaveDecision.decide(latest, service: service).route
+            let reachable = !meguriUnreachable
             closeQuestion()
-            await submit(id, draft: draft, confirmed: confirmed, route: route, summary: latest)
+            await submit(id, draft: draft, confirmed: confirmed, route: route, reachable: reachable)
         }
     }
 
@@ -576,27 +605,54 @@ public final class NoteTypesModel {
 
     private func ask(_ question: Question) {
         preparing = nil
+        let fresh = self.question == nil
         self.question = question
         if !presentQuestion() {
             self.question = nil
             failure = .notSaved
+            return
+        }
+        if question.decision.route == .meguriSync { checkReachability(fresh: fresh) }
+    }
+
+    /// D4: the check made as the sheet opens. The sheet shows Meguri Sync's
+    /// paragraph until the check finds the server does not answer; a sheet
+    /// shown again keeps what the last check found until this one answers.
+    private func checkReachability(fresh: Bool) {
+        reachabilityToken &+= 1
+        let token = reachabilityToken
+        if fresh { meguriUnreachable = false }
+        reachabilityTask?.cancel()
+        guard let meguriSync else { return }
+        reachabilityTask = Task {
+            let reachable = await meguriSync.noteTypeSyncReachable()
+            guard !Task.isCancelled, token == reachabilityToken, question != nil, !confirming else { return }
+            meguriUnreachable = !reachable
         }
     }
 
     private func closeQuestion() {
         question = nil
+        reachabilityToken &+= 1
+        reachabilityTask?.cancel()
         dismissQuestion()
     }
 
     private func submit(_ id: Int64, draft: NoteTypeDraft, confirmed: NotetypeConfirmedLosses, route: NoteTypeSaveDecision.Route,
-                        summary: NotetypeDraftSummary) async {
-        let meguriSyncSave = meguriSyncSave
-        // D6: Meguri Sync's job (U269) owns the round, the save and the upload.
-        guard route == .local || meguriSyncSave != nil else { return }
+                        reachable: Bool) async {
+        let meguriSync = meguriSync
+        // D6: Meguri Sync's job owns the round, the save and the upload; it
+        // runs only with a ready binding, read again now.
+        guard route == .local || (meguriSync != nil && meguriSyncState == .ready) else {
+            if route == .meguriSync { failure = .notSaved }
+            return
+        }
         guard writable() else { failure = .notSaved; return }
+        // Leaving waits for this Save: a job started now would make it wait for a whole round and upload.
+        if route == .meguriSync, leaving { return }
         // D5 step 3's deck creations: the Fields tab sets no deck override.
         let epoch = epoch
-        progress = Progress(notetypeId: id)
+        progress = Progress(notetypeId: id, stage: route == .local ? nil : (reachable ? .syncing : .saving))
         do {
             if route == .local {
                 try await backend.save(draft.structureDraft(confirmed: confirmed)) { [weak self] completed, total in
@@ -604,8 +660,29 @@ public final class NoteTypesModel {
                     self?.progress?.completed = completed
                     self?.progress?.total = total
                 }
-            } else if let meguriSyncSave {
-                try await meguriSyncSave(draft.structureDraft(confirmed: confirmed), summary)
+            } else if let meguriSync {
+                syncJobRunning = true
+                defer { syncJobRunning = false }
+                let result = try await meguriSync.saveNotetypeStructure(draft.structureDraft(confirmed: confirmed), reachable: reachable) {
+                    [weak self] stage, completed, total in
+                    guard self?.progress?.notetypeId == id else { return }
+                    self?.progress?.stage = stage
+                    self?.progress?.completed = completed
+                    self?.progress?.total = total
+                }
+                guard self.epoch == epoch else { return }
+                progress = nil
+                switch result {
+                case .saved(let uploaded):
+                    saved(id)
+                    // Offline, the sheet already said the upload waits (D4); otherwise say it did not happen.
+                    if !uploaded, reachable { notice = .notUploaded }
+                case .syncStopped: failure = .syncStopped
+                case .cancelled: break
+                case .notSaved: failure = .notSaved
+                case .unconfirmed: failure = .unconfirmed
+                }
+                return
             }
             guard self.epoch == epoch else { return }
             progress = nil
@@ -724,14 +801,21 @@ public final class NoteTypesModel {
         if question != nil { closeQuestion() }
         phase = .idle; items = []; selection = nil; records = [:]; recordFailed = []; typeCounts = [:]; fieldCounts = [:]
         drafts = [:]; revisions = [:]; summaries = [:]; references = [:]; changedElsewhere = []; stale = []; selectedField = [:]
-        renaming = nil; renameRefusal = nil; preparing = nil; progress = nil; failure = nil; confirming = false
+        renaming = nil; renameRefusal = nil; preparing = nil; progress = nil; failure = nil; notice = nil; confirming = false
+        meguriUnreachable = false
         // A section on screen reads the new collection's list at once.
         if appeared { reloadList() }
     }
 
     /// Waits for a save that runs (the app goes to the background or closes
-    /// the collection): a save is never cancelled halfway by the app.
+    /// the collection): a save is never cancelled halfway by the app. Meguri
+    /// Sync's job is asked to stop where MP7 allows (before the save nothing
+    /// is saved; after it the upload is left pending), so leaving never waits
+    /// for a whole upload.
     public func cancelAndDrain() async {
+        leaving = true
+        defer { leaving = false }
+        if syncJobRunning { meguriSync?.cancelNotetypeStructureSave() }
         await saveTask?.value
     }
 
@@ -741,6 +825,7 @@ public final class NoteTypesModel {
     func settle() async {
         for _ in 0..<50 { await Task.yield() }
         await saveTask?.value
+        await reachabilityTask?.value
         for task in summaryTasks.values { await task.value }
         for task in detailTasks.values { await task.value }
         for task in countTasks.values.flatMap({ $0 }) { await task.value }
@@ -776,5 +861,11 @@ public final class NoteTypesModel {
     @_spi(MeguriTestHooks) public func stageQuestion(_ id: Int64, summary: NotetypeDraftSummary) {
         guard let draft = drafts[id] else { return }
         ask(Question(notetypeId: id, name: draft.name, summary: summary, decision: .decide(summary, service: service())))
+    }
+
+    /// Shows a running save's progress for the staged draft, the note type
+    /// locked (test hooks' routes).
+    @_spi(MeguriTestHooks) public func stageProgress(_ id: Int64, stage: NoteTypeSyncStage?, completed: UInt64 = 0, total: UInt64? = nil) {
+        progress = Progress(notetypeId: id, completed: completed, total: total, stage: stage)
     }
 }

@@ -18,8 +18,13 @@ extension TestHooks {
     /// - `notetypes/save/losses`: that draft's Save sheet with iCloud or no
     ///   service: the losses, then Cancel and a destructive Save.
     /// - `notetypes/save/meguri-sync`: the same with a ready Meguri Sync
-    ///   binding: the sync paragraph and Save and Upload (U269 not built, so
-    ///   the button is disabled).
+    ///   binding: the sync paragraph and Save and Upload.
+    /// - `notetypes/save/meguri-unreachable`: the same while Meguri Sync
+    ///   cannot be reached (D4): the save runs now, the upload waits; Save.
+    /// - `notetypes/save/meguri-not-set-up`: Meguri Sync chosen but not set
+    ///   up: Save and Upload disabled, with what to do first.
+    /// - `notetypes/save/uploading`: Save and Upload running, its upload in
+    ///   the toolbar ("Uploading…"), the note type locked.
     /// - `notetypes/first-run`: the shell with no collection on this device
     ///   (N18.3): Today's welcome, no deck, and no Note Types row; the route
     ///   asks for Note Types, and the shell keeps Today.
@@ -30,6 +35,9 @@ extension TestHooks {
             registry.registerShell("notetypes/fields/edited") { _ in launch(.edited) }
             registry.registerShell("notetypes/save/losses") { _ in launch(.question(.other)) }
             registry.registerShell("notetypes/save/meguri-sync") { _ in launch(.question(.meguriSync)) }
+            registry.registerShell("notetypes/save/meguri-unreachable") { _ in launch(.question(.meguriSync), sync: .init(reachable: false)) }
+            registry.registerShell("notetypes/save/meguri-not-set-up") { _ in launch(.question(.meguriSync), sync: .init(state: .notSetUp)) }
+            registry.registerShell("notetypes/save/uploading") { _ in launch(.progress(.uploading)) }
             registry.registerShell("notetypes/first-run") { _ in firstRun() }
         }
 
@@ -63,12 +71,16 @@ extension TestHooks {
             case list
             case typical, edited
             case question(NoteTypeSaveService)
+            /// Save and Upload running at this stage of its job.
+            case progress(NoteTypeSyncStage)
         }
 
-        @MainActor static func launch(_ state: State) -> ShellLaunch {
+        @MainActor static func launch(_ state: State, sync: SampleMeguriSync = .init()) -> ShellLaunch {
             let backend = SampleNoteTypesBackend()
             let model = NoteTypesModel(backend: backend)
             if case .question(let service) = state { model.service = { service } }
+            if case .progress = state { model.service = { .meguriSync } }
+            model.meguriSync = sync
             var features = ShellSample.features(.typical)
             features.todayRoot = true
             #if os(macOS)
@@ -101,7 +113,7 @@ extension TestHooks {
                     switch state {
                     case .list, .typical:
                         model.selectedField[id] = 1
-                    case .edited, .question:
+                    case .edited, .question, .progress:
                         model.stage(id) { draft in
                             draft.delete(11)
                             let added = draft.addField()
@@ -112,6 +124,9 @@ extension TestHooks {
                             if let draft = model.draft(id), let summary = try? await backend.summary(draft.structureDraft()) {
                                 model.stageQuestion(id, summary: summary)
                             }
+                        } else if case .progress(let stage) = state {
+                            await model.settleForTestHooks()
+                            model.stageProgress(id, stage: stage)
                         } else {
                             await model.settleForTestHooks()
                         }
@@ -119,6 +134,22 @@ extension TestHooks {
                 }
             }
         }
+    }
+
+    /// Meguri Sync for the routes: a binding in the state asked for, and a
+    /// job that never runs (nothing is saved or sent).
+    @MainActor final class SampleMeguriSync: NoteTypesMeguriSync {
+        let noteTypeSyncState: NoteTypeSyncState
+        private let reachable: Bool
+        init(state: NoteTypeSyncState = .ready, reachable: Bool = true) {
+            noteTypeSyncState = state
+            self.reachable = reachable
+        }
+        func noteTypeSyncReachable() async -> Bool { reachable }
+        func saveNotetypeStructure(_ draft: NotetypeStructureDraft, reachable: Bool,
+                                   progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)
+            async throws -> NoteTypeSyncSaveResult { .notSaved }
+        func cancelNotetypeStructureSave() {}
     }
 
     /// A made-up collection's note types, in memory (sample content only).
