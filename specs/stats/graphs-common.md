@@ -4,6 +4,7 @@ Spec: stats/graphs-common
 Requirements: R1281, R1282, R1283, R1285, R1289, R1290, R1291, R1292, R1293, R1294, R1295, R1349, R1350, R1351, R1352, R1353, R1355, R1356, R1357, R1360, R1367, R1446, R1838
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/graphs/scope/
+Status: Under review (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
 
 The machinery every Stats-screen graph shares (U98): which cards and review-log rows a request reads (scope and history), how it reads them, what it returns, the column caches behind it, and what the Stats shell (U225) can rely on. Individual graphs are `stats/graphs-revlog` (U99) and `stats/graphs-cards` (U101); binning, ranges and text are `stats/graph-presentation` (U226); browse queries are `stats/browse-queries`. Days are `stats/day-buckets`, the Today section `stats/studied-today`.
 
@@ -55,6 +56,8 @@ The cards of Deck `D` are those whose `did` is one of the scope's decks, and tho
 
 ## G3. History
 
+Changed 2026-11-22 (round 11): the Statistics page has no history control of its own: its period (`stats/statistics-page` S3.2) asks for `last12Months` for 1M to 1Y and `allHistory` for All, and its first period is All, so the default of a first open is `allHistory` (R1352's default is superseded in part). The values, windows and rules below are unchanged.
+
 The history control has two values (R1352):
 
 | Value | Label (U225) | Rows read |
@@ -81,6 +84,8 @@ Rows are read by their typed values (`model/row-records` R1), with the tolerance
 
 ## G5. Graphs
 
+Changed 2026-11-22 (round 11): the Statistics page also asks for the Meguri parts of `stats/history-reads` H5 (`card_states_over_time`, `started`, `knowledge_over_time`, `retention_by_day`, `by_deck`, `activity_days`, `studied_today`), which run on this machinery with the scopes Collection and Deck only, and for the extras H6 to H8 inside Anki's records; every Data result of a page request also carries H9's `oldest_day`. It does not ask for `calendar` or `today`.
+
 The graph set, in Anki's order (R1357): Today, Future Due, Calendar, Reviews, Card Counts, Intervals, Stability, Difficulty, Retrievability, Retention, Hourly Breakdown, Answer Buttons, Added.
 
 - Card Ease is not computed or returned (R1360).
@@ -102,6 +107,8 @@ Each graph's record holds aggregates at the finest resolution, never one value p
 - The day keys a review graph returns lie in the history window; a card graph's lie wherever its cards put them. How many days a chart shows is U226's.
 
 ## G7. Graph preferences
+
+Changed 2026-11-22 (round 11): the Statistics page writes none of the three keys: their effects are fixed (`stats/statistics-page` S3.4). The core still reads and returns them; this section's write rule applies to no control.
 
 Three synced config keys change what graphs show. The result carries their values as read in G1's snapshot:
 
@@ -145,6 +152,8 @@ One of:
 An error or Context changed result never adds to the memo (G8.3) and never changes the caches.
 
 ### G8.3 Refreshes and the memo
+
+Changed 2026-11-22 (round 11): the Statistics page makes one request per refresh, naming every part, and the core returns the parts in tiers as they are ready, with progress for the slow ones (`stats/history-reads` H15). The two-request rule below applies to no screen; the context token, the memo and the rule that every request resolves the whole scope hold for that one request.
 
 A refresh is one computation of the screen for a scope and history: opening Stats, a scope or history change, or a refresh after a change (G10). Each refresh takes a new context (G1).
 
@@ -224,6 +233,8 @@ Each committed change set (`engine/change-stream` S1, S2) updates the caches fro
 - **Off the main thread.** Building, loading, updating and releasing never run on the main thread (R1291).
 
 ## G10. When graphs are stale
+
+Changed 2026-11-22 (round 11): the Statistics page refreshes half a second after the last of these (`stats/statistics-page` S11), and drops its kept results on `CollectionReplaced` (S10.2).
 
 The screen's graphs are stale, and U225 refreshes them (R1356), after:
 
