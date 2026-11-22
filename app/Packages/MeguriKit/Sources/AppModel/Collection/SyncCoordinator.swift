@@ -954,7 +954,7 @@ public final class SyncCoordinator {
             failureKey: meguriFailureKey, finishOffered: meguriCanFinish, automatic: settings.automatic && storedAutomatic,
             mediaFilesLeft: meguriSetupMediaLeft, mediaListKnown: (meguriAffectedFileCount ?? 0) > 0,
             structureStage: meguriStructureStage, structureUploadPending: meguriStructureUploadPending,
-            signedInBefore: meguriSignedInBefore, signInRefused: meguriSignInErrorKey != nil)
+            signedInBefore: meguriSignedInBefore, signInRefused: meguriFirstSignInRefused)
     }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
     private var providerDiscovery: ProviderDiscoveryOwnership?
@@ -981,8 +981,8 @@ public final class SyncCoordinator {
         // T21.2: a sign-in on this connection makes a later sign-out a problem;
         // a removed connection starts over as setup.
         didSet {
-            if meguriPhase == .setupRequired { meguriSignedInBefore = true }
-            else if meguriPhase == .unconfigured { meguriSignedInBefore = false }
+            if meguriPhase == .setupRequired { meguriSignedInBefore = true; meguriFirstSignInRefused = false }
+            else if meguriPhase == .unconfigured { meguriSignedInBefore = false; meguriFirstSignInRefused = false }
         }
     }
     /// Kept in this device's defaults, so a relaunch gives the same answer; the
@@ -991,6 +991,9 @@ public final class SyncCoordinator {
         didSet { if meguriSignedInBefore != oldValue { defaults?.set(meguriSignedInBefore, forKey: Self.signedInBeforeKey) } }
     }
     private static let signedInBeforeKey = "meguri.sync.signedInBefore"
+    /// A first Sign In from the fields failed (T21.2). Kept apart from the
+    /// error text, which an edit of the address clears.
+    private var meguriFirstSignInRefused = false
     /// T21.2: Meguri Sync is selected and has not been signed in yet; the Sync
     /// section shows the sign-in form alone and the status stays quiet.
     public var meguriSetupNotFinished: Bool {
@@ -1183,6 +1186,10 @@ public final class SyncCoordinator {
         meguriSignInErrorKey = Self.meguriAuthenticationKey(failure)
     }
     func clearMeguriSignInPreparationError() { meguriSignInErrorKey = nil }
+    /// Tests only: the state a refused first Sign In leaves (T21.2).
+    func renderFirstSignInRefusedForTests() {
+        meguriPhase = .blocked; meguriSignInErrorKey = "sync.meguri.error.credentials"; meguriFirstSignInRefused = true
+    }
     public func meguriAddressEdited() {
         meguriAddressEditRevision &+= 1
         meguriAddressDirty = true; meguriReady = false; meguriRoutine = nil; meguriSignInErrorKey = nil
@@ -1379,6 +1386,7 @@ public final class SyncCoordinator {
                 self.meguriLastError = error
                 if self.generation == expected, self.hostRevision == revision, editRevision == self.meguriAddressEditRevision {
                     if self.meguriSignInErrorKey == nil { self.meguriSignInErrorKey = Self.meguriAuthenticationKey(error) }
+                    if !self.meguriSignedInBefore { self.meguriFirstSignInRefused = true }
                     if let owner = self.meguriConnectionOwner {
                         self.meguriPhase = await owner.phase
                         self.meguriUsername = await owner.username

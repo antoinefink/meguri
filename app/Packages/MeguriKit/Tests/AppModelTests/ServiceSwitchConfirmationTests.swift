@@ -137,6 +137,15 @@ import Testing
         #expect(relaunched.meguriKindFacts.signedInBefore)
     }
 
+    @Test func aRefusedFirstSignInStaysSetupWhenTheAddressIsEdited() {
+        let sync = SyncCoordinator(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+                                   configuration: nil, defaults: nil)
+        sync.renderFirstSignInRefusedForTests()
+        #expect(sync.meguriKindFacts.signInRefused && !sync.meguriKindFacts.signedInBefore)
+        sync.meguriAddressEdited()
+        #expect(sync.meguriSignInErrorKey == nil && sync.meguriKindFacts.signInRefused)
+    }
+
     @Test func theCoordinatorReadsICloudCountsFromItsStatus() {
         let facts = SyncCoordinator.renderFixture(.iCloudNeedsYou).serviceSwitchFacts(source: .iCloud)
         #expect(facts.changes == .count(12) && facts.heldBack == 0 && facts.media == 0)

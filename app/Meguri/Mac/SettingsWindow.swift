@@ -79,9 +79,11 @@ private struct SettingsToolbarStyle: NSViewRepresentable {
                 let chrome = window.frame.height - content
                 let height = min(SettingsWindowSize.defaultHeight, screen.visibleFrame.height - chrome)
                 guard height > content else { return }
+                // Grow downward from the same top edge, kept within the visible screen.
                 var frame = window.frame
                 frame.origin.y -= height - content
                 frame.size.height = height + chrome
+                frame.origin.y = max(frame.origin.y, screen.visibleFrame.minY)
                 window.setFrame(frame, display: true)
             }
         }
