@@ -1414,10 +1414,23 @@ fn open_writer() {
     changed.notify_all();
 }
 
+/// Lets the derived writer go however the test ends, so a failed
+/// assertion never leaves the host's close waiting on a held writer.
+struct WriterRelease;
+
+impl Drop for WriterRelease {
+    fn drop(&mut self) {
+        meguri_model::faultpoint::disarm("engine.derived.before_apply");
+        open_writer();
+    }
+}
+
 #[test]
 fn h14_4_commits_during_a_build_are_kept_and_applied_after_the_swap() {
     use meguri_model::faultpoint::{self, Fault};
     let big = big(30_000, 240_000);
+    // Dropped before `big`: the writer is free before the host closes.
+    let _release = WriterRelease;
     let host = &big.host;
     assert!(data(read(host, Scope::Collection, History::AllHistory)).from_component);
     let collection = host.collection().unwrap();
@@ -1482,9 +1495,10 @@ fn h18_a_store_closed_during_a_build_leaves_a_waiting_read_to_the_snapshot() {
             .unwrap()
         })
     };
+    // The read has reported that it waits for the build.
     let deadline = meguri_engine::monotonic::now() + WAIT;
-    while !matches!(host.derived().readiness(HISTORY_COMPONENT).unwrap().readiness, Readiness::Building { .. }) {
-        assert!(meguri_engine::monotonic::now() < deadline, "the build never started");
+    while !waiting.load(std::sync::atomic::Ordering::SeqCst) {
+        assert!(meguri_engine::monotonic::now() < deadline, "the read never waited for the build");
         std::thread::sleep(Duration::from_millis(1));
     }
     host.derived().close().unwrap();
