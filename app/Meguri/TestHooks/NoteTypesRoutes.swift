@@ -12,6 +12,7 @@ extension TestHooks {
     /// collection is opened and Save writes nothing.
     ///
     /// - `notetypes/fields/typical`: Vocabulary's Fields tab with no draft.
+    /// - `notetypes/fields/inspector-hidden`: the same with the Mac's inspector hidden.
     /// - `notetypes/list/typical`: on iPad, the list of note types alone.
     /// - `notetypes/fields/edited`: a draft that deletes Tavrin Notes and adds
     ///   Origin: "Edited" in the list, "Save…" in the toolbar.
@@ -37,6 +38,7 @@ extension TestHooks {
     enum NoteTypesRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.registerShell("notetypes/fields/typical") { _ in launch(.typical) }
+            registry.registerShell("notetypes/fields/inspector-hidden") { _ in launch(.inspectorHidden) }
             registry.registerShell("notetypes/list/typical") { _ in launch(.list) }
             registry.registerShell("notetypes/fields/edited") { _ in launch(.edited) }
             registry.registerShell("notetypes/save/losses") { _ in launch(.question(.other)) }
@@ -79,6 +81,8 @@ extension TestHooks {
             /// The list alone: on iPad no note type is opened (on the Mac, as typical).
             case list
             case typical, edited
+            /// The Fields tab with the Mac's inspector hidden.
+            case inspectorHidden
             case question(NoteTypeSaveService)
             /// Save and Upload running at this stage of its job.
             case progress(NoteTypeSyncStage)
@@ -140,8 +144,9 @@ extension TestHooks {
                             model.cardPart = .styling
                         }
                         await model.settleForTestHooks()
-                    case .list, .typical:
+                    case .list, .typical, .inspectorHidden:
                         model.selectedField[id] = 1
+                        if case .inspectorHidden = state { model.inspectorShown = false }
                     case .edited, .question, .progress:
                         model.stage(id) { draft in
                             draft.delete(11)

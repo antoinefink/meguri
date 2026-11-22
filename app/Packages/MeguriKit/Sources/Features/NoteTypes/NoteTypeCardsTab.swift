@@ -13,14 +13,12 @@ struct NoteTypeCardsTab: View {
 
     var body: some View {
         #if os(macOS)
+        // N22.3: the lists belong to the editor's side of the window, on the
+        // same background as its bar and issues, not a second sidebar; only
+        // the app's navigation sidebar uses sidebar material.
         HSplitView {
-            VSplitView {
-                NoteTypeCardTypesList(model: model, id: id)
-                    .frame(minHeight: Self.listMinimum)
-                NoteTypeCardFieldsList(model: model, id: id)
-                    .frame(minHeight: Self.listMinimum)
-            }
-            .frame(minWidth: Self.columnMinimum, idealWidth: Self.columnIdeal, maxWidth: Self.columnMaximum)
+            NoteTypeCardsListColumn(model: model, id: id)
+                .frame(minWidth: Self.columnMinimum, idealWidth: Self.columnIdeal, maxWidth: Self.columnMaximum)
             NoteTypeTemplateEditorColumn(model: model, id: id)
                 .frame(minWidth: ContentWidth.primaryAction, maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -28,15 +26,17 @@ struct NoteTypeCardsTab: View {
         // iPad (N22.7): the Mac's columns with touch sizes. Hiding the lists
         // while a card type is open waits for the preview that shares the
         // space with the code (U283).
-        HStack(spacing: .zero) {
-            VStack(spacing: .zero) {
-                NoteTypeCardTypesList(model: model, id: id)
-                Divider()
-                NoteTypeCardFieldsList(model: model, id: id)
-            }
-            .frame(width: Self.columnIdeal)
+        VStack(spacing: .zero) {
+            // The navigation bar's edge, across both columns.
             Divider()
-            NoteTypeTemplateEditorColumn(model: model, id: id)
+            HStack(spacing: .zero) {
+                NoteTypeCardsListColumn(model: model, id: id)
+                    .frame(width: Self.columnIdeal)
+                // The columns run to the bottom edge, under the home indicator.
+                Divider()
+                    .ignoresSafeArea(.container, edges: .bottom)
+                NoteTypeTemplateEditorColumn(model: model, id: id)
+            }
         }
         #endif
     }
@@ -48,7 +48,40 @@ struct NoteTypeCardsTab: View {
     private static let columnIdeal: CGFloat = 280
     #endif
     private static let columnMaximum: CGFloat = 320
-    private static let listMinimum: CGFloat = 120
+}
+
+/// The bar at the top of each column of the Cards tab: the card types
+/// column's title and the editor's Front | Back | Styling share one height,
+/// so their hairlines make one line across the tab.
+struct CardsColumnBar: ViewModifier {
+    #if os(macOS)
+    @ScaledMetric(relativeTo: .body) private var height: CGFloat = ControlMetrics.minimumTarget + 2 * Spacing.xSmall
+    #else
+    @ScaledMetric(relativeTo: .body) private var height: CGFloat = ControlMetrics.minimumTarget + Spacing.xSmall
+    #endif
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, Spacing.small)
+            .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
+    }
+}
+
+/// The card types column: its bar, then one list with the card types (+ and
+/// − under them) and the Fields section (W5).
+struct NoteTypeCardsListColumn: View {
+    @Bindable var model: NoteTypesModel
+    let id: Int64
+
+    var body: some View {
+        VStack(spacing: .zero) {
+            SectionTitle(title: "noteTypes.cards.cardTypes")
+                .modifier(CardsColumnBar())
+                .accessibilityIdentifier("noteTypes.cards.cardTypesHeader")
+            Divider()
+            NoteTypeCardTypesList(model: model, id: id)
+        }
+    }
 }
 
 // MARK: The card types list (W5)
@@ -90,32 +123,45 @@ struct NoteTypeCardTypesList: View {
     }
 
     var body: some View {
-        VStack(spacing: .zero) {
-            ListHeader(title: "noteTypes.cards.cardTypes", identifier: "noteTypes.cards.cardTypesHeader")
-            List(selection: selection) {
+        // One list, two sections: the card types with their + and − under
+        // them, then the fields. Plain rows on the editor side's background,
+        // with the system selection.
+        List(selection: selection) {
+            Section {
                 ForEach(model.cardTypeLines(id)) { line in
                     CardTypeRowView(model: model, id: id, line: line)
                         .tag(line.id)
                         .contextMenu { menu(line) }
                 }
                 .onMove { offsets, destination in model.moveCardTypes(id, fromOffsets: offsets, toOffset: destination) }
+                .disabled(!editable)
+            } footer: {
+                bottomBar
             }
-            #if os(macOS)
-            .listStyle(.sidebar)
-            .onDeleteCommand { deleteSelected() }
-            #endif
-            .focused($listFocused)
-            // Return renames the selected card type in place (W5).
-            .onKeyPress(.return) {
-                guard listFocused, model.renamingCard == nil, let row = shownRow, !row.deleted else { return .ignored }
-                startRename(row.id)
-                return .handled
+            Section {
+                NoteTypeCardFieldRows(model: model, id: id)
+            } header: {
+                SectionTitle(title: "noteTypes.cards.fields")
+                    .accessibilityIdentifier("noteTypes.cards.fieldsHeader")
             }
-            .disabled(!editable)
-            .accessibilityIdentifier("noteTypes.cards.list")
-            Divider()
-            bottomBar
         }
+        #if os(macOS)
+        .listStyle(.inset)
+        // The window's background, as the editor's bar and issues have.
+        .scrollContentBackground(.hidden)
+        .onDeleteCommand { deleteSelected() }
+        #else
+        // The plain list's own background: the page's, as the editor's.
+        .listStyle(.plain)
+        #endif
+        .focused($listFocused)
+        // Return renames the selected card type in place (W5).
+        .onKeyPress(.return) {
+            guard listFocused, model.renamingCard == nil, let row = shownRow, !row.deleted else { return .ignored }
+            startRename(row.id)
+            return .handled
+        }
+        .accessibilityIdentifier("noteTypes.cards.list")
         .background { keys }
     }
 
@@ -184,7 +230,6 @@ struct NoteTypeCardTypesList: View {
             Spacer()
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, Spacing.xSmall)
         .disabled(!editable)
     }
 
@@ -274,29 +319,24 @@ private struct CardTypeRowView: View {
     }
 }
 
-/// A list's title above it, as a sidebar section header reads.
-private struct ListHeader: View {
+/// The title of a section of the card types column: the column's bar and
+/// the Fields section header read alike.
+private struct SectionTitle: View {
     let title: LocalizedStringKey
-    let identifier: String
 
     var body: some View {
         Text(title, bundle: .module)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Spacing.small)
-            .padding(.top, Spacing.small)
-            .padding(.bottom, Spacing.xxSmall)
             .accessibilityAddTraits(.isHeader)
-            .accessibilityIdentifier(identifier)
     }
 }
 
-// MARK: The Fields list (W5)
+// MARK: The Fields section (W5)
 
 /// Every draft field; the ones the shown card type does not use are grey.
 /// Double click inserts `{{<name>}}` at the insertion point; a drag drops it.
-struct NoteTypeCardFieldsList: View {
+struct NoteTypeCardFieldRows: View {
     let model: NoteTypesModel
     let id: Int64
 
@@ -307,32 +347,23 @@ struct NoteTypeCardFieldsList: View {
     }
 
     var body: some View {
-        VStack(spacing: .zero) {
-            ListHeader(title: "noteTypes.cards.fields", identifier: "noteTypes.cards.fieldsHeader")
-            fields
+        // Their own identities: the card types above share the list, and a field's
+        // row id must never be taken for a card type's.
+        ForEach(model.draft(id)?.keptRows ?? [], id: \.fieldListID) { row in
+            let unused = used.map { !$0.contains(row.id) } ?? false
+            Text(verbatim: row.name)
+                .foregroundStyle(unused ? .secondary : .primary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { insert(row.name) }
+                .draggable(reference(row.name))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { insert(row.name) }
+                // Fields are never the list's selection: the card types are.
+                .selectionDisabled()
+                .accessibilityIdentifier("noteTypes.cards.field.\(row.id)")
         }
-    }
-
-    private var fields: some View {
-        List {
-                ForEach(model.draft(id)?.keptRows ?? []) { row in
-                    let unused = used.map { !$0.contains(row.id) } ?? false
-                    Text(verbatim: row.name)
-                        .foregroundStyle(unused ? .secondary : .primary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .onTapGesture(count: 2) { insert(row.name) }
-                        .draggable(reference(row.name))
-                        .accessibilityAddTraits(.isButton)
-                        .accessibilityAction { insert(row.name) }
-                        .accessibilityIdentifier("noteTypes.cards.field.\(row.id)")
-                }
-        }
-        #if os(macOS)
-        .listStyle(.sidebar)
-        #endif
-        .accessibilityIdentifier("noteTypes.cards.fieldsList")
     }
 
     /// The reference a drag drops, in the shown part's delimiters (A14).
@@ -345,6 +376,11 @@ struct NoteTypeCardFieldsList: View {
         guard let card = model.shownCard(id), model.cardPart != .styling else { return }
         model.request(id, card: card, part: model.cardPart, .insert(.field(name)))
     }
+}
+
+extension NoteTypeFieldRow {
+    /// A field's identity in the card types column's list.
+    nonisolated fileprivate var fieldListID: String { "field.\(id)" }
 }
 
 // MARK: The editor column (W6, W7)
@@ -400,8 +436,8 @@ struct NoteTypeTemplateEditorColumn: View {
             Spacer(minLength: Spacing.xSmall)
             insertMenu
         }
-        .padding(.horizontal, Spacing.small)
-        .padding(.vertical, Spacing.xSmall)
+        .padding(.vertical, Spacing.xxSmall)
+        .modifier(CardsColumnBar())
         .background {
             // ⌘1, ⌘2, ⌘3 choose the part (R929).
             Group {
@@ -446,7 +482,8 @@ struct NoteTypeTemplateEditorColumn: View {
                 accessibilityLabel: NoteTypesStrings.part(part, locale: locale),
                 onChange: { model.setText(id, card: card, part: part, $0) },
                 onConsume: { model.consumeEditorRequest($0) },
-                onFlip: draft?.isCloze == true ? nil : { model.flip(id, card: card) },
+                onFlip: draft?.isCloze == true ? nil : { model.flipped(id, card: card) },
+                onReplaceFront: { model.replaceText(id, card: card, part: .front, expected: $0, with: $1) },
                 syntax: { text, styling in await model.syntax(text, styling: styling) })
         } else {
             Color.clear
@@ -482,10 +519,15 @@ struct NoteTypeIssuesList: View {
         let issues = model.liveIssues(id)
         VStack(alignment: .leading, spacing: .zero) {
             if issues.isEmpty {
+                // Until the reads answer, the row keeps its place without
+                // claiming there is nothing to fix.
+                let known = model.issuesKnown(id)
                 Label { Text("noteTypes.issues.none", bundle: .module) } icon: { Image(systemName: "checkmark.circle") }
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, Spacing.small)
                     .padding(.vertical, Spacing.xSmall)
+                    .opacity(known ? 1 : 0)
+                    .accessibilityHidden(!known)
                     .accessibilityIdentifier("noteTypes.cards.issues.none")
             } else {
                 ScrollView {
@@ -525,31 +567,53 @@ private struct IssueRow: View {
     @Environment(\.locale) private var locale
 
     var body: some View {
-        let words = NoteTypesStrings.issue(issue, locale: locale)
         HStack(alignment: .firstTextBaseline, spacing: Spacing.xSmall) {
             Image(systemName: "circle.fill")
                 .imageScale(.small)
                 .foregroundStyle(issue.severity == .red ? Color.red : Color.yellow)
                 .accessibilityHidden(true)
-            Button { model.showIssue(id, issue) } label: {
-                VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-                    Text(verbatim: words.message.isEmpty ? words.location : words.location + " " + words.message)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let reason = words.reason {
-                        Text(verbatim: reason).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let fix = issue.fix, isOffered(fix) {
+                // The fix sits after the message while both fit on one line;
+                // otherwise it takes its own line under the message, so it
+                // never narrows the text into a thin column.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+                        message
+                        fixButton(fix)
+                    }
+                    VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                        message
+                        fixButton(fix)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("noteTypes.cards.issue.\(index)")
-            if let fix = issue.fix, isOffered(fix) {
-                Button { model.applyFix(id, issue) } label: { Text(verbatim: NoteTypesStrings.fix(fix, locale: locale)) }
-                    .disabled(!model.editable(id) && !isShowNotes(fix))
-                    .accessibilityIdentifier("noteTypes.cards.fix.\(index)")
+            } else {
+                message
             }
         }
+    }
+
+    private var message: some View {
+        let words = NoteTypesStrings.issue(issue, locale: locale)
+        return Button { model.showIssue(id, issue) } label: {
+            VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                Text(verbatim: words.message.isEmpty ? words.location : words.location + " " + words.message)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let reason = words.reason {
+                    Text(verbatim: reason).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("noteTypes.cards.issue.\(index)")
+    }
+
+    private func fixButton(_ fix: NoteTypeLiveIssue.Fix) -> some View {
+        Button { model.applyFix(id, issue) } label: { Text(verbatim: NoteTypesStrings.fix(fix, locale: locale)) }
+            .fixedSize()
+            .disabled(!model.editable(id) && !isShowNotes(fix))
+            .accessibilityIdentifier("noteTypes.cards.fix.\(index)")
     }
 
     /// Show Notes waits for Browse to take note ids (U287).
