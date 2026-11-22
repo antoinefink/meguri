@@ -463,7 +463,8 @@
     const focus = focusState();
     gesture = { context: context, id: call(pointerIdOf, event), start: time, events: [event],
       selection: hasSelection(), editable: focus.editable, typeans: focus.typeans, composing: composingNow,
-      multi: false, done: false, end: null, target: null, exempt: true, x: 0, y: 0, awaitClick: false, timer: 0 };
+      multi: false, done: false, end: null, target: null, exempt: true, x: 0, y: 0, awaitClick: false, timer: 0,
+      clickSeen: false, clickBubbled: false };
     if (lastTouchStart && time - call(stamp, lastTouchStart) < 100) call(push, gesture.events, lastTouchStart);
   }
   function touchStart(event) {
@@ -509,15 +510,26 @@
   function lateEvent(event) {
     if (!trusted(event)) return;
     // touchend and a click after pointerup belong to the closing gesture.
-    if (gesture && gesture.done && gesture.end) {
-      const g = gesture;
-      call(push, g.events, event);
-      if (g.awaitClick && call(eventType, event) === "click") {
-        g.awaitClick = false;
-        cancelTimer(g.timer);
-        g.timer = later(function () { finish(g); }, 0);
-      }
-    } else remember(event);
+    if (gesture && gesture.done && gesture.end) call(push, gesture.events, event);
+    else remember(event);
+  }
+  // Clicks are taken first (capture, before any card handler) and seen again
+  // on the way back to the window: one that never returns was stopped by a
+  // card handler, which then owns the tap.
+  function clickCaptured(event) {
+    if (!trusted(event)) return;
+    const g = gesture;
+    if (!g || !g.done || !g.end) { remember(event); return; }
+    call(push, g.events, event);
+    g.clickSeen = true;
+    if (g.awaitClick) {
+      g.awaitClick = false;
+      cancelTimer(g.timer);
+      g.timer = later(function () { finish(g); }, 0);
+    }
+  }
+  function clickBubbled(event) {
+    if (trusted(event) && gesture && gesture.clickSeen) gesture.clickBubbled = true;
   }
   function finish(g) {
     if (gesture !== g) return;
@@ -531,6 +543,7 @@
     }
     let isExempt = g.exempt;
     try { if (!call(connectedOf, g.target)) isExempt = true; } catch (_) { isExempt = true; }
+    if (g.clickSeen && !g.clickBubbled) isExempt = true;
     const view = geometry();
     if (!view) return;
     const x = g.x - view.offsetX, y = g.y - view.offsetY;
@@ -564,7 +577,8 @@
   call(add, window, "touchcancel", cancelled, { capture: true, passive: true });
   call(add, window, "pointerup", pointerUp, { passive: true });
   call(add, window, "touchend", lateEvent, { passive: true });
-  call(add, window, "click", lateEvent, { passive: true });
+  call(add, window, "click", clickCaptured, { capture: true, passive: true });
+  call(add, window, "click", clickBubbled, { passive: true });
   call(add, window, "compositionstart", function (event) { if (trusted(event)) composingNow = true; }, true);
   call(add, window, "compositionend", function (event) { if (trusted(event)) composingNow = false; }, true);
 
