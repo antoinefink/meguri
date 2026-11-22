@@ -181,7 +181,7 @@ public struct StatsChartBox<Accessory: View>: View {
             Text(verbatim: isReady ? figure?.sentence ?? " " : " ")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .lineLimit(stacks ? 4 : 2, reservesSpace: true)
+                .lineLimit(stacks ? 3 : 2, reservesSpace: true)
         }
         // The chart element reads the figure and its sentence (S15).
         .accessibilityHidden(true)
@@ -189,6 +189,7 @@ public struct StatsChartBox<Accessory: View>: View {
 
     private var plot: some View {
         StatsChartPlot(
+            box: box,
             data: isReady ? data : data.skeleton(),
             phase: plotPhase,
             size: size,
@@ -233,7 +234,7 @@ public struct StatsChartBox<Accessory: View>: View {
         Button {
             StatsChartExport.copyImage(
                 of: StatsChartPlot(
-                    data: data, phase: .ready, size: size, summary: title,
+                    box: box, data: data, phase: .ready, size: size, summary: title,
                     selection: .constant(.none), showInBrowse: nil, separatesSeries: separatesSeries
                 )
                 .environment(\.locale, locale)

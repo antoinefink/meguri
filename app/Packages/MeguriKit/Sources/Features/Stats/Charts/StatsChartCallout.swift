@@ -5,6 +5,7 @@ import SwiftUI
 /// swatch, name and value, and Show in Browse when the bin can be listed. A
 /// small material panel beside the rule, never over it.
 struct StatsChartCallout: View {
+    let box: String
     let title: String
     let rows: [(name: String, value: String, color: StatsSeriesColor?)]
     let showInBrowse: (() -> Void)?
@@ -38,7 +39,7 @@ struct StatsChartCallout: View {
                 }
                 .font(.caption)
                 .controlSize(.small)
-                .accessibilityIdentifier("stats.chart.callout.showInBrowse")
+                .accessibilityIdentifier("stats.box.\(box).showInBrowse")
             }
         }
         .padding(Spacing.xSmall)

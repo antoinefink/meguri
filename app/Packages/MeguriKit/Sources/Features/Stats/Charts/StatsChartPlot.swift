@@ -59,6 +59,8 @@ enum StatsPlotPhase: Hashable {
 /// side, one axis only (S8.2), the selection and its callout (S8.3), the plot
 /// keys (S14), the accessibility elements (S15) and the system legend under it.
 struct StatsChartPlot: View {
+    /// The box's id, for the callout button's identifier.
+    let box: String
     let data: StatsChartData
     let phase: StatsPlotPhase
     let size: StatsPlotSize
@@ -79,9 +81,10 @@ struct StatsChartPlot: View {
     private let topSeries: Int?
 
     init(
-        data: StatsChartData, phase: StatsPlotPhase, size: StatsPlotSize, summary: String,
+        box: String, data: StatsChartData, phase: StatsPlotPhase, size: StatsPlotSize, summary: String,
         selection: Binding<StatsChartSelection>, showInBrowse: ((Int) -> Void)?, separatesSeries: Bool?
     ) {
+        self.box = box
         self.data = data
         self.phase = phase
         self.size = size
@@ -480,6 +483,7 @@ struct StatsChartPlot: View {
             let ruleX = plot.minX + x
             let leading = ruleX > plot.midX
             StatsChartCallout(
+                box: box,
                 title: format.name(data.bins[bin]),
                 rows: format.calloutRows(data, bin: bin),
                 showInBrowse: data.browsable.contains(bin) && showInBrowse != nil && selection.pinned ? { browse(bin) } : nil
