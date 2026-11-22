@@ -4,7 +4,7 @@ Spec: stats/graphs-cards
 Requirements: R1285, R1293, R1294, R1373, R1374, R1375, R1378, R1390, R1391, R1392, R1393, R1394, R1397, R1398, R1399, R1400, R1401, R1402, R1403, R1415, R1416, R1446
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/graphs/future-due/, conformance/scenarios/stats/graphs/card-counts/, conformance/scenarios/stats/graphs/intervals/, conformance/scenarios/stats/graphs/fsrs/, conformance/scenarios/stats/graphs/added/
-Status: Under review (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). Every other section is in force and unchanged.
 
 The data of the seven card graphs (U101): Future Due, Card Counts, Intervals, Stability, Difficulty, Retrievability and Added. They run on the machinery of `stats/graphs-common` (scope G2, history G3, row reading G4, graph order G5, aggregate shape G6, preferences G7, requests G8, caches G9). This file says, per graph, which cards count, the value each card gives, the record's keys and its extras. Ranges, bins, quantiles, medians of Intervals and Stability, cumulative series, tooltip and table text, and every histogram bar's query are `stats/graph-presentation` (U226, `stats/graphs-common` G12, item 1). Card Counts' label queries are `stats/browse-queries` Q4.1.
 

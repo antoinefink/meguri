@@ -4,7 +4,7 @@ Spec: stats/graph-presentation
 Requirements: R1290, R1293, R1362, R1363, R1364, R1365, R1366, R1367, R1368, R1376, R1377, R1378, R1380, R1382, R1383, R1386, R1387, R1388, R1389, R1392, R1395, R1396, R1398, R1399, R1400, R1401, R1403, R1404, R1406, R1407, R1409, R1412, R1414, R1415, R1416, R1417, R1418, R1420, R1439, R1440, R1443, R1444
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/presentation/
-Status: Under review (R1357) for P24 and the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-22 (R1357) for P24 and the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). Every other section is in force and unchanged.
 
 How the Stats screen turns each graph's record into bars, labels, tooltips, tables and Browser queries (U226), and how charts behave and read with VoiceOver. It is the only place that bins, ranges, quantiles and presentation text are defined (`stats/graphs-common` G12, decision 1). The records come from `stats/graphs-common` G6, `stats/graphs-cards` (Future Due, Card Counts, Intervals, Stability, Difficulty, Retrievability, Added) and `stats/graphs-revlog` (Reviews, Calendar, Retention, Hourly Breakdown, Answer Buttons). The Today section is `stats/studied-today`. The scope text and the join of a query are `stats/browse-queries` Q2 and Q3; this file gives only the item text of histogram bars.
 
