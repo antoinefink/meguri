@@ -693,7 +693,7 @@ fn g6_twenty_years_of_daily_study_fit_the_limit() {
 fn g6_a_record_past_the_limit_is_returned_whole() {
     // G6's test: one row of each kind on every day from 1970-01-01, each
     // with a stored time of 4,000,000,000 ms.
-    let days = (PARIS_NOON_MS / 1_000 / DAY) as i64;
+    let days = PARIS_NOON_MS / 1_000 / DAY;
     let rows = format!(
         "WITH RECURSIVE day(d) AS (SELECT 0 UNION ALL SELECT d + 1 FROM day WHERE d < {days}), \
          kind(k, type, last) AS (VALUES (0, 0, 30), (1, 2, 30), (2, 1, 5), (3, 1, 30), (4, 3, 30)) \
