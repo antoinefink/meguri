@@ -1,5 +1,8 @@
 @testable import AppModel
 @testable import CoreBridge
+#if canImport(AppKit)
+import AppKit
+#endif
 import Foundation
 import Testing
 
@@ -156,12 +159,20 @@ import Testing
     @Test func iCloudSymbolsAreDrawnForICloudOnly() {
         let shapes = [SyncSymbol.upToDate, SyncSymbol.moving, SyncSymbol.waiting, SyncSymbol.needsYou, SyncSymbol.off]
         for shape in shapes where shape != SyncSymbol.off {
-            #expect(SyncSymbol.glyph(shape, iCloud: true) == .system(shape))
+            #expect(SyncSymbol.glyph(shape, iCloud: true) == shape)
         }
         // Sync Off is no service, so never an `icloud` symbol.
-        #expect(SyncSymbol.glyph(SyncSymbol.off, iCloud: true) == .cloud("slash"))
-        #expect(shapes.map { SyncSymbol.glyph($0, iCloud: false) }
-            == [.cloud("checkmark"), .cloud("arrows"), .cloud("none"), .cloud("exclamationmark"), .cloud("slash")])
+        #expect(SyncSymbol.glyph(SyncSymbol.off, iCloud: true) == "cloud")
+        // N23.2 (2026-11-22): one unrestricted system symbol per state, nothing drawn inside a cloud.
+        let other = shapes.map { SyncSymbol.glyph($0, iCloud: false) }
+        #expect(other == ["checkmark.circle", "arrow.trianglehead.2.clockwise.rotate.90", "cloud",
+                          "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90", "cloud"])
+        #expect(other.allSatisfy { !$0.contains("icloud") })
+        #if canImport(AppKit)
+        for name in other + shapes.filter({ $0 != SyncSymbol.off }) {
+            #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "\(name)")
+        }
+        #endif
         #expect(!SyncCoordinator.renderFixture(.meguriConnected).symbolsAreICloud)
         #expect(!SyncCoordinator.renderFixture(.off).symbolsAreICloud)
         #expect(!SyncCoordinator.renderFixture(.meguriBlocked).symbolsAreICloud)

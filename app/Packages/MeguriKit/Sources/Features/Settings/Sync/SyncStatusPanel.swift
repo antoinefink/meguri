@@ -4,32 +4,27 @@ import DesignSystem
 import SwiftUI
 
 /// N23.2: the status symbol, the same in the toolbar, the panel and the Sync
-/// section. Shape first; only needs you has a colour. The `icloud` symbols are
-/// drawn for iCloud only; other services get the same shapes from `cloud` (N23.4).
+/// section: one system symbol, drawn by the system at its place's size and
+/// weight. Only needs you has a colour. The `icloud` symbols are for iCloud
+/// only; other services get unrestricted symbols (N23.4).
 struct SyncStatusSymbol: View {
     let status: SyncMainStatus
     let iCloud: Bool
     /// Only the toolbar button's symbol turns (N23.1).
     var turning = false
     /// The panel and the Sync section draw it in the secondary colour, the
-    /// toolbar in its own; needs you is orange everywhere (N23.2).
+    /// toolbar in its own, Sync Off excepted; needs you is orange everywhere (N23.2).
     var secondary = false
     var body: some View {
+        let glyph = Image(systemName: SyncSymbol.glyph(status.symbol, iCloud: iCloud))
+            .symbolEffect(.rotate, options: .repeating, isActive: turning)
         Group {
             if status.needsYou { glyph.foregroundStyle(.orange) }
-            else if secondary { glyph.foregroundStyle(.secondary) }
+            else if secondary || status.symbol == SyncSymbol.off { glyph.foregroundStyle(.secondary) }
             else { glyph }
         }
         // The title beside it, or the button's own label, says the state.
         .accessibilityHidden(true)
-    }
-    @ViewBuilder private var glyph: some View {
-        switch SyncSymbol.glyph(status.symbol, iCloud: iCloud) {
-        case .system(let name):
-            Image(systemName: name).symbolEffect(.rotate, options: .repeating, isActive: turning)
-        case .cloud(let badge):
-            CloudShapeSymbol(CloudShapeSymbol.Badge(rawValue: badge) ?? .none, turning: turning)
-        }
     }
 }
 
