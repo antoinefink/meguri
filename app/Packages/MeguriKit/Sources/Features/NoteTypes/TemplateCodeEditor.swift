@@ -715,6 +715,12 @@ struct TemplateCodeEditor: UIViewRepresentable {
                 well.isEnabled = textView.isEditable
                 well.isHidden = false
                 // One element per swatch: the well's own parts stay out of the tree.
+                well.layoutIfNeeded()
+                for part in well.subviews {
+                    part.isAccessibilityElement = false
+                    part.accessibilityElementsHidden = true
+                }
+                well.accessibilityElements = []
                 well.isAccessibilityElement = true
                 well.accessibilityTraits = .button
                 well.accessibilityLabel = SwatchHex.string(red: Double(value.red) / 255, green: Double(value.green) / 255,

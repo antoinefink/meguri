@@ -426,8 +426,12 @@ struct NoteTypeTemplateEditorColumn: View {
             }
         } label: {
             Text("noteTypes.insert", bundle: .module)
-                .accessibilityIdentifier("noteTypes.cards.insert.label")
         }
+        #if os(iOS)
+        // One button in the tree, as the Mac's pull-down is.
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
+        #endif
         .fixedSize()
         .disabled(!model.editable(id) || card.flatMap { draft?.cardRow($0)?.deleted } == true)
         .accessibilityIdentifier("noteTypes.cards.insert")
