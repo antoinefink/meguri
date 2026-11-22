@@ -148,8 +148,10 @@ import Testing
         // A newer change wins over a reading still on its way.
         core.holdReads = true
         model.activate(.saved("Hard Ones"))
+        await until { core.heldReadCount == 1 }
         model.activate(.state(.new))
         core.releaseReads()
+        await until { core.readTexts.count == 2 && core.heldReadCount == 0 }
         try? await Task.sleep(for: .milliseconds(20))
         #expect(model.query.tokens.last == token(.state(.new)))
     }
@@ -367,7 +369,7 @@ import Testing
 
     // MARK: The sidebar's filter (S6)
 
-    @Test func theFilterShowsMatchesAndTheirAncestorsExpanded() {
+    @Test func theFilterShowsMatchesAndTheirAncestorsExpanded() throws {
         struct Item { let name: String; var children: [Item] = [] }
         let tree = [
             Item(name: "Languages", children: [Item(name: "Español", children: [Item(name: "Vocabulary")]), Item(name: "日本語")]),
@@ -377,13 +379,17 @@ import Testing
         let filter = BrowseSidebarFilter("voc")
         let shown = filter.tree(tree, label: \.name, children: \.children, rootMatched: false)
         #expect(shown.map(\.item.name) == ["Languages"])
-        #expect(shown[0].expanded && shown[0].children.map(\.item.name) == ["Español"])
-        #expect(shown[0].children[0].children.map(\.item.name) == ["Vocabulary"] && shown[0].children[0].children[0].matched)
+        let languages = try #require(shown.first)
+        #expect(languages.expanded && languages.children.map(\.item.name) == ["Español"])
+        let español = try #require(languages.children.first)
+        let vocabulary = try #require(español.children.first)
+        #expect(español.children.map(\.item.name) == ["Vocabulary"] && vocabulary.matched)
         // Leading and trailing spaces count: " mam" does not match "mammal".
         #expect(!BrowseSidebarFilter(" voc").matches("Vocabulary") && BrowseSidebarFilter("OCAB").matches("Vocabulary"))
         // A matching section root shows every top-level item, folded unless a descendant matches.
         let root = BrowseSidebarFilter("chem").tree(tree, label: \.name, children: \.children, rootMatched: true)
         #expect(root.map(\.item.name) == ["Languages", "Science", "Music Theory"])
+        try #require(root.count == 3)
         #expect(!root[0].expanded && root[1].expanded)
         // White_Space only is off.
         #expect(!BrowseSidebarFilter("  ").isOn && BrowseSidebarFilter("  ").tree(tree, label: \.name, children: \.children, rootMatched: false).isEmpty)
@@ -445,6 +451,7 @@ import Testing
     var readTexts: [String] = []
     var holdReads = false
     private var heldReads: [CheckedContinuation<Void, Never>] = []
+    var heldReadCount: Int { heldReads.count }
     var runTexts = 0
     var tagNodes = [TagNode(name: "brask", fullName: "brask", collapsed: false, implicit: false, children: [
         TagNode(name: "oddly", fullName: "brask::oddly", collapsed: false, implicit: false, children: []),

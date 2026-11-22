@@ -101,7 +101,9 @@ struct ShellFeatures {
         features.sectionRoot = { section, _ in
             switch section {
             case .settings: AnyView(SettingsView(collection: collection))
+            #if os(macOS)
             case .browse: AnyView(BrowseView(model: collection.browse))
+            #endif
             default: AnyView(HomeView(collection: collection))
             }
         }

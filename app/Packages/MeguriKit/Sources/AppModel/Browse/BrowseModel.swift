@@ -93,6 +93,8 @@ public final class BrowseModel {
     @ObservationIgnored private let store: BrowseDeviceStore
     /// Whether the collection is open and ready for reads.
     @ObservationIgnored public var ready: @MainActor () -> Bool = { true }
+    /// A handed search whose reading failed, tried again on the next appear.
+    private var pendingSearch: String?
     /// A search handed to Browse (a deep link, R319), taken once: T14's
     /// "with a search" replaces the query by its reading.
     @ObservationIgnored public var takeEntrySearch: @MainActor () -> String? = { nil }
@@ -115,7 +117,7 @@ public final class BrowseModel {
         visible = true
         guard ready() else { return }
         if !opened { open() }
-        if let search = takeEntrySearch(), !search.isEmpty { replace(byReading: search) }
+        takeHandedSearch()
         if stale { reload() }
     }
 
@@ -181,17 +183,30 @@ public final class BrowseModel {
 
     /// T14 "with a search", and T9's saved searches: the whole query
     /// becomes T7's reading of `text`, unless the query changed meanwhile.
-    private func replace(byReading text: String) {
+    private func replace(byReading text: String, handed: Bool = false) {
         queryRevision &+= 1
         let revision = queryRevision, epoch = epoch
+        if handed { pendingSearch = nil }
         Task {
-            guard let read = try? await backend.read(text), self.epoch == epoch, revision == queryRevision else { return }
+            let read: FilterQuery
+            do { read = try await backend.read(text) } catch {
+                // A handed search is kept until it can be read, unless something newer came.
+                if handed, self.epoch == epoch, revision == queryRevision { pendingSearch = text }
+                return
+            }
+            guard self.epoch == epoch, revision == queryRevision else { return }
             setQuery(read)
         }
     }
 
+    /// The search handed to Browse, or one whose reading failed before.
+    private func takeHandedSearch() {
+        if let search = takeEntrySearch() ?? pendingSearch, !search.isEmpty { replace(byReading: search, handed: true) }
+    }
+
     /// T9: a click on a filter row.
     public func activate(_ row: BrowseSidebarTag, click: Click = .plain) {
+        pendingSearch = nil
         switch row {
         case .builtIn(let search):
             setQuery(search.query)
@@ -302,10 +317,13 @@ public final class BrowseModel {
         if openInFlight {
             opened = false
             openInFlight = false
+        } else if opened {
+            // A save of the run text dropped with the old epoch is made again.
+            keepRunText()
         }
         if visible, ready() {
             if !opened { open() }
-            if let search = takeEntrySearch(), !search.isEmpty { replace(byReading: search) }
+            takeHandedSearch()
             reload()
         }
     }
@@ -324,6 +342,7 @@ public final class BrowseModel {
         stale = true
         device.runText = nil
         device.notesMode = nil
+        pendingSearch = nil
         saveDevice()
     }
 
@@ -398,14 +417,20 @@ public final class BrowseModel {
                 if let value { next[row] = value }
             }
             counts = next
-            readsPending = false
-            guard !topTags.isEmpty else { return }
+            guard !topTags.isEmpty else { readsPending = false; return }
             if mode == .notes {
                 tagNotes = Dictionary(uniqueKeysWithValues: topTags.compactMap { name in next[.tag(name)].map { (name, $0) } })
+                readsPending = false
                 return
             }
-            guard let notes = try? await backend.counts(.notes, topTags.map { .value(.tag($0)) }), !Task.isCancelled,
-                  token == countsToken, self.epoch == epoch else { return }
+            // The refresh stays pending until the tags' note counts arrive too.
+            let notes: [UInt64?]
+            do { notes = try await backend.counts(.notes, topTags.map { .value(.tag($0)) }) } catch {
+                if token == countsToken, self.epoch == epoch { stale = true }
+                return
+            }
+            guard !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
+            readsPending = false
             var byTag: [String: UInt64] = [:]
             for (name, value) in zip(topTags, notes) {
                 if let value { byTag[name] = value }
@@ -464,8 +489,13 @@ public final class BrowseModel {
     public func setTagExpanded(_ node: TagNode, _ expanded: Bool) {
         guard tagExpanded(node) != expanded else { return }
         tagExpansion[node.fullName] = expanded
-        let backend = backend
-        Task { try? await backend.setTagsCollapsed([node.fullName], collapsed: !expanded) }
+        let backend = backend, name = node.fullName
+        Task {
+            do { try await backend.setTagsCollapsed([name], collapsed: !expanded) } catch {
+                // Not written: the disclosure shows the stored state again, unless toggled since.
+                if tagExpansion[name] == expanded { tagExpansion[name] = nil }
+            }
+        }
     }
 
     // MARK: Device state
