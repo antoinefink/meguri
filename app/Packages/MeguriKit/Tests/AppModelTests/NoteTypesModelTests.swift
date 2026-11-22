@@ -306,37 +306,6 @@ import Testing
         #expect(model.failure == .notSaved && model.isEdited(7) && backend.saved.isEmpty)
     }
 
-    /// D3 with a ready Meguri Sync binding: structural changes ask, and until U269's job exists Save and Upload cannot run.
-    @Test func meguriSyncAsksAndRoutesToItsJob() async {
-        let backend = FakeNoteTypesBackend()
-        backend.summaries = [NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldAdded(name: "Field 1")], losesContent: false)]
-        let (model, _) = await open(backend)
-        model.service = { .meguriSync }
-        model.addField(7)
-        model.cancelRename()
-        #expect(model.saveAsks(7))
-        model.save()
-        await model.settle()
-        #expect(model.question?.decision.route == .meguriSync && model.question?.decision.syncParagraph == true)
-        #expect(!model.canConfirm)
-        model.confirm()
-        await model.settle()
-        #expect(backend.saved.isEmpty, "never D5's local save alone with a ready binding")
-        var handed: NotetypeStructureDraft?
-        model.meguriSyncSave = { draft, _ in handed = draft }
-        #expect(model.canConfirm)
-        model.confirm()
-        await model.settle()
-        #expect(handed?.fields.last?.name == "Field 1" && backend.saved.isEmpty)
-        // A rename-only draft with Meguri Sync: no sheet, a local save that syncs normally.
-        model.revert(7)
-        backend.summaries = [NotetypeDraftSummary(reasons: [], changes: [.fieldRenamed(from: "Front", to: "Prompt")], losesContent: false)]
-        model.renameField()
-        model.save()
-        await model.settle()
-        #expect(model.question == nil && backend.saved.count == 1)
-    }
-
     @Test func aChangeElsewhereToADraftedTypeShowsTheRow() async {
         let backend = FakeNoteTypesBackend()
         let (model, _) = await open(backend)
@@ -485,23 +454,158 @@ extension NoteTypesModelTests {
         #expect(model.renameRefusal == nil && model.draft(7)?.row(row)?.name == "Extra")
     }
 
-    @Test func meguriSyncsJobLocksTheNoteTypeAndItsRefusalsAreHandled() async {
+    /// D3 with Meguri Sync chosen: structural changes ask; Save and Upload runs only with a ready binding.
+    @Test func meguriSyncAsksAndRoutesToItsJob() async {
         let backend = FakeNoteTypesBackend()
         backend.summaries = [NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldAdded(name: "Field 1")], losesContent: false)]
         let (model, _) = await open(backend)
+        let sync = FakeMeguriSync()
+        sync.state = .notSetUp
         model.service = { .meguriSync }
-        var locked = false
-        model.meguriSyncSave = { _, _ in
-            locked = !model.editable(7)
-            throw BridgeError.stale(table: .notetypes, key: "7")
-        }
+        model.meguriSync = sync
+        model.addField(7)
+        model.cancelRename()
+        #expect(model.saveAsks(7))
+        model.save()
+        await model.settle()
+        #expect(model.question?.decision.route == .meguriSync && model.question?.decision.syncParagraph == true)
+        #expect(!model.canConfirm && model.meguriSyncState == .notSetUp, "set up Meguri Sync first")
+        model.confirm()
+        await model.settle()
+        #expect(backend.saved.isEmpty && sync.saves.isEmpty, "never D5's local save alone while Meguri Sync is chosen")
+        sync.state = .uploadPending
+        #expect(!model.canConfirm)
+        sync.state = .ready
+        #expect(model.canConfirm)
+        model.confirm()
+        await model.settle()
+        #expect(sync.saves.map { $0.draft.fields.last?.name } == ["Field 1"] && sync.saves.first?.reachable == true && backend.saved.isEmpty)
+        #expect(!model.isEdited(7) && model.notice == nil && model.failure == nil)
+        // A rename-only draft with Meguri Sync: no sheet, a local save that syncs normally.
+        backend.summaries = [NotetypeDraftSummary(reasons: [], changes: [.fieldRenamed(from: "Front", to: "Prompt")], losesContent: false)]
+        model.renameField()
+        model.save()
+        await model.settle()
+        #expect(model.question == nil && backend.saved.count == 1 && sync.saves.count == 1)
+    }
+
+    /// Stage a structural draft and accept its sheet with Meguri Sync.
+    private func confirmWithMeguriSync(_ sync: FakeMeguriSync, reachable: Bool = true) async -> (NoteTypesModel, FakeNoteTypesBackend) {
+        let backend = FakeNoteTypesBackend()
+        backend.summaries = [NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldAdded(name: "Field 1")], losesContent: false)]
+        let (model, _) = await open(backend)
+        sync.reachable = reachable
+        model.service = { .meguriSync }
+        model.meguriSync = sync
         model.addField(7)
         model.cancelRename()
         model.save()
         await model.settle()
         model.confirm()
         await model.settle()
-        #expect(locked && model.changedElsewhere == [7] && model.isEdited(7) && model.editable(7))
+        return (model, backend)
+    }
+
+    @Test func eachResultOfTheJobShowsWhatHappened() async {
+        // Saved and uploaded: the draft goes, nothing more to say.
+        var sync = FakeMeguriSync()
+        var (model, _) = await confirmWithMeguriSync(sync)
+        #expect(!model.isEdited(7) && model.notice == nil && model.failure == nil && model.progress == nil && model.editable(7))
+        // Saved here, not uploaded: the draft goes and the person is told.
+        sync = FakeMeguriSync(); sync.results = [.saved(uploaded: false)]
+        (model, _) = await confirmWithMeguriSync(sync)
+        #expect(!model.isEdited(7) && model.notice == .notUploaded && model.failure == nil)
+        // The round stopped: nothing changed, the draft stays, the sync status says why.
+        sync = FakeMeguriSync(); sync.results = [.syncStopped]
+        (model, _) = await confirmWithMeguriSync(sync)
+        #expect(model.isEdited(7) && model.failure == .syncStopped && model.editable(7))
+        // Cancelled before the save: the draft stays and nothing is said.
+        sync = FakeMeguriSync(); sync.results = [.cancelled]
+        (model, _) = await confirmWithMeguriSync(sync)
+        #expect(model.isEdited(7) && model.failure == nil && model.notice == nil)
+        // The job could not run.
+        sync = FakeMeguriSync(); sync.results = [.notSaved]
+        (model, _) = await confirmWithMeguriSync(sync)
+        #expect(model.isEdited(7) && model.failure == .notSaved)
+    }
+
+    /// D4's unreachable case: the sheet says so, its button reads Save, and the upload waits without an alert.
+    @Test func offlineTheSheetSaysSoAndTheSaveRunsWithTheUploadPending() async {
+        let backend = FakeNoteTypesBackend()
+        backend.summaries = [NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldAdded(name: "Field 1")], losesContent: false)]
+        let (model, _) = await open(backend)
+        let sync = FakeMeguriSync()
+        sync.reachable = false
+        sync.results = [.saved(uploaded: false)]
+        model.service = { .meguriSync }
+        model.meguriSync = sync
+        model.addField(7)
+        model.cancelRename()
+        model.save()
+        await model.settle()
+        #expect(model.meguriUnreachable && model.canConfirm)
+        model.confirm()
+        await model.settle()
+        #expect(sync.saves.first?.reachable == false && model.progress == nil)
+        #expect(!model.isEdited(7) && model.notice == nil, "the sheet already said the upload waits")
+    }
+
+    @Test func meguriSyncsJobLocksTheNoteTypeAndItsRefusalsAreHandled() async {
+        let backend = FakeNoteTypesBackend()
+        backend.summaries = [NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldAdded(name: "Field 1")], losesContent: false)]
+        let (model, _) = await open(backend)
+        let sync = FakeMeguriSync()
+        model.service = { .meguriSync }
+        model.meguriSync = sync
+        let seen = SyncSeen()
+        sync.during = {
+            seen.locked = !model.editable(7)
+            seen.stages.append(model.progress?.stage)
+        }
+        sync.errors = [BridgeError.stale(table: .notetypes, key: "7")]
+        model.addField(7)
+        model.cancelRename()
+        model.save()
+        await model.settle()
+        model.confirm()
+        await model.settle()
+        #expect(seen.locked && seen.stages == [.uploading] && model.changedElsewhere == [7] && model.isEdited(7) && model.editable(7))
+        // LossesChanged from the job: the question again with the new counts; accepting it starts a new job.
+        backend.summaries = [Self.losing]
+        sync.errors = [BridgeError.notetypeStructureRefused(.lossesChanged(summary: Self.losing))]
+        model.keepEditing(7)
+        model.reload(7)
+        await model.settle()
+        model.deleteField(7, row: 1)
+        model.save()
+        await model.settle()
+        model.confirm()
+        await model.settle()
+        #expect(model.question?.summary == Self.losing && model.isEdited(7))
+        model.confirm()
+        await model.settle()
+        #expect(sync.saves.count == 3 && sync.saves.last?.draft.confirmed.fields[1] == 12 && !model.isEdited(7))
+    }
+
+    /// Leaving (the background, a close) asks the job to stop where MP7 allows, so it never waits for a whole upload.
+    @Test func leavingCancelsTheRunningJob() async {
+        let backend = FakeNoteTypesBackend()
+        backend.summaries = [NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldAdded(name: "Field 1")], losesContent: false)]
+        let (model, _) = await open(backend)
+        let sync = FakeMeguriSync()
+        sync.waitsForCancel = true
+        sync.results = [.saved(uploaded: false)]
+        model.service = { .meguriSync }
+        model.meguriSync = sync
+        model.addField(7)
+        model.cancelRename()
+        model.save()
+        await model.settle()
+        model.confirm()
+        for _ in 0..<50 { await Task.yield() }
+        #expect(model.progress != nil && !model.editable(7))
+        await model.cancelAndDrain()
+        #expect(sync.cancels == 1 && model.progress == nil && model.editable(7) && !model.isEdited(7))
     }
 
     @Test func anUneditedDraftTakesTheNewerRecord() async {
@@ -518,6 +622,42 @@ extension NoteTypesModelTests {
 }
 
 @MainActor private final class Flag { var value = false }
+
+/// A scripted Meguri Sync for the Save sheet: each save takes the first error, else the first result.
+@MainActor private final class FakeMeguriSync: NoteTypesMeguriSync {
+    var state: NoteTypeSyncState = .ready
+    var reachable = true
+    var results: [NoteTypeSyncSaveResult] = []
+    var errors: [any Error] = []
+    var during: (@MainActor () -> Void)?
+    var waitsForCancel = false
+    private(set) var saves: [(draft: NotetypeStructureDraft, reachable: Bool)] = []
+    private(set) var cancels = 0
+    private var cancelled: CheckedContinuation<Void, Never>?
+    var noteTypeSyncState: NoteTypeSyncState { state }
+    func noteTypeSyncReachable() async -> Bool { reachable }
+    func saveNotetypeStructure(_ draft: NotetypeStructureDraft, reachable: Bool,
+                               progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)
+        async throws -> NoteTypeSyncSaveResult {
+        saves.append((draft, reachable))
+        progress(.uploading, 0, nil)
+        during?()
+        if waitsForCancel { await withCheckedContinuation { cancelled = $0 } }
+        if !errors.isEmpty { throw errors.removeFirst() }
+        return results.isEmpty ? .saved(uploaded: true) : results.removeFirst()
+    }
+    func cancelNotetypeStructureSave() {
+        cancels += 1
+        cancelled?.resume()
+        cancelled = nil
+    }
+}
+
+@MainActor private final class SyncSeen {
+    var locked = false
+    var stages: [NoteTypeSyncStage?] = []
+}
+
 
 private extension NoteTypesModel {
     func renameField() { edit(7) { $0.rename(0, to: "Prompt") } }

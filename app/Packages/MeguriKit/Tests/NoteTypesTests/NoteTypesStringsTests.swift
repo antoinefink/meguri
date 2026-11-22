@@ -33,6 +33,11 @@ import Testing
         #expect(NoteTypesStrings.syncBody(device: "Mac", locale: english)
             == "These changes alter the structure of your collection, so they cannot be merged. Meguri syncs this Mac first, saves, then uploads this collection in place of the one on Meguri Sync.")
         #expect(NoteTypesStrings.backup(device: "iPad", locale: english) == "A backup of the collection is kept on this iPad.")
+        // D4 when Meguri Sync cannot be reached, and D6 step 4's alert.
+        #expect(NoteTypesStrings.unreachableBody(device: "Mac", locale: english)
+            == "Meguri saves on this Mac now and asks you to upload this collection when the server can be reached.")
+        #expect(NoteTypesStrings.notUploaded(device: "iPad", locale: english)
+            == "The changes are saved on this iPad. The sync status shows what to do next.")
         let bundle = NoteTypesStrings.bundle
         let expected = [
             "noteTypes.save.sync.title": "Meguri Sync will be replaced.",
@@ -49,7 +54,13 @@ import Testing
             "noteTypes.inspector.collapsed": "Collapsed in Editor", "noteTypes.inspector.collapsedHelp": "Closed in Add Note until you open it",
             "noteTypes.inspector.rtl": "Right-to-Left", "noteTypes.inspector.placeholder": "Placeholder",
             "noteTypes.inspector.placeholderHelp": "Grey text shown while the field is empty",
-            "noteTypes.save.meguriUnavailable": "Saving structure changes with Meguri Sync isn’t available yet.",
+            "noteTypes.save.unreachable.title": "Meguri Sync cannot be reached.",
+            "noteTypes.save.notSetUp": "To save these changes, set up Meguri Sync in Settings first.",
+            "noteTypes.save.uploadPending": "Upload your earlier note type changes first, with Upload… in the sync status.",
+            "noteTypes.progress.syncing": "Syncing…", "noteTypes.progress.uploading": "Uploading…",
+            "noteTypes.notUploaded.title": "Changes Not Uploaded",
+            "noteTypes.failed.syncMessage": "Nothing was changed, because Meguri couldn’t sync with Meguri Sync first. The sync status shows why.",
+            "noteTypes.list.noCollection.title": "No Collection",
             "noteTypes.fields.fieldOrder": "Show in Field Order",
         ]
         for (key, value) in expected {

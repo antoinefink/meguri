@@ -75,6 +75,16 @@ public enum NoteTypesStrings {
         String(localized: "noteTypes.save.sync.body", defaultValue: "\(device)", bundle: .module, locale: locale)
     }
 
+    /// D4's first paragraph when Meguri Sync cannot be reached, after its bold title.
+    public static func unreachableBody(device: String, locale: Locale) -> String {
+        String(localized: "noteTypes.save.unreachable.body", defaultValue: "\(device)", bundle: .module, locale: locale)
+    }
+
+    /// The alert after Save and Upload saved on this device only (D6 step 4).
+    public static func notUploaded(device: String, locale: Locale) -> String {
+        String(localized: "noteTypes.notUploaded.message", defaultValue: "\(device)", bundle: .module, locale: locale)
+    }
+
     public static func backup(device: String, locale: Locale) -> String {
         String(localized: "noteTypes.save.backup", defaultValue: "\(device)", bundle: .module, locale: locale)
     }

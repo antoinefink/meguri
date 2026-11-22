@@ -5,10 +5,11 @@ import SwiftUI
 
 /// The Save sheet (`notetypes/draft-save` D4, N22.5): the changes the save
 /// makes, the losses first and in red with their counts, the sync paragraph
-/// when Meguri Sync's collection would be replaced, then Cancel and the
-/// confirm button D3 names. A destructive confirm is never the default, so
-/// Return does nothing destructive. A window sheet on the Mac, a form sheet
-/// on iPad.
+/// when Meguri Sync's collection would be replaced (or, when the server does
+/// not answer, that the save runs now and the upload waits), then Cancel and
+/// the confirm button D3 names. A destructive confirm is never the default,
+/// so Return does nothing destructive. A window sheet on the Mac, a form
+/// sheet on iPad.
 public struct NoteTypeSaveSheet: View {
     private let model: NoteTypesModel
     @Environment(\.locale) private var locale
@@ -84,7 +85,12 @@ public struct NoteTypeSaveSheet: View {
             }
             if question.decision.syncParagraph {
                 VStack(alignment: .leading, spacing: Spacing.xSmall) {
-                    Text("\(Text("noteTypes.save.sync.title", bundle: .module).bold()) \(NoteTypesStrings.syncBody(device: device, locale: locale))")
+                    if model.meguriUnreachable {
+                        // D4's unreachable case: the save runs now, the upload waits.
+                        Text("\(Text("noteTypes.save.unreachable.title", bundle: .module).bold()) \(NoteTypesStrings.unreachableBody(device: device, locale: locale))")
+                    } else {
+                        Text("\(Text("noteTypes.save.sync.title", bundle: .module).bold()) \(NoteTypesStrings.syncBody(device: device, locale: locale))")
+                    }
                     Text("noteTypes.save.sync.others", bundle: .module)
                 }
                 .fixedSize(horizontal: false, vertical: true)
@@ -95,14 +101,24 @@ public struct NoteTypeSaveSheet: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("noteTypes.list.saveSheetBackup")
-            if question.decision.route == .meguriSync && !model.canSaveWithMeguriSync {
-                // Until Meguri Sync's structure save exists (U269), say why the button is off.
-                Text("noteTypes.save.meguriUnavailable", bundle: .module)
+            if let reason = unavailableReason(question) {
+                // Save and Upload cannot run now: say what to do first.
+                Text(verbatim: reason)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("noteTypes.list.saveSheetUnavailable")
             }
+        }
+    }
+
+    /// Why Save and Upload is disabled, when it is (D3 with Meguri Sync chosen).
+    private func unavailableReason(_ question: NoteTypesModel.Question) -> String? {
+        guard question.decision.route == .meguriSync else { return nil }
+        switch model.meguriSyncState {
+        case .ready: return nil
+        case .notSetUp: return NoteTypesStrings.text("noteTypes.save.notSetUp", locale: locale)
+        case .uploadPending: return NoteTypesStrings.text("noteTypes.save.uploadPending", locale: locale)
         }
     }
 
@@ -113,10 +129,10 @@ public struct NoteTypeSaveSheet: View {
     }
 
     @ViewBuilder private func confirm(_ question: NoteTypesModel.Question) -> some View {
-        let label = question.decision.confirm == .saveAndUpload
+        // D4: when Meguri Sync cannot be reached the button reads Save.
+        let label = question.decision.confirm == .saveAndUpload && !model.meguriUnreachable
             ? Text("noteTypes.save.confirm.saveAndUpload", bundle: .module) : Text("noteTypes.save.confirm.save", bundle: .module)
-        let unavailable = question.decision.route == .meguriSync && !model.canSaveWithMeguriSync
-        let help = unavailable ? Text("noteTypes.save.meguriUnavailable", bundle: .module) : Text(verbatim: "")
+        let help = Text(verbatim: unavailableReason(question) ?? "")
         if question.decision.destructive {
             Button(role: .destructive) { model.confirm() } label: { label }
                 .help(help)

@@ -117,12 +117,7 @@ public struct NoteTypePage: View {
                 Button(role: .destructive) { model.revert(id) } label: { Text("noteTypes.discard.discard", bundle: .module) }
                 Button(role: .cancel) { model.confirmingRevert = false } label: { Text("noteTypes.discard.keepEditing", bundle: .module) }
             }
-            .alert(Text("noteTypes.failed.title", bundle: .module), isPresented: Binding(
-                get: { model.failure != nil }, set: { if !$0 { model.failure = nil } })) {
-                Button(role: .cancel) { model.failure = nil } label: { Text("noteTypes.failed.ok", bundle: .module) }
-            } message: {
-                Text("noteTypes.failed.message", bundle: .module)
-            }
+            .modifier(SaveOutcomeAlerts(model: model))
     }
 
     private var subtitle: String {

@@ -589,6 +589,12 @@ public final class SyncCoordinator {
             settings = .init(enabled: true, paused: false, automatic: true, media: true)
             status = .renderFixture(state: .iCloudUnavailable(.noAccount), accountStatus: .noAccount,
                 syncNow: .unavailable(.iCloudUnavailable))
+        case .meguriStructureUploadPending:
+            providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+            meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
+            meguriRoutine = .idle; meguriLastExchange = recent
+            meguriStructureUploadPending = true
+            renderConnected = true
         case .meguriBlocked:
             providerState = .renderFixture(selection: .meguri, phase: .blocked)
             meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
@@ -825,7 +831,8 @@ public final class SyncCoordinator {
         let shown = status?.state == .needsAttention ? status?.stateWithoutAttention : status?.state
         return SyncPanel.progress(mainStatus, meguri: providerState?.selection == .meguri || providerNeedsAttention,
             setupValue: meguriProgressValue,
-            meguriMoving: meguriAuthenticating || (meguriStage == nil && meguriRoutine == .exchanging), cloudState: shown)
+            meguriMoving: meguriAuthenticating || meguriStructureStage != nil
+                || (meguriStage == nil && meguriRoutine == .exchanging), cloudState: shown)
     }
     /// N23.1: the files line under the bar, while iCloud's media transfers and a
     /// count is known. Meguri Sync's status sentence carries its count (resume fix).
@@ -895,7 +902,8 @@ public final class SyncCoordinator {
         .init(handoffRecovery: providerState?.phase == .handoffRecovery, providerBlocked: providerState?.phase == .blocked,
             connection: meguriAuthenticating ? .authenticating : meguriPhase, stage: meguriStage, routine: meguriRoutine,
             failureKey: meguriFailureKey, finishOffered: meguriCanFinish, automatic: settings.automatic && storedAutomatic,
-            mediaFilesLeft: meguriSetupMediaLeft, mediaListKnown: (meguriAffectedFileCount ?? 0) > 0)
+            mediaFilesLeft: meguriSetupMediaLeft, mediaListKnown: (meguriAffectedFileCount ?? 0) > 0,
+            structureStage: meguriStructureStage, structureUploadPending: meguriStructureUploadPending)
     }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
     private var providerDiscovery: ProviderDiscoveryOwnership?
@@ -952,6 +960,20 @@ public final class SyncCoordinator {
     public private(set) var meguriProgressFailure: BridgeError?
     public private(set) var meguriBusy = false
     public private(set) var meguriCancelling = false
+    /// MP7: the phase of the note type structure save job (or Upload…) that runs.
+    public private(set) var meguriStructureStage: MeguriStructureStage?
+    /// MP7 step 5: a structure save is committed here and its upload has not
+    /// run. Read from the core on load, after every job and after note type
+    /// changes (an undo withdraws it); no round runs while it holds.
+    public private(set) var meguriStructureUploadPending = false
+    /// The running job, cancelled where MP7 allows.
+    @ObservationIgnored private var meguriStructureJob: Task<MeguriStructureOutcome, any Error>?
+    @ObservationIgnored private var meguriStructureRun: UUID?
+    @ObservationIgnored private var meguriStructureCancelRequested = false
+    /// Tests only: replaces the bridge's structure jobs and the provider's pending read.
+    @ObservationIgnored var meguriStructureJobsOverride: (any MeguriStructureJobService)?
+    /// D7: a completed upload clears the undo history; the Edit menu reads it again.
+    @ObservationIgnored var meguriStructureJobEnded: (@MainActor () -> Void)?
     var meguriCollectionWorkHeld: Bool {
         meguriPreview != nil || meguriSetupPreview != nil || meguriStage == .preparing || meguriStage == .collection
     }
@@ -988,7 +1010,8 @@ public final class SyncCoordinator {
     }
     public var meguriStatus: MeguriSyncStatusPresentation {
         .init(stopped: providerNeedsAttention, connection: meguriAuthenticating ? .authenticating : meguriPhase,
-            stage: meguriStage, routine: meguriRoutine, settling: deviceSettingsSettling)
+            stage: meguriStage, routine: meguriRoutine, settling: deviceSettingsSettling,
+            structureRunning: meguriStructureStage != nil, structureUploadPending: meguriStructureUploadPending)
     }
     var prepareEditorReplacement: (@MainActor (String, ReviewCollection.EditorReplacementDecision, @MainActor () -> Bool) async -> ReviewCollection.EditorReplacementAdmission?)?
     var editorReplacementIsCurrent: (@MainActor (UUID) -> Bool)?
@@ -1170,8 +1193,13 @@ public final class SyncCoordinator {
             guard meguriCurrent(owner, expected, revision), meguriBootstrap === facade else { return }
             meguriReady = true; meguriRound = round; meguriStage = nil; meguriOperation = nil
             if meguriRoutine == nil { meguriRoutine = .unreported }
+            // MP7 step 5's state survives a relaunch in the core: it is read with the binding.
+            await refreshMeguriStructurePending()
         case .unbound(let retained):
             meguriReady = false; meguriRound = nil; meguriRoutine = nil
+            // A structure upload that held the binding still waits (MP7 step 4).
+            await refreshMeguriStructurePending()
+            guard meguriCurrent(owner, expected, revision), meguriBootstrap === facade else { return }
             // Intent is historical display evidence. Only the checked lookup
             // names an active preparation, which may be newer than that intent.
             let pending = try await facade.pendingPreparation()
@@ -2134,7 +2162,8 @@ public final class SyncCoordinator {
         requestMeguriWake(automatic: false, retryMedia: true)
     }
     private func requestMeguriWake(automatic: Bool, retryMedia: Bool = false) {
-        guard meguriCanRun, meguriSchedulingAllowed(automatic: automatic) else { return }
+        // MP7 step 5: no round runs while a structure upload waits (the core refuses it too).
+        guard meguriCanRun, !meguriStructureUploadPending, meguriSchedulingAllowed(automatic: automatic) else { return }
         switch meguriRoutine {
         case .mediaBlocked: if !retryMedia { return }
         case .acceptanceUnknown, .fullSyncRequired, .authentication, .failed: return
@@ -4958,6 +4987,8 @@ extension SyncCoordinator {
         case meguriPreparing, iCloudNoAccount, meguriMediaBlocked, meguriAcceptanceUnknown, iCloudSetupNeeded
         /// MP6.5 (resume fix): setup's media step paused, and stopped after its automatic attempts.
         case meguriSetupMediaPaused, meguriSetupMediaStopped
+        /// MP7 step 5: a note type structure save waits for Upload….
+        case meguriStructureUploadPending
     }
     /// Builds synthetic Sync section examples. The coordinator is never
     /// attached: it owns no collection, account, binding or server, and its
@@ -4967,5 +4998,190 @@ extension SyncCoordinator {
             defaults: nil, clock: clock)
         sync.applyRenderFixture(state)
         return sync
+    }
+}
+
+// MARK: Note type structure saves (`sync/meguri-provider` MP7, `notetypes/draft-save` D6, D7)
+
+/// Collects a job's answer across the provider action that runs it.
+@MainActor private final class MeguriStructureAnswer {
+    var value: Result<NoteTypeSyncSaveResult, any Error>?
+}
+
+extension SyncCoordinator: NoteTypesMeguriSync {
+    /// The jobs for the ready binding, and the pending read for any binding.
+    private var meguriStructureJobs: (any MeguriStructureJobService)? {
+        if let meguriStructureJobsOverride { return meguriStructureJobsOverride }
+        guard let provider else { return nil }
+        return CoreMeguriStructureJobs(round: meguriRound, provider: provider)
+    }
+
+    /// D3 with Meguri Sync chosen: Save and Upload runs only with a ready binding
+    /// and no earlier upload waiting.
+    public var noteTypeSyncState: NoteTypeSyncState {
+        guard providerState?.selection == .meguri, !providerNeedsAttention else { return .notSetUp }
+        if meguriStructureUploadPending { return .uploadPending }
+        guard meguriReady, meguriRound != nil || meguriStructureJobsOverride != nil, meguriStage == nil,
+              meguriPhase == .setupRequired, !closing, !replacing, !suspended else { return .notSetUp }
+        return .ready
+    }
+
+    /// D4: no network path, or the server gives no HTTP answer to a HEAD
+    /// request (no sign-in is sent). An unknown answer counts as reachable:
+    /// the job's round then finds out.
+    public func noteTypeSyncReachable() async -> Bool {
+        if reachable == false { return false }
+        let endpoint = meguriEndpoint
+        guard !endpoint.isEmpty, meguriStructureJobsOverride == nil else { return true }
+        switch await EndpointReachability.check(endpoint) {
+        case .response, .cancelled: return true
+        case .unavailable, .timedOut, .secureConnectionFailed: return false
+        }
+    }
+
+    public func saveNotetypeStructure(_ draft: NotetypeStructureDraft, reachable: Bool,
+                                      progress: @escaping @MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)
+        async throws -> NoteTypeSyncSaveResult {
+        try await runMeguriStructure(progress: progress) { jobs, onStage in
+            try await jobs.saveNotetypeStructure(draft, reachable: reachable, onStage: onStage)
+        }
+    }
+
+    public func cancelNotetypeStructureSave() {
+        meguriStructureCancelRequested = true
+        meguriStructureJob?.cancel()
+    }
+
+    /// MP7 step 5's Upload…: the server's facts and the upload, no round and
+    /// no question (the sheet was the consent). Runs from the status row and
+    /// the panel.
+    @discardableResult public func uploadNotetypeStructure() -> Task<Void, Never>? {
+        guard meguriCanUploadStructure else { return nil }
+        return Task { _ = try? await runMeguriStructure(progress: nil) { jobs, onStage in try await jobs.uploadNotetypeStructure(onStage: onStage) } }
+    }
+
+    /// Upload… can run now.
+    public var meguriCanUploadStructure: Bool {
+        meguriStructureUploadPending && meguriStructureStage == nil && !meguriBusy && !closing && !replacing && !suspended
+    }
+
+    /// A note type changed (an undo or redo among them): a waiting upload is read again,
+    /// since undoing the save withdraws it (D7, MP7 step 6).
+    func notetypesChanged() {
+        guard meguriStructureUploadPending, meguriStructureStage == nil else { return }
+        Task { await refreshMeguriStructurePending() }
+    }
+
+    /// Reads MP7 step 5's state. When it is withdrawn (the save was undone),
+    /// ordinary rounds run again.
+    @discardableResult func refreshMeguriStructurePending() async -> Bool? {
+        guard providerState?.selection == .meguri, let jobs = meguriStructureJobs else { return nil }
+        let expected = generation, revision = hostRevision
+        guard let value = try? await jobs.structureUploadPending(), generation == expected, hostRevision == revision else { return nil }
+        let withdrawn = meguriStructureUploadPending && !value
+        meguriStructureUploadPending = value
+        if withdrawn, meguriStructureStage == nil { requestMeguriWake(automatic: true) }
+        return value
+    }
+
+    /// One job as the provider's one action: a round or another action that
+    /// runs first ends (the job's own round replaces the next one), then the
+    /// job, then what its outcome shows.
+    private func runMeguriStructure(progress: (@MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)?,
+        _ start: @escaping @Sendable (any MeguriStructureJobService,
+            @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void) async throws -> MeguriStructureOutcome)
+        async throws -> NoteTypeSyncSaveResult {
+        meguriStructureCancelRequested = false
+        for _ in 0..<8 {
+            if let wake = meguriWake {
+                meguriWakePending = false; meguriWakeManual = false
+                await wake.task.value
+            } else if let action = meguriAction {
+                await action.task.value
+            } else { break }
+        }
+        guard !meguriStructureCancelRequested else { return .cancelled }
+        guard meguriWake == nil, meguriAction == nil, meguriStructureStage == nil, let jobs = meguriStructureJobs else { return .notSaved }
+        let answer = MeguriStructureAnswer()
+        let run = UUID()
+        let issued = issueMeguri { [weak self] _ in
+            guard let self else { return }
+            self.meguriStructureRun = run
+            let onStage: @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void = { [weak self] stage, stream in
+                Task { @MainActor in self?.meguriStructureStarted(stage, stream, run: run, progress: progress) }
+            }
+            let job = Task { try await start(jobs, onStage) }
+            self.meguriStructureJob = job
+            if self.meguriStructureCancelRequested { job.cancel() }
+            let result = await job.result
+            self.meguriStructureJob = nil
+            answer.value = await self.finishMeguriStructure(result)
+            self.meguriStructureRun = nil
+            self.meguriStructureStage = nil
+            self.meguriStructureJobEnded?()
+        }
+        guard issued, let task = meguriAction?.task else { return .notSaved }
+        await task.value
+        guard let value = answer.value else { return .notSaved }
+        return try value.get()
+    }
+
+    private func meguriStructureStarted(_ stage: MeguriStructureStage, _ stream: AsyncStream<CoreProgress>?, run: UUID,
+                                        progress: (@MainActor (NoteTypeSyncStage, UInt64, UInt64?) -> Void)?) {
+        // A phase reported after its job ended changes nothing.
+        guard meguriStructureRun == run else { return }
+        meguriStructureStage = stage
+        let shown = MeguriStructureEffect.stage(stage)
+        progress?(shown, 0, nil)
+        // The save reports "Updating <i> of <n> notes" (D5 step 5).
+        guard stage == .save, let stream, let progress else { return }
+        Task { @MainActor [weak self] in
+            for await report in stream {
+                guard self?.meguriStructureRun == run, self?.meguriStructureStage == .save else { return }
+                progress(.saving, report.completed, report.total)
+            }
+        }
+    }
+
+    /// The pending state is read again after every job, failed ones included:
+    /// an error after the commit still leaves a save this device holds.
+    private func finishMeguriStructure(_ result: Result<MeguriStructureOutcome, any Error>) async -> Result<NoteTypeSyncSaveResult, any Error> {
+        let pending = await refreshMeguriStructurePending()
+        let outcome: MeguriStructureOutcome
+        switch result {
+        case .success(let value): outcome = value
+        case .failure(let error):
+            meguriLastError = error
+            // Saved, though the job did not say so: never "nothing was changed".
+            if pending == true { return .success(.saved(uploaded: false)) }
+            return .failure(error)
+        }
+        let effect = MeguriStructureEffect.after(outcome)
+        if let report = effect.round {
+            meguriRoundReport = report
+            meguriCollectionFinalization = nil; meguriMediaFinalization = nil
+            reduceMeguriRound(report)
+        }
+        if let routine = effect.routine { meguriRoutine = routine }
+        if effect.exchanged { meguriLastExchange = Int64(clock.now().timeIntervalSince1970 * 1_000) }
+        let choose = effect.choose || meguriRoutine == .fullSyncRequired
+        if effect.readiness || choose, let facade = meguriBootstrap, let owner = meguriConnectionOwner {
+            let expected = generation, revision = hostRevision
+            try? await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+            // T19.5 "full sync required": the needs-you row with its Choose action.
+            if choose, meguriCurrent(owner, expected, revision), meguriChoiceAllowed, meguriStage == .required {
+                meguriStage = .failed; meguriFailureKey = MeguriSetupSequence.fullSyncKey
+            }
+        }
+        if effect.wake { meguriReadyWakePending = true }
+        return .success(effect.result)
+    }
+
+    /// Tests only: a coordinator with a ready Meguri Sync binding over `jobs`.
+    func stageMeguriStructureForTests(_ jobs: any MeguriStructureJobService) {
+        meguriStructureJobsOverride = jobs
+        setupState = .attached
+        providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+        meguriPhase = .setupRequired; meguriReady = true; meguriRoutine = .idle
     }
 }

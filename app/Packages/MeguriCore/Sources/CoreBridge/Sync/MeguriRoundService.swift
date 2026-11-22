@@ -113,10 +113,17 @@ public struct MeguriRoundPhaseResult: Sendable {
     public let outcome: MeguriRoundPhaseOutcome
     public let finalization: MeguriRoundFinalization?
     public let trackingFailure: BridgeError?
+    public init(outcome: MeguriRoundPhaseOutcome, finalization: MeguriRoundFinalization?, trackingFailure: BridgeError?) {
+        self.outcome = outcome; self.finalization = finalization; self.trackingFailure = trackingFailure
+    }
 }
 public struct MeguriRoundReport: Sendable {
     public let collection: MeguriRoundPhaseResult
     public let media: MeguriRoundPhaseResult?
+    /// A structure save job's stopped round has a collection phase only (MP7 step 2).
+    public init(collection: MeguriRoundPhaseResult, media: MeguriRoundPhaseResult?) {
+        self.collection = collection; self.media = media
+    }
     public var complete: Bool {
         guard case .collection(let collection) = collection.outcome, collection.succeeded,
               let media, case .media(let media) = media.outcome else { return false }

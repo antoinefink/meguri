@@ -203,6 +203,16 @@
         }
       }
     },
+    "noteTypes.failed.syncMessage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing was changed, because Meguri couldn’t sync with Meguri Sync first. The sync status shows why."
+          }
+        }
+      }
+    },
     "noteTypes.failed.title": {
       "localizations": {
         "en": {
@@ -573,6 +583,26 @@
         }
       }
     },
+    "noteTypes.notUploaded.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The changes are saved on this %@. The sync status shows what to do next."
+          }
+        }
+      }
+    },
+    "noteTypes.notUploaded.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes Not Uploaded"
+          }
+        }
+      }
+    },
     "noteTypes.progress": {
       "localizations": {
         "en": {
@@ -601,6 +631,26 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "noteTypes.progress.syncing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing…"
+          }
+        }
+      }
+    },
+    "noteTypes.progress.uploading": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uploading…"
           }
         }
       }
@@ -811,22 +861,22 @@
         }
       }
     },
-    "noteTypes.save.meguriUnavailable": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Saving structure changes with Meguri Sync isn’t available yet."
-          }
-        }
-      }
-    },
     "noteTypes.save.noCards": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "No cards."
+          }
+        }
+      }
+    },
+    "noteTypes.save.notSetUp": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To save these changes, set up Meguri Sync in Settings first."
           }
         }
       }
@@ -929,6 +979,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Save Changes to “%@”?"
+          }
+        }
+      }
+    },
+    "noteTypes.save.unreachable.body": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri saves on this %@ now and asks you to upload this collection when the server can be reached."
+          }
+        }
+      }
+    },
+    "noteTypes.save.unreachable.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri Sync cannot be reached."
+          }
+        }
+      }
+    },
+    "noteTypes.save.uploadPending": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload your earlier note type changes first, with Upload… in the sync status."
           }
         }
       }
