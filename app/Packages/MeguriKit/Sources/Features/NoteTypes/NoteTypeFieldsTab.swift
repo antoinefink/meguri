@@ -32,6 +32,8 @@ struct NoteTypeFieldsTab: View {
     @State private var sortOrder: [KeyPathComparator<FieldLine>] = []
     /// The save job's status, as the toolbar shows it (N22.5).
     @State private var jobShown = SaveJobShown()
+    /// The sync button (N23.6), before Revert and Save.
+    @Environment(\.syncStatusItem) private var syncStatusItem
     @State private var columns = TableColumnCustomization<FieldLine>()
     @Environment(\.locale) private var locale
 
@@ -82,6 +84,7 @@ struct NoteTypeFieldsTab: View {
                 .toolbar {
                     // Items of the inspector's own part of the toolbar, pushed to its end.
                     ToolbarSpacer()
+                    if let syncStatusItem { ToolbarItem(placement: .automatic) { syncStatusItem } }
                     NoteTypeSaveToolbar(model: model, running: jobShown.running(in: model), placement: .automatic)
                     ToolbarItem(placement: .automatic) { InspectorToggle(model: model) }
                 }

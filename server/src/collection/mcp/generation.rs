@@ -9,14 +9,17 @@ use regex::Regex;
 
 const MAX_SIBLINGS: usize = 2048;
 pub(super) struct Sibling { pub ord: u16, pub home: i64, pub new_position: Option<i64> }
-pub(super) fn siblings(c: &Connection, id: i64) -> Result<Vec<Sibling>> {
+pub(super) fn prepare_siblings(c: &Connection) -> Result<rusqlite::Statement<'_>> {
     // A row LIMIT does not bound a table scan. Require the intended single-key
     // nid index, then force it so missing/partial/wrong indexes refuse safely.
     // Never repair uploaded schema in a request.
     let indexed: bool = c.query_row("SELECT count(*)=1 AND min(name)='nid' AND min(coll)='BINARY' FROM pragma_index_xinfo('ix_cards_nid') WHERE key=1", [], |r|r.get::<_,Option<bool>>(0))
         .map_err(sql_error)?.unwrap_or(false);
     if !indexed { return Err(unsupported()); }
-    let mut q=c.prepare("SELECT ord,did,odid,type,due,odue FROM cards INDEXED BY ix_cards_nid WHERE nid=?1 ORDER BY id LIMIT ?2").map_err(sql_error)?;
+    c.prepare("SELECT ord,did,odid,type,due,odue FROM cards INDEXED BY ix_cards_nid WHERE nid=?1 ORDER BY id LIMIT ?2").map_err(sql_error)
+}
+pub(super) fn siblings(c: &Connection, id: i64) -> Result<Vec<Sibling>> {
+    let mut q=prepare_siblings(c)?;
     let sql_limit=i64::try_from(MAX_SIBLINGS+1).map_err(|_|too_large())?;
     let mut rows=q.query(params![id,sql_limit]).map_err(sql_error)?;
     let mut result=Vec::new();
@@ -33,6 +36,22 @@ pub(super) fn siblings(c: &Connection, id: i64) -> Result<Vec<Sibling>> {
         result.push(Sibling { ord:r.get(0).map_err(sql_error)?,home:if odid!=0 {odid} else {did},new_position:position });
     }
     Ok(result)
+}
+/// Membership only, after prepare_siblings has qualified the existing index.
+/// Do not decode scheduling or other card details for an unrelated note.
+pub(super) fn has_home_deck(c: &Connection, id: i64, deck: i64) -> Result<bool> {
+    let mut q=c.prepare("SELECT (CASE WHEN odid!=0 THEN odid ELSE did END)=?2
+        FROM cards INDEXED BY ix_cards_nid WHERE nid=?1 ORDER BY id LIMIT ?3").map_err(sql_error)?;
+    let sql_limit=i64::try_from(MAX_SIBLINGS+1).map_err(|_|too_large())?;
+    let mut rows=q.query(params![id,deck,sql_limit]).map_err(sql_error)?;
+    let mut inspected=0;
+    while let Some(r)=rows.next().map_err(sql_error)? {
+        // A match beyond the inspection bound cannot establish safe membership.
+        if inspected==MAX_SIBLINGS { return Err(too_large()); }
+        inspected+=1;
+        if r.get::<_,Option<bool>>(0).map_err(sql_error)?.unwrap_or(false) { return Ok(true); }
+    }
+    Ok(false)
 }
 pub(super) fn validate_type(nt: &Notetype) -> Result<()> {
     if !matches!(nt.config.kind,0|1) || nt.templates.is_empty() || nt.fields.is_empty()

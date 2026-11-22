@@ -108,6 +108,39 @@ impl Fixture {
     fn create(&self,front:&str,tags:Vec<String>,time:i64)->Result<WriteResult> {
         self.backend.create_note(&self.path,&self.access,CreateInput {deck_id:"1".into(),note_type_id:"10".into(),fields:Fields(BTreeMap::from([("Front".into(),front.into()),("Back".into(),"generated answer".into())])),tags:Some(tags)},&Runtime(time))
     }
+    fn deck_search()->Self {
+        let f=Self::new();
+        f.create("Needle [a.b] deck:1",vec!["Chosen".into()],1000).unwrap();
+        f.create("Needle [axb] deck:1",vec!["ChosenExtra".into()],1001).unwrap();
+        let tx=f.db.unchecked_transaction().unwrap();
+        for (id,name) in [(2,"Selected"),(4,"Empty"),(20,"Other exact ID")] {
+            tx.execute("INSERT INTO decks SELECT ?1,?2,mtime_secs,usn,common,kind FROM decks WHERE id=1",params![id,name]).unwrap();
+        }
+        let filtered=ProtoBlob::new(DeckKindMessage::new(DeckKind::Filtered(Default::default()))).to_bytes().into_owned();
+        tx.execute("INSERT INTO decks SELECT 3,'Temporary',mtime_secs,usn,common,?1 FROM decks WHERE id=1",[filtered]).unwrap();
+        {
+            let mut notes=tx.prepare("INSERT INTO notes SELECT ?1,printf('generated-%d',?1),mid,mod,usn,tags,flds,sfld,csum,flags,data FROM notes WHERE id=?2").unwrap();
+            let mut cards=tx.prepare("INSERT INTO cards SELECT ?1,?1,?2,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data FROM cards WHERE id=1000").unwrap();
+            // Together with the two seed notes, 450 lower IDs belong to deck 1.
+            for id in 1002..1450 {
+                notes.execute(params![id,1000]).unwrap();
+                cards.execute(params![id,1]).unwrap();
+            }
+            notes.execute(params![1500,1000]).unwrap();
+            cards.execute(params![1500,20]).unwrap();
+            for id in 2000..2005 {
+                notes.execute(params![id,if id%2==0 {1000} else {1001}]).unwrap();
+                cards.execute(params![id,2]).unwrap();
+            }
+        }
+        // The first match has no card currently in its home deck. The temporary
+        // deck also holds an unrelated note, and neither is at home there.
+        tx.execute("UPDATE cards SET odid=did,odue=due,did=3 WHERE id IN (1000,2000)",[]).unwrap();
+        // A late card ID must neither reorder nor repeat its earlier note.
+        tx.execute("INSERT INTO cards SELECT 9000,nid,did,1,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data FROM cards WHERE id=2001",[]).unwrap();
+        tx.commit().unwrap();
+        f
+    }
     fn exact(&self,id:&str)->NoteResult {
         self.backend.search_notes(&self.path,&self.access,SearchInput {note_id:Some(id.into()),..Default::default()}).unwrap().notes.remove(0)
     }
@@ -193,6 +226,109 @@ fn paging_advances_examined_candidates_and_never_skips_a_match_for_fit() {
         if cursor.is_none() {break;}
     }
     assert_eq!(seen,vec!["2000","2001","2002"]);
+}
+#[test]
+fn deck_selected_pages_reach_matches_past_unrelated_notes_without_skips_or_repeats() {
+    let f=Fixture::deck_search();
+    let cases:[(Option<&str>,Option<&str>,&[&str]);3]=[
+        (None,None,&["2000","2001","2002","2003","2004"]),
+        (Some("cHoSeN"),None,&["2000","2002","2004"]),
+        (None,Some("NEEDLE [A.B] DECK:1"),&["2000","2002","2004"]),
+    ];
+    for (tag,query,expected) in cases {
+        let mut cursor=None;let mut seen=Vec::new();
+        // Cap traversal so a repeated or nonterminating cursor fails promptly.
+        for page_number in 0..4 {
+            let page=f.backend.search_notes(&f.path,&f.access,SearchInput {
+                deck_id:Some("2".into()),tag:tag.map(str::to_owned),query:query.map(str::to_owned),
+                limit:Some(2),cursor,..Default::default()
+            }).unwrap();
+            let ids=page.notes.into_iter().map(|n|n.note_id).collect::<Vec<_>>();
+            if page_number==0 {
+                assert_eq!(ids,expected[..2],"first deck-selected page: tag={tag:?}, query={query:?}, cursor={:?}",page.next_cursor);
+                assert!(page.next_cursor.is_some());
+            }
+            assert!(ids.len()<=2);
+            seen.extend(ids);cursor=page.next_cursor;
+            if cursor.is_none() {break;}
+        }
+        assert!(cursor.is_none(),"deck-selected search did not exhaust: tag={tag:?}, query={query:?}");
+        assert_eq!(seen,expected,"deck-selected cursor skipped or repeated notes: tag={tag:?}, query={query:?}");
+    }
+}
+#[test]
+fn deck_selected_empty_absent_and_filtered_decks_exhaust_on_the_first_page() {
+    let f=Fixture::deck_search();
+    // Deck 3 has resident cards but their nonzero odid overrides did. Deck 4
+    // exists without cards; deck 999 is absent. Global notes remain in all cases.
+    for deck in ["3","4","999"] {
+        let page=f.backend.search_notes(&f.path,&f.access,SearchInput {
+            deck_id:Some(deck.into()),limit:Some(2),..Default::default()
+        }).unwrap();
+        assert!(page.notes.is_empty(),"unexpected home-deck match for deck {deck}");
+        assert!(page.next_cursor.is_none(),"empty deck {deck} must exhaust without paging through unrelated notes");
+    }
+}
+#[test]
+fn deck_candidates_keep_empty_combined_pages_resumable_and_fallback_local() {
+    let mut f=Fixture::deck_search();
+    // More than a page of relevant candidates fail both remaining filters.
+    f.db.execute_batch("WITH RECURSIVE n(id) AS (VALUES(1600) UNION ALL SELECT id+1 FROM n WHERE id<1800)
+        INSERT INTO notes SELECT n.id,printf('generated-%d',n.id),mid,mod,usn,tags,flds,sfld,csum,flags,data FROM n CROSS JOIN notes WHERE notes.id=1001;
+        WITH RECURSIVE n(id) AS (VALUES(1600) UNION ALL SELECT id+1 FROM n WHERE id<1800)
+        INSERT INTO cards SELECT n.id,n.id,2,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,0,flags,data FROM n CROSS JOIN cards WHERE cards.id=2001;").unwrap();
+    let input=||SearchInput {deck_id:Some("2".into()),tag:Some("Chosen".into()),query:Some("NEEDLE [A.B] DECK:1".into()),..Default::default()};
+    let first=f.backend.search_notes(&f.path,&f.access,input()).unwrap();
+    assert!(first.notes.is_empty());assert!(first.next_cursor.is_some());
+    let second=f.backend.search_notes(&f.path,&f.access,SearchInput {cursor:first.next_cursor,..input()}).unwrap();
+    assert_eq!(second.notes.iter().map(|n|n.note_id.as_str()).collect::<Vec<_>>(),["2000","2002","2004"]);
+    assert!(second.next_cursor.is_none());
+    let budget=read::DeckBudget::install(&mut f.db).expect("scoped fixture requires a progress handler");
+    // Exceed the candidate budget with an ordinary read on the same transaction.
+    // A still-armed callback would interrupt this read after successful selection
+    // or an index fallback; budget interruption must also leave it dormant.
+    let ordinary_read=|c:&Connection| {
+        let sum:i64=c.query_row("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000) SELECT sum(x) FROM n",[],|r|r.get(0)).unwrap();
+        assert_eq!(sum,200010000);
+    };
+    {
+        let tx=f.db.transaction().unwrap();
+        let ids=read::deck_candidates(&tx,2,0,&budget).unwrap().unwrap();
+        assert_eq!(ids.len(),MAX_CANDIDATES+1);
+        ordinary_read(&tx);
+        assert_eq!(read::deck_candidates(&tx,2,2001,&budget).unwrap().unwrap(),[2002,2003,2004]);
+        ordinary_read(&tx);
+        tx.commit().unwrap();
+    }
+    // Orphans cannot consume candidate slots. Enough of them force the local
+    // work guard even with the native indexes; partial results must be dropped.
+    f.db.execute_batch("WITH RECURSIVE n(id) AS (VALUES(10000) UNION ALL SELECT id+1 FROM n WHERE id<39999)
+        INSERT INTO cards SELECT n.id,99999,2,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,0,flags,data FROM n CROSS JOIN cards WHERE cards.id=2001;").unwrap();
+    {
+        let tx=f.db.transaction().unwrap();
+        assert!(read::deck_candidates(&tx,2,0,&budget).unwrap().is_none());
+        ordinary_read(&tx);
+        tx.commit().unwrap();
+    }
+    for unavailable in 0..3 {
+        if unavailable==1 { f.db.execute_batch("DROP INDEX ix_cards_sched; CREATE INDEX ix_cards_sched ON cards(nid)").unwrap(); }
+        if unavailable==2 { f.db.execute_batch("DROP INDEX ix_cards_sched").unwrap(); }
+        {
+            let tx=f.db.transaction().unwrap();
+            assert!(read::deck_candidates(&tx,2,0,&budget).unwrap().is_none());
+            ordinary_read(&tx);
+            tx.commit().unwrap();
+        }
+        let page=f.backend.search_notes(&f.path,&f.access,input()).unwrap();
+        assert!(page.notes.is_empty());assert!(page.next_cursor.is_some());
+        let mut cursor=page.next_cursor;let mut seen=Vec::new();
+        for _ in 0..5 {
+            let page=f.backend.search_notes(&f.path,&f.access,SearchInput {cursor,..input()}).unwrap();
+            seen.extend(page.notes.into_iter().map(|n|n.note_id));cursor=page.next_cursor;
+            if cursor.is_none() {break;}
+        }
+        assert!(cursor.is_none());assert_eq!(seen,["2000","2002","2004"]);
+    }
 }
 #[test]
 fn typed_catalog_and_handles_are_bound_to_shape_and_publication() {
@@ -364,12 +500,118 @@ fn sibling_index_absence_refuses_deck_search_and_writes_without_repair() {
 }
 
 #[test]
+fn empty_deck_scopes_preserve_authoritative_sibling_index_refusals() {
+    use std::{sync::Arc,time::{Duration,Instant}};
+    for replacement in [
+        "",
+        "CREATE INDEX ix_cards_nid ON cards(did)",
+        "CREATE INDEX ix_cards_nid ON cards(nid) WHERE nid=999",
+        "CREATE INDEX ix_cards_nid ON notes(mid)",
+        "CREATE INDEX ix_cards_nid ON cards(nid COLLATE NOCASE)",
+    ] {
+        let f=Fixture::new();
+        f.create("selected",vec![],1000).unwrap();
+        f.create("unrelated",vec![],2000).unwrap();
+        f.db.execute_batch("UPDATE cards SET did=3 WHERE nid=2000;
+            INSERT INTO decks SELECT 2,'Empty',mtime_secs,usn,common,kind FROM decks WHERE id=1;
+            DROP INDEX ix_cards_sched;").unwrap();
+        // Obtain an actual legacy global-driver cursor after the deck's last
+        // note, while the unrelated higher global note still remains.
+        let request=||SearchInput {deck_id:Some("1".into()),limit:Some(1),..Default::default()};
+        let first=f.backend.search_notes(&f.path,&f.access,request()).unwrap();
+        assert_eq!(first.notes[0].note_id,"1000");
+        let cursor=first.next_cursor.unwrap();
+        f.db.execute_batch("CREATE INDEX ix_cards_sched ON cards(did,queue,due)").unwrap();
+        let index={
+            let tx=f.db.unchecked_transaction().unwrap();
+            Arc::new(SearchIndex::build(&tx,Instant::now()+Duration::from_secs(30)).unwrap())
+        };
+        f.db.execute_batch("DROP INDEX ix_cards_nid").unwrap();
+        f.db.execute_batch(replacement).unwrap();
+        let schema:i64=f.db.pragma_query_value(None,"schema_version",|r|r.get(0)).unwrap();
+        let stamp=f.stamp();
+        for warm in [false,true] {
+            for (deck,after) in [("999",None),("2",None),("1",Some(cursor.clone()))] {
+                let authoritative=generation::siblings(&f.db,if after.is_some() {2000} else {1000}).err().unwrap();
+                let result=f.backend.search_notes_with_index(&f.path,&f.access,SearchInput {
+                    deck_id:Some(deck.into()),cursor:after,limit:Some(1),..Default::default()
+                },|_|warm.then(||index.clone()));
+                let error=result.unwrap_err();
+                assert_eq!(error.code,authoritative.code,"{replacement}, warm={warm}, deck={deck}");
+                if authoritative.mcp_detail.is_some() { assert_eq!(error.mcp_detail,authoritative.mcp_detail); }
+            }
+        }
+        assert_eq!(f.stamp(),stamp);
+        assert_eq!(f.db.pragma_query_value::<i64,_>(None,"schema_version",|r|r.get(0)).unwrap(),schema);
+        // If no global notes remain after the original position, legacy search
+        // never invokes siblings and still permits an empty response.
+        f.db.execute("DELETE FROM notes WHERE id=2000",[]).unwrap();
+        for warm in [false,true] {
+            let page=f.backend.search_notes_with_index(&f.path,&f.access,SearchInput {
+                cursor:Some(cursor.clone()),..request()
+            },|_|warm.then(||index.clone())).unwrap();
+            assert!(page.notes.is_empty());assert!(page.next_cursor.is_none());
+        }
+    }
+}
+
+#[test]
+fn deck_drivers_validate_scheduling_only_after_home_deck_membership() {
+    use std::{sync::Arc,time::{Duration,Instant}};
+    for filtered in [false,true] {
+        let mut f=Fixture::new();
+        f.create("unrelated",vec![],1000).unwrap();
+        f.create("selected",vec![],2000).unwrap();
+        // A valid sibling index, but an unsupported new position outside the
+        // requested deck. Include saved-home membership as well as ordinary did.
+        f.db.execute("UPDATE cards SET did=?1,odid=?2,due=?3 WHERE nid=1000",
+            params![if filtered {3} else {2},if filtered {2} else {0},i64::from(i32::MAX)+1]).unwrap();
+        generation::prepare_siblings(&f.db).unwrap();
+        let budget=read::DeckBudget::install(&mut f.db).unwrap();
+        let index={
+            let tx=f.db.unchecked_transaction().unwrap();
+            Arc::new(SearchIndex::build(&tx,Instant::now()+Duration::from_secs(30)).unwrap())
+        };
+        assert_eq!(index.candidates(Some(1),None,None),Some([2000].as_slice()));
+        assert_eq!(index.candidates(Some(2),None,None),Some([1000].as_slice()));
+        for driver in ["cold","warm","global"] {
+            if driver=="global" { f.db.execute_batch("DROP INDEX ix_cards_sched").unwrap(); }
+            let scoped=read::deck_candidates(&f.db,1,0,&budget).unwrap();
+            if driver=="global" { assert!(scoped.is_none()); }
+            else { assert_eq!(scoped.unwrap(),[2000]); }
+            let request=|deck:&str|SearchInput {deck_id:Some(deck.into()),..Default::default()};
+            let page=f.backend.search_notes_with_index(&f.path,&f.access,request("1"),
+                |_|(driver=="warm").then(||index.clone())).unwrap();
+            assert_eq!(page.notes.iter().map(|n|n.note_id.as_str()).collect::<Vec<_>>(),["2000"],"{driver}, filtered={filtered}");
+            assert!(page.next_cursor.is_none());
+            assert_eq!(f.backend.search_notes_with_index(&f.path,&f.access,request("2"),
+                |_|(driver=="warm").then(||index.clone())).unwrap_err().code,"unsupported_collection","{driver}, filtered={filtered}");
+        }
+        // Selecting the other note also requires validating this malformed
+        // sibling, even though that sibling itself belongs to a different deck.
+        f.db.execute("INSERT INTO cards SELECT 3000,2000,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data FROM cards WHERE id=1000",[]).unwrap();
+        assert_eq!(f.backend.search_notes(&f.path,&f.access,SearchInput {
+            deck_id:Some("1".into()),..Default::default()
+        }).unwrap_err().code,"unsupported_collection");
+    }
+}
+
+#[test]
 fn indexed_sibling_sample_keeps_its_row_bound() {
     let f=Fixture::new();f.create("one",vec![],1000).unwrap();
     f.db.execute_batch("WITH RECURSIVE n(id) AS (VALUES(2000) UNION ALL SELECT id+1 FROM n WHERE id<4046) INSERT INTO cards SELECT n.id,c.nid,c.did,c.ord,c.mod,c.usn,c.type,c.queue,c.due,c.ivl,c.factor,c.reps,c.lapses,c.left,c.odue,c.odid,c.flags,c.data FROM n CROSS JOIN cards c WHERE c.id=1000").unwrap();
     assert_eq!(generation::siblings(&f.db,1000).unwrap().len(),2048);
+    f.db.execute_batch("DROP INDEX ix_cards_sched").unwrap();
+    let request=|deck:&str|SearchInput {deck_id:Some(deck.into()),..Default::default()};
+    let empty=f.backend.search_notes(&f.path,&f.access,request("2")).unwrap();
+    assert!(empty.notes.is_empty());assert!(empty.next_cursor.is_none());
     f.db.execute_batch("INSERT INTO cards SELECT 5000,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data FROM cards WHERE id=1000").unwrap();
     assert_eq!(generation::siblings(&f.db,1000).err().unwrap().code,"result_too_large");
+    f.db.execute("UPDATE cards SET did=2 WHERE id=5000",[]).unwrap();
+    // Neither an absent deck nor a match beyond the cap can be decided safely.
+    for deck in ["2","3"] {
+        assert_eq!(f.backend.search_notes(&f.path,&f.access,request(deck)).unwrap_err().code,"result_too_large");
+    }
 }
 
 #[test]
@@ -419,4 +661,43 @@ fn sqlite_diagnostics_distinguish_open_from_access_without_error_text() {
     assert_eq!(sql_error(raw()).code,"unsupported_collection");
     let config=sql_open_storage_error(raw());
     assert_eq!((config.code,config.mcp_detail),("storage_unavailable",Some(Detail::SqliteOpen)));
+}
+
+#[test]
+fn indexed_byte_fit_keeps_omitted_note_across_candidate_driver_changes() {
+    use std::{sync::Arc,time::{Duration,Instant}};
+    for indexed_first in [true,false] {
+        let f=Fixture::new();
+        let text="\"".repeat(120000);
+        for id in 2000..2003 { f.create(&text,vec![],id).unwrap(); }
+        let index={
+            let tx=f.db.unchecked_transaction().unwrap();
+            Arc::new(SearchIndex::build(&tx,Instant::now()+Duration::from_secs(30)).unwrap())
+        };
+        let input=||SearchInput {deck_id:Some("1".into()),..Default::default()};
+        let first=f.backend.search_notes_with_index(&f.path,&f.access,input(),|_| indexed_first.then(||index.clone())).unwrap();
+        assert_eq!(first.notes.iter().map(|n|n.note_id.as_str()).collect::<Vec<_>>(),["2000","2001"]);
+        assert!(first.next_cursor.is_some());
+        let next=f.backend.search_notes_with_index(&f.path,&f.access,SearchInput {cursor:first.next_cursor,..input()},|_| (!indexed_first).then(||index.clone())).unwrap();
+        assert_eq!(next.notes.iter().map(|n|n.note_id.as_str()).collect::<Vec<_>>(),["2002"]);
+        assert!(next.next_cursor.is_none());
+        assert!(Backend::result_json(&next).unwrap().len()<=MAX_RESULT_BYTES);
+    }
+}
+
+#[test]
+fn unavailable_index_deck_falls_back_to_u1_before_applying_other_postings() {
+    use std::{sync::Arc,time::{Duration,Instant}};
+    let f=Fixture::deck_search();
+    let index={
+        let tx=f.db.unchecked_transaction().unwrap();
+        Arc::new(SearchIndex::build(&tx,Instant::now()+Duration::from_secs(30)).unwrap().test_without_decks())
+    };
+    for (tag,query) in [(Some("Chosen"),None),(None,Some("[a.b]")),(Some("Chosen"),Some("[a.b]"))] {
+        let page=f.backend.search_notes_with_index(&f.path,&f.access,SearchInput {
+            deck_id:Some("2".into()),tag:tag.map(str::to_owned),query:query.map(str::to_owned),..Default::default()
+        },|_|Some(index.clone())).unwrap();
+        assert_eq!(page.notes.iter().map(|n|n.note_id.as_str()).collect::<Vec<_>>(),["2000","2002","2004"]);
+        assert!(page.next_cursor.is_none());
+    }
 }
