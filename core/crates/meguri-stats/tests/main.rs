@@ -16,5 +16,7 @@ pub mod graphs_revlog;
 pub mod history_knowledge;
 #[path = "history_parts.rs"]
 pub mod history_parts;
+#[path = "history_request.rs"]
+pub mod history_request;
 #[path = "history_states.rs"]
 pub mod history_states;

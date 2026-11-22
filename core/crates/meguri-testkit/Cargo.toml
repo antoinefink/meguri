@@ -189,6 +189,11 @@ harness = false
 name = "stats_knowledge_build"
 harness = false
 
+# U293's page request: every part named, to each tier's last part.
+[[bench]]
+name = "stats_page"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]
