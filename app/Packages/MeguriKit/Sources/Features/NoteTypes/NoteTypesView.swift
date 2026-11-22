@@ -5,12 +5,14 @@ import SwiftUI
 
 /// The Note Types section (`native-interface-contract` N22.1): the list of
 /// note types beside the selected one's detail, with Fields and Cards in the
-/// toolbar, then Revert and Save at its trailing edge (`notetypes/workspace`
-/// W2, `notetypes/draft-save` D1, D3, D5). The shell shows it as the section's
+/// toolbar, then Revert and Save at its trailing edge, or while a save job
+/// runs one status item in their place (`notetypes/workspace` W2,
+/// `notetypes/draft-save` D1, D3, D5; N22.5). The shell shows it as the section's
 /// root in the sidebar layout (Mac, iPad); the model outlives it.
 public struct NoteTypesView: View {
     @Bindable private var model: NoteTypesModel
     @Environment(\.locale) private var locale
+    @State private var jobShown = SaveJobShown()
 
     public init(model: NoteTypesModel) {
         self.model = model
@@ -40,6 +42,7 @@ public struct NoteTypesView: View {
                 Button(role: .cancel) { model.confirmingRevert = false } label: { Text("noteTypes.discard.keepEditing", bundle: .module) }
             }
             .modifier(SaveOutcomeAlerts(model: model))
+            .task(id: model.progress?.notetypeId) { await SaveJobShown.follow(model.progress?.notetypeId, into: $jobShown) }
             .onAppear { model.appear() }
     }
 
@@ -48,9 +51,16 @@ public struct NoteTypesView: View {
             NoteTypeListColumn(model: model)
                 .frame(minWidth: Self.listMinimum, idealWidth: Self.listIdeal, maxWidth: Self.listMaximum)
             detail
-                .frame(minWidth: ContentWidth.primaryAction, maxWidth: .infinity, maxHeight: .infinity)
+                // The detail asks for all the room whatever has loaded, so the list
+                // opens at its minimum on every launch; with its content's own width
+                // the list opened at its minimum or its maximum depending on whether
+                // the fields had loaded by the split view's first layout.
+                .frame(minWidth: ContentWidth.primaryAction, idealWidth: Self.detailIdeal, maxWidth: .infinity, maxHeight: .infinity)
         }
     }
+
+    /// Wider than any window: the split view gives the list only its minimum at first.
+    private static let detailIdeal: CGFloat = 10_000
 
     /// The list column fits the longest stock name with its count (N22.1).
     private static let listMinimum: CGFloat = 200
@@ -96,33 +106,84 @@ public struct NoteTypesView: View {
             .disabled(model.selection == nil)
             .accessibilityIdentifier("noteTypes.list.tabs")
         }
-        ToolbarItemGroup(placement: .primaryAction) {
-            if let id = model.selection, let progress = model.progress, progress.notetypeId == id {
-                SaveProgressView(progress: progress)
-            }
-            Button {
-                model.confirmingRevert = true
-            } label: {
-                Text("noteTypes.revert", bundle: .module)
-            }
-            .disabled(model.selection.map { !(model.isEdited($0) && model.editable($0)) } ?? true)
-            .accessibilityIdentifier("noteTypes.list.revert")
-            Button {
-                model.save()
-            } label: {
-                if let id = model.selection, model.saveAsks(id) {
-                    Text("noteTypes.saveAsks", bundle: .module)
-                } else {
+        // N22.5: while a save job runs, one status item takes Revert and
+        // Save's place; they return when it ends. A plain status, not a control,
+        // so it has no glass of its own. One item either way, so the toolbar
+        // keeps its other items as the job starts and ends.
+        let running = runningProgress
+        ToolbarItem(placement: .primaryAction) {
+            if let running {
+                SaveStatusView(progress: running.progress, notes: model.typeCounts[running.id]?.notes)
+            } else {
+                // One control group: Revert and Save read as one pair in one shape.
+                // Save is not prominent: it is disabled until there is a draft, and
+                // a tinted disabled button reads as broken.
+                ControlGroup {
+                    Button {
+                        model.confirmingRevert = true
+                    } label: {
+                        Text("noteTypes.revert", bundle: .module)
+                    }
+                    .disabled(model.selection.map { !(model.isEdited($0) && model.editable($0)) } ?? true)
+                    .accessibilityIdentifier("noteTypes.list.revert")
+                    Button {
+                        model.save()
+                    } label: {
+                        if let id = model.selection, model.saveAsks(id) {
+                            Text("noteTypes.saveAsks", bundle: .module)
+                        } else {
+                            Text("noteTypes.save", bundle: .module)
+                        }
+                    }
+                    // ⌘S is File › Save's (N4).
+                    .disabled(model.selection.map { !model.canSave($0) } ?? true)
+                    .accessibilityIdentifier("noteTypes.list.save")
+                } label: {
+                    // The group's title where the toolbar folds it into its overflow menu.
                     Text("noteTypes.save", bundle: .module)
                 }
             }
-            // ⌘S is File › Save's (N4).
-            .buttonStyle(.borderedProminent)
-            .disabled(model.selection.map { !model.canSave($0) } ?? true)
-            .accessibilityIdentifier("noteTypes.list.save")
         }
+        .sharedBackgroundVisibility(running == nil ? .automatic : .hidden)
+    }
+
+    /// The selected note type's save job, once the toolbar shows it.
+    private var runningProgress: (id: Int64, progress: NoteTypesModel.Progress)? {
+        guard let id = model.selection, let progress = model.progress, progress.notetypeId == id,
+              jobShown.shown(for: id) else { return nil }
+        return (id, progress)
     }
     #endif
+}
+
+/// When the toolbar shows a running save job (N22.5): half a second after it
+/// starts (D5 step 5's "once a save has run for a moment"). A short save
+/// leaves the toolbar as it was.
+struct SaveJobShown: Equatable {
+    private var id: Int64?
+
+    func shown(for notetypeId: Int64) -> Bool { id == notetypeId }
+
+    /// The job whose status has shown already: a view that appears while it
+    /// runs (the iPad page pushed again) shows the status at once.
+    @MainActor private static var shownJob: Int64?
+
+    /// Follows the job of `notetypeId` (nil: none runs) for as long as the task lives.
+    @MainActor static func follow(_ notetypeId: Int64?, into state: Binding<SaveJobShown>) async {
+        guard let notetypeId else {
+            shownJob = nil
+            state.wrappedValue = SaveJobShown()
+            return
+        }
+        if shownJob == notetypeId {
+            state.wrappedValue = SaveJobShown(id: notetypeId)
+            return
+        }
+        state.wrappedValue = SaveJobShown()
+        guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { return }
+        shownJob = notetypeId
+        state.wrappedValue = SaveJobShown(id: notetypeId)
+    }
 }
 
 /// The selected note type's detail: D1's row when it changed elsewhere, then
@@ -155,38 +216,65 @@ struct NoteTypeDetailContent: View {
     }
 }
 
-/// D5 step 5: "Updating 212 of 412 notes", shown once a save has run for a
-/// moment; with Meguri Sync, the job's stage first ("Syncing…", then the
-/// count, then "Uploading…", D6).
-struct SaveProgressView: View {
+/// D5 step 5's status while a save job runs (N22.5): a small spinner and
+/// "Updating 212 of 412 notes" ("Saving…" until the first count); with Meguri Sync, the job's stage first
+/// ("Syncing…", then the count, then "Uploading…", D6). The widest text the
+/// job can show reserves its width, so the toolbar does not move as the
+/// stage or the count changes.
+struct SaveStatusView: View {
     let progress: NoteTypesModel.Progress
+    /// The note type's notes, which the count can reach before its total is known.
+    let notes: UInt64?
     @Environment(\.locale) private var locale
-    @State private var visible = false
 
     var body: some View {
+        // Trailing, where Save was: the spinner sits just before the text.
+        ZStack(alignment: .trailing) {
+            ForEach(candidates, id: \.self) { text in line(text).hidden() }
+            line(current)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("noteTypes.saving", bundle: .module))
+        .accessibilityValue(Text(verbatim: current))
+        .accessibilityIdentifier("noteTypes.list.progress")
+    }
+
+    private func line(_ text: String) -> some View {
         HStack(spacing: Spacing.xSmall) {
             ProgressView().controlSize(.small)
-            switch progress.stage {
-            case .syncing?:
-                Text("noteTypes.progress.syncing", bundle: .module).foregroundStyle(.secondary)
-            case .uploading?:
-                Text("noteTypes.progress.uploading", bundle: .module).foregroundStyle(.secondary)
-            case .saving?, nil:
-                if let total = progress.total {
-                    Text(NoteTypesStrings.progress(completed: progress.completed, total: total, locale: locale))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-            }
+            Text(verbatim: text)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
         }
-        .opacity(visible ? 1 : 0)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("noteTypes.saving", bundle: .module))
-        .accessibilityIdentifier("noteTypes.list.progress")
-        .task {
-            try? await Task.sleep(for: .milliseconds(500))
-            visible = true
+        .fixedSize()
+    }
+
+    /// Every text this job can show, so the widest reserves the width.
+    private var candidates: [String] {
+        [NoteTypesStrings.text("noteTypes.progress.syncing", locale: locale),
+         NoteTypesStrings.text("noteTypes.progress.uploading", locale: locale),
+         NoteTypesStrings.text("noteTypes.progress.saving", locale: locale), widestCount]
+    }
+
+    private var current: String { Self.text(progress, locale: locale) }
+
+    /// The job's stage text.
+    static func text(_ progress: NoteTypesModel.Progress, locale: Locale) -> String {
+        switch progress.stage {
+        case .syncing?: NoteTypesStrings.text("noteTypes.progress.syncing", locale: locale)
+        case .uploading?: NoteTypesStrings.text("noteTypes.progress.uploading", locale: locale)
+        case .saving?, nil:
+            // Before the first count, which can come after the status shows.
+            progress.total.map { NoteTypesStrings.progress(completed: progress.completed, total: $0, locale: locale) }
+                ?? NoteTypesStrings.text("noteTypes.progress.saving", locale: locale)
         }
+    }
+
+    /// The count at its end, with the largest total this job can have: its digits are monospaced.
+    private var widestCount: String {
+        let total = max(progress.total ?? 0, notes ?? 0, progress.completed)
+        return NoteTypesStrings.progress(completed: total, total: total, locale: locale)
     }
 }
 

@@ -60,6 +60,9 @@ public struct NoteTypePage: View {
     @Bindable private var model: NoteTypesModel
     private let id: Int64
     @Environment(\.locale) private var locale
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var jobShown = SaveJobShown()
+    private var jobRuns: Bool { model.progress?.notetypeId == id && jobShown.shown(for: id) }
 
     public init(model: NoteTypesModel, id: Int64) {
         self.model = model
@@ -77,7 +80,7 @@ public struct NoteTypePage: View {
             }
             .onDisappear { model.optionsField = nil }
             .toolbar {
-                if model.isEdited(id) {
+                if model.isEdited(id) && !jobRuns {
                     ToolbarItem(placement: .topBarLeading) {
                         Button { model.confirmingRevert = true } label: { Text("noteTypes.revert", bundle: .module) }
                             .disabled(!model.editable(id))
@@ -97,18 +100,41 @@ public struct NoteTypePage: View {
                     .fixedSize()
                     .accessibilityIdentifier("noteTypes.list.tabs")
                 }
-                ToolbarItemGroup(placement: .primaryAction) {
-                    if let progress = model.progress, progress.notetypeId == id {
-                        SaveProgressView(progress: progress)
+                if let progress = model.progress, progress.notetypeId == id, jobRuns, sizeClass == .compact {
+                    // N22.5 at compact width, where the tab bar takes the bottom bar's
+                    // middle: the spinner takes Save's place and the stage text the
+                    // subtitle's, under the note type's name.
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ProgressView()
+                            .accessibilityLabel(Text("noteTypes.saving", bundle: .module))
+                            .accessibilityValue(Text(verbatim: SaveStatusView.text(progress, locale: locale)))
+                            .accessibilityIdentifier("noteTypes.list.progress")
                     }
-                    Button { model.save(id) } label: {
-                        model.saveAsks(id) ? Text("noteTypes.saveAsks", bundle: .module) : Text("noteTypes.save", bundle: .module)
+                    .sharedBackgroundVisibility(.hidden)
+                } else if let progress = model.progress, progress.notetypeId == id, jobRuns {
+                    // N22.5: the job's status takes Save's and Revert's place. It sits in the
+                    // bottom toolbar's status place, as Mail's does: the top bar keeps only
+                    // narrow items beside the title, so nothing there can run into the
+                    // tabs at any width; the bottom bar has the room at every width.
+                    ToolbarItem(placement: .status) {
+                        SaveStatusView(progress: progress, notes: model.typeCounts[id]?.notes)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!model.canSave(id))
-                    .accessibilityIdentifier("noteTypes.list.save")
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    // Its own glass shape, apart from the tabs'. Not prominent: it is disabled
+                    // until there is a draft, and a tinted disabled button reads as broken.
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { model.save(id) } label: {
+                            model.saveAsks(id) ? Text("noteTypes.saveAsks", bundle: .module) : Text("noteTypes.save", bundle: .module)
+                        }
+                        .disabled(!model.canSave(id))
+                        .accessibilityIdentifier("noteTypes.list.save")
+                    }
                 }
             }
+            .task(id: model.progress?.notetypeId) { await SaveJobShown.follow(model.progress?.notetypeId, into: $jobShown) }
             .confirmationDialog(Text("noteTypes.discard.title", bundle: .module), isPresented: $model.confirmingRevert,
                                 titleVisibility: .visible) {
                 Button(role: .destructive) { model.revert(id) } label: { Text("noteTypes.discard.discard", bundle: .module) }
@@ -118,6 +144,9 @@ public struct NoteTypePage: View {
     }
 
     private var subtitle: String {
+        if sizeClass == .compact, jobRuns, let progress = model.progress {
+            return SaveStatusView.text(progress, locale: locale)
+        }
         guard let counts = model.typeCounts[id] else { return "" }
         return NoteTypesStrings.subtitle(notes: counts.notes, cards: counts.cards, locale: locale)
     }
