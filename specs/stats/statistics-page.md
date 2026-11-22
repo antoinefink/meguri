@@ -460,7 +460,7 @@ The rows' Product Contract ids are the plan owner's to assign (the plan's §3).
 - **UI** (macOS test VM, one job at a time; simulators): for every screen unit, the first-run state (no collection on the device) and S12.1 to S12.7, light and dark, the largest text size; the Mac page at 560, 1,250 and 1,600 points; the iPhone column; the Duo opened (nothing on the fold); Show in Browse and Back keeping the scroll position.
 - **Accessibility** (`tools/mg a11y`): each chart's label, its audio graph and per-bar elements; the strip's elements; Differentiate Without Colour's separating lines.
 - **Performance**: S19's intervals in `StatsPerfTests` and the core benchmarks of H19.
-- The Statistics section is shown (S13's last line) once U296 to U301 and U304 have landed.
+- The Statistics section is shown (S13's last line) once U296 to U302 and U304 to U306 have landed (U307); Show in Browse (U303) may come after, and until then no callout offers it.
 
 ## S21. Later
 

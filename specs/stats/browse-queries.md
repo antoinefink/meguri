@@ -12,6 +12,8 @@ Decided 2026-10-27: U88's `join` writes canonical text (`search/join-and-replace
 
 ## Q1. Who builds what
 
+Changed 2026-11-22 (round 11): the builders are now U101 (the Card Counts label texts in the record, C4.3), U98 (`stats_browse_scope`), U294 (the item texts of Q9's bars, from the page's bins) and U303 (`StatsBrowseLink`, the only place that joins); U225 and U226 are superseded (`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md`). The rules below are unchanged.
+
 | Part | Built by | Rule |
 |---|---|---|
 | scope text | the core (U98's `stats_browse_scope`), from the request's snapshot, in the Data result (`stats/graphs-common` G8.2) | Q2 |
