@@ -36,6 +36,18 @@ impl Grid {
         self.phase
     }
 
+    /// The last whole second of `day` (H1's day end).
+    pub(crate) fn end(self, day: i64) -> i64 {
+        self.phase + day * DAY
+    }
+
+    /// A boundary of the grid after every row a collection holds (the year
+    /// 2298): `sched/fsrs-items` I4's days counted back from it differ as
+    /// the grid's days do, as they would from any `N` after the rows.
+    pub(crate) fn reference(self) -> i64 {
+        self.end(120_000)
+    }
+
     /// The day that holds whole second `t`: the one whose end is the first
     /// boundary at or after it (H1's day end).
     fn day_of_second(self, t: i64) -> i64 {
@@ -219,12 +231,13 @@ pub(crate) fn shape(card: &CardRead) -> Shape {
     }
 }
 
-/// H2.2 and H2.3 for one existing card.
-pub(crate) fn replay(grid: Grid, input: &CardInput) -> Contribution {
+/// A readable card with its readable rows sorted by `id`, or why it is
+/// unreadable (G4).
+pub(crate) fn readable(input: &CardInput) -> Result<(StatsCard, Vec<StatsRow>), BadCard> {
     let card = match input.card {
         CardRead::Card(card) => card,
         CardRead::Bad(bad) => {
-            return Contribution::Bad(BadCard {
+            return Err(BadCard {
                 card: bad.id,
                 did: bad.did,
                 odid: bad.odid,
@@ -246,7 +259,7 @@ pub(crate) fn replay(grid: Grid, input: &CardInput) -> Contribution {
         }
     }
     if let Some((row, column)) = first_bad {
-        return Contribution::Bad(BadCard {
+        return Err(BadCard {
             card: card.id,
             did: Some(card.did),
             odid: Some(card.odid),
@@ -255,7 +268,12 @@ pub(crate) fn replay(grid: Grid, input: &CardInput) -> Contribution {
         });
     }
     rows.sort_by_key(|row| row.id);
-    let current = State::current(&card);
+    Ok((card, rows))
+}
+
+/// H2.2 and H2.3 for a readable card and its rows sorted by `id`.
+pub(crate) fn replay_rows(grid: Grid, card: &StatsCard, rows: &[StatsRow]) -> Replayed {
+    let current = State::current(card);
     let created = grid.card_day(card.id);
     let key = Key {
         did: card.did,
@@ -271,10 +289,10 @@ pub(crate) fn replay(grid: Grid, input: &CardInput) -> Contribution {
     };
     let Some(newest) = rows.last() else {
         // No row: in its current state from its creation day.
-        return Contribution::Card(Replayed {
+        return Replayed {
             record,
             segments: vec![(created, current)],
-        });
+        };
     };
     let newest_day = grid.row_day(newest.id);
     let first_day = grid.row_day(rows[0].id);
@@ -302,5 +320,5 @@ pub(crate) fn replay(grid: Grid, input: &CardInput) -> Contribution {
     record.table_state = Some(state);
     record.newest_row = Some(newest.id);
     record.first_review = rows.iter().find(|row| is_graded(row)).map(|row| grid.row_day(row.id));
-    Contribution::Card(Replayed { record, segments })
+    Replayed { record, segments }
 }

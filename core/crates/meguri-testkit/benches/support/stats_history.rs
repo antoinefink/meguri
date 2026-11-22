@@ -11,7 +11,9 @@ use meguri_host::{CoreHost, HostConfig};
 use meguri_model::clock::{FixedClock, UtcOffset};
 use meguri_model::rng::SeededRandom;
 use meguri_stats::graphs::{History, Scope};
-use meguri_stats::history::{self, HISTORY_COMPONENT, HistoryData, HistoryRequest, HistoryResult};
+use meguri_stats::history::{
+    self, HISTORY_COMPONENT, HistoryData, HistoryRequest, HistoryResult, KnowledgeData, KnowledgeRequest, KnowledgeResult,
+};
 use meguri_storage::ReaderRole;
 use meguri_storage::raw::SqlValue;
 use meguri_storage::space::StatvfsSpace;
@@ -62,6 +64,24 @@ pub fn read(host: &CoreHost, scope: &Scope, history: History) -> Box<HistoryData
     let collection = host.collection().unwrap();
     match history::card_states(host.stats(), &collection, host.derived(), &request, &mut |_| {}).unwrap() {
         HistoryResult::Data(data) => {
+            assert!(data.from_component, "{scope:?}");
+            data
+        }
+        other => panic!("{scope:?}: {other:?}"),
+    }
+}
+
+/// One read of H3's part (U290); the component must serve it.
+pub fn read_knowledge(host: &CoreHost, scope: &Scope, history: History) -> Box<KnowledgeData> {
+    let request = KnowledgeRequest {
+        scope: scope.clone(),
+        history,
+        oldest_day: None,
+        cancel: CancelToken::new(),
+    };
+    let collection = host.collection().unwrap();
+    match history::knowledge_over_time(host.stats(), &collection, host.derived(), &request, &mut |_| {}).unwrap() {
+        KnowledgeResult::Data(data) => {
             assert!(data.from_component, "{scope:?}");
             data
         }
