@@ -204,8 +204,10 @@ public final class NoteTypesModel {
                 refreshCounts()
             } catch {
                 guard token == listToken else { return }
-                // A collection that went while the list was read is not a failure.
-                phase = !hasCollection() ? .noCollection : items.isEmpty ? .failed : .ready
+                // A collection that went while the list was read is not a failure,
+                // and its rows go with it.
+                guard hasCollection() else { items = []; selection = nil; phase = .noCollection; return }
+                phase = items.isEmpty ? .failed : .ready
             }
         }
     }
