@@ -47,9 +47,12 @@ final class TapZoneUITests: XCTestCase {
         XCTAssertFalse(waitForAnswered(app, 1, timeout: 2), "A tap on the card's link does not answer")
         capture(app, "04-answer-after-control-taps")
 
-        // The right half answers Good: the next card's question.
+        // The right half answers Good: the next card's question, and the
+        // card is done for the session (the total stays).
+        let total = self.total(app)
         tap(card, x: 0.8)
         XCTAssertTrue(waitForAnswered(app, 1), "A tap on the right half answers")
+        XCTAssertEqual(self.total(app), total, "Good: the card leaves the session")
         XCTAssertTrue(waitForQuestion(app), "The next card's question")
         capture(app, "05-next-question-after-good")
 
@@ -65,8 +68,11 @@ final class TapZoneUITests: XCTestCase {
             tap(card, x: 0.75)
             XCTAssertTrue(waitForAnswer(app))
         }
+        let before = self.total(app)
         tap(card, x: 0.2)
         XCTAssertTrue(waitForAnswered(app, 1), "A tap on the left half answers")
+        // Again: the card comes back as a learning card, so the total grows.
+        XCTAssertEqual(self.total(app).map { $0 - 1 }, before, "Again: the card stays in the session")
         XCTAssertTrue(waitForQuestion(app))
         capture(app, "07-next-question-after-again")
 
@@ -84,6 +90,9 @@ final class TapZoneUITests: XCTestCase {
     // MARK: Helpers
 
     private func tap(_ card: XCUIElement, x: CGFloat) {
+        // Double Tap Prevention (250 ms after an answer, and after the answer
+        // appears) is behaviour under test elsewhere: these taps come after it.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
         // Low on the card, below its text: plain card, not a control.
         card.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.8)).tap()
     }
@@ -118,6 +127,14 @@ final class TapZoneUITests: XCTestCase {
         guard progress.exists, let value = progress.value as? String,
               let first = value.split(separator: " ").first else { return nil }
         return Int(first)
+    }
+
+    /// The session's size, from the progress ("2 of 6").
+    private func total(_ app: XCUIApplication) -> Int? {
+        let progress = element(app, "review.session.progress")
+        guard progress.exists, let value = progress.value as? String,
+              let last = value.split(separator: " ").last else { return nil }
+        return Int(last)
     }
 
     private func waitForAnswered(_ app: XCUIApplication, _ count: Int, timeout: TimeInterval = 10) -> Bool {

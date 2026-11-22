@@ -51,6 +51,10 @@ public nonisolated struct ReviewTapGesture: Equatable, Sendable {
 /// What the card page saw of the same gesture, after its own handlers (R405–R407).
 public nonisolated struct ReviewTapObservation: Equatable, Sendable {
     public var update: CardUpdate
+    /// The page's time of the gesture's end, in seconds on that page's clock,
+    /// and which page: each document has its own clock.
+    public var pageTime: TimeInterval = 0
+    public var page: Int = 0
     public var exempt: Bool
     public var defaultPrevented: Bool
     public var selection: Bool
@@ -81,6 +85,8 @@ public nonisolated struct ReviewTapState: Equatable, Sendable {
     public var answerShownUptime: TimeInterval?
     /// VoiceOver or Switch Control: the answer buttons are the way to answer (R184, R1981).
     public var assistiveTechnology: Bool
+    /// The software keyboard is on screen (R412).
+    public var keyboardShown = false
 
     public init(side: Side?, update: CardUpdate?, visibleX: ClosedRange<CGFloat>, doubleTapPrevention: TimeInterval,
                 lastAnswerUptime: TimeInterval?, answerShownUptime: TimeInterval?, assistiveTechnology: Bool) {
@@ -108,7 +114,9 @@ public nonisolated enum ReviewTapRules {
         if observation.exempt { return .none(.exempt) }
         if observation.defaultPrevented { return .none(.cancelledByCard) }
         if observation.selection { return .none(.selection) }
-        if observation.editable || observation.composing { return .dismissKeyboard }
+        // R412: only while the software keyboard is up. A field the card
+        // focused by itself, with no keyboard shown, does not hold the tap.
+        if observation.composing || observation.editable && state.keyboardShown { return .dismissKeyboard }
         let window = max(0, state.doubleTapPrevention)
         switch side {
         case .question:
@@ -136,8 +144,12 @@ public nonisolated struct ReviewTapPairing: Sendable {
     public static let maximumWait: TimeInterval = 1
     /// In points: the page's point and the touch's agree to well within a fingertip.
     public static let maximumDistance: CGFloat = 24
+    /// Between two pairs, the page's clock and the touches' advance alike;
+    /// an observation of an earlier gesture would lag by a whole tap.
+    public static let maximumDrift: TimeInterval = 0.15
     private var gesture: (value: ReviewTapGesture, arrival: TimeInterval)?
     private var observation: (value: ReviewTapObservation, point: CGPoint, arrival: TimeInterval)?
+    private var last: [Int: (up: TimeInterval, page: TimeInterval)] = [:]
 
     public init() {}
 
@@ -154,14 +166,23 @@ public nonisolated struct ReviewTapPairing: Sendable {
     }
 
     public mutating func clear() { gesture = nil; observation = nil }
+    /// A new touch went down: nothing waiting belongs to it.
+    public mutating func touchDown() { gesture = nil; observation = nil }
 
     private mutating func pair(now: TimeInterval) -> (ReviewTapGesture, ReviewTapObservation)? {
-        if let gesture, now - gesture.arrival > Self.maximumWait { self.gesture = nil }
-        if let observation, now - observation.arrival > Self.maximumWait { self.observation = nil }
+        if let waiting = gesture, now - waiting.arrival > Self.maximumWait { gesture = nil }
+        if let waiting = observation, now - waiting.arrival > Self.maximumWait { observation = nil }
         guard let gesture, let observation else { return nil }
         self.gesture = nil; self.observation = nil
         let dx = gesture.value.location.x - observation.point.x, dy = gesture.value.location.y - observation.point.y
         guard (dx * dx + dy * dy).squareRoot() <= Self.maximumDistance else { return nil }
+        let up = gesture.value.upUptime, time = observation.value.pageTime, page = observation.value.page
+        if let previous = last[page], abs((up - previous.up) - (time - previous.page)) > Self.maximumDrift {
+            // Refused; the next pair starts a new baseline (a reloaded page has a new clock).
+            last[page] = nil
+            return nil
+        }
+        last[page] = (up, time)
         return (gesture.value, observation.value)
     }
 }

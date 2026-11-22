@@ -449,7 +449,7 @@ public final class CardPagePair {
         audio.replay(payload: payload, update: update)
     }
     /// R412: blurs the visible page's focused field, which puts the software
-    /// keyboard away. Fixed code in Meguri's world; the page keeps the focus.
+    /// keyboard away. Fixed code, run in Meguri's world.
     public func dismissKeyboard() {
         guard !closed, !suspended, !lifecycleSuspended, current.behaviorAvailable else { return }
         let page = current

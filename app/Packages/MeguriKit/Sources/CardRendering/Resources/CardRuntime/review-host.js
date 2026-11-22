@@ -118,7 +118,7 @@
   }
   function clear() {
     context = null;
-    gesture = null; inputSerial = 0;
+    gesture = null; inputSerial = 0; lastTouchStart = null; composingNow = false;
     stop(background); stop(resources);
   }
   function current(request) {
@@ -330,6 +330,8 @@
   const EXEMPT = "a,button,input,select,textarea,label,summary,details,audio,video," +
     "[onclick],[contenteditable],[role=button],.tappable,.replay-button,#typeans";
   const QUERY = "meguri:query";
+  // How long a gesture waits for the click a card handler could see (ms).
+  const CLICK_WAIT = 350;
   const matches = Element.prototype.matches;
   const parentNodeOf = getter(Node.prototype, "parentNode");
   const shadowHostOf = getter(ShadowRoot.prototype, "host");
@@ -444,13 +446,15 @@
   function pointerDown(event) {
     if (disposed || !trusted(event)) return;
     const time = call(stamp, event);
-    if (gesture && !gesture.done && time - gesture.start < 2000) { gesture.multi = true; return; }
+    // A second pointer joins the gesture; a primary one starts a new gesture
+    // (no other pointer is down then), so a lost end never blocks the next tap.
+    if (!call(primaryOf, event)) { if (gesture && !gesture.done) gesture.multi = true; return; }
     gesture = null;
-    if (!call(primaryOf, event) || !context || context.visibility !== "presented") return;
+    if (!context || context.visibility !== "presented") return;
     const focus = focusState();
     gesture = { context: context, id: call(pointerIdOf, event), start: time, events: [event],
       selection: hasSelection(), editable: focus.editable, typeans: focus.typeans, composing: composingNow,
-      multi: false, cancelled: false, done: false, end: null, target: null, exempt: true, x: 0, y: 0 };
+      multi: false, done: false, end: null, target: null, exempt: true, x: 0, y: 0, awaitClick: false, timer: 0 };
     if (lastTouchStart && time - call(stamp, lastTouchStart) < 100) call(push, gesture.events, lastTouchStart);
   }
   function touchStart(event) {
@@ -460,8 +464,19 @@
     remember(event);
     if (touchesOf && touchCount && call(touchCount, call(touchesOf, event)) > 1) gesture.multi = true;
   }
+  // Scrolling, pinching or a long-press selection: the gesture is WebKit's.
   function cancelled(event) {
-    if (trusted(event) && gesture) gesture.cancelled = true;
+    if (trusted(event) && gesture && !gesture.done) gesture = null;
+  }
+  // Whether a card listener anywhere on the target's path could still handle
+  // the click that may follow (C13's question, window and document included).
+  function clickListened(target) {
+    const kinds = ["click", "mousedown", "mouseup"];
+    for (let i = 0; i < kinds.length; i++) {
+      const query = new CustomEventClass(QUERY, { detail: kinds[i], bubbles: true, cancelable: true, composed: true });
+      if (call(dispatch, target, query) !== false) return true;
+    }
+    return false;
   }
   function pointerUp(event) {
     if (disposed || !trusted(event) || !gesture || gesture.done) return;
@@ -475,21 +490,32 @@
       g.target = path.length > 0 ? path[0] : call(eventTarget, event);
       g.x = call(clientXOf, event); g.y = call(clientYOf, event);
       g.exempt = exempt(g.target);
-    } catch (_) { g.exempt = true; }
-    // After the page's own handlers for this gesture, a click among them.
-    later(function () { finish(g); }, 0);
+      // On iOS a click comes later, from a separate commit of the tap. When a
+      // card handler could see it, wait for it (bounded), so its
+      // preventDefault counts; otherwise close after this dispatch.
+      g.awaitClick = !g.exempt && clickListened(g.target);
+    } catch (_) { g.exempt = true; g.awaitClick = false; }
+    g.timer = later(function () { finish(g); }, g.awaitClick ? CLICK_WAIT : 0);
   }
   function lateEvent(event) {
+    if (!trusted(event)) return;
     // touchend and a click after pointerup belong to the closing gesture.
-    if (trusted(event) && gesture && gesture.done && gesture.end) call(push, gesture.events, event);
-    else if (trusted(event)) remember(event);
+    if (gesture && gesture.done && gesture.end) {
+      const g = gesture;
+      call(push, g.events, event);
+      if (g.awaitClick && call(eventType, event) === "click") {
+        g.awaitClick = false;
+        cancelTimer(g.timer);
+        g.timer = later(function () { finish(g); }, 0);
+      }
+    } else remember(event);
   }
   function finish(g) {
     if (gesture !== g) return;
     gesture = null;
     const start = g.context;
     // R415: a gesture belongs to the side presented when it began.
-    if (disposed || !post || g.cancelled || g.multi || context !== start) return;
+    if (disposed || !post || g.multi || context !== start) return;
     let defaultPrevented = false;
     for (let i = 0; i < g.events.length; i++) {
       if (call(prevented, g.events[i])) defaultPrevented = true;
@@ -520,15 +546,16 @@
     } catch (_) {}
   }
   function noop() {}
-  // R408: CSS :active styles need a touch listener on the document.
+  // R408: CSS :active styles need a touch listener on the document. Every
+  // listener here is passive: it never cancels, so it never holds up scrolling.
   call(add, document, "touchstart", noop, { passive: true });
-  call(add, window, "pointerdown", pointerDown, true);
+  call(add, window, "pointerdown", pointerDown, { capture: true, passive: true });
   call(add, window, "touchstart", touchStart, { capture: true, passive: true });
-  call(add, window, "pointercancel", cancelled, true);
+  call(add, window, "pointercancel", cancelled, { capture: true, passive: true });
   call(add, window, "touchcancel", cancelled, { capture: true, passive: true });
-  call(add, window, "pointerup", pointerUp, false);
+  call(add, window, "pointerup", pointerUp, { passive: true });
   call(add, window, "touchend", lateEvent, { passive: true });
-  call(add, window, "click", lateEvent, false);
+  call(add, window, "click", lateEvent, { passive: true });
   call(add, window, "compositionstart", function (event) { if (trusted(event)) composingNow = true; }, true);
   call(add, window, "compositionend", function (event) { if (trusted(event)) composingNow = false; }, true);
 

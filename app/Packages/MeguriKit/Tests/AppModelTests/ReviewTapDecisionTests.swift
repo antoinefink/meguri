@@ -83,12 +83,23 @@ struct ReviewTapDecisionTests {
     }
 
     @Test func aTapWhileTypingOnlyPutsTheKeyboardAway() {
-        let q = Self.state(.question, update: Self.question)
+        var q = Self.state(.question, update: Self.question)
+        q.keyboardShown = true
         #expect(Self.decide(Self.gesture(update: Self.question), Self.observation(Self.question, editable: true), q) == .dismissKeyboard)
         #expect(Self.decide(Self.gesture(update: Self.question), Self.observation(Self.question, composing: true), q) == .dismissKeyboard)
-        #expect(Self.decide(Self.gesture(), Self.observation(editable: true)) == .dismissKeyboard)
+        var a = Self.state()
+        a.keyboardShown = true
+        #expect(Self.decide(Self.gesture(), Self.observation(editable: true), a) == .dismissKeyboard)
         // An exempt target (the field itself) keeps its tap.
-        #expect(Self.decide(Self.gesture(), Self.observation(exempt: true, editable: true)) == .none(.exempt))
+        #expect(Self.decide(Self.gesture(), Self.observation(exempt: true, editable: true), a) == .none(.exempt))
+    }
+
+    @Test func aFieldFocusedWithoutTheKeyboardDoesNotHoldTheTap() {
+        // A type-in card focuses its field by itself; with no keyboard on
+        // screen the first tap still reveals (R412 is about the keyboard).
+        let q = Self.state(.question, update: Self.question)
+        #expect(Self.decide(Self.gesture(update: Self.question), Self.observation(Self.question, editable: true), q) == .reveal)
+        #expect(Self.decide(Self.gesture(x: 350), Self.observation(editable: true)) == .good)
     }
 
     // MARK: Which card (R415) and when (R416)
@@ -167,5 +178,35 @@ struct ReviewTapDecisionTests {
         _ = once.add(Self.gesture(x: 300), at: 1)
         #expect(once.add(Self.observation(), point: CGPoint(x: 300, y: 200), at: 1.01) != nil)
         #expect(once.add(Self.observation(), point: CGPoint(x: 300, y: 200), at: 1.02) == nil)
+    }
+
+    static func observation(at time: TimeInterval, page: Int = 1, exempt: Bool = false) -> ReviewTapObservation {
+        var o = observation(exempt: exempt)
+        o.pageTime = time; o.page = page
+        return o
+    }
+
+    @Test func aNewTouchDropsWhateverWasWaiting() {
+        var pairing = ReviewTapPairing()
+        #expect(pairing.add(Self.observation(), point: CGPoint(x: 300, y: 200), at: 1) == nil)
+        pairing.touchDown()
+        #expect(pairing.add(Self.gesture(x: 300), at: 1.1) == nil, "The earlier observation is gone")
+    }
+
+    @Test func aLateObservationOfAnEarlierTapCannotPairWithTheNextGesture() {
+        var pairing = ReviewTapPairing()
+        // First tap: a baseline for this page's clock (page time 100 s ~ uptime 10.08 s).
+        _ = pairing.add(Self.gesture(x: 300, down: 10), at: 10.1)
+        #expect(pairing.add(Self.observation(at: 100.0), point: CGPoint(x: 300, y: 200), at: 10.11) != nil)
+        // Second tap's observation (page 101.0) is lost; the third tap, 0.6 s
+        // later, meets the second's late observation: the clocks disagree.
+        _ = pairing.add(Self.gesture(x: 300, down: 11.6), at: 11.7)
+        #expect(pairing.add(Self.observation(at: 101.0), point: CGPoint(x: 300, y: 200), at: 11.71) == nil)
+        // The clocks agree again on the next pair.
+        _ = pairing.add(Self.gesture(x: 300, down: 12.6), at: 12.7)
+        #expect(pairing.add(Self.observation(at: 102.6), point: CGPoint(x: 300, y: 200), at: 12.71) != nil)
+        // Another page has its own clock.
+        _ = pairing.add(Self.gesture(x: 300, down: 13.6), at: 13.7)
+        #expect(pairing.add(Self.observation(at: 5.0, page: 2), point: CGPoint(x: 300, y: 200), at: 13.71) != nil)
     }
 }
