@@ -729,19 +729,28 @@ public final class BrowseResults {
             let cells = try? await Self.readQA(session, list.handle, list.revision, range, which, columns, presenter)
             // A read for a replaced store leaves the new store's entries alone.
             guard self.epoch == epoch, let shown = self.list, shown.token == list.token, self.store === store else { return }
-            qaFetching.remove(page)
-            guard let cells else {
-                // A failed read is tried again twice, a moment later; then the cells wait for the rows to show again.
-                let tries = qaRetries[page, default: 0]
-                guard tries < 2 else { return }
-                qaRetries[page] = tries + 1
-                try? await Task.sleep(for: .milliseconds(250))
-                guard self.list?.token == list.token else { return }
+            // Cells read for another layout or before the page changed do not land; the page's are read
+            // again at once, with a fresh budget, whatever happened to this read.
+            guard shown.revision == list.revision, shown.columns == columns, store.page(page).generation == generation else {
+                qaFetching.remove(page)
+                qaRetries[page] = nil
                 return readNearRows()
             }
-            // Cells read for another layout or before the page changed do not land; the page's are read again.
-            guard shown.revision == list.revision, shown.columns == columns, store.page(page).generation == generation,
-                  let rows = store.page(page).rows, rows.count == cells.count else { return readNearRows() }
+            guard let cells, let rows = store.page(page).rows, rows.count == cells.count else {
+                // A failed read is tried again twice, a moment later, the page held meanwhile; then the
+                // cells wait for the rows to show again.
+                let tries = qaRetries[page, default: 0]
+                guard tries < 2 else {
+                    qaFetching.remove(page)
+                    return
+                }
+                qaRetries[page] = tries + 1
+                try? await Task.sleep(for: .milliseconds(250))
+                guard self.list?.token == list.token, self.store === store else { return }
+                qaFetching.remove(page)
+                return readNearRows()
+            }
+            qaFetching.remove(page)
             qaRetries[page] = nil
             store.page(page).fill(zip(rows, cells).map { $0.filling($1) })
         }
