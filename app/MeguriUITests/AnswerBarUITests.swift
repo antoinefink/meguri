@@ -18,6 +18,7 @@ final class AnswerBarUITests: XCTestCase {
         card.swipeUp(velocity: .slow)
         settle()
         capture(app, "long-light-answer-middle")
+        checkBlurBehindButtons(app)
         try scrollToLastLine(app, card)
         capture(app, "long-light-answer-bottom")
     }
@@ -91,6 +92,7 @@ final class AnswerBarUITests: XCTestCase {
         card.swipeUp(velocity: .slow)
         settle()
         capture(app, "dark-dark-answer-middle")
+        checkBlurBehindButtons(app)
         try scrollToLastLine(app, card)
         capture(app, "dark-dark-answer-bottom")
     }
@@ -104,6 +106,7 @@ final class AnswerBarUITests: XCTestCase {
         card.swipeUp(velocity: .slow)
         settle()
         capture(app, "long-dark-answer-middle")
+        checkBlurBehindButtons(app)
     }
 
     // MARK: Checks
@@ -120,6 +123,47 @@ final class AnswerBarUITests: XCTestCase {
         // 34 pt on iPhone) is the only space between the buttons and the bar.
         let strip = window.maxY - good.frame.maxY
         XCTAssertTrue((20...40).contains(strip), "Buttons to the screen's bottom: \(strip) pt")
+    }
+
+    /// Behind each button the card shows only as texture (N16.9): in
+    /// the parts of each button away from its label, the luminance spread
+    /// stays small; sharp text behind (black on white, white on black) would
+    /// span most of the range.
+    private func checkBlurBehindButtons(_ app: XCUIApplication) {
+        let screenshot = app.screenshot()
+        guard let image = screenshot.image.cgImage else { return XCTFail("No screenshot pixels") }
+        let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            // A bitmap context's first row in memory is the image's top row.
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return XCTFail("No pixel context") }
+        func luminance(_ x: Int, _ y: Int) -> Double {
+            let i = (y * width + x) * 4
+            return (0.2126 * Double(pixels[i]) + 0.7152 * Double(pixels[i + 1]) + 0.0722 * Double(pixels[i + 2])) / 255
+        }
+        for id in ["again", "hard", "good", "easy"] {
+            let frame = element(app, "review.session.rate.\(id)").frame
+            guard !frame.isEmpty else { continue }
+            // The outer fifth on each side of the button, around its middle row.
+            var low = 1.0, high = 0.0
+            for band in [frame.minX + frame.width * 0.06 ... frame.minX + frame.width * 0.2,
+                         frame.maxX - frame.width * 0.2 ... frame.maxX - frame.width * 0.06] {
+                for px in stride(from: band.lowerBound, through: band.upperBound, by: 1) {
+                    for py in stride(from: frame.midY - 8, through: frame.midY + 8, by: 1) {
+                        let value = luminance(Int(px * scale), Int(py * scale))
+                        low = min(low, value); high = max(high, value)
+                    }
+                }
+            }
+            XCTAssertLessThan(high - low, 0.3, "Luminance spread behind \(id): \(high - low)")
+        }
     }
 
     private func scrollToLastLine(_ app: XCUIApplication, _ card: XCUIElement) throws {

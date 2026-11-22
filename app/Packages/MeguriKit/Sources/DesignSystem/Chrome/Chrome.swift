@@ -161,3 +161,27 @@ extension View {
         modifier(ChromeButton(prominent: prominent))
     }
 }
+
+#if !os(macOS)
+extension View {
+    /// The review's answer buttons float over the card (N16.9). A blurring
+    /// system material clipped to the button's own rounded rectangle lies
+    /// under its grey fill, so card text behind a button blurs to texture
+    /// and the label keeps its contrast; over a plain card the button looks
+    /// as before. The material turns opaque with Reduce Transparency and
+    /// follows Increase Contrast. Flat chrome draws the opaque background.
+    public func answerAreaBacking() -> some View {
+        modifier(AnswerAreaBacking())
+    }
+}
+
+private struct AnswerAreaBacking: ViewModifier {
+    @Environment(\.chromeGlass) private var chromeGlass
+    func body(content: Content) -> some View {
+        switch chromeGlass {
+        case .liquid: content.background(.regularMaterial, in: ButtonBorderShape.roundedRectangle)
+        case .flat: content.background(.token(.cardPage), in: ButtonBorderShape.roundedRectangle)
+        }
+    }
+}
+#endif

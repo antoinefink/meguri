@@ -699,6 +699,7 @@ public struct ReviewAnswerBar: View {
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle)
+        .answerAreaBacking()
         .disabled(!enabled)
         .accessibilityIdentifier("review.session.reveal")
     }
@@ -748,6 +749,7 @@ public struct ReviewAnswerBar: View {
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle)
+        .answerAreaBacking()
         .disabled(!enabled || phase != .answer)
         .accessibilityLabel("\(title), \(label.map(Self.interval) ?? "")")
         .accessibilityIdentifier("review.session.rate.\(ReviewCoordinator.name(rating))")
