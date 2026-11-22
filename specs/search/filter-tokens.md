@@ -4,7 +4,7 @@ Spec: search/filter-tokens
 Requirements: R1078, R1080, R1084, R1092, R1102, R1104, R1105, R1106, R1107, R1110, R1111, R1114, R1115, R1158, R1165; supersedes in part R1076, R1077, R1086 to R1091, R1093 to R1101, R1103, R1108, R1109, R1112, R1159, R1168 to R1170 (the Browse and Note Types plan §5 lists the notes)
 Anki: none (Meguri design, decided by Antoine 2026-11-20, round 8 option 2A; it reads and writes Anki search text by the 26.09.3 grammar)
 Scenarios: none; tests in `core/crates/meguri-search/tests/` (T16)
-Status: Approved 2026-11-20 (R1232). Approved by Antoine in chat (round 8, decided 2026-11-20, `docs/design/decisions.md` row `browser`), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). The lines that carry the marker "changed 2026-11-21" with "U88a review", in any letter case or punctuation, are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/builder-spec-gaps-20261121.md`). The lines that carry the marker "changed 2026-11-21" with "implementation review", in any letter case or punctuation, are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/spec-followups-20261121.md`). Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R1232). Approved by Antoine in chat (round 8, decided 2026-11-20, `docs/design/decisions.md` row `browser`), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). The lines that carry the marker "changed 2026-11-21" with "U88a review", in any letter case or punctuation, are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/builder-spec-gaps-20261121.md`). The lines that carry the marker "changed 2026-11-21" with "implementation review", in any letter case or punctuation, are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/spec-followups-20261121.md`). The lines that begin "Changed 2026-11-22 (round 11)" are under review (R1357); do not implement them until approved. Every other section is in force and unchanged.
 
 What Browse's search field holds and means (`docs/design/native-interface-contract.md` N21.2): plain words plus filter tokens, how they combine, how they become one Anki search that the existing search stack runs, how Anki search text typed, pasted or stored is read back into tokens, how the filter sidebar and the tokens stay in step, the suggestions, and the built-in saved searches. The grammar, the term meanings, the canonical writer and the builder stay `search/grammar`, `search/query-model`, `search/canonical-form` and `search/join-and-replace`; this file only says which built items a query makes. No syntax mode, no syntax reference and no canonical text are ever shown.
 
@@ -42,6 +42,8 @@ What Browse's search field holds and means (`docs/design/native-interface-contra
 | Field f (one kind per field name; label "<f>") | contains t: the field contains item (T3.1); is empty: the field empty item (T3.1); has content: field present (`f:_*`) | none |
 | Duplicates (made only by Find Duplicates, `browser/workspace` V10) | the note ids of the duplicate groups: J3 note ids | none |
 | Studied On (made only by a heatmap day, `browser/workspace` V15; label "Studied on <date>") | the ids of the cards answered inside that heatmap day's bounds: J3 card ids | none |
+
+Changed 2026-11-22 (round 11): the Statistics page also makes Studied On tokens, for a day of Reviews Over Time, Activity or Forgotten (`stats/browse-queries` Q9): the ids of the cards `stats/history-reads` H13 returns for that day of Anki's day (`stats/day-buckets` B3), labelled "Studied on <date>", or "Forgotten on <date>" for Forgotten. Nothing else about the kind changes: the label is the maker's, and the token reads back as an advanced token (T16).
 
 - Day meanings are `search/history` H2 to H5 and `search/properties` P4. "Last 7 Days" is today and the six days before it.
 - Labels are Meguri's (T15). A value whose built item J3 refuses (a negative id, a field name J3.3 refuses) is not offered.
@@ -244,6 +246,7 @@ The list under the field while it has focus (Mac, iPad: under the field; iPhone 
 | Is, Is Not, Add Another %@…, Remove Filter, Edit | token menu; %@ the kind's label in lower case ("Add Another tag…") |
 | Show All %@ | a cut-short section; %@ the section label |
 | Save Search…, Due Today, Added in Last 7 Days, Leeches | saved searches |
+| Studied on %@, Forgotten on %@ | Studied On token labels (V15 and, changed 2026-11-22 (round 11), `stats/browse-queries` Q9); %@ the date |
 | Save Search, Name, Save, Cancel, A saved search named “%@” already exists. Replace it?, Replace | the Save Search sheet and its question |
 | in %@, in %lld note types | Field and Card Type suggestion detail (plural) |
 

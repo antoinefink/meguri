@@ -4,6 +4,7 @@ Spec: stats/browse-queries
 Requirements: R1351, R1383, R1393, R1417, R1419, R1420, AE60
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/browse-queries/
+Status: Under review (R1357) for Q9 and the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
 
 The search text a click on a Stats graph opens in the Browser: the scope's part, the item's part, and how the two are joined. Scopes are `stats/graphs-common` G2. Histogram bar queries are `stats/graph-presentation` (U226); this file states the scope text, the join and the queries of fixed items. Search syntax is `search/grammar`, canonical text `search/canonical-form`. The general join and replace services of the search field are `search/join-and-replace` (U88); the Stats join below is its own rule, because R1417 and AE60 fix its exact text.
 
@@ -116,6 +117,9 @@ With X = ` AND -("is:buried" OR "is:suspended")` when `cardCountsSeparateInactiv
 
 ## Q5. Opening the Browser
 
+Changed 2026-11-22 (round 11): the Statistics page opens Browse as Q9 says; its action is "Show in Browse" (`stats/statistics-page` S8.4), and the rest of this section applies.
+
+
 - The joined text goes to the `open(search:)` route on AppNavigation (R1417, U210; the plan's U225 calls the same route U150's `openBrowser(search:)`, `browser/entry-points` E1). The Browser opens in the same window (sidebar Browse on Mac and iPad, the Browse tab on iPhone), shows exactly that text in its search field, and runs it in its current cards or notes mode, as Anki's Browser does with a search handed to it.
 - On touch, the item's tooltip shows "Show in Browser" first; on Mac a click opens at once (R1418, U226).
 - Coming back restores the Stats screen as it was (R1419, U225).
@@ -153,3 +157,25 @@ Anki hands its Browser the text: a space, the scope search, a space, the item te
 | `parse-all` | Q6 | `canonical_search` of every joined text of Q3's table and of the separated and plain label texts for Deck `Lang`: each parses |
 
 Meguri-only tests: the `did:` form, with a name of each Q2.2 case (an empty level and a level holding `::` included), `deck:"Current"` for decks `current` and `current::a`, and `unavailable` for a `did:` case with a negative deck id (Q2.2), all as `stats_browse_scope` returns them (Q1); `deck:"\_\*"` for a deck named `_*` finding only that deck's cards (`stats/graphs-common` G13); future cells without a query (Q4.2); the top-level-OR wrap of an item in a Deck scope and its absence in Collection (Q3); a Stats search holding U+001F, whose graph scope and Browser cards are equal (Q2.3); Q3's table for both joins (Q6); and the hand-off to the Browser (Q5, U225's UI tests).
+
+## Q9. The Statistics page's items (round 11)
+
+Changed 2026-11-22 (round 11; `stats/statistics-page` S8.4). The Statistics page has no Search scope (`stats/history-reads` H1), so its scope text is Q2.1's or Q2.2's. Show in Browse opens Browse (Q5's route) with a query made of tokens (`search/filter-tokens`): the joined text Q3 gives for the page scope and the item below, read into tokens by `search/filter-tokens` T4 (a deck becomes its Deck token; an item that no kind shows stays an advanced token). A card-ids item is made as the heatmap's day is (`browser/workspace` V15): the Deck token, when a deck is the filter, and a Studied On token holding the ids that `stats/history-reads` H13 returned. Scope text `unavailable` makes no item of the page clickable (Q2.2).
+
+| Box (`stats/statistics-page`) | Item | Item text |
+|---|---|---|
+| Card Counts, a state row | the row | Q4.1's text with X, always separating (S3.4) |
+| Reviews Due, a bar of days `a` to `b` (0 ≤ `a` ≤ `b`) | the cards due then | `"prop:due=<a>"` when `a` = `b`, else `"prop:due>=<a>" AND "prop:due<=<b>"` |
+| Reviews Due, the Overdue bar | the overdue cards | `"prop:due<=-1"` |
+| Added and Started, an Added bar of days `a` to `b` (`a` ≤ `b` ≤ 0) | the cards added then | `"added:<1 − a>"` when `b` = 0, else `"added:<1 − a>" AND -"added:<−b>"` |
+| Stability, a bar of keys [`a`, `b`) | its cards | `"prop:s<0.5"` for the first bar (`a` = 0, negative stabilities included), `"prop:s>=729.5"` for the last ([730, ∞)), else `"prop:s>=<a − 0.5>" "prop:s<<b − 0.5>"` |
+| Difficulty, a bar [`a`, `a` + 10) of percent keys | its cards | `"prop:d<0.1"` for the first, `"prop:d>=0.9"` for the last (keys of 100 and above included), else `"prop:d>=<a ÷ 100>" AND "prop:d<<(a + 10) ÷ 100>"` |
+| Retrievability, a bar [`a`, `a` + 5) | its cards | `"prop:r<0.05"`, `"prop:r>=0.95"`, else `"prop:r>=<a ÷ 100>" AND "prop:r<<(a + 5) ÷ 100>"` |
+| Reviews Over Time, a day bar | Cards Reviewed on <date> | card ids, H13 `reviewed`; Studied On token labelled "Studied on <date>" |
+| Activity, a day with reviews | Cards Reviewed on <date> | card ids, H13 `answered`; the same token |
+| Forgotten, a day bar | Cards Forgotten on <date> | card ids, H13 `forgotten`; Studied On token labelled "Forgotten on <date>" |
+
+- Numbers are written as `stats/graph-presentation` P4.7 writes them (shortest decimal, no grouping).
+- As in Anki and P6 and P10 to P11, a `prop:` query uses the search's own rules, which can differ from what the bar counts: `prop:due` never matches buried cards, which Future Due counts for k ≥ 1 (`stats/graphs-cards` C3.6), and `prop:r` reads retrievability by X5's elapsed rule, not C9.1's (C9.6). The card-ids items find exactly the cards the bar's rows belong to.
+- A day item's date is the day's date (`stats/history-reads` H1). An empty day is not a link (the card-ids item refuses an empty list).
+- Tests (Meguri-only): each item text parses (Q6) and, on the fixture, finds the cards Q9 says for Deck and All Decks; the two card-ids tokens carry their labels; Back returns to the page's scroll position and selection (`stats/statistics-page` S20).

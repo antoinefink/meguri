@@ -4,6 +4,7 @@ Spec: stats/studied-today
 Requirements: R1269, R1277, R1278, R1279, R1281, R1282, R1288, R1295, R1296, R1297, R1298, R1300, R1369, R1370, R1371, R1372, R1448, R1889, R304, R95
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/studied-today/, conformance/scenarios/stats/today/
+Status: Under review (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
 
 Two texts report today's answers:
 
@@ -109,6 +110,8 @@ Every row was checked against the oracle at the current pin. Scenario `studied-t
 
 ## T3. The Today section: values
 
+Changed 2026-11-22 (round 11): the Statistics page has no Today section: its strip (`stats/statistics-page` S6) shows Studied Today from `stats/history-reads` H12 (T12.1's numbers for the page scope) and Retention Today in place of an Again count. T3 and T4 apply to no screen; they stay the reproduction of Anki's Today lines, and their scenarios stay. T2 and T12 are unchanged.
+
 ### T3.1 Rows
 
 The Today section of a scope (T3.2) reads the rows with `id ≥ S`: unlike the Home line, a row stamped exactly `S` counts (R1369). There is no upper end: rows dated after now, or after `N`, count, as on the Home line.
@@ -176,6 +179,8 @@ The Today section is a graph of the Stats graph request (T6.2), so it reads rows
 - The Home line reads only `id`, `type` and `time` (T2.1): a row this section calls unreadable for another column still counts there (T4.5).
 
 ## T4. The Today section: lines
+
+Changed 2026-11-22 (round 11): applies to no screen (T3's note).
 
 ### T4.1 No answers
 
