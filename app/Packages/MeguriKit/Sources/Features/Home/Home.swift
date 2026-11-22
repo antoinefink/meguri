@@ -605,7 +605,9 @@ public struct HomeDeckTree: View {
                         Section {
                             branches
                         } header: {
+                            // The system's header grey falls short of 4.5:1 here, as on the iPad sidebar.
                             Text("Decks", bundle: .module)
+                                .foregroundStyle(.token(.textSecondary))
                                 .accessibilityIdentifier("home.collection.decksHeader")
                         }
                     } else {
@@ -750,6 +752,8 @@ private struct HomeDeckBranch: View {
     @Environment(\.locale) private var locale
     #else
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// The list's vertical padding around a row's 44-point content (N26.5), growing with the text.
+    @ScaledMetric(relativeTo: .body) private var rowInset = Spacing.xxSmall
     #endif
 
     private var path: String {
@@ -788,6 +792,10 @@ private struct HomeDeckBranch: View {
                 row
             }
             .padding(.leading, CGFloat(depth) * Spacing.medium)
+            // N26.5: every deck row is as tall as one without subdecks. The row button's 44-point
+            // minimum is the row's content, so the list's vertical padding around it shrinks;
+            // the padding alone, added to that minimum, made rows with a disclosure taller.
+            .listRowInsets(.vertical, rowInset)
             .tag(HomeListRow.deck(node.id))
             if expanded.wrappedValue {
                 ForEach(node.children, id: \.id) { child in
@@ -846,8 +854,8 @@ private struct HomeDeckBranch: View {
                 #if os(macOS)
                 .frame(minHeight: ControlMetrics.minimumTarget)
                 #else
-                // A childless row's button fills its cell; one beside a disclosure doesn't.
-                .frame(minHeight: node.children.isEmpty ? nil : ControlMetrics.minimumTarget)
+                // The touch target's minimum on every row, with or without a disclosure (N26.5).
+                .frame(minHeight: ControlMetrics.minimumTarget)
                 #endif
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -961,6 +969,7 @@ private struct HomeTodayRowView: View {
     let row: HomeTodayRow
     #if !os(macOS)
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var rowInset = Spacing.xxSmall
     #endif
 
     var body: some View {
@@ -974,6 +983,10 @@ private struct HomeTodayRowView: View {
         .accessibilityValue(Text("\(row.waiting) cards waiting", bundle: .module))
         .accessibilityAddTraits(row.selected ? .isSelected : [])
         .accessibilityIdentifier("home.today.row")
+        #if !os(macOS)
+        // As a deck row (N26.5): the 44-point target is the content, with a tighter padding around it.
+        .listRowInsets(.vertical, rowInset)
+        #endif
         .tag(HomeListRow.today)
     }
 
