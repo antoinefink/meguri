@@ -328,7 +328,7 @@ fn rebase(view: &View) -> (CardsBuilder, RevlogBuilder) {
             continue;
         }
         while let Some(row) = others.next_if(|row| row.id() < slotted.row.id) {
-            revlog.push(row, &slot_of);
+            revlog.push(row, slot_of);
         }
         let card = match view.base_row_card(slotted.row.id, slotted.slot) {
             Some(CardKey::Slot(slot)) => Some(view.cards.id(slot)),
@@ -338,7 +338,7 @@ fn rebase(view: &View) -> (CardsBuilder, RevlogBuilder) {
         revlog.push_slotted(slotted.row, card.and_then(slot_of));
     }
     for row in others {
-        revlog.push(row, &slot_of);
+        revlog.push(row, slot_of);
     }
     (cards, revlog)
 }
@@ -441,7 +441,7 @@ impl DerivedComponent for StatsColumns {
         let mut stopped: Option<EngineError> = None;
         let step = |sink: &mut BuildSink, done: &mut u64, stopped: &mut Option<EngineError>| {
             *done += 1;
-            if *done % CHECK_EVERY == 0 {
+            if (*done).is_multiple_of(CHECK_EVERY) {
                 if let Err(error) = sink.check() {
                     *stopped = Some(error);
                     return false;

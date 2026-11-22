@@ -50,6 +50,12 @@ pub fn fixture_path(dir: &Path) -> std::path::PathBuf {
     collection
 }
 
+impl Default for Fixture {
+    fn default() -> Fixture {
+        Fixture::new()
+    }
+}
+
 impl Fixture {
     /// The fixture without its review-log rows.
     pub fn new() -> Fixture {

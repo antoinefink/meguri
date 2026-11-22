@@ -5,7 +5,7 @@
 //! from the snapshot, after any sequence of changes (G9.6). Names and
 //! values are made up.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use meguri_engine::Readiness;
 use meguri_model::card::{CardQueue, CardType};
@@ -63,9 +63,9 @@ fn wait_ready(f: &Fixture) {
 }
 
 fn wait_ready_after(f: &Fixture, step: &str) {
-    let deadline = Instant::now() + WAIT;
+    let deadline = meguri_engine::monotonic::now() + WAIT;
     while readiness(f) != Readiness::Ready {
-        assert!(Instant::now() < deadline, "{step}: stats_columns never became ready: {:?}", readiness(f));
+        assert!(meguri_engine::monotonic::now() < deadline, "{step}: stats_columns never became ready: {:?}", readiness(f));
         std::thread::sleep(Duration::from_millis(5));
     }
     f.host.derived().flush().unwrap();

@@ -14,7 +14,7 @@
 
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use criterion::Criterion;
 use meguri_engine::derived_host::Invalidation;
@@ -62,13 +62,13 @@ fn open_host(path: &std::path::Path, auxiliary: &std::path::Path) -> CoreHost {
 }
 
 fn wait_ready(host: &CoreHost) {
-    let deadline = Instant::now() + Duration::from_secs(600);
+    let deadline = meguri_engine::monotonic::now() + Duration::from_secs(600);
     loop {
         host.derived().flush().unwrap();
         if host.derived().readiness(COMPONENT).map(|r| r.readiness) == Some(Readiness::Ready) {
             return;
         }
-        assert!(Instant::now() < deadline, "the stats columns never became ready");
+        assert!(meguri_engine::monotonic::now() < deadline, "the stats columns never became ready");
         std::thread::sleep(Duration::from_millis(2));
     }
 }

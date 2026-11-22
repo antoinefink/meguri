@@ -250,7 +250,7 @@ fn converted<T: TryFrom<i64>>(cell: Option<&Cell>) -> Option<T> {
         Some(Cell::Integer(value)) => T::try_from(*value).ok(),
         Some(Cell::Real(value)) if value.is_finite() => {
             let truncated = value.trunc();
-            if truncated >= -9.223_372_036_854_776e18 && truncated < 9.223_372_036_854_776e18 {
+            if (-9.223_372_036_854_776e18..9.223_372_036_854_776e18).contains(&truncated) {
                 T::try_from(truncated as i64).ok()
             } else {
                 None

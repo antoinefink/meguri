@@ -216,11 +216,11 @@ impl CardTable {
     pub(crate) fn open(backing: Backing) -> Result<CardTable, Malformed> {
         let parsed = parse(&backing, KIND_CARDS, CARD_COLUMNS)?;
         let extras = &backing.bytes()[parsed.extras];
-        if extras.len() % BAD_CARD_BYTES != 0 {
+        if !extras.len().is_multiple_of(BAD_CARD_BYTES) {
             return Err(Malformed("the unreadable cards"));
         }
         let mut bad = Vec::with_capacity(extras.len() / BAD_CARD_BYTES);
-        for entry in extras.chunks_exact(BAD_CARD_BYTES) {
+        for entry in extras.as_chunks::<BAD_CARD_BYTES>().0 {
             let number = |at: usize| i64::from_le_bytes(entry[at..at + 8].try_into().expect("eight bytes"));
             let present = entry[24];
             bad.push(BadCard {
@@ -360,11 +360,11 @@ impl RevlogTable {
     pub(crate) fn open(backing: Backing) -> Result<RevlogTable, Malformed> {
         let parsed = parse(&backing, KIND_REVLOG, REVLOG_COLUMNS)?;
         let extras = &backing.bytes()[parsed.extras];
-        if extras.len() % BAD_ROW_BYTES != 0 {
+        if !extras.len().is_multiple_of(BAD_ROW_BYTES) {
             return Err(Malformed("the unreadable rows"));
         }
         let mut bad = Vec::with_capacity(extras.len() / BAD_ROW_BYTES);
-        for entry in extras.chunks_exact(BAD_ROW_BYTES) {
+        for entry in extras.as_chunks::<BAD_ROW_BYTES>().0 {
             let number = |at: usize| i64::from_le_bytes(entry[at..at + 8].try_into().expect("eight bytes"));
             bad.push(BadRow {
                 id: number(0),

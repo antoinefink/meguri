@@ -7,7 +7,7 @@ mod common;
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use common::{NOW_MS, copy_fixture, note, open_config};
 use meguri_engine::derived_host::{
@@ -145,9 +145,9 @@ impl Opened {
     }
 
     fn wait_ready(&self, name: &str) {
-        let deadline = Instant::now() + WAIT;
+        let deadline = meguri_engine::monotonic::now() + WAIT;
         while self.readiness(name) != Readiness::Ready {
-            assert!(Instant::now() < deadline, "{name} never became ready");
+            assert!(meguri_engine::monotonic::now() < deadline, "{name} never became ready");
             std::thread::sleep(Duration::from_millis(2));
         }
     }
