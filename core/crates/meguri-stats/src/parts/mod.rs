@@ -32,7 +32,8 @@ pub fn page_day(id_ms: i64, next_day_at: i64) -> i32 {
 }
 
 /// The review-log ids of H1's day `day` (≤ 0): `start <= id < end`, with no
-/// end for day 0, which holds every later row. `None` for a day after 0.
+/// end for day 0, which holds every later row, and `start` at least 0.
+/// `None` for a day after 0.
 pub fn day_ids(day: i32, next_day_at: i64) -> Option<(i64, Option<i64>)> {
     if day > 0 {
         return None;
@@ -41,7 +42,8 @@ pub fn day_ids(day: i32, next_day_at: i64) -> Option<(i64, Option<i64>)> {
     // Day `d` holds the whole seconds `N + (d − 1) × 86,400 + 1` to
     // `N + d × 86,400`.
     let first = next_day_at.saturating_add((day - 1) * DAY).saturating_add(1);
-    let start = first.saturating_mul(1000);
+    // Rows with a negative id are read by no part (G3, H9, H11).
+    let start = first.saturating_mul(1000).max(0);
     let end = (day < 0).then(|| next_day_at.saturating_add(day * DAY).saturating_add(1).saturating_mul(1000));
     Some((start, end))
 }

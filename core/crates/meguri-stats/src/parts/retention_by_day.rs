@@ -1,9 +1,9 @@
 //! Retention and Forgotten per day (`stats/history-reads` H4), with the
 //! desired-retention weights of the Retention chart's dashed line (H3.4).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
-use super::decks::DeckFacts;
+use super::decks::Retentions;
 use super::page_day;
 use crate::graphs::records::retention::outcome;
 use crate::graphs::ScopeData;
@@ -46,19 +46,17 @@ pub struct RetentionByDayPart {
 }
 
 /// H4 over the scope's window rows; H3.4's retentions over its cards.
-pub(crate) fn build(scope: &ScopeData, next_day_at: i64, decks: &DeckFacts) -> RetentionByDayPart {
-    let mut in_force: HashMap<i64, f32> = HashMap::new();
+pub(crate) fn build(scope: &ScopeData, next_day_at: i64, decks: &Retentions) -> RetentionByDayPart {
     let mut distinct: Vec<u32> = Vec::new();
     for card in scope.cards() {
-        if let Some(retention) = decks.retention_of(card.did, card.odid) {
-            in_force.insert(card.id, retention);
-            if !distinct.contains(&retention.to_bits()) {
-                distinct.push(retention.to_bits());
-            }
+        if let Some(retention) = decks.of(card.did, card.odid)
+            && !distinct.contains(&retention.to_bits())
+        {
+            distinct.push(retention.to_bits());
         }
     }
     let mut part = RetentionByDayPart::default();
-    for scoped in scope.rows() {
+    for (scoped, card_decks) in scope.rows_with_decks() {
         let Some(counted) = outcome(&scoped.row) else {
             continue;
         };
@@ -70,8 +68,8 @@ pub(crate) fn build(scope: &ScopeData, next_day_at: i64, decks: &DeckFacts) -> R
             (true, false) => &mut day.mature_failed,
         };
         *count += 1;
-        if let Some(retention) = scoped.card.and_then(|card| in_force.get(&card)) {
-            day.desired_sum += f64::from(*retention);
+        if let Some(retention) = card_decks.and_then(|(did, odid)| decks.of(did, odid)) {
+            day.desired_sum += f64::from(retention);
             day.desired_rows += 1;
         }
     }

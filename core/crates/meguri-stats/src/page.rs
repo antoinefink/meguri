@@ -42,7 +42,7 @@ use crate::history::{self, CardStatesOverTime, HistoryRequest, HistoryResult, Pr
 use crate::parts::activity::{self, ActivityDaysPart};
 use crate::parts::by_answer;
 use crate::parts::by_deck::{self, ByDeckPart};
-use crate::parts::decks::DeckFacts;
+use crate::parts::decks::{self, DeckEntry, Retentions};
 use crate::parts::retention_by_day::{self, RetentionByDayPart};
 use crate::parts::studied_today::{self, StudiedTodayPart};
 
@@ -459,14 +459,14 @@ fn run(
                     Some(Err(failure)) => PartOutcome::Failed(failure.clone()),
                     None => PartOutcome::Failed(PartFailure::Failed("the strip's numbers were not read".into())),
                 },
-                Source::RetentionByDay => match &reads.decks {
+                Source::RetentionByDay => match &reads.retentions {
                     Some(Ok(decks)) => PartOutcome::Data(PartValue::RetentionByDay(retention_by_day::build(
                         scope_data.as_ref(),
                         header.context.next_day_at,
                         decks,
                     ))),
                     Some(Err(failure)) => PartOutcome::Failed(failure.clone()),
-                    None => PartOutcome::Failed(PartFailure::Failed("the decks were not read".into())),
+                    None => PartOutcome::Failed(PartFailure::Failed("the retentions were not read".into())),
                 },
                 Source::ByDeck => match &reads.decks {
                     Some(Ok(decks)) => PartOutcome::Data(PartValue::ByDeck(by_deck::build(
@@ -549,11 +549,13 @@ fn all_history_rows(data: &Arc<ScopeData>) -> Result<Arc<ScopeData>, PartFailure
 }
 
 /// What the parts read on the request's snapshot besides its scope, before
-/// the first part (H12's numbers; the decks for H3.4, H4 and H10), and the
-/// scope's rows of all history. `None` for what no requested part needs.
+/// the first part (H12's numbers; the retentions for H3.4 and H4; the decks
+/// for H10), and the scope's rows of all history. `None` for what no
+/// requested part needs; each fails only its own parts.
 struct SnapshotReads {
     studied: Option<Result<StudiedTodayPart, PartFailure>>,
-    decks: Option<Result<DeckFacts, PartFailure>>,
+    retentions: Option<Result<Retentions, PartFailure>>,
+    decks: Option<Result<Vec<DeckEntry>, PartFailure>>,
     all_rows: Result<Arc<ScopeData>, PartFailure>,
 }
 
@@ -573,13 +575,19 @@ impl SnapshotReads {
                 PartFailure::Failed(error.to_string())
             })
         });
-        let decks = (wants(Source::RetentionByDay) || wants(Source::ByDeck)).then(|| {
-            DeckFacts::read(&**snapshot).map_err(|error| {
-                tracing::warn!(%error, "the page's deck read failed");
-                PartFailure::Failed(error.to_string())
-            })
-        });
-        SnapshotReads { studied, decks, all_rows }
+        let failed = |what: &str, error: meguri_engine::EngineError| {
+            tracing::warn!(%error, "the page's {what} read failed");
+            PartFailure::Failed(error.to_string())
+        };
+        let retentions =
+            wants(Source::RetentionByDay).then(|| Retentions::read(&**snapshot).map_err(|e| failed("retention", e)));
+        let decks = wants(Source::ByDeck).then(|| decks::deck_entries(&**snapshot).map_err(|e| failed("deck", e)));
+        SnapshotReads {
+            studied,
+            retentions,
+            decks,
+            all_rows,
+        }
     }
 }
 

@@ -325,6 +325,12 @@ impl ScopeData {
         }
     }
 
+    /// [`Self::rows`], each with its card's `did` and `odid` now, read from
+    /// the copies (no lookup by card id).
+    pub(crate) fn rows_with_decks(&self) -> RowsWithDecks<'_> {
+        RowsWithDecks(self.rows())
+    }
+
     /// The window's first id (G3).
     pub fn window_start(&self) -> i64 {
         self.window_start
@@ -347,6 +353,41 @@ impl Iterator for Rows<'_> {
     type Item = ScopeRow;
 
     fn next(&mut self) -> Option<ScopeRow> {
+        self.next_keyed().map(|(row, _)| row)
+    }
+}
+
+/// [`ScopeData::rows_with_decks`].
+pub(crate) struct RowsWithDecks<'d>(Rows<'d>);
+
+impl Iterator for RowsWithDecks<'_> {
+    /// The row, and its card's `did` and `odid` now (none for a deleted
+    /// card's row).
+    type Item = (ScopeRow, Option<(i64, i64)>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (row, key) = self.0.next_keyed()?;
+        let view = &self.0.data.view;
+        let decks = key.and_then(|key| match key {
+            CardKey::Slot(slot) => match view.cards.decks(slot) {
+                (Some(did), Some(odid)) => Some((did, odid)),
+                _ => None,
+            },
+            CardKey::Patched(id) => match view.patch.cards.get(&id) {
+                Some(Some(card)) => match card.decks() {
+                    (Some(did), Some(odid)) => Some((did, odid)),
+                    _ => None,
+                },
+                _ => None,
+            },
+        });
+        Some((row, decks))
+    }
+}
+
+impl Rows<'_> {
+    /// The next row with the key of its card now.
+    fn next_keyed(&mut self) -> Option<(ScopeRow, Option<CardKey>)> {
         let data = self.data;
         let revlog = &data.view.revlog;
         let patch = &data.view.patch;
@@ -378,10 +419,11 @@ impl Iterator for Rows<'_> {
             if let Some(row) = row
                 && data.row_counts(card)
             {
-                return Some(ScopeRow {
+                let scoped = ScopeRow {
                     row,
                     card: data.card_id(card),
-                });
+                };
+                return Some((scoped, card));
             }
         }
     }

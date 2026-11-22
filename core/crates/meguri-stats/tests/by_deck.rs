@@ -412,3 +412,20 @@ fn h10_a_deck_without_own_cards_has_no_own_row_and_caches_change_nothing() {
     .unwrap();
     assert!(failed);
 }
+
+#[test]
+fn h10_a_deck_the_deck_list_hides_still_has_its_row() {
+    // Default's only card sits in a filtered deck (`odid` 1): the deck list
+    // hides Default (C2), but By Deck places every card of a normal deck.
+    let f = Fixture::with_raw(&["DELETE FROM cards"]);
+    put_cards(&f, &[(1, CRAM, 1), (2, LANG, 0)]);
+    let n = f.next_day_at();
+    put_rows(&f, &[(1, ((n - 3_600) * 1_000, 3, 30, 2_500, 1_000, 1))]);
+    let all = by_deck(&f, Scope::Collection, History::Last12Months);
+    assert_eq!(decks(&all), [(1, false), (LANG, false)]);
+    assert_eq!(all.rows[0].cards, 1);
+    assert_eq!(all.rows[0].windows.one_month.reviews, 1);
+    let default = by_deck(&f, Scope::Deck(DeckId(1)), History::Last12Months);
+    assert_eq!(decks(&default), [(1, true)]);
+    assert_eq!(default.rows[0].cards, 1);
+}

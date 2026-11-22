@@ -17,7 +17,7 @@ pub const STUDIED_SQL: &str =
     "SELECT count(*), count(DISTINCT cid), coalesce(sum(time), 0) FROM revlog WHERE id > ?1 AND type NOT IN (4, 5)";
 
 /// [`STUDIED_SQL`] over the rows of the cards whose `did` is one of
-/// `decks` decks, or whose non-zero `odid` is (`stats/graphs-common`
+/// `decks` deck ids, or whose non-zero `odid` is (`stats/graphs-common`
 /// G2.1), bound as `?2` onwards. Each half of the card set has its own
 /// index (`ix_cards_sched`, the partial `idx_cards_odid`); the rows come
 /// through `ix_revlog_cid` with the rowid bound.

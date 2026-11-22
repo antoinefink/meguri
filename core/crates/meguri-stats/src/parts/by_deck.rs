@@ -2,12 +2,11 @@
 //! decks, its cards partitioned by home deck so the rows add up, unlike the
 //! page's other parts, which follow G2.1's deck rule.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use meguri_engine::decks::tree::Node;
 use meguri_model::ids::DeckId;
 
-use super::decks::{DeckFacts, home_deck};
+use super::decks::{DeckEntry, home_deck};
 use super::{PERIOD_DAYS, period_start};
 use crate::graphs::records::retention::outcome;
 use crate::graphs::records::reviews::counted;
@@ -75,58 +74,61 @@ pub struct DeckRow {
 /// Part `by_deck`. Member order: `rows`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ByDeckPart {
-    /// The rows in the deck tree's order (`sched/counts` C1), the own-cards
-    /// row first; a deck with no cards and no reviews in any window is not
-    /// a row.
+    /// The rows in the deck tree's order (`sched/counts` C1's sibling
+    /// order), the own-cards row first; a deck with no cards and no reviews
+    /// in any window is not a row.
     pub rows: Vec<DeckRow>,
 }
 
-/// The decks of a node's subtree, the node included.
-fn subtree(node: &Node, out: &mut Vec<i64>) {
-    out.push(node.id.0);
-    for child in &node.children {
-        subtree(child, out);
-    }
-}
-
-fn find(nodes: &[Node], deck: DeckId) -> Option<&Node> {
-    nodes
-        .iter()
-        .find_map(|node| if node.id == deck { Some(node) } else { find(&node.children, deck) })
-}
-
-/// The rows' decks and which row each home deck counts in.
-fn layout(scope: &Scope, decks: &DeckFacts) -> (Vec<(DeckId, bool)>, HashMap<i64, usize>) {
+/// The rows' decks and which row each home deck counts in (H10.1). A deck
+/// is a row's when its folded name is the row deck's or starts with it and
+/// U+001F, as G2.1's subtree is found.
+fn layout(scope: &Scope, decks: &[DeckEntry]) -> (Vec<(DeckId, bool)>, BTreeMap<i64, usize>) {
+    const SEPARATOR: char = '\u{1f}';
     let mut rows: Vec<(DeckId, bool)> = Vec::new();
-    let mut of_home: HashMap<i64, usize> = HashMap::new();
-    let mut add_subtrees = |nodes: &[Node], rows: &mut Vec<(DeckId, bool)>| {
-        for node in nodes.iter().filter(|node| !node.filtered) {
-            let mut members = Vec::new();
-            subtree(node, &mut members);
-            for deck in members {
-                of_home.insert(deck, rows.len());
+    let mut of_home: BTreeMap<i64, usize> = BTreeMap::new();
+    // The normal decks one level below `parent` (none: the top level), in
+    // order, each with its subtree.
+    let mut add_level = |parent: Option<&str>, rows: &mut Vec<(DeckId, bool)>| {
+        for deck in decks.iter().filter(|deck| !deck.filtered) {
+            let rest = match parent {
+                None => Some(deck.folded.as_str()),
+                Some(parent) => deck.folded.strip_prefix(parent).and_then(|rest| rest.strip_prefix(SEPARATOR)),
+            };
+            if rest.is_none_or(|rest| rest.contains(SEPARATOR)) {
+                continue;
             }
-            rows.push((node.id, false));
+            let mut prefix = deck.folded.clone();
+            prefix.push(SEPARATOR);
+            for member in decks.iter().filter(|d| d.folded == deck.folded || d.folded.starts_with(&prefix)) {
+                of_home.insert(member.id, rows.len());
+            }
+            rows.push((DeckId(deck.id), false));
         }
     };
     match scope {
         Scope::Deck(deck) => {
-            if let Some(node) = find(&decks.tree, *deck) {
+            if let Some(entry) = decks.iter().find(|entry| entry.id == deck.0) {
                 // First the deck's own cards, outside its subdecks.
-                let mut own = vec![(node.id, true)];
-                add_subtrees(&node.children, &mut own);
-                of_home.insert(node.id.0, 0);
-                rows = own;
+                rows.push((*deck, true));
+                add_level(Some(&entry.folded), &mut rows);
+                of_home.insert(deck.0, 0);
             }
         }
         // A Search scope never reaches here (H1: `unsupported_scope`).
-        Scope::Collection | Scope::Search(_) => add_subtrees(&decks.tree, &mut rows),
+        Scope::Collection | Scope::Search(_) => add_level(None, &mut rows),
     }
     (rows, of_home)
 }
 
 /// H10 over the scope's cards and window rows.
-pub(crate) fn build(scope: &ScopeData, page_scope: &Scope, history: History, next_day_at: i64, decks: &DeckFacts) -> ByDeckPart {
+pub(crate) fn build(
+    scope: &ScopeData,
+    page_scope: &Scope,
+    history: History,
+    next_day_at: i64,
+    decks: &[DeckEntry],
+) -> ByDeckPart {
     let (layout, of_home) = layout(page_scope, decks);
     let mut rows: Vec<DeckRow> = layout
         .iter()
@@ -142,17 +144,15 @@ pub(crate) fn build(scope: &ScopeData, page_scope: &Scope, history: History, nex
         .collect();
     // Each existing card of the scope in its home deck's row, if any. Under
     // G2.1 the scope holds every card whose home deck is in its tree.
-    let mut row_of_card: HashMap<i64, usize> = HashMap::new();
     for card in scope.cards() {
         if let Some(at) = of_home.get(&home_deck(card.did, card.odid)) {
             rows[*at].cards += 1;
-            row_of_card.insert(card.id, *at);
         }
     }
     let bounds = PERIOD_DAYS.map(|days| period_start(next_day_at, days));
-    for scoped in scope.rows() {
+    for (scoped, card_decks) in scope.rows_with_decks() {
         // Deleted cards' rows are in no row.
-        let Some(at) = scoped.card.and_then(|card| row_of_card.get(&card)) else {
+        let Some(at) = card_decks.and_then(|(did, odid)| of_home.get(&home_deck(did, odid))) else {
             continue;
         };
         let row = scoped.row;
