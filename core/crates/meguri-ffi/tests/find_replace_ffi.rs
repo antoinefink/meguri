@@ -65,6 +65,21 @@ fn finish(rx: &mpsc::Receiver<CoreEvent>, id: u64) -> JobOutcome {
     }
 }
 
+/// The outcomes of the jobs `ids`, in that order, whichever order they end
+/// in (`finish` drops the events of other jobs).
+fn finish_all(rx: &mpsc::Receiver<CoreEvent>, ids: &[u64]) -> Vec<JobOutcome> {
+    let mut outcomes: Vec<Option<JobOutcome>> = vec![None; ids.len()];
+    while outcomes.iter().any(Option::is_none) {
+        let event = rx.recv_timeout(Duration::from_secs(20)).unwrap();
+        if let CoreEventKind::JobFinished { id, outcome } = event.kind
+            && let Some(at) = ids.iter().position(|wanted| *wanted == id)
+        {
+            outcomes[at] = Some(outcome);
+        }
+    }
+    outcomes.into_iter().map(Option::unwrap).collect()
+}
+
 /// Opens a new collection with FSRS on (answers need it, `sched/answering`
 /// A9) and adds the note type Quorv (Front, Back; one card per note).
 fn open(dir: &tempfile::TempDir) -> (mpsc::Receiver<CoreEvent>, i64) {
@@ -448,12 +463,14 @@ fn a_newer_preview_cancels_the_older_and_a_cancelled_run_writes_nothing() {
     let undo = peek_undo(ReviewUndoScope::Global).unwrap();
     drop(held);
 
-    assert_eq!(finish(&rx, older.handle.id), JobOutcome::Cancelled);
+    assert_eq!(
+        finish_all(&rx, &[older.handle.id, newer.handle.id, cancelled.handle.id]),
+        [JobOutcome::Cancelled, JobOutcome::Succeeded, JobOutcome::Cancelled]
+    );
     assert_eq!(older.result.result(), Err(CoreError::Cancelled));
-    assert_eq!(finish(&rx, newer.handle.id), JobOutcome::Succeeded);
     let shown = newer.result.result().unwrap().unwrap();
     assert_eq!((shown.changed, shown.considered), (2, 2));
-    assert_eq!(run(&rx, cancelled), Err(CoreError::Cancelled));
+    assert_eq!(cancelled.result.result(), Err(CoreError::Cancelled));
     assert_eq!(notes(&ids), before);
     assert_eq!(peek_undo(ReviewUndoScope::Global).unwrap(), undo);
 
