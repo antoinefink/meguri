@@ -4,6 +4,7 @@ Spec: stats/graphs-cards
 Requirements: R1285, R1293, R1294, R1373, R1374, R1375, R1378, R1390, R1391, R1392, R1393, R1394, R1397, R1398, R1399, R1400, R1401, R1402, R1403, R1415, R1416, R1446
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/graphs/future-due/, conformance/scenarios/stats/graphs/card-counts/, conformance/scenarios/stats/graphs/intervals/, conformance/scenarios/stats/graphs/fsrs/, conformance/scenarios/stats/graphs/added/
+Status: Under review (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
 
 The data of the seven card graphs (U101): Future Due, Card Counts, Intervals, Stability, Difficulty, Retrievability and Added. They run on the machinery of `stats/graphs-common` (scope G2, history G3, row reading G4, graph order G5, aggregate shape G6, preferences G7, requests G8, caches G9). This file says, per graph, which cards count, the value each card gives, the record's keys and its extras. Ranges, bins, quantiles, medians of Intervals and Stability, cumulative series, tooltip and table text, and every histogram bar's query are `stats/graph-presentation` (U226, `stats/graphs-common` G12, item 1). Card Counts' label queries are `stats/browse-queries` Q4.1.
 
@@ -76,6 +77,8 @@ daily load = Σ 1 / max(`ivl`, 1) over the cards of C3.1, buried cards included 
 
 ### C3.6 Record
 
+Changed 2026-11-22 (round 11): the record also carries the Meguri extra `future_due_young` of `stats/history-reads` H8 (the same map for cards with `ivl` < 21), not observed (C12).
+
 | Member | Value |
 |---|---|
 | `future_due` | k → number of counted cards (C3.2, C3.3), sparse, keys signed 32-bit |
@@ -113,6 +116,8 @@ The number of distinct `nid` among the scope's cards, the same for both settings
 The record holds the item text of each shown label for both settings, as `stats/browse-queries` Q4.1 writes them (Q1: the core puts fixed-item texts in the record). Each label's joined text finds exactly the cards its count counts (Q4.1, AE60).
 
 ### C4.4 Record
+
+Changed 2026-11-22 (round 11): the record also carries the Meguri extra `suspended_by_state` of `stats/history-reads` H8 (the suspended cards by type bucket), not observed (C12).
 
 `including_inactive` and `excluding_inactive` (C4.1), the notes count (C4.2) and the label texts (C4.3).
 
@@ -262,10 +267,12 @@ A card last reviewed 400 days ago with no `lrt` (H = `today` − 400 + `ivl`) me
 
 ## C11. Records
 
+Changed 2026-11-22 (round 11): Future Due's Meguri extras add `future_due_young` and Card Counts' add `suspended_by_state` (`stats/history-reads` H8). The Statistics page reads `intervals` only for its median (`stats/statistics-page` S7.13).
+
 | Graph (G5) | Part (C12) | Anki's members | Meguri extras |
 |---|---|---|---|
-| Future Due | `future_due` | `future_due`, `have_backlog`, `daily_load` | due tomorrow |
-| Card Counts | `card_counts` | `including_inactive`, `excluding_inactive` | notes, label texts |
+| Future Due | `future_due` | `future_due`, `have_backlog`, `daily_load` | due tomorrow, `future_due_young` (round 11) |
+| Card Counts | `card_counts` | `including_inactive`, `excluding_inactive` | notes, label texts, `suspended_by_state` (round 11) |
 | Intervals | `intervals` | `intervals` | none |
 | Stability | `stability` | `intervals` | left out |
 | Difficulty | `difficulty` | `eases`, `average` | left out |

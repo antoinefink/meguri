@@ -34,7 +34,9 @@ screens:
     purpose: >-
       Root layout with the sidebar on iPad and Mac and the tab bar on iPhone, plus the status
       overlay. Its menu bar (Mac, and iPad with a keyboard) is organised by object: File, Edit, Deck,
-      Card, with one Undo in Edit and no Study menu (native-interface-contract N20.4).
+      Card, with one Undo in Edit and no Study menu (native-interface-contract N20.4). Changed
+      2026-11-22 (round 11, N25.1): the sidebar is Today, Statistics, Browse, Note Types, then the
+      decks; the iPhone tabs are Decks, Statistics, Browse, Settings; View › Statistics ⇧⌘S.
   - id: shell.keyboardShortcuts
     title: Keyboard shortcuts help
     units: [U158]
@@ -170,8 +172,9 @@ screens:
     purpose: >-
       One deck's labelled New, Learning and To Review counts with the buried "+N" badge (U228a), the
       Study button, the finished state, the Subdecks section, then the deck's activity heatmap with its
-      subdecks (N14.11, stats/activity-heatmap); streak stats and the Stats action (U228) are not
-      built.
+      subdecks (N14.11, stats/activity-heatmap). Changed 2026-11-22 (round 11, N25.1): the Activity
+      header is a button that opens Statistics on that deck (stats/statistics-page S13); streak
+      stats stay off the deck page (they are on the Statistics page).
   - id: home.deckMenu
     title: Deck menu
     units: [U152, U156]
@@ -184,7 +187,10 @@ screens:
       One menu for a deck, shown as the row's context menu (right-click on Mac, long press on touch;
       native-interface-contract N20.2, decided 2026-11-20). Groups, each item with its SF Symbol:
       Study (play) and Add Note (square.and.pencil); Rename… (pencil) and New Subdeck…
-      (folder.badge.plus); then Delete Deck (trash, destructive). A filtered deck's menu holds only
+      (folder.badge.plus); then Delete Deck (trash, destructive). Changed 2026-11-22 (round 11, N25.1):
+      Deck Statistics (chart.bar.xaxis) joins group 1 after Browse Cards, for normal and filtered
+      decks, and the menu bar's Deck menu and the touch More menu have it; it opens Statistics on
+      that deck. A filtered deck's menu holds only
       Rename… and Delete Deck (R53). No
       Overview and no hover ⋯ button: a tap or click on the row opens the deck page. On Mac the menu
       shows the Deck menu's keys (Study ⌘R, Rename… ⇧⌘R). iPhone Duo held wide: the menu opens beside
@@ -651,65 +657,47 @@ screens:
 
   - id: stats.overview
     title: Statistics
-    units: [U225, U226, U230, U231]
+    units: [U294, U295, U296, U297, U298, U299, U300, U301, U302, U303, U304, U305, U306, U307]
     signature: true
     platforms: [iphone, ipad, mac]
     states: [empty, typical, overflow, error, loading]
     variants: full
     references: [charts, calendar-grid, toolbar, content-unavailable]
     purpose: >-
-      The scope and history header and the graph cards in R1357's order (Today, Future Due, Calendar,
-      ... Added) for a deck, the collection or a search. The heatmap and streak stats are not here:
-      they live on Home and the deck page (home.deckList, home.deckPage). The shell is U225's; the
-      graphs are U226's, U230's and U231's (stats/graph-presentation). Entry points (R1349): the Stats
-      sidebar section (Mac, iPad), the Stats tab (iPhone), the deck page's and the deck menu's Stats
-      (that deck's scope) and the T key on Home and the deck page. Stats reopens with the device's
-      last scope, deck, search and history, except when opened from a deck (R1354). Header, in the
-      toolbar (native-interface-contract N11.7): at regular width the scope picker (Deck,
-      Collection, Search), then the deck pop-up button listing every deck, filtered decks included
-      (Deck scope), or a search field run on Return or when it loses focus (Search scope), then the
-      history picker (Last 12 Months, All History; stats/graphs-common G3); at compact width the
-      title "Statistics" with the scope and history as its subtitle ("Japanese · Last 12 Months")
-      and one toolbar menu with the same choices, the Search scope showing the navigation bar's
-      search field. Choosing a deck never changes the current deck (R1353). Content: one scrolling
-      grid of graph boxes, 3 columns on wide Mac windows, 2 at medium widths and iPad landscape, 1 on
-      iPhone and narrow windows (R1359); each box is a system group box with Anki's title and
-      subtitle (R1358), one row of the graph's controls, the chart and its table. Changing a graph's
-      control re-bins without a core call (R1355); the range pickers are remembered per device
-      (R1366); Backlog and Separate suspended/buried read their synced keys
-      (`futureDueShowBacklog`, `cardCountsSeparateInactive`; stats/graphs-common G7) and write them
-      as editor/config-keys K1 writes its boolean keys (decided 2026-10-27, as K1 does not list
-      these two yet): a compact JSON boolean, written only when the user flips the toggle, a
-      missing key or a value of another type kept until then, one key per change, at once, with no
-      undo step (UserNonUndoable); every other control follows stats/graph-presentation. On Mac a click on
-      a clickable bar, cell or label opens Browse in the same window with the joined search
-      (stats/browse-queries Q3) and hover shows its tooltip; on touch a first tap selects it and shows
-      the tooltip with "Show in Browser" (R1417, R1418); coming back restores scope, controls, scroll
-      position and selection (R1419). Loading: Stats opens at once on the last result for the scope,
-      or on blank placeholders of the final size, and puts the new data in place without moving
-      the layout (R1291); every open refreshes (R1294). Empty: a scope with no cards and no reviews:
-      each box shows its empty state, `No Data`, with Card Counts keeping its table
-      (stats/graph-presentation P16.5, R1361); the header stays usable. Error: a Search scope
-      error shows its message (search/errors E7) in one line at the top of the content, under the
-      search field at compact width, and the graphs shown stay (R1351); while a scope error shows,
-      no item is clickable (stats/browse-queries Q2.3); a deck deleted while it is
-      the scope (unknown_deck) shows "This deck no longer exists." in the same place; an unreadable
-      row (stats/graphs-common G8.2) shows a content-unavailable view in place of the grid, saying
-      Check Database can repair it, with a Check Database button once U128 lands. Live: after a
-      change set, a rollover, a day-clock change or CollectionReplaced (G10) a visible Stats screen
-      refreshes in place, about 500 ms after the last event, keeping every control and the scroll
-      position (R1356); a hidden one refreshes when it appears. Overflow: the largest text sizes, a
-      long deck name (middle truncation in the pop-up, full name as help text) and all graphs in one
-      column scroll. Keyboard: Tab moves through the header controls, then each box's controls; ⌘F
-      selects the Search scope and focuses its field; Return runs it; T opens Stats from Home and the
-      deck page. VoiceOver: each box is a container named by its title; each chart has a summary and
-      an audio graph (U226); an empty box reads stats/graph-presentation P18.1's "<title>. <scope>.
-      No Data"; the header controls are labelled "Scope", "Deck",
-      "Search" and "History". Identifiers stats.scope.deck, stats.scope.collection,
-      stats.scope.search, stats.history.all (R1445). Core: stats/graphs-common G8 requests on the
-      query lane, two per refresh (the graphs above the fold first, G8.3), the superseded one
-      cancelled; the G7 preferences in the result; the G10 events; the scope text and the join of
-      stats/browse-queries Q2 and Q3 in Swift; viewing writes nothing (G11, R1295).
+      Statistics, round 11 (decided 2026-11-22: 1A 2A 3A 4A 5A 6A 7A 8A 9A, All as the first
+      period, Forgotten orange; the loading rule decided the same day). Layout:
+      docs/design/native-interface-contract.md N25; behaviour: stats/statistics-page; data:
+      stats/history-reads and the stats graph specs. One dense page: the strip (Studied Today,
+      Retention Today, Remaining Today, Streak, Mature), then seven sections in this order:
+      Knowledge (Knowledge Over Time, Retention, Forgotten), Reviews (Reviews Over Time,
+      Activity with streaks), Cards (Cards Over Time, Card Counts, Added and Started), Coming Up
+      (Reviews Due), Answering (Answers, Time of Day), Memory (Retrievability, Stability,
+      Difficulty), Decks (By Deck). Two controls for the whole page, in the toolbar: the deck
+      pop-up (All Decks, the deck tree, filtered decks last; a deck includes its subdecks) and the
+      period (1M 3M 6M 1Y All), kept per window and device, first time All Decks and All, never
+      synced or written to the collection; opening from a deck replaces the deck. Grid: 2 columns
+      up to about 1,250 pt, 3 beyond, 1 under about 560; lead boxes span the row; boxes are system
+      group boxes; a box's header opens the chart's own page (full chart, every row, About This
+      Chart; ⌘[ back; contract stats.chartPage added with its unit). iPhone, folded Duo, narrow
+      iPad: one column, four strip tiles, the period pinned under the bar, a Jump menu. Duo opened:
+      a section per screenful, lead box left of the fold, the other boxes right. Ways in: the sidebar
+      row second under Today (chart.bar.xaxis), View › Statistics ⇧⌘S, the Statistics tab between
+      Decks and Browse, Deck Statistics in the deck menus, a deck page's Activity header, T.
+      States: empty (no cards: one system empty view, controls disabled; no reviews yet: charts of
+      the present work, the others say "No reviews yet"), typical, overflow (150,000 cards and 1.2
+      million reviews: counts per bar, never rows; the largest text size; long deck names),
+      error (unreadable record: Statistics Unavailable; a deleted deck: "This deck no longer
+      exists." with Show All Decks; one box failing alone), loading (tiered: present state, review
+      log, knowledge; kept results first, refreshed in place with "Updating…" in the subtitle;
+      with nothing kept, each box at its final size with a small progress indicator in its plot,
+      determinate where the core reports progress; no full-page spinner or shimmer). No session
+      timer, FSRS always shown, no Card Ease, no second axes, no donut. Live: refreshes itself
+      half a second after a change, a sync or a rollover; no Refresh command. Every screen unit
+      checks first run and no collection. Identifiers stats.<element> (stats/statistics-page
+      S15). Core: one G8 request per refresh with stats/history-reads H5's parts, cancelled when
+      superseded; viewing writes nothing. Search scope and PDF export come later (9A).
+      This replaces the earlier text of this entry (the scope and history header, the thirteen
+      boxes in Anki's order, the heatmap and streaks not here, per-graph ranges and toggles).
   - id: stats.heatmapSettings
     title: Heatmap settings
     units: [U229]
