@@ -34,6 +34,8 @@ extension TestHooks {
             registry.register("home/deck-list/beside-deck") { _ in .screen { HomeDeckListPreview.besideDetail(deck: 2) } }
             registry.register("home/deck-list/beside-today") { _ in .screen { HomeDeckListPreview.besideDetail(deck: nil) } }
             registry.register("home/deck-list/empty") { _ in .screen { HomeDeckListPreview.preview(.empty) } }
+            // N18.3: Start Empty disabled while sync work runs, with its reason line.
+            registry.register("home/deck-list/start-empty-waits") { _ in .screen { HomeDeckListPreview.welcomeWaitingForSync() } }
             // N14.11, N24.6: the tab layout's list with its heatmap after the rows.
             registry.register("home/deck-list/typical") { _ in .screen { HomeDeckListPreview.typicalWithActivity() } }
             // N24.4: the production sidebar's rows over sample decks, Today's summary beside them.

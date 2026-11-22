@@ -47,7 +47,8 @@ pub struct Duplicates {
     /// The groups: each holds two or more notes with equal keys, ascending;
     /// the groups by their first note.
     pub groups: Vec<Vec<NoteId>>,
-    /// The target notes read: those whose note type has the field.
+    /// The target notes read: those whose note type has the field, those
+    /// left out (an empty key, a negative id) included.
     pub considered: u64,
 }
 
@@ -63,8 +64,9 @@ impl Duplicates {
 
 /// V10's `find_duplicates(field name, target)`: for every target note whose
 /// note type has a field named exactly `field` (the first of two with that
-/// name), its key; notes with an empty key are left out, and notes with
-/// equal keys form a group. A field name no note type has finds nothing.
+/// name), its key; notes with an empty key or a negative id are left out,
+/// and notes with equal keys form a group. A field name no note type has
+/// finds nothing.
 /// Reports its progress to `progress`: the notes read of those note types'
 /// notes for All Notes, the listed notes read of the listed notes for All
 /// Found. A Found target is refused as `resolve_selection` refuses
@@ -172,7 +174,13 @@ pub fn find_duplicates(
         if every && found.considered.is_multiple_of(PACE) {
             progress.report(found.considered, Some(total));
         }
-        if let (Some(flds), Ok(at)) = (flds, ords.binary_search_by_key(&mid, |(id, _)| id.0)) {
+        // A note with a negative id (a damaged collection) is left out as a
+        // note with an empty key is: the Duplicates token cannot name it
+        // (`search/filter-tokens` refuses a negative id). A group it leaves
+        // with one note is no group.
+        if id >= 0
+            && let (Some(flds), Ok(at)) = (flds, ords.binary_search_by_key(&mid, |(id, _)| id.0))
+        {
             groups.add(NoteId(id), fields::field_at(flds, ords[at].1));
         }
         !token.is_cancelled()

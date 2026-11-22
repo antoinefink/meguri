@@ -114,6 +114,11 @@ pub enum CoreError {
     Browse {
         failure: crate::browse_search::BrowseFailure,
     },
+    /// Find and Replace refused (`browser/find-replace` F11): nothing was
+    /// written and both undo histories are as they were.
+    FindReplaceRefused {
+        refusal: crate::find_replace::FindReplaceRefusal,
+    },
 }
 
 impl fmt::Display for CoreError {
@@ -154,6 +159,7 @@ impl fmt::Display for CoreError {
                 write!(f, "operation {seq} committed; post-commit failure: {message}")
             }
             CoreError::Browse { .. } => write!(f, "{self:?}"),
+            CoreError::FindReplaceRefused { .. } => write!(f, "{self:?}"),
         }
     }
 }
@@ -211,9 +217,8 @@ impl From<EngineError> for CoreError {
             EngineError::Open(failure) => CoreError::Open {
                 failure: failure.into(),
             },
-            // Its own refusal kind comes with the Find and Replace exports.
-            EngineError::FindReplace(_) => CoreError::InvalidArgument {
-                message: error.to_string(),
+            EngineError::FindReplace(refusal) => CoreError::FindReplaceRefused {
+                refusal: refusal.into(),
             },
             EngineError::InvalidIgnoreBeforeDate { .. } => CoreError::InvalidArgument {
                 message: error.to_string(),
@@ -301,6 +306,7 @@ impl From<CoreError> for EngineError {
             CoreError::Browse { failure } => EngineError::Internal {
                 message: format!("browse: {failure:?}"),
             },
+            CoreError::FindReplaceRefused { refusal } => EngineError::FindReplace(refusal.into()),
         }
     }
 }

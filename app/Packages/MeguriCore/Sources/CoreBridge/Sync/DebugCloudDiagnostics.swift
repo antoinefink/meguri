@@ -680,6 +680,7 @@ public enum DebugCloudDiagnostics {
             case .mediaCommitPending: return "bridge.mediaCommitPending"
             case .commitCompleted: return "bridge.commitCompleted"
             case .browse: return "bridge.browse"
+            case .findReplaceRefused: return "bridge.findReplaceRefused"
             }
         }
         if let failure = error as? CloudOwnTransportFailure {

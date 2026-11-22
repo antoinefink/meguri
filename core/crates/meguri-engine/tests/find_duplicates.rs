@@ -266,6 +266,42 @@ fn all_found_takes_the_notes_of_a_handles_rows_in_both_modes() {
     assert_eq!((after.groups.len(), after.considered), (0, 2));
 }
 
+/// V10: a note with a negative id, which
+/// only a damaged collection holds, is left out of the groups and the note
+/// ids, so the Duplicates token can always be built; a group it leaves with
+/// one note disappears. It is still read, so it counts as considered.
+#[test]
+fn a_note_with_a_negative_id_is_left_out_of_every_group() {
+    let fx = fixture();
+    let lone = fx.add(fx.zorvan, &["ko", "ub"]);
+    let damaged_lone = fx.add(fx.zorvan, &["KO", "ub"]);
+    let pair = [fx.add(fx.zorvan, &["lu", "ub"]), fx.add(fx.zorvan, &["Lu", "ub"])];
+    let damaged_third = fx.add(fx.zorvan, &["lu ", "ub"]);
+    let mut negative = Vec::new();
+    for note in [damaged_lone, damaged_third] {
+        let id = SqlValue::Integer(-note.0);
+        let old = SqlValue::Integer(note.0);
+        raw(&fx.h.collection, "UPDATE notes SET id = ?1 WHERE id = ?2", &[id.clone(), old.clone()]);
+        raw(&fx.h.collection, "UPDATE cards SET nid = ?1 WHERE nid = ?2", &[id, old]);
+        negative.push(NoteId(-note.0));
+    }
+
+    let found = fx.all("Glif");
+    assert_eq!(found.groups, vec![pair.to_vec()]);
+    assert_eq!(found.note_ids(), pair.to_vec());
+    assert!(!found.note_ids().contains(&lone));
+    assert_eq!(found.considered, 5);
+
+    // All Found: the handle's rows hold the damaged notes too.
+    for mode in [SearchMode::Cards, SearchMode::Notes] {
+        let (handle, count) = fx.search("Trand:ub", mode);
+        let found = fx.found(handle, count, "Glif").unwrap();
+        assert_eq!(found.groups, vec![pair.to_vec()], "{mode:?}");
+        assert!(negative.iter().all(|id| !found.note_ids().contains(id)), "{mode:?}");
+        assert_eq!(found.considered, 5, "{mode:?}");
+    }
+}
+
 #[test]
 fn a_selection_is_refused_as_resolve_selection_refuses_it_and_cancel_and_halt_stop_it() {
     let fx = fixture();

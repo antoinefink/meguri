@@ -10,8 +10,11 @@
 //! Every action runs admitted by the open collection's review service
 //! (`ReviewService::admit_card_action`): the answers it accepted are written
 //! first, so none fails on a card row the action rewrote or removed, and an
-//! active session sees the change. Selections of a search handle arrive
-//! with the Browse FFI (U264); these exports take the ids.
+//! active session sees the change. Each action takes ids, or a Browse
+//! selection (`browser/bulk-framework` K1) that the job resolves in the
+//! core, after admission, so a large selection never crosses the FFI as
+//! ids. Find and Replace's start call (`find_replace`) runs the same way.
+use crate::browse_search::BrowseSelection;
 use crate::{CoreError, callback, jobs::JobHandle, mutations::MutationSummary, runtime};
 use meguri_engine::bulk::cards::{self, CardAction};
 use meguri_engine::bulk::change_deck::{self, DeckTarget};
@@ -153,7 +156,7 @@ impl From<BulkNoteAction> for NoteAction {
 }
 
 /// Runs `run` as a bulk job admitted by the host's review service.
-fn admitted(
+pub(crate) fn admitted(
     run: impl FnOnce(&meguri_engine::Collection, Arc<meguri_engine::CancelToken>, meguri_engine::ProgressSink)
         -> Result<BulkOutcome, meguri_engine::EngineError>
         + Send
@@ -179,7 +182,42 @@ fn admitted(
 #[uniffi::export]
 pub fn start_bulk_card_action(cards: Vec<i64>, action: BulkCardAction) -> Result<BulkActionJobStart, CoreError> {
     callback::enter("start_bulk_card_action");
-    let target = CardTarget::Cards(cards.into_iter().map(CardId).collect());
+    card_action(CardTarget::Cards(cards.into_iter().map(CardId).collect()), action)
+}
+
+/// Starts a card action on the target cards of `selection` (B1, H12: every
+/// card of each selected note in Notes mode), resolved by the job. A
+/// selection that cannot be resolved (released, superseded, of another
+/// revision or collection) is the job's `InvalidArgument` (K1).
+#[uniffi::export]
+pub fn start_bulk_card_action_on_selection(
+    selection: Arc<BrowseSelection>,
+    action: BulkCardAction,
+) -> Result<BulkActionJobStart, CoreError> {
+    callback::enter("start_bulk_card_action_on_selection");
+    card_action(CardTarget::Selection(selection.engine_selection().clone()), action)
+}
+
+/// Starts a note action on `notes` (in table order, B1).
+#[uniffi::export]
+pub fn start_bulk_note_action(notes: Vec<i64>, action: BulkNoteAction) -> Result<BulkActionJobStart, CoreError> {
+    callback::enter("start_bulk_note_action");
+    note_action(NoteTarget::Notes(notes.into_iter().map(NoteId).collect()), action)
+}
+
+/// Starts a note action on the target notes of `selection` (B1, H12),
+/// resolved by the job, refused as `start_bulk_card_action_on_selection`
+/// says.
+#[uniffi::export]
+pub fn start_bulk_note_action_on_selection(
+    selection: Arc<BrowseSelection>,
+    action: BulkNoteAction,
+) -> Result<BulkActionJobStart, CoreError> {
+    callback::enter("start_bulk_note_action_on_selection");
+    note_action(NoteTarget::Selection(selection.engine_selection().clone()), action)
+}
+
+fn card_action(target: CardTarget, action: BulkCardAction) -> Result<BulkActionJobStart, CoreError> {
     match EngineAction::from(action) {
         EngineAction::ChangeDeck(deck) => admitted(move |collection, cancel, progress| {
             change_deck::run(collection, &target, &deck, cancel, progress).map(BulkOutcome::of)
@@ -190,11 +228,7 @@ pub fn start_bulk_card_action(cards: Vec<i64>, action: BulkCardAction) -> Result
     }
 }
 
-/// Starts a note action on `notes` (in table order, B1).
-#[uniffi::export]
-pub fn start_bulk_note_action(notes: Vec<i64>, action: BulkNoteAction) -> Result<BulkActionJobStart, CoreError> {
-    callback::enter("start_bulk_note_action");
-    let target = NoteTarget::Notes(notes.into_iter().map(NoteId).collect());
+fn note_action(target: NoteTarget, action: BulkNoteAction) -> Result<BulkActionJobStart, CoreError> {
     let action = NoteAction::from(action);
     admitted(move |collection, cancel, progress| {
         notes::run(collection, &target, &action, cancel, progress)

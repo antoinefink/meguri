@@ -345,6 +345,7 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
             case .mediaCommitPending: category = "bridge.mediaCommitPending"
             case .commitCompleted: category = "bridge.commitCompleted"
             case .browse: category = "bridge.browse"
+            case .findReplaceRefused: category = "bridge.findReplaceRefused"
             case .cloudSDKCallbackRejected: category = "bridge.cloudSDKCallbackRejected"
             }
         default: category = "other"
