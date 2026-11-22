@@ -1241,6 +1241,28 @@ class NativeSidebarSearchField(unittest.TestCase):
         self.assertEqual(kinds(hierarchy_check.check(ios)), ["missing-identifier", "missing-identifier"])
 
 
+class NativeToolbarSearchField(unittest.TestCase):
+    """The field `searchable(placement: .toolbar)` puts in the Mac window
+    toolbar, with its Search and cancel buttons and its tokens (U271)."""
+
+    def tree(self, children=None, group_id="", platform="mac"):
+        buttons = [el("button", label="Search", f=(950, 38, 29, 36)), el("button", label="cancel", f=(1236, 38, 36, 36))]
+        tokens = [el("textField", f=(976, 48, 186, 16)), el("textField", f=(1162, 48, 186, 16))]
+        field = el("searchField", f=(946, 37, 327, 38), children=children if children is not None else buttons + tokens)
+        tree = doc(el("toolbar", f=(0, 30, 1280, 52), children=[el("group", group_id, f=(947, 30, 329, 52), children=[field])]))
+        tree["platform"] = platform
+        return tree
+
+    def test_the_toolbar_search_field_its_buttons_and_scrolled_tokens_are_system_parts(self):
+        self.assertEqual(hierarchy_check.check(self.tree()), [])
+
+    def test_toolbar_search_field_lookalikes_are_still_reported(self):
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(self.tree(group_id="sample.screen.group"))))
+        self.assertIn("missing-identifier",
+                      kinds(hierarchy_check.check(self.tree([el("button", label="Delete", f=(950, 38, 29, 36))]))))
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(self.tree(platform="ios"))))
+
+
 class NativeTableCellsAndSegments(unittest.TestCase):
     """A SwiftUI Table's row is named by one of its cells (Browse names its
     state cell, U270a); a named segmented Picker in a Mac toolbar reports

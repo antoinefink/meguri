@@ -55,23 +55,17 @@ private struct BrowseTokenView: View {
         }
     }
 
-    /// The first part in the secondary style, a space, then the second.
-    static func styled(_ secondary: String, then primary: String) -> AttributedString {
-        var first = AttributedString(secondary)
-        first.foregroundColor = .secondary
-        return first + AttributedString(" " + primary)
-    }
-
     @ViewBuilder private func label(_ filter: FilterToken) -> some View {
         switch filter {
         case .advanced(let text):
             Text(verbatim: text).foregroundStyle(.secondary)
-        case .value(let values, let negated):
-            if let kind = filter.kind {
+        case .value(let values, _):
+            if filter.kind != nil {
                 let flag = values.lazy.compactMap { value -> UInt8? in if case .flag(let n) = value { n } else { nil } }.first
+                // The kind (and "is not") is the token's menu part, drawn by the
+                // system from the menu's first checked item; the label is the values.
                 Label {
-                    Text(Self.styled(BrowseStrings.kindLabel(kind, negated: negated),
-                                     then: BrowseStrings.values(values, flagNames: model.flagNames)))
+                    Text(verbatim: BrowseStrings.values(values, flagNames: model.flagNames))
                 } icon: {
                     if let flag {
                         Image(systemName: "circle.fill").foregroundStyle(BrowseStrings.flagColor(flag))
@@ -98,13 +92,18 @@ private struct BrowseTokenMenu: View {
             Divider()
             remove
         case .value(let values, let negated):
-            Picker(selection: Binding(get: { negated }, set: { model.setNegated(index, $0) })) {
-                Text("browse.token.is", bundle: .module).tag(false)
-                Text("browse.token.isNotMenu", bundle: .module).tag(true)
-                    .disabled(!token.canNegate)
-            } label: { EmptyView() }
-            .pickerStyle(.inline)
-            .labelsHidden()
+            // Is and Is Not, as the kind with and without "is not": the system
+            // token draws its menu part from the first checked item, so the
+            // token reads "DECK ⌄ Spanish", "TAG IS NOT ⌄ alpha or beta".
+            if let kind = token.kind {
+                Toggle(isOn: Binding(get: { !negated }, set: { if $0 { model.setNegated(index, false) } })) {
+                    Text(verbatim: BrowseStrings.kindLabel(kind, negated: false))
+                }
+                Toggle(isOn: Binding(get: { negated }, set: { if $0 { model.setNegated(index, true) } })) {
+                    Text(verbatim: BrowseStrings.kindLabel(kind, negated: true))
+                }
+                .disabled(!token.canNegate)
+            }
             Divider()
             if case .field(let field)? = token.kind {
                 fieldTests(field, values)

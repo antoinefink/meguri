@@ -1443,16 +1443,6 @@
         }
       }
     },
-    "browse.token.is": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Is"
-          }
-        }
-      }
-    },
     "browse.token.isEmpty": {
       "localizations": {
         "en": {
@@ -1479,16 +1469,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "is not"
-          }
-        }
-      }
-    },
-    "browse.token.isNotMenu": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Is Not"
           }
         }
       }
