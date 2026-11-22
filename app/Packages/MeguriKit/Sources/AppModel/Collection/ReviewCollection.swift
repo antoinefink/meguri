@@ -776,11 +776,11 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// arrive by notification just after: wait briefly for them instead of dropping
     /// the press, so this row acts on that click as Set Up Sync and Import do.
     public func startEmptyFromPress(activationWait: Duration = .milliseconds(500)) async {
-        let step = Duration.milliseconds(25)
-        var waited = Duration.zero
-        while !canStartEmpty, startEmptyAvailable, waited < activationWait {
-            try? await Task.sleep(for: step)
-            waited += step
+        // Elapsed time, not the sum of the sleeps asked for: a wake can come late.
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: activationWait)
+        while !canStartEmpty, startEmptyAvailable, clock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(25))
         }
         await startEmpty()
     }
