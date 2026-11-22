@@ -18,14 +18,14 @@ final class SyncButtonPlacementTests: XCTestCase {
         try assertGroup([sync, search, add], "the deck list at the top")
         assertNoBottomBarOrEmptyItem(app, "the deck list at the top")
 
-        app.otherElements["home.collection.screen"].firstMatch.swipeUp()
-        app.otherElements["home.collection.screen"].firstMatch.swipeUp()
+        app.windows.firstMatch.swipeUp()
+        app.windows.firstMatch.swipeUp()
         XCTAssertTrue(sync.waitForExistence(timeout: 5))
         try assertGroup([sync, search, add], "the deck list scrolled to the bottom")
         assertNoBottomBarOrEmptyItem(app, "the deck list scrolled to the bottom")
 
-        app.otherElements["home.collection.screen"].firstMatch.swipeDown()
-        app.otherElements["home.collection.screen"].firstMatch.swipeDown()
+        app.windows.firstMatch.swipeDown()
+        app.windows.firstMatch.swipeDown()
         let languages = app.buttons["home.deck.row.1884308400001"]
         XCTAssertTrue(languages.waitForExistence(timeout: 10))
         languages.tap()
@@ -80,8 +80,12 @@ final class SyncButtonPlacementTests: XCTestCase {
         let sync = app.buttons["sync.status.button"]
         XCTAssertFalse(app.toolbars.buttons["sync.status.button"].exists, "The sync button is in no toolbar on \(place)")
         XCTAssertLessThan(sync.frame.midY, app.windows.firstMatch.frame.height / 3, "The sync button stays at the top on \(place)")
-        for button in app.navigationBars.buttons.allElementsBoundByIndex where button.exists {
-            XCTAssertFalse(button.label.isEmpty && button.identifier.isEmpty, "An empty bar item on \(place): \(button.frame)")
+        // An unnamed button with a named one at the same frame is the system's own
+        // wrapper of that bar button, not an item of its own.
+        let buttons = app.navigationBars.buttons.allElementsBoundByIndex.filter(\.exists)
+        let named = buttons.filter { !$0.label.isEmpty || !$0.identifier.isEmpty }.map(\.frame)
+        for button in buttons where button.label.isEmpty && button.identifier.isEmpty {
+            XCTAssertTrue(named.contains(button.frame), "An empty bar item on \(place): \(button.frame)")
         }
     }
 

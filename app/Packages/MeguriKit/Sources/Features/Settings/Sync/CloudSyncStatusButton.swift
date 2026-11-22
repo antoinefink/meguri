@@ -68,17 +68,12 @@ public struct CloudSyncStatusButton: View {
         Menu {
             menuItems
         } label: {
-            // A Label, as Search and Add have: the toolbar shows its icon alone, and
-            // the system's own bar button takes the title, so no inner element is
-            // left without a name. N23.2: the moving symbol turns exactly while the
-            // panel's bar shows.
-            Label {
-                Text(SyncText.value("sync.button.accessibilityLabel"))
-            } icon: {
-                SyncStatusSymbol(status: main, iCloud: collection.sync.symbolsAreICloud,
-                    turning: !reduceMotion && collection.sync.panelProgress != nil,
-                    accented: feedback.accented)
-            }
+            // The symbol alone, not a Label: a toolbar draws a Label's icon in its
+            // own colour, which drops needs you's orange and the accent after a
+            // success. N23.2: the moving symbol turns exactly while the panel's bar shows.
+            SyncStatusSymbol(status: main, iCloud: collection.sync.symbolsAreICloud,
+                turning: !reduceMotion && collection.sync.panelProgress != nil,
+                accented: feedback.accented)
         } primaryAction: {
             tap()
         }
