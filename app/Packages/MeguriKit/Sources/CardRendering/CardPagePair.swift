@@ -451,11 +451,17 @@ public final class CardPagePair {
     /// R412: blurs the visible page's focused field, which puts the software
     /// keyboard away. Fixed code, run in Meguri's world.
     public func dismissKeyboard() {
-        guard !closed, !suspended, !lifecycleSuspended, current.behaviorAvailable else { return }
+        guard !closed, !suspended, !lifecycleSuspended, current.behaviorAvailable, let update = current.update else { return }
         let page = current
-        Task { @MainActor in
-            try? await page.run("const e = document.activeElement; if (e && e !== document.body && typeof e.blur === \"function\") e.blur();",
-                                world: CardPage.world)
+        Task { @MainActor [weak self] in
+            // Still the visible page, on the same side, with the pair active.
+            guard let self, !self.closed, !self.suspended, !self.lifecycleSuspended, page === self.current,
+                  page.update == update, page.behaviorAvailable else { return }
+            try? await page.run("""
+                let e = document.activeElement;
+                while (e && e.shadowRoot && e.shadowRoot.activeElement) e = e.shadowRoot.activeElement;
+                if (e && e !== document.body && typeof e.blur === "function") e.blur();
+                """, world: CardPage.world)
         }
     }
     public func pauseAudio() { audio.pause() }

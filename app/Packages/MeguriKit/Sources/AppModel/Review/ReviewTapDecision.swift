@@ -142,8 +142,8 @@ public nonisolated enum ReviewTapRules {
 /// and they pair only when the page saw the tap where the finger lifted.
 public nonisolated struct ReviewTapPairing: Sendable {
     public static let maximumWait: TimeInterval = 1
-    /// In points: the page's point and the touch's agree to well within a fingertip.
-    public static let maximumDistance: CGFloat = 24
+    /// In points. The page reports the same touch's point.
+    public static let maximumDistance: CGFloat = 8
     /// Between two pairs, the page's clock and the touches' advance alike;
     /// an observation of an earlier gesture would lag by a whole tap.
     public static let maximumDrift: TimeInterval = 0.15

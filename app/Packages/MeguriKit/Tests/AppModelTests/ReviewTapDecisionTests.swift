@@ -193,6 +193,16 @@ struct ReviewTapDecisionTests {
         #expect(pairing.add(Self.gesture(x: 300), at: 1.1) == nil, "The earlier observation is gone")
     }
 
+    @Test func twoGesturesBeforeOneObservationNeverMixTheirFacts() {
+        // Taps at x 195 and 205; the page reports the first one late.
+        var pairing = ReviewTapPairing()
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 195), at: 1)
+        pairing.touchDown()
+        _ = pairing.add(Self.gesture(x: 205), at: 1.2)
+        #expect(pairing.add(Self.observation(), point: CGPoint(x: 195, y: 200), at: 1.25) == nil)
+    }
+
     @Test func aLateObservationOfAnEarlierTapCannotPairWithTheNextGesture() {
         var pairing = ReviewTapPairing()
         // First tap: a baseline for this page's clock (page time 100 s ~ uptime 10.08 s).

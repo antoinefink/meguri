@@ -335,6 +335,8 @@
   const matches = Element.prototype.matches;
   const parentNodeOf = getter(Node.prototype, "parentNode");
   const shadowHostOf = getter(ShadowRoot.prototype, "host");
+  const shadowRootOf = getter(Element.prototype, "shadowRoot");
+  const shadowActiveOf = getter(ShadowRoot.prototype, "activeElement");
   const connectedOf = getter(Node.prototype, "isConnected");
   const composedPath = Event.prototype.composedPath;
   const prevented = getter(Event.prototype, "defaultPrevented");
@@ -386,7 +388,14 @@
   }
   function focusState() {
     try {
-      const active = call(activeOf, document);
+      let active = call(activeOf, document);
+      // Focus inside an open shadow root: the focused element itself.
+      for (let depth = 0; active && depth < 32; depth++) {
+        const root = active instanceof ElementClass ? call(shadowRootOf, active) : null;
+        const inner = root ? call(shadowActiveOf, root) : null;
+        if (!inner) break;
+        active = inner;
+      }
       if (!active || active === call(bodyGetter, document) || active === call(rootOf, document)) {
         return { editable: false, typeans: false };
       }

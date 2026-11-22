@@ -777,11 +777,13 @@ public final class ReviewCoordinator {
             sideIsAnswer = false
             timer.start(at: uptime())
             if paused { timer.pause(at: uptime()) }
-            if keepAnswer { try await surface.reveal(inputTime: uptime()); sideIsAnswer = true }
+            if keepAnswer {
+                try await surface.reveal(inputTime: uptime()); sideIsAnswer = true
+                answerShownUptime = uptime()
+            }
         }
         try Task.checkCancellation()
         terminalPresentation = nil
-        if sideIsAnswer { answerShownUptime = uptime() }
         phase = sideIsAnswer ? .answer : .question
         firstPresentation()
         finishRestoration(intent)
