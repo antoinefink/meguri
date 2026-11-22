@@ -82,57 +82,40 @@ import Testing
                 let securePassword = try nativeAccountString(in: password,
                     selector: #selector(NSAccessibilityProtocol.accessibilitySubrole)) == NSAccessibility.Subrole.secureTextField.rawValue
                 #expect(securePassword)
-                // P25.3: selected and not yet connected, Sync Automatically shows and is disabled.
-                let automaticElementResult = try accountGraph.element("settings.sync.automatic")
-                _ = try #require(automaticElementResult)
-                #expect(!collection.sync.automaticSwitchAvailable && collection.sync.automaticSwitchValue)
-                // T19.6: no media toggle, Pause, Sign Out, Stop Using or Connect; no iCloud footer.
-                for id in ["settings.sync.media", "settings.sync.pause", "settings.sync.stop", "settings.sync.connect",
+                // T21.2: before the first sign-in the section is the form alone: no status,
+                // Sync Automatically or Sync Now. T19.6: no media toggle, Pause, Sign Out,
+                // Stop Using or Connect; no iCloud footer.
+                #expect(collection.sync.meguriSetupNotFinished)
+                for id in ["settings.sync.status", "settings.sync.automatic", "settings.sync.syncNow",
+                           "settings.sync.media", "settings.sync.pause", "settings.sync.stop", "settings.sync.connect",
                            "settings.sync.meguri.signOut", "settings.sync.privacyFooter"] {
                     let absent = try accountGraph.element(id) == nil
                     #expect(absent)
                 }
                 #expect(collection.sync.meguriPhase == .unconfigured)
                 #expect(collection.sync.meguriPreview == nil && collection.sync.meguriRoundReport == nil)
+                // T21.2: before its first sign-in Meguri Sync holds nothing to lose, so
+                // leaving it asks nothing; the question itself (T21.1) is covered once
+                // signed in, by MacHomeHierarchyTests.
                 let currentGraph = nativeAccountGraph(in: controller.view, window: window, controller: controller)
-                do { try selectNativeService(.iCloud, in: currentGraph) }
+                do { try selectNativeService(.localOnly, in: currentGraph) }
                 catch { currentGraph.recordDiagnostic(); throw error }
-                try await waitForNativeAccountState { window.attachedSheet != nil }
-                let sheet = try #require(window.attachedSheet)
-                let sheetContent = try #require(sheet.contentView)
-                let sheetGraph = nativeAccountGraph(in: sheetContent, window: sheet)
-                let serviceSwitchConfirmElementResult = try sheetGraph.element("sync.serviceSwitch.confirm")
-                _ = try #require(serviceSwitchConfirmElementResult)
-                let revision = collection.sync.providerState?.revision
-                let enter = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
-                    timestamp: 0, windowNumber: sheet.windowNumber, context: nil,
-                    characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
-                sheet.sendEvent(enter)
-                await Task.yield()
-                #expect(window.attachedSheet === sheet)
-                #expect(!collection.syncPresentation.serviceChanging)
-                #expect(collection.sync.providerState?.selection == .meguri)
-                #expect(collection.sync.providerState?.revision == revision)
-                let cancelGraph = nativeAccountGraph(in: sheetContent, window: sheet)
-                let serviceSwitchCancelElementResult = try cancelGraph.element("sync.serviceSwitch.cancel")
-                let cancel = try #require(serviceSwitchCancelElementResult)
-                guard cancelGraph.nodes[ObjectIdentifier(cancel)]?.role == NSAccessibility.Role.button.rawValue else {
-                    throw NativeAccountStateFailure.inappropriateRole
+                try await waitForNativeAccountState {
+                    collection.sync.providerState?.selection == .localOnly && !collection.syncPresentation.serviceChanging
                 }
-                try performNativeAccountPress(on: cancel)
-                try await waitForNativeAccountState { window.attachedSheet == nil }
-                #expect(collection.sync.providerState?.selection == .meguri)
+                #expect(window.attachedSheet == nil)
                 #expect(collection.sync.meguriLastCommand == nil && collection.sync.meguriRoundReport == nil)
                 try #require(await collection.close())
             } catch { _ = await collection.close(); throw error }
         }
     }
-    private func waitForNativeAccountState(_ ready: () throws -> Bool) async throws {
+    private func waitForNativeAccountState(line: Int = #line, _ ready: () throws -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(20)
         while ContinuousClock.now < deadline {
             if try ready() { return }
             await Task.yield()
         }
+        Issue.record("timeout: waitForNativeAccountState from line \(line)")
         throw NativeAccountStateFailure.notSettled
     }
     private enum NativeAccountStateFailure: Error {

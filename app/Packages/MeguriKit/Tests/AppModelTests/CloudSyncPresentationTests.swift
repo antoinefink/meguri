@@ -520,9 +520,10 @@ import Testing
         #expect(SyncText.format("sync.meguri.media.filesLeft", Int64(2)) == "2 media files left")
         #expect(SyncText.format("sync.meguri.media.notTransferred", Int64(1)) == "1 media file hasn’t transferred.")
         #expect(SyncText.format("sync.meguri.media.remotePending", Int64(2)) == "2 files on the server haven’t reached this device.")
-        #expect(SyncText.format("sync.switch.heldBack", Int64(1), "iCloud Sync") == "1 review answer on this device hasn’t been sent to iCloud Sync yet.")
-        #expect(SyncText.format("sync.switch.pending", Int64(2), "Meguri Sync") == "2 changes on this device haven’t been sent to Meguri Sync.")
-        #expect(SyncText.format("sync.switch.media", Int64(1), "Meguri Sync") == "1 media file hasn’t synced with Meguri Sync.")
+        // T21.1 (2026-11-22): the confirmation's list lines replace T18.2's sentences.
+        #expect(SyncText.format("sync.switch.unsent.heldBack", Int64(1)) == "1 review answer")
+        #expect(SyncText.format("sync.switch.unsent.changes", Int64(2)) == "2 changes")
+        #expect(SyncText.format("sync.switch.unsent.media", Int64(1)) == "1 media file")
         #expect(MeguriSyncStatusPresentation.failureKey(.storage) == "sync.meguri.setup.error.storage")
         #expect(MeguriSyncStatusPresentation.failureKey(.operationMismatch) == nil)
     }

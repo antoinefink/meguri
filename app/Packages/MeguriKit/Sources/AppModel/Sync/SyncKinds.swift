@@ -106,12 +106,21 @@ public struct MeguriKindFacts: Sendable, Equatable {
     public var structureStage: MeguriStructureStage?
     /// MP7 step 5: a committed structure save waits for Upload….
     public var structureUploadPending: Bool
+    /// This device was signed in to the connection since the collection opened:
+    /// a sign-out then needs the person, while before any sign-in setup is only
+    /// unfinished (T21.2).
+    public var signedInBefore: Bool
+    /// The last Sign In from the fields failed and its error shows under them.
+    public var signInRefused: Bool
     public init(handoffRecovery: Bool = false, providerBlocked: Bool = false,
                 connection: MeguriProviderConnectionPhase = .setupRequired, stage: MeguriSetupStage? = nil,
                 routine: MeguriRoutineState? = nil, failureKey: String? = nil, finishOffered: Bool = false,
                 automatic: Bool = true, mediaFilesLeft: UInt64? = nil, mediaListKnown: Bool = true,
-                structureStage: MeguriStructureStage? = nil, structureUploadPending: Bool = false) {
+                structureStage: MeguriStructureStage? = nil, structureUploadPending: Bool = false,
+                signedInBefore: Bool = true, signInRefused: Bool = false) {
+        self.signInRefused = signInRefused
         self.structureStage = structureStage; self.structureUploadPending = structureUploadPending
+        self.signedInBefore = signedInBefore
         self.handoffRecovery = handoffRecovery; self.providerBlocked = providerBlocked; self.connection = connection
         self.stage = stage; self.routine = routine; self.failureKey = failureKey
         self.finishOffered = finishOffered; self.automatic = automatic
@@ -302,13 +311,31 @@ public enum SyncKinds {
 
     // MARK: Meguri Sync (T19.5)
 
+    /// T21.2's "setup not finished": Meguri Sync before its first sign-in, which
+    /// is none of the three kinds. The provider's own problems come first.
+    public static func meguriSetupNotFinished(_ facts: MeguriKindFacts) -> Bool {
+        guard !facts.handoffRecovery, !facts.providerBlocked else { return false }
+        switch facts.connection {
+        case .unconfigured: return true
+        // Signing in for the first time is still setup: the form stays until it succeeds.
+        case .signedOut, .cancelled, .authenticating: return !facts.signedInBefore
+        // A first Sign In that failed reports a blocked connection; its error is under the fields.
+        case .blocked: return !facts.signedInBefore && facts.signInRefused
+        case .setupRequired: return false
+        }
+    }
+
     /// The first condition that applies, in T18.4's order.
     public static func meguriRow(_ facts: MeguriKindFacts) -> SyncKindRow {
         if facts.handoffRecovery { return .init(.needsYou, "sync.needsYou.switchUnfinished", .serviceRecovery) }
         if facts.providerBlocked { return .init(.needsYou, "sync.needsYou.blocked", .copyDebugInfo) }
         switch facts.connection {
-        case .blocked: return .init(.needsYou, "sync.needsYou.meguri.signInStore", .meguriConnectionRetry)
+        case .blocked:
+            if meguriSetupNotFinished(facts) { return .init(nil, "sync.meguri.status.notSetUp.detail", .meguriSignIn) }
+            return .init(.needsYou, "sync.needsYou.meguri.signInStore", .meguriConnectionRetry)
         case .unconfigured, .signedOut, .cancelled:
+            // T21.2: before the first sign-in the fields are the next step, not a problem.
+            if meguriSetupNotFinished(facts) { return .init(nil, "sync.meguri.status.notSetUp.detail", .meguriSignIn) }
             return .init(.needsYou, "sync.meguri.status.signedOut.detail", .meguriSignIn)
         case .authenticating: return .init(nil, nil)
         case .setupRequired: break
@@ -318,7 +345,9 @@ public enum SyncKinds {
         // MP7 step 5: in place of MP6.3's choice for this binding, also while
         // its upload holds the binding (setup required, nothing retained); a
         // collection choice that Upload… found needed, and other setup steps, come first.
-        if facts.structureUploadPending, facts.stage == nil || facts.stage == .required {
+        // A round's acceptance unknown is settled first (MP6.9, MP7 step 5): its row stays before Upload….
+        if facts.structureUploadPending, facts.stage == nil || facts.stage == .required,
+           facts.routine != .acceptanceUnknown {
             // The server refused the sign-in during the upload: Sign In first, then Upload….
             if facts.routine == .authentication { return .init(.needsYou, "sync.needsYou.meguri.signIn", .meguriSignIn) }
             return .init(.needsYou, "sync.needsYou.meguri.structureUpload", .meguriUploadStructure)
@@ -395,6 +424,8 @@ public enum SyncKinds {
         let busy = SyncSymbol.moving
         let stopped = SyncSymbol.waiting
         if facts.connection == .authenticating { return (busy, "sync.meguri.status.signingIn.title") }
+        // T21.2: quiet, as Sync Off is.
+        if meguriSetupNotFinished(facts) { return (SyncSymbol.off, "sync.meguri.status.notSetUp.title") }
         // MP7: the round and the save sync; the upload transfers the collection, then its media.
         if let structure = facts.structureStage {
             return switch structure {

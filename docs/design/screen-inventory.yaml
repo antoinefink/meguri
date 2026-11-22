@@ -902,7 +902,9 @@ screens:
     variants: pairwise
     references: [grouped-form, sidebar]
     purpose: >-
-      Settings as one flat page (native-interface-contract N15.1; N5, N11.4 for the Mac scene). A
+      2026-11-22 (native-interface-contract N15.7): the Mac Settings window has a fixed width and
+      is resizable in height, with a minimum and a default height that fits the Sync section, as
+      System Settings is. Settings as one flat page (native-interface-contract N15.1; N5, N11.4 for the Mac scene). A
       grouped Form whose sections are Sync (settings.accountSync), then Collection
       (settings.importExport's file import and export); the sections' rows are on the page itself
       and no row pushes a form that repeats a section. iPhone, iPad and a folded or tall iPhone
@@ -921,7 +923,15 @@ screens:
     variants: pairwise
     references: [grouped-form, list-counts, confirmation-dialog]
     purpose: >-
-      The Sync section of Settings, version 2 of this contract (native-interface-contract N15.2,
+      2026-11-22 (native-interface-contract N15.7; sync/status-strings T21.2): before the first
+      sign-in to Meguri Sync ("setup not finished") the section has the Service control in its own
+      group, a group with Server Address, Username and Password (placeholders, content types,
+      Return to the next field) and Sign In (trailing on the Mac, never a disabled prominent
+      button), the setup footnote as its footer, and Troubleshooting; no status row, Sync
+      Automatically or Sync Now until a sign-in succeeds, and the sync button keeps Sync Off's
+      quiet symbol. Test routes settings/sync/meguri-never-signed-in and
+      settings/sync/window/meguri-never-signed-in. Where the text below differs, this paragraph
+      wins. The Sync section of Settings, version 2 of this contract (native-interface-contract N15.2,
       N15.4, N15.6; sync/policy P25, sync/cloudkit-recovery V27, sync/meguri-provider MP6; text
       sync/status-strings T19). It replaces the Account & Sync page: the id stays, since the status
       ledger records it, and the identifiers' prefix is now settings.sync. The section is on the
@@ -1553,6 +1563,16 @@ screens:
     variants: pairwise
     references: [sheet-form]
     purpose: >-
+      2026-11-22 (native-interface-contract N15.7; sync/status-strings T21.1): no longer a sheet.
+      The confirmation is the system alert on every platform (on the Mac attached to the Settings
+      window): title `sync.switch.title.*`
+      (a question), one message (the `sync.switch.message.*` paragraph, then the "Not yet sent"
+      list with its closing sentence, `sync.switch.unsent.none`, or `sync.switch.unknown`, then
+      `sync.switch.acceptanceUnknown` when it applies), Cancel with the cancel role and
+      `sync.switch.confirm.*` with the destructive role, never the default. It opens only while
+      the change can run; progress and failure show under the Service control. System alerts drop
+      button identifiers, so tests reach the buttons by label. Test routes
+      settings/sync/window/switch-*. Where the text below differs, this paragraph wins.
       Round 2 (native-interface-contract N15.2; sync/status-strings T19.2; sync/cloudkit-recovery
       V27.5): the sheet also confirms Off, with the title and destructive button
       `sync.switch.title.off` and `sync.switch.confirm.off` and the line `sync.switch.next.localOnly`;

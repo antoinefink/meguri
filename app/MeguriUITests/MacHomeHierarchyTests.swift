@@ -142,11 +142,10 @@ final class MacHomeHierarchyTests: XCTestCase {
             let signIn = unique(settings, "settings.sync.meguri.signIn")
             XCTAssertEqual(signIn.elementType, .button)
             XCTAssertFalse(signIn.isEnabled, "The empty setup form cannot sign in")
-            // P25.3: selected but not connected, the switch shows its stored value and is disabled.
-            let automatic = unique(settings, "settings.sync.automatic")
-            XCTAssertFalse(automatic.isEnabled, "Sync Automatically has no effect before the service is connected")
-            // T19.6: no media toggle, Pause, Sign Out, Stop Using or Connect.
-            for id in ["settings.sync.media", "settings.sync.pause", "settings.sync.stop", "settings.sync.connect",
+            // T21.2: before the first sign-in the section is the form alone: no status,
+            // Sync Automatically or Sync Now. T19.6: no media toggle, Pause, Sign Out, Stop Using or Connect.
+            for id in ["settings.sync.status", "settings.sync.automatic", "settings.sync.syncNow",
+                       "settings.sync.media", "settings.sync.pause", "settings.sync.stop", "settings.sync.connect",
                        "settings.sync.meguri.signOut", "settings.sync.privacyFooter"] {
                 XCTAssertEqual(count(id), 0, id)
             }
@@ -155,28 +154,13 @@ final class MacHomeHierarchyTests: XCTestCase {
         try choose("Meguri Sync")
         XCTAssertEqual(settings.sheets.count, 0)
         meguriForm()
-        try choose("iCloud (Beta)")
-        let sheets = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.serviceSwitch.cancel"))
-        let sheet = sheets.element(boundBy: 0)
-        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
-        XCTAssertEqual(sheets.count, 1)
-        let cancel = unique(sheet, "sync.serviceSwitch.cancel")
-        let confirm = unique(sheet, "sync.serviceSwitch.confirm")
-        XCTAssertEqual(cancel.elementType, .button)
-        XCTAssertEqual(confirm.elementType, .button)
-        actionable(cancel)
-        actionable(confirm)
-        try app.bringToFront(bundleIdentifier: bundle)
-        sheet.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
-        XCTAssertTrue(sheet.exists, "Return must not activate the destructive confirmation")
-        XCTAssertEqual(sheets.count, 1)
-        XCTAssertEqual(picker.value as? String, "Meguri Sync")
-        for id in ["address", "username", "password", "signIn"] {
-            _ = unique(settings, "settings.sync.meguri.\(id)")
-        }
-        actionable(cancel)
-        try click(cancel, app: app, bundle: bundle)
-        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        // T21.2: before its first sign-in Meguri Sync holds nothing to lose, so leaving
+        // it asks nothing. The question (T21.1) and Return's refusal are checked once
+        // signed in, when the journey turns sync off.
+        try choose("Off")
+        waitFor({ picker.value as? String == "Off" }, "Leaving an unfinished setup changes the service at once")
+        XCTAssertEqual(settings.sheets.count, 0)
+        try choose("Meguri Sync")
         XCTAssertEqual(settings.sheets.count, 0)
         meguriForm()
         if let journey {
@@ -335,14 +319,14 @@ final class MacHomeHierarchyTests: XCTestCase {
             // V27.5, T19.2: Off is the one way out. It asks once, names the removed
             // sign-in, and its destructive button is not the default.
             try choose("Off")
-            let offSheets = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.serviceSwitch.confirm"))
+            // T21.1: a system alert; its buttons are found by label.
+            let offSheets = settings.sheets
             let offSheet = offSheets.element(boundBy: 0)
             XCTAssertTrue(offSheet.waitForExistence(timeout: 10))
             XCTAssertEqual(offSheets.count, 1)
-            XCTAssertEqual(settings.sheets.count, 1)
-            let offConfirm = unique(offSheet, "sync.serviceSwitch.confirm")
+            let offConfirm = offSheet.buttons["Turn Off Sync"]
+            XCTAssertTrue(offConfirm.waitForExistence(timeout: 10))
             XCTAssertEqual(offConfirm.elementType, .button)
-            XCTAssertTrue(offConfirm.label == "Turn Off Sync" || offConfirm.title == "Turn Off Sync")
             try app.bringToFront(bundleIdentifier: bundle)
             offSheet.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
             XCTAssertTrue(offSheet.exists, "Return must not turn sync off")
