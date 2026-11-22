@@ -851,7 +851,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/mcp_service/transport.rs':
         '6c0fed2e3865fbdf02cd4faa84340fc70e8b888f3834cd64529ade113705bab9',
     'server/src/mcp_service/authority_tests.rs':
-        '7714d0522108e89ef351884762e6557f17ad1184e46cbf0a06eb7e68be35453c',
+        '7b4c9e754a30ca8dca5dbfd226f2856104ec8627de5c69cc4fcb6adb0152b2e2',
     'server/src/mcp_service/attachments/format/audio.rs':
         '1eca9c96b3c638ad66723119d54ed0537246a3fedcd3fe6fd9acb5e8fa8043a9',
     'server/src/mcp_service/attachments/format/images.rs':
@@ -871,7 +871,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/mcp_transport/inputs.rs':
         '35fcbf999f5235196af4ae965cd2bf75b9482e5bfc83f16a566260f35d577522',
     'server/src/mcp_transport/mod.rs':
-        '6b852054131da7a1bf66c372461188d278cd6647c0117a1fde22e774f410b30b',
+        '759e5513925799c9abc1f377d8b0bd6fba30c8ae20d9eb475f9ce24d30c56b42',
     'server/src/mcp_transport/tests.rs':
         '8d70b80220be300bab08739d2bc2bdfdf79e274f9dc6b1d833d3ada4ae5d546a',
     'server/src/collection/mcp/tests.rs':
@@ -1192,7 +1192,7 @@ PUBLIC_ARTIFACTS = {
     "specs/servers/meguri-sync-web.md":
         '5b80364781b6b1eaa16529b666cfd1ca3e6a76098dcb8c2282e7406810640bea',
     "specs/servers/meguri-collection-mcp.md":
-        "027bf623ffb399d420722072fbcbde82a0feb7c2d5eaaf44675b8d787bf5ca26",
+        "343caeef1e94b42c4ab4483382a920984aecac2cc47011740cb8668ada266d66",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
         "81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb",
     "specs/conformance/meguri-sync-server.md":
