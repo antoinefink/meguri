@@ -417,7 +417,12 @@ impl CoreHost {
                 _ => None,
             }
         };
-        if let Some(task) = abandoned { let _ = self.meguri_round_result(&task); }
+        let Some(task) = abandoned else { return };
+        // A finalization that failed earlier is tried again here, since no
+        // owner is left to ask for it; while it fails the entry stays.
+        if self.meguri_round_result(&task).is_ok_and(|result| result.is_some_and(|result| result.recovery.is_some())) {
+            let _ = self.retry_meguri_round_finalization(&task);
+        }
     }
     pub(crate) fn meguri_rounds_owner(&self) -> Arc<()> { self.meguri_rounds.owner.clone() }
     pub(crate) fn meguri_structure_job_active(&self) -> bool {

@@ -70,7 +70,9 @@ pub struct ProviderDocument {
     #[serde(default)] pub meguri_bootstrap: Option<MeguriBootstrapIntent>,
     /// `sync/meguri-provider#MP7`: a note type structure save was admitted
     /// for upload under this binding. It is pending only while the
-    /// collection it names still carries the `scm` that the save set.
+    /// collection it names still carries the `scm` that the save set, or,
+    /// until that stamp is recorded, any `scm` other than the one before the
+    /// save (`MeguriStructureUpload::covers`).
     #[serde(default)] pub meguri_structure: Option<MeguriStructureUpload>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
