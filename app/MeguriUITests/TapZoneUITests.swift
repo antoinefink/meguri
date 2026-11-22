@@ -121,9 +121,10 @@ final class TapZoneUITests: XCTestCase {
         XCTAssertTrue(waitForQuestion(app))
         // Level with Show Answer, beside it: no reveal.
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-        let reveal = element(app, "review.session.reveal").frame
-        app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: max(8, reveal.minX / 2), dy: reveal.midY)).tap()
+        // Frames are in screen coordinates; the offset is from the window's origin.
+        let reveal = element(app, "review.session.reveal").frame, window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: max(8, (reveal.minX - window.frame.minX) / 2), dy: reveal.midY - window.frame.minY)).tap()
         XCTAssertFalse(waitForAnswer(app, timeout: 2), "A tap beside Show Answer does not reveal")
         capture(app, "09-question-after-tap-beside-show-answer")
         // On the answer side the four buttons fill the row: the system's own
