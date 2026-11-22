@@ -6,12 +6,15 @@ mg_job core-xcframework host mg_core_xcframework \
 mg_job swift-test host mg_swift_test \
   "swift test on a local package (--package, default MeguriCore), --config Debug|Profile (default Debug); matched core/SPM products, Profile tests under the host lease; any compiler warning fails; args after -- select tests"
 
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/../scripts/host-build.sh"
+
 # mg__xcframework <report> [script args...]: run the build script, record its
 # report, and return its exit code.
 mg__xcframework() {
   local report="$1" rc
   shift
-  /bin/bash tools/scripts/build-core-xcframework.sh ${1+"$@"} --report "$report"
+  mg_host_build /bin/bash tools/scripts/build-core-xcframework.sh ${1+"$@"} --report "$report"
   rc=$?
   [ ! -s "$report" ] || mg_detail xcframework "$(cat "$report")"
   return "$rc"
@@ -220,7 +223,7 @@ mg_swift_test() {
       '{cpu: $cpu, os: $os, os_build: $os_build, arch: $arch}')"
   fi
   local build="$MG_RUN_DIR/swift-build.log" rc
-  swift build --package-path "$dir" "${product_args[@]}" --build-tests 2>&1 | tee "$build"
+  mg_host_build swift build --package-path "$dir" "${product_args[@]}" --build-tests 2>&1 | tee "$build"
   rc=${PIPESTATUS[0]}
   mg_artifact log "$build" "swift build"
   local warnings
