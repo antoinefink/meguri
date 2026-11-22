@@ -1,0 +1,442 @@
+import CoreBridge
+import Foundation
+import Observation
+
+/// Browse's state (U270): the query, which the sidebar's filter rows show
+/// (`search/filter-tokens` T1, T9), the mode, and the sidebar's content
+/// and counts (`browser/workspace` V6, T12.4). Held by `ReviewCollection`
+/// above the layout switch, so leaving Browse for Today, a deck or review
+/// and coming back finds it as it was (V1); a relaunch starts as T14 says.
+/// Every read here is pure: nothing writes the collection but a person's
+/// toggle of a tag's disclosure.
+@Observable @MainActor
+public final class BrowseModel {
+    /// A user saved search (`browser/config-keys` K7.1), in the sidebar's
+    /// order (`browser/sidebar` S3.1).
+    public nonisolated struct SavedSearch: Hashable, Sendable {
+        public let name: String
+        public let text: String
+        public init(name: String, text: String) {
+            self.name = name
+            self.text = text
+        }
+    }
+
+    /// The modifier keys of a click on a filter row (T9).
+    public nonisolated enum Click: Sendable, Hashable {
+        case plain, command, option
+    }
+
+    // MARK: State
+
+    /// What the search field holds (T1); the sidebar is a view of it.
+    public private(set) var query = FilterQuery()
+    /// Cards or Notes (V2.1): rows and counts are of this mode (T11).
+    public private(set) var mode: BrowseMode = .cards
+    /// Browse has opened in this launch (T14's first open has run).
+    public private(set) var opened = false
+    public private(set) var savedSearches: [SavedSearch] = []
+    /// Every deck's value as the core makes it (T3), by deck id.
+    public private(set) var deckValues: [Int64: FilterValue] = [:]
+    public private(set) var notetypes: [NotetypeName] = []
+    public private(set) var tags: [TagNode] = []
+    /// Flags 1 to 7's shown names (F4).
+    public private(set) var flagNames: [String] = []
+    /// Each row's count in the current mode (T12.3 step 4); a row without
+    /// one shows none until it is known.
+    public private(set) var counts: [BrowseSidebarTag: UInt64] = [:]
+    /// The sidebar's filter text (`browser/sidebar` S6).
+    public var filter = ""
+    /// V6: the folded sections, kept on the device.
+    public var folded: Set<BrowseSidebarSection> {
+        didSet { if folded != oldValue { saveDevice() } }
+    }
+    /// V6: the Tags section shows the whole tree (kept on the device).
+    public var showsAllTags: Bool {
+        didSet { if showsAllTags != oldValue { saveDevice() } }
+    }
+    /// Raised when a selection the list made is not the query's, so the
+    /// list draws the query's selection again.
+    public private(set) var selectionEcho: UInt64 = 0
+
+    /// Tag disclosures toggled in this launch, before the tree is read again.
+    private var tagExpansion: [String: Bool] = [:]
+    /// The top-level tags' note counts, which pick the eight Tags shows (V6).
+    private var tagNotes: [String: UInt64] = [:]
+    private var visible = false
+    private var stale = true
+    /// T14's first open has started and not ended: a collection that turns
+    /// ready again meanwhile makes it start over.
+    private var openInFlight = false
+    /// Raised by every change of the query: a reading started before it
+    /// (a saved search, the first open) gives way to the newer query.
+    private var queryRevision: UInt64 = 0
+    /// Raised when the collection goes: work started before must not land.
+    private var epoch: UInt64 = 0
+    private var namesToken: UInt64 = 0
+    private var countsToken: UInt64 = 0
+    @ObservationIgnored private var namesTask: Task<Void, Never>?
+    @ObservationIgnored private var countsTask: Task<Void, Never>?
+    @ObservationIgnored private var device: BrowseDeviceState
+
+    // MARK: Seams
+
+    @ObservationIgnored let backend: any BrowseBackend
+    @ObservationIgnored private let store: BrowseDeviceStore
+    /// Whether the collection is open and ready for reads.
+    @ObservationIgnored public var ready: @MainActor () -> Bool = { true }
+    /// A search handed to Browse (a deep link, R319), taken once: T14's
+    /// "with a search" replaces the query by its reading.
+    @ObservationIgnored public var takeEntrySearch: @MainActor () -> String? = { nil }
+
+    public init(backend: any BrowseBackend, store: BrowseDeviceStore = BrowseDeviceStore(defaults: nil)) {
+        self.backend = backend
+        self.store = store
+        let device = store.load()
+        self.device = device
+        folded = device.folded
+        showsAllTags = device.showsAllTags
+    }
+
+    // MARK: Showing
+
+    /// Browse's sidebar appeared: the first open of the launch runs T14,
+    /// then the rows and counts are read, at once and without waiting for
+    /// each other.
+    public func appear() {
+        visible = true
+        guard ready() else { return }
+        if !opened { open() }
+        if let search = takeEntrySearch(), !search.isEmpty { replace(byReading: search) }
+        if stale { reload() }
+    }
+
+    public func disappear() {
+        visible = false
+        countsTask?.cancel()
+    }
+
+    /// T14: the first open on this device reads `defaultSearchText` (the
+    /// whole collection when it is not set); later launches read the run
+    /// text kept on the device. The mode is the collection's (K6.1).
+    private func open() {
+        opened = true
+        openInFlight = true
+        let revision = queryRevision, epoch = epoch, kept = device.runText
+        Task {
+            let opening = try? await backend.opening()
+            guard self.epoch == epoch else { return }
+            defer { if self.epoch == epoch { openInFlight = false } }
+            if let notes = opening?.notesMode, notes != (mode == .notes) {
+                mode = notes ? .notes : .cards
+                counts = [:]
+                refreshCounts()
+            }
+            let text = kept ?? opening?.defaultSearch
+            guard let text, revision == queryRevision else {
+                if kept == nil { keepRunText() }
+                return
+            }
+            guard let read = try? await backend.read(text), self.epoch == epoch, revision == queryRevision else { return }
+            setQuery(read)
+        }
+    }
+
+    // MARK: The query
+
+    private func setQuery(_ next: FilterQuery) {
+        queryRevision &+= 1
+        if next != query { query = next }
+        keepRunText()
+    }
+
+    /// The device keeps the query's run text for a relaunch (T14).
+    private func keepRunText() {
+        let revision = queryRevision, epoch = epoch, query = query
+        Task {
+            guard let text = try? await backend.runText(query), self.epoch == epoch, revision == queryRevision else { return }
+            device.runText = text
+            saveDevice()
+        }
+    }
+
+    /// T14 "with a search", and T9's saved searches: the whole query
+    /// becomes T7's reading of `text`, unless the query changed meanwhile.
+    private func replace(byReading text: String) {
+        queryRevision &+= 1
+        let revision = queryRevision, epoch = epoch
+        Task {
+            guard let read = try? await backend.read(text), self.epoch == epoch, revision == queryRevision else { return }
+            setQuery(read)
+        }
+    }
+
+    /// T9: a click on a filter row.
+    public func activate(_ row: BrowseSidebarTag, click: Click = .plain) {
+        switch row {
+        case .builtIn(let search):
+            setQuery(search.query)
+        case .saved(let name):
+            guard let saved = savedSearches.first(where: { $0.name == name }) else { return }
+            replace(byReading: saved.text)
+        case .showAllTags:
+            showsAllTags = true
+        case .section:
+            return
+        default:
+            guard let value = value(of: row) else { return }
+            switch click {
+            case .plain: setQuery(query.clicking(value))
+            case .command: setQuery(query.commandClicking(value))
+            case .option: setQuery(query.optionClicking(value))
+            }
+        }
+    }
+
+    /// The value a filter row stands for (T3); nil for a row that is not a
+    /// value, or a deck the core does not offer.
+    public func value(of row: BrowseSidebarTag) -> FilterValue? {
+        switch row {
+        case .state(let state): .state(state)
+        case .flag(0): .noFlag
+        case .flag(let flag): .flag(flag)
+        case .deck(let id): deckValues[id]
+        case .notetype(let id): notetypes.first { $0.id == id }.map { .notetype(id: $0.id, name: $0.name) }
+        case .tag(let name): .tag(name)
+        case .builtIn(let search): search.value
+        case .section, .saved, .showAllTags: nil
+        }
+    }
+
+    /// T9: the filter rows that show selected, those whose value is in its
+    /// kind's **is** token.
+    public var selectedRows: Set<BrowseSidebarTag> {
+        var rows = Set<BrowseSidebarTag>()
+        for case .value(let values, false) in query.tokens {
+            for value in values {
+                switch value {
+                case .deck(let id, _, _): rows.insert(.deck(id))
+                case .notetype(let id, _): rows.insert(.notetype(id))
+                case .tag(let name): rows.insert(.tag(name))
+                case .state(let state) where state != .leech: rows.insert(.state(state))
+                case .flag(let flag): rows.insert(.flag(flag))
+                case .noFlag: rows.insert(.flag(0))
+                default: break
+                }
+            }
+        }
+        return rows
+    }
+
+    /// The list's selection: the Browse row, then the selected filter rows.
+    public var listSelection: Set<BrowseSidebarTag> {
+        selectedRows.union([.section(.browse)])
+    }
+
+    /// The list's selection after a click or a key, read as T9's input:
+    /// a section row navigates (its section is returned); one filter row
+    /// alone is a click (or ⌥-click) on it; with ⌘, each row that came or
+    /// went is a ⌘-click; anything else (a ⇧ range, an empty selection)
+    /// changes nothing. The list then draws the query's selection again.
+    public func listSelectionChanged(to new: Set<BrowseSidebarTag>, click: Click) -> AppSection? {
+        let old = listSelection
+        defer { selectionEcho &+= 1 }
+        if case .section(let section)? = new.subtracting(old).first(where: { if case .section = $0 { true } else { false } }),
+           section != .browse {
+            return section
+        }
+        let rows = new.filter { if case .section = $0 { false } else { true } }
+        switch click {
+        case .command:
+            for row in rows.symmetricDifference(old.filter { if case .section = $0 { false } else { true } }) {
+                activate(row, click: .command)
+            }
+        case .plain, .option:
+            if rows.count == 1, let row = rows.first { activate(row, click: click) }
+        }
+        return nil
+    }
+
+    // MARK: Rows and counts
+
+    /// The collection's rows changed (`engine/change-stream`): the names
+    /// and counts are read again while Browse shows, else when it next does.
+    public func changesCommitted(_ changes: ChangeSet) {
+        // Saved searches and flag names are config keys (K7, K8).
+        let names = changes.configKeys.contains { $0.name == "savedFilters" || $0.name == "flagLabels" }
+        guard changes.wholeCollection || !changes.cards.isEmpty || !changes.notes.isEmpty || !changes.decks.isEmpty
+            || !changes.tags.isEmpty || !changes.notetypes.isEmpty || names else { return }
+        stale = true
+        if visible, ready() { reload() }
+    }
+
+    /// The collection became ready again (a new generation): its names and
+    /// counts are read again.
+    public func collectionReady() {
+        epoch &+= 1
+        stale = true
+        countsTask?.cancel()
+        if openInFlight {
+            opened = false
+            openInFlight = false
+        }
+        if visible, ready() {
+            if !opened { open() }
+            reload()
+        }
+    }
+
+    /// The collection was replaced: the next open is a first open (T14).
+    public func collectionReplaced() {
+        epoch &+= 1
+        countsTask?.cancel()
+        opened = false
+        openInFlight = false
+        mode = .cards
+        query = FilterQuery()
+        queryRevision &+= 1
+        savedSearches = []; deckValues = [:]; notetypes = []; tags = []; flagNames = []
+        counts = [:]; tagNotes = [:]; tagExpansion = [:]; filter = ""
+        stale = true
+        device.runText = nil
+        saveDevice()
+    }
+
+    private func reload() {
+        stale = false
+        namesToken &+= 1
+        let token = namesToken, epoch = epoch, backend = backend
+        namesTask = Task {
+            async let saved = try? backend.values(.savedSearches)
+            async let decks = try? backend.values(.decks)
+            async let notetypes = try? backend.notetypes()
+            async let tags = try? backend.tagTree()
+            async let flags = try? backend.flagNames()
+            let (savedRows, deckRows, notetypeList, tagTree, flagList) = await (saved, decks, notetypes, tags, flags)
+            guard token == namesToken, self.epoch == epoch else { return }
+            if let savedRows {
+                savedSearches = savedRows.compactMap {
+                    if case .savedSearch(let name, let text) = $0 { SavedSearch(name: name, text: text) } else { nil }
+                }
+            }
+            if let deckRows {
+                var values: [Int64: FilterValue] = [:]
+                for case .value(let value) in deckRows {
+                    if case .deck(let id, _, _) = value { values[id] = value }
+                }
+                deckValues = values
+            }
+            if let notetypeList { self.notetypes = notetypeList }
+            if let tagTree { self.tags = tagTree; tagExpansion = [:] }
+            if let flagList { flagNames = flagList }
+            refreshCounts()
+        }
+    }
+
+    /// Every row the sidebar can show, with what it counts.
+    private var countedRows: [(BrowseSidebarTag, FilterCountItem)] {
+        var rows: [(BrowseSidebarTag, FilterCountItem)] = FilterBuiltIn.allCases.map { (.builtIn($0), .value($0.value)) }
+        rows += savedSearches.map { (.saved($0.name), .saved($0.text)) }
+        rows += Self.states.map { (.state($0), .value(.state($0))) }
+        rows += (0...7).map { (.flag(UInt8($0)), .value($0 == 0 ? .noFlag : .flag(UInt8($0)))) }
+        rows += deckValues.sorted { $0.key < $1.key }.map { (.deck($0.key), .value($0.value)) }
+        rows += notetypes.map { (.notetype($0.id), .value(.notetype(id: $0.id, name: $0.name))) }
+        func walk(_ nodes: [TagNode]) {
+            for node in nodes {
+                rows.append((.tag(node.fullName), .value(.tag(node.fullName))))
+                walk(node.children)
+            }
+        }
+        walk(tags)
+        return rows
+    }
+
+    /// T12.4: the counts, off the main thread at utility priority; a newer
+    /// refresh supersedes this one (the core cancels its job) and the
+    /// counts shown stay until the new ones arrive. In Cards mode, with
+    /// more than 12 top-level tags, the top-level tags' note counts follow,
+    /// to pick the eight Tags shows (V6).
+    private func refreshCounts() {
+        countsTask?.cancel()
+        countsToken &+= 1
+        let token = countsToken, epoch = epoch, mode = mode, backend = backend
+        let rows = countedRows
+        let topTags = tags.count > Self.tagsShownWhole ? tags.map(\.fullName) : []
+        countsTask = Task(priority: .utility) {
+            guard let values = try? await backend.counts(mode, rows.map(\.1)), !Task.isCancelled,
+                  token == countsToken, self.epoch == epoch else { return }
+            var next: [BrowseSidebarTag: UInt64] = [:]
+            for (row, value) in zip(rows.map(\.0), values) {
+                if let value { next[row] = value }
+            }
+            counts = next
+            guard !topTags.isEmpty else { return }
+            if mode == .notes {
+                tagNotes = Dictionary(uniqueKeysWithValues: topTags.compactMap { name in next[.tag(name)].map { (name, $0) } })
+                return
+            }
+            guard let notes = try? await backend.counts(.notes, topTags.map { .value(.tag($0)) }), !Task.isCancelled,
+                  token == countsToken, self.epoch == epoch else { return }
+            var byTag: [String: UInt64] = [:]
+            for (name, value) in zip(topTags, notes) {
+                if let value { byTag[name] = value }
+            }
+            tagNotes = byTag
+        }
+    }
+
+    /// The five states of the Card State section (V6; Leech is a saved search).
+    public static let states: [FilterState] = [.new, .learning, .review, .suspended, .buried]
+    /// V6: up to this many top-level tags, the Tags section shows them all.
+    public static let tagsShownWhole = 12
+    /// V6: otherwise it shows this many, those with the most notes.
+    public static let tagsShownFew = 8
+
+    /// V6: the top-level tags the Tags section shows, in tree order, and
+    /// the number Show All names (nil when every tag shows): with more than
+    /// 12, the 8 with the most notes (descendants counted), ties in tree
+    /// order; before the note counts are known, the first 8.
+    public var shownTopLevelTags: (tags: [TagNode], showAll: Int?) {
+        guard tags.count > Self.tagsShownWhole, !showsAllTags else { return (tags, nil) }
+        let ranked = tags.indices.sorted { a, b in
+            let na = tagNotes[tags[a].fullName] ?? 0, nb = tagNotes[tags[b].fullName] ?? 0
+            return na != nb ? na > nb : a < b
+        }
+        let kept = Set(ranked.prefix(Self.tagsShownFew))
+        return (tags.indices.filter(kept.contains).map { tags[$0] }, tags.count)
+    }
+
+    // MARK: Tag disclosures
+
+    /// A tag's disclosure: the tag's own expansion (`browser/config-keys`
+    /// K6.2's note); a person's toggle writes it.
+    public func tagExpanded(_ node: TagNode) -> Bool {
+        tagExpansion[node.fullName] ?? !node.collapsed
+    }
+
+    public func setTagExpanded(_ node: TagNode, _ expanded: Bool) {
+        guard tagExpanded(node) != expanded else { return }
+        tagExpansion[node.fullName] = expanded
+        let backend = backend
+        Task { try? await backend.setTagsCollapsed([node.fullName], collapsed: !expanded) }
+    }
+
+    // MARK: Device state
+
+    private func saveDevice() {
+        device.folded = folded
+        device.showsAllTags = showsAllTags
+        store.save(device)
+    }
+
+    // MARK: Test hooks
+
+    /// Puts the model in a sampled state without the core (test-hook routes).
+    @_spi(MeguriTestHooks) public func prepareForTestHooks(query: FilterQuery) async {
+        opened = true
+        setQuery(query)
+        reload()
+        await namesTask?.value
+        await countsTask?.value
+    }
+}

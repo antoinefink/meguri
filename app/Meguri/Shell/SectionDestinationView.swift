@@ -1,4 +1,5 @@
 import AppModel
+import Browse
 import DeckOptions
 import DesignSystem
 import Editor
@@ -65,6 +66,11 @@ struct ShellFeatures {
     var sidebarDecks: (AppNavigation) -> AnyView
     /// The sidebar with its deck search around it (N20.1); fixtures keep the bare list.
     var sidebarSearch: (AnyView) -> AnyView = { $0 }
+    /// N21.1, `browser/workspace` V6: the whole sidebar while Browse is
+    /// selected, around the section rows the shell gives (tagged
+    /// `BrowseSidebarTag.section`): the filters in place of the decks. Nil
+    /// keeps the decks (fixtures without Browse).
+    var browseSidebar: ((AppNavigation, AnyView) -> AnyView)?
     /// H12: Return or S while the sidebar has focus starts the selected row's review: a
     /// deck's, or Today's Study. True when the row takes the key, even to do nothing.
     var sidebarStudy: (SidebarItem) -> Bool = { _ in false }
@@ -87,13 +93,20 @@ struct ShellFeatures {
         features.today = { _ in AnyView(TodayView(collection: collection, besideDeckList: true)) }
         #if os(macOS)
         features.nativeMacWorkspace = true
-        features.availableSections = [.home]
+        // N21.1: Today, then Browse. The iPad's Browse row waits for its own layout (U278).
+        features.availableSections = [.home, .browse]
         #else
         features.availableSections = [.home, .settings]
         #endif
         features.sectionRoot = { section, _ in
-            if section == .settings { AnyView(SettingsView(collection: collection)) }
-            else { AnyView(HomeView(collection: collection)) }
+            switch section {
+            case .settings: AnyView(SettingsView(collection: collection))
+            case .browse: AnyView(BrowseView(model: collection.browse))
+            default: AnyView(HomeView(collection: collection))
+            }
+        }
+        features.browseSidebar = { navigation, header in
+            AnyView(BrowseSidebarHost(collection: collection, navigation: navigation, header: header))
         }
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
@@ -182,6 +195,27 @@ struct SectionDestinationView: View {
         case let .deckPage(deck): features.deckPage(deck, navigation)
         case let .deckOptions(deck): features.deckOptions(deck, navigation)
         case let .settingsPage(page): features.settingsPage(page)
+        }
+    }
+}
+
+/// Browse's sidebar over the app's collection: Today's deck tree and its
+/// expansion (V6), and its reads once the collection is ready.
+private struct BrowseSidebarHost: View {
+    let collection: ReviewCollection
+    let navigation: AppNavigation
+    let header: AnyView
+
+    var body: some View {
+        BrowseSidebar(model: collection.browse, decks: collection.decks, deckExpanded: { id in
+            Binding(get: { collection.studyExpanded(deckID: id) },
+                    set: { collection.setStudyExpanded(deckID: id, expanded: $0, includingDescendants: false) })
+        }, navigate: { navigation.select(.section($0)) }) {
+            header
+        }
+        // Rows and counts are read once the collection can answer (a launch, a replacement).
+        .onChange(of: collection.browseReadable) { _, readable in
+            if readable { collection.browse.appear() }
         }
     }
 }

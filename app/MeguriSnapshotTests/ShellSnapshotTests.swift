@@ -79,6 +79,22 @@ import AppKit
         #expect(settings.keyEquivalent == "," && settings.keyEquivalentModifierMask == .command, "Settings must use ⌘,")
     }
 
+    /// N21.8: View › Browse takes ⇧⌘B, and nothing else in the menu bar
+    /// does (Card › Show in Browse, which shares it while review presents a
+    /// card, is U280's and not built yet).
+    @Test func viewBrowseOwnsShiftCommandB() throws {
+        let view = try #require(NSApp.mainMenu?.items.first { $0.title == "View" }?.submenu, "no View menu")
+        let item = try #require(view.items.first { $0.title == "Browse" }, "\(view.items.map(\.title))")
+        func isShiftCommandB(_ item: NSMenuItem) -> Bool {
+            let mask = item.keyEquivalentModifierMask.intersection([.command, .shift, .option, .control])
+            return (item.keyEquivalent == "b" && mask == [.command, .shift])
+                || (item.keyEquivalent == "B" && mask.contains(.command) && !mask.contains(.option) && !mask.contains(.control))
+        }
+        #expect(isShiftCommandB(item), "key \(item.keyEquivalent) mask \(item.keyEquivalentModifierMask.rawValue)")
+        let claims = menuItems(NSApp.mainMenu).filter(isShiftCommandB).map(\.title)
+        #expect(claims == ["Browse"], "\(claims)")
+    }
+
     @Test func theWindowMenuShowsTheMainWindow() throws {
         let window = try #require(NSApp.mainMenu?.items.first { $0.title == "Window" }?.submenu, "no Window menu")
         #expect(window.items.contains { $0.title == "Meguri" }, "\(window.items.map(\.title))")

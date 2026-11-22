@@ -357,6 +357,27 @@ public final class ReviewCollection: ChangeFanoutSink {
         deckNamesAllowed(host: .main, route: nil) && deckNamesOwner?.busy != true
     }
 
+    private var browseOwner: BrowseModel?
+    /// Browse (U270): its query, sidebar rows and counts, above the layout
+    /// switch, so leaving Browse and coming back keeps them (`browser/workspace` V1).
+    public var browse: BrowseModel {
+        if let browseOwner { return browseOwner }
+        let value = BrowseModel(backend: CoreBrowseBackend(), store: BrowseDeviceStore(defaults: configuration.deviceDefaults))
+        value.ready = { [weak self] in self?.browseReadable ?? false }
+        value.takeEntrySearch = { [weak self] in
+            guard let self, !self.navigation.browseSearch.isEmpty else { return nil }
+            defer { self.navigation.browseSearch = "" }
+            return self.navigation.browseSearch
+        }
+        browseOwner = value
+        return value
+    }
+    /// Browse reads the open collection only while it is ready.
+    public var browseReadable: Bool {
+        guard state == .ready, !opening, !closed, !closing, case .ready(let current) = lifecycle else { return false }
+        return current == generation
+    }
+
     private var deckDeletionOwner: DeckDeletionModel?
     public var deckDeletion: DeckDeletionModel {
         if let deckDeletionOwner { return deckDeletionOwner }
@@ -1033,6 +1054,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         do {
             if candidateActive {
                 navigation.collectionReplaced()
+                browseOwner?.collectionReplaced()
                 previousRecord = nil; recoveryDrops.removeAll(); dropWalk()
                 try await records.remove()
                 try await completeOpenedHost(loadRecord: false)
@@ -1143,6 +1165,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             // Any write may be a new step (a text-only note edit changes no count); coalesced.
             if event.generation == generation { undoOwner?.scheduleRefresh() }
             if event.generation == generation { deckOptionsOwner?.changesCommitted(changes, generation: event.generation) }
+            if event.generation == generation { browseOwner?.changesCommitted(changes) }
             if event.generation == generation,
                changes.wholeCollection || !changes.notetypes.isEmpty || !changes.decks.isEmpty {
                 addFlowOwner?.selectionChanged(generation: event.generation)
@@ -1174,6 +1197,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             studyPreparation.collectionEnded()
             decks = []; countTimer?.invalidate(); countsTask?.cancel()
             navigation.collectionReplaced(keepingEntrySheet: opening)
+            browseOwner?.collectionReplaced()
             if !opening {
                 navigation.dismissSheet()
                 entryOwner?.destinationChanged()
@@ -1221,6 +1245,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         case .ready(let next):
             activity.generationChanged(to: next)
             activity.collectionReady()
+            let renewed = !wasReady || generation != next
             if generation != next {
                 addFlowOwner?.generationEnded()
                 editFlowOwner?.generationEnded()
@@ -1234,6 +1259,7 @@ public final class ReviewCollection: ChangeFanoutSink {
                 state = .ready
                 if let review { review.onVisibleMediaChanged?(review.visibleMediaNames) }
                 if !wasReady && foreground { Task { await day?.checkNow() } }
+                if renewed { browseOwner?.collectionReady() }
             }
         case .opening, .upgrading: invalidateDeckActions(); state = .loading
         case .exclusiveBusy: invalidateDeckActions(); state = .unavailable; review?.requestRefresh()

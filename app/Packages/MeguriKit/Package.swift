@@ -83,6 +83,7 @@ let package = Package(
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"], swiftSettings: settings),
         .testTarget(name: "HomeTests", dependencies: ["Home"], swiftSettings: settings),
         .testTarget(name: "DeckOptionsTests", dependencies: ["DeckOptions", "AppModel"], swiftSettings: settings),
+        .testTarget(name: "BrowseTests", dependencies: ["Browse", "AppModel", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
         .testTarget(name: "HeatmapKitTests", dependencies: ["HeatmapKit"], swiftSettings: settings),
         .testTarget(name: "ReviewTests", dependencies: ["Review", "AppModel", "DesignSystem", "Settings"], swiftSettings: settings),
         .testTarget(
@@ -100,9 +101,9 @@ let package = Package(
     ] + features.map { name in
         .target(
             name: name,
-            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (name == "Home" ? ["HeatmapKit"] : []) + (["Home", "Review", "Settings", "Editor", "DeckOptions"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (name == "Editor" ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
+            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (name == "Home" ? ["HeatmapKit"] : []) + (["Home", "Review", "Settings", "Editor", "DeckOptions", "Browse"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (name == "Editor" ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
             path: "Sources/Features/\(name)",
-            resources: ["Home", "Review", "Settings", "Editor", "DeckOptions"].contains(name) ? [.process("Resources")] : [],
+            resources: ["Home", "Review", "Settings", "Editor", "DeckOptions", "Browse"].contains(name) ? [.process("Resources")] : [],
             swiftSettings: settings
         )
     }

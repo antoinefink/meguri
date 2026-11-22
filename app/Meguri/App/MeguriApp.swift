@@ -48,6 +48,7 @@ struct MeguriApp: App {
         self.hooks = hooks
         if hooks.startsFresh {
             uiStateStore = UIStateStore(defaults: nil)
+            configuration.deviceDefaults = nil
         }
         if let shell = hooks.shell {
             features = shell.features

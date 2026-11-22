@@ -58,6 +58,7 @@ extension TestHooks {
             CollectionEntryRoutes.register(in: &registry)
             SyncRoutes.register(in: &registry)
             ReviewRoutes.register(in: &registry)
+            BrowseRoutes.register(in: &registry)
             return registry
         }
 

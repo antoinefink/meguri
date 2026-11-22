@@ -101,6 +101,21 @@ struct NativeCommandContext {
         collection.deckDeletion.delete(deckID: deck, host: host)
     }
 
+    // MARK: View
+
+    /// N21.1, N21.8: View › Browse (⇧⌘B) selects the Browse row, which
+    /// returns to Browse's kept state (`browser/workspace` V1); disabled
+    /// while review presents a card, when Card › Show in Browse takes the
+    /// key, and while a sheet holds the window.
+    var canShowBrowse: Bool {
+        host == .main && layout == .sidebar && collection.navigation.sheet == nil
+            && collection.review == nil && collection.navigation.review == nil
+    }
+    func showBrowse() {
+        guard canShowBrowse else { return }
+        collection.navigation.select(.section(.browse))
+    }
+
     // MARK: Card
 
     var review: ReviewCoordinator? {
@@ -213,6 +228,15 @@ struct AppCommands: Commands {
         // The system's Find, Spelling, Substitutions and other text groups stay;
         // Find… comes first, so ⌘F reaches it while the deck workspace shows and
         // the text inputs' own Find otherwise (when it is disabled).
+        #if os(macOS)
+        // N21.8: View › Browse; the iPad's Browse row waits for its own layout (U278).
+        CommandGroup(before: .sidebar) {
+            Button("Browse") { context?.showBrowse() }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+                .disabled(context?.canShowBrowse != true)
+            Divider()
+        }
+        #endif
         CommandGroup(before: .textEditing) {
             Button("Find…") { context?.find() }
                 .keyboardShortcut("f", modifiers: .command)

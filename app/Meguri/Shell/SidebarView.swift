@@ -13,8 +13,7 @@ struct SidebarView: View {
     let features: ShellFeatures
 
     var body: some View {
-        // N20.1: the deck search's field tops the sidebar; its results replace this list.
-        features.sidebarSearch(AnyView(list))
+        content
             .sidebarColumnChrome()
             .navigationTitle(Text(verbatim: "Meguri"))
             #if !os(macOS)
@@ -23,32 +22,49 @@ struct SidebarView: View {
             #endif
     }
 
+    @ViewBuilder
+    private var content: some View {
+        if navigation.section == .browse, let browseSidebar = features.browseSidebar {
+            // N21.1: with Browse selected, the filters take the decks' place.
+            browseSidebar(navigation, AnyView(sectionRows { BrowseSidebarTag.section($0) }))
+        } else {
+            // N20.1: the deck search's field tops the sidebar; its results replace this list.
+            features.sidebarSearch(AnyView(list))
+        }
+    }
+
+    /// The section rows at the top (N21.1: Today and Browse, each with its
+    /// symbol), each tagged for the list it is in.
+    private func sectionRows<Tag: Hashable>(tag: @escaping (AppSection) -> Tag) -> some View {
+        ForEach(features.availableSections, id: \.self) { section in
+            Button {
+                navigation.select(.section(section))
+            } label: {
+                Label {
+                    // Rows grow with the text size rather than cut it.
+                    Text(homeTitle(section))
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    // The title names the row; the symbol is decoration.
+                    Image(systemName: homeSymbol(section))
+                        .accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("shell.root.sidebar.\(section.rawValue)")
+            .accessibilityAddTraits(navigation.sidebarSelection == .section(section) ? .isSelected : [])
+            .tag(tag(section))
+        }
+    }
+
     private var list: some View {
         List(selection: Binding<SidebarItem?>(get: { navigation.sidebarSelection }, set: { item in
             if let item { navigation.select(item) }
         })) {
             Section {
-                ForEach(features.availableSections, id: \.self) { section in
-                    Button {
-                        navigation.select(.section(section))
-                    } label: {
-                        Label {
-                            // Rows grow with the text size rather than cut it.
-                            Text(homeTitle(section))
-                                .fixedSize(horizontal: false, vertical: true)
-                        } icon: {
-                            // The title names the row; the symbol is decoration.
-                            Image(systemName: homeSymbol(section))
-                                .accessibilityHidden(true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("shell.root.sidebar.\(section.rawValue)")
-                    .accessibilityAddTraits(navigation.sidebarSelection == .section(section) ? .isSelected : [])
-                    .tag(SidebarItem.section(section))
-                }
+                sectionRows { SidebarItem.section($0) }
             }
             if features.nativeMacWorkspace {
                 // N14.6: a system section label under Today.
@@ -108,7 +124,8 @@ struct SidebarView: View {
 
     private func homeSymbol(_ section: AppSection) -> String {
         guard section == .home else { return section.systemImage }
-        return features.todayRoot ? "sun.max" : section.systemImage
+        // N21.1: Today's system symbol, as Browse has its own.
+        return features.todayRoot ? "calendar" : section.systemImage
     }
 }
 
