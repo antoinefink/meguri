@@ -23,6 +23,8 @@ tracing.workspace = true
 meguri-model = { workspace = true, features = ["test-hooks"] }
 meguri-storage = { workspace = true, features = ["test-hooks"] }
 meguri-testkit.workspace = true
+# The oracle goldens of stats/graphs-revlog V10 (tests/graphs_revlog.rs).
+serde_json.workspace = true
 tempfile.workspace = true
 
 # Integration tests: one binary. A file gets its own target only when it

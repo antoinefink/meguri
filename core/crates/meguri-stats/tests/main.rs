@@ -8,3 +8,5 @@ pub mod card_info;
 pub mod graphs_common;
 #[path = "graphs_common_cache.rs"]
 pub mod graphs_common_cache;
+#[path = "graphs_revlog.rs"]
+pub mod graphs_revlog;

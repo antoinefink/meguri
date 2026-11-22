@@ -158,6 +158,11 @@ harness = false
 name = "stats_columns_build"
 harness = false
 
+# U99's review-log records from current caches: 12 months and all history.
+[[bench]]
+name = "stats_log_year"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]

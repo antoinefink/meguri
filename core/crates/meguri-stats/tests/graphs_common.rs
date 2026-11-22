@@ -656,7 +656,7 @@ fn g8_a_graph_not_built_yet_is_an_error_not_made_up_values() {
     let request = GraphRequest {
         scope: Scope::Collection,
         history: History::AllHistory,
-        graphs: vec![meguri_stats::graphs::Graph::Reviews],
+        graphs: vec![meguri_stats::graphs::Graph::Calendar],
         refresh: 1,
         context: None,
         cancel: CancelToken::new(),
@@ -665,7 +665,7 @@ fn g8_a_graph_not_built_yet_is_an_error_not_made_up_values() {
     let result = f.host.stats().request(&f.collection(), f.host.derived(), &request);
     assert!(matches!(
         result,
-        Err(meguri_stats::graphs::StatsError::NotBuilt(meguri_stats::graphs::Graph::Reviews))
+        Err(meguri_stats::graphs::StatsError::NotBuilt(meguri_stats::graphs::Graph::Calendar))
     ));
 }
 
