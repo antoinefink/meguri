@@ -4,6 +4,7 @@ Spec: stats/graphs-revlog
 Requirements: R1271, R1277, R1367, R1379, R1380, R1381, R1382, R1383, R1384, R1385, R1386, R1387, R1388, R1389, R1405, R1406, R1407, R1408, R1410, R1411, R1412, R1413, R1414, R1446
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/graphs/calendar/, conformance/scenarios/stats/graphs/reviews/, conformance/scenarios/stats/graphs/retention/, conformance/scenarios/stats/graphs/hourly/, conformance/scenarios/stats/graphs/buttons/
+Status: Under review (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Do not implement them until approved. Every other section is in force and unchanged.
 
 The data of the five review-log graphs (U99): Calendar, Reviews, Retention (the True Retention table), Hourly Breakdown and Answer Buttons. They run on the machinery of `stats/graphs-common`: scope G2, history G3, row reading G4, graph order G5, aggregate shape G6, requests G8, caches G9. This file says, per graph, which review-log rows count, the keys and values of its record, and its extras. Ranges, bins, the "0–4" first-bin shift, table values, percentages, "N/A" cells, tooltip and day text, and the colour scale are `stats/graph-presentation` (U226, `stats/graphs-common` G12, item 1). The Calendar cells' item queries are `stats/browse-queries` Q4.2; the other four graphs have no browse queries.
 
@@ -67,6 +68,8 @@ Each counted row (V1) adds 1 to its kind's count and its `time` to its kind's ti
 | 9223372036854775807 | −622,211,972 |
 
 ### V2.2 Record
+
+Changed 2026-11-22 (round 11): the record also carries the Meguri extras `count_by_answer`, `time_by_answer` and `unrated` of `stats/history-reads` H6. They are computed in the same pass, are not observed (V8) and change none of the values below (G6's list of extras).
 
 `count` and `time`: two sparse maps day index → `{learn, relearn, young, mature, filtered}`. A key is present in both maps exactly when at least one row counted on that day; a kind with nothing is 0. Nothing else is in the record (G6).
 
@@ -172,6 +175,8 @@ With t the row's whole second (`floor(id / 1,000)`), a row is in a period when `
 
 ### V4.3 Record
 
+Changed 2026-11-22 (round 11): the Statistics page also reads the Meguri part `retention_by_day` (`stats/history-reads` H4), the same row rule (V4.1) per day; this record is unchanged and is the By Period table.
+
 One entry per period: `{young_passed, young_failed, mature_passed, mature_failed}`, the four counts of V4.1. Nothing else (G6). The Young, Mature and All tables, the percentages with one decimal and the "N/A" cells (R1407) are U226's, from these counts.
 
 ## V5. Hourly Breakdown
@@ -197,6 +202,8 @@ The hour of a counted row (V1: Learn, Review and Relearn) is the hour of its loc
 
 ### V5.3 Record
 
+Changed 2026-11-22 (round 11): the record also carries the Meguri extras of `stats/history-reads` H7: a `six_months` range and `retention_by_hour`. Not observed (V8); Anki's four ranges are unchanged.
+
 For each range, 24 entries, hour 0 to 23: `{total, correct}`, where `total` counts the range's rows in that hour and `correct` those with `ease` above 1 (R1410). The range picker, its default, percentages and text (R1412) are U226's.
 
 ## V6. Answer Buttons
@@ -215,6 +222,8 @@ A row counts when its kind gives a group and its `ease` is 1 to 4 (R1413):
 Rows with `ease` 0 or above 4 are left out.
 
 ### V6.2 Record
+
+Changed 2026-11-22 (round 11): the record also carries H7's `six_months` range. Not observed (V8).
 
 For each range of V5.2 (same bounds, `all_time` only with `allHistory`): `{learning, young, mature}`, each four counts for buttons 1 to 4. Each group's total presses and correct percentage, and the share of each button (R1414), are U226's, from these counts.
 
