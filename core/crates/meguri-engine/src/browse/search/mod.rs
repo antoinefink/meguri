@@ -2,12 +2,15 @@
 //! U85): a session runs one request at a time on a search worker, hands back
 //! a handle of ordered ids, and answers row pages, reverses, resorts,
 //! invalidation by change sets and selection resolution through it. The
-//! one-shot id search for the local servers is [`search_ids`].
+//! one-shot id search for the local servers is [`search_ids`]; Find
+//! Duplicates (`browser/workspace` V10) reads through a session's handle or
+//! the whole collection ([`find_duplicates`]).
 //!
 //! A search never writes: the day comes from the pure day calculation
 //! (`sched/day-clock` D3, D4) on the request's snapshot, never from a day
 //! query, which would unbury cards and store timing keys.
 
+mod duplicates;
 mod handle;
 mod one_shot;
 mod page;
@@ -30,6 +33,7 @@ use crate::changes::stream::Seq;
 use crate::error::EngineError;
 use crate::lifecycle::{Engine, Generation, WeakEngine};
 
+pub use duplicates::{Duplicates, DuplicatesTarget, find_duplicates};
 pub use handle::{Invalidation, Refetch};
 pub use one_shot::search_ids;
 pub use page::{QaCells, QaWhich};

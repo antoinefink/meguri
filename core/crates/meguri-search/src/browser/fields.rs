@@ -15,13 +15,17 @@ use super::cells::Cell;
 /// empty text. Of two fields with that name (a damaged note type) the first
 /// position counts.
 pub fn value<'n>(note: &'n Note, kind: &Notetype, name: &str) -> Option<&'n str> {
-    let ord = kind
-        .fields
+    Some(field_at(&note.fields, ord_of(kind, name)?))
+}
+
+/// The position of the field named exactly `name` in note type `kind`, the
+/// first of two with that name; `None` when it has none.
+pub fn ord_of(kind: &Notetype, name: &str) -> Option<u32> {
+    kind.fields
         .iter()
         .filter(|field| field.name == name)
         .map(|field| field.ord)
-        .min()?;
-    Some(field_at(&note.fields, ord))
+        .min()
 }
 
 /// The value at position `ord` of a note's stored fields; the empty text

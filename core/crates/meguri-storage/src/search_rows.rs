@@ -102,6 +102,70 @@ pub(crate) fn visit_note_tags(
     })
 }
 
+/// What [`visit_note_fields`] hands each note: its id, `mid` and `flds`;
+/// false stops the read.
+pub type FieldsVisit<'v> = dyn FnMut(i64, i64, Option<&str>) -> bool + 'v;
+
+/// Find Duplicates' read (`browser/workspace` V10): the id, `mid` and
+/// `flds` of every note whose `mid` is one of `notetypes` and, when `notes`
+/// is given, whose id is one of them. `flds` is read as [`visit_note_tags`]
+/// reads `tags`: TEXT with invalid UTF-8 replaced, INTEGER and REAL as
+/// SQLite's text for them, NULL and BLOB as none. Cancelled as [`visit`]
+/// is.
+pub(crate) fn visit_note_fields(
+    conn: &Connection,
+    notetypes: &[i64],
+    notes: Option<&[i64]>,
+    cancel: &dyn Fn() -> bool,
+    visit: &mut FieldsVisit<'_>,
+) -> Result<(), StorageError> {
+    const COLUMNS: &str = "SELECT id, mid, CASE WHEN typeof(flds) IN ('integer', 'real') THEN CAST(flds AS TEXT) ELSE flds END \
+         FROM notes WHERE mid IN (SELECT value FROM json_each(?1))";
+    if notetypes.is_empty() || notes.is_some_and(<[i64]>::is_empty) {
+        return Ok(());
+    }
+    let kinds = json_list(notetypes);
+    with_cancel(conn, cancel, || {
+        let mut statement;
+        let mut rows = match notes {
+            None => {
+                statement = conn.prepare(COLUMNS)?;
+                statement.query([kinds])?
+            }
+            Some(notes) => {
+                statement = conn.prepare(&format!("{COLUMNS} AND id IN (SELECT value FROM json_each(?2))"))?;
+                statement.query([kinds, json_list(notes)])?
+            }
+        };
+        while let Some(row) = rows.next()? {
+            let (id, mid) = (row.get::<_, i64>(0)?, row.get::<_, i64>(1)?);
+            let keep = match row.get_ref(2)? {
+                rusqlite::types::ValueRef::Text(bytes) => visit(id, mid, Some(&String::from_utf8_lossy(bytes))),
+                _ => visit(id, mid, None),
+            };
+            if !keep {
+                break;
+            }
+        }
+        Ok(())
+    })
+}
+
+/// A JSON array of `ids`, for `json_each` (meguri-search writes its own id
+/// lists; storage does not depend on it).
+fn json_list(ids: &[i64]) -> String {
+    let mut list = String::with_capacity(ids.len() * 14 + 2);
+    list.push('[');
+    for (at, id) in ids.iter().enumerate() {
+        if at > 0 {
+            list.push(',');
+        }
+        list.push_str(&id.to_string());
+    }
+    list.push(']');
+    list
+}
+
 /// Every deck's id and `name` as text, as the deck terms' `meguri_regex`
 /// reads it (`search/filter-tokens` T12.4's deck counts; see
 /// [`visit_note_tags`] for the text).
