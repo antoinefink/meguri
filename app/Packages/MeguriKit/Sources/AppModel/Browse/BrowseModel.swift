@@ -122,6 +122,8 @@ public final class BrowseModel {
     @ObservationIgnored var suggestionsText: String?
     @ObservationIgnored var offersToken: UInt64 = 0
     @ObservationIgnored var liveRun: Task<Void, Never>?
+    /// The query the results last ran.
+    @ObservationIgnored var lastRun: FilterQuery?
     /// The text a commit left, which D5's incomplete rule no longer holds (T8).
     @ObservationIgnored var committedText: String?
 
@@ -232,6 +234,7 @@ public final class BrowseModel {
 
     /// The results show the query in the mode.
     func showResults() {
+        lastRun = query
         results.run(query, mode: mode)
     }
 
@@ -424,6 +427,8 @@ public final class BrowseModel {
     /// counts are read again.
     public func collectionReady() {
         epoch &+= 1
+        // A save on its way went with the old epoch: Save can be tried again.
+        if savingSearch?.saving == true { savingSearch?.markFailed() }
         results.collectionReady()
         readies &+= 1
         if let unwritten = unwrittenMode, unwritten == mode { writeMode(unwritten) }
@@ -506,8 +511,7 @@ public final class BrowseModel {
     }
 
     /// The values the suggestions offer that no sidebar row counts (T12.3
-    /// step 4), counted in the same read so the first suggestion screen's
-    /// counts come with the sidebar's (T12.4's budget).
+    /// step 4), counted in a second read once the sidebar's counts are in.
     static let suggestedValues: [FilterValue] = [.currentDeck, .untagged, .anyFlag]
         + FilterDue.allCases.map { .due($0) }
         + FilterPeriod.allCases.flatMap { [FilterValue.added($0), .edited($0), .studied($0)] }
@@ -542,41 +546,42 @@ public final class BrowseModel {
         let rows = countedRows
         let topTags = tags.count > Self.tagsShownWhole ? tags.map(\.fullName) : []
         countsTask = Task(priority: .utility) {
-            // Then the values only the suggestions show; the last item is the whole collection: V11's total.
-            let extra = Self.suggestedValues
-            guard var values = try? await backend.counts(mode, rows.map(\.1) + extra.map { .value($0) } + [.query(FilterQuery())]),
-                  !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
+            // The last item is the whole collection: V11's total.
+            guard var values = try? await backend.counts(mode, rows.map(\.1) + [.query(FilterQuery())]), !Task.isCancelled,
+                  token == countsToken, self.epoch == epoch else { return }
             results.setTotal(values.popLast() ?? nil, mode: mode)
-            var extraCounts: [FilterValue: UInt64] = [:]
-            for (value, count) in zip(extra, values.suffix(extra.count)) {
-                if let count { extraCounts[value] = count }
-            }
-            values.removeLast(min(extra.count, values.count))
-            valueCounts = extraCounts
             var next: [BrowseSidebarTag: UInt64] = [:]
             for (row, value) in zip(rows.map(\.0), values) {
                 if let value { next[row] = value }
             }
             counts = next
-            guard !topTags.isEmpty else { readsPending = false; return }
-            if mode == .notes {
+            if !topTags.isEmpty, mode == .notes {
                 tagNotes = Dictionary(uniqueKeysWithValues: topTags.compactMap { name in next[.tag(name)].map { (name, $0) } })
-                readsPending = false
-                return
+            } else if !topTags.isEmpty {
+                // The refresh stays pending until the tags' note counts arrive too.
+                let notes: [UInt64?]
+                do { notes = try await backend.counts(.notes, topTags.map { .value(.tag($0)) }) } catch {
+                    if token == countsToken, self.epoch == epoch { stale = true }
+                    return
+                }
+                guard !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
+                var byTag: [String: UInt64] = [:]
+                for (name, value) in zip(topTags, notes) {
+                    if let value { byTag[name] = value }
+                }
+                tagNotes = byTag
             }
-            // The refresh stays pending until the tags' note counts arrive too.
-            let notes: [UInt64?]
-            do { notes = try await backend.counts(.notes, topTags.map { .value(.tag($0)) }) } catch {
-                if token == countsToken, self.epoch == epoch { stale = true }
-                return
-            }
-            guard !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
             readsPending = false
-            var byTag: [String: UInt64] = [:]
-            for (name, value) in zip(topTags, notes) {
-                if let value { byTag[name] = value }
+            // Then the values only the suggestions show, after the sidebar's own,
+            // so their slower day searches never hold the sidebar back.
+            let extra = Self.suggestedValues
+            guard let extraCounts = try? await backend.counts(mode, extra.map { .value($0) }), !Task.isCancelled,
+                  token == countsToken, self.epoch == epoch else { return }
+            var shown: [FilterValue: UInt64] = [:]
+            for (value, count) in zip(extra, extraCounts) {
+                if let count { shown[value] = count }
             }
-            tagNotes = byTag
+            valueCounts = shown
         }
     }
 

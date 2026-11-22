@@ -587,7 +587,14 @@ import Testing
     func notetypes() async throws -> [NotetypeName] { [NotetypeName(id: 8, name: "Basic"), NotetypeName(id: 7, name: "Vocabulary")] }
     func tagTree() async throws -> [TagNode] { tagNodes }
     func flagNames() async throws -> [String] { ["Red", "Orange", "Green", "Blue", "Pink", "Turquoise", "Purple"] }
+    /// The second read of a refresh, the values only the suggestions show
+    /// (U271): answered at once and kept apart from the sidebar's calls.
+    var suggestionCountCalls: [(BrowseMode, [FilterCountItem])] = []
     func counts(_ mode: BrowseMode, _ items: [FilterCountItem]) async throws -> [UInt64?] {
+        if items == BrowseModel.suggestedValues.map({ .value($0) }) {
+            suggestionCountCalls.append((mode, items))
+            return items.map { _ in 3 }
+        }
         let call = countCalls.count
         countCalls.append((mode, items))
         guard holdCounts else { return items.map { _ in 1 } }

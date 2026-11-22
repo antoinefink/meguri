@@ -125,7 +125,8 @@ import Testing
         let (model, core) = await makeModel()
         core.suggestionRows[.tags] = (0..<12).map { FilterSuggestion(section: .tags, row: .value(.tag("t\($0)")), key: nil) }
         model.activate(.tag("t0"))
-        await until { model.tokenOffers[.tag]?.count == 12 }
+        // The menu keeps the token's own values and 8 others, no more.
+        await until { model.tokenOffers[.tag]?.count == 9 }
         #expect(model.offeredValues(0) == (1...8).map { .tag("t\($0)") })
         let focus = model.focusRequests
         model.setFieldFocused(true)
@@ -205,13 +206,44 @@ import Testing
 
     @Test func filterByOpensAKindsValueListAndAddsWithoutDroppingText() async {
         let (model, core) = await makeModel()
-        type(model, "plimb")
+        // Filter By shows with the caret after White_Space: no word to drop.
+        type(model, "plimb ")
         model.setFieldFocused(true)
         model.accept(FilterSuggestion(section: .filterBy, row: .filterBy(.decks), key: nil))
         #expect(model.suggestionScope == .decks)
         await until { core.suggestionCalls.last?.2 == .decks }
         model.accept(FilterSuggestion(section: .decks, row: .value(Self.spanish), key: nil))
-        #expect(model.query == FilterQuery(tokens: [token(Self.spanish)], text: "plimb") && model.suggestionScope == nil)
+        #expect(model.query == FilterQuery(tokens: [token(Self.spanish)], text: "plimb ") && model.suggestionScope == nil)
+        // Show All from a typed word: the list is that word's, so the word goes.
+        type(model, "jap")
+        model.accept(FilterSuggestion(section: .decks, row: .showAll(.decks), key: nil))
+        model.accept(FilterSuggestion(section: .decks, row: .value(Self.japanese), key: nil))
+        #expect(model.query.text == "plimb ")
+    }
+
+    @Test func isEmptyAndHasContentDropTheWordThatFoundTheField() async {
+        let (model, _) = await makeModel()
+        type(model, "plimb vor")
+        model.accept(FilterSuggestion(section: .fields, row: .field(name: "Vorrel", notetypes: [8]), key: nil))
+        model.acceptFieldTest(.empty)
+        #expect(model.query == FilterQuery(tokens: [token(.field("Vorrel", .empty))], text: "plimb "))
+    }
+
+    @Test func containsAnswersEvenAfterTheFieldLostTheFocus() async {
+        let (model, _) = await makeModel()
+        model.setFieldFocused(true)
+        type(model, "back")
+        model.accept(FilterSuggestion(section: .fields, row: .field(name: "Back", notetypes: [8]), key: nil))
+        model.acceptFieldTest(.contains(""))
+        guard let editing = model.editingContains else {
+            Issue.record("Contains… did not ask for its text")
+            return
+        }
+        // The alert takes the focus, then clears its binding before its button runs.
+        model.setFieldFocused(false)
+        model.dismissContains()
+        model.finishContains(editing, "pear")
+        #expect(model.query.tokens == [token(.field("Back", .contains("pear")))] && model.query.text.isEmpty)
     }
 
     @Test func aFieldSuggestionsContainsTakesTheWordUnlessItIsTheFieldsName() async {
@@ -238,6 +270,14 @@ import Testing
         model.accept(FilterSuggestion(section: .decks, row: .value(Self.spanish), key: "deck:10"))
         model.setFieldFocused(true)
         await until { core.suggestionCalls.last?.3 == ["deck:10", "deck:20"] }
+    }
+
+    @Test func theSuggestionsOnlyValuesAreCountedAfterTheSidebars() async {
+        let (model, core) = await makeModel()
+        await until { model.valueCounts[.due(.overdue)] == 3 }
+        #expect(core.suggestionCountCalls.count == 1 && model.count(of: .added(.today)) == 3)
+        // The sidebar's own rows keep the sidebar's counts.
+        #expect(model.count(of: Self.spanish) == 1)
     }
 
     // MARK: T13

@@ -27,8 +27,9 @@ struct BrowseSearchField: ViewModifier {
                 SaveSearchSheet(model: model)
             }
             .alert(Text(verbatim: model.editingContains?.field ?? ""), isPresented: Binding(
-                get: { model.editingContains != nil }, set: { if !$0 { model.finishContains(nil) } })) {
-                ContainsPrompt(model: model)
+                get: { model.editingContains != nil }, set: { if !$0 { model.dismissContains() } }),
+                   presenting: model.editingContains) { editing in
+                ContainsPrompt(model: model, editing: editing)
             }
     }
 }
@@ -138,7 +139,6 @@ private struct BrowseTokenMenu: View {
 
     private var remove: some View {
         Button { model.removeToken(index) } label: { Text("browse.token.remove", bundle: .module) }
-            .keyboardShortcut(.delete, modifiers: [])
     }
 }
 
@@ -361,6 +361,11 @@ private struct SaveSearchSheet: View {
     @FocusState private var focused: Bool
 
     var body: some View {
+        // A stack of its own, so Save and Cancel show on touch as on the Mac.
+        NavigationStack { form }
+    }
+
+    private var form: some View {
         Form {
             TextField(text: $name) { Text("browse.saveSearch.name", bundle: .module) }
                 .focused($focused)
@@ -384,13 +389,13 @@ private struct SaveSearchSheet: View {
             }
         }
         .alert(Text(verbatim: BrowseStrings.replaceSavedSearch(model.savingSearch?.replacing ?? "")), isPresented: Binding(
-            get: { model.savingSearch?.replacing != nil }, set: { if !$0 { model.keepNaming() } })) {
+            get: { model.savingSearch?.replacing != nil }, set: { if !$0 { model.keepNaming() } }),
+               presenting: model.savingSearch?.replacing) { replacing in
             Button(role: .cancel) { model.keepNaming() } label: { Text("browse.saveSearch.cancel", bundle: .module) }
-            Button { model.saveSearch(named: model.savingSearch?.replacing ?? name) } label: {
+            Button { model.replaceSavedSearch(named: replacing) } label: {
                 Text("browse.saveSearch.replace", bundle: .module)
             }
         }
-        .frame(minWidth: 320)
         .onAppear {
             name = model.savingSearch?.name ?? ""
             focused = true
@@ -401,14 +406,15 @@ private struct SaveSearchSheet: View {
 /// Contains…'s text (T10): the field's name as the title, the text, OK and Cancel.
 private struct ContainsPrompt: View {
     let model: BrowseModel
+    let editing: EditingContains
     @State private var text = ""
 
     var body: some View {
         TextField(text: $text) { Text("browse.token.containsMenu", bundle: .module) }
-            .onAppear { text = model.editingContains?.text ?? "" }
+            .onAppear { text = editing.text }
             .accessibilityIdentifier("browse.search.contains.text")
-        Button(role: .cancel) { model.finishContains(nil) } label: { Text("browse.saveSearch.cancel", bundle: .module) }
-        Button { model.finishContains(text) } label: { Text("browse.search.contains.ok", bundle: .module) }
+        Button(role: .cancel) { model.dismissContains() } label: { Text("browse.saveSearch.cancel", bundle: .module) }
+        Button { model.finishContains(editing, text) } label: { Text("browse.search.contains.ok", bundle: .module) }
     }
 }
 

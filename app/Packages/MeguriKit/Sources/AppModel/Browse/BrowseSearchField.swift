@@ -41,6 +41,11 @@ public nonisolated struct SavingSearch: Hashable, Sendable {
     public internal(set) var saving = false
     /// The last write failed: the sheet keeps the name and says so.
     public internal(set) var failed = false
+
+    mutating func markFailed() {
+        saving = false
+        failed = true
+    }
 }
 
 /// Contains… asking for its text (T10): of the Field token at `token`, or
@@ -212,6 +217,8 @@ extension BrowseModel {
             let committed = (try? await backend.commit(query)) ?? query
             guard revision == queryRevision, self.epoch == epoch else { return }
             committedText = committed.text
+            // Nothing to read into tokens and already shown: no second run.
+            if committed == query, lastRun == query { return }
             setQuery(committed)
         }
     }
@@ -224,8 +231,12 @@ extension BrowseModel {
         if focused {
             refreshSuggestions()
         } else {
-            suggestionScope = nil
-            suggestedField = nil
+            // Contains… or Save Search took the focus: the Field suggestion
+            // they finish stays.
+            if editingContains == nil {
+                suggestionScope = nil
+                suggestedField = nil
+            }
             if !query.text.isEmpty { commitText() }
         }
     }
@@ -310,11 +321,12 @@ extension BrowseModel {
 
     /// A value from the suggestions or a value list: added to its kind's
     /// token (T8: never a second token of a kind), the typed word gone.
+    /// The typed word goes in a value list too: the core filters that list
+    /// by it. Accepting is a commit (T8): syntax left in the text reads now.
     private func add(_ value: FilterValue) {
-        let scoped = suggestionScope != nil
         leaveLists()
-        let base = scoped ? query : query.droppingWord()
-        setQuery(base.adding(value))
+        setQuery(query.droppingWord().adding(value))
+        if !query.text.isEmpty { commitText() }
     }
 
     private func leaveLists() {
@@ -334,9 +346,9 @@ extension BrowseModel {
             setQuery(query.droppingWord().adding(.field(field.name, .contains(text))))
             return
         }
+        // The word found the field; only Contains… takes it as its text (T12.1).
         suggestedField = nil
-        let base = field.containsText == nil ? query.droppingWord() : query
-        setQuery(base.adding(.field(field.name, test)))
+        setQuery(query.droppingWord().adding(.field(field.name, test)))
     }
 
     /// D6: a syntax candidate's text put in place; one that completes commits.
@@ -392,18 +404,23 @@ extension BrowseModel {
         offersToken &+= 1
         let kinds = Set(query.tokens.compactMap { $0.kind }.filter { $0.section != nil && !$0.isField })
         guard ready(), !kinds.isEmpty else { return }
-        let token = offersToken, epoch = epoch, backend = backend
+        let token = offersToken, epoch = epoch, backend = backend, recent = device.recentSuggestions ?? []
+        // A menu shows the token's own values and 8 others: no more are kept.
+        let needed = Dictionary(query.tokens.compactMap { token -> (FilterKind, Int)? in
+            guard case .value(let values, _) = token, let kind = token.kind else { return nil }
+            return (kind, values.count + Self.offeredValues)
+        }, uniquingKeysWith: max)
         Task {
             var offers: [FilterKind: [FilterValue]] = [:]
             for kind in kinds {
                 guard let section = kind.section,
-                      let rows = try? await backend.suggestions(for: FilterQuery(), caret: 0, scope: section, recent: []) else { continue }
-                offers[kind] = rows.compactMap { row in
+                      let rows = try? await backend.suggestions(for: FilterQuery(), caret: 0, scope: section, recent: recent) else { continue }
+                offers[kind] = Array(rows.lazy.compactMap { row -> FilterValue? in
                     switch row.row {
                     case .value(let value), .cardType(let value, _): value
                     default: nil
                     }
-                }
+                }.prefix(needed[kind] ?? Self.offeredValues))
             }
             guard token == offersToken, self.epoch == epoch else { return }
             tokenOffers = offers
@@ -495,6 +512,17 @@ extension BrowseModel {
     /// empty text changes nothing (T3.1 refuses it).
     public func finishContains(_ text: String?) {
         guard let editing = editingContains else { return }
+        finishContains(editing, text)
+    }
+
+    /// Contains… dismissed without an answer.
+    public func dismissContains() {
+        editingContains = nil
+    }
+
+    /// Contains…'s answer for the question `editing` asked (the alert hands
+    /// it back, whatever order it clears its binding in).
+    public func finishContains(_ editing: EditingContains, _ text: String?) {
         editingContains = nil
         guard let text, !text.isEmpty else { return }
         let value = FilterValue.field(editing.field, .contains(text))
@@ -562,6 +590,12 @@ extension BrowseModel {
 
     public func cancelSavingSearch() {
         savingSearch = nil
+    }
+
+    /// The replace question's Replace: `name` saved over the one there.
+    public func replaceSavedSearch(named name: String) {
+        savingSearch = SavingSearch(name: name, replacing: name)
+        saveSearch(named: name)
     }
 
     /// The replace question's Cancel: back to the name, to choose another.
