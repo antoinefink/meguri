@@ -158,6 +158,12 @@ harness = false
 name = "stats_columns_build"
 harness = false
 
+# U101's card records (the present tier): one request naming the seven card
+# graphs, and Retrievability alone.
+[[bench]]
+name = "stats_present"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]
