@@ -843,12 +843,14 @@ extension NoteTypesModelTests {
         model.selection = 9
         #expect(model.shownSelection == 7, "the shown note type stays while 9 is read")
         var checks = 0
-        while model.shownSelection != 9 {
+        while model.shownSelection != 9, checks < 400 {
             let shown = try #require(model.shownSelection)
             #expect(model.draft(shown) != nil, "never an empty detail")
+            #expect(!model.editable(shown) || shown == 9, "the stand-in takes no edits")
             checks += 1
             try await Task.sleep(for: .milliseconds(5))
         }
+        #expect(model.shownSelection == 9, "the swap happened")
         #expect(checks > 1, "the read was in flight")
         #expect(model.draft(9) != nil, "the detail swaps to 9 in one step, drawn")
     }
@@ -896,6 +898,21 @@ extension NoteTypesModelTests {
         model.changesCommitted(.notetypes([9]))
         await model.settle()
         #expect(model.records[9] == nil, "the version read before the change is never kept")
+    }
+
+    @Test func aNewerReadAheadKeepsItsEntryWhenAnOlderOneEnds() async throws {
+        let backend = FakeNoteTypesBackend()
+        backend.records[9] = NoteTypeCardsTests.record()
+        let (model, _) = await open(backend)
+        backend.readWait = .milliseconds(60)
+        model.warm(9)
+        model.changesCommitted(.notetypes([9]))  // cancels the first read
+        try await Task.sleep(for: .milliseconds(10))
+        model.warm(9)  // its replacement, still in flight when the first one ends
+        try await Task.sleep(for: .milliseconds(55))
+        model.changesCommitted(.notetypes([9]))  // must still find and cancel the replacement
+        await model.settle()
+        #expect(model.records[9] == nil, "no version from before the second change is kept")
     }
 
     @Test func aRenameBegunOnTheShownNoteTypeEndsWhenTheDetailSwaps() async throws {

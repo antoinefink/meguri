@@ -423,6 +423,19 @@ struct TemplateCodeEditor: NSViewRepresentable {
 /// 2026-11-22) and so covered the lines above and below.
 final class ColourSwatch: NSControl {
     var color: NSColor = .clear { didSet { needsDisplay = true } }
+    /// The swatch the colour panel sends its changes to, while one is.
+    private static weak var bound: ColourSwatch?
+
+    /// A swatch disabled (its value moved or went) lets the panel go: a later
+    /// change never lands on the value it is given next.
+    override var isEnabled: Bool {
+        didSet {
+            guard !isEnabled, Self.bound === self else { return }
+            NSColorPanel.shared.setTarget(nil)
+            NSColorPanel.shared.setAction(nil)
+            Self.bound = nil
+        }
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -462,11 +475,12 @@ final class ColourSwatch: NSControl {
         panel.color = color
         panel.setTarget(self)
         panel.setAction(#selector(panelChanged(_:)))
+        Self.bound = self
         panel.orderFront(nil)
     }
 
     @objc private func panelChanged(_ panel: NSColorPanel) {
-        guard isEnabled else { return }
+        guard isEnabled, Self.bound === self else { return }
         color = panel.color
         sendAction(action, to: target)
     }
@@ -715,7 +729,11 @@ struct TemplateCodeEditor: UIViewRepresentable {
             recolour()
         }
 
-        func textViewDidChange(_ textView: UITextView) {
+        func textViewDidChange(_ textView: UITextView) { publish(textView) }
+
+        /// The text as it now stands goes to the draft. Typing reaches it through
+        /// the delegate; an edit made in code (a fix, Insert, Flip) through `perform`.
+        private func publish(_ textView: UITextView) {
             if let key { historyText[key.history] = textView.text }
             if !applyingSwatch { swatches.forEach { $0.isEnabled = false } }
             parent?.onChange(textView.text)
@@ -760,6 +778,7 @@ struct TemplateCodeEditor: UIViewRepresentable {
                   let end = textView.position(from: textView.beginningOfDocument, offset: edit.range.upperBound),
                   let range = textView.textRange(from: start, to: end) else { return }
             textView.replace(range, withText: edit.text)
+            publish(textView)
             textView.selectedRange = NSRange(location: edit.caret, length: 0)
             textView.scrollRangeToVisible(textView.selectedRange)
         }

@@ -144,7 +144,8 @@ public final class NoteTypesModel {
     @ObservationIgnored private var summaryTasks: [Int64: Task<Void, Never>] = [:]
     @ObservationIgnored private var detailTasks: [Int64: Task<Void, Never>] = [:]
     /// Records read ahead (`warm`) that are still in flight.
-    @ObservationIgnored private var warming: Set<Int64> = []
+    @ObservationIgnored private var warming: [Int64: UInt64] = [:]
+    @ObservationIgnored private var warmToken: UInt64 = 0
     /// Note types whose detail loaded (counts, issues, references) because
     /// they were selected; a record only read ahead is not among them, and
     /// changes elsewhere read nothing more for it.
@@ -327,9 +328,12 @@ public final class NoteTypesModel {
         // Not while its record is read already (a load in flight).
         guard records[id] == nil, detailTasks[id] == nil, !recordFailed.contains(id) else { return }
         let epoch = epoch
-        warming.insert(id)
+        warmToken &+= 1
+        let token = warmToken
+        warming[id] = token
         detailTasks[id] = Task {
-            defer { if self.epoch == epoch { warming.remove(id) } }
+            // Only the read that still owns the entry clears it: a newer one may have replaced it.
+            defer { if warming[id] == token { warming[id] = nil } }
             do {
                 let record = try await backend.read(id)
                 guard !Task.isCancelled, self.epoch == epoch, records[id] == nil else { return }
@@ -358,7 +362,7 @@ public final class NoteTypesModel {
         // Notes changed since W8 was read: it reads again when the note type shows.
         if !force, records[id] != nil, blankKeys[id] == nil { refreshIssues(id, immediately: true) }
         // A read ahead in flight finishes the load itself (`warm`).
-        if !force, warming.contains(id) { return }
+        if !force, warming[id] != nil { return }
         guard force || records[id] == nil || recordFailed.contains(id) else { return }
         detailTasks[id]?.cancel()
         recordFailed.remove(id)
@@ -453,6 +457,8 @@ public final class NoteTypesModel {
     /// Editing stops while a save prepares or runs (D5 step 5).
     public func editable(_ id: Int64) -> Bool {
         progress?.notetypeId != id && preparing != id && !(question?.notetypeId == id) && rereading[id] == nil
+            // The note type shown in the selected one's place for a moment takes no edits.
+            && !(shownSelection != selection && id == shownSelection)
     }
 
     // MARK: Editing (W3, W4)
@@ -1141,14 +1147,14 @@ public final class NoteTypesModel {
         }
         // A read ahead still in flight may hold the version from before the change:
         // it is dropped, and read again at once if its note type is selected.
-        for id in Array(warming) where changes.wholeCollection || changes.notetypes.contains(where: { $0.id == id }) {
+        for id in Array(warming.keys) where changes.wholeCollection || changes.notetypes.contains(where: { $0.id == id }) {
             detailTasks[id]?.cancel()
             detailTasks[id] = nil
-            warming.remove(id)
+            warming[id] = nil
             if selection == id { loadDetail(id) }
         }
         // A record only read ahead goes, to be read again when it is needed.
-        for id in records.keys where !loaded.contains(id) && !warming.contains(id)
+        for id in records.keys where !loaded.contains(id) && warming[id] == nil
             && (changes.wholeCollection || changes.notetypes.contains(where: { $0.id == id })) {
             records[id] = nil
             detailTasks[id] = nil
@@ -1210,7 +1216,7 @@ public final class NoteTypesModel {
         for task in blankTasks.values { task.cancel() }
         for task in referencesTask.values { task.cancel() }
         referencesTask = [:]
-        summaryTasks = [:]; detailTasks = [:]; warming = []; loaded = []; countTasks = [:]; fieldCountsBase = [:]; renameTokens = [:]
+        summaryTasks = [:]; detailTasks = [:]; warming = [:]; loaded = []; countTasks = [:]; fieldCountsBase = [:]; renameTokens = [:]
         issueTasks = [:]; blankTasks = [:]; blankKeys = [:]; cardCountsBase = [:]
         selectedCard = [:]; renamingCard = nil; templateCardCounts = [:]; issueReads = [:]; blankReads = [:]; editorRequest = nil
         flipRefused = false
