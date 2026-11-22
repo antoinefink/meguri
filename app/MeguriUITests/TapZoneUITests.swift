@@ -109,7 +109,7 @@ final class TapZoneUITests: XCTestCase {
     /// A margin above the answer area's buttons (its padding there is 12 pt).
     private static let answerAreaPadding: CGFloat = 16
 
-    func testATapBesideTheAnswerButtonsDoesNothing() throws {
+    func testATapBesideShowAnswerDoesNothing() throws {
         let app = try launch()
         let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
             "home.deck.row.", "Tap Zones")).firstMatch
@@ -125,18 +125,11 @@ final class TapZoneUITests: XCTestCase {
         app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: max(8, reveal.minX / 2), dy: reveal.midY)).tap()
         XCTAssertFalse(waitForAnswer(app, timeout: 2), "A tap beside Show Answer does not reveal")
-        tap(card, x: 0.5)
-        XCTAssertTrue(waitForAnswer(app))
-        // Level with the buttons, left of Again in the area's padding: the
-        // card shows there under the answer area, but a tap is never a grade.
-        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-        let again = element(app, "review.session.rate.again").frame, good = element(app, "review.session.rate.good").frame
-        let gapPoint = CGPoint(x: max(4, again.minX / 2), y: good.midY)
-        app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: gapPoint.x, dy: gapPoint.y)).tap()
-        XCTAssertFalse(waitForAnswered(app, 1, timeout: 2), "A tap beside the buttons does not answer")
-        XCTAssertTrue(isAnswer(app))
-        capture(app, "09-answer-after-tap-beside-buttons")
+        capture(app, "09-question-after-tap-beside-show-answer")
+        // On the answer side the four buttons fill the row: the system's own
+        // hit regions of those buttons reach into the area's padding, so a tap
+        // level with them belongs to the nearest button. The tap-zone rule
+        // for the area is in ReviewTapDecisionTests.
     }
 
     private func isAnswer(_ app: XCUIApplication) -> Bool {

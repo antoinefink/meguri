@@ -86,7 +86,8 @@ final class AnswerBarUITests: XCTestCase {
         XCTAssertTrue((8...14).contains(gap), "Answers to the progress bar's bottom: \(gap) pt (\(good.frame), \(progress.frame))")
         // Above the home indicator, never under it.
         let window = app.windows.firstMatch.frame
-        XCTAssertLessThan(progress.frame.maxY, window.maxY, "The progress bar keeps the bottom safe area")
+        // Every pool device has a home indicator, whose safe area is at least 20 pt.
+        XCTAssertLessThanOrEqual(progress.frame.maxY, window.maxY - 20, "The progress bar keeps the bottom safe area")
     }
 
     private func scrollToLastLine(_ app: XCUIApplication, _ card: XCUIElement) throws {
