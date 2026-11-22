@@ -674,7 +674,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     for e in texts:
         window = e.window()
         # A search field's tokens scroll inside it, as a scroll view's rows do.
-        if window is None or e.under(SCROLLING | {"searchField"}):
+        if window is None or e.under(SCROLLING) or any(a.type == "searchField" for a in e.ancestors):
             continue
         t = EDGE_TOLERANCE
         inside = (e.x >= window.x - t and e.y >= window.y - t and

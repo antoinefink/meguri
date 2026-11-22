@@ -124,6 +124,7 @@ public final class BrowseModel {
     @ObservationIgnored var liveRun: Task<Void, Never>?
     /// The query the results last ran.
     @ObservationIgnored var lastRun: FilterQuery?
+    @ObservationIgnored var savingPresentations: UInt64 = 0
     /// The text a commit left, which D5's incomplete rule no longer holds (T8).
     @ObservationIgnored var committedText: String?
 
@@ -571,12 +572,17 @@ public final class BrowseModel {
                 }
                 tagNotes = byTag
             }
-            readsPending = false
             // Then the values only the suggestions show, after the sidebar's own,
             // so their slower day searches never hold the sidebar back.
             let extra = Self.suggestedValues
-            guard let extraCounts = try? await backend.counts(mode, extra.map { .value($0) }), !Task.isCancelled,
-                  token == countsToken, self.epoch == epoch else { return }
+            let extraCounts: [UInt64?]
+            do { extraCounts = try await backend.counts(mode, extra.map { .value($0) }) } catch {
+                // Read again on the next appear or change; the sidebar's counts stay.
+                if token == countsToken, self.epoch == epoch { stale = true }
+                return
+            }
+            guard !Task.isCancelled, token == countsToken, self.epoch == epoch else { return }
+            readsPending = false
             var shown: [FilterValue: UInt64] = [:]
             for (value, count) in zip(extra, extraCounts) {
                 if let count { shown[value] = count }

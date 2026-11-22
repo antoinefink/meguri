@@ -35,6 +35,8 @@ public nonisolated struct SuggestedField: Hashable, Sendable {
 /// whether to replace it.
 public nonisolated struct SavingSearch: Hashable, Sendable {
     public var name = ""
+    /// Which presentation this is: a write lands only on the one that started it.
+    public internal(set) var id: UInt64 = 0
     /// The name the question asks about ("A saved search named … already exists").
     public internal(set) var replacing: String?
     /// The write is on its way: the sheet stays until it lands.
@@ -218,7 +220,7 @@ extension BrowseModel {
             guard revision == queryRevision, self.epoch == epoch else { return }
             committedText = committed.text
             // Nothing to read into tokens and already shown: no second run.
-            if committed == query, lastRun == query { return }
+            if committed == query, lastRun == query, !results.isDimmed, !results.failed { return }
             setQuery(committed)
         }
     }
@@ -555,7 +557,8 @@ extension BrowseModel {
     /// Save Search…: asks for a name.
     public func startSavingSearch() {
         guard !query.isEmpty else { return }
-        savingSearch = SavingSearch()
+        savingPresentations &+= 1
+        savingSearch = SavingSearch(id: savingPresentations)
     }
 
     /// The name given: a name already saved asks whether to replace it
@@ -567,23 +570,26 @@ extension BrowseModel {
             savingSearch = nil
             return
         }
+        let presentation = savingSearch?.id ?? 0
         if savedSearches.contains(where: { $0.name == name }), savingSearch?.replacing != name {
-            savingSearch = SavingSearch(name: name, replacing: name)
+            savingSearch = SavingSearch(name: name, id: presentation, replacing: name)
             return
         }
         // The sheet stays, with its name, until the write lands; a failed
         // write says so and keeps the name for another try.
-        savingSearch = SavingSearch(name: name, replacing: nil, saving: true, failed: false)
+        savingSearch = SavingSearch(name: name, id: presentation, replacing: nil, saving: true, failed: false)
         let query = query, backend = backend, epoch = epoch
+        // Lands only on the presentation that started it, while it still waits.
+        func current() -> Bool { self.epoch == epoch && savingSearch?.id == presentation && savingSearch?.saving == true }
         Task {
             do {
                 let text = try await backend.runText(query)
                 try await backend.saveSearch(name: name, text: text)
-                guard self.epoch == epoch, savingSearch?.saving == true else { return }
+                guard current() else { return }
                 savingSearch = nil
             } catch {
-                guard self.epoch == epoch, savingSearch?.saving == true else { return }
-                savingSearch = SavingSearch(name: name, replacing: nil, saving: false, failed: true)
+                guard current() else { return }
+                savingSearch?.markFailed()
             }
         }
     }
@@ -594,7 +600,7 @@ extension BrowseModel {
 
     /// The replace question's Replace: `name` saved over the one there.
     public func replaceSavedSearch(named name: String) {
-        savingSearch = SavingSearch(name: name, replacing: name)
+        savingSearch = SavingSearch(name: name, id: savingSearch?.id ?? 0, replacing: name)
         saveSearch(named: name)
     }
 

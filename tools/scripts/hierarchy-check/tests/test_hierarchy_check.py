@@ -1249,7 +1249,8 @@ class NativeToolbarSearchField(unittest.TestCase):
         buttons = [el("button", label="Search", f=(950, 38, 29, 36)), el("button", label="cancel", f=(1236, 38, 36, 36))]
         tokens = [el("textField", f=(976, 48, 186, 16)), el("textField", f=(1162, 48, 186, 16))]
         field = el("searchField", f=(946, 37, 327, 38), children=children if children is not None else buttons + tokens)
-        tree = doc(el("toolbar", f=(0, 30, 1280, 52), children=[el("group", group_id, f=(947, 30, 329, 52), children=[field])]))
+        tree = doc(el("toolbar", f=(0, 30, 1280, 52), children=[el("group", group_id, f=(947, 30, 329, 52), children=[field])]),
+                   window=(0, 0, 1280, 800))
         tree["platform"] = platform
         return tree
 
@@ -1261,6 +1262,12 @@ class NativeToolbarSearchField(unittest.TestCase):
         self.assertIn("missing-identifier",
                       kinds(hierarchy_check.check(self.tree([el("button", label="Delete", f=(950, 38, 29, 36))]))))
         self.assertIn("missing-identifier", kinds(hierarchy_check.check(self.tree(platform="ios"))))
+        # The field itself still must sit inside its window; only its tokens scroll.
+        field = el("searchField", f=(1200, 37, 327, 38), children=[el("button", label="Search", f=(1204, 38, 29, 36))])
+        outside = doc(el("toolbar", f=(0, 30, 1280, 52), children=[el("group", f=(1200, 30, 329, 52), children=[field])]),
+                      window=(0, 0, 1280, 800))
+        outside["platform"] = "mac"
+        self.assertIn("text-outside-window", kinds(hierarchy_check.check(outside)))
 
 
 class NativeTableCellsAndSegments(unittest.TestCase):
