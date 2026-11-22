@@ -5097,7 +5097,19 @@ extension SyncCoordinator: NoteTypesMeguriSync {
         guard let value = try? await jobs.structureUploadPending(), generation == expected, hostRevision == revision else { return nil }
         let withdrawn = meguriStructureUploadPending && !value
         meguriStructureUploadPending = value
-        if withdrawn, meguriStructureStage == nil { requestMeguriWake(automatic: true) }
+        if withdrawn, meguriStructureStage == nil {
+            if !meguriReady, let facade = meguriBootstrap, let owner = meguriConnectionOwner {
+                // The upload had held the binding: read it again, so a binding the
+                // core gave back is ready before the next round is asked for.
+                let expected = generation, revision = hostRevision
+                Task {
+                    try? await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+                    requestMeguriWake(automatic: true)
+                }
+            } else {
+                requestMeguriWake(automatic: true)
+            }
+        }
         return value
     }
 

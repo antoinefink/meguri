@@ -267,6 +267,9 @@ private let draft = NotetypeStructureDraft(notetypeId: 7, base: [1], name: "Samp
         #expect(SyncKinds.meguriRow(MeguriKindFacts(stage: .required, structureUploadPending: true)).action == .meguriUploadStructure)
         #expect(MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: .required, routine: nil,
                                              structureUploadPending: true).needsUser)
+        // There, a sign-in the server refused during the upload is asked for first.
+        #expect(SyncKinds.meguriRow(MeguriKindFacts(stage: .required, routine: .authentication, structureUploadPending: true)).action
+            == .meguriSignIn)
         // A setup step (the collection choice after Upload…) comes before the line.
         #expect(SyncKinds.meguriRow(MeguriKindFacts(stage: .failed, failureKey: MeguriSetupSequence.fullSyncKey,
                                                     structureUploadPending: true)).action == .chooseCollection)
