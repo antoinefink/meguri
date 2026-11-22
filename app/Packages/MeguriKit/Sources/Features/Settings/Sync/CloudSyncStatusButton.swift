@@ -162,8 +162,8 @@ public struct CloudSyncStatusButton: View {
 #if os(iOS)
 extension CloudSyncStatusButton {
     /// The panel laid out where its sheet would show it, hidden, so the sheet's
-    /// one detent is known before the sheet opens. Width and insets come from the
-    /// last sheet shown, or before the first from the window.
+    /// one detent is known before the sheet opens. Its width comes from the last
+    /// sheet shown, or before the first from the window.
     @ViewBuilder fileprivate var sheetMeasure: some View {
         let kind: SheetMetrics.Kind? = compact ? .sheet
             : UIDevice.current.userInterfaceIdiom == .phone ? .popover : nil
@@ -175,8 +175,7 @@ extension CloudSyncStatusButton {
                 .hidden()
                 .accessibilityHidden(true)
                 .allowsHitTesting(false)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panel in
-                    let needed = panel + SheetMetrics.insets(kind)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { needed in
                     switch kind {
                     case .sheet: sheetHeight = needed
                     case .popover: popoverHeight = needed
@@ -186,17 +185,13 @@ extension CloudSyncStatusButton {
     }
 }
 
-/// What a sheet on an iPhone-class screen gives the panel: its width and the
-/// insets around it, learned from the last sheet shown.
+/// The width a sheet on an iPhone-class screen gives the panel, learned from
+/// the last sheet shown.
 @MainActor enum SheetMetrics {
     enum Kind { case sheet, popover }
     private static var widths: [Kind: CGFloat] = [:]
-    private static var learnedInsets: [Kind: CGFloat] = [:]
 
-    static func learn(_ kind: Kind, width: CGFloat, insets: CGFloat) {
-        widths[kind] = width
-        learnedInsets[kind] = insets
-    }
+    static func learn(_ kind: Kind, width: CGFloat) { widths[kind] = width }
 
     /// Before the first sheet: the window's width less the floating sheet's
     /// margins; the popover's sheet keeps the popover's width.
@@ -208,33 +203,28 @@ extension CloudSyncStatusButton {
         }
     }
 
-    static func insets(_ kind: Kind) -> CGFloat {
-        learnedInsets[kind] ?? keyWindow?.safeAreaInsets.bottom ?? 0
-    }
-
     private static var keyWindow: UIWindow? {
         UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows).first(where: \.isKeyWindow)
     }
 }
 
-/// The panel in a scroll view that reports the height it needs, its insets
-/// included (the sheet's safe area), so a sheet can be exactly that tall. It
-/// also records the sheet's width and insets for the next measurement.
+/// The panel in a scroll view that reports its height, so a sheet can be
+/// exactly that tall (a height detent keeps the sheet's own safe area). It
+/// also records the sheet's width for the next measurement.
 private struct FittedPanelScroll<Content: View>: View {
     @Binding var height: CGFloat?
     let learns: SheetMetrics.Kind
     @ViewBuilder let content: () -> Content
-    private struct Fit: Equatable { var needed, width, insets: CGFloat }
+    private struct Fit: Equatable { var needed, width: CGFloat }
     var body: some View {
         ScrollView { content() }
             .scrollBounceBehavior(.basedOnSize)
             .onScrollGeometryChange(for: Fit.self) { geometry in
-                let insets = geometry.contentInsets.top + geometry.contentInsets.bottom
-                return Fit(needed: geometry.contentSize.height + insets, width: geometry.containerSize.width, insets: insets)
+                Fit(needed: geometry.contentSize.height, width: geometry.containerSize.width)
             } action: { _, fit in
                 guard fit.needed > 0 else { return }
-                SheetMetrics.learn(learns, width: fit.width, insets: fit.insets)
+                SheetMetrics.learn(learns, width: fit.width)
                 height = fit.needed
             }
     }
