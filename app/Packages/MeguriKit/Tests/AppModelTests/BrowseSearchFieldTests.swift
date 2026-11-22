@@ -280,6 +280,27 @@ import Testing
         #expect(model.count(of: Self.spanish) == 1)
     }
 
+    @Test func theTextSurvivesTheFieldEmptyingItWhenItTakesASuggestion() async {
+        let (model, core) = await makeModel()
+        let contains = FilterSuggestion(section: nil, row: .contains("plimb"), key: nil)
+        // The field empties the text, then hands over the suggestion.
+        type(model, "plimb")
+        model.editText("")
+        model.setFieldTokens(model.fieldTokens + [.suggestion(contains)])
+        #expect(model.query.text == "plimb")
+        await until { core.commits.last?.text == "plimb" }
+        // The other order: the suggestion first, then the emptied text.
+        await until { !model.acceptedThisTurn && model.clearedThisTurn == nil }
+        type(model, " zindro")
+        model.setFieldTokens(model.fieldTokens + [.suggestion(FilterSuggestion(section: nil, row: .contains("zindro"), key: nil))])
+        model.editText("")
+        #expect(model.query.text == "plimb zindro")
+        // A clear of its own, later, still empties it.
+        await until { !model.acceptedThisTurn }
+        model.editText("")
+        #expect(model.query.text.isEmpty)
+    }
+
     // MARK: T13
 
     @Test func saveSearchStoresTheRunTextAndAsksBeforeReplacing() async {

@@ -155,6 +155,15 @@ extension BrowseModel {
             case .fieldTest(let test): tests.append(test)
             }
         }
+        if !accepted.isEmpty || !tests.isEmpty {
+            // The field emptied the text first: it comes back before the row is accepted.
+            if query.text.isEmpty, let cleared = clearedThisTurn {
+                queryRevision &+= 1
+                query.text = cleared
+            }
+            acceptedThisTurn = true
+            Task { acceptedThisTurn = false }
+        }
         if kept != query.tokens {
             pendingSearch = nil
             setQuery(FilterQuery(tokens: kept, text: query.text))
@@ -175,6 +184,12 @@ extension BrowseModel {
     private func edit(_ text: String, pasteCommits: Bool) {
         guard text != query.text else { return }
         let before = query.text
+        if text.isEmpty, !before.isEmpty {
+            // The field emptying its text after it took a suggestion: the text stays.
+            if acceptedThisTurn { return }
+            clearedThisTurn = before
+            Task { clearedThisTurn = nil }
+        }
         pendingSearch = nil
         queryRevision &+= 1
         query.text = text

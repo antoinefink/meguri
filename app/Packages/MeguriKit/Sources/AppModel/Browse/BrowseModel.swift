@@ -124,6 +124,11 @@ public final class BrowseModel {
     @ObservationIgnored var liveRun: Task<Void, Never>?
     /// The query the results last ran.
     @ObservationIgnored var lastRun: FilterQuery?
+    /// The system's field empties its text when it takes a suggestion as a
+    /// token: the text an emptying edit replaced in this turn, and whether a
+    /// suggestion arrived in it, so the typed text survives either order.
+    @ObservationIgnored var clearedThisTurn: String?
+    @ObservationIgnored var acceptedThisTurn = false
     @ObservationIgnored var savingPresentations: UInt64 = 0
     /// The text a commit left, which D5's incomplete rule no longer holds (T8).
     @ObservationIgnored var committedText: String?
