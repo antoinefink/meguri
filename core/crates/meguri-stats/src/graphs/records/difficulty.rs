@@ -155,13 +155,9 @@ mod tests {
     #[test]
     fn c8_2_distinct_value_counts_match_a_sort_of_every_value() {
         // A deterministic spread with many repeats and both infinities.
-        let mut seed = 0x2545_f491_u32;
-        let mut next = || {
-            seed ^= seed << 13;
-            seed ^= seed >> 17;
-            seed ^= seed << 5;
-            seed
-        };
+        use meguri_model::rng::{RandomSource, SeededRandom};
+        let random = SeededRandom::new(7);
+        let next = || random.next_u64();
         for len in 0..60usize {
             let values: Vec<f32> = (0..len)
                 .map(|_| match next() % 50 {
