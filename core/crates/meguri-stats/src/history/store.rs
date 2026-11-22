@@ -965,14 +965,11 @@ fn add_sums(tables: &ComponentTables<'_>, sums: &Sums) -> Result<(), EngineError
              studied = studied + excluded.studied"
         ))
         .map_err(sql)?;
-    let mut drop = conn
-        .prepare_cached(&format!(
-            "DELETE FROM \"{samples}\" WHERE did = ?1 AND odid = ?2 AND day = ?3 AND recall = 0 AND studied = 0"
-        ))
-        .map_err(sql)?;
+    // A sample brought to nothing stays as a zero row, which reads as no
+    // row does: an update then costs one statement per sample, and the
+    // next build drops them.
     for ((key, day), values) in &sums.knowledge {
         add.execute([key.did, key.odid, *day, values[0], values[1]]).map_err(sql)?;
-        drop.execute((key.did, key.odid, day)).map_err(sql)?;
     }
     Ok(())
 }
@@ -1456,10 +1453,13 @@ pub(crate) fn visit_kept_now(
     cancel: &dyn Fn() -> bool,
     each: &mut dyn FnMut(&NowInputs),
 ) -> Result<(), StorageError> {
-    snapshot.visit_derived(
+    // Only the records today's point can count: a suspended card, or one
+    // with no item and no failure, adds nothing.
+    snapshot.visit_derived_where(
         HISTORY_COMPONENT,
         CARDS,
         "did, odid, suspended, preset, cut_code, cut_s, cut_d, cut_l, free_code, free_s, free_d, free_l, id, failed_at, newest_row",
+        "suspended = 0 AND (cut_code != 0 OR free_code != 0 OR failed_at IS NOT NULL)",
         cancel,
         &mut |cells| {
             let (Some(did), Some(odid), Some(id)) = (integer(cells, 0), integer(cells, 1), integer(cells, 12)) else {
