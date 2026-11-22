@@ -1046,7 +1046,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` ro
 - View › Note Types ⇧⌘T; File › New Note Type… (no key). ⇧⌘N stays New Deck…. R282's and R915's ⇧⌘N for Note Types are superseded.
 - iPhone and the Duo folded: Settings › Collection › Note Types and the Filters menu of Browse push the list; no tab.
 - Under about 1,100 points the sidebar hides itself while the Cards tab shows, as Mail and Xcode do with their navigators.
-- Nothing flashes (added 2026-11-22, after Antoine's report from the Mac app; decided by Claude (coordinator) under his delegation): choosing another note type keeps the shown one on screen until the new one's fields can draw, then the detail changes in one step; the title changes at once. A wait longer than about half a second shows a progress indicator over the old content, never an empty page. After Save or Reload the version shown stays, read-only, until the note type is read again. The rows beside the selection, and on iPad the rows on screen, are read ahead with pure reads. The issues list says "No issues" only once its reads have answered.
+- Nothing flashes (added 2026-11-22, after Antoine's report from the Mac app; decided by Claude (coordinator) under his delegation): choosing another note type keeps the shown one on screen until the new one's fields can draw, then the detail changes in one step. The Mac's title and its "n notes · c cards" subtitle change together once the new note type's counts are read (they are read ahead with the record), so the subtitle never empties. A wait longer than about half a second shows a progress indicator over the old content, never an empty page. After Save or Reload the version shown stays, read-only, until the note type is read again. The rows beside the selection, and on iPad the rows on screen, are read ahead with pure reads. The issues list says "No issues" only once its reads have answered.
 - Changed 2026-11-22 (U281 iPad): on iPad the note type list is the section's root (large title, the system search field as its filter) and a note type opens as a navigation step with its own page (N22.7), instead of the list beside the detail. Accepted by Claude (coordinator) under Antoine's delegation, after the built app was compared in landscape and portrait.
 
 ### N22.2 Fields tab (2B)
@@ -1081,7 +1081,7 @@ Changed 2026-11-22 (Antoine's feedback on the captures of PR #112: on Mac "I can
 
 - While a save job runs (once it has run for half a second, D5 step 5), the toolbar shows one status item in place of Revert and Save: a small system progress indicator and the stage text ("Syncing…", "Updating 212 of 412 notes", "Uploading…"; "Saving…" until the first count arrives), with no glass of its own. Its width is the widest text the job can show, with monospaced digits, so the toolbar does not move as the text changes. Revert and Save are not shown until the job ends; the note type stays locked (W3).
 - No disabled prominent button: Revert and Save are one toolbar group in the standard style, and Save is not prominent, since it is disabled until there is a draft.
-- iPad: Fields | Cards and Save are separate items with their own glass shapes; the job's status sits in the bottom toolbar's status place, as Mail's does, so nothing wide sits in the navigation bar beside the tabs at any width. At compact width (the iPhone and the Duo folded, where the tab bar takes the bottom bar's middle), the spinner takes Save's place and the stage text takes the subtitle's place under the note type's name.
+- iPad: Fields | Cards, the sync status (N23.6) and Save are separate items with their own glass shapes, in that order at the trailing end (on the Mac the order is the sync status, Revert and Save, then the inspector's toggle); the list of note types has the sync status in its own trailing place; the job's status sits in the bottom toolbar's status place, as Mail's does, so nothing wide sits in the navigation bar beside the tabs at any width. At compact width (the iPhone and the Duo folded, where the tab bar takes the bottom bar's middle), the spinner takes Save's place and the stage text takes the subtitle's place under the note type's name.
 - This replaces the earlier toolbar, where the progress, Revert and a tinted Save were three separate shapes and, on iPad, the progress overlapped the tabs.
 
 ### N22.6 New and Duplicate (7B)
@@ -1385,7 +1385,7 @@ From Antoine's annotations on a capture of his opened iPhone Duo (`decisions.md`
 
 ### N26.3 Top destinations and the decks
 
-- Built (variant A, chosen): Today is a section of its own, then the decks in a section with the system header "Decks", as the iPad sidebar has (N14.6). The column's large title, which would repeat "Decks", is "Meguri", as Music's and Podcasts' sidebars carry the app's name over their library. The tab is still called Decks.
+- Built (variant A, chosen): Today is a section of its own, then the decks in a section with the system header "Decks", as the iPad sidebar has (N14.6). The column draws no title (N26.6). The tab is still called Decks.
 - Variant B: the same two sections with the system's section spacing only, no header, and the title "Decks".
 - Recommendation and reason: Apple's sidebars with fixed destinations above the person's own list put a header over that list: Mail (Favorites, then each account), Notes (the account's folders under its name), Reminders ("My Lists" under the smart lists), Files (Locations, Favorites, Tags). A header also matches the iPad, so the Duo opened and the iPad read the same.
 
@@ -1399,3 +1399,9 @@ From Antoine's annotations on a capture of his opened iPhone Duo (`decisions.md`
 - Cause of the mismatch: the 44-point minimum sat on rows with a disclosure only, and the list added its own vertical padding around it, so those rows were about 73 points against 52.
 - iPad and Mac sidebars draw the system's own rows, which already share one height; unchanged.
 - Checked by UI tests in the test VM.
+
+### N26.6 No title over the list beside Today (2026-11-22)
+
+- Antoine, on the opened Duo: "Should we remove the big Meguri text on the top left?"; the coordinator decided yes. The column beside Today draws no title: its navigation bar holds only the trailing buttons (sync, Add) and the always-visible search field follows directly, with the inline title mode so no large-title band is left (`toolbar(removing: .title)`, as the iPad sidebar, N14.9). "Decks" stays the column's navigation title for VoiceOver and the scene; "Decks" is drawn once, as the section header (N26.3).
+- Single-column layouts (an iPhone, the Duo folded or held tall) keep the large title "Decks" (N14.8) and have no "Decks" header, so the word shows once there too. The iPad sidebar draws no title (N14.9); the Mac sidebar never drew one. Both unchanged.
+- Replaces N26.3's column title "Meguri".

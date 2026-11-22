@@ -124,6 +124,19 @@ tools/mg sync-server-local start
 Remove the private password file after recovery. Keep failed MG evidence. This
 workflow does not publish, deploy, upgrade, back up or restore a service.
 
+MCP paged search builds an optional in-memory candidate index in a separate
+blocking job. One build and two retained snapshots are allowed per service;
+there is no queue or persisted index. Builds have a five-second cooperative
+limit. Snapshots have a 60-second eligibility lifetime, and failed builds have
+a 60-second cooldown. An idle repository retains this memory until the next
+lookup/cache operation removes expired entries or the service restarts. The
+index has fixed facet capacities (about 116 MiB peak requested Rust heap per
+build, excluding SQLite/allocator overhead); unavailable facets and capacity
+misses use the existing bounded search. Completed entries retain no SQLite
+reader, collection pin or root owner. Restart discards all entries. Epoch,
+publication and committed collection stamps are checked on every use. No
+operator rebuild, schema migration or additional permission is needed.
+
 Native collection and MCP diagnostics are opt-in for `serve` through
 `MEGURI_SYNC_LOG_LEVEL=off|info|debug` (default `off`). Only these exact lowercase
 values are accepted; empty, whitespace, unknown and non-Unicode values fail

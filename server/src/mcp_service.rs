@@ -50,7 +50,12 @@ impl McpService {
     }
 
     pub(crate) async fn search_notes(&self, authority: oauth::Authority, input: SearchInput) -> Result<SearchResult> {
-        self.execute(authority, false, move |backend, path, a| backend.search_notes(path, a, input)).await
+        let cache = self.service.mcp_search_cache.clone();
+        self.execute(authority, false, move |backend, path, a| {
+            backend.search_notes_with_index(path, a, input, |c| {
+                cache.get_or_schedule(c, a.original.account_id(), a.original.data_epoch(), &a.held.root, path)
+            })
+        }).await
     }
 
     pub(crate) async fn list_decks_and_note_types(&self, authority: oauth::Authority, input: CatalogInput) -> Result<CatalogResult> {
@@ -108,7 +113,7 @@ impl McpService {
             let pin = root.pin_collection(&path).map_err(|e| e.mcp_storage_detail(Detail::CollectionPin))?;
             let publication = path.parent().and_then(Path::file_name)
                 .and_then(|name| name.to_str()).ok_or_else(|| Error::new("storage_unavailable").with_mcp_detail(Detail::CollectionPath))?.to_owned();
-            let context = Context { account: original.account_id().into(), publication };
+            let context = Context { account: original.account_id().into(), publication: original.publication_context(&publication) };
             let held = Arc::new(HeldPublication { root, path: path.clone(), _pin: pin,
                 _barrier: _publication.0, _guard: _publication.1 });
             let authority = CollectionAuthority { original, context, held, sessions, write,
