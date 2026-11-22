@@ -136,6 +136,8 @@ private nonisolated struct MediaResponse: Sendable {
             media = false
         } else if first == "_addons" { return failure(404) }
         else {
+            // The hidden object is inventory only; PDF bytes never enter WebKit.
+            guard !CardAttachmentPDF.accepts(String(path.dropFirst())) else { return failure(404) }
             guard let resolver = binding.0 else { return failure(404) }
             let opened = try await resolver.openURLPath(path)
             file = opened; data = nil; mime = MediaMIMETypes.type(for: opened.name); media = true

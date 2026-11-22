@@ -69,6 +69,11 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     var onAction: ((CardPage, CardBridgeAction) -> Void)?
     var onConfirmation: ((CardPage, [String: Any]) -> Void)?
     private let configuration: CardWebConfiguration
+    let mediaResolver: MediaPathResolver?
+    var attachmentPDFAvailable: Bool {
+        behaviorAvailable && hostDOMKnown && readyPhases.contains("shown")
+            && committedRootDocument == documentID && webView.url == MediaOrigin.url
+    }
     private var appearance: CardRuntime.Appearance
     private var questionAppearance: CardRuntime.Appearance?
     private var runtimeSettled = false
@@ -102,6 +107,7 @@ public final class CardPage: NSObject, WKNavigationDelegate {
          appearance: CardRuntime.Appearance, reviewExtra: String, identifier: String, size: CGSize,
          diagnostics: CardDiagnostics, makeWebView: (CGRect, WKWebViewConfiguration) -> CardNativeWebView) {
         self.configuration = configuration
+        self.mediaResolver = resolver
         self.platform = platform
         self.appearance = appearance
         self.diagnostics = diagnostics
@@ -395,6 +401,7 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         } else if signal == "visible" {
             visibleReceipt = update
         } else if signal == "updateFailed" {
+            behavior.cancel()
             hostInstalledDOM = false; hostReports.invalidate()
             readyPhases.insert("failed")
             runtimeSettled = false; visibleToken = nil
