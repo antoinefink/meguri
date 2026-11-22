@@ -504,35 +504,39 @@ pub(crate) fn replay_cards(
     let (inputs, queue) = mpsc::sync_channel::<Vec<CardInput>>(threads * 2);
     let queue = Mutex::new(queue);
     let (results, done) = mpsc::channel::<Done>();
+    // One batch replayed, its parts added to `sums`.
+    let process = |batch: &[CardInput], sums: &mut Sums| {
+        let mut cards = Vec::with_capacity(batch.len());
+        let mut weight = 0u64;
+        for input in batch {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            weight += 1 + u64::try_from(input.rows.len()).unwrap_or(0);
+            let preset = match input.card {
+                rows::CardRead::Card(card) => work.presets.home(Key {
+                    did: card.did,
+                    odid: card.odid,
+                }),
+                rows::CardRead::Bad(_) => None,
+            };
+            cards.push(replay_card(work.grid, work.days, input, preset, sums, 1));
+        }
+        Done { cards, weight }
+    };
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(threads);
         for _ in 0..threads {
             let results = results.clone();
-            let (queue, stop) = (&queue, &stop);
-            handles.push(scope.spawn(move || {
+            let (queue, stop, process) = (&queue, &stop, &process);
+            let spawned = std::thread::Builder::new().spawn_scoped(scope, move || {
                 let mut sums = Sums::default();
                 let replayed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loop {
                     let batch = match lock(queue).recv() {
                         Ok(batch) => batch,
                         Err(_) => break,
                     };
-                    let mut cards = Vec::with_capacity(batch.len());
-                    let mut weight = 0u64;
-                    for input in &batch {
-                        if stop.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        weight += 1 + u64::try_from(input.rows.len()).unwrap_or(0);
-                        let preset = match input.card {
-                            rows::CardRead::Card(card) => work.presets.home(Key {
-                                did: card.did,
-                                odid: card.odid,
-                            }),
-                            rows::CardRead::Bad(_) => None,
-                        };
-                        cards.push(replay_card(work.grid, work.days, input, preset, &mut sums, 1));
-                    }
-                    if results.send(Done { cards, weight }).is_err() {
+                    if results.send(process(&batch, &mut sums)).is_err() {
                         break;
                     }
                 }));
@@ -543,8 +547,18 @@ pub(crate) fn replay_cards(
                     while lock(queue).recv().is_ok() {}
                 }
                 replayed.map(|()| sums)
-            }));
+            });
+            match spawned {
+                Ok(handle) => handles.push(handle),
+                // The workers that started do the work.
+                Err(error) => {
+                    tracing::warn!(%error, "starting a history replay worker");
+                    break;
+                }
+            }
         }
+        // No worker at all: this thread replays as it reads.
+        let mut inline = handles.is_empty().then(|| (Sums::default(), results.clone()));
         drop(results);
         let mut stopped = false;
         let mut batch: Vec<CardInput> = Vec::with_capacity(WORK);
@@ -560,7 +574,9 @@ pub(crate) fn replay_cards(
             batch.push(input);
             if batch.len() >= WORK {
                 let full = std::mem::replace(&mut batch, Vec::with_capacity(WORK));
-                if inputs.send(full).is_err() {
+                if let Some((sums, results)) = inline.as_mut() {
+                    let _ = results.send(process(&full, sums));
+                } else if inputs.send(full).is_err() {
                     return false;
                 }
             }
@@ -568,12 +584,21 @@ pub(crate) fn replay_cards(
             !stopped && !stop.load(Ordering::Relaxed) && !cancel()
         });
         if read.is_ok() && !stopped && !cancel() && !batch.is_empty() {
-            let _ = inputs.send(std::mem::take(&mut batch));
+            let last = std::mem::take(&mut batch);
+            match inline.as_mut() {
+                Some((sums, results)) => {
+                    let _ = results.send(process(&last, sums));
+                }
+                None => {
+                    let _ = inputs.send(last);
+                }
+            }
         }
         if read.is_err() || cancel() {
             stop.store(true, Ordering::Relaxed);
         }
         drop(inputs);
+        let inline = inline.map(|(sums, _)| sums);
         for finished in done.iter() {
             if cancel() {
                 // The workers drop what they hold (H16).
@@ -584,7 +609,7 @@ pub(crate) fn replay_cards(
                 stop.store(true, Ordering::Relaxed);
             }
         }
-        let mut sums = Sums::default();
+        let mut sums = inline.unwrap_or_default();
         for handle in handles {
             match handle.join() {
                 Ok(Ok(part)) => sums.merge(part),
