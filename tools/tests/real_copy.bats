@@ -35,7 +35,14 @@ setup() {
 mg_lint_ui_first() { echo lint >>"$STUB_LOG"; }
 mg__xcframework() { echo "xcframework $*" >>"$STUB_LOG"; }
 # The identity check itself runs on real products (app_identity_check.py).
-mg_app_real_copy_identity() { echo "identity $1" >>"$STUB_LOG"; [ "${FX_IDENTITY_RC:-0}" -eq 0 ]; }
+# A product built over a stale incremental folder (its stale-icon marker) shows
+# the other identity until that folder is removed.
+mg_app_real_copy_identity() {
+  echo "identity $1" >>"$STUB_LOG"
+  [ "${FX_IDENTITY_RC:-0}" -eq 0 ] && [ ! -e "${1%/Build/Products/*}/stale-icon" ]
+}
+# Another volume than Applications: the install stages beside the target.
+if [ -n "${FX_OTHER_VOLUME:-}" ]; then mg_app_real_copy_same_volume() { return 1; }; fi
 MG_LSREGISTER="$BIN/lsregister"
 MG_APP_REAL_COPY_APPLICATIONS="$FX/Applications"
 MG_APP_REAL_COPY_TRASH="$FX/Trash"
@@ -97,23 +104,44 @@ case "$5" in -) cat ;; *) cat "$5" ;; esac'
 if [ -n "${FX_NO_UDID:-}" ]; then echo "{\"SPHardwareDataType\":[{}]}"; exit 0; fi
 if [ -n "${FX_SP_FAILS:-}" ]; then echo "{\"SPHardwareDataType\":[{\"provisioning_UDID\":\"00000000-0000-4000-8000-000000000009\"}]}"; exit 1; fi
 echo "{\"SPHardwareDataType\":[{\"provisioning_UDID\":\"00000000-0000-4000-8000-000000000009\"}]}"'
+  # PlugInKit and LaunchServices keep the paths registered with them in
+  # $FX/pk-registry and $FX/ls-registry: -r/-u remove one, lsregister -f adds
+  # one (not with FX_LS_NO_REGISTER), a path containing FX_LS_STICKY is never
+  # removed.
   stub pluginkit 'echo "pluginkit $*" >>"$STUB_LOG"
-case "$1" in -m*) [ -z "${FX_PLUGINKIT_FAILS:-}" ] || exit 1 ;; esac'
-  # -dump lists one unrelated app; FX_LS_UNREADABLE empties it; once a build
-  # ran, FX_KEEP_REGISTERED keeps the built widget listed.
-  stub lsregister 'echo "lsregister $*" >>"$STUB_LOG"
-if [ "$1" = -dump ]; then
-  [ -z "${FX_LS_UNREADABLE:-}" ] || exit 1
-  n=$(( $(cat "$FX/dumps" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$FX/dumps"
-  [ -z "${FX_LS_FAIL_FROM:-}" ] || [ "$n" -lt "$FX_LS_FAIL_FROM" ] || exit 1
-  echo "path: /Applications/Other.app (0x1)"
-  if [ -n "${FX_KEEP_REGISTERED:-}" ] && [ -f "$FX/built" ]; then echo "path: $FX_KEEP_REGISTERED (0x2)"; fi
-fi
+case "$1" in
+  -m*) [ -z "${FX_PLUGINKIT_FAILS:-}" ] || exit 1; sed "s/^/     Path = /" "$FX/pk-registry" 2>/dev/null ;;
+  -r) grep -vxF -- "$2" "$FX/pk-registry" >"$FX/pk-registry.new" 2>/dev/null; mv "$FX/pk-registry.new" "$FX/pk-registry" ;;
+esac
 exit 0'
+  # -dump lists one unrelated app and the registry; FX_LS_UNREADABLE empties
+  # it; once a build ran, FX_KEEP_REGISTERED keeps the built widget listed.
+  stub lsregister 'echo "lsregister $*" >>"$STUB_LOG"
+case "$1" in
+  -dump)
+    [ -z "${FX_LS_UNREADABLE:-}" ] || exit 1
+    n=$(( $(cat "$FX/dumps" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$FX/dumps"
+    [ -z "${FX_LS_FAIL_FROM:-}" ] || [ "$n" -lt "$FX_LS_FAIL_FROM" ] || exit 1
+    echo "path: /Applications/Other.app (0x1)"
+    if [ -n "${FX_KEEP_REGISTERED:-}" ] && [ -f "$FX/built" ]; then echo "path: $FX_KEEP_REGISTERED (0x2)"; fi
+    sed "s/.*/path: & (0x3)/" "$FX/ls-registry" 2>/dev/null ;;
+  -f) [ -n "${FX_LS_NO_REGISTER:-}" ] || grep -qxF -- "$2" "$FX/ls-registry" 2>/dev/null || echo "$2" >>"$FX/ls-registry" ;;
+  -u)
+    case "$2" in *"${FX_LS_STICKY:-//never//}"*) exit 0 ;; esac
+    grep -vxF -- "$2" "$FX/ls-registry" >"$FX/ls-registry.new" 2>/dev/null; mv "$FX/ls-registry.new" "$FX/ls-registry" ;;
+esac
+exit 0'
+  # FX_AUTO_REGISTER: LaunchServices registers the unpacked app where it lands,
+  # as it did with a staging folder in /Applications (2026-11-22).
   stub ditto 'echo "ditto $*" >>"$STUB_LOG"
 case "$1 $2" in
   "-c -k") [ "$3" = --keepParent ] && [ -d "$4" ] || exit 1; echo zip >"$5" ;;
-  "-x -k") mkdir -p "$4/Meguri.app/Contents"; cp "$FX/info.json" "$4/Meguri.app/Contents/Info.plist" ;;
+  "-x -k")
+    mkdir -p "$4/Meguri.app/Contents"; cp "$FX/info.json" "$4/Meguri.app/Contents/Info.plist"
+    if [ -n "${FX_AUTO_REGISTER:-}" ]; then
+      echo "${4%/}/Meguri.app" >>"$FX/ls-registry"
+      echo "${4%/}/Meguri.app/Contents/PlugIns/MeguriWidget.appex" >>"$FX/pk-registry"
+    fi ;;
   *) exit 97 ;;
 esac'
   stub pgrep 'echo "pgrep $*" >>"$STUB_LOG"; [ -z "${FX_PGREP_RC:-}" ] || exit "$FX_PGREP_RC"; [ -n "${FX_RUNNING:-}" ]'
@@ -235,7 +263,7 @@ EOF
 
 @test "the real copy builds Release with installed profiles only, packs it and forgets the built app" {
   real_copy
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .status)" = pass ]
   called '^xcodebuild -showBuildSettings -json .* -target Meguri -target MeguriWidget -configuration Release -sdk macosx -arch arm64 MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_MAC_AGENT_PROFILE_STYLE=Manual MEGURI_MAC_AGENT_PROFILE_SPECIFIER=11111111-2222-3333-4444-555555555555$'
   called '^xcodebuild build .* -configuration Release -destination platform=macOS,arch=arm64 -derivedDataPath build/app/RealCopyDerivedData .* MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_MAC_AGENT_PROFILE_STYLE=Manual MEGURI_MAC_AGENT_PROFILE_SPECIFIER=11111111-2222-3333-4444-555555555555$'
@@ -397,11 +425,17 @@ EOF
 @test "the real copy installs into Applications only when asked, never while Meguri runs, never over a test copy" {
   mkdir -p "$FX/Applications"
   real_copy --install
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .details.real_copy_installed.launched)" = false ]
   [ "$(jq -r .CFBundleIdentifier "$FX/Applications/Meguri.app/Contents/Info.plist")" = com.antoinefink.meguri ]
-  called "^ditto -x -k $SB/build/app/real-copy/Meguri.zip $FX/Applications/\.meguri-install\.[^/]+/$"
+  # Staged outside Applications, on its volume; then only the installed path is registered.
+  called "^ditto -x -k $SB/build/app/real-copy/Meguri.zip $SB/build/app/real-copy/\.meguri-install\.[^/]+/$"
   [ -z "$(ls -A "$FX/Applications" | grep '^\.meguri-install')" ]
+  [ -z "$(ls -A "$SB/build/app/real-copy" | grep '^\.meguri-install')" ]
+  called "^lsregister -u $SB/build/app/real-copy/\.meguri-install\.[^/]+/Meguri.app$"
+  called "^lsregister -f $FX/Applications/Meguri.app$"
+  [ "$(field .details.real_copy_registration.installed_path_registered)" = true ]
+  [ "$(field .details.real_copy_registration.staging_paths_registered)" = false ]
   not_called '^open '
   # An earlier real copy leaves LaunchServices and PlugInKit, then goes to the Trash.
   : >"$STUB_LOG"
@@ -468,4 +502,134 @@ PY
   run python3 "$SB/tools/scripts/daily-driver-profiles.py" --require ios --ios-device "$phone"
   [ "$status" -eq 1 ]
   [ "$(jq -r .ios_widget.state <<<"$output")" = missing ]
+}
+
+@test "the install unregisters a staging path LaunchServices picked up and registers the installed path" {
+  mkdir -p "$FX/Applications"
+  # An earlier install left its staging path registered in Applications.
+  echo "$FX/Applications/.meguri-install.Ab12Cd/Meguri.app" >"$FX/ls-registry"
+  echo "$FX/Applications/.meguri-install.Ab12Cd/Meguri.app/Contents/PlugIns/MeguriWidget.appex" >"$FX/pk-registry"
+  # A killed install left its staging folder with a daily-id app in it.
+  mkdir -p "$SB/build/app/real-copy/.meguri-install.Ef34Gh/Meguri.app/Contents"
+  FX_AUTO_REGISTER=1 real_copy --install
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
+  [ "$(field .status)" = pass ]
+  called "^lsregister -u $FX/Applications/\.meguri-install\.Ab12Cd/Meguri.app$"
+  called "^pluginkit -r $FX/Applications/\.meguri-install\.Ab12Cd/Meguri.app/Contents/PlugIns/MeguriWidget.appex$"
+  called "^pluginkit -r $SB/build/app/real-copy/\.meguri-install\.[^/]+/Meguri.app/Contents/PlugIns/MeguriWidget.appex$"
+  [ "$(cat "$FX/ls-registry")" = "$FX/Applications/Meguri.app" ]
+  [ ! -s "$FX/pk-registry" ]
+  [ ! -e "$SB/build/app/real-copy/.meguri-install.Ef34Gh" ]
+  called "^lsregister -u $SB/build/app/real-copy/\.meguri-install\.Ef34Gh/Meguri.app$"
+  [ "$(field .details.real_copy_registration.installed_path_registered)" = true ]
+  # Registered after the swap and again after the unregistrations, each
+  # before the dump that checks it.
+  [ "$(grep -c "^lsregister -f $FX/Applications/Meguri.app$" "$STUB_LOG")" -eq 2 ]
+  [ "$(grep -n "^lsregister -f $FX/Applications/Meguri.app$" "$STUB_LOG" | tail -n 1 | cut -d: -f1)" -lt "$(grep -n '^lsregister -dump$' "$STUB_LOG" | tail -n 1 | cut -d: -f1)" ]
+}
+
+@test "the install fails clearly when LaunchServices keeps a staging path or does not list the installed app" {
+  mkdir -p "$FX/Applications"
+  FX_AUTO_REGISTER=1 FX_LS_STICKY=.meguri-install. real_copy --install
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-registration ]
+  [[ "$(field '.failures[0].message')" == *"still lists a staging path"*"/.meguri-install."*"lsregister -u <path>"*"-f $FX/Applications/Meguri.app"* ]]
+  [ "$(field .details.real_copy_installed.path)" = "$FX/Applications/Meguri.app" ]
+  [ "$(jq -r .CFBundleIdentifier "$FX/Applications/Meguri.app/Contents/Info.plist")" = com.antoinefink.meguri ]
+  rm -rf "$FX/Applications" "$FX/ls-registry" "$FX/pk-registry"; mkdir -p "$FX/Applications"
+  : >"$STUB_LOG"
+  FX_LS_NO_REGISTER=1 real_copy --install
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-registration ]
+  [[ "$(field '.failures[0].message')" == *"does not list $FX/Applications/Meguri.app"*"lsregister -f $FX/Applications/Meguri.app"* ]]
+}
+
+@test "the install stages beside the target only when its folder is on another volume" {
+  mkdir -p "$FX/Applications"
+  FX_OTHER_VOLUME=1 FX_AUTO_REGISTER=1 real_copy --install
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
+  called "^ditto -x -k $SB/build/app/real-copy/Meguri.zip $FX/Applications/\.meguri-install\.[^/]+/$"
+  called "^lsregister -u $FX/Applications/\.meguri-install\.[^/]+/Meguri.app$"
+  [ -z "$(ls -A "$FX/Applications" | grep '^\.meguri-install')" ]
+  [ "$(cat "$FX/ls-registry")" = "$FX/Applications/Meguri.app" ]
+}
+
+@test "an earlier real copy that cannot go to the Trash stays registered in place" {
+  mkdir -p "$FX/Applications"
+  real_copy --install
+  [ "$status" -eq 0 ]
+  rm -rf "$FX/Trash"; echo file >"$FX/Trash"
+  : >"$STUB_LOG"
+  real_copy --install
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-install ]
+  [ "$(grep -c "^lsregister -u $FX/Applications/Meguri.app$" "$STUB_LOG")" -eq 1 ]
+  [ "$(grep -n "^lsregister -f $FX/Applications/Meguri.app$" "$STUB_LOG" | cut -d: -f1)" -gt "$(grep -n "^lsregister -u $FX/Applications/Meguri.app$" "$STUB_LOG" | cut -d: -f1)" ]
+  grep -qxF "$FX/Applications/Meguri.app" "$FX/ls-registry"
+  [ -z "$(ls -A "$SB/build/app/real-copy" | grep '^\.meguri-install')" ]
+}
+
+@test "the real copy records its identity settings and removes derived data built with others, once" {
+  local dd="$SB/build/app/RealCopyDerivedData"
+  real_copy
+  [ "$status" -eq 0 ]
+  [ "$(field '.details.derived_data_cleaned // empty')" = "" ]
+  [ "$(jq -r '.targets[0].PRODUCT_BUNDLE_IDENTIFIER' "$dd/meguri-build-identity.json")" = com.antoinefink.meguri ]
+  # Same settings: the folder is kept.
+  mkdir -p "$dd/Build/Intermediates.noindex"; echo kept >"$dd/Build/Intermediates.noindex/marker"
+  : >"$STUB_LOG"
+  real_copy
+  [ "$status" -eq 0 ]
+  [ -f "$dd/Build/Intermediates.noindex/marker" ]
+  [ "$(field '.details.derived_data_cleaned // empty')" = "" ]
+  # A folder without the record (built before it existed) is removed first.
+  rm "$dd/meguri-build-identity.json"
+  : >"$STUB_LOG"
+  real_copy
+  [ "$status" -eq 0 ]
+  [ "$(field .details.derived_data_cleaned.reason)" = no-identity-record ]
+  [ "$(field .details.derived_data_cleaned.path)" = build/app/RealCopyDerivedData ]
+  [ ! -e "$dd/Build/Intermediates.noindex/marker" ]
+  [[ "$(field .message)" == *"build/app/RealCopyDerivedData was removed first (no-identity-record)"* ]]
+  [ "$(grep -c '^xcodebuild build ' "$STUB_LOG")" -eq 1 ]
+  # Other identity settings (an earlier icon name): removed too.
+  echo kept >"$dd/marker"
+  jq '.targets[0].ASSETCATALOG_COMPILER_APPICON_NAME = "AppIcon-Dev"' "$dd/meguri-build-identity.json" >"$FX/record.json"
+  cp "$FX/record.json" "$dd/meguri-build-identity.json"
+  : >"$STUB_LOG"
+  real_copy
+  [ "$status" -eq 0 ]
+  [ "$(field .details.derived_data_cleaned.reason)" = identity-settings-changed ]
+  [ ! -e "$dd/marker" ]
+  [ "$(jq -r '.targets[0].ASSETCATALOG_COMPILER_APPICON_NAME' "$dd/meguri-build-identity.json")" = AppIcon ]
+}
+
+@test "a real copy showing the other identity is rebuilt once from an empty folder, never twice" {
+  local dd="$SB/build/app/RealCopyDerivedData"
+  real_copy
+  [ "$status" -eq 0 ]
+  # Matching record, stale product: the identity check fails until the folder goes.
+  echo stale >"$dd/stale-icon"
+  : >"$STUB_LOG"
+  real_copy
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
+  [ "$(field .details.derived_data_cleaned.reason)" = stale-product ]
+  [ "$(grep -c '^xcodebuild build ' "$STUB_LOG")" -eq 2 ]
+  [ ! -e "$dd/stale-icon" ]
+  # The daily-driver product is forgotten before its folder is removed.
+  [ "$(grep -n "^lsregister -u $(built)$" "$STUB_LOG" | head -n 1 | cut -d: -f1)" -lt "$(grep -n '^xcodebuild build ' "$STUB_LOG" | tail -n 1 | cut -d: -f1)" ]
+  # A clean build that still shows the wrong identity fails after two builds.
+  : >"$STUB_LOG"
+  FX_IDENTITY_RC=1 real_copy
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-product ]
+  [ "$(grep -c '^xcodebuild build ' "$STUB_LOG")" -eq 2 ]
+  [ ! -e "$(built)" ]
+  # A folder this run already removed (no record) is not removed again.
+  mkdir -p "$dd"; rm -f "$dd/meguri-build-identity.json"
+  : >"$STUB_LOG"
+  FX_IDENTITY_RC=1 real_copy
+  [ "$status" -eq 1 ]
+  [ "$(field .details.derived_data_cleaned.reason)" = no-identity-record ]
+  [ "$(grep -c '^xcodebuild build ' "$STUB_LOG")" -eq 1 ]
 }
