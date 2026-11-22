@@ -211,7 +211,7 @@ public struct CardsPlaceholder: View {
 }
 
 /// D5 step 5's status while a save job runs (N22.5): a small spinner and
-/// "Updating 212 of 412 notes"; with Meguri Sync, the job's stage first
+/// "Updating 212 of 412 notes" ("Saving…" until the first count); with Meguri Sync, the job's stage first
 /// ("Syncing…", then the count, then "Uploading…", D6). The widest text the
 /// job can show reserves its width, so the toolbar does not move as the
 /// stage or the count changes.
@@ -247,7 +247,8 @@ struct SaveStatusView: View {
     /// Every text this job can show, so the widest reserves the width.
     private var candidates: [String] {
         [NoteTypesStrings.text("noteTypes.progress.syncing", locale: locale),
-         NoteTypesStrings.text("noteTypes.progress.uploading", locale: locale), widestCount]
+         NoteTypesStrings.text("noteTypes.progress.uploading", locale: locale),
+         NoteTypesStrings.text("noteTypes.progress.saving", locale: locale), widestCount]
     }
 
     private var current: String {
@@ -255,7 +256,9 @@ struct SaveStatusView: View {
         case .syncing?: NoteTypesStrings.text("noteTypes.progress.syncing", locale: locale)
         case .uploading?: NoteTypesStrings.text("noteTypes.progress.uploading", locale: locale)
         case .saving?, nil:
-            progress.total.map { NoteTypesStrings.progress(completed: progress.completed, total: $0, locale: locale) } ?? ""
+            // Before the first count, which can come after the status shows.
+            progress.total.map { NoteTypesStrings.progress(completed: progress.completed, total: $0, locale: locale) }
+                ?? NoteTypesStrings.text("noteTypes.progress.saving", locale: locale)
         }
     }
 

@@ -645,6 +645,16 @@
         }
       }
     },
+    "noteTypes.progress.saving": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving…"
+          }
+        }
+      }
+    },
     "noteTypes.progress.syncing": {
       "localizations": {
         "en": {
