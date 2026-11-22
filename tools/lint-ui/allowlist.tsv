@@ -1,3 +1,4 @@
 # UI lint allowlist (tools/lint-ui/path-rules.sh): rule<TAB>path<TAB>reason, one entry per line.
 # path is a file, or a directory ending in /, relative to the repository root. Every entry needs a
 # reason; glass outside DesignSystem/Chrome/ is allowed only for the control layer (R1996).
+fixed-font-size	app/Packages/MeguriKit/Sources/Features/Browse/BrowseTable.swift	Browse cells take the note type's own browser font and size (browser/columns C6, R1150): user-authored styling, not app chrome.
