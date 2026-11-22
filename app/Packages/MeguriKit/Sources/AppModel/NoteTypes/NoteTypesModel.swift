@@ -83,6 +83,13 @@ public final class NoteTypesModel {
     /// never shows an empty page (nothing flashes); the title follows the
     /// selection at once.
     public private(set) var shownSelection: Int64?
+    /// The note type the Mac's title and "n notes · c cards" subtitle name:
+    /// the selection once its counts are read (or could not be), so the
+    /// subtitle never empties between two note types.
+    public private(set) var headerSelection: Int64?
+    /// The counts the subtitle shows for `headerSelection`, kept apart from the
+    /// cache: dropping cached counts after a change elsewhere leaves it as it is.
+    public private(set) var headerCounts: NotetypeRemovalCounts?
     public var tab: Tab = .fields {
         didSet { if tab == .cards, oldValue != .cards, let id = selection, records[id] != nil { refreshIssues(id, immediately: true) } }
     }
@@ -296,9 +303,10 @@ public final class NoteTypesModel {
         renaming = nil
         renameRefusal = nil
         renamingCard = nil
-        guard let id = selection else { shownSelection = nil; return }
+        guard let id = selection else { shownSelection = nil; headerSelection = nil; headerCounts = nil; return }
         loadDetail(id)
         showSelectionWhenReady()
+        showHeaderWhenReady()
         warmNeighbours(of: id)
     }
 
@@ -312,6 +320,21 @@ public final class NoteTypesModel {
         renameRefusal = nil
         renamingCard = nil
         shownSelection = id
+    }
+
+    /// The title and subtitle move to the selection once its counts are in.
+    private func showHeaderWhenReady(countsAnswered: Bool = false) {
+        guard let id = selection else { headerSelection = nil; headerCounts = nil; return }
+        if headerSelection == nil || countsAnswered || typeCounts[id] != nil || recordFailed.contains(id) {
+            headerSelection = id
+            headerCounts = typeCounts[id]
+        }
+    }
+
+    /// Counts read for a note type; the subtitle's too when it names it.
+    private func store(_ counts: NotetypeRemovalCounts, for id: Int64) {
+        typeCounts[id] = counts
+        if headerSelection == id { headerCounts = counts }
     }
 
     /// Reads ahead, with pure reads, the records of the rows beside the
@@ -340,11 +363,21 @@ public final class NoteTypesModel {
                 records[id] = record
                 if drafts[id] == nil, selectedField[id] == nil { selectedField[id] = record.fields.first.map { Int($0.ord) } }
                 // Selected while it was read: it loads as a selection does.
-                if selection == id { finishLoading(id) }
+                if selection == id {
+                    finishLoading(id)
+                } else if typeCounts[id] == nil {
+                    // The subtitle's counts too (one cheap count), so the title can move at once.
+                    countTasks[id, default: []].append(Task {
+                        guard let counts = try? await backend.typeCounts(id), !Task.isCancelled, self.epoch == epoch else { return }
+                        store(counts, for: id)
+                        if selection == id { showHeaderWhenReady() }
+                    })
+                }
             } catch {
                 guard !Task.isCancelled, self.epoch == epoch, selection == id else { return }
                 recordFailed.insert(id)
                 showSelectionWhenReady()
+                showHeaderWhenReady()
             }
         }
     }
@@ -379,7 +412,7 @@ public final class NoteTypesModel {
                 guard !Task.isCancelled else { return }
                 rereading[id] = nil
                 if records[id] == nil { recordFailed.insert(id) }
-                if selection == id { showSelectionWhenReady() }
+                if selection == id { showSelectionWhenReady(); showHeaderWhenReady() }
             }
         }
     }
@@ -403,8 +436,9 @@ public final class NoteTypesModel {
         countTasks[id] = [
             Task {
                 let counts = try? await backend.typeCounts(id)
-                guard !Task.isCancelled, self.epoch == epoch, let counts else { return }
-                typeCounts[id] = counts
+                guard !Task.isCancelled, self.epoch == epoch else { return }
+                if let counts { store(counts, for: id) }
+                if selection == id { showHeaderWhenReady(countsAnswered: true) }
             },
             // W5: by stored ordinal, for the base the rows show; a draft whose
             // note type changed elsewhere waits for Reload or Revert, as Notes does.
@@ -1158,6 +1192,10 @@ public final class NoteTypesModel {
             && (changes.wholeCollection || changes.notetypes.contains(where: { $0.id == id })) {
             records[id] = nil
             detailTasks[id] = nil
+            // Its count read ahead may hold the version from before the change: it goes too.
+            for task in countTasks[id] ?? [] { task.cancel() }
+            countTasks[id] = nil
+            typeCounts[id] = nil
         }
         let touched = changes.wholeCollection ? Set(records.keys) : Set(changes.notetypes.map(\.id))
         for id in touched where records[id] != nil {

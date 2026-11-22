@@ -13,6 +13,12 @@
 //! synchronous: run them on the server's bounded blocking collection executor.
 mod input;
 mod read;
+mod search_index;
+mod search_cache;
+pub(crate) use search_cache::SearchCache;
+pub(crate) use search_index::SearchIndex;
+#[cfg(test)]
+pub(crate) use search_cache::BuildBoundary;
 mod tokens;
 mod write;
 mod generation;
@@ -104,16 +110,21 @@ impl Backend {
         self.transaction_with_hook(path, authority, write, f, None)
     }
     fn transaction_with_hook<A: Authority, T>(&self, path: &Path, authority: &A, write: bool,
-        f: impl FnOnce(&Connection) -> Result<T>, mut before_commit: Option<&mut dyn FnMut() -> Result<()>>) -> Result<T> {
+        f: impl FnOnce(&Connection) -> Result<T>, before_commit: Option<&mut dyn FnMut() -> Result<()>>) -> Result<T> {
+        self.transaction_with_deck_budget(path, authority, write, false, |c,_| f(c), before_commit)
+    }
+    fn transaction_with_deck_budget<A: Authority, T>(&self, path: &Path, authority: &A, write: bool, deck_read: bool,
+        f: impl FnOnce(&Connection, Option<&read::DeckBudget>) -> Result<T>, mut before_commit: Option<&mut dyn FnMut() -> Result<()>>) -> Result<T> {
         let context = authority.context();
         if context.account.len() > 256 || context.publication.len() > 256 { return Err(unsupported()); }
         let guard = authority.admit(write)?;
         let mut c = super::schema::open_mcp(path, write)?;
+        let budget = if deck_read { read::DeckBudget::install(&mut c).ok() } else { None };
         let tx = c.transaction_with_behavior(if write { TransactionBehavior::Immediate } else { TransactionBehavior::Deferred })
             .map_err(sql_error)?;
         let version: i64 = tx.query_row("SELECT ver FROM col WHERE id=1", [], |r| r.get(0)).map_err(sql_error)?;
         if version != 18 { return Err(unsupported()); }
-        let value = f(&tx).map_err(|e| e.mcp_storage_detail(Detail::CollectionAccess))?;
+        let value = f(&tx, budget.as_deref()).map_err(|e| e.mcp_storage_detail(Detail::CollectionAccess))?;
         authority.recheck(&guard)?;
         if let Some(hook) = before_commit.as_mut() {
             hook()?;

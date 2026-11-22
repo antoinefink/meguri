@@ -812,6 +812,7 @@ dependencies = [
  "rand 0.9.4",
  "rawzip",
  "regex",
+ "regex-syntax",
  "reqwest",
  "rusqlite",
  "serde",

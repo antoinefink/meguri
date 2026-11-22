@@ -222,6 +222,11 @@ pub(crate) struct Authority {
 }
 impl Authority {
     pub(crate) fn account_id(&self) -> &str { &self.id }
+    pub(crate) fn data_epoch(&self) -> i64 { self.data_epoch }
+    // Keep the outer handle schema stable; content stamps never enter it.
+    pub(crate) fn publication_context(&self, publication: &str) -> String {
+        format!("{}:{}:{publication}", self.generation, self.data_epoch)
+    }
     pub(crate) fn grant_id(&self) -> &str { &self.grant }
     pub(crate) fn client_id(&self) -> &str { &self.client }
     pub(crate) fn can_write(&self) -> bool { self.write }

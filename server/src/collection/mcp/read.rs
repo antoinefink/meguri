@@ -3,6 +3,7 @@ use super::*;
 use meguri_model::{deck::Deck, notetype::Notetype, proto::deck::DeckKind};
 use rusqlite::{OptionalExtension, params};
 use sha2::{Digest, Sha256};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicU32, Ordering}};
 use unicase::UniCase;
 
 pub(super) struct StoredNote {
@@ -79,6 +80,74 @@ pub(super) fn revision_state(mut state: Sha256, nt: &Notetype) -> [u8;32] {
 pub(super) fn tag_list(stored: &str) -> Vec<String> {
     stored.split([' ','\u{3000}']).filter(|s|!s.is_empty()).map(str::to_owned).collect()
 }
+
+#[derive(Default)]
+pub(super) struct DeckBudget { ticks: AtomicU32, interrupted: AtomicBool }
+impl DeckBudget {
+    pub(super) fn install(c: &mut Connection) -> rusqlite::Result<Arc<Self>> {
+        let budget = Arc::new(Self::default());
+        let handler = budget.clone();
+        // Install before borrowing the connection for its sole transaction.
+        // Zero ticks keep the callback dormant outside candidate selection.
+        c.progress_handler(1000, Some(move || {
+            let ticks = handler.ticks.load(Ordering::Relaxed);
+            if ticks == 0 { return false; }
+            handler.ticks.store(ticks-1, Ordering::Relaxed);
+            if ticks == 1 { handler.interrupted.store(true, Ordering::Relaxed); true } else { false }
+        }))?;
+        Ok(budget)
+    }
+}
+
+/// Candidate IDs only; callers retain authoritative note/sibling reads and fit
+/// accounting. None means use the existing global keyset path from the same ID.
+pub(super) fn deck_candidates(c: &Connection, deck: i64, after: i64, budget: &DeckBudget) -> Result<Option<Vec<i64>>> {
+    // Be conservative about imported indexes, especially partial predicates.
+    // These checks choose a plan; submitted indexes never prove bounded work.
+    for (name, expected) in [
+        ("ix_cards_sched", "CREATEINDEXIX_CARDS_SCHEDONCARDS(DID,QUEUE,DUE)"),
+        ("idx_cards_odid", "CREATEINDEXIDX_CARDS_ODIDONCARDS(ODID)WHEREODID!=0"),
+    ] {
+        let sql: Option<String> = c.query_row(
+            "SELECT sql FROM sqlite_schema WHERE type='index' AND tbl_name='cards' AND name=?1 AND octet_length(sql)<=256",
+            [name], |r|r.get(0)).optional().map_err(sql_error)?;
+        if sql.is_none_or(|s|s.chars().filter(|c|!c.is_ascii_whitespace()).collect::<String>().to_ascii_uppercase()!=expected) {
+            return Ok(None);
+        }
+    }
+    // LIMIT bounds retained IDs, not the UNION scan/dedup/sort. Interrupt at a
+    // 100,000 VM-instruction budget, including prepare-time work. Disarm before
+    // fallback or ordinary reads; the request-owned callback can stay dormant.
+    struct WorkGuard<'a>(&'a DeckBudget);
+    impl Drop for WorkGuard<'_> {
+        fn drop(&mut self) { self.0.ticks.store(0, Ordering::Relaxed); }
+    }
+    let guard = WorkGuard(budget);
+    budget.interrupted.store(false, Ordering::Relaxed);
+    budget.ticks.store(100, Ordering::Relaxed);
+    let selected = (|| -> rusqlite::Result<Vec<i64>> {
+        // CROSS JOIN fixes cards first, with keyed surviving-note lookups. A
+        // filtered card belongs only to odid; orphans never consume the cap.
+        let mut q = c.prepare(
+            "SELECT n.id FROM cards AS c INDEXED BY ix_cards_sched
+             CROSS JOIN notes AS n ON n.id=c.nid
+             WHERE c.did=?1 AND c.odid=0 AND n.id>?2
+             UNION
+             SELECT n.id FROM cards AS c INDEXED BY idx_cards_odid
+             CROSS JOIN notes AS n ON n.id=c.nid
+             WHERE c.odid=?1 AND c.odid!=0 AND n.id>?2
+             ORDER BY 1 LIMIT ?3")?;
+        let rows = q.query_map(params![deck,after,(MAX_CANDIDATES+1) as i64], |r|r.get(0))?;
+        rows.collect()
+    })();
+    drop(guard);
+    match selected {
+        Ok(ids) => Ok(Some(ids)),
+        Err(rusqlite::Error::SqliteFailure(ref e, _)) if e.code==rusqlite::ErrorCode::OperationInterrupted
+            && budget.interrupted.load(Ordering::Relaxed) => Ok(None),
+        Err(e) => Err(sql_error(e)),
+    }
+}
 impl Backend {
     pub(super) fn note_result(&self, context: &Context, note: &StoredNote, nt: &Notetype) -> Result<NoteResult> {
         if note.id<=0 || note.mid<=0 { return Err(unsupported()); }
@@ -91,6 +160,12 @@ impl Backend {
             revision:self.revision(context,&revision_state(note.state.clone(),nt))? })
     }
     pub fn search_notes<A: Authority>(&self, path: &Path, a: &A, input: SearchInput) -> Result<SearchResult> {
+        self.search_notes_with_index(path, a, input, |_| None)
+    }
+    // The service supplies cache ownership separately from the authority guard.
+    // This callback runs only for paged search, inside its committed snapshot.
+    pub(crate) fn search_notes_with_index<A: Authority>(&self, path: &Path, a: &A, input: SearchInput,
+        index: impl FnOnce(&Connection) -> Option<Arc<SearchIndex>>) -> Result<SearchResult> {
         input::bounded_input(&input)?;
         if let Some(ref id) = input.note_id {
             let id = input::id(id)?;
@@ -114,15 +189,40 @@ impl Backend {
         let page = self.page(input.cursor.as_deref(),a.context(),"search_notes",&shape)?;
         if page.as_ref().is_some_and(|p|p.kind != 0) { return Err(invalid()); }
         let after = page.map_or(0,|p|p.after);
-        self.transaction(path,a,false,|c| {
+        self.transaction_with_deck_budget(path,a,false,deck_id.is_some(),|c,budget| {
+            let index = index(c);
+            // Even an empty scoped posting must not bypass legacy sibling
+            // validation. On failure let the original global cursor reach its
+            // next note and return the authoritative sibling error (or exhaust).
+            let eligible = deck_id.is_none() || generation::prepare_siblings(c).is_ok();
+            let indexed = index.as_ref().filter(|_|eligible)
+                .and_then(|i| i.candidates(deck_id,tag.as_deref(),input.query.as_deref()));
+            // Every driver uses the same authenticated note-ID position. Keep
+            // the full posting for an exact lookahead even at a byte-fit stop.
+            let indexed = indexed.map(|ids| &ids[ids.partition_point(|id| *id <= after)..]);
+            let cold = if eligible && indexed.is_none() {
+                match (deck_id,budget) { (Some(d),Some(b)) => deck_candidates(c,d,after,b)?, _ => None }
+            } else { None };
+            let scoped = indexed.or(cold.as_deref());
             let mut result = SearchResult { notes:vec![], next_cursor:None };
             let mut position = after; let mut work = 0;
-            for _ in 0..MAX_CANDIDATES {
-                let id: Option<i64> = c.query_row("SELECT id FROM notes WHERE id>?1 ORDER BY id LIMIT 1",[position],|r|r.get(0)).optional().map_err(sql_error)?;
+            for candidate in 0..MAX_CANDIDATES {
+                let id = match &scoped {
+                    Some(ids) => ids.get(candidate).copied(),
+                    None => c.query_row("SELECT id FROM notes WHERE id>?1 ORDER BY id LIMIT 1",[position],|r|r.get(0)).optional().map_err(sql_error)?,
+                };
                 let Some(id) = id else { break; };
-                // All scanned candidates are keyed. A deck test examines at
-                // most MAX_SIBLINGS cards through the existing nid index.
-                let matches_deck = match deck_id { None => true, Some(d) => generation::siblings(c,id)?.iter().any(|s|s.home == d) };
+                // Global fallback must establish membership before decoding
+                // unrelated scheduling data. Probe only with the qualified nid
+                // index and the existing sibling bound; an invalid index still
+                // reaches the authoritative siblings error below.
+                // Selected matching notes retain the complete sibling read and
+                // validation, including cards whose home is another deck.
+                let matches_deck = match deck_id {
+                    None => true,
+                    Some(d) if scoped.is_none() && eligible && !generation::has_home_deck(c,id,d)? => false,
+                    Some(d) => generation::siblings(c,id)?.iter().any(|s|s.home == d),
+                };
                 if !matches_deck { position=id; continue; }
                 let note = stored_note(c,id)?.ok_or_else(unsupported)?;
                 let bytes = note.fields.len()+note.tags.len();
@@ -142,11 +242,14 @@ impl Backend {
                 position=id;
                 if result.notes.len() == limit { break; }
             }
-            let more = c.query_row("SELECT id FROM notes WHERE id>?1 ORDER BY id LIMIT 1",[position],|r|r.get::<_,i64>(0)).optional().map_err(sql_error)?.is_some();
+            let more = match &scoped {
+                Some(ids) => ids.iter().any(|id|*id>position),
+                None => c.query_row("SELECT id FROM notes WHERE id>?1 ORDER BY id LIMIT 1",[position],|r|r.get::<_,i64>(0)).optional().map_err(sql_error)?.is_some(),
+            };
             if more { result.next_cursor=Some(self.page_token(a.context(),"search_notes",&shape,0,position)?); }
             Self::result_json(&result)?;
             Ok(result)
-        })
+        },None)
     }
     pub fn list_decks_and_note_types<A: Authority>(&self, path: &Path, a: &A, input: CatalogInput) -> Result<CatalogResult> {
         input::bounded_input(&input)?;
