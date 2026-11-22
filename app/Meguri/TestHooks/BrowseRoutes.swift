@@ -28,6 +28,9 @@ extension TestHooks {
     /// - `browse/search/tokens`: the search field (U271, N21.2) holding a
     ///   Deck token, a Tag is-not token of two values, a Flag token, an
     ///   advanced token and the text "plimb".
+    /// - `browse/search/save-search`: Save Search… asking for a name (T13).
+    /// - `browse/search/contains`: a Field token's Contains… asking for its
+    ///   text (T10).
     enum BrowseRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.registerShell("browse/sidebar/typical") { _ in launch(.typical) }
@@ -40,9 +43,11 @@ extension TestHooks {
             registry.registerShell("browse/table/error") { _ in launch(.error) }
             registry.registerShell("browse/table/large") { _ in launch(.large) }
             registry.registerShell("browse/search/tokens") { _ in launch(.tokens) }
+            registry.registerShell("browse/search/save-search") { _ in launch(.saveSearch) }
+            registry.registerShell("browse/search/contains") { _ in launch(.contains) }
         }
 
-        enum State { case typical, filtered, today, table, notes, noResults, emptyCollection, error, large, tokens }
+        enum State { case typical, filtered, today, table, notes, noResults, emptyCollection, error, large, tokens, saveSearch, contains }
 
         @MainActor static func launch(_ state: State) -> ShellLaunch {
             let cards = switch state {
@@ -80,6 +85,8 @@ extension TestHooks {
             case .table, .notes, .error: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(1)], negated: false)])
             case .noResults: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(7)], negated: false), .value([.state(.learning)], negated: false)])
             case .emptyCollection, .large: FilterQuery()
+            case .saveSearch: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(1)], negated: false)])
+            case .contains: FilterQuery(tokens: [.value([.field("Front", .contains("zindro"))], negated: false)])
             case .tokens:
                 FilterQuery(tokens: [.value([SampleBrowseBackend.deck(1)], negated: false),
                                      .value([.tag("brask"), .tag("orrin")], negated: true),
@@ -91,6 +98,8 @@ extension TestHooks {
                 if state == .notes { model.setMode(.notes) }
                 Task { @MainActor in
                     await model.prepareForTestHooks(query: query)
+                    if state == .saveSearch { model.startSavingSearch() }
+                    if state == .contains { model.editContains(in: 0) }
                     guard state == .table || state == .notes else { return }
                     // One row chosen, as after a click.
                     for _ in 0..<200 where model.results.list == nil { try? await Task.sleep(for: .milliseconds(10)) }
