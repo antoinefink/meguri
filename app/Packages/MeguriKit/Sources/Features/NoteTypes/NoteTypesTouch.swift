@@ -164,7 +164,7 @@ struct NoteTypeFieldsTouchList: View {
                             if line.deleted, model.draft(id)?.canRestore(line.id) == true {
                                 Button { model.restoreField(id, row: line.id) } label: { Text("noteTypes.fields.restore", bundle: .module) }
                                     .tint(.accentColor)
-                            } else if line.deleteBlock == nil {
+                            } else if !line.deleted, line.deleteBlock == nil {
                                 Button(role: .destructive) { model.deleteField(id, row: line.id) } label: {
                                     Text("noteTypes.fields.delete", bundle: .module)
                                 }

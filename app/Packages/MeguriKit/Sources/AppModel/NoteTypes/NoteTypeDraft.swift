@@ -115,8 +115,10 @@ public nonisolated struct NoteTypeDraft: Sendable, Hashable {
     /// (under case folding): two fields would share it.
     public func canRestore(_ id: Int) -> Bool {
         guard let row = row(id), row.deleted else { return false }
-        let name = row.name.lowercased()
-        return !keptRows.contains { $0.name.lowercased() == name }
+        // Unicode case folding, as the core compares names (`ſc` and `sc` collide).
+        func folded(_ name: String) -> String { name.folding(options: [.caseInsensitive], locale: nil) }
+        let name = folded(row.name)
+        return !keptRows.contains { folded($0.name) == name }
     }
 
     /// The step ⌘Z undoes and Edit › Undo names; nil when there is none.

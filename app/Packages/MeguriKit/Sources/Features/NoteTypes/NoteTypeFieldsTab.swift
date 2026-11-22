@@ -301,10 +301,19 @@ private struct FieldNameCell: View {
             .onChange(of: text) { _, _ in pending() }
             .onDisappear { model.pendingEdits["rename"] = nil }
         } else {
-            Text(verbatim: line.name)
-                .strikethrough(line.deleted)
-                .foregroundStyle(line.deleted ? .secondary : .primary)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                Text(verbatim: line.name)
+                    .strikethrough(line.deleted)
+                    .foregroundStyle(line.deleted ? .secondary : .primary)
+                    .lineLimit(1)
+                // A refused name stays under its row until it is corrected or cancelled.
+                if let refusal = model.renameRefusal, refusal.row == line.id {
+                    Text(NoteTypesStrings.refusal(refusal.refusal, locale: locale))
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("noteTypes.fields.renameRefusal.\(line.id)")
+                }
+            }
                 .accessibilityValue(line.deleted ? Text("noteTypes.fields.deleted", bundle: .module) : Text(verbatim: ""))
                 .accessibilityIdentifier("noteTypes.fields.row.\(line.id)")
         }

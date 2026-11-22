@@ -59,6 +59,12 @@ import Testing
         _ = draft.rename(added, to: "Other")
         let restored = draft.restore(2)
         #expect(restored)
+        // Unicode case folding: `ſc` and `sc` are one name.
+        var unicode = NoteTypeDraft(Self.record(fields: ["Front", "sc"]))
+        _ = unicode.delete(1)
+        let other = unicode.addField()
+        _ = unicode.rename(other, to: "ſc")
+        #expect(!unicode.canRestore(1))
     }
 
     /// W3: Delete is disabled for the last remaining field and for a protected one, with the reason.

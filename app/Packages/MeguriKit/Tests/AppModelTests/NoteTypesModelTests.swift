@@ -356,6 +356,33 @@ extension NoteTypesModelTests {
         #expect(!model.committingForSave)
     }
 
+    @Test func aRefusalThatEndedBeforeSaveStillHoldsSave() async {
+        let (model, backend) = await open()
+        model.setOption(7, row: 1) { $0.rtl = true }
+        model.trackCommit("name.0") { await model.commitRename(7, row: 0, typed: "back") }
+        await model.settle()
+        #expect(model.renameRefusal != nil && !model.canSave(7))
+        model.save()
+        await model.settle()
+        #expect(backend.saved.isEmpty)
+        model.cancelRename()
+        #expect(model.canSave(7))
+    }
+
+    @Test func keepEditingThenRevertReadsTheNewerVersion() async {
+        let backend = FakeNoteTypesBackend()
+        let (model, _) = await open(backend)
+        model.renameField()
+        backend.records[7] = NotetypeRecord(id: 7, name: "Sample", kind: 0, sortField: 0, css: ".card {}", base: [9, 9],
+                                            fields: NoteTypeDraftTests.record().fields, templates: NoteTypeDraftTests.record().templates)
+        model.changesCommitted(.notetypes([7]))
+        await model.settle()
+        model.keepEditing(7)
+        model.revert(7)
+        await model.settle()
+        #expect(model.draft(7)?.base.base == [9, 9])
+    }
+
     @Test func aCrossedOutNameIsFreeForAnotherField() async {
         let (model, _) = await open()
         model.deleteField(7, row: 2)
