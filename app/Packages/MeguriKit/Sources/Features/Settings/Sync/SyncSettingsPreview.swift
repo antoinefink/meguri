@@ -8,8 +8,9 @@ import SwiftUI
 public enum SyncSettingsPreview {
     public enum Page: Equatable, Sendable {
         case settings, troubleshooting, issues, keepCollection, statusPopover
-        /// N23's panel drawn in the window, as the popover shows it: a window
-        /// capture on Mac does not include the popover's own window.
+        /// N23's panel as a person sees it. Mac: drawn at the popover's size under
+        /// the toolbar button, since a window capture does not include the
+        /// popover's own window. Touch: the real popover (the sheet at compact width).
         case statusPanel
         /// Settings as the tab layout shows it; held wide, the sections are a list beside the section (N15.1).
         case settingsInTabLayout
@@ -43,15 +44,34 @@ private struct SyncSettingsPreviewScreen: View {
                     MeguriKeepCollectionSheet(collection: collection, facts: Self.keepCollectionFacts(collection))
                 }
         case .statusPanel:
+            #if os(macOS)
+            // As a person sees it: the popover's size, under the toolbar button
+            // that opens it, over the window. Only its own window is left out:
+            // a Mac window capture does not include a popover's window.
             NavigationStack {
-                SyncStatusPanel(collection: collection, openEntry: { _, _ in }, showSettings: { _ in })
-                    .padding()
-                    .frame(width: ContentWidth.primaryAction)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("sync.status.popover")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .topTrailing) {
+                        SyncStatusPanel(collection: collection, openEntry: { _, _ in }, showSettings: { _ in })
+                            .padding()
+                            .frame(width: ContentWidth.primaryAction)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .floatingChrome(in: Radius.rounded(Radius.large))
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("sync.status.popover")
+                            .padding(.trailing, Spacing.small)
+                    }
                     .toolbar { ToolbarItem(placement: .primaryAction) { CloudSyncStatusButton(collection: collection) } }
             }
+            #else
+            // Touch captures include the popover (the sheet at compact width): the real one.
+            NavigationStack {
+                Form {}
+                    .formStyle(.grouped)
+                    .toolbar { ToolbarItem(placement: .primaryAction) { CloudSyncStatusButton(collection: collection) } }
+                    .task { collection.syncPresentation.statusPresented = true }
+            }
+            #endif
         case .statusPopover:
             NavigationStack {
                 Form {}
