@@ -760,8 +760,9 @@ fn q2_the_browse_scope_text_of_each_scope() {
     );
 }
 
-/// Q6's test-only join, built from `stats_browse_scope`'s text: Q3.
-fn join(scope: &BrowseScope, item: &str) -> Option<String> {
+/// Q6's test-only join, built from `stats_browse_scope`'s text: Q3. AE60's
+/// test (`graphs_cards`) uses it too.
+pub fn join(scope: &BrowseScope, item: &str) -> Option<String> {
     // Q3: an item with an OR at its top level (outside every group and
     // every quoted text) is grouped.
     let top_level_or = {
