@@ -293,8 +293,8 @@
         "sha256": "0ad6d487b3437a8458067232dcaa3125fd44a16b140945d2b1bca5a353dc82e4"
       },
       "server/tools/package-context.py": {
-        "bytes": 4232,
-        "sha256": "c9c5e140f77ac5b8fdfc18921c9bbda066848df146b3665149b3d7a228c7fa78"
+        "bytes": 4733,
+        "sha256": "614f4c490ee8a1dfcb0eed2c4eaa9399e0b594570c9c31c5e4e23fd194723ddf"
       },
       "server/tools/package-inventory.py": {
         "bytes": 9180,
