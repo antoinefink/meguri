@@ -187,24 +187,33 @@ pub(crate) struct Presets {
 }
 
 impl Presets {
-    pub(crate) fn read(source: &impl ReadRows) -> Presets {
-        let decks: HashMap<i64, Option<i64>> = match source.deck_rows() {
-            Ok(decks) => decks.iter().map(|deck| (deck.id.0, deck_preset(deck))).collect(),
-            Err(error) => {
-                tracing::warn!(%error, "reading the decks for the knowledge history");
-                HashMap::new()
-            }
-        };
-        let mut presets = HashMap::new();
-        for id in decks.values().flatten().copied().collect::<BTreeSet<i64>>() {
-            match source.deck_config(DeckConfigId(id)) {
-                Ok(row) => {
-                    presets.insert(id, Preset::new(preset_inputs(id, row)));
+    pub(crate) fn read(source: &impl ReadRows) -> Result<Presets, StorageError> {
+        // Row by row, as a capture reads them: an unreadable deck is that
+        // deck's alone.
+        let mut decks: HashMap<i64, Option<i64>> = HashMap::new();
+        let mut after: Option<RowKey> = None;
+        loop {
+            let page = source.row_page(Table::Decks, after.as_ref())?;
+            let Some(last) = page.last() else { break };
+            after = match last.first() {
+                Some(Cell::Integer(id)) => Some(RowKey::Id(*id)),
+                _ => break,
+            };
+            for cells in &page {
+                if let Ok(deck) = Deck::from_cells(cells) {
+                    decks.insert(deck.id.0, deck_preset(&deck));
                 }
-                Err(error) => tracing::warn!(%error, preset = id, "reading a preset for the knowledge history"),
             }
         }
-        Presets { decks, presets }
+        let mut presets = HashMap::new();
+        for id in decks.values().flatten().copied().collect::<BTreeSet<i64>>() {
+            let row = source.row_image(Table::DeckConfig, &RowKey::Id(id))?;
+            // An unreadable preset has none: its cards fail (as a capture).
+            if let Ok(inputs) = image_inputs(id, row.as_ref()) {
+                presets.insert(id, Preset::new(inputs));
+            }
+        }
+        Ok(Presets { decks, presets })
     }
 
     fn home(&self, key: Key) -> Option<&Preset> {
@@ -264,9 +273,8 @@ fn committed_preset(rows: &ObserverRows<'_>, key: Key, cache: &mut HashMap<i64, 
         return Ok(found.clone());
     }
     let found = match rows.row_image(Table::Decks, &RowKey::Id(deck))? {
-        // An unreadable deck: a build reads none of the decks (`Presets`),
-        // so this commit is applied as one too.
-        Some(cells) => match deck_preset(&Deck::from_cells(&cells).map_err(|_| Unusable)?) {
+        // An unreadable deck has no preset, as a build reads it.
+        Some(cells) => match Deck::from_cells(&cells).ok().as_ref().and_then(deck_preset) {
             Some(id) => {
                 let preset = rows.row_image(Table::DeckConfig, &RowKey::Id(id))?;
                 image_inputs(id, preset.as_ref()).ok()
@@ -416,6 +424,7 @@ pub(crate) struct Kept {
     pub preset: Option<i64>,
     pub cut: Memory,
     pub free: Memory,
+    pub failed_at: Option<i64>,
 }
 
 /// H2 and H3 for one card on `grid`, with the kept sample `days` (no
@@ -442,7 +451,7 @@ fn replay_card(
     let record = replayed.record;
     // H3 reads H2.1's cards: suspended ones are left out.
     let known = match days {
-        Some(days) if !record.suspended => knowledge(grid, days, card.id, &rows, preset),
+        Some(days) if !record.suspended => knowledge(grid, days, card.id, &rows, preset, grid.reference()),
         _ => Knowledge::NONE,
     };
     let contribution = Contribution::Card(replayed);
@@ -455,6 +464,7 @@ fn replay_card(
             preset: preset.map(|preset| preset.inputs.id),
             cut: known.cut,
             free: known.free,
+            failed_at: known.failed_at,
         }),
     }
 }
@@ -565,6 +575,10 @@ pub(crate) fn replay_cards(
         }
         drop(inputs);
         for finished in done.iter() {
+            if cancel() {
+                // The workers drop what they hold (H16).
+                stop.store(true, Ordering::Relaxed);
+            }
             if !stopped && !stop.load(Ordering::Relaxed) && !each(finished) {
                 stopped = true;
                 stop.store(true, Ordering::Relaxed);
@@ -650,8 +664,8 @@ fn put_records(tables: &ComponentTables<'_>, records: &[Kept]) -> Result<(), Eng
         .conn()
         .prepare_cached(&format!(
             "INSERT OR REPLACE INTO \"{table}\" (id, did, odid, suspended, state, newest_row, first_review, preset, \
-             cut_code, cut_s, cut_d, cut_l, free_code, free_s, free_d, free_l) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
+             cut_code, cut_s, cut_d, cut_l, free_code, free_s, free_d, free_l, failed_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"
         ))
         .map_err(sql)?;
     for kept in records {
@@ -676,6 +690,7 @@ fn put_records(tables: &ComponentTables<'_>, records: &[Kept]) -> Result<(), Eng
                 free_s,
                 free_d,
                 free_l,
+                optional(kept.failed_at),
             ]))
             .map_err(sql)?;
     }
@@ -733,9 +748,11 @@ fn put_presets<'a>(tables: &ComponentTables<'_>, presets: impl Iterator<Item = &
                 Cell::Integer(inputs.id),
                 Cell::Blob(params_blob(&inputs.params)),
                 Cell::Integer(i64::from(inputs.usable)),
-                Cell::Real(f64::from(inputs.decay)),
+                // The bits: a refused list may end in a NaN, which SQLite
+                // would store as NULL.
+                Cell::Integer(i64::from(inputs.decay.to_bits())),
                 optional(inputs.cutoff),
-                Cell::Real(f64::from(inputs.retention)),
+                Cell::Integer(i64::from(inputs.retention.to_bits())),
             ]))
             .map_err(sql)?;
     }
@@ -743,7 +760,7 @@ fn put_presets<'a>(tables: &ComponentTables<'_>, presets: impl Iterator<Item = &
 }
 
 fn preset_of_cells(cells: &[Cell]) -> Option<Preset> {
-    let (Some(Cell::Integer(id)), Some(Cell::Blob(params)), Some(Cell::Integer(usable)), Some(Cell::Real(decay)), Some(cutoff), Some(Cell::Real(retention))) =
+    let (Some(Cell::Integer(id)), Some(Cell::Blob(params)), Some(Cell::Integer(usable)), Some(Cell::Integer(decay)), Some(cutoff), Some(Cell::Integer(retention))) =
         (cells.first(), cells.get(1), cells.get(2), cells.get(3), cells.get(4), cells.get(5))
     else {
         return None;
@@ -752,12 +769,12 @@ fn preset_of_cells(cells: &[Cell]) -> Option<Preset> {
         id: *id,
         params: blob_params(params),
         usable: *usable == 1,
-        decay: *decay as f32,
+        decay: f32::from_bits(u32::try_from(*decay).ok()?),
         cutoff: match cutoff {
             Cell::Integer(cutoff) => Some(*cutoff),
             _ => None,
         },
-        retention: *retention as f32,
+        retention: f32::from_bits(u32::try_from(*retention).ok()?),
     }))
 }
 
@@ -776,9 +793,9 @@ fn read_preset(tables: &ComponentTables<'_>, id: i64) -> Result<Option<Preset>, 
                 Cell::Integer(row.get(0).map_err(sql)?),
                 Cell::Blob(row.get(1).map_err(sql)?),
                 Cell::Integer(row.get(2).map_err(sql)?),
-                Cell::Real(row.get(3).map_err(sql)?),
+                Cell::Integer(row.get(3).map_err(sql)?),
                 optional(row.get(4).map_err(sql)?),
-                Cell::Real(row.get(5).map_err(sql)?),
+                Cell::Integer(row.get(5).map_err(sql)?),
             ];
             preset_of_cells(&cells)
                 .map(Some)
@@ -993,6 +1010,8 @@ pub(crate) struct Replay {
     pub sums: Sums,
     pub bad: Vec<BadCard>,
     pub now: Vec<NowInputs>,
+    /// The home presets the replay used, by id.
+    pub presets: HashMap<i64, Preset>,
 }
 
 pub(crate) fn replay_all(
@@ -1002,7 +1021,7 @@ pub(crate) fn replay_all(
     cancel: &dyn Fn() -> bool,
 ) -> Result<Replay, StorageError> {
     let presets = match frame {
-        Some(_) => Presets::read(source),
+        Some(_) => Presets::read(source)?,
         None => Presets {
             decks: HashMap::new(),
             presets: HashMap::new(),
@@ -1027,21 +1046,59 @@ pub(crate) fn replay_all(
         }
         true
     })?;
-    Ok(Replay { sums, bad, now })
+    Ok(Replay {
+        sums,
+        bad,
+        now,
+        presets: presets.presets,
+    })
 }
 
 /// What today's point reads of a record, with its preset's decay and
 /// cutoff.
 fn now_inputs<'a>(kept: &Kept, preset: impl Fn(i64) -> Option<&'a Preset>) -> NowInputs {
-    let preset = kept.preset.and_then(preset);
+    let found = kept.preset.and_then(preset);
     NowInputs {
+        id: kept.card.id,
         key: kept.card.key,
         suspended: kept.card.suspended,
-        decay: preset.map_or(0.0, Preset::decay),
-        cutoff: preset.and_then(|preset| preset.inputs.cutoff),
+        preset: kept.preset,
+        decay: found.map(Preset::decay),
+        cutoff: found.and_then(|preset| preset.inputs.cutoff),
         cut: kept.cut,
         free: kept.free,
+        failed_at: kept.failed_at,
+        newest_row: kept.card.newest_row,
     }
+}
+
+/// Today's point of a card with a row after the request's `N`
+/// (`next_day_at`): replayed from its rows in `source` with I4's days
+/// counted back from that `N`, as H3.1 says, instead of from the grid's
+/// far boundary that serves every past sample.
+pub(crate) fn now_at(source: &impl ReadRows, grid: Grid, card: &NowInputs, preset: Option<&Preset>, next_day_at: i64) -> Result<NowInputs, StorageError> {
+    let rows: Vec<rows::StatsRow> = {
+        let mut read: Vec<rows::StatsRow> = Vec::new();
+        for image in source.card_revlog_images(CardId(card.id))? {
+            match rows::read_row(&image) {
+                RowRead::Row { row, cid } if cid == card.id && row.id >= 0 => read.push(row),
+                // An unreadable row fails the part before this (G4).
+                _ => {}
+            }
+        }
+        read.sort_by_key(|row| row.id);
+        read
+    };
+    let known = knowledge(grid, &[], card.id, &rows, preset, next_day_at);
+    Ok(NowInputs {
+        cut: known.cut,
+        free: known.free,
+        failed_at: match (known.failed_at, card.failed_at) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        },
+        ..*card
+    })
 }
 
 impl DerivedComponent for StatsHistory {
@@ -1058,7 +1115,7 @@ impl DerivedComponent for StatsHistory {
                 "(id INTEGER PRIMARY KEY, did INTEGER NOT NULL, odid INTEGER NOT NULL, suspended INTEGER NOT NULL, \
                  state INTEGER, newest_row INTEGER, first_review INTEGER, preset INTEGER, \
                  cut_code INTEGER NOT NULL, cut_s REAL, cut_d REAL, cut_l INTEGER, \
-                 free_code INTEGER NOT NULL, free_s REAL, free_d REAL, free_l INTEGER)",
+                 free_code INTEGER NOT NULL, free_s REAL, free_d REAL, free_l INTEGER, failed_at INTEGER)",
             ))
             .table(TableDef::columns(
                 DAYS,
@@ -1078,8 +1135,8 @@ impl DerivedComponent for StatsHistory {
             ))
             .table(TableDef::columns(
                 PRESETS,
-                "(id INTEGER PRIMARY KEY, params BLOB NOT NULL, usable INTEGER NOT NULL, decay REAL NOT NULL, \
-                 cutoff INTEGER, retention REAL NOT NULL)",
+                "(id INTEGER PRIMARY KEY, params BLOB NOT NULL, usable INTEGER NOT NULL, decay INTEGER NOT NULL, \
+                 cutoff INTEGER, retention INTEGER NOT NULL)",
             ))
             .table(TableDef::columns(
                 BAD,
@@ -1154,7 +1211,7 @@ impl DerivedComponent for StatsHistory {
     fn build(&self, source: &Snapshot<'_>, sink: &mut BuildSink) -> Result<(), EngineError> {
         let (grid, frame) = self.shared.wanted();
         let total = source.row_count(Table::Cards)? + source.row_count(Table::Revlog)?;
-        let presets = Presets::read(&**source);
+        let presets = Presets::read(&**source)?;
         let days = frame.kept_days();
         let work = Work {
             grid,
@@ -1377,18 +1434,24 @@ pub(crate) fn visit_kept_now(
     snapshot.visit_derived(
         HISTORY_COMPONENT,
         CARDS,
-        "did, odid, suspended, preset, cut_code, cut_s, cut_d, cut_l, free_code, free_s, free_d, free_l",
+        "did, odid, suspended, preset, cut_code, cut_s, cut_d, cut_l, free_code, free_s, free_d, free_l, id, failed_at, newest_row",
         cancel,
         &mut |cells| {
-            let (Some(did), Some(odid)) = (integer(cells, 0), integer(cells, 1)) else { return true };
-            let preset = integer(cells, 3).and_then(|id| presets.get(&id));
+            let (Some(did), Some(odid), Some(id)) = (integer(cells, 0), integer(cells, 1), integer(cells, 12)) else {
+                return true;
+            };
+            let found = integer(cells, 3).and_then(|id| presets.get(&id));
             each(&NowInputs {
+                id,
                 key: Key { did, odid },
                 suspended: integer(cells, 2) == Some(1),
-                decay: preset.map_or(0.0, Preset::decay),
-                cutoff: preset.and_then(|preset| preset.inputs.cutoff),
+                preset: integer(cells, 3),
+                decay: found.map(Preset::decay),
+                cutoff: found.and_then(|preset| preset.inputs.cutoff),
                 cut: memory_of(cells, 4),
                 free: memory_of(cells, 8),
+                failed_at: integer(cells, 13),
+                newest_row: integer(cells, 14),
             });
             true
         },

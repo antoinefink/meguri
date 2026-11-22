@@ -266,12 +266,19 @@ impl Totals {
 /// every row with and without that cutoff.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NowInputs {
+    pub id: i64,
     pub key: Key,
     pub suspended: bool,
-    pub decay: f64,
+    /// Its home preset's id, decay and cutoff, when it has one.
+    pub preset: Option<i64>,
+    pub decay: Option<f64>,
     pub cutoff: Option<i64>,
     pub cut: Memory,
     pub free: Memory,
+    pub failed_at: Option<i64>,
+    /// The id of its newest row: a row after a request's `N` makes
+    /// today's point replay the card against that `N` (I4).
+    pub newest_row: Option<i64>,
 }
 
 /// H3.3's part, summed from the selected keys' kept samples and records.
@@ -332,10 +339,11 @@ impl KnowledgeTotals {
         if card.suspended || !self.selects(card.key) {
             return;
         }
-        match Knowledge::now(card.cut, card.free, card.cutoff, now_ms) {
-            Memory::Failed => self.failed += 1,
-            memory => {
-                if let Some(recall) = memory.recall_at(now_ms.div_euclid(1_000), card.decay) {
+        match (Knowledge::now(card.cut, card.free, card.failed_at, card.cutoff, now_ms), card.decay) {
+            // A state with no kept preset cannot be: never a recall of 1.
+            (Memory::Failed, _) | (Memory::State { .. }, None) => self.failed += 1,
+            (memory, decay) => {
+                if let Some(recall) = memory.recall_at(now_ms.div_euclid(1_000), decay.unwrap_or(0.0)) {
                     self.now[0] += i128::from(recall);
                     self.now[1] += 1;
                 }

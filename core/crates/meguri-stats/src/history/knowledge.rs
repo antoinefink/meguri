@@ -5,12 +5,15 @@
 //!
 //! - The replay is `meguri_sched`'s memory items (`sched/fsrs-items` I3 to
 //!   I5) on the pinned crate: one `historical_memory_states` call per
-//!   history start, read at each cut (C6.3's states are the ones `memory`
-//!   gives for each prefix); a crate error falls back to one `memory` call
-//!   per cut, so the first failing sample is exact.
+//!   history start, read at each prefix of the rows (C6.3's states are the
+//!   ones `memory` gives for each prefix); on a crate error each prefix of
+//!   that start is replayed with `memory`, so the first failing instant is
+//!   exact.
 //! - A chance of recall is kept as a whole number of 2^-40 cards: sums are
 //!   exact integers, so a sum kept through any sequence of changes equals a
 //!   cold one bit for bit, and the rounding of each card is under 1e-12.
+
+use std::collections::HashMap;
 
 use fsrs::FSRS;
 use meguri_engine::activity::civil;
@@ -224,15 +227,20 @@ impl Memory {
     }
 }
 
-/// One card's knowledge (H14.1): what it adds at each kept sample day, and
-/// its memory over every row, with and without its preset's cutoff (today's
-/// point reads the first when now is at or after the cutoff instant).
+/// One card's knowledge (H14.1): what it adds at each kept sample day, its
+/// memory over every row, with and without its preset's cutoff (today's
+/// point reads the first when now is at or after the cutoff instant), and
+/// the first instant its replay fails at.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Knowledge {
     /// Each kept sample day it is studied on, with its quantized chance.
     pub points: Vec<(i64, i64)>,
     pub cut: Memory,
     pub free: Memory,
+    /// H3.1's crate error: from this whole second on, the card is out of
+    /// every sample and in `failed`. It depends only on the card's rows and
+    /// preset, never on which samples a store keeps.
+    pub failed_at: Option<i64>,
 }
 
 impl Knowledge {
@@ -240,11 +248,15 @@ impl Knowledge {
         points: Vec::new(),
         cut: Memory::None,
         free: Memory::None,
+        failed_at: None,
     };
 
     /// The memory today's point uses at `now_ms`, for a preset whose
     /// cutoff is `cutoff`.
-    pub(crate) fn now(cut: Memory, free: Memory, cutoff: Option<i64>, now_ms: i64) -> Memory {
+    pub(crate) fn now(cut: Memory, free: Memory, failed_at: Option<i64>, cutoff: Option<i64>, now_ms: i64) -> Memory {
+        if failed_at.is_some_and(|failed| failed <= now_ms.div_euclid(1_000)) {
+            return Memory::Failed;
+        }
         match cutoff {
             Some(cutoff) if now_ms < cutoff => free,
             _ => cut,
@@ -291,40 +303,44 @@ struct Selected {
 
 /// H3.1 for one existing, unsuspended card with readable rows sorted by
 /// `id`, on the kept sample `days` (ascending); `preset` is its home preset,
-/// `None` when it has none (a missing or filtered home deck).
-pub(crate) fn knowledge(grid: Grid, days: &[i64], card: i64, rows: &[StatsRow], preset: Option<&Preset>) -> Knowledge {
+/// `None` when it has none (a missing or filtered home deck). I4's days are
+/// counted back from `reference`: [`Grid::reference`] for kept samples,
+/// whose rows are all before any request's `N`; a request's `N` for today's
+/// point of a card with a row at or after it.
+pub(crate) fn knowledge(
+    grid: Grid,
+    days: &[i64],
+    card: i64,
+    rows: &[StatsRow],
+    preset: Option<&Preset>,
+    reference: i64,
+) -> Knowledge {
     let entries: Vec<RevlogEntry> = rows.iter().map(|row| entry(row, card)).collect();
     // No graded row gives no item at any cut (I3), whatever the preset.
     if !entries.iter().any(is_graded) {
         return Knowledge::NONE;
     }
-    let Some((preset, model, cutoff)) = preset.and_then(|p| Some((p, p.model.as_ref()?, p.inputs.cutoff?))) else {
-        return Knowledge {
-            points: Vec::new(),
-            cut: Memory::Failed,
-            free: Memory::Failed,
-        };
-    };
+    let cutoff = preset.and_then(|preset| preset.inputs.cutoff);
     Replay {
         entries: &entries,
-        model,
-        retention: preset.inputs.retention,
-        cutoff,
+        // No model (a refused list or cutoff, no home preset): every cut
+        // that gives an item fails.
+        model: preset.and_then(|preset| preset.model.as_ref()),
+        retention: preset.map_or(0.9, |preset| preset.inputs.retention),
+        cutoff: cutoff.unwrap_or(i64::MIN),
         // A cutoff before every row cuts nothing: both forms are the same.
-        cuts_nothing: entries.first().is_some_and(|first| cutoff < first.id.0),
-        reference: grid.reference(),
+        cuts_nothing: cutoff.is_none_or(|cutoff| entries.first().is_some_and(|first| cutoff < first.id.0)),
+        reference,
     }
-    .run(grid, days, preset.decay)
+    .run(grid, days, preset.map_or(0.0, Preset::decay))
 }
 
 struct Replay<'a> {
     entries: &'a [RevlogEntry],
-    model: &'a FSRS,
+    model: Option<&'a FSRS>,
     retention: f32,
     cutoff: i64,
     cuts_nothing: bool,
-    /// I4's days are counted back from this boundary of the grid, after
-    /// every row: only their differences matter, and they are the grid's.
     reference: i64,
 }
 
@@ -345,11 +361,29 @@ impl Replay<'_> {
         })
     }
 
-    /// The memory at every cut: one `historical_memory_states` call per
-    /// history start, over its longest cut.
-    fn states_at(&self, cuts: &[Cut]) -> Vec<Memory> {
+    /// The cut at whole second `instant`: the rows at or before it, with the
+    /// cutoff from the cutoff instant on.
+    fn cut_at(&self, instant: i64) -> Cut {
+        Cut {
+            rows: self.entries.partition_point(|row| second(row) <= instant),
+            with_cutoff: self.cuts_nothing || instant.saturating_mul(1_000) >= self.cutoff,
+        }
+    }
+
+    /// The memory at every cut of the rows (each prefix, with and without
+    /// the cutoff): one `historical_memory_states` call per history start,
+    /// over its longest cut; on a crate error, one `memory` call per cut.
+    fn states_at(&self, cuts: &[Cut]) -> HashMap<Cut, Memory> {
         let selected: Vec<Option<Selected>> = cuts.iter().map(|cut| self.select(*cut)).collect();
-        let mut states_at = vec![Memory::None; cuts.len()];
+        let mut states_at: HashMap<Cut, Memory> = cuts.iter().map(|cut| (*cut, Memory::None)).collect();
+        let Some(model) = self.model else {
+            for (cut, found) in cuts.iter().zip(&selected) {
+                if found.is_some() {
+                    states_at.insert(*cut, Memory::Failed);
+                }
+            }
+            return states_at;
+        };
         // Each history start, with the longest cut that has it.
         let mut starts: Vec<((usize, bool), usize)> = Vec::new();
         for (at, found) in selected.iter().enumerate() {
@@ -361,97 +395,79 @@ impl Replay<'_> {
                 None => starts.push((key, at)),
             }
         }
+        let state = |state: meguri_model::card_data::MemoryState, found: &Selected| Memory::State {
+            stability: state.stability,
+            difficulty: state.difficulty,
+            last: found.last,
+        };
         for (key, longest) in starts {
             let states = self
                 .history(cuts[longest])
-                .map(|history| history.historical(self.model, self.reference, self.retention));
+                .map(|history| history.historical(model, self.reference, self.retention));
             for (at, found) in selected.iter().enumerate() {
                 let Some(found) = found.filter(|found| (found.start, found.complete) == key) else { continue };
-                states_at[at] = match &states {
-                    Some(Ok(states)) => match states.get(found.kept - 1) {
-                        Some(state) => Memory::State {
-                            stability: state.stability,
-                            difficulty: state.difficulty,
-                            last: found.last,
-                        },
-                        None => Memory::Failed,
-                    },
-                    // The first failing cut decides: each cut on its own.
-                    _ => match self.history(cuts[at]).map(|h| h.memory(self.model, self.reference, self.retention)) {
-                        Some(Ok(state)) => Memory::State {
-                            stability: state.stability,
-                            difficulty: state.difficulty,
-                            last: found.last,
-                        },
+                let memory = match &states {
+                    Some(Ok(states)) => states.get(found.kept - 1).map_or(Memory::Failed, |s| state(*s, &found)),
+                    _ => match self.history(cuts[at]).map(|h| h.memory(model, self.reference, self.retention)) {
+                        Some(Ok(memory)) => state(memory, &found),
                         _ => Memory::Failed,
                     },
                 };
+                states_at.insert(cuts[at], memory);
             }
         }
         states_at
     }
 
     fn run(&self, grid: Grid, days: &[i64], decay: f64) -> Knowledge {
+        let all = self.entries.len();
+        let forms: &[bool] = if self.cuts_nothing { &[true] } else { &[true, false] };
+        let cuts: Vec<Cut> = (1..=all)
+            .flat_map(|rows| forms.iter().map(move |with_cutoff| Cut { rows, with_cutoff: *with_cutoff }))
+            .collect();
+        let states_at = self.states_at(&cuts);
+        let memory = |cut: Cut| states_at.get(&cut).copied().unwrap_or(Memory::None);
+        // H3.1's first failing instant, whatever the samples: the cut
+        // changes only at a row's second and at the cutoff instant.
+        let mut changes: Vec<i64> = self.entries.iter().map(second).collect();
+        if !self.cuts_nothing {
+            changes.push(self.cutoff.div_euclid(1_000) + i64::from(self.cutoff.rem_euclid(1_000) != 0));
+        }
+        changes.sort_unstable();
+        let failed_at = changes
+            .into_iter()
+            .find(|instant| matches!(memory(self.cut_at(*instant)), Memory::Failed));
         let first_day = grid.row_day(self.entries[0].id.0);
         let days = &days[days.partition_point(|day| *day < first_day)..];
-        // Each sample's cut: the rows at or before its instant (H1's day
-        // end), with the cutoff from the cutoff instant on.
-        let mut samples: Vec<(i64, i64, usize)> = Vec::with_capacity(days.len());
-        let mut cuts: Vec<Cut> = Vec::new();
-        let mut rows = 0;
+        let mut points = Vec::with_capacity(days.len());
         for day in days {
             let instant = grid.end(*day);
-            while rows < self.entries.len() && second(&self.entries[rows]) <= instant {
-                rows += 1;
+            if failed_at.is_some_and(|failed| failed <= instant) {
+                // Out of that sample and every later one.
+                break;
             }
-            let cut = Cut {
-                rows,
-                with_cutoff: self.cuts_nothing || instant.saturating_mul(1_000) >= self.cutoff,
-            };
-            if cuts.last() != Some(&cut) {
-                cuts.push(cut);
+            if let Some(recall) = memory(self.cut_at(instant)).recall_at(instant, decay) {
+                points.push((*day, recall));
             }
-            samples.push((*day, instant, cuts.len() - 1));
         }
         // Today's point reads every row (H1: "for now, every row").
-        let all = self.entries.len();
-        let now_cut = cuts.len();
-        cuts.push(Cut {
+        let cut = memory(Cut {
             rows: all,
             with_cutoff: true,
         });
-        if !self.cuts_nothing {
-            cuts.push(Cut {
+        let free = if self.cuts_nothing {
+            cut
+        } else {
+            memory(Cut {
                 rows: all,
                 with_cutoff: false,
-            });
+            })
+        };
+        Knowledge {
+            points,
+            cut,
+            free,
+            failed_at,
         }
-        let states_at = self.states_at(&cuts);
-        let mut points = Vec::with_capacity(samples.len());
-        let mut failed = false;
-        for (day, instant, cut) in samples {
-            match states_at[cut] {
-                // H3.1: out of that sample and every later one.
-                Memory::Failed => {
-                    failed = true;
-                    break;
-                }
-                memory => {
-                    if let Some(recall) = memory.recall_at(instant, decay) {
-                        points.push((day, recall));
-                    }
-                }
-            }
-        }
-        if failed {
-            return Knowledge {
-                points,
-                cut: Memory::Failed,
-                free: Memory::Failed,
-            };
-        }
-        let cut = states_at[now_cut];
-        let free = if self.cuts_nothing { cut } else { states_at[now_cut + 1] };
-        Knowledge { points, cut, free }
     }
 }

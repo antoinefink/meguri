@@ -440,7 +440,6 @@ fn serve<T>(
     cold: &PartRead<'_, T>,
 ) -> Result<Served<T>, StatsError> {
     let shared = caches.history_shared();
-    shared.want(Grid::of(context.next_day_at), Frame::of(context));
     let mut reporter = Reporter {
         report: progress,
         last: None,
@@ -453,6 +452,8 @@ fn serve<T>(
         if cancelled() {
             return Ok(Served::Cancelled);
         }
+        // Each try: a cancelled request's wish never outlives this one's.
+        shared.want(Grid::of(context.next_day_at), Frame::of(context));
         let other_grid = {
             let lease = collection.reader(ReaderRole::Query)?;
             let snapshot = lease.snapshot()?;
@@ -471,6 +472,8 @@ fn serve<T>(
             if derived.has_failed(HISTORY_COMPONENT) || derived.readiness(HISTORY_COMPONENT).is_none() || tries >= MAX_TRIES
             {
                 tracing::warn!("the stats history cannot be built: the history part is computed from the snapshot");
+                // A replay of every card: no fraction to report (H15).
+                reporter.unknown();
                 let read = cold(&snapshot, selection, &cancelled);
                 return finish(read, false, &cancelled);
             }
@@ -680,6 +683,14 @@ fn months(context: &Context, request: &KnowledgeRequest) -> (bool, Option<i64>) 
     )
 }
 
+/// Whether today's point of `card` is replayed against the request's `N`:
+/// an unsuspended card with a row after it (dated later by a device's
+/// clock), whose I4 days fold onto day 0 (H3.1). Every other card's kept
+/// memory is the same against any `N` after its rows.
+fn today(card: &sums::NowInputs, context: &Context) -> bool {
+    !card.suspended && card.newest_row.is_some_and(|id| id.div_euclid(1_000) > context.next_day_at)
+}
+
 /// H3's part from the kept samples of the keys `selection` selects and
 /// today's point from their records.
 fn read_kept_knowledge(
@@ -698,7 +709,16 @@ fn read_kept_knowledge(
     store::visit_kept_keys(snapshot, cancelled, &mut |key, count| totals.add_left_out(key, count))?;
     store::visit_kept_samples(snapshot, cancelled, &mut |key, day, values| totals.add_day(key, day, values))?;
     let presets = store::kept_presets(snapshot)?;
-    store::visit_kept_now(snapshot, &presets, cancelled, &mut |card| totals.add_now(card, context.now_ms))?;
+    let mut later = Vec::new();
+    store::visit_kept_now(snapshot, &presets, cancelled, &mut |card| match today(card, context) {
+        true => later.push(*card),
+        false => totals.add_now(card, context.now_ms),
+    })?;
+    let grid = Grid::of(context.next_day_at);
+    for card in &later {
+        let preset = card.preset.and_then(|id| presets.get(&id));
+        totals.add_now(&store::now_at(&**snapshot, grid, card, preset, context.next_day_at)?, context.now_ms);
+    }
     let (months, oldest) = months(context, request);
     Ok(Read::Parts(totals.finish(
         Grid::of(context.next_day_at),
@@ -730,7 +750,12 @@ fn read_cold_knowledge(
     let mut totals = KnowledgeTotals::new(selection);
     totals.add_sums(&replayed.sums);
     for card in &replayed.now {
-        totals.add_now(card, context.now_ms);
+        if today(card, context) {
+            let preset = card.preset.and_then(|id| replayed.presets.get(&id));
+            totals.add_now(&store::now_at(&**snapshot, grid, card, preset, context.next_day_at)?, context.now_ms);
+        } else {
+            totals.add_now(card, context.now_ms);
+        }
     }
     let (months, oldest) = months(context, request);
     Ok(Read::Parts(totals.finish(grid, frame, context.now_ms, months, oldest)))

@@ -920,3 +920,56 @@ fn h3_today_point_is_computed_at_each_requests_now() {
     assert!(undo.samples.last().unwrap().knowledge < b.knowledge);
     compare(&f, &[Scope::Deck(DeckId(deck))], "an undo");
 }
+
+#[test]
+fn h3_1_a_refused_preset_fails_only_cards_with_an_item_and_a_nan_list_is_kept() {
+    let f = Fixture::new();
+    let n = f.next_day_at();
+    let mut nan = fsrs::DEFAULT_PARAMETERS.to_vec();
+    nan[20] = f32::NAN;
+    let (_, refused) = preset_deck(&f, "NaN", Some(nan), "");
+    // A graded row that gives no item at any cut (no learning run, no
+    // interday row): not failed.
+    let quiet = at(n, -40, 1);
+    put_card(&f, refused, quiet, vec![row(at(n, -30, 1), quiet, 3, 0, 2500, REVIEW)]);
+    let part = warm(&f, Scope::Deck(DeckId(refused)), History::AllHistory);
+    assert_eq!(part, KnowledgeOverTime::default());
+    // One that gives an item fails from its first row on.
+    let failing = at(n, -40, 2);
+    put_card(
+        &f,
+        refused,
+        failing,
+        vec![row(at(n, -30, 2), failing, 3, -600, 2500, LEARN), row(at(n, -29, 3), failing, 3, 3, 2500, LEARN)],
+    );
+    let part = warm(&f, Scope::Deck(DeckId(refused)), History::AllHistory);
+    assert_eq!((part.failed, part.samples.len()), (1, 0));
+    compare(&f, &[Scope::Collection, Scope::Deck(DeckId(refused))], "a refused list");
+}
+
+#[test]
+fn h3_1_todays_point_counts_a_later_dated_row_from_the_requests_day() {
+    let f = Fixture::new();
+    let n = f.next_day_at();
+    let deck = add_deck(&f, "Ahead");
+    let id = at(n, -20, 1);
+    // A row stamped two days after `N` by another device's clock.
+    let rows = vec![
+        row(at(n, -10, 1), id, 3, -600, 2500, LEARN),
+        row(at(n, -9, 2), id, 3, 2, 2500, LEARN),
+        row((n + 2 * DAY) * 1_000, id, 1, -600, 2500, REVIEW),
+    ];
+    put_card(&f, deck, id, rows.clone());
+    let part = warm(&f, Scope::Deck(DeckId(deck)), History::Last12Months);
+    let view = preset_view(&f, 1);
+    let model = fsrs::FSRS::new(view.parameters()).unwrap();
+    let items = Items::select(&rows, 0, HistoryForm::Memory).unwrap();
+    let state = items.memory(&model, n, view.fields().historical_retention).unwrap();
+    let now = f.clock.now_ms().div_euclid(1_000);
+    let raw = curve((now - (n + 2 * DAY)) as f64 / 86_400.0, f64::from(state.stability), f64::from(view.decay()));
+    let expected = if raw.is_nan() { 0.0 } else { raw.clamp(0.0, 1.0) };
+    let today = part.samples.last().unwrap();
+    assert_eq!(today.studied, 1);
+    close(today.knowledge, expected, "today's point");
+    compare(&f, &[Scope::Deck(DeckId(deck))], "a later dated row");
+}
