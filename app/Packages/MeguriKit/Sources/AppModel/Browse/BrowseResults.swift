@@ -496,7 +496,7 @@ public final class BrowseResults {
     }
 
     /// Ascending, merged ranges of a set of indexes.
-    static func ranges(_ indexes: Set<Int>) -> [Range<UInt64>] {
+    nonisolated static func ranges(_ indexes: Set<Int>) -> [Range<UInt64>] {
         var ranges: [Range<UInt64>] = []
         for index in indexes.sorted() {
             let value = UInt64(index)
@@ -684,7 +684,7 @@ public final class BrowseResults {
 
     /// The index `index` takes when the rows at `removed` (ascending) go;
     /// nil when it is one of them.
-    static func shifted(_ index: Int, removing removed: [Int]) -> Int? {
+    nonisolated static func shifted(_ index: Int, removing removed: [Int]) -> Int? {
         var low = 0, high = removed.count
         while low < high {
             let mid = (low + high) / 2

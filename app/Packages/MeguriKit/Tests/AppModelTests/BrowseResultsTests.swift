@@ -428,7 +428,7 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
             throw error
         }
         let cards = results[text] ?? []
-        let ids = mode == .cards ? cards : Array(Set(cards.map { locked { note($0) } })).sorted()
+        let ids = mode == .cards ? cards : Array(Set(locked { cards.map { note($0) } })).sorted()
         return begin(ids: ordered(ids, sort), mode: mode, text: text)
     }
 
@@ -445,7 +445,7 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
         guard old.complete else { throw BridgeError.browse(.notComplete) }
         let cards = results[old.text] ?? []
         let mode: BrowseMode = old.mode == .cards ? .notes : .cards
-        let ids = mode == .cards ? cards : Array(Set(cards.map { locked { note($0) } })).sorted()
+        let ids = mode == .cards ? cards : Array(Set(locked { cards.map { note($0) } })).sorted()
         return begin(ids: ordered(ids, sort), mode: mode, text: old.text)
     }
 

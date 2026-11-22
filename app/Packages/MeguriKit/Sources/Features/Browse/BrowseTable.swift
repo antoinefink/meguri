@@ -6,12 +6,12 @@ import SwiftUI
 /// One row of the table: its index in the shown list. Its cells read the
 /// row from `BrowseResults` when it has been read (`browser/result-sets`
 /// H7); until then they draw nothing.
-struct BrowseLine: Identifiable, Hashable {
+nonisolated struct BrowseLine: Identifiable, Hashable {
     let id: Int
 }
 
 /// The list's indexes as rows, without a value per row in memory.
-struct BrowseLines: RandomAccessCollection {
+nonisolated struct BrowseLines: RandomAccessCollection {
     let count: Int
     var startIndex: Int { 0 }
     var endIndex: Int { count }
@@ -19,14 +19,14 @@ struct BrowseLines: RandomAccessCollection {
 }
 
 /// A header's sort: the table never sorts; a click asks the core (V4.1).
-struct BrowseSortComparator: SortComparator, Hashable {
+nonisolated struct BrowseSortComparator: SortComparator, Hashable {
     let key: String
     var order: SortOrder
     func compare(_ lhs: BrowseLine, _ rhs: BrowseLine) -> ComparisonResult { .orderedSame }
 }
 
 /// A column of the list (V2.3).
-struct BrowseColumn: Identifiable, Hashable {
+nonisolated struct BrowseColumn: Identifiable, Hashable {
     let key: String
     let index: Int
     let mode: BrowseMode
@@ -50,20 +50,7 @@ struct BrowseTable: View {
                 .width(BrowseMetrics.stateColumn)
                 .disabledCustomizationBehavior(.all)
                 TableColumnForEach(columns) { column in
-                    if BrowseColumns.sortable(column.key, mode: column.mode), let first = BrowseColumns.firstDirection(column.key) {
-                        TableColumn(Text(verbatim: BrowseStrings.column(column.key, mode: column.mode)),
-                                    sortUsing: BrowseSortComparator(key: column.key, order: first == .ascending ? .forward : .reverse)) { line in
-                            BrowseCellView(results: results, index: line.id, column: column)
-                        }
-                        .width(min: BrowseMetrics.minimum(column.key), ideal: BrowseMetrics.ideal(column.key))
-                        .alignment(BrowseMetrics.trailing(column.key) ? .trailing : .leading)
-                    } else {
-                        TableColumn(Text(verbatim: BrowseStrings.column(column.key, mode: column.mode))) { line in
-                            BrowseCellView(results: results, index: line.id, column: column)
-                        }
-                        .width(min: BrowseMetrics.minimum(column.key), ideal: BrowseMetrics.ideal(column.key))
-                        .alignment(BrowseMetrics.trailing(column.key) ? .trailing : .leading)
-                    }
+                    dataColumn(column)
                 }
             } rows: {
                 ForEach(BrowseLines(count: list?.count ?? 0)) { line in
@@ -77,6 +64,31 @@ struct BrowseTable: View {
                 guard let target = results.scrollTarget, target.token == list?.token else { return }
                 proxy.scrollTo(target.index, anchor: .center)
             }
+        }
+    }
+
+    /// A column of the set: sortable ones sort through the core (V4.1);
+    /// the others show no sort affordance (`browser/sorting` S1).
+    @TableColumnBuilder<BrowseLine, BrowseSortComparator>
+    private func dataColumn(_ column: BrowseColumn) -> some TableColumnContent<BrowseLine, BrowseSortComparator> {
+        let title = Text(verbatim: BrowseStrings.column(column.key, mode: column.mode))
+        let alignment: TableColumnAlignment = BrowseMetrics.trailing(column.key) ? .trailing : .leading
+        // Two ifs, not if and else: the builder joins a sortable column and
+        // an unsortable one only as a block.
+        let first = BrowseColumns.sortable(column.key, mode: column.mode) ? BrowseColumns.firstDirection(column.key) : nil
+        if let first {
+            TableColumn(title, sortUsing: BrowseSortComparator(key: column.key, order: first == .ascending ? .forward : .reverse)) { line in
+                BrowseCellView(results: results, index: line.id, column: column)
+            }
+            .width(min: BrowseMetrics.minimum(column.key), ideal: BrowseMetrics.ideal(column.key))
+            .alignment(alignment)
+        }
+        if first == nil {
+            TableColumn(title) { line in
+                BrowseCellView(results: results, index: line.id, column: column)
+            }
+            .width(min: BrowseMetrics.minimum(column.key), ideal: BrowseMetrics.ideal(column.key))
+            .alignment(alignment)
         }
     }
 
