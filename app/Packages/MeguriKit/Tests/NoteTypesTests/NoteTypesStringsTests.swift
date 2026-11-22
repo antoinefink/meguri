@@ -76,4 +76,45 @@ import Testing
         #expect(NoteTypesStrings.subtitle(notes: 0, cards: 0, locale: english) == "0 notes · 0 cards")
         #expect(NoteTypesStrings.progress(completed: 212, total: 412, locale: english) == "Updating 212 of 412 notes")
     }
+
+    /// W7's lines and fixes, W15's strings.
+    @Test func w7sIssueLinesReadAsTheSpecSays() {
+        func issue(_ kind: NoteTypeLiveIssue.Kind, part: NoteTypeTemplatePart? = .front, line: Int? = nil,
+                   fix: NoteTypeLiveIssue.Fix? = nil) -> NoteTypeLiveIssue {
+            NoteTypeLiveIssue(id: "x", severity: .red, card: 0, cardName: "Recognition", part: part, line: line, kind: kind, fix: fix)
+        }
+        func words(_ issue: NoteTypeLiveIssue) -> String {
+            let words = NoteTypesStrings.issue(issue, locale: english)
+            return [words.location, words.message].filter { !$0.isEmpty }.joined(separator: " ")
+        }
+        #expect(words(issue(.unknownField(name: "Wrod"), line: 3)) == "Recognition · Front, line 3. No field is named “Wrod”.")
+        #expect(words(issue(.unclosedSection(tag: "{{#Reading}}"), part: .back, line: 12))
+            == "Recognition · Back, line 12. {{#Reading}} is opened but never closed.")
+        #expect(words(issue(.duplicateFront(earlier: "Production"))) == "Recognition · Front. The front repeats “Production”.")
+        #expect(words(issue(.noFrontField)) == "Recognition · Front. The front shows no field.")
+        #expect(words(issue(.missingCloze, part: .back)) == "Recognition · Back. A cloze note type needs a cloze field on the front and the back.")
+        let blank = NoteTypesStrings.issue(issue(.blankFront(notes: 38, field: "Meaning")), locale: english)
+        #expect(blank.location == "Recognition · The front is blank for 38 notes." && blank.reason == "Their Meaning is empty, so the front is blank.")
+        #expect(NoteTypesStrings.issue(issue(.blankFront(notes: 1, field: nil)), locale: english).location == "Recognition · The front is blank for 1 note.")
+        #expect(NoteTypesStrings.fix(.useField(from: "Wrod", to: "Word"), locale: english) == "Use “Word”")
+        #expect(NoteTypesStrings.fix(.addClose("{{/Reading}}"), locale: english) == "Add {{/Reading}}")
+        #expect(NoteTypesStrings.fix(.showNotes([1]), locale: english) == "Show Notes")
+        #expect(NoteTypesStrings.fixToSave(2, locale: english) == "Fix the 2 red issues to save.")
+        #expect(NoteTypesStrings.fixToSave(1, locale: english) == "Fix the red issue to save.")
+        let bundle = NoteTypesStrings.bundle
+        let expected = [
+            "noteTypes.cards.cardTypes": "Card Types", "noteTypes.editor.front": "Front", "noteTypes.editor.back": "Back",
+            "noteTypes.editor.styling": "Styling", "noteTypes.editor.shared": "Shared by All Card Types", "noteTypes.insert": "Insert",
+            "noteTypes.insert.field": "Field", "noteTypes.insert.special": "Special Field",
+            "noteTypes.insert.ifContent": "Show Only If Field Has Content", "noteTypes.insert.ifEmpty": "Show Only If Field Is Empty",
+            "noteTypes.insert.hint": "Hint", "noteTypes.insert.typeIn": "Type-in Answer", "noteTypes.insert.textOnly": "Text Only",
+            "noteTypes.insert.furigana": "Furigana", "noteTypes.insert.divider": "Answer Divider",
+            "noteTypes.insert.darkRule": "Dark Appearance Rule", "noteTypes.issues.none": "No Issues",
+            "noteTypes.cards.moveUp": "Move Up", "noteTypes.cards.moveDown": "Move Down", "noteTypes.cards.duplicate": "Duplicate",
+            "noteTypes.cards.rename": "Rename", "noteTypes.cards.delete": "Delete", "noteTypes.cards.restore": "Restore",
+        ]
+        for (key, value) in expected {
+            #expect(bundle.localizedString(forKey: key, value: "missing", table: nil) == value, "\(key)")
+        }
+    }
 }

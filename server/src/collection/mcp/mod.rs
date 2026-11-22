@@ -100,6 +100,10 @@ impl Backend {
     }
     fn transaction<A: Authority, T>(&self, path: &Path, authority: &A, write: bool,
         f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        self.transaction_with_hook(path, authority, write, f, None)
+    }
+    fn transaction_with_hook<A: Authority, T>(&self, path: &Path, authority: &A, write: bool,
+        f: impl FnOnce(&Connection) -> Result<T>, mut before_commit: Option<&mut dyn FnMut() -> Result<()>>) -> Result<T> {
         let context = authority.context();
         if context.account.len() > 256 || context.publication.len() > 256 { return Err(unsupported()); }
         let guard = authority.admit(write)?;
@@ -110,6 +114,12 @@ impl Backend {
         if version != 18 { return Err(unsupported()); }
         let value = f(&tx)?;
         authority.recheck(&guard)?;
+        if let Some(hook) = before_commit.as_mut() {
+            hook()?;
+            // Media has its own durable commit. Its work may outlast the
+            // original authority, even while publication remains guarded.
+            authority.recheck(&guard)?;
+        }
         tx.commit().map_err(sql_error)?;
         // This guard also owns any account/path pin and capacity reservation.
         Ok(value)

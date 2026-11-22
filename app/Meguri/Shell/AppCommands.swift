@@ -57,10 +57,16 @@ struct NativeCommandContext {
 
     // MARK: Edit
 
-    var canFind: Bool { host == .main && DeckSearchFocus.available(collection, layout: layout) }
+    var canFind: Bool { host == .main && (canFindInBrowse || DeckSearchFocus.available(collection, layout: layout)) }
     func find() {
         guard canFind else { return }
+        if canFindInBrowse { return collection.browse.focusField() }
         DeckSearchFocus.request(collection, layout: layout)
+    }
+    /// N21.8, T10: in Browse, Find… focuses Browse's search field.
+    private var canFindInBrowse: Bool {
+        layout == .sidebar && collection.navigation.section == .browse && collection.navigation.sheet == nil
+            && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
 
     // MARK: Deck

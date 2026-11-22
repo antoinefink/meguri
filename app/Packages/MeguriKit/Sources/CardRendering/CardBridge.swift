@@ -122,6 +122,9 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         func boolean(_ key: String) -> Bool { Self.bool(dictionary[key]) != nil }
         switch signal {
+        case "openAttachmentPDF":
+            guard keys(["filename"]) else { reject(.signalFields); return }
+            guard let name = string("filename", max: 75), CardAttachmentPDF.accepts(name) else { reject(.signalValue); return }
         case "settled", "shown":
             guard keys([]) else { reject(.signalFields); return }
         case "visible":
@@ -178,6 +181,8 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         guard isCurrent(generation, side: side) else { return }
         switch signal {
+        case "openAttachmentPDF":
+            if let name = dictionary["filename"] as? String { page.behavior.openAttachmentPDF(name) }
         case "settled", "shown", "updateFailed":
 #if DEBUG
             switch signal {

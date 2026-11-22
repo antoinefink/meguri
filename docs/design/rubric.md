@@ -30,7 +30,7 @@ Each rule has an owner. Where the owner is a tool, the tool's result is the sour
 | Id | Rule | Owner | Usually |
 |---|---|---|---|
 | `platform-system-components` | System components (lists, forms, split views, tab bars, toolbars, tables, search fields, sheets, inspectors, menus) are used wherever they fit (R1995). | critic | high |
-| `platform-native-defaults` | Preserve each platform's default typography, colors, control sizing, spacing and interaction. Overrides need a documented functional, compatibility or verified accessibility reason; tokens alone are not a reason. Compare the exact native build with unmodified system controls, including relevant disabled, selected and focus states. Cosmetic exceptions need Antoine's approval (`native-interface-contract.md`, 2026-10-25). | critic | high |
+| `platform-native-defaults` | Preserve each platform's default typography, colors, control sizing, spacing and interaction. Overrides need a documented functional, compatibility or verified accessibility reason; tokens alone are not a reason. Compare the exact native build with unmodified system controls, including relevant disabled, selected and focus states. Cosmetic exceptions need Antoine's approval (`native-interface-contract.md`, 2026-10-25). | critic; `lint:painted-selection` for a list selection drawn by the app | high |
 | `platform-no-custom-bars` | No custom tab bars, custom navigation bars or hamburger menus (R1995). | `lint:custom-tab-bar`, `lint:custom-navigation-bar`, `lint:hamburger-menu`; critic for look-alikes built under other names | high |
 | `platform-idioms` | Each platform's idioms hold: Mac menus, shortcuts, hover and resizable windows; iPad sidebar, inspector, pointer and keyboard; iPhone thumb reach and navigation stacks. | critic | medium |
 | `platform-adaptivity` | The layout works at every supported width: small and large iPhone, iPad compact and regular, resizable iPhone windows, Mac windows from minimum to large. | critic | high |
@@ -128,9 +128,11 @@ The `lint-ui` rule ids, for reading gate output (`app/.swiftlint.yml` holds the 
 | `glass-outside-chrome` | `glass-control-layer-only` |
 | `custom-tab-bar`, `custom-navigation-bar`, `hamburger-menu` | `platform-no-custom-bars` |
 | `non-sf-symbol-icon` | `icon-sf-symbols` |
+| `painted-selection` | `platform-native-defaults` |
 | `inline-disable`, `allowlist-invalid` | none: a misused exemption, fixed in place |
 
 ## Changes
 
+- 2026-11-22 (no version change, the rule's meaning is unchanged): `lint:painted-selection` checks one case of `platform-native-defaults`, a selected list row painted with `listRowBackground` instead of the List's own selection (native-interface-contract N26.1).
 - v2 (2026-10-25, Antoine): require native platform defaults, document exceptions and replace token-only rules. Existing lint patterns constrain explicit custom values; they do not enforce native appearance.
 - v1 (U9): first version.

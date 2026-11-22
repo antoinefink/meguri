@@ -545,7 +545,40 @@ import Testing
     func runText(_ query: FilterQuery) async throws -> String {
         runTexts += 1
         if let runTextDelay { try? await Task.sleep(for: runTextDelay) }
-        return query.isEmpty ? "" : "run:\(query.tokens.count)"
+        if query.isEmpty { return "" }
+        return query.text.isEmpty ? "run:\(query.tokens.count)" : "run:\(query.tokens.count):\(query.text)"
+    }
+    // The search field (U271).
+    var commits: [FilterQuery] = []
+    var committed: [FilterQuery: FilterQuery] = [:]
+    func commit(_ query: FilterQuery) async throws -> FilterQuery {
+        commits.append(query)
+        return committed[query] ?? query
+    }
+    var incomplete: Set<String> = []
+    var incompleteChecks: [String] = []
+    func isIncomplete(_ text: String, caret: Int) async throws -> Bool {
+        incompleteChecks.append(text)
+        return incomplete.contains(text)
+    }
+    var suggestionCalls: [(FilterQuery, Int, FilterSection?, [String])] = []
+    var suggestionRows: [FilterSection?: [FilterSuggestion]] = [:]
+    func suggestions(for query: FilterQuery, caret: Int, scope: FilterSection?, recent: [String]) async throws
+        -> [FilterSuggestion] {
+        suggestionCalls.append((query, caret, scope, recent))
+        return suggestionRows[scope] ?? []
+    }
+    var savedSearchWrites: [(String, String)] = []
+    var saveFails = false
+    var holdSaves = false
+    private var heldSaves: [CheckedContinuation<Void, Never>] = []
+    func releaseSaves() { heldSaves.forEach { $0.resume() }; heldSaves = [] }
+    var heldSaveCount: Int { heldSaves.count }
+    func releaseFirstSave() { if !heldSaves.isEmpty { heldSaves.removeFirst().resume() } }
+    func saveSearch(name: String, text: String) async throws {
+        if holdSaves { await withCheckedContinuation { heldSaves.append($0) } }
+        if saveFails { throw BridgeError.unavailable(reason: "sample") }
+        savedSearchWrites.append((name, text))
     }
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
         switch section {
@@ -560,7 +593,14 @@ import Testing
     func notetypes() async throws -> [NotetypeName] { [NotetypeName(id: 8, name: "Basic"), NotetypeName(id: 7, name: "Vocabulary")] }
     func tagTree() async throws -> [TagNode] { tagNodes }
     func flagNames() async throws -> [String] { ["Red", "Orange", "Green", "Blue", "Pink", "Turquoise", "Purple"] }
+    /// The second read of a refresh, the values only the suggestions show
+    /// (U271): answered at once and kept apart from the sidebar's calls.
+    var suggestionCountCalls: [(BrowseMode, [FilterCountItem])] = []
     func counts(_ mode: BrowseMode, _ items: [FilterCountItem]) async throws -> [UInt64?] {
+        if items == BrowseModel.suggestedValues.map({ .value($0) }) {
+            suggestionCountCalls.append((mode, items))
+            return items.map { _ in 3 }
+        }
         let call = countCalls.count
         countCalls.append((mode, items))
         guard holdCounts else { return items.map { _ in 1 } }

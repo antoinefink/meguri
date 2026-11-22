@@ -727,6 +727,16 @@ public enum CoreBrowseQuery {
         }
     }
 
+    /// Save Search… (T13, `browser/config-keys` K7.2): `search`, the query's
+    /// run text (T4), stored under `name` as one undoable "Save Search"
+    /// step, replacing a saved search of that name (the caller asks first).
+    /// `written` is false when that name already holds that text.
+    public static func saveSearch(name: String, search: String) async throws(BridgeError) -> BoolMutation {
+        try await InteractiveLane.shared.call(.saveBrowserSearch) {
+            BoolMutation(try saveBrowserSearch(name: name, search: search))
+        }
+    }
+
     /// V7, V8.1: the counts of a selection's target cards and notes, as a
     /// job. A newer call for a selection of the same session cancels this
     /// one. When the selection itself is refused, `value()` throws that

@@ -73,6 +73,13 @@ custom_rules:
     excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Chrome/'
     excluded_match_kinds: [comment, doccomment, string]
 
+  painted-selection:
+    name: Painted row selection
+    regex: '\.listRowBackground\s*\((?=[^)"/]*(?:selected|isSelected|selection|isMarked))'
+    message: "A list's selection is the system's: give the List a selection binding and tag the rows (List(selection:)); never paint a selected row with listRowBackground (native-interface-contract N26.1)."
+    severity: error
+    excluded_match_kinds: [comment, doccomment, string]
+
   glass-outside-chrome:
     name: Glass outside the control layer
     regex: '(?:\.glassEffect(?:ID|Union|Transition)?\s*\(|\bGlassEffectContainer\b|\bGlass(?:Prominent)?ButtonStyle\b|\.buttonStyle\s*\(\s*\.glass(?:Prominent)?\b|\bGlass\s*\.\s*(?:regular|clear|identity)\b|\.glassBackgroundEffect\s*\(|\b(?:UI|NS)Glass\w*|\b(?:UIVisualEffectView|NSVisualEffectView|UIBlurEffect)\b|\.(?:ultraThin|thin|regular|thick|ultraThick)Material\b|\bMaterial\s*\.\s*\w+)'

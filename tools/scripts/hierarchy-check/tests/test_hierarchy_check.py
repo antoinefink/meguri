@@ -1204,6 +1204,30 @@ class NativeMacToolbarTitlePair(unittest.TestCase):
         self.assertIn("text-overlap", kinds(hierarchy_check.check(tree)))
 
 
+class NativeNavigationBarTitlePair(unittest.TestCase):
+    """The iPad's Today (N26.2): the large title and its navigationSubtitle, whose
+    line boxes share about two points inside the navigation bar."""
+
+    def tree(self, subtitle_frame=(340, 131.25, 178, 13.5), title_label="Today", extra=()):
+        title = el("staticText", "", title_label, f=(340, 92.5, 95.5, 41))
+        subtitle = el("staticText", "", "24 new · 3 learning · 75 to review", f=subtitle_frame)
+        return doc(el("navigationBar", "Today", f=(214, 24, 850, 130), children=[title, subtitle, *extra]),
+                   window=(0, 0, 1064, 800))
+
+    def test_the_title_and_its_subtitle_do_not_overlap(self):
+        self.assertEqual(hierarchy_check.check(self.tree()), [])
+
+    def test_other_overlaps_still_count(self):
+        # Not on the title's leading edge, overlapping by more than a line box's share,
+        # a title that is not the bar's name, and two texts under the title.
+        self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(subtitle_frame=(360, 131.25, 178, 13.5)))))
+        self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(subtitle_frame=(340, 120, 178, 13.5)))))
+        self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(title_label="Decks"))))
+        second = el("staticText", "", "Another", f=(340, 131.25, 120, 13.5))
+        # Both texts under the title keep their overlaps with it, besides their own.
+        self.assertEqual(kinds(hierarchy_check.check(self.tree(extra=[second]))), ["text-overlap"] * 3)
+
+
 class NativeSidebarSearchField(unittest.TestCase):
     """The field `searchable(placement: .sidebar)` puts above a Mac sidebar
     (seen in Browse's export, U270): no identifier, in an unnamed group
@@ -1239,6 +1263,42 @@ class NativeSidebarSearchField(unittest.TestCase):
         ios = self.tree()
         ios["platform"] = "ios"
         self.assertEqual(kinds(hierarchy_check.check(ios)), ["missing-identifier", "missing-identifier"])
+
+
+class NativeToolbarSearchField(unittest.TestCase):
+    """The field `searchable(placement: .toolbar)` puts in the Mac window
+    toolbar, with its Search and cancel buttons and its tokens (U271)."""
+
+    def tree(self, children=None, group_id="", platform="mac"):
+        buttons = [el("button", label="Search", f=(950, 38, 29, 36)), el("button", label="cancel", f=(1236, 38, 36, 36))]
+        tokens = [el("textField", f=(976, 48, 186, 16)), el("textField", f=(1162, 48, 186, 16))]
+        field = el("searchField", f=(946, 37, 327, 38), children=children if children is not None else buttons + tokens)
+        tree = doc(el("toolbar", f=(0, 30, 1280, 52), children=[el("group", group_id, f=(947, 30, 329, 52), children=[field])]),
+                   window=(0, 0, 1280, 800))
+        tree["platform"] = platform
+        return tree
+
+    def test_the_toolbar_search_field_its_buttons_and_scrolled_tokens_are_system_parts(self):
+        self.assertEqual(hierarchy_check.check(self.tree()), [])
+
+    def test_an_open_token_menu_beside_the_field_is_a_system_part(self):
+        tree = self.tree()
+        group = tree["root"]["children"][0]["children"][0]["children"][0]
+        group["children"].append(el("menu", f=(980, 67, 166, 120), children=[
+            el("menuItem", "menuAction:", f=(980, 67, 166, 24)), el("menuItem", "menuAction:", f=(980, 91, 166, 24))]))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_toolbar_search_field_lookalikes_are_still_reported(self):
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(self.tree(group_id="sample.screen.group"))))
+        self.assertIn("missing-identifier",
+                      kinds(hierarchy_check.check(self.tree([el("button", label="Delete", f=(950, 38, 29, 36))]))))
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(self.tree(platform="ios"))))
+        # The field itself still must sit inside its window; only its tokens scroll.
+        field = el("searchField", f=(1200, 37, 327, 38), children=[el("button", label="Search", f=(1204, 38, 29, 36))])
+        outside = doc(el("toolbar", f=(0, 30, 1280, 52), children=[el("group", f=(1200, 30, 329, 52), children=[field])]),
+                      window=(0, 0, 1280, 800))
+        outside["platform"] = "mac"
+        self.assertIn("text-outside-window", kinds(hierarchy_check.check(outside)))
 
 
 class NativeTableCellsAndSegments(unittest.TestCase):

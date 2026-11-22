@@ -37,12 +37,16 @@ each column's x and width, in a group directly in the table's outline, above
 the columns' body), the field a split view's sidebar `searchable` puts above
 its list (no identifier, none can be set; in an unnamed group directly in the
 system-named split group, holding only its own unnamed Search and cancel
-buttons), and a
+buttons), the field a `searchable(placement: .toolbar)` puts in the Mac
+window toolbar (likewise, in an unnamed group directly in the toolbar,
+holding its Search and cancel buttons and its tokens' unnamed text fields,
+which scroll inside the field and show only where it does), and a
 NavigationSplitView's '<scene id>, SidebarNavigationSplitView', and AppKit's
 exact NSOutlineViewDisclosureButtonKey on a disclosure triangle directly in
 a cell under an outline row in an outline; on iOS a sidebar disclosure row's
 system button, which copies its label's identifier, with its own chevron; and
-on the Mac the window toolbar's title and subtitle, reported at one frame), elements
+on the Mac the window toolbar's title and subtitle, reported at one frame; on iOS a
+navigation bar's title and the subtitle drawn under it, whose line boxes touch), elements
 with an empty frame, and transient elements (activity and progress
 indicators) with everything inside them. Wrong colors, broken alignment and
 unreadable text are judgments for the critic (U10), not checks here.
@@ -137,7 +141,7 @@ class Element:
         h), or None when they show none of it."""
         x0, y0, x1, y1 = self.x, self.y, self.x + self.w, self.y + self.h
         for a in self.ancestors:
-            if a.type in SCROLLING:
+            if a.type in SCROLLING or a.type == "searchField":
                 x0, y0, x1, y1 = max(x0, a.x), max(y0, a.y), min(x1, a.x + a.w), min(y1, a.y + a.h)
         if x1 <= x0 or y1 <= y0:
             return None
@@ -187,6 +191,12 @@ def is_system_identifier(e):
         return True
     if ALERT_BUTTON.match(ident):
         return e.type == "button" and any(a.type in ("sheet", "alert") for a in e.ancestors)
+    if ident == "menuAction:":
+        # AppKit's action name on the items of a search token's menu (U271),
+        # open under the toolbar search field's group.
+        return (e.type == "menuItem" and e.parent is not None and e.parent.type == "menu"
+                and e.parent.parent is not None and e.parent.parent.type == "group"
+                and e.parent.parent.parent is not None and e.parent.parent.parent.type == "toolbar")
     if ident == "chevron.backward":
         return e.type == "button" and e.parent is not None and e.parent.type == "toolbar"
     if ident == "NSOutlineViewDisclosureButtonKey":
@@ -272,6 +282,41 @@ def native_sidebar_search_fields(document, root):
                             for b in field.children)):
                 parts.add(field)
                 parts.update(field.children)
+    return parts
+
+
+def native_toolbar_search_fields(document, root):
+    """The Mac field `searchable(placement: .toolbar)` adds to the window
+    toolbar: a searchField with no identifier in an unidentified group
+    directly in the toolbar, whose only children are its unidentified Search
+    and cancel buttons and its tokens, unidentified text fields with no
+    children (Browse's search tokens, U271; an identifier set on a token's
+    view does not reach them). Returns the field, its buttons and its
+    tokens; the tokens are clipped to the field (`Element.shown`)."""
+    parts = set()
+    if document.get("platform") != "mac":
+        return parts
+    for bar in root.walk():
+        if bar.type != "toolbar":
+            continue
+        for group in bar.children:
+            # The field, and while a token's menu is open, that menu.
+            fields = [c for c in group.children if c.type == "searchField"]
+            menus = [c for c in group.children if c.type == "menu"]
+            if (group.type != "group" or group.identifier or len(fields) != 1
+                    or len(fields) + len(menus) != len(group.children) or len(menus) > 1):
+                continue
+            field = fields[0]
+            if field.identifier:
+                continue
+            buttons = [c for c in field.children if c.type == "button"]
+            tokens = [c for c in field.children if c.type == "textField"]
+            if (len(buttons) + len(tokens) == len(field.children)
+                    and all(not b.identifier and b.label in SEARCH_FIELD_BUTTONS and not b.children for b in buttons)
+                    and all(not t.identifier and not t.children for t in tokens)):
+                parts.add(field)
+                parts.update(buttons)
+                parts.update(tokens)
     return parts
 
 
@@ -528,11 +573,12 @@ def native_toolbar_title_pairs(document, root):
     the window with the same frame, each with a value. AppKit reports both at
     the title area's frame; they are drawn one above the other, so they do not
     overlap on screen. Exactly two at a frame: three or more are not this shape
-    and keep their overlaps. Returns the set of such pairs as frozensets.
+    and keep their overlaps. On iOS, the navigation bar's pair instead
+    (`navigation_bar_title_pairs`). Returns the set of such pairs as frozensets.
     """
     pairs = set()
     if document.get("platform") != "mac":
-        return pairs
+        return navigation_bar_title_pairs(root)
     for window in root.walk():
         if window.type != "window":
             continue
@@ -542,6 +588,33 @@ def native_toolbar_title_pairs(document, root):
         for t in texts:
             by_frame.setdefault(tuple(sorted(t.frame.items())), []).append(t)
         pairs.update(frozenset(group) for group in by_frame.values() if len(group) == 2)
+    return pairs
+
+
+# A navigation bar's title and subtitle on iOS: their line boxes share a few
+# points where the subtitle is drawn under the title.
+SUBTITLE_TOUCH = 4.0
+
+
+def navigation_bar_title_pairs(root):
+    """An iOS navigation bar's title and its subtitle (a page's navigationTitle and
+    navigationSubtitle): unidentified static texts inside the bar, the title
+    labelled as the bar is named, the subtitle starting on the title's leading
+    edge and drawn under it, its top within SUBTITLE_TOUCH points of the title's
+    bottom. Exactly one such text under the title: anything else keeps its
+    overlaps. Returns the set of such pairs as frozensets.
+    """
+    pairs = set()
+    for bar in root.walk():
+        if bar.type != "navigationBar" or not bar.identifier:
+            continue
+        texts = [e for e in bar.walk() if e is not bar and e.type == "staticText" and not e.identifier]
+        for title in (t for t in texts if t.label == bar.identifier):
+            bottom = title.y + title.h
+            under = [t for t in texts if t is not title and abs(t.x - title.x) <= EDGE_TOLERANCE
+                     and t.y > title.y + title.h / 2 and bottom - SUBTITLE_TOUCH <= t.y <= bottom + SUBTITLE_TOUCH]
+            if len(under) == 1:
+                pairs.add(frozenset((title, under[0])))
     return pairs
 
 
@@ -570,7 +643,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     sheet_grabbers = native_sheet_grabbers(document, root)
     toggle_parts = (native_toggle_switch_parts(document, root) | native_stepper_arrows(document, root)
                     | native_table_headers(root) | native_control_parts(root)
-                    | native_sidebar_search_fields(document, root))
+                    | native_sidebar_search_fields(document, root) | native_toolbar_search_fields(document, root))
     disclosure_labels, disclosure_chevrons = native_disclosure_row_parts(document, root)
     title_pairs = native_toolbar_title_pairs(document, root)
     segment_buttons = native_radio_segments(root)
@@ -639,7 +712,8 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
 
     for e in texts:
         window = e.window()
-        if window is None or e.under(SCROLLING):
+        # A search field's tokens scroll inside it, as a scroll view's rows do.
+        if window is None or e.under(SCROLLING) or any(a.type == "searchField" for a in e.ancestors):
             continue
         t = EDGE_TOLERANCE
         inside = (e.x >= window.x - t and e.y >= window.y - t and
