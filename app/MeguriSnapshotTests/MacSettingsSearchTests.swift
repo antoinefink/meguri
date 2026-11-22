@@ -94,42 +94,20 @@ import Testing
                 }
                 #expect(collection.sync.meguriPhase == .unconfigured)
                 #expect(collection.sync.meguriPreview == nil && collection.sync.meguriRoundReport == nil)
+                // T21.2: before its first sign-in Meguri Sync holds nothing to lose, so
+                // leaving it asks nothing; the question itself (T21.1) is covered once
+                // signed in, by MacHomeHierarchyTests.
                 let currentGraph = nativeAccountGraph(in: controller.view, window: window, controller: controller)
-                do { try selectNativeService(.iCloud, in: currentGraph) }
+                do { try selectNativeService(.localOnly, in: currentGraph) }
                 catch { currentGraph.recordDiagnostic(); throw error }
-                try await waitForNativeAccountState { window.attachedSheet != nil }
-                let sheet = try #require(window.attachedSheet)
-                let sheetContent = try #require(sheet.contentView)
-                // T21.1: a system alert, whose buttons carry no identifiers; they are found by title.
-                _ = try nativeAlertButton("Switch to iCloud", in: sheetContent)
-                let revision = collection.sync.providerState?.revision
-                let enter = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
-                    timestamp: 0, windowNumber: sheet.windowNumber, context: nil,
-                    characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
-                sheet.sendEvent(enter)
-                await Task.yield()
-                #expect(window.attachedSheet === sheet)
-                #expect(!collection.syncPresentation.serviceChanging)
-                #expect(collection.sync.providerState?.selection == .meguri)
-                #expect(collection.sync.providerState?.revision == revision)
-                try performNativeAccountPress(on: try nativeAlertButton("Cancel", in: sheetContent))
-                try await waitForNativeAccountState { window.attachedSheet == nil }
-                #expect(collection.sync.providerState?.selection == .meguri)
+                try await waitForNativeAccountState {
+                    collection.sync.providerState?.selection == .localOnly && !collection.syncPresentation.serviceChanging
+                }
+                #expect(window.attachedSheet == nil)
                 #expect(collection.sync.meguriLastCommand == nil && collection.sync.meguriRoundReport == nil)
                 try #require(await collection.close())
             } catch { _ = await collection.close(); throw error }
         }
-    }
-    /// The one button of an alert's view tree with this title (system alerts drop identifiers).
-    private func nativeAlertButton(_ title: String, in root: NSView) throws -> NSButton {
-        var found: [NSButton] = []
-        var pending: [NSView] = [root]
-        while let view = pending.popLast() {
-            if let button = view as? NSButton, button.title == title { found.append(button) }
-            pending += view.subviews
-        }
-        guard found.count == 1, let button = found.first else { throw NativeAccountStateFailure.duplicateIdentifier }
-        return button
     }
     private func waitForNativeAccountState(_ ready: () throws -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(20)

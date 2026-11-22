@@ -154,30 +154,13 @@ final class MacHomeHierarchyTests: XCTestCase {
         try choose("Meguri Sync")
         XCTAssertEqual(settings.sheets.count, 0)
         meguriForm()
-        try choose("iCloud (Beta)")
-        // T21.1: a system alert on the Settings window; its buttons carry no identifiers.
-        let sheets = settings.sheets
-        let sheet = sheets.element(boundBy: 0)
-        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
-        XCTAssertEqual(sheets.count, 1)
-        let cancel = sheet.buttons["Cancel"]
-        let confirm = sheet.buttons["Switch to iCloud"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
-        XCTAssertEqual(cancel.elementType, .button)
-        XCTAssertEqual(confirm.elementType, .button)
-        actionable(cancel)
-        actionable(confirm)
-        try app.bringToFront(bundleIdentifier: bundle)
-        sheet.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
-        XCTAssertTrue(sheet.exists, "Return must not activate the destructive confirmation")
-        XCTAssertEqual(sheets.count, 1)
-        XCTAssertEqual(picker.value as? String, "Meguri Sync")
-        for id in ["address", "username", "password", "signIn"] {
-            _ = unique(settings, "settings.sync.meguri.\(id)")
-        }
-        actionable(cancel)
-        try click(cancel, app: app, bundle: bundle)
-        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        // T21.2: before its first sign-in Meguri Sync holds nothing to lose, so leaving
+        // it asks nothing. The question (T21.1) and Return's refusal are checked once
+        // signed in, when the journey turns sync off.
+        try choose("Off")
+        waitFor({ picker.value as? String == "Off" }, "Leaving an unfinished setup changes the service at once")
+        XCTAssertEqual(settings.sheets.count, 0)
+        try choose("Meguri Sync")
         XCTAssertEqual(settings.sheets.count, 0)
         meguriForm()
         if let journey {
