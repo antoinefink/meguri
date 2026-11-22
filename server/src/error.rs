@@ -12,6 +12,7 @@ pub struct Error {
     pub code: &'static str,
     pub field: Option<&'static str>,
     pub retry_after: Option<u64>,
+    pub(crate) mcp_detail: Option<McpDiagnosticDetail>,
 }
 impl Error {
     pub const fn new(code: &'static str) -> Self {
@@ -19,6 +20,7 @@ impl Error {
             code,
             field: None,
             retry_after: None,
+            mcp_detail: None,
         }
     }
     pub const fn field(field: &'static str) -> Self {
@@ -26,6 +28,7 @@ impl Error {
             code: "validation_failed",
             field: Some(field),
             retry_after: None,
+            mcp_detail: None,
         }
     }
     pub fn limited(seconds: u64) -> Self {
@@ -33,7 +36,19 @@ impl Error {
             code: "rate_limited",
             field: None,
             retry_after: Some(seconds.max(1)),
+            mcp_detail: None,
         }
+    }
+    pub(crate) fn with_mcp_detail(mut self, detail: McpDiagnosticDetail) -> Self {
+        self.mcp_detail = Some(detail);
+        self
+    }
+    /// An erased storage cause permits a phase label, never a guessed cause.
+    pub(crate) fn mcp_storage_detail(mut self, detail: McpDiagnosticDetail) -> Self {
+        if self.code == "storage_unavailable" && self.mcp_detail.is_none() {
+            self.mcp_detail = Some(detail);
+        }
+        self
     }
     pub fn status(&self) -> StatusCode {
         match self.code {
@@ -48,6 +63,8 @@ impl Error {
             "provision_unavailable" | "storage_unavailable" | "admission_closed" => {
                 StatusCode::SERVICE_UNAVAILABLE
             }
+            "attachment_invalid" | "attachment_unavailable" => StatusCode::BAD_REQUEST,
+            "attachment_conflict" | "busy" => StatusCode::CONFLICT,
             "invalid_request" => StatusCode::BAD_REQUEST,
             "unsupported_content_type" => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "request_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
@@ -101,5 +118,26 @@ impl IntoResponse for Error {
             );
         }
         response
+    }
+}
+
+/// MCP terminal diagnostics only. Never serialize into a client error body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum McpDiagnosticDetail {
+    PublicationGate, NativeWriter, CollectionPath, CollectionPin,
+    CollectionStorage, CollectionWorker, AuthorityStorage, CollectionOpen,
+    CollectionAccess, SqliteOpen, SqliteOpenBusy, SqliteAccess, SqliteAccessBusy,
+}
+impl McpDiagnosticDetail {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::PublicationGate => "publication_gate", Self::NativeWriter => "native_writer",
+            Self::CollectionPath => "collection_path", Self::CollectionPin => "collection_pin",
+            Self::CollectionStorage => "collection_storage", Self::CollectionWorker => "collection_worker",
+            Self::AuthorityStorage => "authority_storage", Self::CollectionOpen => "collection_open",
+            Self::CollectionAccess => "collection_access", Self::SqliteOpen => "sqlite_open",
+            Self::SqliteOpenBusy => "sqlite_open_busy", Self::SqliteAccess => "sqlite_access",
+            Self::SqliteAccessBusy => "sqlite_access_busy",
+        }
     }
 }

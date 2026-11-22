@@ -6,7 +6,7 @@ import OSLog
 /// Its actor performs creation and removal without suspension.
 nonisolated final class NativePlaybackCopy {
     nonisolated enum Failure: Error { case copy }
-    static let extensions: Set<String> = ["mp3", "m4a", "aac", "wav", "flac", "3gp"]
+    static let extensions: Set<String> = ["mp3", "m4a", "aac", "wav", "flac", "3gp", "aif", "aiff", "aifc", "caf"]
     static let namespace = "meguri-native-audio-v1"
     private static let maintenance = Maintenance()
     private static let lockName = "lease"

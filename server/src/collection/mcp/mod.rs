@@ -2,8 +2,9 @@
 //! Collection-only MCP backend (M4–M6, C7). No transport or credential parsing.
 //!
 //! The adapter supplies a server-resolved path and an Authority for the exact
-//! original grant/account/publication. Admission must be nonblocking, refuse an
-//! active native writer, and acquire the account publication barrier before any
+//! original grant/account/publication. Writes refuse contention and an active
+//! native writer immediately; reads may wait up to 500 ms asynchronously for
+//! the account publication barrier before the worker and before any
 //! collection state lock. Its guard must retain the barrier through commit (and
 //! through the final read check), including cancellation of the blocking worker.
 //! Never implement admission using native round retirement. Schedule WAL
@@ -18,7 +19,7 @@ mod generation;
 #[cfg(test)] mod tests;
 
 pub use input::{CatalogInput, CatalogKind, CreateInput, EditInput, Fields, SearchInput};
-use crate::{Error, Result};
+use crate::{Error, Result, error::McpDiagnosticDetail as Detail};
 use rusqlite::{Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::BTreeMap, path::Path};
@@ -100,6 +101,10 @@ impl Backend {
     }
     fn transaction<A: Authority, T>(&self, path: &Path, authority: &A, write: bool,
         f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        self.transaction_with_hook(path, authority, write, f, None)
+    }
+    fn transaction_with_hook<A: Authority, T>(&self, path: &Path, authority: &A, write: bool,
+        f: impl FnOnce(&Connection) -> Result<T>, mut before_commit: Option<&mut dyn FnMut() -> Result<()>>) -> Result<T> {
         let context = authority.context();
         if context.account.len() > 256 || context.publication.len() > 256 { return Err(unsupported()); }
         let guard = authority.admit(write)?;
@@ -108,23 +113,40 @@ impl Backend {
             .map_err(sql_error)?;
         let version: i64 = tx.query_row("SELECT ver FROM col WHERE id=1", [], |r| r.get(0)).map_err(sql_error)?;
         if version != 18 { return Err(unsupported()); }
-        let value = f(&tx)?;
+        let value = f(&tx).map_err(|e| e.mcp_storage_detail(Detail::CollectionAccess))?;
         authority.recheck(&guard)?;
+        if let Some(hook) = before_commit.as_mut() {
+            hook()?;
+            // Media has its own durable commit. Its work may outlast the
+            // original authority, even while publication remains guarded.
+            authority.recheck(&guard)?;
+        }
         tx.commit().map_err(sql_error)?;
         // This guard also owns any account/path pin and capacity reservation.
         Ok(value)
     }
 }
-pub fn busy() -> Error { Error { code: "busy", field: None, retry_after: Some(1) } }
+pub fn busy() -> Error { Error { retry_after: Some(1), ..Error::new("busy") } }
 fn invalid() -> Error { Error::new("invalid_input") }
 fn conflict() -> Error { Error::new("conflict") }
 fn unsupported() -> Error { Error::new("unsupported_collection") }
 fn too_large() -> Error { Error::new("result_too_large") }
 pub(super) fn sql_error(e: rusqlite::Error) -> Error {
+    sql_error_at(e, Detail::SqliteAccess, Detail::SqliteAccessBusy, unsupported())
+}
+pub(super) fn sql_open_error(e: rusqlite::Error) -> Error {
+    sql_error_at(e, Detail::SqliteOpen, Detail::SqliteOpenBusy, unsupported())
+}
+// Shared configuration used to erase raw SQLite failures into storage errors.
+// Preserve that public classification while retaining directly observed locks.
+pub(super) fn sql_open_storage_error(e: rusqlite::Error) -> Error {
+    sql_error_at(e, Detail::SqliteOpen, Detail::SqliteOpenBusy, Error::new("storage_unavailable"))
+}
+fn sql_error_at(e: rusqlite::Error, failure: Detail, locked: Detail, fallback: Error) -> Error {
     match e {
         rusqlite::Error::SqliteFailure(ref detail, _) if matches!(detail.code,
-            rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => busy(),
-        _ => unsupported(),
+            rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => busy().with_mcp_detail(locked),
+        _ => fallback.with_mcp_detail(failure),
     }
 }
 fn size(value: &impl Serialize) -> Result<usize> {

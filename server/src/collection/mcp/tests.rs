@@ -27,6 +27,57 @@ impl WriteRuntime for Runtime {
     // P4's published vector for p=1. Tests with due-order decks never call it.
     fn random_position(&self,p:u32)->Result<u32> { assert_eq!(p,1);Ok(825) }
 }
+#[test]
+fn media_hook_authority_loss_rolls_back_create_and_edit_with_guard_still_held() {
+    use std::rc::Rc;
+    struct Held(Rc<Cell<bool>>);
+    impl Drop for Held { fn drop(&mut self) { self.0.set(false); } }
+    struct Guarded { access: Access, held: Rc<Cell<bool>> }
+    impl Authority for Guarded {
+        type Guard = Held;
+        fn context(&self) -> &Context { &self.access.context }
+        fn admit(&self, write: bool) -> Result<Held> {
+            self.access.admit(write)?;
+            assert!(!self.held.replace(true));
+            Ok(Held(self.held.clone()))
+        }
+        fn recheck(&self, guard: &Held) -> Result<()> {
+            assert!(Rc::ptr_eq(&self.held,&guard.0));
+            assert!(self.held.get());
+            self.access.recheck(&())
+        }
+    }
+    for create in [true,false] {
+        let f = Fixture::new();
+        let original = f.create("original",vec![],1000).unwrap();
+        let before = f.exact(&original.note_id);
+        let stamps = f.stamp();
+        let positions = write::config(&f.db,"nextPos").unwrap();
+        let a = Guarded { access:Access::new(),held:Rc::new(Cell::new(false)) };
+        let mut hook = || {
+            assert!(a.held.get());
+            assert_eq!(a.access.checks.get(),1);
+            a.access.fail.set(true);
+            Ok(())
+        };
+        let references = [("Back".into(),"[sound:meguri-generated.mp3]".into())];
+        let result = if create {
+            f.backend.create_note_with_media(&f.path,&a,CreateInput { deck_id:"1".into(),note_type_id:"10".into(),
+                fields:Fields(BTreeMap::from([("Front".into(),"new".into())])),tags:Some(vec!["new-tag".into()]) },
+                &Runtime(2000),&references,Some(&mut hook))
+        } else {
+            f.backend.edit_note_with_media(&f.path,&a,EditInput { note_id:original.note_id.clone(),revision:original.revision,
+                fields:None,add_tags:Some(vec!["new-tag".into()]),remove_tags:None },
+                &Runtime(2000),&references,Some(&mut hook))
+        };
+        assert_eq!(result.unwrap_err().code,"permission_denied");
+        assert_eq!(a.access.checks.get(),2); assert!(!a.held.get());
+        assert_eq!(f.exact(&original.note_id),before); assert_eq!(f.stamp(),stamps);
+        assert_eq!(write::config(&f.db,"nextPos").unwrap(),positions);
+        let counts:(i64,i64,i64) = f.db.query_row("SELECT (SELECT count(*) FROM notes),(SELECT count(*) FROM cards),(SELECT count(*) FROM tags)",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(counts,(1,1,0));
+    }
+}
 struct Fixture { _temp:tempfile::TempDir,path:PathBuf,db:rusqlite::Connection,backend:Backend,access:Access }
 impl Fixture {
     fn new()->Self {
@@ -178,6 +229,7 @@ fn active_sqlite_writer_is_busy_without_retiring_or_waiting() {
     let start=std::time::Instant::now();
     let error=f.create("content",vec![],1000).unwrap_err();
     assert_eq!(error.code,"busy");assert_eq!(error.retry_after,Some(1));
+    assert_eq!(error.mcp_detail,Some(Detail::SqliteAccessBusy));
     assert!(start.elapsed()<std::time::Duration::from_millis(250));
     assert!(!f.db.is_autocommit());f.db.execute_batch("ROLLBACK").unwrap();
     assert_eq!(f.db.query_row("SELECT count(*) FROM notes",[],|r|r.get::<_,i64>(0)).unwrap(),0);
@@ -345,4 +397,26 @@ fn omitted_tag_patches_preserve_legacy_bytes_registry_and_durable_noops() {
         f.edit(&first.note_id,&original.revision,&[("Front","changed")]).unwrap();
         let after=snapshot();assert_eq!(after.0.0,legacy);assert_eq!(after.1,before.1);
     }
+}
+
+#[test]
+fn sqlite_diagnostics_distinguish_open_from_access_without_error_text() {
+    for code in [rusqlite::ErrorCode::DatabaseBusy,rusqlite::ErrorCode::DatabaseLocked] {
+        let raw=||rusqlite::Error::SqliteFailure(rusqlite::ffi::Error {
+            code,extended_code:0,
+        },Some("generated private SQLite/path/content".into()));
+        let open=sql_open_error(raw());
+        let access=sql_error(raw());
+        let config=sql_open_storage_error(raw());
+        assert_eq!((config.code,config.mcp_detail),("busy",Some(Detail::SqliteOpenBusy)));
+        assert_eq!((open.code,open.mcp_detail),("busy",Some(Detail::SqliteOpenBusy)));
+        assert_eq!((access.code,access.mcp_detail),("busy",Some(Detail::SqliteAccessBusy)));
+    }
+    let raw=||rusqlite::Error::InvalidQuery;
+    assert_eq!(sql_open_error(raw()).mcp_detail,Some(Detail::SqliteOpen));
+    assert_eq!(sql_error(raw()).mcp_detail,Some(Detail::SqliteAccess));
+    assert_eq!(sql_open_error(raw()).code,"unsupported_collection");
+    assert_eq!(sql_error(raw()).code,"unsupported_collection");
+    let config=sql_open_storage_error(raw());
+    assert_eq!((config.code,config.mcp_detail),("storage_unavailable",Some(Detail::SqliteOpen)));
 }

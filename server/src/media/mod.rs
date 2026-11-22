@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MIT
 //! Durable media publication, independent of collection-round state.
+mod attachments;
+pub(crate) use attachments::{prepare_in as prepare_insert_in, install as install_insert};
+#[cfg(test)]
+pub(crate) use attachments::prepare as prepare_insert;
 pub(crate) mod archive;
 pub(crate) mod blobs;
 pub(crate) mod index;

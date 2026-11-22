@@ -2,6 +2,7 @@
 //! Generated accounts, real bridge and loopback HTTP only. Boundary mutations
 //! simulate invalidation/clock expiry; they are not lifecycle barrier proofs.
 use super::*;
+use crate::media;
 use crate::mcp_transport::{self as transport, Access, AuthorizationRequest, Authorizer, BoxFuture};
 use axum::response::Response;
 use meguri_model::proto::{ProtoBlob, notetype::{FieldConfig, NotetypeConfig, TemplateConfig}};
@@ -50,6 +51,146 @@ impl Fixture {
     fn snapshot(&self) -> (String,i64,i64,i64,i64,i64) {
         let db=crate::collection::schema::open(&self.path,false).unwrap();
         db.query_row("SELECT flds,notes.mod,notes.usn,col.mod,col.usn,(SELECT count(*) FROM cards) FROM notes CROSS JOIN col WHERE notes.id=1",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).unwrap()
+    }
+}
+
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn overlapping_same_account_read_only_searches_wait_and_both_return_the_note() {
+    let f=Fixture::new(false).await;
+    let authority=f.service.mcp_authority(&f.token,false).await.unwrap();
+    let gate=f.service.mcp_publication_barrier(&authority).await.unwrap();
+    let (admitted,admission)=tokio::sync::oneshot::channel();
+    let (release,released)=std::sync::mpsc::sync_channel(1);
+    let admitted=std::sync::Mutex::new(Some(admitted));
+    let released=std::sync::Mutex::new(released);
+    let first_bridge=McpService::new(f.service.clone()).with_test_probe(Arc::new(move |boundary| {
+        if boundary==TestBoundary::Admitted {
+            admitted.lock().unwrap().take().unwrap().send(()).unwrap();
+            // Dropping the sender on any failure also unblocks this worker.
+            released.lock().unwrap().recv_timeout(Duration::from_secs(10))
+                .expect("first search must be released");
+        }
+    }));
+    let first_authority=authority.clone();
+    let first=tokio::spawn(async move {
+        first_bridge.search_notes(first_authority,SearchInput {note_id:Some("1".into()),..Default::default()}).await
+    });
+    tokio::time::timeout(Duration::from_secs(5),admission).await
+        .expect("first search must reach admission").unwrap();
+
+    let second_bridge=McpService::new(f.service.clone());
+    let second=second_bridge.search_notes(authority,SearchInput {note_id:Some("1".into()),..Default::default()});
+    tokio::pin!(second);
+    // The baseline completes with busy. A waiting implementation must actually
+    // poll the shared lock before we release the first search; no start sleeps.
+    let observed=tokio::time::timeout(Duration::from_secs(5),async {
+        tokio::select! {
+            result=&mut second => Some(result),
+            _=gate.waiter_pending() => None,
+        }
+    }).await;
+    // Release before inspecting any outcome, including an ordering timeout.
+    release.send(()).unwrap();
+    let first=tokio::time::timeout(Duration::from_secs(5),first).await
+        .expect("first search must finish after release").unwrap().unwrap();
+    let second=match observed.expect("second search must complete or join the lock wait") {
+        Some(result)=>result,
+        None=>tokio::time::timeout(Duration::from_secs(5),&mut second).await
+            .expect("second search must finish after release"),
+    }.expect("overlapping read-only search must wait instead of returning busy");
+    for result in [first,second] {
+        assert_eq!(result.notes.len(),1);
+        assert_eq!(result.notes[0].note_id,"1");
+        assert_eq!(result.notes[0].fields["Front"],"original");
+    }
+}
+
+#[tokio::test]
+async fn held_gate_bounds_reads_but_writes_refuse_immediately() {
+    use transport::Backend as _;
+    // A write-capable grant still receives read-oriented busy for a read call.
+    let f=Fixture::new(true).await;
+    let bridge=McpService::new(f.service.clone());
+    let authority=f.service.mcp_authority(&f.token,true).await.unwrap();
+    let gate=f.service.mcp_publication_barrier(&authority).await.unwrap();
+    let held=gate.enter().await;
+    for (name,args,write) in [
+        ("search_notes",json!({"note_id":"1"}),false),
+        ("list_decks_and_note_types",json!({}),false),
+        ("edit_note",json!({"note_id":"1","revision":"stale","fields":{"Front":"changed"}}),true),
+    ] {
+        let call=transport::inputs::parse(name,args.as_object().unwrap().clone()).unwrap();
+        let start=std::time::Instant::now();
+        let result=bridge.dispatch(authority.clone(),call);
+        #[cfg(feature="test-hooks")]
+        let result=async {
+            if write {
+                tokio::select! {
+                    result=result => result,
+                    _=gate.waiter_pending() => panic!("writes must never join the read wait"),
+                }
+            } else {
+                tokio::pin!(result);
+                tokio::select! {
+                    _=&mut result => panic!("held-gate read must wait before timing out"),
+                    _=gate.waiter_pending() => {},
+                }
+                result.await
+            }
+        };
+        let result=tokio::time::timeout(Duration::from_secs(5),result).await.unwrap();
+        assert!(matches!(result,Err(transport::DispatchFailure::Diagnosed {
+            failure:transport::ToolFailure::Busy,detail:Detail::PublicationGate
+        })));
+        if !write { assert!(start.elapsed()>=Duration::from_millis(500)); }
+        assert!(gate.try_enter().is_none(),"independent holder must remain held");
+    }
+    drop(held);
+    assert_eq!(f.snapshot().0,"original");
+}
+
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn queued_reads_release_worker_capacity_and_recheck_authorities() {
+    use transport::Backend as _;
+    for name in ["search_notes","list_decks_and_note_types"] {
+        for mutation in [None,Some("UPDATE oauth_grants SET revoked=1"),Some("UPDATE oauth_tokens SET expires_at=1")] {
+            let f=Fixture::new(false).await;
+            let bridge=McpService::new(f.service.clone());
+            let authority=f.service.mcp_authority(&f.token,false).await.unwrap();
+            let gate=f.service.mcp_publication_barrier(&authority).await.unwrap();
+            let held=gate.enter().await;
+            let args=if name=="search_notes" {json!({"note_id":"1"})} else {json!({})};
+            let call=transport::inputs::parse(name,args.as_object().unwrap().clone()).unwrap();
+            let queued=bridge.dispatch(authority,call);
+            tokio::pin!(queued);
+            tokio::time::timeout(Duration::from_secs(5),async {
+                tokio::select! {
+                    _=&mut queued => panic!("read must join the held gate"),
+                    _=gate.waiter_pending() => {},
+                }
+            }).await.unwrap();
+            // All metadata/files permits are available during the gate wait.
+            let capacity=f.service.metadata.test_hold_capacity();
+            drop(capacity);
+            if let Some(sql)=mutation {
+                // Deliberate boundary invalidation, as in the existing late
+                // revocation fixtures; production invalidation takes the gate.
+                f.service.metadata.run(move |c| { c.execute(sql,[])?;Ok(()) }).await.unwrap();
+            }
+            drop(held);
+            let result=tokio::time::timeout(Duration::from_secs(5),&mut queued).await.unwrap();
+            if mutation.is_some() {
+                assert!(matches!(result,Err(transport::DispatchFailure::Challenge(_))));
+            } else {
+                match result.ok().expect("queued read must succeed after release") {
+                    transport::ToolOutput::Notes {notes,..} => assert_eq!(notes[0].fields["Front"],"original"),
+                    transport::ToolOutput::Catalog {note_types,..} => assert_eq!(note_types[0].note_type_id,"10"),
+                    _ => panic!("unexpected read result"),
+                }
+            }
+        }
     }
 }
 
@@ -121,5 +262,192 @@ async fn late_oauth_failures_challenge_without_releasing_stale_reads_or_committi
             assert_eq!(f.snapshot(),before);
             control.close();stop.send(()).unwrap();server.await.unwrap();control.idle().await;
         }
+    }
+}
+
+fn generated_audio() -> Vec<u8> {
+    // Two complete MPEG-1 layer III frames with fixture-owned payloads.
+    let mut bytes=vec![0;834];
+    for at in [0,417] { bytes[at..at+4].copy_from_slice(&[0xff,0xfb,0x90,0]); }
+    bytes
+}
+fn media_type(f: &Fixture) {
+    use meguri_model::proto::{deck::{DeckCommon,DeckKind,DeckKindMessage,NormalDeck},deck_config::DeckConfigMessage};
+    let db=crate::collection::schema::open(&f.path,true).unwrap();
+    let common=ProtoBlob::new(DeckCommon::default()).to_bytes().into_owned();
+    let mut normal=NormalDeck::default();normal.config_id=1;
+    let kind=ProtoBlob::new(DeckKindMessage::new(DeckKind::Normal(normal))).to_bytes().into_owned();
+    db.execute("INSERT OR REPLACE INTO decks VALUES(1,'Generated deck',0,0,?1,?2)",rusqlite::params![common,kind]).unwrap();
+    db.execute("INSERT OR REPLACE INTO deck_config VALUES(1,'Generated preset',0,0,?1)",[ProtoBlob::new(DeckConfigMessage::default()).to_bytes().into_owned()]).unwrap();
+    db.execute("INSERT INTO fields VALUES(10,1,'Back',?1)",[ProtoBlob::new(FieldConfig::default()).to_bytes().into_owned()]).unwrap();
+    db.execute("UPDATE notes SET flds='original'||char(31)||'kept' WHERE id=1",[]).unwrap();
+}
+async fn mapped(bridge: &McpService, f: &Fixture, name: &str, args: serde_json::Value) -> std::result::Result<transport::ToolOutput,transport::DispatchFailure> {
+    use transport::Backend as _;
+    let authority=f.service.mcp_authority(&f.token,true).await.unwrap();
+    bridge.dispatch(authority,transport::inputs::parse(name,args.as_object().unwrap().clone()).unwrap()).await
+}
+fn media_counts(f: &Fixture) -> (i64,i64,usize) {
+    let root=f.service.metadata.owner();
+    let db=storage::inspect(root.database()).unwrap();
+    let usn=db.query_row("SELECT media_usn FROM accounts",[],|r|r.get(0)).unwrap();
+    let rows=db.query_row("SELECT count(*) FROM media_names",[],|r|r.get(0)).unwrap();
+    let a: String=db.query_row("SELECT id FROM accounts",[],|r|r.get(0)).unwrap();
+    let durable=std::fs::read_dir(root.stores(&a).unwrap().media).unwrap().filter(|e|e.as_ref().unwrap().file_name().to_string_lossy().starts_with("blob-")).count();
+    (usn,rows,durable)
+}
+#[tokio::test]
+async fn direct_mapping_reuses_bytes_and_stale_or_invalid_notes_leave_no_durable_blobs() {
+    let f=Fixture::new(true).await;media_type(&f);
+    let mut bridge=McpService::new(f.service.clone());
+    let fetched=Arc::new(std::sync::atomic::AtomicUsize::new(0));let count=fetched.clone();
+    bridge.direct_fixture=Some(Arc::new(move |url| {
+        assert_eq!(url,"https://files.oaiusercontent.com/generated?secret=synthetic");
+        count.fetch_add(1,std::sync::atomic::Ordering::SeqCst);Ok(generated_audio())
+    }));
+    let files=json!([{"download_url":"https://files.oaiusercontent.com/generated?secret=synthetic","file_id":"fixture-secret","file_name":"untrusted.png","mime_type":"image/png"}]);
+    let created=mapped(&bridge,&f,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{"Front":"question"},"files":files,"file_fields":["Back"]})).await;
+    let transport::ToolOutput::Changed {note_id,revision}=created.ok().unwrap() else {panic!()};
+    let a=f.service.mcp_authority(&f.token,true).await.unwrap();
+    let read=bridge.search_notes(a,SearchInput {note_id:Some(note_id.clone()),..Default::default()}).await.unwrap();
+    assert_eq!(read.notes[0].fields["Front"],"question");
+    let reference=read.notes[0].fields["Back"].clone();
+    assert!(reference.starts_with("[sound:meguri-"));assert!(reference.ends_with(".mp3]"));
+    assert_eq!(media_counts(&f),(1,1,1));
+    // Supplied replacements are the base text. Omitted fields keep stored text.
+    let edited=mapped(&bridge,&f,"edit_note",json!({"note_id":note_id,"revision":revision,"fields":{"Back":"answer"},"files":files,"file_fields":["Back"]})).await;
+    let transport::ToolOutput::Changed {revision:new_revision,..}=edited.ok().unwrap() else {panic!()};
+    assert_ne!(new_revision,revision);assert_eq!(media_counts(&f),(1,1,1));
+    let noop=mapped(&bridge,&f,"edit_note",json!({"note_id":note_id,"revision":new_revision,"files":files,"file_fields":["Back"]})).await;
+    let transport::ToolOutput::Changed {revision:unchanged,..}=noop.ok().unwrap() else {panic!()};
+    assert_eq!(unchanged,new_revision);assert_eq!(media_counts(&f),(1,1,1));
+    let stale=mapped(&bridge,&f,"edit_note",json!({"note_id":note_id,"revision":revision,"files":files,"file_fields":["Front"]})).await;
+    assert!(matches!(stale,Err(transport::DispatchFailure::Tool(transport::ToolFailure::Conflict))));
+    // Different valid bytes need a new temporary, but invalid fields cannot publish it.
+    bridge.direct_fixture=Some(Arc::new(|_| {let mut bytes=generated_audio();bytes[50]=1;Ok(bytes)}));
+    let invalid=mapped(&bridge,&f,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{},"files":files,"file_fields":["Unknown"]})).await;
+    assert!(matches!(invalid,Err(transport::DispatchFailure::Tool(transport::ToolFailure::InvalidInput))));
+    let stale=mapped(&bridge,&f,"edit_note",json!({"note_id":note_id,"revision":revision,"files":files,"file_fields":["Front"]})).await;
+    assert!(matches!(stale,Err(transport::DispatchFailure::Tool(transport::ToolFailure::Conflict))));
+    assert_eq!(media_counts(&f),(1,1,1));
+    // A no-op note can still need its previously referenced media installed.
+    bridge.direct_fixture=Some(Arc::new(|_| Ok(generated_audio())));
+    let db=storage::open(f.service.metadata.owner().database(),false).unwrap();
+    db.execute("UPDATE media_names SET blob=NULL",[]).unwrap();drop(db);
+    let again=mapped(&bridge,&f,"edit_note",json!({"note_id":note_id,"revision":new_revision,"files":files,"file_fields":["Back"]})).await;
+    let transport::ToolOutput::Changed { revision:installed,.. }=again.ok().unwrap() else {panic!()};
+    assert_eq!(installed,new_revision);
+    assert_eq!(media_counts(&f),(2,1,2));
+    assert_eq!(fetched.load(std::sync::atomic::Ordering::SeqCst),4);
+}
+#[tokio::test]
+async fn direct_refusals_and_late_revocation_or_expiry_never_publish() {
+    for mutation in ["UPDATE oauth_grants SET revoked=1","UPDATE oauth_tokens SET expires_at=1"] {
+        let f=Fixture::new(true).await;
+        let mut bridge=McpService::new(f.service.clone());
+        let database=f.service.metadata.owner().database();
+        // Grant and token changes occur after the request pin, during acquisition.
+        bridge.direct_fixture=Some(Arc::new(move |_| {
+            let db=storage::open(database.clone(),false).unwrap();db.execute(mutation,[]).unwrap();Ok(generated_audio())
+        }));
+        let before=f.snapshot();
+        let result=mapped(&bridge,&f,"edit_note",json!({"note_id":"1","revision":"stale","files":[{"download_url":"https://files.oaiusercontent.com/generated","file_id":"f"}],"file_fields":["Front"]})).await;
+        assert!(matches!(result,Err(transport::DispatchFailure::Challenge(_))));
+        assert_eq!(f.snapshot(),before);assert_eq!(media_counts(&f),(0,0,0));
+    }
+    let f=Fixture::new(true).await;
+    let mut bridge=McpService::new(f.service.clone());
+    bridge.direct_fixture=Some(Arc::new(|_| panic!("a refused URL must not reach the fixture")));
+    for url in ["http://files.oaiusercontent.com/generated","https://untrusted.example.test/generated","https://files.oaiusercontent.com/generated#fragment"] {
+        let result=mapped(&bridge,&f,"edit_note",json!({"note_id":"1","revision":"stale","files":[{"download_url":url,"file_id":"f"}],"file_fields":["Front"]})).await;
+        assert!(matches!(result,Err(transport::DispatchFailure::Tool(transport::ToolFailure::AttachmentUnavailable))));
+    }
+    assert_eq!(media_counts(&f),(0,0,0));
+}
+
+#[tokio::test]
+async fn upload_expiry_is_generic_and_never_publishes_media() {
+    let f=Fixture::new(true).await;
+    let bridge=McpService::new(f.service.clone());
+    let a=f.service.mcp_authority(&f.token,true).await.unwrap();
+    let (id,_,_)=bridge.prepare_media_upload(a).await.unwrap();
+    f.service.mcp_uploads.expire_fixture(&id);
+    let result=mapped(&bridge,&f,"edit_note",json!({"note_id":"1","revision":"irrelevant","uploads":[{"upload_id":id,"field":"Front"}]})).await;
+    assert!(matches!(result,Err(transport::DispatchFailure::Tool(transport::ToolFailure::AttachmentUnavailable))));
+    assert_eq!(media_counts(&f),(0,0,0));
+}
+#[tokio::test]
+async fn occupied_generated_media_names_compare_actual_bytes_before_coordination() {
+    use std::io::Write;
+    let f=Fixture::new(true).await;
+    let root=f.service.metadata.owner();let a=f.service.mcp_authority(&f.token,true).await.unwrap();
+    let value=Arc::new(attachments::Validated::new(generated_audio()).unwrap());
+    // Deliberately occupy the generated name through ordinary media storage with
+    // different valid bytes and matching metadata for those different bytes.
+    let mut other=generated_audio();other[50]=1;
+    let mut temp=media::blobs::Temporary::create(&root,a.account_id(),f.service.temp.clone()).unwrap();temp.write_all(&other).unwrap();
+    let content=media::blobs::Content {blob:temp.publish().unwrap(),size:other.len() as u64,
+        sha1:media::blobs::hex(&sha1::Sha1::digest(&other)),sha256:sha2::Sha256::digest(&other).to_vec()};
+    let mut db=storage::open(root.database(),false).unwrap();let tx=db.transaction().unwrap();
+    media::index::apply(&tx,a.account_id(),&[(value.name.clone(),Some(content))],&[true]).unwrap();tx.commit().unwrap();drop(db);
+    let result=media::prepare_insert(&root,a.account_id(),vec![value],f.service.temp.clone());
+    assert!(matches!(result,Err(Error {code:"attachment_conflict",..})));assert_eq!(media_counts(&f),(1,1,1));
+}
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn media_blob_durability_failure_rolls_back_note_before_metadata_commit() {
+    let f=Fixture::new(true).await;media_type(&f);
+    let original=f.service.mcp_authority(&f.token,true).await.unwrap();
+    let root=f.service.metadata.owner();
+    let value=Arc::new(attachments::Validated::new(generated_audio()).unwrap());
+    let mut prepared=media::prepare_insert(&root,original.account_id(),vec![value],f.service.temp.clone()).unwrap();
+    let barrier=f.service.mcp_publication_barrier(&original).await.unwrap();let guard=barrier.try_enter().unwrap();
+    let before=f.snapshot();
+    let path=f.path.clone();let sessions=f.service.normal_sessions.clone();let backend=Backend::new(f.service.mcp_key);
+    let result=f.service.metadata.files(move |_| {
+        let pin=root.pin_collection(&path)?;
+        let publication=path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_owned();
+        let context=Context {account:original.account_id().to_owned(),publication};
+        let held=Arc::new(HeldPublication {root:root.clone(),path:path.clone(),_pin:pin,_barrier:barrier,_guard:guard});
+        let authority=CollectionAuthority {original,context,held,sessions,write:true,probe:None};
+        let mut install=||crate::test_hooks::storage_failure("media_before_blob_durability",||media::install_insert(&root,&authority.original,&mut prepared));
+        backend.create_note_with_media(&path,&authority,CreateInput {deck_id:"1".into(),note_type_id:"10".into(),
+            fields:mcp::Fields(BTreeMap::from([("Front".into(),"new question".into())])),tags:None},&Runtime,&[],Some(&mut install))
+    }).await;
+    assert!(result.is_err());assert_eq!(f.snapshot(),before);assert_eq!(media_counts(&f),(0,0,0));
+    let db=crate::collection::schema::open(&f.path,false).unwrap();
+    assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM notes",[],|r|r.get(0)).unwrap(),1);
+}
+
+use crate::mcp_service::attachment_formats as expanded_fixtures;
+#[tokio::test]
+async fn direct_expanded_types_ignore_metadata_and_keep_immutable_media_on_reuse() {
+    let f=Fixture::new(true).await; media_type(&f);
+    let mut bridge=McpService::new(f.service.clone());
+    let files=json!([{"download_url":"https://files.oaiusercontent.com/generated","file_id":"fixture","file_name":"misleading.svg","mime_type":"text/html"}]);
+    for (index,(ext,bytes,template)) in [
+        ("gif",expanded_fixtures::gif(),"<img src=\"NAME\">"),
+        ("wav",expanded_fixtures::wav(),"[sound:NAME]"),
+        ("ogg",expanded_fixtures::ogg(true),"<audio controls src=\"NAME\"></audio>"),
+        ("pdf",expanded_fixtures::pdf(),"<a href=\"NAME\">Open PDF</a><object data=\"NAME\" hidden></object>"),
+    ].into_iter().enumerate() {
+        let digest=crypto::digest(&bytes); let source=bytes.clone();
+        bridge.direct_fixture=Some(Arc::new(move |_|Ok(source.clone())));
+        let result=mapped(&bridge,&f,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{"Front":"question"},"files":files,"file_fields":["Back"]})).await;
+        let transport::ToolOutput::Changed {note_id,revision}=result.ok().unwrap() else {panic!()};
+        let authority=f.service.mcp_authority(&f.token,true).await.unwrap();
+        let read=bridge.search_notes(authority,SearchInput {note_id:Some(note_id.clone()),..Default::default()}).await.unwrap();
+        let name=format!("meguri-{}.{ext}",media::blobs::hex(&digest));
+        assert_eq!(read.notes[0].fields["Back"],template.replace("NAME",&name));
+        let expected=(index as i64+1,index as i64+1,index+1); assert_eq!(media_counts(&f),expected);
+        let noop=mapped(&bridge,&f,"edit_note",json!({"note_id":note_id,"revision":revision,"files":files,"file_fields":["Back"]})).await;
+        let transport::ToolOutput::Changed {revision:unchanged,..}=noop.ok().unwrap() else {panic!()};
+        assert_eq!(unchanged,revision); assert_eq!(media_counts(&f),expected);
+    }
+    for bytes in [b"<html>active</html>".to_vec(),expanded_fixtures::pdf_with(b"/JS (active)")] {
+        bridge.direct_fixture=Some(Arc::new(move |_|Ok(bytes.clone())));
+        let result=mapped(&bridge,&f,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{},"files":files,"file_fields":["Front"]})).await;
+        assert!(matches!(result,Err(transport::DispatchFailure::Tool(transport::ToolFailure::AttachmentInvalid))));
+        assert_eq!(media_counts(&f),(4,4,4));
     }
 }

@@ -2,6 +2,7 @@
 //! Application seam. Authority is server-owned and deliberately generic here.
 use super::{descriptors::*, inputs::ToolCall};
 use axum::{http::HeaderMap, response::Response};
+pub use crate::error::McpDiagnosticDetail;
 use serde::Serialize;
 use std::{collections::BTreeMap, future::Future, pin::Pin};
 
@@ -44,6 +45,7 @@ pub trait Backend<A>: Send + Sync + 'static {
 /// supplies the same server-built challenge used by its HTTP authorizer.
 pub enum DispatchFailure {
     Tool(ToolFailure),
+    Diagnosed { failure: ToolFailure, detail: McpDiagnosticDetail },
     Challenge(Response),
 }
 impl From<ToolFailure> for DispatchFailure {
@@ -76,6 +78,7 @@ pub enum ToolOutput {
     Notes { notes: Vec<Note>, next_cursor: Option<String> },
     Catalog { decks: Vec<Deck>, note_types: Vec<NoteType>, next_cursor: Option<String> },
     Changed { note_id: String, revision: String },
+    Upload { upload_id: String, upload_url: String, expires_at: String },
 }
 impl ToolOutput {
     pub(super) fn bounded(&self) -> bool {
@@ -93,12 +96,13 @@ impl ToolOutput {
                 && note_types.iter().all(|n| text(&n.name) && n.field_names.len() <= MAX_FIELDS
                     && n.field_names.iter().all(|s| text(s))),
             Self::Changed { revision, .. } => revision.len() <= MAX_HANDLE_BYTES,
+            Self::Upload { upload_id,upload_url,expires_at } => upload_id.len() == 43 && upload_url.len() <= MAX_HANDLE_BYTES && expires_at.len() <= 64,
         }
     }
 }
 
 /// Fixed public outcomes prevent SQL, collection text or bearer material from
-/// entering protocol errors. Busy certifies that no write committed.
+/// entering protocol errors. Write busy certifies that no write committed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolFailure {
     NotFound,
@@ -107,6 +111,9 @@ pub enum ToolFailure {
     ResultTooLarge,
     UnsupportedCollection,
     Busy,
+    AttachmentInvalid,
+    AttachmentUnavailable,
+    AttachmentConflict,
     Internal,
 }
 impl ToolFailure {
@@ -115,8 +122,16 @@ impl ToolFailure {
             Self::NotFound => "not_found", Self::Conflict => "conflict",
             Self::InvalidInput => "invalid_input", Self::ResultTooLarge => "result_too_large",
             Self::UnsupportedCollection => "unsupported_collection", Self::Busy => "busy",
-            Self::Internal => "internal_error",
+            Self::AttachmentInvalid => "attachment_invalid", Self::AttachmentUnavailable => "attachment_unavailable",
+            Self::AttachmentConflict => "attachment_conflict", Self::Internal => "internal_error",
         }
+    }
+    pub(super) fn value_for_access(self, access: Access) -> serde_json::Value {
+        if self == Self::Busy && access == Access::Read {
+            serde_json::json!({"error":{"code":"busy",
+                "message":"The collection is busy. Try again after one second.",
+                "retryable":true,"retry_after_ms":1000}})
+        } else { self.value() }
     }
     pub(super) fn value(self) -> serde_json::Value {
         let code = self.code();
@@ -127,6 +142,9 @@ impl ToolFailure {
             Self::ResultTooLarge => "The data exceeds the tool's size limit. Send less content, narrow the search or request a smaller page.",
             Self::UnsupportedCollection => "This collection is not supported for this operation. Use a supported collection.",
             Self::Busy => "The collection is busy. The write did not commit. Retry after one second.",
+            Self::AttachmentInvalid => "Use a supported image, audio file or PDF within 8 MiB per file and 16 MiB per call. The note was not changed.",
+            Self::AttachmentUnavailable => "The attachment is unavailable. Attach the file again or use prepare_media_upload and return to chat before it expires. The note was not changed.",
+            Self::AttachmentConflict => "The media state changed or its saved name is occupied. The note was not changed. Check the collection before trying again.",
             Self::Internal => "The operation could not be completed. Check the current collection state before deciding whether to try again.",
         };
         if matches!(self, Self::Busy) {

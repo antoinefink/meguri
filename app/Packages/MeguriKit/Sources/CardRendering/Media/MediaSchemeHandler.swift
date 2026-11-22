@@ -136,6 +136,14 @@ private nonisolated struct MediaResponse: Sendable {
             media = false
         } else if first == "_addons" { return failure(404) }
         else {
+            // The hidden object is inventory only; PDF bytes never enter WebKit.
+            // Include filesystem aliases with default-ignorable scalars after NFC/case folding.
+            // This broader refusal key never changes media resolution or native admission.
+            let caseKey = String(path.dropFirst()).precomposedStringWithCanonicalMapping.lowercased()
+            let refusalKey = String(String.UnicodeScalarView(caseKey.unicodeScalars.filter {
+                !$0.properties.isDefaultIgnorableCodePoint
+            }))
+            guard !CardAttachmentPDF.accepts(refusalKey) else { return failure(404) }
             guard let resolver = binding.0 else { return failure(404) }
             let opened = try await resolver.openURLPath(path)
             file = opened; data = nil; mime = MediaMIMETypes.type(for: opened.name); media = true

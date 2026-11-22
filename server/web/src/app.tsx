@@ -12,6 +12,7 @@ import { Accounts } from "./accounts";
 import { Collection } from "./collection";
 import { Connection } from "./connection";
 import { Consent } from "./consent";
+import { MediaUpload } from "./media-upload";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Outcome, Sidebar, SidebarContent, SidebarGroup, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "./ui";
 import type { OutcomeValue } from "./ui";
 import pomegranate from "./favicon-64.png";
@@ -52,7 +53,7 @@ type PageState = { path: string; token: string; visit: number };
 export function App() {
   const [page, setPage] = useState<PageState>(() => {
     const token = consumeInitialToken();
-    return { path: location.pathname, token: ["/setup", "/invite", "/reset", "/oauth/consent"].includes(location.pathname) ? token : "", visit: 0 };
+    return { path: location.pathname, token: ["/setup", "/invite", "/reset", "/oauth/consent", "/mcp/upload"].includes(location.pathname) ? token : "", visit: 0 };
   });
   const [me, setMe] = useState<Me | null>(null), [setup, setSetup] = useState(false), [loading, setLoading] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<OutcomeValue | null>(null), [notice, setNotice] = useState<OutcomeValue | null>(null);
@@ -142,11 +143,12 @@ export function App() {
     } finally { logoutBusy.current = false; if (alive.current) setSigningOut(false); }
   }
   const capabilityPage = ["/setup", "/invite", "/reset"].includes(page.path);
-  const accountShell = me !== null && !capabilityPage && page.path !== "/login" && page.path !== "/oauth/consent";
+  const accountShell = me !== null && !capabilityPage && page.path !== "/login" && page.path !== "/oauth/consent" && page.path !== "/mcp/upload";
   let content: ReactNode;
   if (loading) content = <p role="status">Opening Meguri…</p>;
   else if (bootstrapError) content = <Card><CardHeader><CardTitle>Could not open your account</CardTitle></CardHeader><CardContent><Outcome value={bootstrapError} /><Button onClick={() => void bootstrap()}>Try loading again</Button></CardContent></Card>;
   else if (!navigation.some(path => path === page.path)) content = <Card><CardHeader><CardTitle>Page not found</CardTitle><CardDescription>This address does not match a Meguri account page.</CardDescription></CardHeader><CardContent>{link(me ? accountHomePath : "/login", me ? "Go to Collection" : "Go to sign in")}</CardContent></Card>;
+  else if (page.path === "/mcp/upload") content = <MediaUpload key={page.visit} uploadId={page.token} clearUpload={clearToken} me={me} onLogin={setMe} onSessionLoss={() => setMe(null)} onSignOut={() => void logout(true)} signingOut={signingOut} link={link} />;
   else if (page.path === "/oauth/consent") content = <Consent key={page.visit} request={page.token} clearRequest={clearToken} me={me} onLogin={setMe} onSessionLoss={() => setMe(null)} link={link} />;
   else if (capabilityPage && me) content = <Card className="auth-card"><CardHeader><CardTitle>Check your account</CardTitle><CardDescription>You are signed in as {me.username} ({me.role === "admin" ? "administrator" : "member"}).</CardDescription></CardHeader><CardContent className="stack"><p>This link may be intended for a different account. Sign out before using it.</p><Button aria-disabled={signingOut} onClick={() => void logout(true)}>{signingOut ? "Signing out…" : `Sign out ${me.username}`}</Button>{link(accountHomePath, "Return to your account")}</CardContent></Card>;
   else if (page.path === "/accounts" && me?.role !== "admin") content = <Card><CardHeader><CardTitle>Administrator access required</CardTitle><CardDescription>Your member account does not have permission to manage accounts.</CardDescription></CardHeader><CardContent>{link(accountHomePath, "Return to Collection")}</CardContent></Card>;

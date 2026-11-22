@@ -207,3 +207,30 @@ This bounded clean-room implementation has not run new tests, rebuilt its image
 or qualified a fresh package. The orchestrator must run focused MG negatives,
 independent exact patch/negative-behavior review, the ordinary image rebuild,
 all four audit paths and downstream package/runtime proof before acceptance.
+
+### M8 bounded input refresh (2026-11-22)
+
+`sync-web-verify/20261122T124642Z-96725` failed because the packaging-control
+bytes differed from this assessment. The M8 candidate changes browser API,
+bootstrap/routing, connection/consent copy, policy, API fixtures and the adapted
+source hash records. It adds `src/media-upload.tsx` and
+`tests/browser/media-upload.spec.ts` to the sorted complete file map. The upload
+screen now shows the signed-in identity and reuses account logout while keeping
+an unconsumed refused link in memory for switching accounts. A targeted synthetic
+browser fixture covers wrong-account refusal, logout, correct-account sign-in
+and successful use of the same ID; existing browser assertions are retained.
+
+After those inputs settle, this refresh updates only their exact byte lengths
+and SHA-256 values and those of already-enumerated changed packaging controls
+(`server/Dockerfile`, `server/src/httpapi/mod.rs`, `server/src/webassets/mod.rs`
+and `server/tools/package-inventory.py`). The 14-control set, tool versions,
+lock/graph identities, full advisory report, trust-root exclusions and complete
+tree checks remain unchanged. No JavaScript dependency changes. The new screen
+imports existing application modules only; runtime upload/account input does
+not enter the build-time matcher. The adapted app hashes are refreshed after
+the logout wiring changes, preserving the upstream input hashes and notices.
+
+This is a bounded source/evidence correction, not a passing run. No build,
+browser execution, dependency audit or image rebuild ran here. Retain the red
+receipt; independent exact review, an ordinary `sync-web-image` rebuild and the
+required web/package checks must bind the new bytes before acceptance.

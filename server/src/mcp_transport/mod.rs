@@ -11,7 +11,7 @@
 //! commit, and bounds allocations while reading. Only fixed diagnostic metadata is logged.
 //!
 //! Eight nonqueued slots cover body reads, dispatch and response ownership. Reads
-//! have a ten-second deadline and 1 MiB cap, with depth 16 / 4096 JSON values.
+//! have a ten-second body-read deadline and 1 MiB cap, with depth 16 / 4096 JSON values.
 //! Tool payloads are limited to 512 KiB; complete HTTP responses have a fixed cap.
 //! Close `Control` at shutdown admission, join the listener, then await `idle`.
 //! Dispatch runs to completion even if its HTTP caller disappears; blocking
@@ -297,6 +297,7 @@ async fn execute<A: Clone + Send + Sync + 'static>(
     let server_info = json!({"name":"Meguri", "version":env!("CARGO_PKG_VERSION")});
     let modern = context.dispatch.modern;
     let mut outcome = Outcome::Success;
+    let mut detail = None;
     let mut result = match context.dispatch.operation {
         Operation::Discover => json!({"resultType":"complete", "supportedVersions":SUPPORTED_REVISIONS,
             "capabilities":{"tools":{}}, "_meta":{"io.modelcontextprotocol/serverInfo":server_info}}),
@@ -306,6 +307,7 @@ async fn execute<A: Clone + Send + Sync + 'static>(
         Operation::Ping => json!({}),
         Operation::List => json!({"tools":descriptors::descriptors()}),
         Operation::Call { call, .. } => {
+            let access = call.access();
             match state.backend.dispatch(context.authority, call).await {
                 Ok(output) if output.bounded() => match json::encode(&output, MAX_RESULT_BYTES) {
                     Ok(bytes) => tool_result(serde_json::from_slice(&bytes).expect("encoded tool output"), false),
@@ -318,11 +320,18 @@ async fn execute<A: Clone + Send + Sync + 'static>(
                     outcome = Outcome::ToolError(ToolFailure::ResultTooLarge);
                     tool_result(ToolFailure::ResultTooLarge.value(), true)
                 },
-                Err(DispatchFailure::Tool(error)) => {
+                Err(failure) => {
+                    let error = match failure {
+                        DispatchFailure::Tool(error) => error,
+                        DispatchFailure::Diagnosed { failure, detail: diagnosed } => {
+                            detail = Some(diagnosed);
+                            failure
+                        },
+                        DispatchFailure::Challenge(response) => return authorization_outcome(response, Stage::Dispatch, DiagnosticOperation::Unknown),
+                    };
                     outcome = Outcome::ToolError(error);
-                    tool_result(error.value(), true)
+                    tool_result(error.value_for_access(access), true)
                 },
-                Err(DispatchFailure::Challenge(response)) => return authorization_outcome(response, Stage::Dispatch, DiagnosticOperation::Unknown),
             }
         }
     };
@@ -332,7 +341,7 @@ async fn execute<A: Clone + Send + Sync + 'static>(
     }
     let envelope = json!({"jsonrpc":"2.0", "id":context.dispatch.id, "result":result});
     match json::encode(&envelope, MAX_RESPONSE_BYTES) {
-        Ok(bytes) => Diagnostic::new(Stage::Dispatch, outcome).attach(([("content-type", "application/json")], bytes).into_response()),
+        Ok(bytes) => Diagnostic::new(Stage::Dispatch, outcome).with_detail(detail).attach(([("content-type", "application/json")], bytes).into_response()),
         Err(_) => internal_error(envelope["id"].clone()),
     }
 }
@@ -355,7 +364,7 @@ fn authorization_outcome(response: Response, stage: Stage, operation: Diagnostic
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Outcome::Challenge,
         _ => Outcome::Internal,
     });
-    Diagnostic { stage, operation, outcome }.attach(response)
+    Diagnostic { stage, operation, outcome, detail:None }.attach(response)
 }
 
 struct Retained<A> {

@@ -53,6 +53,9 @@ impl Backend<FixtureAuthority> for Fixture {
                     note_id:"9007199254740994".into(), revision:"generated-created".into(),
                 })),
                 ToolCall::EditNote(_) => ("edit_note", Err(ToolFailure::Conflict.into())),
+                ToolCall::PrepareMediaUpload => ("prepare_media_upload", Ok(ToolOutput::Upload {
+                    upload_id:"u".repeat(43),upload_url:"https://generated.example.test/mcp/upload#upload=fixture".into(),expires_at:"2026-11-22T14:00:00Z".into(),
+                })),
             };
             self.calls.lock().unwrap().push((authority.0, name));
             result
@@ -108,6 +111,32 @@ fn modern_meta() -> Value {
         (wire::CLIENT_INFO):{"name":"Generated fixture", "version":"1"},
         (wire::CLIENT_CAPABILITIES):{}})
 }
+#[test]
+fn attachment_wire_shapes_reject_missing_null_and_duplicate_members_before_dispatch() {
+    let valid_file = json!({"download_url":"https://files.oaiusercontent.com/generated","file_id":"generated"});
+    for (name,arguments) in [
+        ("create_note",json!({"deck_id":"1","note_type_id":"1","fields":{},"files":[valid_file.clone()],"file_fields":["Front"]})),
+        ("edit_note",json!({"note_id":"1","revision":"generated","files":[valid_file.clone()],"file_fields":["Front"]})),
+        ("prepare_media_upload",json!({})),
+    ] {
+        let value = body("tools/call",json!({"name":name,"arguments":arguments}));
+        let bytes = serde_json::to_vec(&value).unwrap();
+        assert!(wire::validate(&axum::http::HeaderMap::new(),value,&bytes).is_ok());
+    }
+    for arguments in [
+        json!({"note_id":"1","revision":"generated","files":[{"download_url":"x"}],"file_fields":["Front"]}),
+        json!({"note_id":"1","revision":"generated","files":[{"download_url":"x","file_id":"f","file_name":null}],"file_fields":["Front"]}),
+        json!({"note_id":"1","revision":"generated","uploads":null}),
+    ] {
+        let value = body("tools/call",json!({"name":"edit_note","arguments":arguments}));
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let response = wire::validate(&axum::http::HeaderMap::new(),value,&bytes).err().unwrap();
+        assert_eq!(response.extensions().get::<Diagnostic>().unwrap().outcome,
+            Outcome::InvalidParameters(ValidationError::Arguments));
+    }
+    let duplicate = br#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"edit_note","arguments":{"note_id":"1","revision":"generated","uploads":[{"upload_id":"u","field":"Front","field":"Back"}]}}}"#;
+    assert!(super::json::parse(duplicate).is_err());
+}
 fn body(method: &str, params: Value) -> Value {
     json!({"jsonrpc":"2.0", "id":7, "method":method, "params":params})
 }
@@ -154,7 +183,7 @@ async fn both_lifecycles_list_real_descriptors_and_bind_each_call_to_its_bearer(
             assert_eq!(listed["result"]["_meta"][wire::VERSION], revision);
         }
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 5);
         for expected in descriptors::descriptors() {
             let actual = tools.iter().find(|v| v["name"] == expected["name"]).unwrap();
             for key in ["inputSchema", "annotations", "securitySchemes", "_meta"] {
@@ -365,7 +394,7 @@ async fn legacy_initialize_negotiates_only_its_proposal_and_rejects_old_calls() 
     // After a lower proposal, both currently supported lanes remain usable.
     for revision in SUPPORTED_REVISIONS {
         let result=rpc(&r,revision,"generated-fixture-a","tools/list",json!({})).await;
-        assert_eq!(result["result"]["tools"].as_array().unwrap().len(),4);
+        assert_eq!(result["result"]["tools"].as_array().unwrap().len(),5);
     }
     r.stop().await;
 }
@@ -461,7 +490,7 @@ fn typed_terminal_diagnostics_distinguish_http_success_errors_and_challenges_at_
         (Outcome::StepUp, "step_up"), (Outcome::Challenge, "challenge"),
         (Outcome::Internal, "failure"),
     ] {
-        let diagnostic = Diagnostic { stage:Stage::Dispatch, operation:DiagnosticOperation::Edit, outcome };
+        let diagnostic = Diagnostic { stage:Stage::Dispatch, operation:DiagnosticOperation::Edit, outcome, detail:None };
         assert!(diagnostic.record(LogLevel::Off, StatusCode::OK, 17).is_none());
         assert_eq!(diagnostic.record(LogLevel::Info, StatusCode::OK, 17).is_none(), outcome == Outcome::Success);
         let debug = diagnostic.record(LogLevel::Debug, StatusCode::OK, 17).unwrap();
@@ -475,7 +504,7 @@ fn typed_terminal_diagnostics_distinguish_http_success_errors_and_challenges_at_
         json!({"method":"tools/call","id":"generated-private-id","params":{"name":"generated-private-tool","arguments":{"tag":"generated-private-tag"}}}),
     ] {
         let diagnostic = Diagnostic { stage:Stage::Protocol, operation:DiagnosticOperation::classify(&request),
-            outcome:Outcome::InvalidParameters(ValidationError::Arguments) };
+            outcome:Outcome::InvalidParameters(ValidationError::Arguments), detail:None };
         let record = diagnostic.record(LogLevel::Debug, StatusCode::OK, 0).unwrap();
         assert!(record.contains("operation=unknown"));
         assert!(!record.contains("generated-private"));
@@ -579,5 +608,82 @@ async fn transport_rejections_keep_busy_retry_and_body_boundary() {
     let mut over_limit = Body::from(vec![b' '; MAX_REQUEST_BYTES + 1]);
     assert_eq!(read(&mut over_limit).await.unwrap_err(), StatusCode::PAYLOAD_TOO_LARGE);
     assert!(r.fixture.calls.lock().unwrap().is_empty());
+    r.stop().await;
+}
+
+#[tokio::test]
+async fn diagnosed_failures_keep_access_specific_envelopes_and_fixed_terminal_detail() {
+    use crate::error::McpDiagnosticDetail as Detail;
+    struct FailureBackend(ToolFailure,Detail);
+    impl Backend<FixtureAuthority> for FailureBackend {
+        fn dispatch(&self,_:FixtureAuthority,_:ToolCall) -> BoxFuture<'_,Result<ToolOutput,DispatchFailure>> {
+            Box::pin(async move {Err(DispatchFailure::Diagnosed {failure:self.0,detail:self.1})})
+        }
+    }
+    let r=Running::start().await;
+    for (name,args,access) in [
+        ("search_notes",json!({"note_id":"1"}),Access::Read),
+        ("list_decks_and_note_types",json!({}),Access::Read),
+        ("edit_note",json!({"note_id":"1","revision":"generated-private","fields":{}}),Access::Write),
+        ("create_note",json!({"deck_id":"1","note_type_id":"1","fields":{}}),Access::Write),
+    ] {
+        for (failure,detail,label) in [
+            (ToolFailure::Busy,Detail::PublicationGate,"publication_gate"),
+            (ToolFailure::Busy,Detail::NativeWriter,"native_writer"),
+            (ToolFailure::Busy,Detail::SqliteOpenBusy,"sqlite_open_busy"),
+            (ToolFailure::Busy,Detail::SqliteAccessBusy,"sqlite_access_busy"),
+            (ToolFailure::Internal,Detail::CollectionPath,"collection_path"),
+            (ToolFailure::Internal,Detail::CollectionPin,"collection_pin"),
+            (ToolFailure::Internal,Detail::CollectionStorage,"collection_storage"),
+            (ToolFailure::Internal,Detail::CollectionWorker,"collection_worker"),
+            (ToolFailure::Internal,Detail::AuthorityStorage,"authority_storage"),
+            (ToolFailure::Internal,Detail::CollectionOpen,"collection_open"),
+            (ToolFailure::Internal,Detail::CollectionAccess,"collection_access"),
+            (ToolFailure::UnsupportedCollection,Detail::SqliteOpen,"sqlite_open"),
+            (ToolFailure::UnsupportedCollection,Detail::SqliteAccess,"sqlite_access"),
+        ] {
+            let state=Arc::new(State {
+                origin:"https://mcp-fixture.invalid".into(),log_level:crate::config::LogLevel::Off,
+                authorizer:r.fixture.clone(),backend:Arc::new(FailureBackend(failure,detail)),admission:r.control.0.clone(),
+            });
+            let value=body("tools/call",json!({"name":name,"arguments":args}));
+            let bytes=serde_json::to_vec(&value).unwrap();
+            let operation=DiagnosticOperation::classify(&value);
+            let validated=wire::validate(&axum::http::HeaderMap::new(),value,&bytes).ok().unwrap();
+            let lease=Arc::new(Lease {_permit:r.control.0.slots.clone().try_acquire_owned().unwrap()});
+            let mut request=Request::new(Body::empty());
+            request.extensions_mut().insert(RequestAuthority {authority:FixtureAuthority("a"),dispatch:validated,_lease:lease});
+            request.extensions_mut().insert(DiagnosticContext {started:std::time::Instant::now(),operation});
+            let response=dispatch(AxumState(state),request).await;
+            assert_eq!(response.status(),StatusCode::OK);
+            let diagnostic=*response.extensions().get::<Diagnostic>().unwrap();
+            assert_eq!(diagnostic.operation,operation);
+            assert!(response.extensions().get::<DiagnosticEmitted>().is_some());
+            assert_eq!(diagnostic.detail,Some(detail));
+            assert_eq!(diagnostic.outcome,Outcome::ToolError(failure));
+            assert!(diagnostic.record(crate::config::LogLevel::Off,StatusCode::OK,0).is_none());
+            let record=diagnostic.record(crate::config::LogLevel::Info,StatusCode::OK,0).unwrap();
+            assert!(record.ends_with(&format!(" detail={label}")));
+            assert!(record.contains(&format!("status=200 outcome=tool_error reason={}",failure.code())));
+            assert!(!record.contains("generated-private"));
+            let bytes=axum::body::to_bytes(response.into_body(),MAX_RESPONSE_BYTES).await.unwrap();
+            let value:Value=serde_json::from_slice(&bytes).unwrap();
+            same_content(&value);
+            let error=&value["result"]["structuredContent"]["error"];
+            let expected=if failure==ToolFailure::Busy && access==Access::Read {
+                json!({"error":{"code":"busy","message":"The collection is busy. Try again after one second.",
+                    "retryable":true,"retry_after_ms":1000}})
+            } else {failure.value()};
+            assert_eq!(value["result"]["structuredContent"],expected);
+            assert_eq!(value["result"]["isError"],true);
+            assert!(error.get("detail").is_none());
+            if access==Access::Read { assert!(error.get("write_committed").is_none()); }
+            if failure==ToolFailure::Busy && access==Access::Write {
+                assert_eq!(error,&json!({"code":"busy",
+                    "message":"The collection is busy. The write did not commit. Retry after one second.",
+                    "retryable":true,"retry_after_ms":1000,"write_committed":false}));
+            }
+        }
+    }
     r.stop().await;
 }

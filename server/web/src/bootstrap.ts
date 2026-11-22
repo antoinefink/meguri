@@ -5,7 +5,7 @@ export function takeFragment(location: Pick<Location, "hash" | "pathname" | "sea
   if (fragment) history.replaceState(null, "", location.pathname + location.search);
   const params = new URLSearchParams(fragment.slice(1));
   fragment = "";
-  const tokens = params.getAll(location.pathname === "/oauth/consent" ? "request" : "token");
+  const tokens = params.getAll(location.pathname === "/oauth/consent" ? "request" : location.pathname === "/mcp/upload" ? "upload" : "token");
   return tokens.length === 1 && /^[A-Za-z0-9_-]{43}$/.test(tokens[0] ?? "") ? tokens[0]! : "";
 }
 let token = takeFragment(window.location, window.history);
