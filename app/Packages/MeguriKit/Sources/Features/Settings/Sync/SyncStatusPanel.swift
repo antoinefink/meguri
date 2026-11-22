@@ -208,6 +208,8 @@ struct SyncStatusActionButton: View {
         case .meguriSignIn: return inPanel
         // A paused or stopped setup media step (resume fix): the status row's own action.
         case .meguriRetryMedia: return sync.meguriCanRetryMedia || (sync.meguriRoutine == .mediaBlocked && !sync.meguriBusy)
+        // MP7 step 5: shown while the upload waits, disabled while something else runs.
+        case .meguriUploadStructure: return sync.meguriStructureUploadPending
         // These have no entry outside their own lists.
         case .abandon, .checkDatabase: return false
         }
@@ -323,6 +325,11 @@ struct SyncStatusActionButton: View {
                 if sync.meguriRoutine == .mediaBlocked { sync.retryMeguriRoundMedia() } else { sync.retryMeguriMedia() }
             }
             .disabled(sync.meguriBusy).accessibilityIdentifier(id)
+        case .meguriUploadStructure:
+            // Runs at once, from the panel too (N23.3), and is never the default:
+            // it replaces the collection on Meguri Sync, as the Save sheet agreed.
+            Button(title) { sync.uploadNotetypeStructure() }
+                .disabled(!sync.meguriCanUploadStructure).accessibilityIdentifier(id)
         case .abandon, .checkDatabase:
             EmptyView()
         }

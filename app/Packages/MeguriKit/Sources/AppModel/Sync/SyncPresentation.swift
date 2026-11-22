@@ -440,10 +440,14 @@ public struct MeguriSyncStatusPresentation {
          (SyncText.value("sync.counts.reviews"), reviews.formatted(.number))]
     }
     public init(stopped: Bool, connection: MeguriProviderConnectionPhase, stage: MeguriSetupStage?,
-                routine: MeguriRoutineState?, settling: Bool = false) {
+                routine: MeguriRoutineState?, settling: Bool = false,
+                structureRunning: Bool = false, structureUploadPending: Bool = false) {
         // T19.7's reasons.
         if stopped || connection == .blocked {
             route = .disabled("sync.meguri.now.unavailable.stopped.sync")
+        } else if structureRunning || (structureUploadPending && (stage == nil || stage == .required) && routine != .authentication) {
+            // MP7: the job holds the provider; a waiting upload comes before any round (its Upload… is the status action).
+            route = .disabled(nil)
         } else if let routine {
             route = switch routine {
             case .acceptanceUnknown: .disabled("sync.meguri.now.unavailable.acceptanceUnknown")
@@ -455,11 +459,14 @@ public struct MeguriSyncStatusPresentation {
             }
         } else { route = .account("sync.meguri.setup.continue") }
         if stopped || connection == .blocked { isBusy = false }
+        else if structureRunning { isBusy = true }
         else if connection == .authenticating { isBusy = true }
         else if connection != .setupRequired { isBusy = false }
         else if let stage { isBusy = stage == .preparing || stage == .collection || stage == .media }
         else { isBusy = routine == .exchanging }
         if stopped || connection == .blocked { needsUser = true }
+        else if structureRunning { needsUser = false }
+        else if structureUploadPending, stage == nil || stage == .required, connection == .setupRequired { needsUser = true }
         else if connection == .unconfigured || connection == .authenticating { needsUser = false }
         else if connection == .signedOut || connection == .cancelled { needsUser = true }
         else if let stage {
