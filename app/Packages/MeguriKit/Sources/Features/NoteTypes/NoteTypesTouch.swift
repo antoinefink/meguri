@@ -11,7 +11,6 @@ import SwiftUI
 /// a popover, and Edit gives drag handles and delete buttons.
 struct NoteTypesTouchRoot: View {
     @Bindable var model: NoteTypesModel
-    let cards: (Int64) -> AnyView
 
     var body: some View {
         List {
@@ -60,17 +59,15 @@ struct NoteTypesTouchRoot: View {
 public struct NoteTypePage: View {
     @Bindable private var model: NoteTypesModel
     private let id: Int64
-    private let cards: (Int64) -> AnyView
     @Environment(\.locale) private var locale
 
-    public init(model: NoteTypesModel, id: Int64, cards: @escaping (Int64) -> AnyView = { _ in AnyView(CardsPlaceholder()) }) {
+    public init(model: NoteTypesModel, id: Int64) {
         self.model = model
         self.id = id
-        self.cards = cards
     }
 
     public var body: some View {
-        NoteTypeDetailContent(model: model, id: id, cards: cards)
+        NoteTypeDetailContent(model: model, id: id)
             .navigationTitle(Text(verbatim: model.draft(id)?.name ?? model.item(id)?.name ?? ""))
             .navigationSubtitle(subtitle)
             .navigationBarTitleDisplayMode(.inline)

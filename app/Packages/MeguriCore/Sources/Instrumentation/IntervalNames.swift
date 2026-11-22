@@ -399,6 +399,12 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let notetypeStructureJobResult = BridgeCall("NotetypeStructureJob.result")
     public static let notetypeCheckFieldName = BridgeCall("notetype_check_field_name")
     public static let templateFieldReferences = BridgeCall("template_field_references")
+    public static let startNotetypeTemplateCardCounts = BridgeCall("start_notetype_template_card_counts")
+    public static let notetypeTemplateCardCountsJobResult = BridgeCall("NotetypeTemplateCardCountsJob.result")
+    public static let notetypeTemplateIssues = BridgeCall("notetype_template_issues")
+    public static let notetypeReplaceFieldReferences = BridgeCall("notetype_replace_field_references")
+    public static let notetypeTemplateSyntax = BridgeCall("notetype_template_syntax")
+    public static let notetypeStylingSyntax = BridgeCall("notetype_styling_syntax")
 
     public static let openSearchSession = BridgeCall("open_search_session")
     public static let browseStartSearch = BridgeCall("BrowseSearchSession.start_search")
@@ -745,6 +751,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
         startNotetypeStructureSave, notetypeStructureJobResult, notetypeCheckFieldName, templateFieldReferences,
+        startNotetypeTemplateCardCounts, notetypeTemplateCardCountsJobResult, notetypeTemplateIssues, notetypeReplaceFieldReferences,
+        notetypeTemplateSyntax, notetypeStylingSyntax,
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
         filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
         startFindDuplicates, findDuplicatesJobResult,

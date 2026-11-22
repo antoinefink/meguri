@@ -1,22 +1,152 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "noteTypes.cards.message": {
+    "noteTypes.cards.add": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Not built yet."
+            "value": "Add Card Type"
           }
         }
       }
     },
-    "noteTypes.cards.title": {
+    "noteTypes.cards.blocked.cloze": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cards"
+            "value": "A cloze note type has one card type."
+          }
+        }
+      }
+    },
+    "noteTypes.cards.blocked.last": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A note type needs at least one card type."
+          }
+        }
+      }
+    },
+    "noteTypes.cards.cardTypes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card Types"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.delete": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.deleteSelected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Card Type"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.deleted": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deleted"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.duplicate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Duplicate"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.fields": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fields"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.issueDot": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Has issues"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.moveDown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move Down"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.moveUp": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move Up"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.rename": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rename"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.restore": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore"
           }
         }
       }
@@ -179,6 +309,96 @@
           "stringUnit": {
             "state": "translated",
             "value": "Discard changes?"
+          }
+        }
+      }
+    },
+    "noteTypes.editor.back": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back"
+          }
+        }
+      }
+    },
+    "noteTypes.editor.flip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flip"
+          }
+        }
+      }
+    },
+    "noteTypes.editor.flipRefused.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flip needs a line <hr id=answer> in the back with text before and after it."
+          }
+        }
+      }
+    },
+    "noteTypes.editor.flipRefused.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Can’t Flip This Card Type"
+          }
+        }
+      }
+    },
+    "noteTypes.editor.front": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Front"
+          }
+        }
+      }
+    },
+    "noteTypes.editor.part": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Part"
+          }
+        }
+      }
+    },
+    "noteTypes.editor.shared": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shared by All Card Types"
+          }
+        }
+      }
+    },
+    "noteTypes.editor.styling": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Styling"
+          }
+        }
+      }
+    },
+    "noteTypes.editor.toggleComment": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment Line"
           }
         }
       }
@@ -433,6 +653,116 @@
         }
       }
     },
+    "noteTypes.insert": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Insert"
+          }
+        }
+      }
+    },
+    "noteTypes.insert.darkRule": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dark Appearance Rule"
+          }
+        }
+      }
+    },
+    "noteTypes.insert.divider": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer Divider"
+          }
+        }
+      }
+    },
+    "noteTypes.insert.field": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Field"
+          }
+        }
+      }
+    },
+    "noteTypes.insert.furigana": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Furigana"
+          }
+        }
+      }
+    },
+    "noteTypes.insert.hint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hint"
+          }
+        }
+      }
+    },
+    "noteTypes.insert.ifContent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Only If Field Has Content"
+          }
+        }
+      }
+    },
+    "noteTypes.insert.ifEmpty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Only If Field Is Empty"
+          }
+        }
+      }
+    },
+    "noteTypes.insert.special": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Special Field"
+          }
+        }
+      }
+    },
+    "noteTypes.insert.textOnly": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text Only"
+          }
+        }
+      }
+    },
+    "noteTypes.insert.typeIn": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type-in Answer"
+          }
+        }
+      }
+    },
     "noteTypes.inspector.collapsed": {
       "localizations": {
         "en": {
@@ -529,6 +859,230 @@
           "stringUnit": {
             "state": "translated",
             "value": "Field"
+          }
+        }
+      }
+    },
+    "noteTypes.issues.addClose": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add %@"
+          }
+        }
+      }
+    },
+    "noteTypes.issues.blank": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %#@notes@"
+          },
+          "substitutions": {
+            "notes": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "The front is blank for %3$@ note."
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "The front is blank for %3$@ notes."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "noteTypes.issues.blankReason": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Their %@ is empty, so the front is blank."
+          }
+        }
+      }
+    },
+    "noteTypes.issues.duplicateFront": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The front repeats “%@”."
+          }
+        }
+      }
+    },
+    "noteTypes.issues.fixToSave": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@issues@"
+          },
+          "substitutions": {
+            "issues": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Fix the red issue to save."
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Fix the %2$@ red issues to save."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "noteTypes.issues.mismatched": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ cannot close %2$@: close the inner section first."
+          }
+        }
+      }
+    },
+    "noteTypes.issues.missingCloze": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A cloze note type needs a cloze field on the front and the back."
+          }
+        }
+      }
+    },
+    "noteTypes.issues.noFrontField": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The front shows no field."
+          }
+        }
+      }
+    },
+    "noteTypes.issues.none": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Issues"
+          }
+        }
+      }
+    },
+    "noteTypes.issues.showNotes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Notes"
+          }
+        }
+      }
+    },
+    "noteTypes.issues.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Issues"
+          }
+        }
+      }
+    },
+    "noteTypes.issues.unclosed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is opened but never closed."
+          }
+        }
+      }
+    },
+    "noteTypes.issues.unknownField": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No field is named “%@”."
+          }
+        }
+      }
+    },
+    "noteTypes.issues.unmatched": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A section tag here does not match."
+          }
+        }
+      }
+    },
+    "noteTypes.issues.unopened": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ closes a section that was never opened."
+          }
+        }
+      }
+    },
+    "noteTypes.issues.use": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use “%@”"
+          }
+        }
+      }
+    },
+    "noteTypes.issues.where.line": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@, line %3$@."
+          }
+        }
+      }
+    },
+    "noteTypes.issues.where.part": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@."
           }
         }
       }

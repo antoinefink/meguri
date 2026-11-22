@@ -114,6 +114,75 @@ public enum NoteTypesStrings {
         }
     }
 
+    // MARK: The Cards tab (W5, W7, W15)
+
+    public static func part(_ part: NoteTypeTemplatePart, locale: Locale) -> String {
+        switch part {
+        case .front: text("noteTypes.editor.front", locale: locale)
+        case .back: text("noteTypes.editor.back", locale: locale)
+        case .styling: text("noteTypes.editor.styling", locale: locale)
+        }
+    }
+
+    public static func cardTypeBlock(_ block: NoteTypeCardTypeBlock, locale: Locale) -> String {
+        switch block {
+        case .lastCardType: text("noteTypes.cards.blocked.last", locale: locale)
+        case .cloze: text("noteTypes.cards.blocked.cloze", locale: locale)
+        }
+    }
+
+    /// W7's line: where ("Recognition · Front, line 3."), what, and for a
+    /// yellow issue the reason when one field decides it.
+    public static func issue(_ issue: NoteTypeLiveIssue, locale: Locale) -> (location: String, message: String, reason: String?) {
+        let card = issue.cardName
+        if case .blankFront(let notes, let field) = issue.kind {
+            let countText = notes.formatted(.number.locale(locale))
+            let line = String(localized: "noteTypes.issues.blank", defaultValue: "\(card) \(notes) \(countText)", bundle: .module, locale: locale)
+            let reason = field.map { String(localized: "noteTypes.issues.blankReason", defaultValue: "\($0)", bundle: .module, locale: locale) }
+            return (line, "", reason)
+        }
+        let location: String
+        if let part = issue.part {
+            let partName = Self.part(part, locale: locale)
+            if let line = issue.line {
+                let lineText = line.formatted(.number.locale(locale))
+                location = String(localized: "noteTypes.issues.where.line", defaultValue: "\(card) \(partName) \(lineText)", bundle: .module, locale: locale)
+            } else {
+                location = String(localized: "noteTypes.issues.where.part", defaultValue: "\(card) \(partName)", bundle: .module, locale: locale)
+            }
+        } else {
+            location = card
+        }
+        let message: String = switch issue.kind {
+        case .unknownField(let name): String(localized: "noteTypes.issues.unknownField", defaultValue: "\(name)", bundle: .module, locale: locale)
+        case .unclosedSection(let tag): String(localized: "noteTypes.issues.unclosed", defaultValue: "\(tag)", bundle: .module, locale: locale)
+        case .unopenedSection(let tag): String(localized: "noteTypes.issues.unopened", defaultValue: "\(tag)", bundle: .module, locale: locale)
+        case .mismatchedSection(let tag, let open):
+            String(localized: "noteTypes.issues.mismatched", defaultValue: "\(tag) \(open)", bundle: .module, locale: locale)
+        case .unmatchedSection: text("noteTypes.issues.unmatched", locale: locale)
+        case .duplicateFront(let earlier): String(localized: "noteTypes.issues.duplicateFront", defaultValue: "\(earlier)", bundle: .module, locale: locale)
+        case .noFrontField: text("noteTypes.issues.noFrontField", locale: locale)
+        case .missingCloze: text("noteTypes.issues.missingCloze", locale: locale)
+        case .blankFront: ""
+        }
+        return (location, message, nil)
+    }
+
+    /// A fix's button title (W7).
+    public static func fix(_ fix: NoteTypeLiveIssue.Fix, locale: Locale) -> String {
+        switch fix {
+        case .useField(_, let to): String(localized: "noteTypes.issues.use", defaultValue: "\(to)", bundle: .module, locale: locale)
+        case .addClose(let close): String(localized: "noteTypes.issues.addClose", defaultValue: "\(close)", bundle: .module, locale: locale)
+        case .showNotes: text("noteTypes.issues.showNotes", locale: locale)
+        }
+    }
+
+    /// W7's bottom line while red issues hold Save.
+    public static func fixToSave(_ count: Int, locale: Locale) -> String {
+        let countText = count.formatted(.number.locale(locale))
+        return String(localized: "noteTypes.issues.fixToSave", defaultValue: "\(count) \(countText)", bundle: .module, locale: locale)
+    }
+
     public static func sortBy(_ name: String, locale: Locale) -> String {
         String(localized: "noteTypes.fields.sortBy", defaultValue: "\(name)", bundle: .module, locale: locale)
     }

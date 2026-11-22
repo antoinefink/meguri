@@ -22,6 +22,16 @@ import Foundation
     func checkFieldName(_ typed: String, fields: [String], renaming: UInt32?) async throws -> NotetypeFieldNameCheck
     /// `render/template-syntax` T11.1 per text.
     func fieldReferences(_ texts: [String]) async throws -> [[String]]
+    /// W5: per stored template ordinal, its cards.
+    func templateCardCounts(_ id: Int64) async throws -> [UInt64]
+    /// W7's red issues of the draft as it would be saved.
+    func templateIssues(_ draft: NotetypeStructureDraft) async throws -> [NotetypeTemplateIssue]
+    /// W8 per card type of the draft (none for a cloze note type).
+    func notesWithoutCard(_ draft: NotetypeStructureDraft) async throws -> [NotetypeBlankFront]
+    /// W7's "Use “<to>”" on one part's text.
+    func replaceFieldReferences(_ text: String, from: String, to: String) async throws -> String
+    /// W6's colouring of a Front or Back text, or of the styling.
+    func syntax(_ text: String, styling: Bool) async throws -> [NotetypeSyntaxSpan]
 }
 
 /// The section's backend over CoreBridge. A job whose task is cancelled
@@ -56,6 +66,21 @@ import Foundation
     }
     public func fieldReferences(_ texts: [String]) async throws -> [[String]] {
         try await service.templateFieldReferences(texts)
+    }
+    public func templateCardCounts(_ id: Int64) async throws -> [UInt64] {
+        try await run { try await self.service.startNotetypeTemplateCardCounts(notetypeId: id) }
+    }
+    public func templateIssues(_ draft: NotetypeStructureDraft) async throws -> [NotetypeTemplateIssue] {
+        try await service.notetypeTemplateIssues(draft)
+    }
+    public func notesWithoutCard(_ draft: NotetypeStructureDraft) async throws -> [NotetypeBlankFront] {
+        try await run { try await self.service.startNotetypeNotesWithoutCard(draft) }
+    }
+    public func replaceFieldReferences(_ text: String, from: String, to: String) async throws -> String {
+        try await service.notetypeReplaceFieldReferences(text, from: from, to: to)
+    }
+    public func syntax(_ text: String, styling: Bool) async throws -> [NotetypeSyntaxSpan] {
+        styling ? try await service.notetypeStylingSyntax(text) : try await service.notetypeTemplateSyntax(text)
     }
 
     private func run<Value: Sendable>(_ start: () async throws -> CoreNotetypeReadJob<Value>) async throws -> Value {
