@@ -47,6 +47,9 @@ public enum BridgeError: Error, Sendable, Hashable {
     /// A Browse search session refused a call or a request
     /// (`browser/result-sets` H14).
     case browse(BrowseFailure)
+    /// Find and Replace refused (`browser/find-replace` F11): nothing was
+    /// written.
+    case findReplaceRefused(FindReplaceRefusal)
 }
 
 extension BridgeError {
@@ -98,6 +101,7 @@ extension BridgeError {
         case .MediaCommitPending(let seq, let message): self = .mediaCommitPending(sequence: seq, message: message)
         case .CommitCompleted(let seq, let message): self = .commitCompleted(sequence: seq, message: message)
         case .Browse(let failure): self = .browse(BrowseFailure(failure))
+        case .FindReplaceRefused(let refusal): self = .findReplaceRefused(FindReplaceRefusal(refusal))
         }
     }
 }

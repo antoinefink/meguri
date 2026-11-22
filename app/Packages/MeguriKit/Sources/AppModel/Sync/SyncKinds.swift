@@ -136,10 +136,10 @@ public struct SyncMainStatus: Sendable, Equatable {
     public var hasIssues: Bool { !issues.isEmpty }
 }
 
-/// N23.2: one cloud family for both services. Shape first; only needs you has a
-/// colour. The names are the `icloud` symbols, which Apple reserves for iCloud:
-/// `glyph` draws them for iCloud only, and the same shapes from the unrestricted
-/// `cloud` symbol for Meguri Sync and Off (N23.4).
+/// N23.2: five states, one system symbol each, for both services; only needs you
+/// has a colour. The names are the `icloud` symbols, which Apple reserves for
+/// iCloud: `glyph` gives them for iCloud only, and unrestricted system symbols
+/// for Meguri Sync and Off (N23.4). Nothing is drawn over or inside a symbol.
 public enum SyncSymbol {
     public static let upToDate = "checkmark.icloud"
     /// Something moves; it turns while the work lasts.
@@ -149,21 +149,16 @@ public enum SyncSymbol {
     public static let needsYou = "exclamationmark.icloud"
     public static let off = "icloud.slash"
 
-    /// What draws a shape: a system symbol (iCloud only) or a drawn cloud.
-    public enum Glyph: Equatable, Sendable {
-        case system(String)
-        /// `cloud` with its badge: none, checkmark, arrows, exclamationmark, slash.
-        case cloud(String)
-    }
-    /// N23.2: the `icloud` symbols only refer to Apple's iCloud.
-    public static func glyph(_ shape: String, iCloud: Bool) -> Glyph {
-        if iCloud, shape != off { return .system(shape) }
+    /// N23.2: the system symbol a state is drawn with. The `icloud` symbols only
+    /// refer to Apple's iCloud, and SF Symbols has no unrestricted cloud with a
+    /// badge, so Meguri Sync and Off use other unrestricted symbols.
+    public static func glyph(_ shape: String, iCloud: Bool) -> String {
+        if iCloud, shape != off { return shape }
         return switch shape {
-        case upToDate: .cloud("checkmark")
-        case moving: .cloud("arrows")
-        case needsYou: .cloud("exclamationmark")
-        case off: .cloud("slash")
-        default: .cloud("none")
+        case upToDate: "checkmark.circle"
+        case moving: "arrow.trianglehead.2.clockwise.rotate.90"
+        case needsYou: "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90"
+        default: "cloud" // Waiting, and Sync Off (in the secondary colour in the toolbar).
         }
     }
 }
