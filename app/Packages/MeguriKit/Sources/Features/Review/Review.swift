@@ -771,6 +771,19 @@ public struct ReviewAnswerBar: View {
 }
 
 #if !os(macOS)
+extension View {
+    /// N16.9: the card passes under the answer buttons. Each button stands on
+    /// the card page's own colour, clipped to its rounded rectangle, under its
+    /// grey fill: card text never shows through, and over a plain card the
+    /// button looks exactly as before. A blurring material was tried first:
+    /// the system fill turns vibrant over it, lighter in light mode and darker
+    /// in dark, so the buttons no longer looked the same. The page colour has
+    /// its increased-contrast variants and needs nothing for Reduce Transparency.
+    func answerAreaBacking() -> some View {
+        background(.token(.cardPage), in: ButtonBorderShape.roundedRectangle)
+    }
+}
+
 /// One child, centred, as wide as one of two equal columns in the row.
 private struct CentredHalfRow: Layout {
     let spacing: CGFloat
