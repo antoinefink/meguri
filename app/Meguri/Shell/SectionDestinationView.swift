@@ -53,6 +53,10 @@ struct ShellFeatures {
         AnyView(ContentUnavailableView("Select a Deck", systemImage: "rectangle.stack"))
     }
     var availableSections: [AppSection] = AppSection.sidebar
+    /// Whether a section's row shows now: Browse and Note Types read the
+    /// collection, so with none on this device (first run, N18.3) they are
+    /// not offered, nor their View commands.
+    var sectionShown: (AppSection) -> Bool = { _ in true }
     var syncStatus: () -> AnyView = { AnyView(EmptyView()) }
     var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
     /// N20.9: the Deck Options page pushed on a deck page.
@@ -102,6 +106,7 @@ struct ShellFeatures {
         // W14: Note Types has a sidebar row at regular width; the tab layout reaches it from Settings (U286).
         features.availableSections = [.home, .noteTypes, .settings]
         #endif
+        features.sectionShown = { section in Self.sectionShown(section, hasCollection: collection.hasCollection) }
         features.sectionRoot = { section, navigation in
             switch section {
             case .settings: AnyView(SettingsView(collection: collection))
@@ -170,6 +175,11 @@ struct ShellFeatures {
         }
         features.deckExists = { collection.deck($0.rawValue) != nil }
         return features
+    }
+
+    /// Today and Settings need no collection; every other section reads one.
+    static func sectionShown(_ section: AppSection, hasCollection: Bool) -> Bool {
+        hasCollection || section == .home || section == .settings
     }
 
     static var standard: ShellFeatures {

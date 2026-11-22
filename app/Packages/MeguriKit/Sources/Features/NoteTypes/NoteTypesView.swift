@@ -274,6 +274,14 @@ private struct NoteTypeListColumn: View {
             switch model.phase {
             case .loading:
                 DelayedProgress()
+            case .noCollection:
+                // Nothing failed: there is no collection to read yet (N18.3's welcome is on Today).
+                ContentUnavailableView {
+                    Label { Text("noteTypes.list.noCollection.title", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
+                } description: {
+                    Text("noteTypes.list.noCollection.message", bundle: .module)
+                }
+                .accessibilityIdentifier("noteTypes.list.noCollection")
             case .failed:
                 ContentUnavailableView {
                     Label { Text("noteTypes.list.failed.title", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }

@@ -159,6 +159,11 @@ struct RootView: View {
         .frame(minWidth: WindowMetrics.minimum.width, minHeight: WindowMetrics.minimum.height)
         #endif
         .task { await collection?.start() }
+        // A section that reads the collection leaves with it (first run, N18.3): Today shows the welcome.
+        .onChange(of: features.sectionShown(navigation.section), initial: true) { _, shown in
+            // After this update: a selection changed during it can be lost.
+            if !shown { Task { @MainActor in if !features.sectionShown(navigation.section) { navigation.select(.section(.home)) } } }
+        }
         .onChange(of: scenePhase) { _, phase in
             collection?.setSceneActive(phase == .active)
             if phase == .active { collection?.setForeground(true) }

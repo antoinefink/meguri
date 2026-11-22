@@ -886,6 +886,7 @@ The values are in the order Off, Meguri Sync, iCloud. A choice made while the va
 
 - New value Off shows `sync.switch.next.localOnly` and, when the old service is Meguri Sync, `sync.switch.signOut`. The old service's pending, held and media lines show for Off as for a switch (MP3 step 1), with `sync.service.iCloud` or `sync.service.meguri` as the old service's name.
 - While the change runs, `sync.service.changing` shows; after a failure, `sync.service.changeFailed`. No text says the sign-in was removed or the selection is unchanged until the core reports it (T18.3).
+- Added 2026-11-22 (real-copy service fix). An installation whose build cannot use iCloud (no verified container and schema, R2065) still changes between Off and Meguri Sync. A change to iCloud there is refused before anything is written, and the line under the picker is `sync.status.unavailable.setupNeeded` in place of `sync.service.changeFailed`. The control stays enabled after any failure: choosing again is the retry. Copy Debug Info names the destination, step (`preparation`, `updateHold`, `handoff`) and reason of the last change that did not finish, as names only.
 
 ### T19.3 Setup and the collection to keep (V27.2, V27.4; MP6.3)
 

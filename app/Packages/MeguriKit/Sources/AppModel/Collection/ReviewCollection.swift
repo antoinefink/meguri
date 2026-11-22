@@ -391,6 +391,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         let value = NoteTypesModel(backend: CoreNoteTypesBackend())
         value.service = { [weak self] in self?.noteTypeSaveService ?? .other }
         value.writable = { [weak self] in self?.noteTypeWriteAllowed ?? false }
+        value.hasCollection = { [weak self] in self?.hasCollection ?? false }
         value.presentQuestion = { [weak self] in
             guard let self, self.navigation.sheet == nil || self.navigation.sheet == .noteTypeSave else { return false }
             self.navigation.present(.noteTypeSave)
@@ -402,6 +403,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         noteTypesOwner = value
         return value
     }
+    /// A collection exists on this device: false on first run, while Today
+    /// shows the welcome (N18.3). The sections that read a collection (Browse,
+    /// Note Types) are not offered until one is created, imported or synced.
+    public var hasCollection: Bool { state != .noFile }
     /// `notetypes/draft-save` D3 counts Meguri Sync only with a ready binding.
     /// Whether the binding is ready is read in the background and can be
     /// unknown for a moment, so any Meguri Sync selection counts here: a
@@ -1041,7 +1046,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             await original.prepareConnectionAuthority()
             guard sync === original, generation == expected, original.generation == expected,
                   original.meguriSignInAttachmentRevision == revision else { throw CancellationError() }
-            guard original.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+            guard original.syncOwnerAttached else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         }
         // Keep retired waits retained until their actual completion, without
         // making a successor join them or letting their cleanup erase its wait.
@@ -1058,13 +1063,15 @@ public final class ReviewCollection: ChangeFanoutSink {
             let location = try await prepareEntry()
             try Task.checkCancellation()
             guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
-            guard sync.setupState != .configurationUnavailable else { throw BridgeError.unavailable(reason: "configuration") }
-            if sync.connectionService != nil { return }
+            // An installation that cannot use iCloud still attaches its provider
+            // here: Off and Meguri Sync need no iCloud setup. iCloud's own entries
+            // refuse it themselves (`prepareCloudConnectionPreview`).
+            if sync.syncOwnerAttached { return }
             // An existing file follows the owner's ordinary open path. Neither
             // discovery nor its UI may create or replace that file.
             if await Self.exists(configuration.collectionLocation.collectionFile), state != .ready {
                 await start()
-                guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+                guard sync.syncOwnerAttached else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
                 return
             }
             let seed = try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max)
@@ -1075,7 +1082,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             sync.setMeguriLocalCollection(false)
             await sync.completeOpenedHost(generation: retainedGeneration)
             try sync.requireProviderAttachment()
-            guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+            guard sync.syncOwnerAttached else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         }
         cloudHostPreparationTask = task
         try await task.value
@@ -2198,7 +2205,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             if state == .noFile {
                 // A retained NoCollection Host has cloud callbacks to drain,
                 // even though there is no local writer to flush or suspend.
-                if sync.connectionService != nil {
+                if sync.syncOwnerAttached {
                     if active { await sync.foregroundAfterLocalResume() }
                     else { _ = await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired ? nil : backgroundDeadlineMilliseconds) }
                 }

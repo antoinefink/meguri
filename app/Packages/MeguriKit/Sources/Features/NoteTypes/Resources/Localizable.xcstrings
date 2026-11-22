@@ -553,6 +553,26 @@
         }
       }
     },
+    "noteTypes.list.noCollection.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note types show here once you set up sync, import a collection or start empty on Today."
+          }
+        }
+      }
+    },
+    "noteTypes.list.noCollection.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Collection"
+          }
+        }
+      }
+    },
     "noteTypes.progress": {
       "localizations": {
         "en": {

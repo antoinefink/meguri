@@ -149,7 +149,9 @@ struct SyncServiceRows: View {
                 .accessibilityIdentifier("settings.sync.serviceChanging")
         }
         if failed {
-            Text(SyncText.value("sync.service.changeFailed")).foregroundStyle(.secondary)
+            // iCloud refused on an installation that cannot use it says so (T19.4's `setupNeeded` text).
+            Text(SyncText.value(sync.serviceChangeFailure?.reason == .iCloudSetupNeeded
+                    ? "sync.status.unavailable.setupNeeded" : "sync.service.changeFailed")).foregroundStyle(.secondary)
                 .accessibilityIdentifier("settings.sync.serviceChangeFailed")
         }
         if refusedForOp, opBlocksChange {
@@ -178,32 +180,14 @@ struct SyncServiceRows: View {
         if let shown, shown != source { destination = nil; return }
         changing = true; failed = false
         Task {
-            do {
-                try await collection.prepareSyncServiceSelection()
-                let current = collection.sync
-                // A choice in the Service control clears the update hold, by writing
-                // `paused: false` before the change itself is asked for (P25.2).
-                guard await current.clearUpdateHold() else { failed = true; changing = false; return }
-                // The selection is not reserved across those waits: a change of it
-                // ends this switch, and the person confirms again.
-                // No state yet shows as Off, the same as `.localOnly`.
-                guard (current.providerState?.selection ?? .localOnly) == (source ?? .localOnly) else {
-                    destination = nil; changing = false; return
-                }
-                let succeeded: Bool
-                if value == "localOnly", source == .iCloud {
-                    // V27.5's rows, through the retained operations.
-                    succeeded = await current.turnOffICloud()
-                } else {
-                    let target: SyncProviderSelection = value == "meguri" ? .meguri : value == "iCloud" ? .iCloud : .localOnly
-                    succeeded = await current.changeProvider(to: target, removeMeguriCredentials: source == .meguri)
-                }
-                failed = !succeeded
-                if succeeded {
-                    destination = nil
-                    if value == "iCloud" { collection.presentCloudSync(.connect, host: host) }
-                }
-            } catch { failed = true }
+            let target: SyncProviderSelection = value == "meguri" ? .meguri : value == "iCloud" ? .iCloud : .localOnly
+            switch await collection.changeSyncService(to: target, from: source) {
+            case .changed:
+                destination = nil
+                if value == "iCloud" { collection.presentCloudSync(.connect, host: host) }
+            case .superseded: destination = nil
+            case .failed: failed = true
+            }
             changing = false
         }
     }

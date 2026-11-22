@@ -1,6 +1,8 @@
 #if MEGURI_TEST_HOOKS
 @_spi(MeguriTestHooks) import AppModel
 import CoreBridge
+import DesignSystem
+import Home
 import NoteTypes
 import SwiftUI
 
@@ -18,6 +20,9 @@ extension TestHooks {
     /// - `notetypes/save/meguri-sync`: the same with a ready Meguri Sync
     ///   binding: the sync paragraph and Save and Upload (U269 not built, so
     ///   the button is disabled).
+    /// - `notetypes/first-run`: the shell with no collection on this device
+    ///   (N18.3): Today's welcome, no deck, and no Note Types row; the route
+    ///   asks for Note Types, and the shell keeps Today.
     enum NoteTypesRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.registerShell("notetypes/fields/typical") { _ in launch(.typical) }
@@ -25,6 +30,32 @@ extension TestHooks {
             registry.registerShell("notetypes/fields/edited") { _ in launch(.edited) }
             registry.registerShell("notetypes/save/losses") { _ in launch(.question(.other)) }
             registry.registerShell("notetypes/save/meguri-sync") { _ in launch(.question(.meguriSync)) }
+            registry.registerShell("notetypes/first-run") { _ in firstRun() }
+        }
+
+        /// No collection: only Today (and, on iPad, Settings) is offered.
+        @MainActor static func firstRun() -> ShellLaunch {
+            var features = ShellSample.features(.typical)
+            features.todayRoot = true
+            #if os(macOS)
+            features.nativeMacWorkspace = true
+            features.availableSections = [.home, .noteTypes]
+            #else
+            features.availableSections = [.home, .noteTypes, .settings]
+            #endif
+            features.sectionShown = { ShellFeatures.sectionShown($0, hasCollection: false) }
+            let placeholder = features.sectionRoot
+            let welcome = HomeDeckListPreview.previewFixtures.first { $0.state == .empty }
+            features.sectionRoot = { section, navigation in
+                guard section == .home, let welcome else { return placeholder(section, navigation) }
+                return AnyView(welcome.makeView().navigationTitle(Text(verbatim: "Today")))
+            }
+            features.sidebarDecks = { _ in
+                AnyView(Text(verbatim: "No decks").foregroundStyle(.secondary).accessibilityIdentifier("home.sidebar.guidance"))
+            }
+            return ShellLaunch(features: features, probe: false) { navigation in
+                navigation.select(.section(.noteTypes))
+            }
         }
 
         enum State {
