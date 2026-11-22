@@ -573,6 +573,8 @@ import Testing
     var holdSaves = false
     private var heldSaves: [CheckedContinuation<Void, Never>] = []
     func releaseSaves() { heldSaves.forEach { $0.resume() }; heldSaves = [] }
+    var heldSaveCount: Int { heldSaves.count }
+    func releaseFirstSave() { if !heldSaves.isEmpty { heldSaves.removeFirst().resume() } }
     func saveSearch(name: String, text: String) async throws {
         if holdSaves { await withCheckedContinuation { heldSaves.append($0) } }
         if saveFails { throw BridgeError.unavailable(reason: "sample") }

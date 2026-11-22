@@ -358,15 +358,23 @@ import Testing
         model.startSavingSearch()
         model.saveSearch(named: "First")
         await until { core.runTexts > 0 && model.savingSearch?.saving == true }
-        // Cancelled while it writes; a second Save Search… starts.
+        await until { core.heldSaveCount == 1 }
+        // Cancelled while it writes; a second Save Search… starts and writes too.
         model.cancelSavingSearch()
         model.startSavingSearch()
+        model.saveSearch(named: "Second")
+        await until { core.heldSaveCount == 2 }
         let second = model.savingSearch
+        #expect(second?.saving == true && second?.name == "Second")
+        // The first write fails while the second still writes: the second sheet stays as it is.
         core.saveFails = true
-        core.releaseSaves()
+        core.releaseFirstSave()
         try? await Task.sleep(for: .milliseconds(50))
-        // The first write's end neither dismisses nor fails the second sheet.
-        #expect(model.savingSearch == second && model.savingSearch?.failed == false)
+        #expect(model.savingSearch == second)
+        // The second write lands: its own sheet closes.
+        core.saveFails = false
+        core.releaseSaves()
+        await until { model.savingSearch == nil }
     }
 
     @Test func countsOfAModeChangeAreReadAgainWhenBrowseHidesMeanwhile() async {
