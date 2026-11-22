@@ -7,7 +7,9 @@
 //! Encoding (G6): the seven counts of `excluding_inactive`, then those of
 //! `including_inactive` (each in [`StateCounts`]' field order), the notes
 //! count, then the label lists for separating and for not separating, each
-//! a list of (label as its [`CountLabel`] index, item text).
+//! a list of (label as its [`CountLabel`] index, item text), then the five
+//! type counts of `suspended_by_state` (new, learning, relearning, young,
+//! mature).
 
 use std::collections::HashSet;
 
@@ -87,8 +89,8 @@ pub struct LabelText {
     pub text: String,
 }
 
-/// `stats/graphs-cards` C4.4 (the round 11 extra `suspended_by_state` is
-/// `stats/history-reads` H8, U288's).
+/// `stats/graphs-cards` C4.4, with the round 11 extra `suspended_by_state`
+/// of `stats/history-reads` H8 (not observed).
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct CardCountsRecord {
@@ -103,6 +105,10 @@ pub struct CardCountsRecord {
     pub labels_separate: Vec<LabelText>,
     /// C4.3 with the setting false: the five type labels.
     pub labels_together: Vec<LabelText>,
+    /// H8: the cards with `queue` −1 in their type's row (C4.1);
+    /// `suspended` and `buried` stay 0. `including_inactive` less this is
+    /// every other card by its type.
+    pub suspended_by_state: StateCounts,
 }
 
 /// C4.1: the row a card's type gives.
@@ -160,12 +166,16 @@ fn shown_labels(separate: bool) -> Vec<LabelText> {
 pub(crate) fn build(input: &GraphInput<'_>) -> Result<CardCountsRecord, NotBuilt> {
     let mut excluding = StateCounts::default();
     let mut including = StateCounts::default();
+    let mut suspended = StateCounts::default();
     let mut notes = HashSet::new();
     for card in input.scope.cards() {
         let row = type_row(card.card_type, card.ivl);
         *including.slot(row) += 1;
         let inactive_row = match card.queue {
-            CardQueue::Suspended => CountLabel::Suspended,
+            CardQueue::Suspended => {
+                *suspended.slot(row) += 1;
+                CountLabel::Suspended
+            }
             queue if is_buried(queue) => CountLabel::Buried,
             _ => row,
         };
@@ -178,6 +188,7 @@ pub(crate) fn build(input: &GraphInput<'_>) -> Result<CardCountsRecord, NotBuilt
         notes: notes.len() as u32,
         labels_separate: shown_labels(true),
         labels_together: shown_labels(false),
+        suspended_by_state: suspended,
     })
 }
 
@@ -202,6 +213,9 @@ impl GraphRecord for CardCountsRecord {
         out.integer(i64::from(self.notes));
         write_labels(out, &self.labels_separate);
         write_labels(out, &self.labels_together);
+        for value in &self.suspended_by_state.values()[..5] {
+            out.integer(i64::from(*value));
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
