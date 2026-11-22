@@ -592,8 +592,9 @@ fn v8_no_counted_row() {
         assert_eq!(parts.retention, empty);
         assert!(ranges(&parts.hourly).iter().all(|hours| busy(hours).is_empty()));
         assert!(button_ranges(&parts.buttons).iter().all(|range| *range == ButtonCounts::default()));
-        // An empty map is its run count, 0.
-        assert_eq!(encode(&parts.reviews), [0]);
+        // An empty map is its run count, 0: By Type's, By Answer's (H6),
+        // then `unrated` 0.
+        assert_eq!(encode(&parts.reviews), [0, 0, 0]);
     }
 }
 
@@ -610,7 +611,23 @@ fn g6_encodings_round_trip() {
     let bytes = encode(&parts.reviews);
     let mut decoder = Decoder::new(&bytes);
     let map = decoder.sparse_map(&[MemberKind::Integers; 10]).unwrap();
+    // H6's By Answer map and `unrated`.
+    let answers = decoder.sparse_map(&[MemberKind::Integers; 8]).unwrap();
+    assert_eq!(decoder.integer().unwrap(), parts.reviews.unrated as i64);
     assert!(decoder.is_done());
+    let by_answer: Vec<(i64, [i64; 4], [i64; 4])> = (0..answers.keys.len())
+        .map(|at| {
+            let member = |m: usize| answers.integers[m][at];
+            (answers.keys[at], [0, 1, 2, 3].map(member), [4, 5, 6, 7].map(member))
+        })
+        .collect();
+    let want: Vec<(i64, [i64; 4], [i64; 4])> = parts
+        .reviews
+        .count_by_answer
+        .iter()
+        .map(|(day, counts)| (i64::from(*day), *counts, parts.reviews.time_by_answer[day]))
+        .collect();
+    assert_eq!(by_answer, want);
     assert_eq!(map.keys, [-9, -4, -3, 0]);
     let decoded: Vec<(ReviewKinds, ReviewKinds)> = (0..map.keys.len())
         .map(|at| {
@@ -641,16 +658,34 @@ fn g6_encodings_round_trip() {
     let decoded = decoder
         .list(|d| d.list(|d| Ok(hour(d.integer()? as u64, d.integer()? as u64))))
         .unwrap();
+    // H7: `six_months`, then `retention_by_hour`'s five ranges.
+    let six = decoder.list(|d| Ok(hour(d.integer()? as u64, d.integer()? as u64))).unwrap();
+    let kept = decoder
+        .list(|d| d.list(|d| Ok((d.integer()? as u64, d.integer()? as u64))))
+        .unwrap();
     assert!(decoder.is_done());
     let want: Vec<Vec<HourCounts>> = ranges(&parts.hourly).into_iter().map(|h| h.to_vec()).collect();
     assert_eq!(decoded, want);
+    assert_eq!(six, parts.hourly.six_months.to_vec());
+    let by_hour = &parts.hourly.retention_by_hour;
+    let want: Vec<Vec<(u64, u64)>> = [&by_hour.one_month, &by_hour.three_months, &by_hour.six_months, &by_hour.one_year]
+        .into_iter()
+        .chain(by_hour.all_time.as_ref())
+        .map(|hours| hours.iter().map(|h| (h.passed, h.failed)).collect())
+        .collect();
+    assert_eq!(kept, want);
     // Answer Buttons: per range three lists of four.
     let bytes = encode(&parts.buttons);
     let mut decoder = Decoder::new(&bytes);
     let decoded = decoder
         .list(|d| (0..3).map(|_| d.list(|d| d.integer())).collect::<Result<Vec<_>, _>>())
         .unwrap();
+    // H7: the `six_months` range.
+    let six: Vec<Vec<i64>> = (0..3).map(|_| decoder.list(|d| d.integer())).collect::<Result<_, _>>().unwrap();
     assert!(decoder.is_done());
+    let b = parts.buttons.six_months;
+    let want_six: Vec<Vec<i64>> = [b.learning, b.young, b.mature].iter().map(|p| p.iter().map(|v| *v as i64).collect()).collect();
+    assert_eq!(six, want_six);
     let want: Vec<Vec<Vec<i64>>> = button_ranges(&parts.buttons)
         .iter()
         .map(|b| [b.learning, b.young, b.mature].iter().map(|p| p.iter().map(|v| *v as i64).collect()).collect())
@@ -658,16 +693,25 @@ fn g6_encodings_round_trip() {
     assert_eq!(decoded, want);
 }
 
+/// The whole record, H6's extras included.
 fn decode_reviews(bytes: &[u8]) -> ReviewsRecord {
     let mut decoder = Decoder::new(bytes);
     let map = decoder.sparse_map(&[MemberKind::Integers; 10]).unwrap();
-    assert!(decoder.is_done());
+    let answers = decoder.sparse_map(&[MemberKind::Integers; 8]).unwrap();
     let mut record = ReviewsRecord::default();
+    record.unrated = decoder.integer().unwrap() as u64;
+    assert!(decoder.is_done());
     for (at, day) in map.keys.iter().enumerate() {
         let member = |m: usize| map.integers[m][at];
         let day = i32::try_from(*day).unwrap();
         record.count.insert(day, kinds(member(0), member(1), member(2), member(3), member(4)));
         record.time.insert(day, kinds(member(5), member(6), member(7), member(8), member(9)));
+    }
+    for (at, day) in answers.keys.iter().enumerate() {
+        let member = |m: usize| answers.integers[m][at];
+        let day = i32::try_from(*day).unwrap();
+        record.count_by_answer.insert(day, [0, 1, 2, 3].map(member));
+        record.time_by_answer.insert(day, [4, 5, 6, 7].map(member));
     }
     record
 }
