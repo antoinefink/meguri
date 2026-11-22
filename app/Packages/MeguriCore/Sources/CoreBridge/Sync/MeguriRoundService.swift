@@ -135,6 +135,10 @@ public actor CoreMeguriRoundService {
     private var retired = false
     private var attempt: (id: UInt64, task: Task<MeguriRoundReport, any Error>)?
     private var nextID: UInt64 = 0
+    /// A structure save job that runs on this facade; retirement joins it.
+    var structureWork: Task<MeguriStructureOutcome, any Error>?
+    /// Raised by every drain: a structure job admitted before it does not start after it.
+    var drains: UInt64 = 0
     init(raw: MeguriCoreBindings.ProviderConnection, connection: MeguriProviderConnection,
          credentials: @escaping @Sendable () async throws -> MeguriProviderCredentials) {
         self.raw = raw; self.connection = connection; self.credentials = credentials
@@ -167,7 +171,22 @@ public actor CoreMeguriRoundService {
         if attempt?.id == id { attempt = nil }
         return try result.get()
     }
+    /// The retained connection with the credentials read for it now, for a
+    /// job that this facade does not own (the structure save job).
+    func admittedInputs() async throws -> (MeguriCoreBindings.ProviderConnection, MeguriCoreBindings.ProviderCredentials) {
+        try current()
+        let value = try await credentials()
+        try current()
+        guard value.connection == connection else { throw MeguriProviderCredentialFailure.wrongConnection }
+        return (raw, MeguriCoreBindings.ProviderCredentials(connection: .init(reference: connection.reference,
+            revision: connection.revision, endpoint: connection.endpoint), username: value.username, hostkey: value.hostKey))
+    }
     public func cancelAndDrain() async {
+        // A structure save job is asked to stop where MP7 allows, and joined.
+        drains &+= 1
+        let structure = structureWork
+        structure?.cancel()
+        _ = await structure?.result
         let original = attempt
         original?.task.cancel()
         _ = await original?.task.result
