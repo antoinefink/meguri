@@ -47,6 +47,10 @@ private struct G6Writer {
         withUnsafeBytes(of: value.bitPattern.littleEndian) { bytes.append(contentsOf: $0) }
     }
 
+    mutating func float64(_ value: Double) {
+        withUnsafeBytes(of: value.bitPattern.littleEndian) { bytes.append(contentsOf: $0) }
+    }
+
     mutating func text(_ value: String) {
         unsigned(UInt64(value.utf8.count))
         bytes.append(contentsOf: value.utf8)
@@ -267,8 +271,19 @@ private func routed(events: [StatsPageEvent], cancelAfter: Int? = nil) async -> 
         #expect(throws: StatsBytes.Failure.self) {
             try decoded(.started) { w in w.map([], []); w.list([1, 2]) { w, d in w.integer(d) } }
         }
+        let knowledge = try decoded(.knowledgeOverTime) { w in
+            w.list([(-1, 1_894_600_799_000, 1.75, 2), (0, 1_894_701_600_000, 1.5, 2)]) { w, sample in
+                w.integer(sample.0); w.integer(sample.1); w.float64(sample.2); w.integer(sample.3)
+            }
+            w.integer(1); w.integer(3)
+        }
+        #expect(knowledge == .knowledgeOverTime(StatsKnowledgeOverTime(samples: [
+            StatsKnowledgeSample(day: -1, instantMilliseconds: 1_894_600_799_000, knowledge: 1.75, studied: 2),
+            StatsKnowledgeSample(day: 0, instantMilliseconds: 1_894_701_600_000, knowledge: 1.5, studied: 2),
+        ], failed: 1, leftOut: 3)))
+
         // A part with no decoder yet is refused, never taken as data.
-        #expect(throws: StatsBytes.Failure.self) { try decoded(.knowledgeOverTime) { _ in } }
+        #expect(throws: StatsBytes.Failure.self) { try decoded(.studiedToday) { _ in } }
     }
 
     @Test func periodsReadTheirHistoryAndOnlyAllNeedsANewRequest() {
@@ -448,11 +463,10 @@ extension EventTests {
             #expect(header.context.nowMilliseconds == 1_894_701_600_000 && header.context.zoneIdentifier == "UTC")
 
             let outcome = { (part: StatsPart) in results.first { $0.part == part }?.outcome }
-            for part in [StatsPart.studiedToday, .retentionByDay, .byDeck, .activityDays, .knowledgeOverTime] {
+            for part in [StatsPart.studiedToday, .retentionByDay, .byDeck, .activityDays] {
                 #expect(outcome(part) == .failed(.notBuilt), "\(part)")
             }
-            for part in StatsPart.allCases where ![.studiedToday, .retentionByDay, .byDeck, .activityDays,
-                                                    .knowledgeOverTime].contains(part) {
+            for part in StatsPart.allCases where ![.studiedToday, .retentionByDay, .byDeck, .activityDays].contains(part) {
                 guard case .data = outcome(part) else { Issue.record("\(part): \(String(describing: outcome(part)))"); continue }
             }
             guard case .data(.cardCounts(let counts)) = outcome(.cardCounts),
@@ -467,6 +481,10 @@ extension EventTests {
             #expect(byAnswer.count.values.map(\.total).reduce(0, +) + byAnswer.unrated
                 == reviews.count.values.map(\.total).reduce(0, +))
             // The last day of Cards Over Time is Card Counts without the suspended cards (H2.2).
+            if case .data(.knowledgeOverTime(let knowledge)) = outcome(.knowledgeOverTime) {
+                #expect(knowledge.samples.allSatisfy { $0.knowledge <= Double($0.studied) + 1e-9 })
+                #expect(knowledge.samples.last.map { $0.day == 0 } ?? true, "today's point last")
+            }
             let today = states.counts(on: 0)
             #expect(today.total + states.leftOut == total(counts.includingInactive))
 

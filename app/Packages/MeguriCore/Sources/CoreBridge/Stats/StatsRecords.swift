@@ -193,6 +193,28 @@ public struct StatsStarted: Sendable, Hashable {
     public let firstDay: Int?
 }
 
+/// One sample of `knowledge_over_time` (H3.3).
+public struct StatsKnowledgeSample: Sendable, Hashable {
+    /// H1's day: −365 to −1 for a day end, earlier for a month end (All only), 0 for today's point.
+    public let day: Int
+    /// The sample instant, epoch milliseconds.
+    public let instantMilliseconds: Int64
+    /// The summed recall probabilities of the cards (each in [0, 1]); never above `studied`.
+    public let knowledge: Double
+    /// The cards with an estimate there.
+    public let studied: Int
+}
+
+/// `knowledge_over_time` (H3.3).
+public struct StatsKnowledgeOverTime: Sendable, Hashable {
+    /// Ascending by instant, today's point last; empty when no card has a memory estimate (S8.5).
+    public let samples: [StatsKnowledgeSample]
+    /// The cards left out for a crate error, from the first sample they failed at on.
+    public let failed: Int
+    /// The scope's suspended cards, left out of every sample (H2.1).
+    public let leftOut: Int
+}
+
 /// A part's value. A part whose value type has no case yet arrives as `StatsPartFailure.undecodable`.
 public enum StatsPartValue: Sendable, Hashable {
     case cardCounts(StatsCardCounts)
@@ -211,6 +233,7 @@ public enum StatsPartValue: Sendable, Hashable {
     case added(StatsSparseMap<Int>)
     case cardStatesOverTime(StatsCardStatesOverTime)
     case started(StatsStarted)
+    case knowledgeOverTime(StatsKnowledgeOverTime)
 }
 
 // MARK: - Decoding
@@ -240,7 +263,8 @@ extension StatsPartValue {
         case .added: value = .added(try bytes.counts())
         case .cardStatesOverTime: value = .cardStatesOverTime(try .decode(&bytes))
         case .started: value = .started(StatsStarted(days: try bytes.counts(), firstDay: try bytes.optional { b throws(StatsBytes.Failure) in try b.integer() }))
-        case .studiedToday, .retentionByDay, .byDeck, .activityDays, .knowledgeOverTime:
+        case .knowledgeOverTime: value = .knowledgeOverTime(try .decode(&bytes))
+        case .studiedToday, .retentionByDay, .byDeck, .activityDays:
             throw StatsBytes.Failure(reason: "no decoder for \(part.rawValue) yet")
         }
         try bytes.finish()
@@ -408,5 +432,15 @@ extension StatsCardStatesOverTime {
         let deltas = try bytes.map(members: 5) { StatsStateCounts($0) }
         return StatsCardStatesOverTime(start: start, deltas: deltas, leftOut: try bytes.count(),
                                        firstDay: try bytes.optional { b throws(StatsBytes.Failure) in try b.integer() })
+    }
+}
+
+extension StatsKnowledgeOverTime {
+    static func decode(_ bytes: inout StatsBytes) throws(StatsBytes.Failure) -> StatsKnowledgeOverTime {
+        let samples = try bytes.list { b throws(StatsBytes.Failure) in
+            StatsKnowledgeSample(day: try b.integer(), instantMilliseconds: Int64(try b.integer()),
+                                 knowledge: try b.float64(), studied: try b.count())
+        }
+        return StatsKnowledgeOverTime(samples: samples, failed: try bytes.count(), leftOut: try bytes.count())
     }
 }

@@ -12,7 +12,7 @@ use meguri_engine::CancelToken;
 use meguri_model::clock::{StepClock, UtcOffset};
 use meguri_stats::graphs::encoding::{Decoder, Encoder, MemberKind};
 use meguri_stats::graphs::{Columns, Graph, History, Scope, ScopeError, StatsError, Unreadable};
-use meguri_stats::history::{CardStatesOverTime, Progress, StartedPart, StateCounts};
+use meguri_stats::history::{CardStatesOverTime, KnowledgeOverTime, KnowledgeSample, Progress, StartedPart, StateCounts};
 use meguri_stats::page::{
     self, ByAnswerPart, OldestDay, PageEnd, PageHeader, PageMessage, PageRequest, Part, PartFailure, PartMessage,
     PartOutcome, PartValue, Period,
@@ -191,6 +191,28 @@ fn decode_started(bytes: &[u8]) -> StartedPart {
     }
 }
 
+fn decode_knowledge(bytes: &[u8]) -> KnowledgeOverTime {
+    let mut decoder = Decoder::new(bytes);
+    let samples = decoder
+        .list(|decoder| {
+            Ok(KnowledgeSample {
+                day: i32::try_from(decoder.integer()?).unwrap(),
+                instant_ms: decoder.integer()?,
+                knowledge: decoder.f64()?,
+                studied: u64::try_from(decoder.integer()?).unwrap(),
+            })
+        })
+        .unwrap();
+    let failed = u64::try_from(decoder.integer().unwrap()).unwrap();
+    let left_out = u64::try_from(decoder.integer().unwrap()).unwrap();
+    assert!(decoder.is_done(), "no byte after `left_out`");
+    KnowledgeOverTime {
+        samples,
+        failed,
+        left_out,
+    }
+}
+
 fn first_header(core: &[PageMessage]) -> Arc<PageHeader> {
     core.iter()
         .find_map(|message| match message {
@@ -263,6 +285,7 @@ fn every_value_crosses_as_g6_bytes_after_one_header_and_before_the_end() {
                     PartValue::ByAnswer(by_answer) => assert_eq!(&decode_by_answer(bytes), by_answer),
                     PartValue::CardStates(states) => assert_eq!(&decode_card_states(bytes), states),
                     PartValue::Started(started) => assert_eq!(&decode_started(bytes), started),
+                    PartValue::Knowledge(knowledge) => assert_eq!(&decode_knowledge(bytes), knowledge),
                 },
                 (PartOutcome::Failed(failure), StatsPartOutcome::Failed { failure: sent }) => {
                     assert_eq!(sent, &StatsPartFailure::from(failure), "{part:?}");
@@ -282,6 +305,8 @@ fn every_value_crosses_as_g6_bytes_after_one_header_and_before_the_end() {
         assert!(!states.deltas.is_empty() && states.first_day.is_some(), "{states:?}");
         let PartValue::Started(started) = value(Part::Started) else { panic!() };
         assert!(started.first_day.is_some(), "{started:?}");
+        let PartValue::Knowledge(knowledge) = value(Part::KnowledgeOverTime) else { panic!() };
+        assert!(!knowledge.samples.is_empty(), "{knowledge:?}");
     }
 }
 

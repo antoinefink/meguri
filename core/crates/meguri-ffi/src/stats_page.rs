@@ -6,7 +6,10 @@
 //!   order the core sends them: the header once, before the first part;
 //!   each part by tier as it is ready (H15); progress for the parts that
 //!   wait; and last, always, the request's `End`. The job's `JobFinished`
-//!   follows the `End`.
+//!   follows the `End`. A job the registry never runs (cancelled before a
+//!   worker took it, or admitted while the registry is paused) sends no
+//!   message: its `JobFinished` is then the request's end, which
+//!   CoreBridge turns into the stream's end.
 //! - Cancellation is the job's token (H16). The core checks it before each
 //!   message, so a cancel from another thread at that instant can let one
 //!   message through: CoreBridge drops every message of a request it has
@@ -21,7 +24,7 @@ use std::sync::Arc;
 use meguri_model::ids::DeckId;
 use meguri_stats::graphs::encoding::{Encoder, Member};
 use meguri_stats::graphs::{BrowseScope, Columns, Context, History, Preferences, Scope, ScopeError, StatsError, Unreadable};
-use meguri_stats::history::{CardStatesOverTime, Progress, StartedPart, StateCounts};
+use meguri_stats::history::{CardStatesOverTime, KnowledgeOverTime, Progress, StartedPart, StateCounts};
 use meguri_stats::page::{
     self, ByAnswerPart, OldestDay, PageEnd, PageHeader, PageMessage, PageRequest, Part, PartFailure, PartOutcome,
     PartValue, Period,
@@ -539,6 +542,7 @@ pub(crate) fn stats_error(error: StatsError) -> CoreError {
 /// | `by_answer` | one sparse map keyed by day index (V2's, unfolded) with eight integer members: the counts of Again, Hard, Good and Easy, then their summed times in milliseconds in the same order; then `unrated` |
 /// | `card_states_over_time` | `start`: five integers, New, Learning, Relearning, Young, Mature; `deltas`: one sparse map keyed by day (H1) with five integer members in the same order; `left_out`; `first_day` as an optional integer |
 /// | `started` | one sparse map keyed by day (H1) with one integer member (cards); `first_day` as an optional integer |
+/// | `knowledge_over_time` | `samples`: a list, ascending by instant with today's point last, each item `day` (H1), `instant_ms`, `knowledge` as binary64, `studied`; then `failed`; then `left_out` |
 pub(crate) fn encode(value: &PartValue) -> Vec<u8> {
     let mut out = Encoder::new();
     match value {
@@ -546,6 +550,7 @@ pub(crate) fn encode(value: &PartValue) -> Vec<u8> {
         PartValue::ByAnswer(part) => by_answer(&mut out, part),
         PartValue::CardStates(states) => card_states(&mut out, states),
         PartValue::Started(started) => started_part(&mut out, started),
+        PartValue::Knowledge(knowledge) => knowledge_part(&mut out, knowledge),
     }
     out.into_bytes()
 }
@@ -595,6 +600,17 @@ fn started_part(out: &mut Encoder, started: &StartedPart) {
     let counts: Vec<i64> = started.days.values().map(|count| *count as i64).collect();
     out.sparse_map(&keys, &[Member::Integers(&counts)]);
     optional(out, started.first_day);
+}
+
+fn knowledge_part(out: &mut Encoder, knowledge: &KnowledgeOverTime) {
+    out.list(&knowledge.samples, |out, sample| {
+        out.integer(i64::from(sample.day));
+        out.integer(sample.instant_ms);
+        out.f64(sample.knowledge);
+        out.integer(sample.studied as i64);
+    });
+    out.integer(knowledge.failed as i64);
+    out.integer(knowledge.left_out as i64);
 }
 
 /// G9.5 and H14.4: the memory warning, as a job. Drops the memo and releases
