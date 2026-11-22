@@ -116,7 +116,9 @@ extension EventTests {
             // the run it confirms, and a typed refusal.
             let previews = try await CoreFindReplacePreviews.open()
             let request = FindReplaceRequest(find: "alpha", replace: "quint", scope: .field("Front"))
-            let previewed = try await previews.start(request, on: selection).value()
+            let previewJob = try await previews.start(request, on: selection)
+            #expect(previewJob.request == request)
+            let previewed = try await previewJob.value()
             #expect(previewed == FindReplacePreview(changed: 1, considered: 2, entries: [
                 FindReplacePreviewEntry(noteID: firstIDs[0], sortField: "alpha", field: "Front", spans: [
                     FindReplaceSpan(edit: .removed, text: "alpha"), FindReplaceSpan(edit: .inserted, text: "quint"),

@@ -321,9 +321,16 @@ impl FindReplacePreviews {
         let handle = self.newest.start(ticket, || {
             Ok(engine.start_job(JobKind::BulkOp, move |job| {
                 completion.started = true;
-                let read = preview_on(&host, generation, &target, &request, job);
-                completion.set(read.clone().map(Into::into).map_err(Into::into));
-                read.map(|_| ())
+                match preview_on(&host, generation, &target, &request, job) {
+                    Ok(preview) => {
+                        completion.set(Ok(preview.into()));
+                        Ok(())
+                    }
+                    Err(error) => {
+                        completion.set(Err(error.clone().into()));
+                        Err(error)
+                    }
+                }
             })?)
         })?;
         Ok(FindReplacePreviewJobStart {

@@ -187,7 +187,8 @@ public final class CoreFindReplaceJob: Sendable {
 }
 
 /// One Find and Replace sheet's previews: each `start` cancels the previous
-/// one, in call order. Releasing the object cancels its newest preview.
+/// one, in call order. Releasing the object and every job it started
+/// cancels its newest preview.
 public final class CoreFindReplacePreviews: Sendable {
     private let raw: MeguriCoreBindings.FindReplacePreviews
     private init(_ raw: MeguriCoreBindings.FindReplacePreviews) {
@@ -206,16 +207,37 @@ public final class CoreFindReplacePreviews: Sendable {
     /// `BridgeError.findReplaceRefused`; a selection that cannot be resolved,
     /// `invalidArgument`.
     public func start(_ request: FindReplaceRequest, on target: BrowseSelection?) async throws(BridgeError)
-        -> CoreBrowseReadJob<FindReplacePreview> {
+        -> CoreFindReplacePreviewJob {
         try await CoreEventStream.shared.start()
         let previews = raw, rawTarget = target?.raw, rawRequest = request.raw
-        return try await MaintenanceLane.shared.call(.findReplacePreviewsStart) {
+        let read = try await MaintenanceLane.shared.call(.findReplacePreviewsStart) {
             let start = try previews.start(target: rawTarget, request: rawRequest)
             let result = start.result
             return CoreBrowseReadJob(job: try Jobs.track(start.handle), resultCall: .findReplacePreviewJobResult) {
                 try result.result().map(FindReplacePreview.init)
             }
         }
+        return CoreFindReplacePreviewJob(request: request, read: read, previews: self)
+    }
+}
+
+/// A started preview, with the request it previews. Supersession follows
+/// the order calls reach the core, which concurrent tasks need not keep:
+/// show and confirm a preview only when `request` is the sheet's current
+/// one. It keeps its sheet's previews alive until it is released.
+public final class CoreFindReplacePreviewJob: Sendable {
+    public let request: FindReplaceRequest
+    private let read: CoreBrowseReadJob<FindReplacePreview>
+    private let previews: CoreFindReplacePreviews
+    public var job: CoreJob { read.job }
+    init(request: FindReplaceRequest, read: CoreBrowseReadJob<FindReplacePreview>, previews: CoreFindReplacePreviews) {
+        self.request = request
+        self.read = read
+        self.previews = previews
+    }
+
+    public func value() async throws(BridgeError) -> FindReplacePreview {
+        try await read.value()
     }
 }
 
