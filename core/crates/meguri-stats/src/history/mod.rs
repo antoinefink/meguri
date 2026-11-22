@@ -272,6 +272,9 @@ pub fn card_states(
         return Ok(HistoryResult::Cancelled);
     }
     let context = page_context(collection, derived)?;
+    if request.cancel.is_cancelled() {
+        return Ok(HistoryResult::Cancelled);
+    }
     card_states_in(caches, collection, derived, &context, request, progress)
 }
 
@@ -331,6 +334,9 @@ pub fn card_states_in(
                 // request's grid. The flush lets the writer mark it stale.
                 shared.rebuild();
                 derived.flush()?;
+                if cancelled() {
+                    return Ok(HistoryResult::Cancelled);
+                }
             }
         }
         derived.request_refresh(HISTORY_COMPONENT);
@@ -338,6 +344,7 @@ pub fn card_states_in(
             Waited::Cancelled => return Ok(HistoryResult::Cancelled),
             Waited::Ready | Waited::Failed => {}
         }
+        // The writer may be in one of a build's short batches (H16).
         derived.flush()?;
         tries += 1;
     }
@@ -355,6 +362,10 @@ fn finish(
     from_component: bool,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<HistoryResult, StatsError> {
+    // A cancelled request returns no part (H16).
+    if cancelled() {
+        return Ok(HistoryResult::Cancelled);
+    }
     match read {
         Ok(Read::Parts(card_states, started)) => Ok(HistoryResult::Data(Box::new(HistoryData {
             context: context.clone(),

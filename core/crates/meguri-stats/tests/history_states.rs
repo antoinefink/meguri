@@ -744,7 +744,7 @@ impl Mix {
     }
 
     fn step(&mut self, f: &mut Fixture) -> &'static str {
-        match self.pick(22) {
+        match self.pick(25) {
             0 | 1 => {
                 // An answer: one row today, the card's new interval.
                 let Some(id) = self.some_card() else { return "none" };
@@ -972,6 +972,54 @@ impl Mix {
                 self.bad_rows.push(id);
                 "unreadable row"
             }
+            21 => {
+                // A rebuild with commits landing while it runs: they are
+                // kept and applied after the swap (D7).
+                f.host.derived().invalidate(Invalidation::CheckDatabase);
+                for _ in 0..3 {
+                    let Some(id) = self.some_card() else { return "none" };
+                    let row_id = self.row_id(f, 0);
+                    f.write(move |scope| {
+                        let mut c = current(scope, id);
+                        c.card_type = CardType::Review;
+                        c.interval = 25;
+                        scope.put(&c)?;
+                        scope.insert_revlog(&row(row_id, id, 3, 25, 2500, RevlogKind::Review))?;
+                        Ok(())
+                    });
+                }
+                "answers during a rebuild"
+            }
+            22 => {
+                // A row with a negative id, which no part reads (G3).
+                let Some(id) = self.some_card() else { return "none" };
+                self.next_id += 1;
+                let row_id = -1_000 - self.next_id;
+                f.write_raw(move |scope| {
+                    scope.insert_revlog(&row(row_id, id, 3, 40, 2500, RevlogKind::Review))?;
+                    Ok(())
+                });
+                "negative-id row"
+            }
+            23 => {
+                // A sync bringing rows before their card, in an earlier
+                // commit.
+                self.next_id += 1;
+                let id = at(f.next_day_at(), -(self.pick(200) as i64), 500 + self.next_id % 400);
+                let (first, second) = (self.row_id(f, 30), self.row_id(f, 5));
+                f.write_raw(move |scope| {
+                    scope.insert_revlog(&row(first, id, 3, 4, 2500, RevlogKind::Review))?;
+                    scope.insert_revlog(&row(second, id, 3, 30, 2500, RevlogKind::Review))?;
+                    Ok(())
+                });
+                let deck = self.decks[self.pick(self.decks.len())];
+                f.write_raw(move |scope| {
+                    scope.put(&shaped(id, deck, CardType::Review, CardQueue::Review, 30))?;
+                    Ok(())
+                });
+                self.cards.push(id);
+                "rows before their card"
+            }
             _ => {
                 f.write(|scope| {
                     scope.set_config("firstDayOfWeek", &ConfigValue::Integer(1))?;
@@ -1003,10 +1051,87 @@ fn mix_run(seed: u64, steps: usize) {
         offset_hours: 0,
     };
     compare(&f, solo, "built");
+    let mut events = f.host.engine().stream().subscribe();
     for at_step in 0..steps {
         let name = mix.step(&mut f);
-        compare(&f, solo, &format!("step {at_step} ({name})"));
+        let step = format!("step {at_step} ({name})");
+        compare(&f, solo, &step);
+        // Every other change is followed commit by commit: the component
+        // never went stale for it (no "rebuild" capture).
+        if REBUILDS.contains(&name) {
+            events = f.host.engine().stream().subscribe();
+        } else {
+            assert_eq!(stale_events(&events), 0, "{step} rebuilt the component");
+        }
     }
+}
+
+/// The steps after which the component is rebuilt or reopened.
+const REBUILDS: [&str; 5] = [
+    "rollover hour change",
+    "time zone change",
+    "several rollovers while closed",
+    "close and reopen",
+    "answers during a rebuild",
+];
+
+/// The `Stale` readiness events of the component received so far.
+fn stale_events(events: &meguri_engine::Subscription) -> usize {
+    std::iter::from_fn(|| events.try_recv())
+        .filter(|event| match &event.kind {
+            meguri_engine::EventKind::Extension(payload) => payload
+                .as_any()
+                .downcast_ref::<meguri_engine::DerivedReadiness>()
+                .is_some_and(|r| r.component == HISTORY_COMPONENT && r.readiness == Readiness::Stale),
+            _ => false,
+        })
+        .count()
+}
+
+#[test]
+fn h1_rows_and_cards_on_the_day_boundaries_fall_on_b3_and_c10_days() {
+    let f = Fixture::new();
+    let n = f.next_day_at();
+    let deck = add_deck(&f, "Edges");
+    let end = n - DAY;
+    // C10: a card created on the last second of day −1 is on day −1, one a
+    // second later on day 0; ids −1 and −1500 truncate to seconds 0 and −1.
+    let cards = [
+        (end * 1_000, -1),
+        (end * 1_000 + 999, -1),
+        (end * 1_000 + 1_000, 0),
+        (-1, -(n.div_euclid(DAY)) as i32),
+        (-1_500, -((n + 1).div_euclid(DAY)) as i32),
+    ];
+    for (id, _) in cards {
+        f.write(move |scope| {
+            scope.put(&shaped(id, deck, CardType::New, CardQueue::New, 0))?;
+            Ok(())
+        });
+    }
+    let got = warm(&f, Scope::Deck(DeckId(deck)), History::AllHistory);
+    let mut expected: BTreeMap<i32, StateCounts> = BTreeMap::new();
+    for (_, day) in cards {
+        expected.entry(day).or_default().new += 1;
+    }
+    assert_eq!(got.card_states.deltas, expected);
+    // B3: a row on the last second of day −2 is on day −2 (its id's
+    // milliseconds dropped), the next second on day −1.
+    let other = add_deck(&f, "Edges2");
+    let id = at(n, -9, 0);
+    let rows = [((end - DAY) * 1_000 + 999, -2), ((end - DAY + 1) * 1_000, -1)];
+    f.write(move |scope| {
+        scope.put(&shaped(id, other, CardType::Review, CardQueue::Review, 5))?;
+        for (row_id, _) in rows {
+            scope.insert_revlog(&row(row_id, id, 3, 5, 2500, RevlogKind::Review))?;
+        }
+        Ok(())
+    });
+    let got = warm(&f, Scope::Deck(DeckId(other)), History::AllHistory);
+    // New from −9, young from the first row's day; its first review then.
+    assert_eq!(one_state(&got.card_states, -3), Some(S::New));
+    assert_eq!(one_state(&got.card_states, -2), Some(S::Young));
+    assert_eq!(got.started.days.keys().copied().collect::<Vec<_>>(), vec![-2]);
 }
 
 #[test]

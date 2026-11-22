@@ -965,7 +965,13 @@ impl OpenStep for HostPort {
                     seq,
                 });
             }
-            Err(error) => tracing::warn!(%error, "the derived store cannot read the collection mark"),
+            Err(error) => {
+                tracing::warn!(%error, "the derived store cannot read the collection mark");
+                // No bind follows: no refresh can run for this open.
+                for view in &mut self.shared.lock().slots {
+                    view.failed = true;
+                }
+            }
         }
         Ok(())
     }
@@ -1420,6 +1426,10 @@ impl Worker {
             }
         }
         let Some(verdicts) = self.open_file(&collection, mark, seq) else {
+            // No refresh can run before the next bind or replacement.
+            for view in &mut self.shared.lock().slots {
+                view.failed = true;
+            }
             return;
         };
         let generation = collection.generation();
@@ -1457,6 +1467,7 @@ impl Worker {
                     Readiness::Stale
                 }
             };
+            state.slots[slot].failed = false;
             self.shared.set_readiness(&mut state, slot, generation, readiness, None);
         }
     }
@@ -2102,6 +2113,7 @@ impl Worker {
             } else {
                 self.slots[slot] = SlotState::Failed;
             }
+            state.slots[slot].failed = !usable;
             state.slots[slot].refresh = None;
             self.shared
                 .set_readiness(&mut state, slot, generation, Readiness::Stale, None);
@@ -2144,6 +2156,7 @@ impl Worker {
                 kind: Kind::Rebuild,
                 cause,
             });
+            state.slots[slot].failed = false;
             self.shared
                 .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);
         }

@@ -164,6 +164,9 @@ fn h18_a_component_whose_refresh_fails_twice_has_failed_until_an_invalidation() 
     // An invalidation queues a refresh again.
     opened.seen.failing.store(false, Ordering::SeqCst);
     opened.host.invalidate(Invalidation::CheckDatabase);
+    opened.host.flush().unwrap();
+    // Queued again: no longer failed, even before it is built.
+    assert!(!opened.host.has_failed(NAME));
     opened.wait_ready();
     assert!(!opened.host.has_failed(NAME));
     opened.close();

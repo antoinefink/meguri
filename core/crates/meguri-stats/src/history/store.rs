@@ -40,11 +40,16 @@ const KEYS: &str = "keys";
 const BAD: &str = "bad";
 /// Cards between two cancellation checks and progress reports of a build.
 const CHECK_EVERY: u64 = 2_048;
-/// Records written per batch of a build.
-const BATCH: usize = 20_000;
+/// Rows written per batch of a build: each batch holds the derived writer
+/// (other components' commits, flushes) only briefly.
+const BATCH: usize = 5_000;
 /// A commit touching more cards than this is checked against H14.3's
 /// tenth of the cards.
 const LARGE_CHANGE: usize = 1_000;
+/// The review-log rows a capture reads at most on the collection writer:
+/// past them the commit is applied as a rebuild (D4's "rebuild" answer),
+/// which keeps the writer's work short.
+const CAPTURE_ROWS: usize = 100_000;
 
 pub(crate) fn internal(message: impl Into<String>) -> EngineError {
     EngineError::Internal {
@@ -179,6 +184,7 @@ fn changes_of(commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Result<Op
         }
     }
     let mut changes = Vec::with_capacity(touched.len());
+    let mut read = 0usize;
     for id in touched {
         let (before, after) = match cards.remove(&id) {
             Some(sides) => sides,
@@ -191,8 +197,12 @@ fn changes_of(commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Result<Op
             // A deleted card's rows: not in the series.
             continue;
         }
-        let now: Vec<RowRead> = rows
-            .card_revlog_images(CardId(id))?
+        let images = rows.card_revlog_images(CardId(id))?;
+        read += images.len();
+        if read > CAPTURE_ROWS {
+            return Err(Unusable);
+        }
+        let now: Vec<RowRead> = images
             .iter()
             .map(|image| rows::read_row(image))
             .filter(|row| row.id() >= 0 && row.cid() == Some(id))
@@ -306,19 +316,24 @@ fn delete_card(tables: &ComponentTables<'_>, id: i64) -> Result<(), EngineError>
     Ok(())
 }
 
-/// Writes `sums` into empty tables (a build).
-fn insert_sums(tables: &ComponentTables<'_>, sums: &Sums) -> Result<(), EngineError> {
-    let days = tables.table(DAYS)?;
+/// Writes days into empty tables (a build).
+fn insert_days(tables: &ComponentTables<'_>, days: &[((Key, i64), DayValues)]) -> Result<(), EngineError> {
+    let table = tables.table(DAYS)?;
     let mut statement = tables
         .conn()
         .prepare_cached(&format!(
-            "INSERT INTO \"{days}\" (did, odid, day, new_cards, learning, relearning, young, mature, started) \
+            "INSERT INTO \"{table}\" (did, odid, day, new_cards, learning, relearning, young, mature, started) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
         ))
         .map_err(sql)?;
-    for ((key, day), values) in &sums.days {
+    for ((key, day), values) in days {
         statement.execute(day_params(*key, *day, values)).map_err(sql)?;
     }
+    Ok(())
+}
+
+/// Writes the suspended counts into empty tables (a build).
+fn insert_keys(tables: &ComponentTables<'_>, sums: &Sums) -> Result<(), EngineError> {
     let keys = tables.table(KEYS)?;
     let mut statement = tables
         .conn()
@@ -575,10 +590,16 @@ impl DerivedComponent for StatsHistory {
             return Err(error);
         }
         sums.prune();
+        let mut days: Vec<((Key, i64), DayValues)> = std::mem::take(&mut sums.days).into_iter().collect();
+        while !days.is_empty() {
+            let batch: Vec<((Key, i64), DayValues)> = days.split_off(days.len().saturating_sub(BATCH));
+            sink.write(move |tables| insert_days(tables, &batch))?;
+        }
+        // The grid last: a build that stops before it leaves none.
         sink.write(move |tables| {
             put_records(tables, &records)?;
             put_bad(tables, &bad)?;
-            insert_sums(tables, &sums)?;
+            insert_keys(tables, &sums)?;
             write_grid(tables, grid)
         })?;
         sink.progress(total, Some(total));
