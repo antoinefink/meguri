@@ -72,7 +72,7 @@ struct BrowseTable: View {
     @TableColumnBuilder<BrowseLine, BrowseSortComparator>
     private func dataColumn(_ column: BrowseColumn) -> some TableColumnContent<BrowseLine, BrowseSortComparator> {
         let title = Text(verbatim: BrowseStrings.column(column.key, mode: column.mode))
-        let alignment: TableColumnAlignment = BrowseMetrics.trailing(column.key) ? .trailing : .leading
+        let alignment: TableColumnAlignment = BrowseMetrics.trailing(column.key, mode: column.mode) ? .trailing : .leading
         // Two ifs, not if and else: the builder joins a sortable column and
         // an unsortable one only as a block.
         let first = BrowseColumns.sortable(column.key, mode: column.mode) ? BrowseColumns.firstDirection(column.key) : nil
@@ -116,7 +116,9 @@ struct BrowseTable: View {
 enum BrowseMetrics {
     static let stateColumn: CGFloat = 22
 
-    static func trailing(_ key: String) -> Bool {
+    static func trailing(_ key: String, mode: BrowseMode) -> Bool {
+        // Notes mode's Cards column is a count (C8).
+        if key == "template" { return mode == .notes }
         switch key {
         case "cardDue", "cardEase", "cardIvl", "cardReps", "cardLapses", "noteCrt", "cardMod", "noteMod",
              "originalPosition", "stability", "difficulty", "retrievability":

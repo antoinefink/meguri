@@ -54,6 +54,7 @@ public struct BrowseView: View {
                 Button { addNote() } label: { Text("browse.empty.add", bundle: .module) }
                     .accessibilityIdentifier("browse.empty.add")
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("browse.empty.collection")
         case .noResults:
             ContentUnavailableView {
@@ -63,6 +64,7 @@ public struct BrowseView: View {
                 Button { model.clearQuery() } label: { Text("browse.empty.clear", bundle: .module) }
                     .accessibilityIdentifier("browse.empty.clear")
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("browse.empty.noResults")
         case .failed:
             ContentUnavailableView {
@@ -72,6 +74,7 @@ public struct BrowseView: View {
                 Button { results.retry() } label: { Text("browse.failed.tryAgain", bundle: .module) }
                     .accessibilityIdentifier("browse.failed.tryAgain")
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("browse.failed")
         }
     }
