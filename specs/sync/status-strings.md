@@ -17,6 +17,8 @@ T20 (2026-11-21, round 10) gives the text of the status panel that the sync butt
 
 The lines and rows marked "changed 2026-11-21 (resume fix)" in T19.1, T19.2, T19.5, T19.7, T19.8 and T20.1 give the text of `sync/meguri-provider#MP6.5`'s paused setup media step and of the Sync section's one status row (`docs/design/native-interface-contract.md` N15.2). In force: decided by Claude (coordinator) under Antoine's delegation of 2026-11-21 and his permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/sync-media-resume-20261121.md`).
 
+The T19.5 row marked "added 2026-11-22 (structure upload)" gives the two texts of `sync/meguri-provider#MP7` step 5 that U269 built in PR #112 (`MeguriStructureSaveTests` checks the row). In force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/stats-spec-approval-20261122.md`).
+
 ## T1. Keys, arguments and plurals
 
 - Every string is an entry of the Sync String Catalog with the stable key given here. The English value is the one given; other languages are Meguri's own translations of the English. Keys never change once shipped; a changed meaning gets a new key.
@@ -1072,6 +1074,7 @@ The same four rules make the main status. The first condition that applies decid
 | connection blocked | needs you | `sync.needsYou.meguri.signInStore`: Meguri can’t read or save your Meguri Sync sign-in on this device. | `sync.meguri.connection.retry` |
 | connection unconfigured, signed out or cancelled | needs you | `sync.meguri.status.signedOut.detail` | `sync.meguri.signIn`: the fields of T18.3 |
 | connection authenticating | none | `sync.meguri.status.signingIn.title` | |
+| structure upload pending (`sync/meguri-provider#MP7` step 5), while no MP7 job runs and no setup stage other than "setup required" is recorded; in place of MP6.3's collection choice for this binding (while a job runs it shows the job's own title, kind none); while the server refuses the sign-in (round failed, authentication), this row shows the text and action of the row "setup failed, `authentication`; round failed, authentication" instead (`sync.needsYou.meguri.signIn`, `sync.meguri.signIn`), so the sign-in comes before the upload (added 2026-11-22 (structure upload)) | needs you | `sync.needsYou.meguri.structureUpload`: Upload this collection to finish your note type changes. | `sync.needsYou.meguri.action.upload`: Upload…, runs MP7 step 5's upload |
 | setup required, before preparation starts | none | `sync.service.settingUp` | |
 | setup preparing | none | `sync.meguri.status.preparing.title`, `sync.meguri.setup.preparing` | `sync.meguri.cancel` |
 | setup preview | none; `sync.keepCollection` is open | | |
