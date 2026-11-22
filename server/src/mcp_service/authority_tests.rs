@@ -278,3 +278,36 @@ async fn media_blob_durability_failure_rolls_back_note_before_metadata_commit() 
     let db=crate::collection::schema::open(&f.path,false).unwrap();
     assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM notes",[],|r|r.get(0)).unwrap(),1);
 }
+
+use crate::mcp_service::attachment_formats as expanded_fixtures;
+#[tokio::test]
+async fn direct_expanded_types_ignore_metadata_and_keep_immutable_media_on_reuse() {
+    let f=Fixture::new(true).await; media_type(&f);
+    let mut bridge=McpService::new(f.service.clone());
+    let files=json!([{"download_url":"https://files.oaiusercontent.com/generated","file_id":"fixture","file_name":"misleading.svg","mime_type":"text/html"}]);
+    for (index,(ext,bytes,template)) in [
+        ("gif",expanded_fixtures::gif(),"<img src=\"NAME\">"),
+        ("wav",expanded_fixtures::wav(),"[sound:NAME]"),
+        ("ogg",expanded_fixtures::ogg(true),"<audio controls src=\"NAME\"></audio>"),
+        ("pdf",expanded_fixtures::pdf(),"<a href=\"NAME\">Open PDF</a><object data=\"NAME\" hidden></object>"),
+    ].into_iter().enumerate() {
+        let digest=crypto::digest(&bytes); let source=bytes.clone();
+        bridge.direct_fixture=Some(Arc::new(move |_|Ok(source.clone())));
+        let result=mapped(&bridge,&f,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{"Front":"question"},"files":files,"file_fields":["Back"]})).await;
+        let transport::ToolOutput::Changed {note_id,revision}=result.ok().unwrap() else {panic!()};
+        let authority=f.service.mcp_authority(&f.token,true).await.unwrap();
+        let read=bridge.search_notes(authority,SearchInput {note_id:Some(note_id.clone()),..Default::default()}).await.unwrap();
+        let name=format!("meguri-{}.{ext}",media::blobs::hex(&digest));
+        assert_eq!(read.notes[0].fields["Back"],template.replace("NAME",&name));
+        let expected=(index as i64+1,index as i64+1,index+1); assert_eq!(media_counts(&f),expected);
+        let noop=mapped(&bridge,&f,"edit_note",json!({"note_id":note_id,"revision":revision,"files":files,"file_fields":["Back"]})).await;
+        let transport::ToolOutput::Changed {revision:unchanged,..}=noop.ok().unwrap() else {panic!()};
+        assert_eq!(unchanged,revision); assert_eq!(media_counts(&f),expected);
+    }
+    for bytes in [b"<html>active</html>".to_vec(),expanded_fixtures::pdf_with(b"/JS (active)")] {
+        bridge.direct_fixture=Some(Arc::new(move |_|Ok(bytes.clone())));
+        let result=mapped(&bridge,&f,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{},"files":files,"file_fields":["Front"]})).await;
+        assert!(matches!(result,Err(transport::DispatchFailure::Tool(transport::ToolFailure::AttachmentInvalid))));
+        assert_eq!(media_counts(&f),(4,4,4));
+    }
+}

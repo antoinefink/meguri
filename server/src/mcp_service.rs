@@ -6,6 +6,9 @@
 mod transport;
 pub(crate) mod attachments;
 #[cfg(test)]
+#[path = "../tests/support/attachment_formats.rs"]
+pub(crate) mod attachment_formats;
+#[cfg(test)]
 mod authority_tests;
 
 use crate::{

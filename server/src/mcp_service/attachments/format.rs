@@ -1,7 +1,23 @@
 // SPDX-License-Identifier: MIT
-//! Bounded signature/header recognition, never image/audio decoding.
+//! Bounded structural recognition; media samples are never decoded or rewritten.
+//! Every walker is capped by both the 8 MiB caller limit and a record budget.
+mod audio;
+mod images;
+mod isobmff;
+mod pdf;
+#[cfg(test)]
+mod tests;
+const RECORDS: usize = 65536;
+fn be16(b: &[u8]) -> u16 { u16::from_be_bytes(b[..2].try_into().unwrap()) }
+fn be32(b: &[u8]) -> u32 { u32::from_be_bytes(b[..4].try_into().unwrap()) }
+fn le32(b: &[u8]) -> u32 { u32::from_le_bytes(b[..4].try_into().unwrap()) }
 pub(super) fn detect(bytes: &[u8]) -> Option<&'static str> {
-    if png(bytes) { Some("png") } else if jpeg(bytes) { Some("jpg") } else if mp3(bytes) { Some("mp3") } else { None }
+    if png(bytes) { Some("png") } else if jpeg(bytes) { Some("jpg") } else if mp3(bytes) { Some("mp3") } else if images::gif(bytes) { Some("gif") }
+    else if images::webp(bytes) { Some("webp") }
+    else if let Some(ext) = isobmff::detect(bytes) { Some(ext) }
+    else if let Some(ext) = audio::detect(bytes) { Some(ext) }
+    else if pdf::valid(bytes) { Some("pdf") }
+    else { None }
 }
 fn png(b: &[u8]) -> bool {
     if b.len() < 57 || !b.starts_with(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR") || !b.ends_with(b"\0\0\0\0IEND\xaeB`\x82") { return false; }
@@ -62,7 +78,7 @@ fn mp3(mut b: &[u8]) -> bool {
     mp3_frame(&b[first..]).is_some()
 }
 #[cfg(test)]
-mod tests {
+mod legacy_tests {
     use super::*;
     #[test]
     fn signatures_require_headers_and_complete_frames() {

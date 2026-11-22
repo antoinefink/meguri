@@ -46,3 +46,22 @@ Independent complete-file privacy review `20261122T133721Z-98983` by `s-20261122
 | `specs/render/media-serving.md` | `5d8eac20f1081ab18f64578914726bf45d916cfae0fe85b852fb859239f18264` |
 | `docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md` | `81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb` |
 | `docs/process/provenance/sessions/s-20261122T133702Z-023bbfaa.json` | `bd5ff072c55e8847ff96e6e2686d1e5bb884e5a67c74f2181cbc5ce78ec095b5` |
+
+The server export `20261122T133414Z-84582` expanded format validation and the picker. Native export `20261122T133518Z-89872` added a bounded local PDF viewer. Independent reviews `20261122T134358Z-27613` and `20261122T134813Z-41324` flagged case aliases for synced PDFs and valid PDF opening destinations and stream syntax. Fixer exports `20261122T134646Z-35849` and `20261122T135321Z-62504` cover those cases. The scanner still refuses controlling PDF actions and the native reader still requires a trusted click and current card binding.
+
+The first expanded server run `sync-server-test/20261122T134937Z-50671` passed 305 of 306 tests. Its short-prefix loop included a complete AAC frame. Fixer export `20261122T135245Z-59585` corrected the fixture and tested both a complete short frame and a partial frame. `sync-server-test/20261122T140040Z-91866` and `sync-server-test/20261122T140924Z-29433` both passed all 312 cases. The second run followed the fixture module cleanup, which corrected a duplicate-module finding from `sync-server-lint/20261122T140418Z-10113`. A final import adjustment places the integration fixture only in its consumer. The expanded browser run `sync-web-verify/20261122T140039Z-91748` passed all 59 browser cases.
+
+The native compiler found a weak local variable that was never mutated. Fixer export `20261122T140351Z-8607` uses a weak task capture. `swift-test/20261122T140512Z-13726` passed seven offscreen PDF attachment cases, including cancellation, tracked reads and forged clicks. It exercises a recording presenter. The iOS Debug build `build-app/20261122T140515Z-15086` passed without warnings. The iPhone simulator run `unit-sim/20261122T134150Z-19536` queued because the test VM is unconfigured. A hosted file handoff and hands-on native PDF presentation still need verification.
+
+Independent non-author `s-20261122T133702Z-023bbfaa` reviewed each complete file below as PUBLIC. The orchestrator matched all exact candidate digests to the reviewed files.
+
+| File | SHA-256 | Review |
+|---|---|---|
+| `server/src/mcp_service/attachments/format/audio.rs` | `0950666b1b175bd5839f5ff9d830e5e048d44bfcbdec13804b52796ef408d9b3` | `20261122T140020Z-90436` |
+| `server/src/mcp_service/attachments/format/isobmff.rs` | `b337b94d622f4e69e0f3851b76cc76342a3ca9a52f1c556236a083ce3d702e2c` | `20261122T140020Z-90436` |
+| `server/src/mcp_service/attachments/format/tests.rs` | `1fb734dd0b26e06e4048f28f7ddb802bb2aadcbb0bdf12e504c6431f26649d28` | `20261122T140849Z-28060` |
+| `server/tests/support/attachment_formats.rs` | `ddf1bbee4b1a5515b011ff3c8d9b1957424ad552faf99f23b5dddb5b4754bbb0` | `20261122T140020Z-90436` |
+| `server/src/mcp_service/authority_tests.rs` | `7714d0522108e89ef351884762e6557f17ad1184e46cbf0a06eb7e68be35453c` | `20261122T140849Z-28060` |
+| `server/src/mcp_transport/backend.rs` | `4a0708c96150f2a28f5c68a493898163eee4c51bd0d52088b3c74f751e07ae62` | `20261122T140335Z-7608` |
+| `server/tests/mcp_oauth.rs` | `f24e5bf89ad95dd53b90d300bebe3d1b6318c41c082171361f90a5c49441db75` | `20261122T141226Z-39714` |
+| `server/web/scripts/audit-assessment.json` | `5333a1f1e2980c2c8559cc912026c2774aa68aef86df15df246a0ac84a1893ee` | `20261122T140849Z-28060` |

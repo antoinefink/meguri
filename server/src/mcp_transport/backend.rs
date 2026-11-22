@@ -133,7 +133,7 @@ impl ToolFailure {
             Self::ResultTooLarge => "The data exceeds the tool's size limit. Send less content, narrow the search or request a smaller page.",
             Self::UnsupportedCollection => "This collection is not supported for this operation. Use a supported collection.",
             Self::Busy => "The collection is busy. The write did not commit. Retry after one second.",
-            Self::AttachmentInvalid => "Use a supported PNG, JPEG or MP3 file within 8 MiB per file and 16 MiB per call. The note was not changed.",
+            Self::AttachmentInvalid => "Use a supported image, audio file or PDF within 8 MiB per file and 16 MiB per call. The note was not changed.",
             Self::AttachmentUnavailable => "The attachment is unavailable. Attach the file again or use prepare_media_upload and return to chat before it expires. The note was not changed.",
             Self::AttachmentConflict => "The media state changed or its saved name is occupied. The note was not changed. Check the collection before trying again.",
             Self::Internal => "The operation could not be completed. Check the current collection state before deciding whether to try again.",

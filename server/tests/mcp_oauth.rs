@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 //! Generated accounts and loopback HTTP only. Redirects are inspected, never
 //! followed to any hosted client or configured public HTTPS origin.
+#[path = "support/attachment_formats.rs"]
+mod attachment_formats;
 mod support;
 use support::*;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -757,4 +759,45 @@ async fn mcp_staged_uploads_are_discarded_on_server_restart() {
     attachment_failure(&h,&c,access,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{},"uploads":[{"upload_id":pending["upload_id"],"field":"Front"}]}),"attachment_unavailable").await;
     let db=rusqlite::Connection::open(h.database()).unwrap();
     assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM media_blobs",[],|r|r.get(0)).unwrap(),0);drop(db);h.stop().await;
+}
+
+#[tokio::test]
+async fn expanded_staged_types_preserve_exact_references_bytes_and_usns_through_sync() {
+    let h=Harness::new().await; let c=local_client(); let identity=h.setup().await;
+    let cookie=h.login("root.admin",PASSWORD).await;
+    attachment_collection(&h,identity["id"].as_str().unwrap());
+    let tokens=grant(&h,&c,&cookie,true,false).await; let access=tokens["access_token"].as_str().unwrap();
+    let key=native_exchange(&h,&c,"hostKey","",json!({"u":"root.admin","p":PASSWORD})).await["key"].as_str().unwrap().to_owned();
+    let before=native_exchange(&h,&c,"meta",&key,json!({"v":11,"cv":"synthetic"})).await;
+    let mut uploads=Vec::new(); let mut names=Vec::new(); let mut originals=Vec::new(); let mut references=Vec::new();
+    for (ext,bytes,template) in [
+        ("gif",attachment_formats::gif(),"<img src=\"NAME\">"),
+        ("wav",attachment_formats::wav(),"[sound:NAME]"),
+        ("ogg",attachment_formats::ogg(true),"<audio controls src=\"NAME\"></audio>"),
+        ("pdf",attachment_formats::pdf(),"<a href=\"NAME\">Open PDF</a><object data=\"NAME\" hidden></object>"),
+    ] {
+        let prepared=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
+        assert_eq!(stage_attachment(&h,&cookie,prepared["upload_id"].as_str().unwrap(),bytes.clone()).await.status(),200);
+        uploads.push(json!({"upload_id":prepared["upload_id"],"field":"Front"}));
+        let name=format!("meguri-{}.{ext}",crypto::digest(&bytes).iter().map(|b|format!("{b:02x}")).collect::<String>());
+        references.push(template.replace("NAME",&name)); names.push(name); originals.push(bytes);
+    }
+    let metadata=rusqlite::Connection::open(h.database()).unwrap();
+    let usn=||metadata.query_row::<i64,_,_>("SELECT media_usn FROM accounts WHERE id=?1",[identity["id"].as_str().unwrap()],|r|r.get(0)).unwrap();
+    assert_eq!(usn(),0,"staging is not publication");
+    let created=note_write_tool(&h,&c,access,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{"Front":"question"},"uploads":uploads})).await;
+    let expected=format!("question<br>{}",references.join("<br>"));
+    let read=note_write_tool(&h,&c,access,"search_notes",json!({"note_id":created["note_id"]})).await;
+    assert_eq!(read["notes"][0]["fields"]["Front"],expected);
+    let (_,_,chunk)=note_write_round(&h,&c,&key,&before["usn"],1).await;
+    assert_eq!(chunk["notes"][0][6],format!("{expected}\u{1f}"));
+    let changes=attachment_media_json(&h,&key,"mediaChanges",json!({"lastUsn":0})).await;
+    assert_eq!(changes.as_array().unwrap().len(),4); assert_eq!(usn(),4);
+    let delivered=attachment_download(&h,&key,&names.iter().map(String::as_str).collect::<Vec<_>>()).await;
+    for (name,bytes) in names.iter().zip(&originals) { assert_eq!(&delivered[name],bytes); }
+    let noop=note_write_tool(&h,&c,access,"edit_note",json!({"note_id":created["note_id"],"revision":created["revision"],"uploads":uploads})).await;
+    assert_eq!(noop,created); assert_eq!(usn(),4);
+    assert_eq!(attachment_media_json(&h,&key,"mediaChanges",json!({"lastUsn":4})).await,json!([]));
+    assert_eq!(attachment_media_json(&h,&key,"mediaSanity",json!({"local":4})).await,"OK");
+    drop(metadata); h.stop().await;
 }

@@ -838,6 +838,8 @@ PUBLIC_ARTIFACTS = {
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
+    'docs/process/review-log/mcp-note-attachments-20261122.md':
+        '3bda3107ca80dea55595e70d0c795c5f2eae9bffd6f874c0fed90699bd11a581',
     'docs/process/review-log/meguri-collection-mcp-20261119.md':
         '05cb4950ef3ced22e56e850a70ff9d1859ac49a216953314eb4aa0ada3ff6ab2',
     'server/src/accounts/oauth/mod.rs':
@@ -845,13 +847,21 @@ PUBLIC_ARTIFACTS = {
     'server/src/httpapi/oauth.rs':
         'efe2fe1940f7a3e08f0982fd79073a64ec0202a1af8932254207f95e2b2e43c8',
     'server/tests/mcp_oauth.rs':
-        'f86fc4956ddf11a21b42432345dad9211890be57ea97f9531d4ad08fe882704f',
+        'f24e5bf89ad95dd53b90d300bebe3d1b6318c41c082171361f90a5c49441db75',
     'server/src/mcp_service/transport.rs':
         '6c0fed2e3865fbdf02cd4faa84340fc70e8b888f3834cd64529ade113705bab9',
     'server/src/mcp_service/authority_tests.rs':
-        'b48e4c5f7d8b2ad2e744391bac51acc03e70366c66a6b80f1d66f9edff343f22',
+        '7714d0522108e89ef351884762e6557f17ad1184e46cbf0a06eb7e68be35453c',
+    'server/src/mcp_service/attachments/format/audio.rs':
+        '0950666b1b175bd5839f5ff9d830e5e048d44bfcbdec13804b52796ef408d9b3',
+    'server/src/mcp_service/attachments/format/isobmff.rs':
+        'b337b94d622f4e69e0f3851b76cc76342a3ca9a52f1c556236a083ce3d702e2c',
+    'server/src/mcp_service/attachments/format/tests.rs':
+        '1fb734dd0b26e06e4048f28f7ddb802bb2aadcbb0bdf12e504c6431f26649d28',
+    'server/tests/support/attachment_formats.rs':
+        'ddf1bbee4b1a5515b011ff3c8d9b1957424ad552faf99f23b5dddb5b4754bbb0',
     'server/src/mcp_transport/backend.rs':
-        '3632c2986b074bfcce7243302242f3d5ed504c9735e6e8aa676b57082a4f9643',
+        '4a0708c96150f2a28f5c68a493898163eee4c51bd0d52088b3c74f751e07ae62',
     'server/src/mcp_transport/diagnostics.rs':
         '3e03a73d427f6d33145db2ded9a456c7e28f500dd725f780ce5bcfd998d57bda',
     'server/src/mcp_transport/inputs.rs':
@@ -883,7 +893,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '8b4d6446cf91a819dc37742d9a0f98dee4b0547917280765724b87d4e4c2e843',
+        '5333a1f1e2980c2c8559cc912026c2774aa68aef86df15df246a0ac84a1893ee',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':

@@ -18,7 +18,7 @@ pub(crate) struct Validated {
     pub name: String,
     pub sha1: String,
     pub sha256: Vec<u8>,
-    audio: bool,
+    extension: &'static str,
 }
 impl Validated {
     pub(super) fn new(bytes: Vec<u8>) -> Result<Self> {
@@ -28,10 +28,15 @@ impl Validated {
         let digest = sha2::Sha256::digest(&bytes);
         Ok(Self { name:format!("meguri-{}.{}", media::blobs::hex(&digest), extension),
             sha1:media::blobs::hex(&sha1::Sha1::digest(&bytes)), sha256:digest.to_vec(),
-            audio:extension == "mp3", bytes })
+            extension, bytes })
     }
     fn reference(&self) -> String {
-        if self.audio { format!("[sound:{}]", self.name) } else { format!("<img src=\"{}\">", self.name) }
+        match self.extension {
+            "pdf" => format!("<a href=\"{0}\">Open PDF</a><object data=\"{0}\" hidden></object>", self.name),
+            "ogg" => format!("<audio controls src=\"{}\"></audio>", self.name),
+            "mp3" | "wav" | "flac" | "aac" | "m4a" | "aiff" | "aifc" | "caf" => format!("[sound:{}]", self.name),
+            _ => format!("<img src=\"{}\">", self.name),
+        }
     }
 }
 #[derive(Clone)]

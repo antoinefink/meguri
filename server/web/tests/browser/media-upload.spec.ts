@@ -114,3 +114,18 @@ test("oversized selections stay local, and the narrow picker remains accessible"
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
+
+for (const [name, mimeType] of [["fixture.gif", "image/gif"], ["fixture.wav", "audio/wav"], ["fixture.ogg", "audio/ogg"], ["fixture.pdf", "application/pdf"]]) {
+  test(`expanded picker sends ${name} through the existing binary upload`, async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!); await page.goto(`/mcp/upload#upload=${uploadId}`);
+    const picker = page.getByLabel("File", { exact: true });
+    await expect(page.getByText("Choose one image, audio file or PDF up to 8 MiB.", { exact: true })).toBeVisible();
+    for (const extension of [".gif", ".webp", ".avif", ".heic", ".heif", ".wav", ".flac", ".aac", ".m4a", ".aiff", ".aifc", ".caf", ".ogg", ".oga", ".opus", ".pdf"]) {
+      expect((await picker.getAttribute("accept"))!.split(",")).toContain(extension);
+    }
+    await picker.setInputFiles({ name: name!, mimeType: mimeType!, buffer: Buffer.from("synthetic file payload") });
+    await page.getByRole("button", { name: "Upload file", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "File uploaded. Return to your chat" })).toBeVisible();
+    expect(state.calls).toBe(1); await privateMemory(page);
+  });
+}

@@ -29,7 +29,7 @@ export function MediaUpload({ uploadId, clearUpload, me, onLogin, onSessionLoss,
   async function submit() {
     if (submitting.current || finished.current || !uploadId || !file || !me) return;
     if (!file.size || file.size > 8 * 1024 * 1024) {
-      setOutcome({ error: true, text: "Choose a nonempty PNG, JPEG or MP3 file up to 8 MiB." }); return;
+      setOutcome({ error: true, text: "Choose a nonempty supported image, audio file or PDF up to 8 MiB." }); return;
     }
     submitting.current = true; setPending(true); setOutcome({ text: "Uploading file…" });
     const request = new AbortController(); controller.current = request;
@@ -53,7 +53,7 @@ export function MediaUpload({ uploadId, clearUpload, me, onLogin, onSessionLoss,
       }
       if (error.status === 401) onSessionLoss();
       setOutcome({ error: true, text: error.code === "attachment_invalid" || error.status === 413
-        ? "The file was not accepted. Use a PNG, JPEG or MP3 file up to 8 MiB and request a new link in your chat."
+        ? "The file was not accepted. Use a supported image, audio file or PDF up to 8 MiB and request a new link in your chat."
         : `The upload could not be confirmed. ${returnToChat}` });
     } finally {
       if (!request.signal.aborted) {
@@ -66,7 +66,7 @@ export function MediaUpload({ uploadId, clearUpload, me, onLogin, onSessionLoss,
     onSessionLoss={() => { finished.current = true; clearUpload(); onSessionLoss(); setOutcome({ error: true, text: returnToChat }); }} link={link}
     compactLoginCopy={{ description: "Sign in to the same Meguri account connected to your chat to upload a file." }} />;
   return <Card className="auth-card"><CardHeader><CardTitle>Attach a file</CardTitle>
-    {!done && uploadId && <CardDescription>Choose one PNG, JPEG or MP3 file up to 8 MiB.</CardDescription>}
+    {!done && uploadId && <CardDescription>Choose one image, audio file or PDF up to 8 MiB.</CardDescription>}
   </CardHeader><CardContent className="stack"><Outcome value={outcome} />
     {me && <div role="group" aria-label="Signed-in account" className="stack">
       <p>Signed in as {me.username}.</p>
@@ -74,9 +74,9 @@ export function MediaUpload({ uploadId, clearUpload, me, onLogin, onSessionLoss,
     </div>}
     {me && uploadId && !finished.current && !refused && <form onSubmit={event => { event.preventDefault(); void submit(); }} aria-busy={pending}>
       <FieldGroup><Field><FieldLabel htmlFor={`${prefix}-file`}>File</FieldLabel>
-        <Input id={`${prefix}-file`} type="file" accept="image/png,image/jpeg,audio/mpeg,.png,.jpg,.jpeg,.mp3" disabled={pending}
+        <Input id={`${prefix}-file`} type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/heic,image/heif,audio/mpeg,audio/wav,audio/x-wav,audio/flac,audio/aac,audio/mp4,audio/aiff,audio/x-aiff,audio/x-caf,audio/ogg,application/ogg,application/pdf,.jpg,.jpeg,.png,.gif,.webp,.avif,.heic,.heif,.mp3,.wav,.flac,.aac,.m4a,.aiff,.aif,.aifc,.caf,.ogg,.oga,.opus,.pdf" disabled={pending}
           aria-describedby={`${prefix}-acceptance`} onChange={event => { setFile(event.target.files?.[0] ?? null); setOutcome(null); }} />
-        <FieldDescription id={`${prefix}-acceptance`}>After uploading, return to your chat to finish attaching the file.</FieldDescription>
+        <FieldDescription id={`${prefix}-acceptance`}>Supported images are JPEG, PNG, GIF, WebP, AVIF and HEIC/HEIF. Supported audio formats are MP3, WAV, FLAC, AAC (ADTS), audio-only M4A, AIFF/AIFC, CAF and Ogg Opus/Vorbis. PDF documents are also supported. After uploading, return to your chat to finish attaching the file.</FieldDescription>
       </Field><Button type="submit" disabled={!file || pending}>{pending ? "Uploading…" : "Upload file"}</Button></FieldGroup>
     </form>}
   </CardContent></Card>;
