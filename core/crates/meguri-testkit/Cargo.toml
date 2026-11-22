@@ -147,6 +147,17 @@ harness = false
 name = "card_info"
 harness = false
 
+# U98's graph engine: a request and one pass over its scope, from the caches
+# and from the snapshot.
+[[bench]]
+name = "stats_engine"
+harness = false
+
+# U98's column caches: a rebuild, and a memory warning's merge and reload.
+[[bench]]
+name = "stats_columns_build"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]

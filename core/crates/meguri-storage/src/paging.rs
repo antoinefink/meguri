@@ -235,6 +235,67 @@ pub trait ReadRows: sealed::Connected {
         crate::queries::studied::studied_since(self.connection(), after)
     }
 
+    /// The Stats graphs' card columns (`stats/graphs-common` G4, G9.1), one
+    /// row per card in ascending id order, as stored: `id`, `nid`, `did`,
+    /// `odid`, `type`, `queue`, `due`, `odue`, `ivl`, `data`. The reading
+    /// tolerances are the graph engine's; cancelled as
+    /// [`ReadRows::visit_id_rows`] is. `visit` returns false to stop.
+    fn visit_stats_cards(
+        &self,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[Cell]) -> bool,
+    ) -> Result<(), StorageError> {
+        crate::search_rows::visit_cells(
+            self.connection(),
+            "SELECT id, nid, did, odid, type, queue, due, odue, ivl, data FROM cards ORDER BY id",
+            &[],
+            cancel,
+            visit,
+        )
+    }
+
+    /// The Stats graphs' review-log columns (G4, G9.1) of the rows with
+    /// `from <= id < below` (no upper end without `below`), in ascending id
+    /// order, as stored: `id`, `cid`, `usn`, `ease`, `ivl`, `lastIvl`,
+    /// `factor`, `time`, `type`. Cancelled as [`ReadRows::visit_id_rows`] is.
+    fn visit_stats_revlog(
+        &self,
+        from: i64,
+        below: Option<i64>,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[Cell]) -> bool,
+    ) -> Result<(), StorageError> {
+        const COLUMNS: &str = "SELECT id, cid, usn, ease, ivl, lastIvl, factor, time, type FROM revlog";
+        match below {
+            None => crate::search_rows::visit_cells(
+                self.connection(),
+                &format!("{COLUMNS} WHERE id >= ?1 ORDER BY id"),
+                &[Cell::Integer(from)],
+                cancel,
+                visit,
+            ),
+            Some(below) => crate::search_rows::visit_cells(
+                self.connection(),
+                &format!("{COLUMNS} WHERE id >= ?1 AND id < ?2 ORDER BY id"),
+                &[Cell::Integer(from), Cell::Integer(below)],
+                cancel,
+                visit,
+            ),
+        }
+    }
+
+    /// The ids of the review-log rows whose `cid` is `card`, ascending (an
+    /// indexed read): what the Stats column caches attach to an added card
+    /// (`stats/graphs-common` G9.4).
+    fn revlog_ids_of_card(&self, card: CardId) -> Result<Vec<i64>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT id FROM revlog WHERE cid = ?1 ORDER BY id")?;
+        Ok(statement
+            .query_map([card.0], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Execute the read-only one-column card-id statement compiled by the
     /// search crate. SQL remains inside storage; callers bind typed cells.
     fn search_card_ids(&self, sql: &str, params: &[Cell]) -> Result<Vec<CardId>, StorageError> {

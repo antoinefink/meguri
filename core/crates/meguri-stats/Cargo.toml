@@ -13,7 +13,10 @@ fsrs.workspace = true
 meguri-engine.workspace = true
 meguri-model.workspace = true
 meguri-sched.workspace = true
+meguri-search.workspace = true
 meguri-storage.workspace = true
+meguri-text.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 # test-hooks: raw SQL on a fixture copy and the step clock.

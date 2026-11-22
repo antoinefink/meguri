@@ -92,6 +92,25 @@ impl DerivedFile {
         read_components(&self.conn)
     }
 
+    /// The directory only `component` uses for its files (D1).
+    pub fn component_dir(&self, component: &str) -> PathBuf {
+        crate::derived::files::component_dir(&self.path, component)
+    }
+
+    /// The names the live record table of `schema` holds (D1); none for a
+    /// component without files.
+    pub fn named_files(&self, schema: &ComponentSchema) -> Result<std::collections::HashSet<String>, StorageError> {
+        crate::derived::files::named_files(&self.conn, schema)
+    }
+
+    /// D5.1's sweep of the component-owned files, after
+    /// [`DerivedTx::sync_components`] committed; `recreated` when the file
+    /// was created or recreated. The failures, for the caller to log; the
+    /// next bind retries them.
+    pub fn sweep_files(&self, registry: &Registry, recreated: bool) -> Vec<StorageError> {
+        crate::derived::files::sweep(&self.conn, &self.path, registry, recreated)
+    }
+
     /// Begins a write transaction (`BEGIN IMMEDIATE`).
     pub fn begin(&mut self) -> Result<DerivedTx<'_>, StorageError> {
         self.conn.execute_batch("BEGIN IMMEDIATE")?;

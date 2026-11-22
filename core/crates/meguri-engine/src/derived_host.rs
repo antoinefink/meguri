@@ -32,10 +32,11 @@ use std::time::Duration;
 
 use meguri_model::time::EpochMillis;
 use meguri_storage::derived::{self, CollectionMark, DerivedFile, Found, Registry, Stamp, Target, Verdict};
+use meguri_storage::StorageError;
 pub use meguri_storage::derived::{ComponentSchema, ComponentTables, IndexDef, TableDef};
 use meguri_storage::{ReadRows, Reader, ReaderRole};
 
-use crate::changes::observers::ObservedCommit;
+use crate::changes::observers::{ObservedCommit, ObserverRows};
 use crate::changes::stream::{ChangeStream, EventKind, ExtensionEvent, Seq};
 use crate::collection::{Collection, CollectionCore};
 use crate::error::{EngineError, panic_message};
@@ -100,6 +101,137 @@ pub trait DerivedComponent: Send + Sync + 'static {
         let _ = (source, since, sink);
         Ok(CatchUp::Rebuild)
     }
+
+    /// [`DerivedComponent::capture`] with read access to the committed rows,
+    /// for a component that must read more than the change set lists (an
+    /// indexed read by key). The same rules: short, on the collection writer.
+    fn capture_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Capture<Self::Delta> {
+        let _ = rows;
+        self.capture(commit)
+    }
+
+    /// D4's `deferred until`: the host signal (`[a-z][A-Za-z0-9]*`) that
+    /// releases, for the rest of a bind, the hold on a refresh queued for
+    /// the component from that bind on; [`DerivedHost::request_refresh`]
+    /// releases it too. `None`: no refresh is held.
+    fn deferred_until(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// D4's `persist`: writes what the component keeps outside its tables
+    /// (an in-memory overlay) into its own files and record rows, through
+    /// `store`'s transactions. Runs on the derived writer at suspend and
+    /// close (D11) and by [`DerivedHost::release`], only while the component
+    /// is ready. An error marks it `ready` 0 and queues its rebuild.
+    fn persist(&self, store: &mut ComponentStore<'_>) -> Result<(), EngineError> {
+        let _ = store;
+        Ok(())
+    }
+
+    /// D4's `release`: drops what the component holds in memory (mapped
+    /// files, an overlay), after its persist. Runs on the derived writer,
+    /// only by [`DerivedHost::release`].
+    fn release(&self) {}
+
+    /// Called once at start with the component's handle to its derived
+    /// writer, for a component that owns files (D1).
+    fn attach(&self, handle: ComponentHandle) {
+        let _ = handle;
+    }
+
+    /// The component's files that `live` (the names its live record rows
+    /// hold) does not name but a reader still maps: the derived writer keeps
+    /// them until the last reader lets go (D1, D7). The component may drop
+    /// its own maps of the others here. Runs on the derived writer.
+    fn files_in_use(&self, live: &std::collections::HashSet<String>) -> std::collections::HashSet<String> {
+        let _ = live;
+        std::collections::HashSet::new()
+    }
+}
+
+/// What a component that owns files may ask its derived writer for, from
+/// any thread (D1, D7; `stats/graphs-common` G9.3). Both requests are
+/// queued and return at once.
+#[derive(Clone)]
+pub struct ComponentHandle {
+    sender: Sender<Msg>,
+    slot: usize,
+}
+
+impl fmt::Debug for ComponentHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ComponentHandle").field("slot", &self.slot).finish()
+    }
+}
+
+impl ComponentHandle {
+    /// Deletes the component's files that no live record row names and no
+    /// reader maps (the last reader of a superseded file let go).
+    pub fn sweep(&self) {
+        let _ = self.sender.send(Msg::Sweep(self.slot));
+    }
+
+    /// A file that the live rows `names` name does not load: when those are
+    /// still the live rows' names and the component is ready, it gets
+    /// `ready` 0 and a queued rebuild (G9.3). Names a later swap or merge
+    /// replaced change nothing.
+    pub fn rebuild_if_named(&self, names: Vec<String>) {
+        let _ = self.sender.send(Msg::RebuildIfNamed(self.slot, names));
+    }
+}
+
+/// What a component's persist writes through (D4): its directory of files
+/// and transactions on its live tables.
+pub struct ComponentStore<'a> {
+    file: &'a mut DerivedFile,
+    schema: &'a ComponentSchema,
+    generation: Generation,
+}
+
+impl fmt::Debug for ComponentStore<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ComponentStore").field("component", &self.schema.name).finish()
+    }
+}
+
+impl ComponentStore<'_> {
+    /// The collection generation the store is bound to.
+    pub fn generation(&self) -> Generation {
+        self.generation
+    }
+
+    /// The directory only this component uses (D1).
+    pub fn dir(&self) -> PathBuf {
+        self.file.component_dir(&self.schema.name)
+    }
+
+    /// The file names the live record table holds (D1).
+    pub fn named(&self) -> Result<std::collections::HashSet<String>, EngineError> {
+        Ok(self.file.named_files(self.schema)?)
+    }
+
+    /// Runs `work` in one derived transaction on the live tables.
+    pub fn write(
+        &mut self,
+        work: impl FnOnce(&ComponentTables<'_>) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        let tx = self.file.begin()?;
+        work(&tx.tables(self.schema, Target::Live))?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Deletes the files of the directory that no live record row names
+    /// and `keep` does not hold (files a reader still maps). The failures
+    /// are retried by the next sweep or bind (D1, D5.1).
+    pub fn sweep(&self, keep: &std::collections::HashSet<String>) -> Vec<StorageError> {
+        let mut names = match self.file.named_files(self.schema) {
+            Ok(names) => names,
+            Err(error) => return vec![error],
+        };
+        names.extend(keep.iter().cloned());
+        derived::files::sweep_dir(&self.dir(), &names)
+    }
 }
 
 /// A component's readiness for one generation (D8).
@@ -163,6 +295,11 @@ trait Erased: Send + Sync {
     fn build(&self, source: &Snapshot<'_>, sink: &mut BuildSink) -> Result<(), EngineError>;
     fn catch_up(&self, source: &Snapshot<'_>, since: EpochMillis, sink: &mut BuildSink)
     -> Result<CatchUp, EngineError>;
+    fn capture_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Capture<AnyDelta>;
+    fn persist(&self, store: &mut ComponentStore<'_>) -> Result<(), EngineError>;
+    fn release(&self);
+    fn attach(&self, handle: ComponentHandle);
+    fn files_in_use(&self, live: &std::collections::HashSet<String>) -> std::collections::HashSet<String>;
 }
 
 struct Adapter<C>(C);
@@ -195,6 +332,30 @@ impl<C: DerivedComponent> Erased for Adapter<C> {
     ) -> Result<CatchUp, EngineError> {
         self.0.catch_up(source, since, sink)
     }
+
+    fn capture_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Capture<AnyDelta> {
+        match self.0.capture_with_rows(commit, rows) {
+            Capture::Nothing => Capture::Nothing,
+            Capture::Delta(delta) => Capture::Delta(Box::new(delta)),
+            Capture::Rebuild => Capture::Rebuild,
+        }
+    }
+
+    fn persist(&self, store: &mut ComponentStore<'_>) -> Result<(), EngineError> {
+        self.0.persist(store)
+    }
+
+    fn release(&self) {
+        self.0.release();
+    }
+
+    fn attach(&self, handle: ComponentHandle) {
+        self.0.attach(handle);
+    }
+
+    fn files_in_use(&self, live: &std::collections::HashSet<String>) -> std::collections::HashSet<String> {
+        self.0.files_in_use(live)
+    }
 }
 
 /// What the derived writer is asked to do.
@@ -226,6 +387,16 @@ enum Msg {
         outcome: Outcome,
     },
     Invalidate(Invalidation, Option<Seq>),
+    /// A host signal (D4 `deferred until`).
+    Signal(String),
+    /// A consumer's `request_refresh` (D4).
+    RequestRefresh(String),
+    /// A consumer's `release` (D4): persist, then release, then the answer.
+    Release(String, SyncSender<()>),
+    /// A component's [`ComponentHandle::sweep`].
+    Sweep(usize),
+    /// A component's [`ComponentHandle::rebuild_if_named`].
+    RebuildIfNamed(usize, Vec<String>),
     Flush(SyncSender<()>),
     Suspend(SyncSender<()>),
     ReleaseForSuspend(SyncSender<Result<(), EngineError>>),
@@ -286,6 +457,8 @@ struct Shared {
     threads: ThreadRegistry,
     registry: Registry,
     components: Vec<Arc<dyn Erased>>,
+    /// Each component's `deferred until` (D4), read at registration.
+    deferred: Vec<Option<&'static str>>,
     /// The seq of the last commit the observer sent to the derived writer.
     sent: Arc<AtomicU64>,
     state: Mutex<SharedState>,
@@ -333,17 +506,40 @@ pub struct DerivedHostBuilder {
     engine: Engine,
     schemas: Vec<ComponentSchema>,
     components: Vec<Arc<dyn Erased>>,
+    /// Each component's `deferred until`, read at registration.
+    deferred: Vec<Result<Option<&'static str>, ()>>,
 }
 
 impl DerivedHostBuilder {
     pub fn component<C: DerivedComponent>(mut self, component: C) -> DerivedHostBuilder {
         self.schemas.push(component.schema());
+        // Read once, here: the writer never runs this component code (a
+        // panic would stop it); a panicking component is refused at start.
+        self.deferred
+            .push(panic::catch_unwind(AssertUnwindSafe(|| component.deferred_until())).map_err(|_| ()));
         self.components.push(Arc::new(Adapter(component)));
         self
     }
 
     /// Checks the components (D4) and starts the derived writer.
     pub fn start(self) -> Result<DerivedHost, EngineError> {
+        let mut deferred = Vec::with_capacity(self.deferred.len());
+        for read in self.deferred {
+            let Ok(read) = read else {
+                return Err(EngineError::internal("a derived component's deferred-until signal panicked"));
+            };
+            deferred.push(read);
+            if let Some(signal) = read {
+                let mut chars = signal.chars();
+                let valid = chars.next().is_some_and(|c| c.is_ascii_lowercase())
+                    && chars.all(|c| c.is_ascii_alphanumeric());
+                if !valid {
+                    return Err(EngineError::internal(format!(
+                        "a deferred-until signal must be [a-z][A-Za-z0-9]*, not {signal:?}"
+                    )));
+                }
+            }
+        }
         let registry = Registry::new(self.schemas)?;
         let slots = registry
             .schemas()
@@ -362,6 +558,7 @@ impl DerivedHostBuilder {
             threads: self.engine.threads().clone(),
             registry,
             components: self.components,
+            deferred,
             sent: Arc::default(),
             state: Mutex::new(SharedState {
                 bound: None,
@@ -373,6 +570,14 @@ impl DerivedHostBuilder {
             changed: Condvar::new(),
         });
         let (sender, inbox) = mpsc::channel();
+        for (slot, component) in shared.components.iter().enumerate() {
+            if shared.registry.schemas()[slot].files.is_some() {
+                component.attach(ComponentHandle {
+                    sender: sender.clone(),
+                    slot,
+                });
+            }
+        }
         let worker = Worker::new(Arc::clone(&shared), inbox, sender.clone());
         let writer = shared
             .threads
@@ -417,6 +622,7 @@ impl DerivedHost {
             engine: engine.clone(),
             schemas: Vec::new(),
             components: Vec::new(),
+            deferred: Vec::new(),
         }
     }
 
@@ -501,6 +707,32 @@ impl DerivedHost {
                 false
             }
         }
+    }
+
+    /// D4's `signal(name)`: records the host signal for the bound
+    /// collection and releases the hold of every component whose `deferred
+    /// until` names it. A signal no component names, one sent again, or one
+    /// sent while no collection is bound changes nothing. Returns at once.
+    pub fn signal(&self, name: &str) {
+        let _ = self.sender.send(Msg::Signal(name.to_owned()));
+    }
+
+    /// D4's `request_refresh(component)`: releases that component's hold
+    /// and returns at once; then wait on D8's events or read without it. A
+    /// component without `deferred until`, or already released, is
+    /// unchanged.
+    pub fn request_refresh(&self, component: &str) {
+        let _ = self.sender.send(Msg::RequestRefresh(component.to_owned()));
+    }
+
+    /// D4's `release(component)`: queued on the derived writer after every
+    /// commit already sent to it, runs the component's persist (while it is
+    /// ready), then its release, and returns once both have run. A failed
+    /// persist marks it `ready` 0 and queues its rebuild (the store unbinds
+    /// when that cannot be written); release still runs. Never call it on
+    /// the main thread.
+    pub fn release(&self, component: &str) {
+        let _ = ask(&self.sender, |ack| Msg::Release(component.to_owned(), ack));
     }
 
     /// Rebuilds every component through staging (D10).
@@ -622,6 +854,20 @@ impl ChangeObserver for HostObserver {
     }
 
     fn observe(&self, commit: &ObservedCommit<'_>) -> Result<(), EngineError> {
+        self.send(commit, &|component: &dyn Erased| component.capture(commit))
+    }
+
+    fn observe_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Result<(), EngineError> {
+        self.send(commit, &|component: &dyn Erased| component.capture_with_rows(commit, rows))
+    }
+}
+
+impl HostObserver {
+    fn send(
+        &self,
+        commit: &ObservedCommit<'_>,
+        capture: &dyn Fn(&dyn Erased) -> Capture<AnyDelta>,
+    ) -> Result<(), EngineError> {
         if commit.changes.whole_collection {
             self.sent.fetch_max(commit.seq.0, Ordering::SeqCst);
             let _ = self
@@ -631,7 +877,7 @@ impl ChangeObserver for HostObserver {
         }
         let mut deltas = Vec::new();
         for (slot, component) in self.components.iter().enumerate() {
-            let captured = panic::catch_unwind(AssertUnwindSafe(|| component.capture(commit)));
+            let captured = panic::catch_unwind(AssertUnwindSafe(|| capture(component.as_ref())));
             match captured {
                 Ok(Capture::Nothing) => {}
                 Ok(capture) => deltas.push((slot, capture)),
@@ -902,6 +1148,9 @@ struct Worker {
     suspend_acks: Vec<SyncSender<()>>,
     /// Failed refreshes in a row, per component.
     failures: Vec<u32>,
+    /// Per component: a refresh queued for it is held until its `deferred
+    /// until` signal or a `request_refresh` (D4); set again at each bind.
+    holds: Vec<bool>,
     suspended: bool,
     /// The last stamp this writer wrote says `clean` 1 (D11).
     marked_clean: bool,
@@ -936,6 +1185,7 @@ impl Worker {
             builders: Vec::new(),
             suspend_acks: Vec::new(),
             failures: vec![0; count],
+            holds: vec![false; count],
             suspended: false,
             marked_clean: false,
             owed: None,
@@ -970,7 +1220,7 @@ impl Worker {
 
     fn handle(&mut self, message: Msg) {
         match message {
-            Msg::Bind { collection, mark, seq } => self.bind(collection, mark, seq),
+            Msg::Bind { collection, mark, seq } => self.bind(collection, mark, seq, true),
             Msg::Commit(commit) => {
                 // Ops commit again: a file let go of while it said clean
                 // must say otherwise, whether the store applies them or not.
@@ -1006,6 +1256,35 @@ impl Worker {
                 self.ack_suspend();
             }
             Msg::Invalidate(why, cause) => self.invalidate(why, cause),
+            Msg::Signal(name) => {
+                if self.collection.is_some() {
+                    for slot in 0..self.slots.len() {
+                        if self.shared.deferred[slot] == Some(name.as_str()) {
+                            self.holds[slot] = false;
+                        }
+                    }
+                }
+            }
+            Msg::RequestRefresh(name) => {
+                if let Some(slot) = self.slot_of(&name) {
+                    self.holds[slot] = false;
+                }
+            }
+            Msg::Sweep(slot) => self.sweep_files(slot),
+            Msg::RebuildIfNamed(slot, names) => self.rebuild_if_named(slot, names),
+            Msg::Release(name, ack) => {
+                if let Some(slot) = self.slot_of(&name) {
+                    self.persist_slot(slot);
+                    let component = Arc::clone(&self.shared.components[slot]);
+                    if let Err(error) = guarded(|| {
+                        component.release();
+                        Ok(())
+                    }) {
+                        tracing::warn!(component = %name, %error, "a derived release failed");
+                    }
+                }
+                let _ = ack.send(());
+            }
             Msg::Flush(ack) => {
                 let _ = ack.send(());
             }
@@ -1053,10 +1332,13 @@ impl Worker {
         if self.suspend_acks.is_empty() || !self.builders.is_empty() {
             return;
         }
-        if self.suspended
-            && let Err(error) = self.mark_clean(true)
-        {
-            tracing::warn!(%error, "writing the derived stamp");
+        if self.suspended {
+            // D11: every component's persist, after every commit sent
+            // before the suspend, then `clean` 1.
+            self.persist_all();
+            if let Err(error) = self.mark_clean(true) {
+                tracing::warn!(%error, "writing the derived stamp");
+            }
         }
         for ack in self.suspend_acks.drain(..) {
             let _ = ack.send(());
@@ -1074,7 +1356,8 @@ impl Worker {
             self.marked_clean = false;
             if let Some(collection) = self.collection.clone() {
                 let (mark, seq) = read_mark(&collection)?;
-                self.bind(collection, mark, seq);
+                // Not a new open: the holds stay as they were (D4).
+                self.bind(collection, mark, seq, false);
                 if self.file.is_none() {
                     return Err(EngineError::internal("cannot reopen derived store after suspend"));
                 }
@@ -1094,8 +1377,16 @@ impl Worker {
         Ok(())
     }
 
-    /// D5.
-    fn bind(&mut self, collection: Collection, mark: CollectionMark, seq: Seq) {
+    /// D5; `hold` at an open: each component with `deferred until` holds its
+    /// refreshes again (D4).
+    fn bind(&mut self, collection: Collection, mark: CollectionMark, seq: Seq, hold: bool) {
+        // Before the file opens: a bind that cannot open it still holds,
+        // and a later replacement that opens it rebuilds held (D4).
+        if hold {
+            for slot in 0..self.slots.len() {
+                self.holds[slot] = self.shared.deferred[slot].is_some();
+            }
+        }
         let Some(verdicts) = self.open_file(&collection, mark, seq) else {
             return;
         };
@@ -1161,6 +1452,11 @@ impl Worker {
                 return None;
             }
         };
+        // D5.1: the component-owned files no record row names.
+        let recreated = !matches!(found, Found::Opened);
+        for error in file.sweep_files(&self.shared.registry, recreated) {
+            tracing::warn!(%error, "sweeping the derived store's files");
+        }
         self.epoch += 1;
         self.file = Some(file);
         // The stamp says `clean` 0 now, whatever an earlier file owed.
@@ -1435,7 +1731,11 @@ impl Worker {
         let (Some(collection), Some(generation)) = (self.collection.clone(), self.generation) else {
             return;
         };
-        let Some(Queued { slot, kind, cause }) = self.queue.pop_front() else {
+        // A held refresh never delays another component's (D7).
+        let Some(next) = self.queue.iter().position(|queued| !self.holds[queued.slot]) else {
+            return;
+        };
+        let Some(Queued { slot, kind, cause }) = self.queue.remove(next) else {
             return;
         };
         let schema = self.schema(slot).clone();
@@ -1571,6 +1871,9 @@ impl Worker {
                             self.shared
                                 .set_readiness(&mut state, slot, generation, Readiness::Ready, cause);
                         }
+                        // D7: the files the old rows named, once no reader
+                        // maps them.
+                        self.sweep_files(slot);
                     }
                     Err(error) => {
                         tracing::warn!(component = %schema.name, %error, "finishing a derived refresh");
@@ -1831,6 +2134,8 @@ impl Worker {
         let _ = self.pay_unclean();
         self.owed = None;
         self.requeue_running();
+        // D11: each component's persist, as at suspend, before `clean` 1.
+        self.persist_all();
         if let Err(error) = self.mark_clean(true) {
             tracing::warn!(%error, "writing the derived stamp");
         }
@@ -1853,10 +2158,116 @@ impl Worker {
         self.shared.changed.notify_all();
     }
 
+    /// D1, D7: deletes the component's files that neither its live record
+    /// rows nor a reader's map hold. Never while its refresh runs: that
+    /// refresh's new files are named only at its swap, which sweeps then.
+    fn sweep_files(&mut self, slot: usize) {
+        if self.running.as_ref().is_some_and(|running| running.slot == slot) {
+            return;
+        }
+        let schema = self.shared.registry.schemas()[slot].clone();
+        let (Some(_), Some(file)) = (&schema.files, self.file.as_ref()) else {
+            return;
+        };
+        let live = match file.named_files(&schema) {
+            Ok(live) => live,
+            Err(error) => {
+                tracing::warn!(component = %schema.name, %error, "reading the derived file records");
+                return;
+            }
+        };
+        let component = Arc::clone(&self.shared.components[slot]);
+        let in_use = match guarded(|| Ok(component.files_in_use(&live))) {
+            Ok(in_use) => in_use,
+            Err(error) => {
+                tracing::warn!(component = %schema.name, %error, "a derived component's files in use");
+                return;
+            }
+        };
+        let mut keep = live;
+        keep.extend(in_use);
+        for error in derived::files::sweep_dir(&file.component_dir(&schema.name), &keep) {
+            tracing::warn!(component = %schema.name, %error, "deleting derived files");
+        }
+    }
+
+    /// G9.3: a live file that does not load is a rebuild, unless the rows
+    /// that named it are no longer the live ones.
+    fn rebuild_if_named(&mut self, slot: usize, names: Vec<String>) {
+        if self.slots[slot] != SlotState::Ready {
+            return;
+        }
+        let schema = self.shared.registry.schemas()[slot].clone();
+        let Some(file) = self.file.as_ref() else { return };
+        let live = match file.named_files(&schema) {
+            Ok(live) => live,
+            Err(error) => {
+                tracing::warn!(component = %schema.name, %error, "reading the derived file records");
+                return;
+            }
+        };
+        if live != names.into_iter().collect() {
+            return;
+        }
+        tracing::warn!(component = %schema.name, "a live derived file does not load: rebuilding");
+        if let Err(error) = self.clear_ready(&[slot]) {
+            tracing::warn!(%error, "the derived store cannot record that a component is stale");
+            self.unbind(None);
+            return;
+        }
+        self.queue_refresh(slot, Kind::Rebuild, None);
+    }
+
+    fn slot_of(&self, name: &str) -> Option<usize> {
+        self.shared.registry.schemas().iter().position(|schema| schema.name == name)
+    }
+
+    /// Every component's persist, in registration order (D11).
+    fn persist_all(&mut self) {
+        for slot in 0..self.slots.len() {
+            if self.file.is_none() {
+                return;
+            }
+            self.persist_slot(slot);
+        }
+    }
+
+    /// D4: a ready component's persist. A failure marks it `ready` 0 and
+    /// queues its rebuild, committed before anything else runs; when that
+    /// cannot be written, the store unbinds (D6).
+    fn persist_slot(&mut self, slot: usize) {
+        if self.slots[slot] != SlotState::Ready {
+            return;
+        }
+        let schema = self.shared.registry.schemas()[slot].clone();
+        let component = Arc::clone(&self.shared.components[slot]);
+        let Some(generation) = self.generation else { return };
+        let Some(file) = self.file.as_mut() else { return };
+        let result = guarded(|| {
+            let mut store = ComponentStore {
+                file,
+                schema: &schema,
+                generation,
+            };
+            component.persist(&mut store)
+        });
+        let Err(error) = result else { return };
+        tracing::warn!(component = %schema.name, %error, "a derived persist failed");
+        if let Err(error) = self.clear_ready(&[slot]) {
+            tracing::warn!(%error, "the derived store cannot record that a component is stale");
+            self.unbind(None);
+            return;
+        }
+        self.queue_refresh(slot, Kind::Rebuild, None);
+    }
+
     fn publish_idle(&self) {
         let idle = self.running.is_none()
             && self.builders.is_empty()
-            && (self.queue.is_empty() || self.suspended || self.file.is_none() || self.stop);
+            && (self.queue.iter().all(|queued| self.holds[queued.slot])
+                || self.suspended
+                || self.file.is_none()
+                || self.stop);
         let mut state = self.shared.lock();
         if state.idle != idle {
             state.idle = idle;
@@ -2097,6 +2508,15 @@ impl BuildSink {
             })
             .map_err(|_| EngineError::Cancelled)?;
         done.recv().unwrap_or(Err(EngineError::Cancelled))
+    }
+
+    /// The directory only this component uses for its files (D1), while
+    /// the store is bound. A build writes each file there whole under a new
+    /// name, then names it in a record row through [`BuildSink::write`].
+    pub fn files_dir(&self) -> Option<PathBuf> {
+        let state = self.shared.lock();
+        let bound = state.bound.as_ref()?;
+        Some(derived::component_dir(&bound.path, &state.slots[self.slot].name))
     }
 
     /// Reports `completed` of `total` rows; published at most every 100 ms.
