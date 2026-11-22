@@ -50,7 +50,9 @@ MG_SIM_RUNNER=vm
 mg_lint_ui_first() { echo lint >>"$STUB_LOG"; }
 mg__xcframework() { echo "xcframework $*" >>"$STUB_LOG"; }
 # The identity checks run on real products (app_identity_check.py, xcode-check).
-mg_app_personal_identity() { echo "identity $1" >>"$STUB_LOG"; }
+# A product built over a stale incremental folder (its stale-icon marker)
+# shows the other identity until that folder is removed.
+mg_app_personal_identity() { echo "identity $1" >>"$STUB_LOG"; [ "${FX_PERSONAL_IDENTITY_RC:-0}" -eq 0 ] && [ ! -e "${1%/Build/Products/*}/stale-icon" ]; }
 mg_app_real_copy_identity() { echo "identity $1" >>"$STUB_LOG"; }
 # Generated dispatcher evidence only. cloud_agent_injection_test.py exercises
 # the real preparation helper with generated descriptors/command doubles.
@@ -76,6 +78,24 @@ EOF
   stub xcrun 'echo "xcrun $*" >>"$STUB_LOG"
 case "$*" in
   "xcdevice list --timeout 20") cat "$FX_DEVICES"; exit "${FX_INVENTORY_RC:-0}" ;;
+  # Read-only device queries: Developer Mode, pairing (FX_DEVMODE, FX_PAIRING,
+  # FX_DETAILS_RC with FX_DETAILS_ERROR as the failed response) and lock state
+  # (FX_PASSCODE, FX_LOCK_RC).
+  "devicectl device info details --device "*|"devicectl device info lockState --device "*)
+    out=""; prev=""
+    for a in "$@"; do [ "$prev" != --json-output ] || out="$a"; prev="$a"; done
+    if [ "$4" = details ]; then
+      if [ "${FX_DETAILS_RC:-0}" -ne 0 ]; then
+        printf "{\"info\":{\"outcome\":\"failed\"},\"error\":{\"userInfo\":{\"NSLocalizedDescription\":\"%s\"}}}" "${FX_DETAILS_ERROR:-}" >"$out"
+        exit "$FX_DETAILS_RC"
+      fi
+      printf "{\"info\":{\"outcome\":\"success\"},\"result\":{\"deviceProperties\":{\"name\":\"PRIVATE_PHONE_NAME\",\"developerModeStatus\":\"%s\"},\"connectionProperties\":{\"pairingState\":\"%s\"}}}" \
+        "${FX_DEVMODE:-enabled}" "${FX_PAIRING:-paired}" >"$out"
+    else
+      [ "${FX_LOCK_RC:-0}" -eq 0 ] || exit "$FX_LOCK_RC"
+      printf "{\"info\":{\"outcome\":\"success\"},\"result\":{\"passcodeRequired\":%s,\"unlockedSinceBoot\":true}}" "${FX_PASSCODE:-false}" >"$out"
+    fi
+    exit 0 ;;
   "xcresulttool get build-results --path "*) echo "{\"errorCount\":0,\"warningCount\":0}" ;;
   "xcresulttool get test-results summary --path "*) cat "$FX_SUMMARY"; exit "${FX_SUMMARY_RC:-0}" ;;
   "xcresulttool get test-results tests --path "*) cat "$FX_TESTS"; exit "${FX_TESTS_RC:-0}" ;;
@@ -136,6 +156,7 @@ if [ "$action" = build ]; then
     [ "${FX_WIDGET_NO_PROFILE:-0}" = 1 ] || cp "$FX_WIDGET_PROFILE" "$w/Contents/embedded.provisionprofile"
   fi
   [ "${FX_SOURCE_CHANGE:-0}" = 0 ] || echo "synthetic mutation" >>app/TestPlans/Performance.xctestplan
+  [ -z "${FX_BUILD_OUTPUT:-}" ] || printf "%s\n" "$FX_BUILD_OUTPUT"
   exit "${FX_BUILD_RC:-0}"
 fi
 if [ "$action" = build-for-testing ]; then
@@ -169,6 +190,10 @@ mg() {
 field() { jq -r "$@" "$result"; }
 called() { grep -Eq -- "$1" "$STUB_LOG" || { cat "$STUB_LOG"; return 1; }; }
 not_called() { ! grep -Eq -- "$1" "$STUB_LOG" || { cat "$STUB_LOG"; return 1; }; }
+# Every devicectl call the route made is a read-only info query.
+only_device_info_queries() {
+  [ -z "$(grep devicectl "$STUB_LOG" | grep -Ev '^xcrun devicectl device info (details|lockState) --device ')" ] || { cat "$STUB_LOG"; return 1; }
+}
 phone_run() { mg ui-test --physical-device "$PHONE" --config Profile --suite MediaTests/testAudio --suite MediaTests/testVideo "$@"; }
 test_tree() {
   jq -n "{testNodes:[{nodeType:\"Test Plan\", children:[{nodeType:\"UI test bundle\",
@@ -386,6 +411,13 @@ EOF
       personal) dd=PersonalPreviewDerivedData; config=Release; personal_facts; args=(--personal-preview) ;;
       ios) platform=ios-sim ;;
     esac
+    if [ "$mode" = personal ]; then
+      # A folder this route built records its identity settings; one without
+      # that record would be removed before the build (mg_app_dd_identity).
+      mg build-app --platform mac "${args[@]}"
+      [ "$status" -eq 0 ]
+      [ -f "$SB/build/app/$dd/meguri-build-identity.json" ]
+    fi
     for build_dir in DerivedData StandaloneDerivedData PersonalPreviewDerivedData; do
       for build_config in Debug Profile Release; do
         products="$SB/build/app/$build_dir/Build/Products/$build_config"
@@ -620,7 +652,7 @@ PY
     else
       mg build-app --personal-preview --platform mac
     fi
-    [ "$status" -eq 0 ] || cat "$STUB_LOG"
+    [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
     [ "$status" -eq 0 ]
     [ "$(field .status)" = pass ]
     called '^xcodebuild -showBuildSettings .* -configuration Release .* MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development$'
@@ -3824,10 +3856,10 @@ real_copy_device_facts() {
   mv "$BATS_TEST_TMPDIR/real-settings.json" "$FX_PERSONAL_SETTINGS"
 }
 
-# real_copy_device_profiles: installed iOS development profiles for the
-# daily app and widget covering $PHONE (synthetic team DNQ34W43XX).
+# real_copy_device_profiles [device]: installed iOS development profiles for
+# the daily app and widget covering $PHONE or [device] (synthetic team DNQ34W43XX).
 real_copy_device_profiles() {
-  python3 - "$MEGURI_PROFILE_DIRS" "$PHONE" <<'PY'
+  python3 - "$MEGURI_PROFILE_DIRS" "${1:-$PHONE}" <<'PY'
 import datetime, plistlib, sys
 for name, ident, grants in (
     ("app", "DNQ34W43XX.com.antoinefink.meguri", {
@@ -3883,7 +3915,8 @@ PY
   called '^xcframework .* --configuration Release --slices device$'
   called '^xcodebuild -showBuildSettings .* -sdk iphoneos -arch arm64 MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_DEVICE_PROFILE_STYLE=Manual MEGURI_DEVICE_PROFILE_SPECIFIER=AAAAAAAA-1111-2222-3333-444444444444 MEGURI_WIDGET_DEVICE_PROFILE_STYLE=Manual MEGURI_WIDGET_DEVICE_PROFILE_SPECIFIER=BBBBBBBB-1111-2222-3333-444444444444$'
   called "^xcodebuild build .* -configuration Release -destination platform=iOS,id=$PHONE -derivedDataPath build/app/RealCopyDeviceDerivedData .* MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development MEGURI_DEVICE_PROFILE_STYLE=Manual MEGURI_DEVICE_PROFILE_SPECIFIER=AAAAAAAA-1111-2222-3333-444444444444 MEGURI_WIDGET_DEVICE_PROFILE_STYLE=Manual MEGURI_WIDGET_DEVICE_PROFILE_SPECIFIER=BBBBBBBB-1111-2222-3333-444444444444$"
-  not_called 'allowProvisioning|MEGURI_BUNDLE_ID_SUFFIX|build-for-testing|-testPlan|devicectl|process launch'
+  not_called 'allowProvisioning|MEGURI_BUNDLE_ID_SUFFIX|build-for-testing|-testPlan|devicectl device (install|process)|process launch'
+  only_device_info_queries
   [ "$(field .details.build.real_copy)" = true ]
   [ "$(field .details.build.messages)" = null ]
   # Wrong resolved settings stop before the build.
@@ -3905,7 +3938,7 @@ mg_run__real_copy_drive() { echo "drive $1 $2" >>"$STUB_LOG"; }
 mg_app_real_copy_device_check() { echo "device-check $2" >>"$STUB_LOG"; [ "${FX_DEVICE_CHECK_RC:-0}" -eq 0 ]; }
 FAKE
   mg run --real-copy --owner-requested --platform iphone --physical-device "$PHONE"
-  [ "$status" -eq 0 ] || cat "$STUB_LOG"
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
   [ "$(field .status)" = pass ]
   [ "$(field .details.launched)" = false ]
   [ "$(field .details.real_copy_profiles.app)" = AAAAAAAA-1111-2222-3333-444444444444 ]
@@ -3914,7 +3947,10 @@ FAKE
   [ "$(grep -n '^drive real-seal' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^drive real-install' "$STUB_LOG" | cut -d: -f1)" ]
   called "^lsregister -u $SB/build/app/RealCopyDeviceDerivedData/Build/Products/Release-iphoneos/Meguri.app$"
   called "^pluginkit -r $SB/build/app/RealCopyDeviceDerivedData/Build/Products/Release-iphoneos/Meguri.app/PlugIns/MeguriWidget.appex$"
-  not_called 'allowProvisioning|process launch|devicectl'
+  not_called 'allowProvisioning|process launch|devicectl device (install|process)'
+  only_device_info_queries
+  [ "$(field .details.device_preflight.result)" = ready ]
+  [ ! -e "$(dirname "$result")/device-preflight" ]
   [ ! -e "$SB/build/app/RealCopyDeviceDerivedData/Build/Products/Release-iphoneos/Meguri.app" ]
   # A failed check installs nothing.
   : >"$STUB_LOG"
@@ -3927,4 +3963,153 @@ FAKE
   mg run --personal-preview --platform iphone --physical-device "$PHONE" real-copy
   [ "$status" -eq 2 ]
   [ ! -s "$STUB_LOG" ]
+}
+
+real_copy_phone() { mg run --real-copy --owner-requested --platform iphone --physical-device "$PHONE"; }
+
+@test "the phone real copy names the selected device when the installed profiles do not list it" {
+  real_copy_device_facts
+  real_copy_device_profiles 00000000-0000000000000099
+  real_copy_phone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-profile ]
+  [[ "$(field '.failures[0].message')" == *"missing: app: this-device; widget: this-device; the installed iOS profiles do not list the selected device $PHONE"* ]]
+  not_called '^(xcframework|xcodebuild)|devicectl'
+}
+
+@test "the phone real copy stops before building when Developer Mode is off, naming the step" {
+  real_copy_device_facts
+  real_copy_device_profiles
+  FX_DEVMODE=disabled real_copy_phone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = physical-developer-mode ]
+  [[ "$(field '.failures[0].message')" == *"Settings › Privacy & Security › Developer Mode, turn it on, let it restart and confirm Turn On"*"nothing was built or installed"* ]]
+  [ "$(field '.user_steps[0].id')" = device-developer-mode ]
+  [ "$(field .details.device_preflight.developer_mode)" = disabled ]
+  called "^xcrun devicectl device info details --device $PHONE --json-output "
+  not_called '^(xcframework|xcodebuild)|lockState'
+  only_device_info_queries
+  # The raw response stays private: kept in the run, never in the receipt.
+  [ -f "$(dirname "$result")/device-preflight/details.json" ]
+  run ! grep -q PRIVATE_PHONE_NAME "$result"
+  # A refused details query that says so is read the same way.
+  : >"$STUB_LOG"
+  FX_DETAILS_RC=1 FX_DETAILS_ERROR="Developer Mode disabled" real_copy_phone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = physical-developer-mode ]
+  not_called '^(xcframework|xcodebuild)'
+}
+
+@test "the phone real copy tells an unpaired, a locked and an unreachable phone apart before building" {
+  real_copy_device_facts
+  real_copy_device_profiles
+  FX_PAIRING=unpaired real_copy_phone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = physical-device-unpaired ]
+  [[ "$(field '.failures[0].message')" == *"tap Trust"* ]]
+  not_called '^(xcframework|xcodebuild)'
+  : >"$STUB_LOG"
+  FX_PASSCODE=true real_copy_phone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = physical-device-locked ]
+  [ "$(field .details.device_preflight.lock)" = locked ]
+  not_called '^(xcframework|xcodebuild)'
+  : >"$STUB_LOG"
+  FX_DETAILS_RC=1 real_copy_phone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = physical-device-unreachable ]
+  not_called '^(xcframework|xcodebuild)'
+  # A failed lock query leaves the decision to the build.
+  : >"$STUB_LOG"
+  FX_LOCK_RC=1 FX_BUILD_RC=1 real_copy_phone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = build ]
+  [ "$(field .details.device_preflight.lock)" = unknown ]
+  called '^xcodebuild build '
+  only_device_info_queries
+}
+
+@test "a physical build Xcode stopped at the destination reports the device's state, not only a build failure" {
+  real_copy_device_facts
+  real_copy_device_profiles
+  FX_BUILD_RC=70 FX_BUILD_OUTPUT='error:Developer Mode disabled To use the device for development, enable Developer Mode in Settings.
+error: Timed out waiting for all destinations' real_copy_phone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = physical-developer-mode ]
+  [[ "$(field '.failures[0].message')" == *"Xcode stopped at the destination; nothing was installed"* ]]
+  : >"$STUB_LOG"
+  FX_BUILD_RC=70 FX_BUILD_OUTPUT='error: Timed out waiting for all destinations' real_copy_phone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = physical-device-unreachable ]
+  : >"$STUB_LOG"
+  FX_BUILD_RC=70 FX_BUILD_OUTPUT='error: Unlock the device to Continue' real_copy_phone
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = physical-device-locked ]
+}
+
+@test "the phone real copy removes its derived data built before the identity record, forgetting the product first" {
+  real_copy_device_facts
+  real_copy_device_profiles
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'FAKE'
+mg_run__real_copy_drive() { echo "drive $1 $2" >>"$STUB_LOG"; }
+mg_app_real_copy_device_check() { echo "device-check $2" >>"$STUB_LOG"; }
+FAKE
+  local dd="$SB/build/app/RealCopyDeviceDerivedData"
+  mkdir -p "$dd/Build/Intermediates.noindex"; echo stale >"$dd/Build/Intermediates.noindex/AppIcon.icns"
+  real_copy_phone
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
+  [ "$(field .details.derived_data_cleaned.reason)" = no-identity-record ]
+  [ ! -e "$dd/Build/Intermediates.noindex/AppIcon.icns" ]
+  [ -f "$dd/meguri-build-identity.json" ]
+  [[ "$(field .message)" == *"build/app/RealCopyDeviceDerivedData was removed first (no-identity-record)"* ]]
+  # Kept when the record matches.
+  echo kept >"$dd/marker"
+  : >"$STUB_LOG"
+  real_copy_phone
+  [ "$status" -eq 0 ]
+  [ -f "$dd/marker" ]
+  [ "$(field '.details.derived_data_cleaned // empty')" = "" ]
+}
+
+@test "personal preview removes derived data built with other identity settings and rebuilds a stale product once" {
+  personal_facts
+  local dd="$SB/build/app/PersonalPreviewDerivedData"
+  mkdir -p "$dd/Build/Products/Release/Meguri.app/Contents/Resources"
+  echo daily >"$dd/Build/Products/Release/Meguri.app/Contents/Resources/AppIcon.icns"
+  mg build-app --personal-preview --platform mac
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
+  [ "$(field .details.derived_data_cleaned.reason)" = no-identity-record ]
+  [ ! -e "$dd/Build/Products/Release/Meguri.app/Contents/Resources/AppIcon.icns" ]
+  [ "$(jq -r '.targets[0].PRODUCT_BUNDLE_IDENTIFIER' "$dd/meguri-build-identity.json")" = com.antoinefink.meguri.dev ]
+  [[ "$(field .message)" == *"build/app/PersonalPreviewDerivedData was removed first (no-identity-record)"* ]]
+  not_called 'lsregister'
+  # Matching record but a stale product: one more build from an empty folder.
+  echo stale >"$dd/stale-icon"
+  : >"$STUB_LOG"
+  mg build-app --personal-preview --platform mac
+  [ "$status" -eq 0 ] || { cat "$STUB_LOG"; false; }
+  [ "$(field .details.derived_data_cleaned.reason)" = stale-product ]
+  [ "$(grep -c '^xcodebuild build ' "$STUB_LOG")" -eq 2 ]
+  [ ! -e "$dd/stale-icon" ]
+  # Still wrong from an empty folder: fails after two builds, never a third.
+  : >"$STUB_LOG"
+  FX_PERSONAL_IDENTITY_RC=1 mg build-app --personal-preview --platform mac
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = personal-preview-identity ]
+  [[ "$(field '.failures[0].message')" == *"also when built from an empty build/app/PersonalPreviewDerivedData"* ]]
+  [ "$(grep -c '^xcodebuild build ' "$STUB_LOG")" -eq 2 ]
+}
+
+@test "the derived data guard never reads, writes or removes through a linked build folder" {
+  personal_facts
+  local outside="$BATS_TEST_TMPDIR/outside"
+  mkdir -p "$outside/PersonalPreviewDerivedData" "$SB/build"
+  echo keep >"$outside/PersonalPreviewDerivedData/marker"
+  ln -s "$outside" "$SB/build/app"
+  mg build-app --personal-preview --platform mac
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = derived-data ]
+  [ -f "$outside/PersonalPreviewDerivedData/marker" ]
+  [ ! -e "$outside/PersonalPreviewDerivedData/meguri-build-identity.json" ]
+  not_called '^xcodebuild build '
 }
