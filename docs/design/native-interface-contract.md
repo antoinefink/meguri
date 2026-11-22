@@ -1046,6 +1046,13 @@ The Styling part shows "Shared by All Card Types" in its bar, and above the CSS 
 
 One Save in the toolbar. When D3 asks, a sheet titled `Save Changes to “<name>”?` lists the changes (losses first, in red, each with its count), then the sync paragraph, then Cancel and the confirm button (Save and Upload with Meguri Sync; Save otherwise; destructive when content is lost). Progress while it saves shows in the toolbar ("Updating 212 of 412 notes").
 
+Changed 2026-11-22 (Antoine's feedback on the captures of PR #112: on Mac "I can't help but think those don't look really good", on iPad "This section looks kind of strange as well"; decided by Claude (coordinator) under his delegation; `decisions.md`, row `noteTypes` of 2026-11-22):
+
+- While a save job runs (once it has run for half a second, D5 step 5), the toolbar shows one status item in place of Revert and Save: a small system progress indicator and the stage text ("Syncing…", "Updating 212 of 412 notes", "Uploading…"), with no glass of its own. Its width is the widest text the job can show, with monospaced digits, so the toolbar does not move as the text changes. Revert and Save are not shown until the job ends; the note type stays locked (W3).
+- No disabled prominent button: Revert and Save are one toolbar group in the standard style, and Save is not prominent, since it is disabled until there is a draft.
+- iPad: Fields | Cards and Save are separate items with their own glass shapes; the job's status sits in the bottom toolbar's status place, as Mail's does, so nothing wide sits in the navigation bar beside the tabs at any width.
+- This replaces the earlier toolbar, where the progress, Revert and a tinted Save were three separate shapes and, on iPad, the progress overlapped the tabs.
+
 ### N22.6 New and Duplicate (7B)
 
 New Note Type… is a sheet listing the six stock kinds as rows, each with its one-line explanation in secondary text, and a Name field; Cancel and Create. Duplicate is a direct command (⌘D, context menu).
