@@ -129,7 +129,8 @@ public final class NoteTypesModel {
     @ObservationIgnored private var saveRunning = false
     /// Commits a view started (a rename still being checked after focus
     /// left), awaited by Save whatever field has the focus now.
-    @ObservationIgnored private var inflightCommits: [String: Task<Bool, Never>] = [:]
+    @ObservationIgnored private var inflightCommits: [TrackedCommitKey: Task<Bool, Never>] = [:]
+    private struct TrackedCommitKey: Hashable { let notetype: Int64; let key: String }
     /// Save is committing typed text: text inputs wait, so nothing typed now is lost.
     public private(set) var committingForSave = false
     /// Raised when the collection goes: work started before must not land.
@@ -242,13 +243,17 @@ public final class NoteTypesModel {
                 guard !Task.isCancelled, self.epoch == epoch, let counts else { return }
                 typeCounts[id] = counts
             },
-            Task {
-                let counts = try? await backend.fieldContentCounts(id)
-                guard !Task.isCancelled, self.epoch == epoch, let counts, records[id]?.base == base else { return }
-                fieldCounts[id] = counts
-                fieldCountsBase[id] = base
-            },
         ]
+        // A note type changed elsewhere keeps the draft's older base, while the
+        // core counts the newer layout's fields: those counts would sit on the
+        // wrong rows, so the Notes column waits for Reload or Revert.
+        guard !stale.contains(id) else { return }
+        countTasks[id, default: []].append(Task {
+            let counts = try? await backend.fieldContentCounts(id)
+            guard !Task.isCancelled, self.epoch == epoch, let counts, records[id]?.base == base, !stale.contains(id) else { return }
+            fieldCounts[id] = counts
+            fieldCountsBase[id] = base
+        })
     }
 
     private func readReferences(_ id: Int64) async {
@@ -357,7 +362,10 @@ public final class NoteTypesModel {
     /// A commit a view started on its own (focus left a field): Save waits
     /// for it. A newer commit under the same key replaces an older one, so a
     /// corrected name is the one that counts.
-    public func trackCommit(_ key: String, _ commit: @escaping @MainActor () async -> Bool) {
+    /// `notetype`: the note type whose draft the commit changes; only its own
+    /// Save waits for it, and only its refusal stops that Save.
+    public func trackCommit(_ notetype: Int64, _ key: String, _ commit: @escaping @MainActor () async -> Bool) {
+        let key = TrackedCommitKey(notetype: notetype, key: key)
         let task = Task { await commit() }
         inflightCommits[key] = task
         Task { _ = await task.value; if inflightCommits[key] == task { inflightCommits[key] = nil } }
@@ -473,9 +481,11 @@ public final class NoteTypesModel {
             committingForSave = true
             var accepted = true
             // Commits that start while Save waits are awaited too.
-            while !inflightCommits.isEmpty {
-                let batch = inflightCommits
-                inflightCommits.removeAll()
+            // Another note type's commits change its own draft only: they run on, unawaited.
+            while true {
+                let batch = inflightCommits.filter { $0.key.notetype == id }
+                if batch.isEmpty { break }
+                for key in batch.keys { inflightCommits[key] = nil }
                 for task in batch.values { accepted = await task.value && accepted }
             }
             for commit in pendingEdits.values where accepted { accepted = await commit() }
@@ -681,6 +691,8 @@ public final class NoteTypesModel {
                 // The draft keeps its base: Save meets `Stale` and offers Reload (D1).
                 changedElsewhere.insert(id)
                 stale.insert(id)
+                // The subtitle's counts were dropped with the change: they read again (type counts only).
+                readCounts(id)
                 return
             }
             records[id] = record
