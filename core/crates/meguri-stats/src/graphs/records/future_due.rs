@@ -40,7 +40,9 @@ pub struct FutureDueRecord {
 /// C3.2: the day a home due `home` falls on.
 fn due_day(home: i32, next_day_at: i64, today: i32) -> i32 {
     if i64::from(home) > TIMESTAMP_ABOVE {
-        // Truncated toward zero, as `/` on integers is.
+        // Truncated toward zero, as `/` on integers is. With H at most
+        // i32::MAX and a real `N`, the quotient fits i32; `as` only matters
+        // for an `N` no day clock gives.
         (i64::from(home).wrapping_sub(next_day_at) / DAY_SECS) as i32
     } else {
         home.wrapping_sub(today)

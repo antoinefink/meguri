@@ -696,7 +696,38 @@ fn c9_2_the_card_decay() {
     );
     close(recall.average, 82.265785);
     close(recall.sum_by_card, 9.871895);
-    close(recall.sum_by_note, 9.871896);
+    // Anki's note order is unspecified (its golden has 9.871896); here one
+    // card per note in id order gives the same sum bit for bit.
+    assert_eq!(recall.sum_by_note.to_bits(), recall.sum_by_card.to_bits());
+}
+
+#[test]
+fn c1_and_c9_4_f32_sums_follow_card_and_note_id_order() {
+    // R 1 (decay 0) on the lowest card id, then two R of about 4.2e-8
+    // (decay 3, s 0.001, 8 days). In id order each small value is lost
+    // against 1.0; added first they survive. The notes run the other way,
+    // so `sum_by_note` (ascending note id) takes the small values first.
+    let f = empty();
+    let lrt = NOW_S - 8 * DAY;
+    put(&f, &[
+        raw(1).note(30).review(10, 5).data(&format!("{{\"decay\":0,\"s\":5.0,\"d\":5.0,\"lrt\":{lrt}}}")),
+        raw(2).note(20).review(10, 5).data(&format!("{{\"decay\":3,\"s\":0.001,\"d\":5.0,\"lrt\":{lrt}}}")),
+        raw(3).note(10).review(10, 5).data(&format!("{{\"decay\":3,\"s\":0.001,\"d\":5.0,\"lrt\":{lrt}}}")),
+    ]);
+    let small = fsrs::current_retrievability(
+        fsrs::MemoryState {
+            stability: 0.001,
+            difficulty: 5.0,
+        },
+        (8 * DAY) as f32 / 86_400.0,
+        3.0,
+    );
+    let id_order = 1.0f32 + small + small;
+    let small_first = small + small + 1.0f32;
+    assert_ne!(id_order.to_bits(), small_first.to_bits(), "the values must be order-sensitive");
+    let recall: RetrievabilityRecord = collection(&f, Graph::Retrievability);
+    assert_eq!(recall.sum_by_card.to_bits(), id_order.to_bits());
+    assert_eq!(recall.sum_by_note.to_bits(), small_first.to_bits());
 }
 
 #[test]
@@ -858,7 +889,9 @@ fn c10_creation_days_from_n_whatever_the_history() {
 
 #[test]
 fn c11_every_card_record_in_one_request_and_an_empty_scope() {
-    // Golden card-counts/empty-scope: no card in the scope.
+    // The setup of card-counts/empty-scope (no card in the scope). Its
+    // golden pins C12's JSON shape, which is U104's observation; this
+    // checks the records under it.
     let f = empty();
     let t = i64::from(context(&f).today);
     put(&f, &[raw(1).review(3, t + 1).data("{\"s\":5.0,\"d\":5.0}")]);
