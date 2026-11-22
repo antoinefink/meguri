@@ -333,9 +333,13 @@ mg__perf_ui_fixtures() {
   for s in "$@"; do mg_word_in "${s%%/*}" "$MG_PERF_UI_150K_SUITES" && needs=1; done
   [ -n "$needs" ] || return 0
   echo "$MG_JOB: making the 150k collection: tools/mg fixtures 150k" >&2
-  "$MG_TOOLS/mg" fixtures 150k >&2 </dev/null || true
-  MG_PERF_UI_FIXTURE="$(ls -d "$MG_ROOT"/build/fixtures/*-1-150k 2>/dev/null | sort | tail -n 1)"
-  [ -n "$MG_PERF_UI_FIXTURE" ] && [ -f "$MG_PERF_UI_FIXTURE/collection.anki2" ] && return 0
+  local result
+  result="$("$MG_TOOLS/mg" fixtures 150k </dev/null)"
+  if [ -n "$result" ] && [ -f "$result" ] && mg_word_in "$(jq -r .status "$result" 2>/dev/null)" "pass warn"; then
+    mg_artifact fixtures "$result" "tools/mg fixtures result"
+    MG_PERF_UI_FIXTURE="$(ls -d "$MG_ROOT"/build/fixtures/*-1-150k 2>/dev/null | sort | tail -n 1)"
+    [ -n "$MG_PERF_UI_FIXTURE" ] && [ -f "$MG_PERF_UI_FIXTURE/collection.anki2" ] && return 0
+  fi
   mg_failure fixture "the 150k collection could not be made in this checkout; nothing was built or launched" "tools/mg fixtures 150k"
   return 1
 }

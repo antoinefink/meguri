@@ -161,8 +161,9 @@ public final class BrowseModel {
             if notes != (mode == .notes) {
                 mode = notes ? .notes : .cards
                 counts = [:]
-                results.setTotal(nil)
                 refreshCounts()
+                // A query chosen meanwhile is shown in the restored mode.
+                if revision != queryRevision { showResults() }
             }
             device.notesMode = notes
             saveDevice()
@@ -212,11 +213,23 @@ public final class BrowseModel {
         device.notesMode = next == .notes
         saveDevice()
         counts = [:]
-        results.setTotal(nil)
         refreshCounts()
         results.setMode(next, query: query)
-        let backend = backend
-        Task { try? await backend.setNotesMode(next == .notes) }
+        writeMode(next)
+    }
+
+    /// The mode a refused write left unwritten, written again when the
+    /// collection is ready again.
+    private var unwrittenMode: BrowseMode?
+
+    private func writeMode(_ next: BrowseMode) {
+        let backend = backend, epoch = epoch
+        unwrittenMode = nil
+        Task {
+            do { try await backend.setNotesMode(next == .notes) } catch {
+                if self.epoch == epoch, mode == next { unwrittenMode = next }
+            }
+        }
     }
 
     /// The device keeps the query's run text for a relaunch (T14).
@@ -366,6 +379,7 @@ public final class BrowseModel {
     public func collectionReady() {
         epoch &+= 1
         results.collectionReady()
+        if let unwritten = unwrittenMode, unwritten == mode { writeMode(unwritten) }
         stale = true
         countsTask?.cancel()
         if openInFlight {
@@ -390,6 +404,7 @@ public final class BrowseModel {
         opened = false
         openInFlight = false
         mode = .cards
+        unwrittenMode = nil
         query = FilterQuery()
         queryRevision &+= 1
         savedSearches = []; deckValues = [:]; notetypes = []; tags = []; flagNames = []
@@ -469,7 +484,7 @@ public final class BrowseModel {
             // The last item is the whole collection: V11's total.
             guard var values = try? await backend.counts(mode, rows.map(\.1) + [.query(FilterQuery())]), !Task.isCancelled,
                   token == countsToken, self.epoch == epoch else { return }
-            results.setTotal(values.popLast() ?? nil)
+            results.setTotal(values.popLast() ?? nil, mode: mode)
             var next: [BrowseSidebarTag: UInt64] = [:]
             for (row, value) in zip(rows.map(\.0), values) {
                 if let value { next[row] = value }

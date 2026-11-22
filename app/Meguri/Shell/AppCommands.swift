@@ -116,6 +116,17 @@ struct NativeCommandContext {
         collection.navigation.select(.section(.browse))
     }
 
+    /// N21.8, V2.1: View › Cards and Notes (⌥⌘T) toggles Browse's mode
+    /// while Browse is shown.
+    var canToggleBrowseMode: Bool {
+        canShowBrowse && collection.navigation.section == .browse
+    }
+    func toggleBrowseMode() {
+        guard canToggleBrowseMode else { return }
+        let browse = collection.browse
+        browse.setMode(browse.mode == .cards ? .notes : .cards)
+    }
+
     /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review
     /// and with no sheet over the window.
     var canShowNoteTypes: Bool {
@@ -276,6 +287,9 @@ struct AppCommands: Commands {
             Button("Browse") { context?.showBrowse() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
                 .disabled(context?.canShowBrowse != true)
+            Button("Cards and Notes") { context?.toggleBrowseMode() }
+                .keyboardShortcut("t", modifiers: [.command, .option])
+                .disabled(context?.canToggleBrowseMode != true)
             #endif
             Button("Note Types") { context?.showNoteTypes() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])

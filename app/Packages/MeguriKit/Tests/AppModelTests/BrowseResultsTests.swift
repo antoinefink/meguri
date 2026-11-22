@@ -120,12 +120,83 @@ import Testing
         try await until { session.starts.count == 2 }
         try await Task.sleep(for: .milliseconds(20))
         #expect(results.list?.count == 2 && results.content == .table)
+        // Another failure keeps the rows read, dimmed (H12, R1108).
         session.failNext = .unavailable(reason: "sample")
         results.run(Self.deckQuery, mode: .cards)
-        try await until { results.content == .failed }
+        try await until { results.isDimmed }
+        #expect(results.list?.count == 2 && results.content == .table)
         session.results["run:1"] = [1]
         results.retry()
+        try await until { results.list?.count == 1 }
+        #expect(!results.isDimmed)
+    }
+
+    @Test func aFailureWithNoRowsShowsTryAgain() async throws {
+        let session = FakeSearchSession()
+        session.results[""] = [4]
+        session.failNext = .unavailable(reason: "sample")
+        let results = results(session)
+        results.run(FilterQuery(), mode: .cards)
+        try await until { results.content == .failed }
+        results.retry()
         try await until { results.content == .table && results.list?.count == 1 }
+    }
+
+    @Test func theEventsOfAStartStillOnItsWayNeverGoToTheRequestQueuedBehindIt() async throws {
+        let session = FakeSearchSession()
+        session.results[""] = [1, 2, 3]
+        session.results["run:1"] = [9]
+        session.eventsBeforeReturn = true
+        session.startDelay = .milliseconds(150)
+        let results = results(session)
+        results.run(FilterQuery(), mode: .cards)
+        try await until { session.starts.count == 1 }
+        // The first start has sent its events and not returned; the second query waits behind it.
+        results.run(Self.deckQuery, mode: .cards)
+        try await until { session.starts.count == 2 }
+        try await until { results.list?.count == 1 }
+        #expect(results.row(at: 0)?.id == 9 && results.list?.handle == BrowseHandle(rawValue: 2))
+    }
+
+    @Test func cardsNotesAndAHeaderClickWhileASearchIsPendingApplyToThatSearch() async throws {
+        let session = FakeSearchSession()
+        session.results[""] = [1, 2, 3]
+        session.results["run:1"] = [2, 3]
+        let results = results(session)
+        results.run(FilterQuery(), mode: .cards)
+        try await until { results.list?.count == 3 }
+        // A new query, not shown yet, then Notes: the new query runs in Notes; nothing toggles the old list.
+        session.holdEvents = true
+        results.run(Self.deckQuery, mode: .cards)
+        try await until { session.starts.count == 2 }
+        results.setMode(.notes, query: Self.deckQuery)
+        try await until { session.starts.count == 3 }
+        #expect(session.toggles.isEmpty && session.starts.last?.text == "run:1" && session.starts.last?.mode == .notes)
+        // A header click before it shows: the same search again, sorted.
+        results.sort(by: "noteCrt")
+        try await until { session.starts.count == 4 }
+        #expect(session.resorts.isEmpty && session.starts.last?.mode == .notes
+            && session.starts.last?.sort == BrowseSort(key: "noteCrt", direction: .descending))
+        session.releaseEvents()
+        try await until { results.list?.mode == .notes }
+        #expect(results.list?.sort.key == "noteCrt" && results.list?.count == 2)
+    }
+
+    @Test func rowsChosenWhileASearchRunsAreTheOnesMapped() async throws {
+        let session = FakeSearchSession()
+        session.results[""] = [1, 2, 3]
+        session.results["run:1"] = [1, 2, 3]
+        let results = results(session)
+        results.run(FilterQuery(), mode: .cards)
+        try await until { results.row(at: 2) != nil }
+        results.select([0])
+        session.holdEvents = true
+        results.run(Self.deckQuery, mode: .cards)
+        try await until { session.starts.count == 2 }
+        results.select([2])
+        session.releaseEvents()
+        try await until { results.list?.token == 2 }
+        #expect(results.selection == [2] && results.currentIndex == 2)
     }
 
     @Test func emptyResultsAreNoResultsOrAnEmptyCollection() async throws {
@@ -156,11 +227,15 @@ import Testing
         try await until { results.list?.sort.key == "cardDue" }
         #expect(results.list?.sort.direction == .descending && session.starts.count == 1 && session.resorts.count == 1)
         #expect(results.row(at: 0)?.id == 3)
-        #expect(backend.columnChanges == [.sortBy("cardDue")])
+        // The set keeps the order shown, written in click order (V4.3).
+        try await until { backend.columnChanges.count == 1 }
+        #expect(backend.columnChanges == [.setSort(BrowseSort(key: "cardDue", direction: .descending))])
         // Again: reversed.
         results.sort(by: "cardDue")
         try await until { results.list?.sort.direction == .ascending }
         #expect(results.row(at: 0)?.id == 1 && session.resorts.count == 2)
+        try await until { backend.columnChanges.count == 2 }
+        #expect(backend.columnChanges.last == .setSort(BrowseSort(key: "cardDue", direction: .ascending)))
         // A column that cannot sort does nothing.
         results.sort(by: "question")
         try await Task.sleep(for: .milliseconds(20))
@@ -254,6 +329,21 @@ import Testing
         try await until { results.row(at: 0) != nil }
         #expect(results.row(at: 1)?.id == 3 && results.row(at: 2)?.id == 4)
         #expect(session.rowCalls.last?.revision == 1)
+    }
+
+    @Test func aRemovalKeepsOnlyPagesWhoseRowsAreAllKnown() async throws {
+        let session = FakeSearchSession()
+        session.results[""] = Array(1...450)
+        let results = results(session)
+        results.run(FilterQuery(), mode: .cards)
+        try await until { results.row(at: 399) != nil }
+        // Page 2 (400 to 449) was never read: after a removal in page 0, page 1's last row would come from it.
+        session.invalidation = BrowseInvalidation(removed: [5], refetch: .rows([]), revision: 1, isComplete: true, count: 449)
+        results.changesCommitted(Self.changes(removing: 6), seq: 3)
+        try await until { results.list?.revision == 1 }
+        #expect(results.row(at: 5)?.id == 7)
+        try await until { results.row(at: 399) != nil }
+        #expect(results.row(at: 399)?.id == 401 && session.rowCalls.last?.revision == 1)
     }
 
     @Test func changesBeforeTheFirstPageArePassedWithTheFirstCall() async throws {
@@ -359,6 +449,9 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
     var failNext: BridgeError? { get { locked { _failNext } } set { locked { _failNext = newValue } } }
     private var _failNext: BridgeError?
     var invalidation: BrowseInvalidation? { get { locked { _invalidation } } set { locked { _invalidation = newValue } } }
+    /// How long a start takes to return after its events went.
+    var startDelay: Duration? { get { locked { _startDelay } } set { locked { _startDelay = newValue } } }
+    private var _startDelay: Duration?
     private var _invalidation: BrowseInvalidation?
 
     // Record.
@@ -429,7 +522,9 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
         }
         let cards = results[text] ?? []
         let ids = mode == .cards ? cards : Array(Set(locked { cards.map { note($0) } })).sorted()
-        return begin(ids: ordered(ids, sort), mode: mode, text: text)
+        let seq = begin(ids: ordered(ids, sort), mode: mode, text: text)
+        if let delay = startDelay { try? await Task.sleep(for: delay) }
+        return seq
     }
 
     func resort(_ handle: BrowseHandle, sort: BrowseSort) async throws -> UInt64 {

@@ -60,7 +60,7 @@ struct BrowseTable: View {
             // Another handle shown is another table: no diff of its rows with the last list's.
             .id(list?.token ?? 0)
             .accessibilityIdentifier("browse.results.table")
-            .onChange(of: results.scrollTarget) {
+            .onChange(of: results.scrollTarget, initial: true) {
                 guard let target = results.scrollTarget, target.token == list?.token else { return }
                 proxy.scrollTo(target.index, anchor: .center)
             }
@@ -197,7 +197,7 @@ struct BrowseCellView: View {
     var body: some View {
         if let row = results.row(at: index), row.cells.indices.contains(column.index) {
             cell(row.cells[column.index], row: row)
-                .foregroundStyle(row.isDimmed ? .secondary : .primary)
+                .foregroundStyle(row.isDimmed || results.isDimmed ? .secondary : .primary)
                 .lineLimit(1)
         }
     }
@@ -238,8 +238,8 @@ struct BrowseCellView: View {
         guard ["noteFld", "question", "answer"].contains(column.key), let font = row.font, font.name != nil || font.size != nil
         else { return nil }
         let size = font.size.map { CGFloat($0) }
-        if let name = font.name { return .custom(name, size: size ?? NSFontSize.body) }
-        return .system(size: size ?? NSFontSize.body)
+        // A size alone keeps the system family (C6: each member applies on its own).
+        return .custom(font.name ?? NSFontSize.systemName, size: size ?? NSFontSize.body)
     }
 }
 
@@ -247,7 +247,9 @@ struct BrowseCellView: View {
 enum NSFontSize {
     #if os(macOS)
     static var body: CGFloat { NSFont.systemFontSize }
+    static var systemName: String { NSFont.preferredFont(forTextStyle: .body).fontName }
     #else
     static var body: CGFloat { UIFont.preferredFont(forTextStyle: .body).pointSize }
+    static var systemName: String { UIFont.preferredFont(forTextStyle: .body).fontName }
     #endif
 }

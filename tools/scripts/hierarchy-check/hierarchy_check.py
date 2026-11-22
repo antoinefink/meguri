@@ -229,14 +229,16 @@ def native_table_headers(root):
     return headers
 
 
-def native_sidebar_search_fields(root):
+def native_sidebar_search_fields(document, root):
     """The Mac field `searchable(placement: .sidebar)` adds: a searchField
     with no identifier in an unidentified group directly in the
     NavigationSplitView's system-named split group, whose only children are
     its own unidentified Search (magnifier) and cancel (clear) buttons. The
     field and those buttons are system parts; anything else is not this
-    shape and keeps its findings."""
+    shape and keeps its findings. The Mac only."""
     parts = set()
+    if document.get("platform") != "mac":
+        return parts
     for split in root.walk():
         if split.type != "splitGroup" or not SPLIT_VIEW.match(split.identifier):
             continue
@@ -546,7 +548,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     elements = [e for e in root.walk() if not e.under(SYSTEM_UI) and not e.under(TRANSIENT)]
     sheet_grabbers = native_sheet_grabbers(document, root)
     toggle_parts = (native_toggle_switch_parts(document, root) | native_stepper_arrows(document, root)
-                    | native_table_headers(root) | native_sidebar_search_fields(root))
+                    | native_table_headers(root) | native_sidebar_search_fields(document, root))
     disclosure_labels, disclosure_chevrons = native_disclosure_row_parts(document, root)
     title_pairs = native_toolbar_title_pairs(document, root)
     segment_buttons = native_radio_segments(root)

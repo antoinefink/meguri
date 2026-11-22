@@ -1196,8 +1196,10 @@ class NativeSidebarSearchField(unittest.TestCase):
     def tree(self, field_children=None, split_id="main, SidebarNavigationSplitView", group_id="", extra=()):
         buttons = field_children if field_children is not None else [el("button", label="Search", f=(13, 91, 25, 28))]
         field = el("searchField", f=(9, 90, 202, 30), children=buttons)
-        return doc(el("splitGroup", split_id, f=(0, 30, 1180, 780), children=[
+        tree = doc(el("splitGroup", split_id, f=(0, 30, 1180, 780), children=[
             el("group", group_id, f=(10, 91, 200, 28), children=[field, *extra])]))
+        tree["platform"] = "mac"
+        return tree
 
     def test_the_sidebar_search_field_and_its_buttons_are_system_parts(self):
         self.assertEqual(hierarchy_check.check(self.tree()), [])
@@ -1216,6 +1218,10 @@ class NativeSidebarSearchField(unittest.TestCase):
         self.assertEqual(kinds(hierarchy_check.check(self.tree(extra=[el("button", label="Go", f=(150, 91, 20, 28))]))),
                          ["missing-identifier", "missing-identifier", "missing-identifier"])
         self.assertEqual(kinds(hierarchy_check.check(doc(el("searchField", f=(9, 90, 202, 30))))), ["missing-identifier"])
+        # The same shape outside the Mac.
+        ios = self.tree()
+        ios["platform"] = "ios"
+        self.assertEqual(kinds(hierarchy_check.check(ios)), ["missing-identifier", "missing-identifier"])
 
 
 class NativeTableCellsAndSegments(unittest.TestCase):

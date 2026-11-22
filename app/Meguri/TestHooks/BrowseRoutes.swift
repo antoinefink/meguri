@@ -74,7 +74,7 @@ extension TestHooks {
             case .typical, .filtered, .today:
                 FilterQuery(tokens: [.value([SampleBrowseBackend.deck(1)], negated: false), .value([.state(.suspended)], negated: false)])
             case .table, .notes, .error: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(1)], negated: false)])
-            case .noResults: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(7)], negated: false)])
+            case .noResults: FilterQuery(tokens: [.value([SampleBrowseBackend.deck(7)], negated: false), .value([.state(.learning)], negated: false)])
             case .emptyCollection, .large: FilterQuery()
             }
             return ShellLaunch(features: features, probe: false) { navigation in

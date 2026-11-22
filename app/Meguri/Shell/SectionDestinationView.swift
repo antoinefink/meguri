@@ -106,7 +106,8 @@ struct ShellFeatures {
             #if os(macOS)
             case .browse:
                 AnyView(BrowseView(model: collection.browse, addNote: {
-                    navigation.present(.add(deck: navigation.selectedDeck))
+                    // Browse shows no deck: Add opens on its default deck.
+                    navigation.present(.add(deck: nil))
                 }, editNoteType: { id in
                     collection.noteTypes.selection = id
                     navigation.select(.section(.noteTypes))

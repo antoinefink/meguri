@@ -60,7 +60,15 @@ public final class BrowseResults {
 
     // MARK: State
 
-    public private(set) var list: List?
+    public private(set) var list: List? {
+        didSet {
+            let released = list?.released ?? false
+            if released != isDimmed { isDimmed = released }
+        }
+    }
+    /// The rows shown belong to a search that went (superseded, failed):
+    /// they show dimmed until the next list (H12, R1108).
+    public private(set) var isDimmed = false
     /// The rows read, by page; replaced with the list, so every cell draws again.
     public private(set) var store = BrowseRowStore()
     /// Indexes of `list`'s rows (R1152).
@@ -71,6 +79,9 @@ public final class BrowseResults {
     public private(set) var showsProgress = false
     /// The latest search failed for a reason other than its text.
     public private(set) var failed = false
+    /// The first search's text could not run (T5): with no rows to keep,
+    /// it shows as finding nothing, with Clear Search.
+    public private(set) var rejected = false
     /// The rows of the whole collection in the shown mode (V11's t); nil
     /// until counted.
     public private(set) var total: UInt64?
@@ -88,7 +99,7 @@ public final class BrowseResults {
 
     public var content: Content {
         if failed { return .failed }
-        guard let list else { return .starting }
+        guard let list else { return rejected ? .noResults : .starting }
         if list.count == 0, list.isComplete { return list.queryIsEmpty ? .emptyCollection : .noResults }
         return .table
     }
@@ -119,8 +130,10 @@ public final class BrowseResults {
         let sort: BrowseSort
         let columns: [String]
         let queryIsEmpty: Bool
-        /// What to map the selection from when its list is shown (H12).
-        let mapping: Mapping?
+        /// What the selection maps from, taken when its list is about to show
+        /// (H12), and whether the list was whole then.
+        var mapping: Mapping?
+        var mappedWhole = false
         var seq: UInt64?
         var handle: BrowseHandle?
         var count = 0
@@ -131,15 +144,18 @@ public final class BrowseResults {
         /// Change sets received since it started (H10).
         var changes: [SequencedChangeSet] = []
 
-        init(kind: Kind, text: String, mode: BrowseMode, sort: BrowseSort, columns: [String], queryIsEmpty: Bool,
-             mapping: Mapping?) {
+        init(kind: Kind, text: String, mode: BrowseMode, sort: BrowseSort, columns: [String], queryIsEmpty: Bool) {
             self.kind = kind
             self.text = text
             self.mode = mode
             self.sort = sort
             self.columns = columns
             self.queryIsEmpty = queryIsEmpty
-            self.mapping = mapping
+        }
+
+        /// The same request as a new search: H8 and H11 need a whole handle.
+        var asSearch: Request {
+            Request(kind: .search, text: text, mode: mode, sort: sort, columns: columns, queryIsEmpty: queryIsEmpty)
         }
     }
 
@@ -147,6 +163,14 @@ public final class BrowseResults {
         let from: BrowseMapSource
         let selected: BrowseSelected
         let current: Int64?
+        /// The same selection as the ids of the rows read, when `from` is a handle.
+        var byIDs: Fallback?
+
+        struct Fallback {
+            let from: BrowseMapSource
+            let selected: BrowseSelected
+            let current: Int64?
+        }
     }
 
     @ObservationIgnored private var session: (any BrowseSearching)?
@@ -156,6 +180,18 @@ public final class BrowseResults {
     private var newest: Request?
     /// A start call is on its way; the next request waits for it.
     @ObservationIgnored private var starting = false
+    /// The request whose start is on its way: an event newer than every seq
+    /// returned is its own, even when a newer request waits behind it.
+    @ObservationIgnored private var inFlight: Request?
+    /// A run text is being read: Cards / Notes and header clicks apply to the
+    /// search it starts.
+    @ObservationIgnored private var runPending = false
+    /// A header click made while the run text was read, in its mode.
+    @ObservationIgnored private var sortOverride: (mode: BrowseMode, sort: BrowseSort)?
+    /// The set's sort writes, one after another.
+    @ObservationIgnored private var sortWrite: Task<Void, Never>?
+    /// The page whose neighbours were last kept.
+    @ObservationIgnored private var keptCenter: Int?
     @ObservationIgnored private var queued: Request?
     /// The newest seq a start returned.
     @ObservationIgnored private var lastReturned: UInt64 = 0
@@ -189,12 +225,14 @@ public final class BrowseResults {
     /// A query or mode to show: its run text (T4) searched with the column
     /// set's sort for the mode (V2.2, V4.3).
     public func run(_ query: FilterQuery, mode: BrowseMode) {
+        if query != lastQuery { sortOverride = nil }
+        rejected = false
         lastQuery = query
         lastMode = mode
         hasRun = true
-        failed = false
         queryRevision &+= 1
         guard ready() else { return }
+        runPending = true
         let revision = queryRevision, epoch = epoch, backend = backend
         let notetype = Self.notetype(of: query)
         Task {
@@ -203,11 +241,16 @@ public final class BrowseResults {
                 let set = try await columnSet(notetype)
                 let runText = try await text
                 guard revision == queryRevision, self.epoch == epoch else { return }
+                runPending = false
                 columnSet = set
-                issue(Request(kind: .search, text: runText, mode: mode, sort: set.sort(mode), columns: set.columns(mode),
-                              queryIsEmpty: query.isEmpty, mapping: mapping()))
+                // The mode and a header click as they are now, not as they were when the run began.
+                let mode = lastMode
+                let sort = sortOverride.flatMap { $0.mode == mode ? $0.sort : nil } ?? set.sort(mode)
+                issue(Request(kind: .search, text: runText, mode: mode, sort: sort, columns: set.columns(mode),
+                              queryIsEmpty: query.isEmpty))
             } catch {
                 guard revision == queryRevision, self.epoch == epoch else { return }
+                runPending = false
                 fail()
             }
         }
@@ -226,30 +269,58 @@ public final class BrowseResults {
     /// V2.1: Cards / Notes. A complete handle toggles without a run (H11);
     /// otherwise the search runs again in the other mode.
     public func setMode(_ mode: BrowseMode, query: FilterQuery) {
+        guard query == lastQuery else { return run(query, mode: mode) }
         lastMode = mode
-        lastQuery = query
-        guard let list, let set = columnSet, list.mode != mode, ready() else { return run(query, mode: mode) }
+        // A run text being read takes the mode when its search starts.
+        if runPending { return }
+        // A search not shown yet is the query: it runs again in the mode.
+        guard let list, let set = columnSet, newest?.shown != false, list.mode != mode, ready() else {
+            return run(query, mode: mode)
+        }
         let kind: Request.Kind = list.isComplete && !list.released ? .toggle(list.handle) : .search
         issue(Request(kind: kind, text: list.text, mode: mode, sort: set.sort(mode), columns: set.columns(mode),
-                      queryIsEmpty: list.queryIsEmpty, mapping: mapping()))
+                      queryIsEmpty: list.queryIsEmpty))
     }
 
     /// V4.1: a header click: the column in its first direction, or the
     /// order shown reversed, as a resort of the shown handle (H8) and a
     /// write of the set's sort (V4.3, no undo step).
     public func sort(by key: String) {
-        guard let list, BrowseColumns.sortable(key, mode: list.mode), ready() else { return }
-        let shown = newest?.mode == list.mode ? (newest?.sort ?? list.sort) : list.sort
-        guard let sort = BrowseColumns.click(key, current: shown) else { return }
+        guard let list, ready() else { return }
+        // The order asked for last: a request not shown yet, a run being read, or the list.
+        let pending = newest.flatMap { $0.shown || $0.ended ? nil : $0 }
+        let mode = runPending ? lastMode : pending?.mode ?? list.mode
+        guard BrowseColumns.sortable(key, mode: mode) else { return }
+        let current = runPending ? (sortOverride.flatMap { $0.mode == mode ? $0.sort : nil } ?? columnSet?.sort(mode))
+            : pending?.sort ?? list.sort
+        guard let current, let sort = BrowseColumns.click(key, current: current) else { return }
         if let set = columnSet {
-            let backend = backend, mode = list.mode
-            Task { try? await backend.changeColumnSet(set.set, mode: mode, change: .sortBy(key)) }
+            writeSort(sort, set: set.set, mode: mode)
             columnSet = set.sorted(sort, mode: mode)
             columnSets[set.notetypeKey] = columnSet
         }
+        if runPending {
+            sortOverride = (mode, sort)
+            return
+        }
+        if let pending {
+            // Not shown yet: its search runs again with the new order.
+            issue(Request(kind: .search, text: pending.text, mode: pending.mode, sort: sort, columns: pending.columns,
+                          queryIsEmpty: pending.queryIsEmpty))
+            return
+        }
         let kind: Request.Kind = list.isComplete && !list.released ? .resort(list.handle) : .search
         issue(Request(kind: kind, text: list.text, mode: list.mode, sort: sort, columns: list.columns,
-                      queryIsEmpty: list.queryIsEmpty, mapping: mapping()))
+                      queryIsEmpty: list.queryIsEmpty))
+    }
+
+    /// V4.3: the set's sort, written in click order, as the order shown.
+    private func writeSort(_ sort: BrowseSort, set: ColumnSetID, mode: BrowseMode) {
+        let previous = sortWrite, backend = backend
+        sortWrite = Task {
+            await previous?.value
+            try? await backend.changeColumnSet(set, mode: mode, change: .setSort(sort))
+        }
     }
 
     private func issue(_ request: Request) {
@@ -269,10 +340,12 @@ public final class BrowseResults {
 
     private func start(_ request: Request) {
         starting = true
+        inFlight = request
         let epoch = epoch
         Task {
             defer {
                 starting = false
+                if inFlight === request { inFlight = nil }
                 if let next = queued {
                     queued = nil
                     if next === newest { start(next) }
@@ -286,18 +359,11 @@ public final class BrowseResults {
                 case .toggle(let handle): try await session.toggle(handle, sort: request.sort)
                 }
                 lastReturned = max(lastReturned, seq)
-                if request.seq == nil { request.seq = seq }
-            } catch BridgeError.browse(.notComplete) {
-                // H8, H11: the handle is not whole yet: the search runs again with the new sort or mode.
+                request.seq = seq
+            } catch BridgeError.browse(.notComplete), BridgeError.browse(.unknownHandle) {
+                // H8, H11: the handle is not whole yet, or gone: the search runs again with the new sort or mode.
                 guard request === newest, self.epoch == epoch else { return }
-                let again = Request(kind: .search, text: request.text, mode: request.mode, sort: request.sort,
-                                    columns: request.columns, queryIsEmpty: request.queryIsEmpty, mapping: request.mapping)
-                newest = again
-                queued = again
-            } catch BridgeError.browse(.unknownHandle) {
-                guard request === newest, self.epoch == epoch else { return }
-                let again = Request(kind: .search, text: request.text, mode: request.mode, sort: request.sort,
-                                    columns: request.columns, queryIsEmpty: request.queryIsEmpty, mapping: nil)
+                let again = request.asSearch
                 newest = again
                 queued = again
             } catch {
@@ -330,24 +396,31 @@ public final class BrowseResults {
         return opened
     }
 
+    /// A failure with rows shown keeps them, dimmed (H12, R1108); with
+    /// none, the error state offers Try Again.
     private func fail() {
-        failed = true
+        if var shown = list {
+            shown.released = true
+            list = shown
+        } else {
+            failed = true
+        }
         stopProgress()
     }
 
     // MARK: Events (H4)
 
     /// The request an event belongs to: the newest one, when the event is
-    /// newer than every seq returned so far (its start has not returned) or
-    /// carries its seq.
+    /// newer than every seq returned so far and it is the one starting, or
+    /// it carries its seq.
     private func request(for seq: UInt64) -> Request? {
-        guard let newest, !newest.ended else { return nil }
-        if let own = newest.seq { return own == seq ? newest : nil }
-        if seq > lastReturned {
-            newest.seq = seq
-            return newest
+        if seq > lastReturned, let inFlight {
+            // The request whose start is on its way; a newer one waiting behind it drops its events.
+            if inFlight.seq == nil { inFlight.seq = seq }
+            return inFlight === newest && !inFlight.ended && inFlight.seq == seq ? inFlight : nil
         }
-        return nil
+        guard let newest, !newest.ended, newest.seq == seq else { return nil }
+        return newest
     }
 
     func receive(_ event: BrowseSearchEvent) {
@@ -363,6 +436,7 @@ public final class BrowseResults {
                 guard revision >= shown.revision else { return }
                 shown.count = Int(matched)
                 list = shown
+                remap(request)
             } else {
                 request.count = Int(matched)
                 request.revision = revision
@@ -388,8 +462,11 @@ public final class BrowseResults {
                 shown.released = true
                 list = shown
             }
-            // T5: a search the text cannot run keeps the results shown.
+            // T5: a search the text cannot run keeps the results shown; any
+            // other failure keeps the rows read too, dimmed (H12, R1108), and
+            // shows Try Again only when there are none.
             if case .browse(.search) = error {
+                if list == nil { rejected = true }
                 stopProgress()
             } else {
                 fail()
@@ -411,27 +488,41 @@ public final class BrowseResults {
         let epoch = epoch, revision = request.revision, presenter = presenter
         let first = 0..<UInt64(min(request.count, BrowseRowStore.pageSize))
         let columns = request.columns, mode = request.mode
+        // The selection as it is now: rows chosen, or pruned, since the request began count.
+        request.mapping = mapping()
+        request.mappedWhole = request.complete
+        let selectionAtShow = selectionRevision
         Task {
             async let rows = Self.read(session, handle, revision, first, columns, mode, presenter)
             async let mapped = mapping(request, in: session, to: handle, revision: revision)
             let (page, selected) = await (try? rows, mapped)
             guard request === newest, !request.ended, self.epoch == epoch else { return }
+            // Its first rows could not be read: the rows shown stay (dimmed), or Try Again.
+            guard page != nil || first.isEmpty else {
+                request.ended = true
+                return fail()
+            }
             tokens &+= 1
             let next = List(token: tokens, handle: handle, mode: request.mode, sort: request.sort, columns: request.columns,
                             count: request.count, revision: request.revision, isComplete: request.complete, released: false,
                             text: request.text, queryIsEmpty: request.queryIsEmpty)
             let store = BrowseRowStore()
-            if let page { store.page(0).rows = page }
+            if let page { store.page(0).set(page) }
             request.shown = true
             failed = false
+            rejected = false
             self.store = store
             list = next
+            keptCenter = nil
             fetching = []
             qaFetching = []
             unapplied = request.changes
-            apply(selected, count: next.count, mapped: request.mapping != nil)
+            if selectionAtShow == selectionRevision { apply(selected, count: next.count, mapped: request.mapping != nil) }
+            else { selection = []; currentIndex = nil }
             if let current = currentIndex, current > 0 { bringIntoView(current) }
             if request.complete { stopProgress() }
+            // A list that became whole while its first rows were read maps the selection again.
+            if request.complete, !request.mappedWhole { remap(request) }
             if !unapplied.isEmpty { applyChanges() }
             readNearRows()
         }
@@ -453,8 +544,15 @@ public final class BrowseResults {
     private func mapping(_ request: Request, in session: any BrowseSearching, to handle: BrowseHandle,
                          revision: UInt64) async -> BrowseMappedSelection? {
         guard let mapping = request.mapping else { return nil }
-        return try? await session.mapSelection(from: mapping.from, selected: mapping.selected, current: mapping.current,
-                                               to: handle, targetRevision: revision)
+        do {
+            return try await session.mapSelection(from: mapping.from, selected: mapping.selected, current: mapping.current,
+                                                  to: handle, targetRevision: revision)
+        } catch {
+            // The source handle went (H6): the ids of the rows read map instead.
+            guard let fallback = mapping.byIDs else { return nil }
+            return try? await session.mapSelection(from: fallback.from, selected: fallback.selected, current: fallback.current,
+                                                   to: handle, targetRevision: revision)
+        }
     }
 
     /// H12's rules on a mapped selection: a current row and nothing else
@@ -487,12 +585,13 @@ public final class BrowseResults {
     private func mapping() -> Mapping? {
         guard let list, !selection.isEmpty || currentIndex != nil else { return nil }
         let currentID = currentIndex.flatMap { row(at: $0)?.id }
+        let ids = { self.selection.sorted().compactMap { self.row(at: $0)?.id } }
         if list.isComplete, !list.released {
+            let fallback = Mapping.Fallback(from: .mode(list.mode), selected: .ids(ids()), current: currentID)
             return Mapping(from: .handle(list.handle, revision: list.revision), selected: .ranges(Self.ranges(selection)),
-                           current: currentID)
+                           current: currentID, byIDs: selection.count <= 10_000 ? fallback : nil)
         }
-        let ids = selection.sorted().compactMap { row(at: $0)?.id }
-        return Mapping(from: .mode(list.mode), selected: .ids(ids), current: currentID)
+        return Mapping(from: .mode(list.mode), selected: .ids(ids()), current: currentID)
     }
 
     /// Ascending, merged ranges of a set of indexes.
@@ -546,28 +645,33 @@ public final class BrowseResults {
         let pages = (list.count - 1) / BrowseRowStore.pageSize
         for candidate in [page, page + 1, page - 1] where (0...pages).contains(candidate) {
             guard fetching.count < 2 else { break }
-            if store.loaded(candidate) { fetchQA(candidate, list: list, session: session); continue }
+            if store.loaded(candidate, count: list.count) { fetchQA(candidate, list: list, session: session); continue }
             if fetching.contains(candidate) { continue }
             fetch(candidate, list: list, session: session)
         }
-        store.evict(around: page)
+        if keptCenter != page {
+            keptCenter = page
+            store.evict(around: page)
+        }
     }
 
     private func fetch(_ page: Int, list: List, session: any BrowseSearching) {
         fetching.insert(page)
         let start = page * BrowseRowStore.pageSize
         let range = UInt64(start)..<UInt64(min(list.count, start + BrowseRowStore.pageSize))
-        let presenter = presenter, epoch = epoch
+        let presenter = presenter, epoch = epoch, store = store, generation = store.page(page).generation
         Task {
             let rows = try? await Self.read(session, list.handle, list.revision, range, list.columns, list.mode, presenter)
-            guard self.epoch == epoch, let shown = self.list, shown.token == list.token else { return }
+            guard self.epoch == epoch, let shown = self.list, shown.token == list.token, self.store === store else { return }
             fetching.remove(page)
+            // Rows read before the page was marked stale (a change, another day) are read again.
+            guard store.page(page).generation == generation else { return readNearRows() }
             guard let rows, shown.revision == list.revision, shown.columns == list.columns else {
                 // A prune or a column change came meanwhile: read again in the new revision.
                 if shown.revision != list.revision || shown.columns != list.columns { readNearRows() }
                 return
             }
-            store.page(page).rows = rows
+            store.page(page).set(rows)
             readNearRows()
         }
     }
@@ -576,6 +680,7 @@ public final class BrowseResults {
     /// (H7, R1242), after their other cells.
     private func fetchQA(_ page: Int, list: List, session: any BrowseSearching) {
         guard !qaFetching.contains(page), store.page(page).pendingQA else { return }
+        let generation = store.page(page).generation, store = store
         let wantsQuestion = list.columns.contains("question"), wantsAnswer = list.columns.contains("answer")
         guard wantsQuestion || wantsAnswer else { return }
         qaFetching.insert(page)
@@ -587,8 +692,10 @@ public final class BrowseResults {
             let cells = try? await Self.readQA(session, list.handle, list.revision, range, which, columns, presenter)
             guard self.epoch == epoch, let shown = self.list, shown.token == list.token else { return }
             qaFetching.remove(page)
-            guard let cells, shown.revision == list.revision, let rows = store.page(page).rows else { return }
-            store.page(page).rows = zip(rows, cells).map { $0.filling($1) }
+            // Cells read for another layout or before the page changed do not land.
+            guard let cells, self.store === store, shown.revision == list.revision, shown.columns == columns,
+                  store.page(page).generation == generation, let rows = store.page(page).rows else { return }
+            store.page(page).set(zip(rows, cells).map { $0.filling($1) }, keepingStale: true)
             store.page(page).pendingQA = false
         }
     }
@@ -631,7 +738,13 @@ public final class BrowseResults {
             let removed = Set(list.mode == .cards
                 ? changes.cards.filter { $0.change == .removed }.map(\.id)
                 : changes.notes.filter { $0.change == .removed }.map(\.id))
-            if !removed.isEmpty { store.markDeleted(removed) }
+            let indexes = store.indexes(of: removed)
+            guard !indexes.isEmpty, var shown = self.list else { return }
+            selection = Set(selection.compactMap { Self.shifted($0, removing: indexes) })
+            currentIndex = currentIndex.flatMap { Self.shifted($0, removing: indexes) }
+            shown.count -= indexes.count
+            store = store.removing(indexes, count: shown.count)
+            self.list = shown
             return
         }
         unapplied.append(sequenced)
@@ -643,7 +756,12 @@ public final class BrowseResults {
         applying = true
         let changes = unapplied, epoch = epoch
         Task {
-            defer { applying = false }
+            var again = false
+            defer {
+                applying = false
+                // Another list came meanwhile: its change sets are applied to it now.
+                if again, !unapplied.isEmpty { applyChanges() }
+            }
             let result: BrowseInvalidation
             do {
                 result = try await session.invalidatedRows(list.handle, revision: list.revision, changes: changes)
@@ -656,7 +774,10 @@ public final class BrowseResults {
                 return
             }
             guard self.epoch == epoch, var shown = self.list, shown.token == list.token, shown.revision == list.revision
-            else { return }
+            else {
+                again = true
+                return
+            }
             unapplied.removeFirst(min(changes.count, unapplied.count))
             if !result.removed.isEmpty {
                 let removed = result.removed.map { Int(clamping: $0) }
@@ -666,19 +787,19 @@ public final class BrowseResults {
                         ?? (Int(result.count) > 0 ? min(current - Self.below(current, removed), Int(result.count) - 1) : nil)
                     if let current = currentIndex, selection.isEmpty { selection = [current] }
                 }
-                store = store.removing(removed)
+                store = store.removing(removed, count: Int(clamping: result.count))
             }
             shown.revision = result.revision
             shown.count = Int(clamping: result.count)
             shown.isComplete = shown.isComplete || result.isComplete
             switch result.refetch {
-            case .all: store.unloadAll()
-            case .rows(let indexes): store.unload(indexes.map { Int(clamping: $0) })
+            case .all: store.markStaleAll()
+            case .rows(let indexes): store.markStale(indexes.map { Int(clamping: $0) })
             }
             self.list = shown
             if shown.isComplete, newest?.shown == true { stopProgress() }
             readNearRows()
-            if !unapplied.isEmpty { applyChanges() }
+            again = true
         }
     }
 
@@ -729,6 +850,7 @@ public final class BrowseResults {
                 shown.columns = set.columns(shown.mode)
                 self.list = shown
                 store = BrowseRowStore()
+                keptCenter = nil
                 fetching = []
                 qaFetching = []
                 readNearRows()
@@ -741,7 +863,7 @@ public final class BrowseResults {
         guard let list else { return }
         let kind: Request.Kind = list.isComplete && !list.released ? .resort(list.handle) : .search
         issue(Request(kind: kind, text: list.text, mode: list.mode, sort: sort, columns: list.columns,
-                      queryIsEmpty: list.queryIsEmpty, mapping: mapping()))
+                      queryIsEmpty: list.queryIsEmpty))
     }
 
     /// Use Standard Columns (V2.2): the own set becomes the standard set's copy.
@@ -754,9 +876,13 @@ public final class BrowseResults {
     // MARK: Counts and progress
 
     /// V11's t, counted with the sidebar's counts.
-    public func setTotal(_ total: UInt64?) {
+    public func setTotal(_ total: UInt64?, mode: BrowseMode) {
         if self.total != total { self.total = total }
+        if totalMode != mode { totalMode = mode }
     }
+
+    /// The mode `total` counts.
+    public private(set) var totalMode: BrowseMode = .cards
 
     private func startProgress() {
         progressTask?.cancel()
@@ -801,6 +927,7 @@ public final class BrowseResults {
         columnSet = nil
         total = nil
         failed = false
+        rejected = false
         hasRun = false
     }
 
@@ -827,7 +954,7 @@ public final class BrowseResults {
 
     /// The day changed: dates read "Today" and "Tomorrow" from another day.
     public func dayChanged() {
-        store.unloadAll()
+        store.markStaleAll()
         readNearRows()
     }
 
@@ -874,20 +1001,21 @@ public final class BrowseRowStore {
         return rows[offset]
     }
 
-    func loaded(_ number: Int) -> Bool { pages[number]?.rows != nil }
-
-    func unloadAll() {
-        for page in pages.values where page.rows != nil {
-            page.rows = nil
-            page.pendingQA = true
-        }
+    /// Read, and not marked stale since.
+    /// Read, not marked stale since, and holding every row the page has in
+    /// a list of `count` rows (a streaming list's last page grows).
+    func loaded(_ number: Int, count: Int) -> Bool {
+        guard let page = pages[number], let rows = page.rows, !page.stale else { return false }
+        return rows.count == min(Self.pageSize, count - number * Self.pageSize)
     }
 
-    func unload(_ indexes: [Int]) {
-        for number in Set(indexes.map { $0 / Self.pageSize }) {
-            pages[number]?.rows = nil
-            pages[number]?.pendingQA = true
-        }
+    /// The rows stay on screen until they are read again (no flash).
+    func markStaleAll() {
+        for page in pages.values where page.rows != nil { page.markStale() }
+    }
+
+    func markStale(_ indexes: [Int]) {
+        for number in Set(indexes.map { $0 / Self.pageSize }) { pages[number]?.markStale() }
     }
 
     func evict(around center: Int) {
@@ -895,38 +1023,43 @@ public final class BrowseRowStore {
         guard loaded.count > Self.keptPages else { return }
         for (number, page) in loaded.sorted(by: { abs($0.key - center) > abs($1.key - center) })
             .prefix(loaded.count - Self.keptPages) where abs(number - center) > 2 {
-            page.rows = nil
-            page.pendingQA = true
+            page.letGo()
         }
     }
 
-    /// The store after the rows at `removed` (ascending, read or not) go.
-    func removing(_ removed: [Int]) -> BrowseRowStore {
+    /// The indexes of the read rows whose id is in `ids`, ascending.
+    func indexes(of ids: Set<Int64>) -> [Int] {
+        var found: [Int] = []
+        for (number, page) in pages {
+            for (offset, row) in (page.rows ?? []).enumerated() where row.id.map(ids.contains) ?? false {
+                found.append(number * Self.pageSize + offset)
+            }
+        }
+        return found.sorted()
+    }
+
+    /// The store after the rows at `removed` (ascending, read or not) go,
+    /// for a list of `count` rows. A page comes back read only when every
+    /// row it holds in the new list is known.
+    func removing(_ removed: [Int], count: Int) -> BrowseRowStore {
         let next = BrowseRowStore()
         var moved: [Int: [Int: BrowseShownRow]] = [:]
+        var stale: Set<Int> = []
         for (number, page) in pages {
             guard let rows = page.rows else { continue }
             for (offset, row) in rows.enumerated() {
                 guard let index = BrowseResults.shifted(number * Self.pageSize + offset, removing: removed) else { continue }
                 moved[index / Self.pageSize, default: [:]][index % Self.pageSize] = row
+                if page.stale { stale.insert(index / Self.pageSize) }
             }
         }
-        // Only pages whose every row is known come back read.
-        for (number, rows) in moved where rows.count == Self.pageSize || rows.keys.max() == rows.count - 1 {
-            next.page(number).rows = (0..<rows.count).compactMap { rows[$0] }
+        for (number, rows) in moved {
+            let expected = min(Self.pageSize, count - number * Self.pageSize)
+            guard expected > 0, rows.count == expected, (0..<expected).allSatisfy({ rows[$0] != nil }) else { continue }
+            next.page(number).set((0..<expected).compactMap { rows[$0] })
+            if stale.contains(number) { next.page(number).markStale() }
         }
         return next
-    }
-
-    func markDeleted(_ ids: Set<Int64>) {
-        for page in pages.values {
-            guard let rows = page.rows, rows.contains(where: { $0.id.map(ids.contains) ?? false }) else { continue }
-            page.rows = rows.map { row in
-                guard let id = row.id, ids.contains(id) else { return row }
-                return BrowseShownRow(status: .deleted, id: nil, noteID: nil, state: nil, font: nil,
-                                      sortFieldRightToLeft: false, cells: row.cells.map { _ in .empty })
-            }
-        }
     }
 }
 
@@ -934,9 +1067,31 @@ public final class BrowseRowStore {
 @Observable @MainActor
 public final class BrowseRowPage {
     /// Nil until read (or after it is let go).
-    public internal(set) var rows: [BrowseShownRow]?
+    public private(set) var rows: [BrowseShownRow]?
+    /// The rows shown are older than a change: they are read again.
+    @ObservationIgnored private(set) var stale = false
+    /// Raised by every mark: a read begun before it does not land.
+    @ObservationIgnored private(set) var generation: UInt64 = 0
     /// Its Question and Answer cells are still to be read.
     @ObservationIgnored var pendingQA = true
+
+    func set(_ rows: [BrowseShownRow], keepingStale: Bool = false) {
+        self.rows = rows
+        if !keepingStale { stale = false }
+    }
+
+    func markStale() {
+        stale = true
+        pendingQA = true
+        generation &+= 1
+    }
+
+    func letGo() {
+        rows = nil
+        stale = false
+        pendingQA = true
+        generation &+= 1
+    }
 }
 
 extension ColumnSetShown {
@@ -975,7 +1130,8 @@ public nonisolated struct BrowseStatus: Equatable, Sendable {
     }
 
     @MainActor public init(results: BrowseResults, query: FilterQuery) {
-        self.init(shown: results.list?.count ?? 0, total: results.total, mode: results.list?.mode ?? .cards,
+        let mode = results.list?.mode ?? .cards
+        self.init(shown: results.list?.count ?? 0, total: results.totalMode == mode ? results.total : nil, mode: mode,
                   wholeCollection: results.list?.queryIsEmpty ?? query.isEmpty, searching: results.showsProgress,
                   selected: results.selection.count)
     }

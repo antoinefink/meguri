@@ -247,10 +247,10 @@ extension TestHooks {
             guard running == nil, let model = model ?? collection?() else { return }
             running = Task { @MainActor in
                 let results = model.results
-                let count = results.list?.count ?? 0
                 var index = 0
                 for _ in 0..<Self.frames {
-                    index = (index + Self.rowsPerFrame) % max(count, 1)
+                    // The list as it is now: a streaming one grows while it scrolls.
+                    index = (index + Self.rowsPerFrame) % max(results.list?.count ?? 0, 1)
                     results.scroll(to: index)
                     try? await Task.sleep(for: .milliseconds(16))
                 }

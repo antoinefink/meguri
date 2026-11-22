@@ -189,14 +189,16 @@ nonisolated struct BrowseFormatter: BrowseRowPresenting {
     /// C12's rounded percent of an `f32`, halves to even.
     private func percent(_ value: Float) -> String {
         guard value.isFinite else { return "\(value.isNaN ? "NaN" : value > 0 ? "inf" : "-inf")%" }
-        return (Double(value) / 100).formatted(.percent.precision(.fractionLength(0)).rounded(rule: .toNearestOrEven)
-            .locale(locale))
+        // Rounded on the value itself, so a half rounds to even exactly.
+        let whole = Double(value).rounded(.toNearestOrEven)
+        return (whole / 100).formatted(.percent.precision(.fractionLength(0)).locale(locale))
     }
 
     /// C12's time span: the unit by the thresholds of the answer buttons,
     /// whole seconds and days, one decimal for the others.
     func span(_ seconds: Float) -> String {
-        guard seconds.isFinite else { return "\(seconds)" }
+        // C12: an infinite span is in years ("inf years").
+        guard seconds.isFinite else { return strings.span(.years, 2, seconds.isNaN ? "NaN" : seconds > 0 ? "inf" : "-inf") }
         let magnitude = abs(seconds)
         let (unit, length): (Strings.Unit, Float) = switch magnitude {
         case ..<60: (.seconds, 1)
