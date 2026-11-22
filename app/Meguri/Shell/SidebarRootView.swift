@@ -65,6 +65,14 @@ struct SidebarRootView: View {
                             #endif
                             .navigationDestination(for: Destination.self) { destination in
                                 SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+                                    #if !os(macOS)
+                                    // A page pushed in those sections (a note type's) keeps it too.
+                                    .toolbar {
+                                        if let syncStatus = features.syncStatus, sectionTakesSyncItem {
+                                            ToolbarItem(placement: .primaryAction) { syncStatus() }
+                                        }
+                                    }
+                                    #endif
                             }
                     }
                     #if !os(macOS)
