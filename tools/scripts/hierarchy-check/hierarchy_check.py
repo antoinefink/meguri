@@ -589,7 +589,8 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
                 and e not in disclosure_chevrons
                 and not (e.type in ROWS and e.identified_inside())
                 and not (e.type == "cell" and e.parent is not None and e.parent.type in ROWS
-                         and e.parent.identified_inside())
+                         and ((e.parent.identifier and not is_system_identifier(e.parent))
+                              or e.parent.identified_inside()))
                 and e not in segment_buttons):
             issues.append(dict(kind="missing-identifier", message="%s '%s' has no accessibility identifier" % (e.type, e.label),
                                **describe(e)))

@@ -26,8 +26,9 @@ final class BrowserSearchPerfTests: PerfTestCase {
         post("\(bundle).testhooks.showBrowse")
         let status = app.staticTexts["browse.status.text"]
         XCTAssert(status.waitForExistence(timeout: 60), "Browse's table did not show")
-        // The whole collection's first page is shown.
-        XCTAssert(app.descendants(matching: .any)["browse.results.table"].waitForExistence(timeout: 60))
+        // The whole collection's first page of rows is shown: a row named by its card.
+        let firstRow = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'browse.table.row.'")).firstMatch
+        XCTAssert(firstRow.waitForExistence(timeout: 120), "Browse showed no rows of the 150k collection")
         let done = "\(bundle).testhooks.browseScrolled"
         try measure(app: app) { _ in
             let finished = expectation(forNotification: Notification.Name(done), object: nil,

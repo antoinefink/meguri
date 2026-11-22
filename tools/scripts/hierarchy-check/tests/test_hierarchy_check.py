@@ -1253,6 +1253,9 @@ class NativeTableCellsAndSegments(unittest.TestCase):
         segments = el("radioGroup", "browse.toolbar.mode", "Cards or Notes", f=(500, 0, 120, 30), children=[
             el("radioButton", label="Cards", f=(500, 0, 60, 30)), el("radioButton", label="Notes", f=(560, 0, 60, 30))])
         self.assertEqual(hierarchy_check.check(doc(el("outline", "sample.screen.table", f=(0, 0, 400, 400), children=[row]), segments)), [])
+        # A row named itself, with empty cells.
+        named = el("outlineRow", "sample.screen.row", f=(0, 0, 400, 20), children=[el("cell", f=(0, 0, 20, 20)), el("cell", f=(20, 0, 200, 20))])
+        self.assertEqual(hierarchy_check.check(doc(el("outline", "sample.screen.table", f=(0, 0, 400, 400), children=[named]))), [])
 
     def test_cells_of_an_unnamed_row_and_unnamed_segments_are_still_reported(self):
         row = el("outlineRow", f=(0, 0, 400, 20), children=[el("cell", f=(0, 0, 20, 20)), el("cell", f=(20, 0, 200, 20))])
