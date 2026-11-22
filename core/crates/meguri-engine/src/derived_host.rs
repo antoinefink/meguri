@@ -132,6 +132,52 @@ pub trait DerivedComponent: Send + Sync + 'static {
     /// files, an overlay), after its persist. Runs on the derived writer,
     /// only by [`DerivedHost::release`].
     fn release(&self) {}
+
+    /// Called once at start with the component's handle to its derived
+    /// writer, for a component that owns files (D1).
+    fn attach(&self, handle: ComponentHandle) {
+        let _ = handle;
+    }
+
+    /// The component's files that `live` (the names its live record rows
+    /// hold) does not name but a reader still maps: the derived writer keeps
+    /// them until the last reader lets go (D1, D7). The component may drop
+    /// its own maps of the others here. Runs on the derived writer.
+    fn files_in_use(&self, live: &std::collections::HashSet<String>) -> std::collections::HashSet<String> {
+        let _ = live;
+        std::collections::HashSet::new()
+    }
+}
+
+/// What a component that owns files may ask its derived writer for, from
+/// any thread (D1, D7; `stats/graphs-common` G9.3). Both requests are
+/// queued and return at once.
+#[derive(Clone)]
+pub struct ComponentHandle {
+    sender: Sender<Msg>,
+    slot: usize,
+}
+
+impl fmt::Debug for ComponentHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ComponentHandle").field("slot", &self.slot).finish()
+    }
+}
+
+impl ComponentHandle {
+    /// Deletes the component's files that no live record row names and no
+    /// reader maps (the last reader of a superseded file let go).
+    pub fn sweep(&self) {
+        let _ = self.sender.send(Msg::Sweep(self.slot));
+    }
+
+    /// A file that the live rows `names` name does not load: when those are
+    /// still the live rows' names and the component is ready, it gets
+    /// `ready` 0 and a queued rebuild (G9.3). Names a later swap or merge
+    /// replaced change nothing.
+    pub fn rebuild_if_named(&self, names: Vec<String>) {
+        let _ = self.sender.send(Msg::RebuildIfNamed(self.slot, names));
+    }
 }
 
 /// What a component's persist writes through (D4): its directory of files
@@ -252,6 +298,8 @@ trait Erased: Send + Sync {
     fn capture_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Capture<AnyDelta>;
     fn persist(&self, store: &mut ComponentStore<'_>) -> Result<(), EngineError>;
     fn release(&self);
+    fn attach(&self, handle: ComponentHandle);
+    fn files_in_use(&self, live: &std::collections::HashSet<String>) -> std::collections::HashSet<String>;
 }
 
 struct Adapter<C>(C);
@@ -300,6 +348,14 @@ impl<C: DerivedComponent> Erased for Adapter<C> {
     fn release(&self) {
         self.0.release();
     }
+
+    fn attach(&self, handle: ComponentHandle) {
+        self.0.attach(handle);
+    }
+
+    fn files_in_use(&self, live: &std::collections::HashSet<String>) -> std::collections::HashSet<String> {
+        self.0.files_in_use(live)
+    }
 }
 
 /// What the derived writer is asked to do.
@@ -337,6 +393,10 @@ enum Msg {
     RequestRefresh(String),
     /// A consumer's `release` (D4): persist, then release, then the answer.
     Release(String, SyncSender<()>),
+    /// A component's [`ComponentHandle::sweep`].
+    Sweep(usize),
+    /// A component's [`ComponentHandle::rebuild_if_named`].
+    RebuildIfNamed(usize, Vec<String>),
     Flush(SyncSender<()>),
     Suspend(SyncSender<()>),
     ReleaseForSuspend(SyncSender<Result<(), EngineError>>),
@@ -510,6 +570,14 @@ impl DerivedHostBuilder {
             changed: Condvar::new(),
         });
         let (sender, inbox) = mpsc::channel();
+        for (slot, component) in shared.components.iter().enumerate() {
+            if shared.registry.schemas()[slot].files.is_some() {
+                component.attach(ComponentHandle {
+                    sender: sender.clone(),
+                    slot,
+                });
+            }
+        }
         let worker = Worker::new(Arc::clone(&shared), inbox, sender.clone());
         let writer = shared
             .threads
@@ -1202,6 +1270,8 @@ impl Worker {
                     self.holds[slot] = false;
                 }
             }
+            Msg::Sweep(slot) => self.sweep_files(slot),
+            Msg::RebuildIfNamed(slot, names) => self.rebuild_if_named(slot, names),
             Msg::Release(name, ack) => {
                 if let Some(slot) = self.slot_of(&name) {
                     self.persist_slot(slot);
@@ -1801,6 +1871,9 @@ impl Worker {
                             self.shared
                                 .set_readiness(&mut state, slot, generation, Readiness::Ready, cause);
                         }
+                        // D7: the files the old rows named, once no reader
+                        // maps them.
+                        self.sweep_files(slot);
                     }
                     Err(error) => {
                         tracing::warn!(component = %schema.name, %error, "finishing a derived refresh");
@@ -2083,6 +2156,66 @@ impl Worker {
         state.collection = None;
         state.closed = true;
         self.shared.changed.notify_all();
+    }
+
+    /// D1, D7: deletes the component's files that neither its live record
+    /// rows nor a reader's map hold. Never while its refresh runs: that
+    /// refresh's new files are named only at its swap, which sweeps then.
+    fn sweep_files(&mut self, slot: usize) {
+        if self.running.as_ref().is_some_and(|running| running.slot == slot) {
+            return;
+        }
+        let schema = self.shared.registry.schemas()[slot].clone();
+        let (Some(_), Some(file)) = (&schema.files, self.file.as_ref()) else {
+            return;
+        };
+        let live = match file.named_files(&schema) {
+            Ok(live) => live,
+            Err(error) => {
+                tracing::warn!(component = %schema.name, %error, "reading the derived file records");
+                return;
+            }
+        };
+        let component = Arc::clone(&self.shared.components[slot]);
+        let in_use = match guarded(|| Ok(component.files_in_use(&live))) {
+            Ok(in_use) => in_use,
+            Err(error) => {
+                tracing::warn!(component = %schema.name, %error, "a derived component's files in use");
+                return;
+            }
+        };
+        let mut keep = live;
+        keep.extend(in_use);
+        for error in derived::files::sweep_dir(&file.component_dir(&schema.name), &keep) {
+            tracing::warn!(component = %schema.name, %error, "deleting derived files");
+        }
+    }
+
+    /// G9.3: a live file that does not load is a rebuild, unless the rows
+    /// that named it are no longer the live ones.
+    fn rebuild_if_named(&mut self, slot: usize, names: Vec<String>) {
+        if self.slots[slot] != SlotState::Ready {
+            return;
+        }
+        let schema = self.shared.registry.schemas()[slot].clone();
+        let Some(file) = self.file.as_ref() else { return };
+        let live = match file.named_files(&schema) {
+            Ok(live) => live,
+            Err(error) => {
+                tracing::warn!(component = %schema.name, %error, "reading the derived file records");
+                return;
+            }
+        };
+        if live != names.into_iter().collect() {
+            return;
+        }
+        tracing::warn!(component = %schema.name, "a live derived file does not load: rebuilding");
+        if let Err(error) = self.clear_ready(&[slot]) {
+            tracing::warn!(%error, "the derived store cannot record that a component is stale");
+            self.unbind(None);
+            return;
+        }
+        self.queue_refresh(slot, Kind::Rebuild, None);
     }
 
     fn slot_of(&self, name: &str) -> Option<usize> {

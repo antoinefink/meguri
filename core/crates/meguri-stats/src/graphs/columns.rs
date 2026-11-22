@@ -19,17 +19,37 @@ const VERSION: u32 = 1;
 const KIND_CARDS: u8 = 1;
 const KIND_REVLOG: u8 = 2;
 
+/// A mapped column file and what to do once nothing reads it.
+pub(crate) struct MappedBytes {
+    pub file: MappedFile,
+    pub on_drop: Option<Box<dyn FnOnce() + Send + Sync>>,
+}
+
+impl std::fmt::Debug for MappedBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.file.fmt(f)
+    }
+}
+
+impl Drop for MappedBytes {
+    fn drop(&mut self) {
+        if let Some(done) = self.on_drop.take() {
+            done();
+        }
+    }
+}
+
 /// The bytes of a table image.
 #[derive(Clone, Debug)]
 pub(crate) enum Backing {
-    Mapped(Arc<MappedFile>),
+    Mapped(Arc<MappedBytes>),
     Owned(Arc<Vec<u8>>),
 }
 
 impl Backing {
     fn bytes(&self) -> &[u8] {
         match self {
-            Backing::Mapped(file) => file.bytes(),
+            Backing::Mapped(mapped) => mapped.file.bytes(),
             Backing::Owned(bytes) => bytes,
         }
     }

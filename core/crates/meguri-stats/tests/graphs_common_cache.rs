@@ -570,11 +570,65 @@ fn g9_3_a_file_that_no_longer_matches_its_row_is_rebuilt_at_the_next_persist() {
     assert!(f.host.derived().wait_idle(WAIT));
     // Fresh at bind, but its files do not match: requests compute from the
     // snapshot, with the same values.
+    assert_eq!(readiness(&f), Readiness::Ready);
     let served = outcome(f.request(Scope::Collection, History::AllHistory));
     assert!(matches!(served, Outcome::Data { cached: false, .. }));
+    // That request queued the rebuild at once: no commit, no persist. It
+    // waits for the open's homeIdle like any rebuild (G9.2).
+    f.host.derived().flush().unwrap();
+    assert_eq!(readiness(&f), Readiness::Stale);
     compare(&f, false, "a damaged file");
     meguri_stats::graphs::stats_home_idle(f.host.derived());
-    meguri_stats::graphs::release_stats_caches(f.host.stats(), f.host.derived());
     wait_ready(&f);
     compare(&f, true, "rebuilt");
+}
+
+fn column_files(f: &Fixture) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(f.path().with_file_name("meguri-derived.files").join(COMPONENT))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+fn rebuild(f: &Fixture) {
+    f.host
+        .derived()
+        .invalidate(meguri_engine::derived_host::Invalidation::CheckDatabase);
+    f.host.derived().flush().unwrap();
+    wait_ready(f);
+}
+
+#[test]
+fn d7_a_swap_deletes_the_old_files_once_no_reader_maps_them() {
+    let f = Fixture::new();
+    f.host.derived().request_refresh(COMPONENT);
+    wait_ready(&f);
+    let first = column_files(&f);
+    assert_eq!(first.len(), 2);
+    // No reader holds them: the swap deletes them.
+    rebuild(&f);
+    let second = column_files(&f);
+    assert_eq!(second.len(), 2);
+    assert!(second.iter().all(|name| !first.contains(name)));
+    // A request still holds the base it read: kept through the swap...
+    let held = match f.request(Scope::Collection, History::AllHistory) {
+        GraphResult::Data(data) => data,
+        other => panic!("{other:?}"),
+    };
+    assert!(held.scope.from_caches());
+    rebuild(&f);
+    let third = column_files(&f);
+    assert_eq!(third.len(), 4, "{third:?}");
+    assert!(second.iter().all(|name| third.contains(name)));
+    // ...and deleted once the last map of them goes (the memo of that
+    // refresh goes with a newer refresh's first request).
+    drop(held);
+    let _ = f.request(Scope::Collection, History::AllHistory);
+    f.host.derived().flush().unwrap();
+    let last = column_files(&f);
+    assert_eq!(last.len(), 2, "{last:?}");
+    assert!(second.iter().all(|name| !last.contains(name)));
+    compare(&f, true, "after the swaps");
 }

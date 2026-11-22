@@ -15,11 +15,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use meguri_engine::changes::observers::RowAfter;
 use meguri_engine::derived_host::{
-    BuildSink, Capture, ComponentSchema, ComponentStore, ComponentTables, DerivedComponent, TableDef,
+    BuildSink, Capture, ComponentHandle, ComponentSchema, ComponentStore, ComponentTables, DerivedComponent, TableDef,
 };
 use meguri_engine::{EngineError, ObservedCommit, ObserverRows, Snapshot};
 use meguri_model::changes::ChangeKind;
@@ -27,7 +27,7 @@ use meguri_model::ids::CardId;
 use meguri_storage::derived::MappedFile;
 use meguri_storage::{Cell, ReadRows, RowImage, RowKey, Table};
 
-use super::columns::{Backing, CardTable, CardsBuilder, RevlogBuilder, RevlogTable, checksum};
+use super::columns::{Backing, CardTable, CardsBuilder, MappedBytes, RevlogBuilder, RevlogTable, checksum};
 use super::overlay::{CardKey, Change, Entry, Patch, View};
 use super::rows::{self, RowRead};
 
@@ -105,9 +105,6 @@ struct State {
     revlog: HashMap<String, Arc<RevlogTable>>,
     /// Advanced by each release: a map begun before it is not kept.
     epoch: u64,
-    /// A file the live rows name did not load: the next commit's capture
-    /// asks for a rebuild (G9.3).
-    rebuild: bool,
     next_name: u64,
 }
 
@@ -115,6 +112,11 @@ struct State {
 #[derive(Default)]
 pub(crate) struct Shared {
     state: Mutex<State>,
+    /// The component's handle to its derived writer (D1, G9.3).
+    handle: Mutex<Option<ComponentHandle>>,
+    /// Every file mapped, while any map of it lives (a request's or the
+    /// cache's): the derived writer keeps these (D7).
+    open: Mutex<HashMap<String, Weak<MappedBytes>>>,
 }
 
 impl Shared {
@@ -124,7 +126,46 @@ impl Shared {
 
     /// Maps the file a record names, checking its length and checksum
     /// (G9.3), or takes the map already held.
-    fn card_table(&self, dir: &Path, record: &FileRecord) -> Result<Arc<CardTable>, EngineError> {
+    fn handle(&self) -> Option<ComponentHandle> {
+        self.handle.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// Maps the file a record names, checking its length and checksum
+    /// (G9.3). Once no map of it is left, the derived writer is asked to
+    /// sweep: it deletes the file if no row names it (D7).
+    fn map(self: &Arc<Shared>, dir: &Path, record: &FileRecord) -> Result<Arc<MappedBytes>, EngineError> {
+        let owner = Arc::downgrade(self);
+        let mapped = Arc::new(MappedBytes {
+            file: map(dir, record)?,
+            on_drop: Some(Box::new(move || {
+                if let Some(handle) = owner.upgrade().and_then(|shared| shared.handle()) {
+                    handle.sweep();
+                }
+            })),
+        });
+        self.open
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(record.name.clone(), Arc::downgrade(&mapped));
+        Ok(mapped)
+    }
+
+    /// The files `live` does not name that a map still holds (D7). The
+    /// cache's own maps of them go first, outside the state lock.
+    fn files_in_use(&self, live: &HashSet<String>) -> HashSet<String> {
+        let superseded = {
+            let mut state = self.lock();
+            let cards: Vec<Arc<CardTable>> = take_unnamed(&mut state.cards, live);
+            let revlog: Vec<Arc<RevlogTable>> = take_unnamed(&mut state.revlog, live);
+            (cards, revlog)
+        };
+        drop(superseded);
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        open.retain(|_, mapped| mapped.strong_count() > 0);
+        open.keys().filter(|name| !live.contains(*name)).cloned().collect()
+    }
+
+    fn card_table(self: &Arc<Shared>, dir: &Path, record: &FileRecord) -> Result<Arc<CardTable>, EngineError> {
         let epoch = {
             let state = self.lock();
             if let Some(table) = state.cards.get(&record.name) {
@@ -133,7 +174,7 @@ impl Shared {
             state.epoch
         };
         let table = Arc::new(
-            CardTable::open(Backing::Mapped(Arc::new(map(dir, record)?)))
+            CardTable::open(Backing::Mapped(self.map(dir, record)?))
                 .map_err(|e| internal(format!("the card copy {}: {}", record.name, e.0)))?,
         );
         let mut state = self.lock();
@@ -143,7 +184,7 @@ impl Shared {
         Ok(table)
     }
 
-    fn revlog_table(&self, dir: &Path, record: &FileRecord) -> Result<Arc<RevlogTable>, EngineError> {
+    fn revlog_table(self: &Arc<Shared>, dir: &Path, record: &FileRecord) -> Result<Arc<RevlogTable>, EngineError> {
         let epoch = {
             let state = self.lock();
             if let Some(table) = state.revlog.get(&record.name) {
@@ -152,7 +193,7 @@ impl Shared {
             state.epoch
         };
         let table = Arc::new(
-            RevlogTable::open(Backing::Mapped(Arc::new(map(dir, record)?)))
+            RevlogTable::open(Backing::Mapped(self.map(dir, record)?))
                 .map_err(|e| internal(format!("the review-log copy {}: {}", record.name, e.0)))?,
         );
         let mut state = self.lock();
@@ -198,7 +239,7 @@ impl Shared {
     /// The view of the copies for `snapshot`, which `is_current` found
     /// current; `None` when they cannot serve it (no base, a file that does
     /// not match its row, entries already dropped).
-    pub(crate) fn view(&self, snapshot: &Snapshot<'_>, dir: &Path) -> Option<View> {
+    pub(crate) fn view(self: &Arc<Shared>, snapshot: &Snapshot<'_>, dir: &Path) -> Option<View> {
         let rows = match snapshot.derived_rows(COMPONENT, FILES, "name, kind, length, checksum, base_seq") {
             Ok(rows) => rows,
             Err(error) => {
@@ -214,11 +255,13 @@ impl Shared {
         let (cards, revlog) = match tables {
             Ok(tables) => tables,
             Err(error) => {
-                // The rows this current snapshot reads name the live base: it
-                // is damaged, which is a rebuild (G9.3), asked by the next
-                // commit's capture or the next persist.
+                // A file of the base these rows name is damaged or gone: a
+                // rebuild (G9.3), which the writer queues only while these
+                // are still the live rows (not a base a swap replaced).
                 tracing::warn!(%error, "mapping the stats column files");
-                self.lock().rebuild = true;
+                if let Some(handle) = self.handle() {
+                    handle.rebuild_if_named(vec![card_file.name.clone(), revlog_file.name.clone()]);
+                }
                 return None;
             }
         };
@@ -281,6 +324,12 @@ impl Shared {
             base_seq: i64::try_from(base_seq).unwrap_or(i64::MAX),
         })
     }
+}
+
+/// Takes out of `maps` the entries whose name `live` does not hold.
+fn take_unnamed<T>(maps: &mut HashMap<String, Arc<T>>, live: &HashSet<String>) -> Vec<Arc<T>> {
+    let names: Vec<String> = maps.keys().filter(|name| !live.contains(*name)).cloned().collect();
+    names.into_iter().filter_map(|name| maps.remove(&name)).collect()
 }
 
 fn map(dir: &Path, record: &FileRecord) -> Result<MappedFile, EngineError> {
@@ -526,6 +575,14 @@ impl DerivedComponent for StatsColumns {
         Some(HOME_IDLE)
     }
 
+    fn attach(&self, handle: ComponentHandle) {
+        *self.shared.handle.lock().unwrap_or_else(PoisonError::into_inner) = Some(handle);
+    }
+
+    fn files_in_use(&self, live: &HashSet<String>) -> HashSet<String> {
+        self.shared.files_in_use(live)
+    }
+
     /// G9.3, G9.5: merges the overlay into new files whose rows replace the
     /// old ones, then deletes the files no row names and no reader maps.
     fn persist(&self, store: &mut ComponentStore<'_>) -> Result<(), EngineError> {
@@ -582,14 +639,9 @@ impl DerivedComponent for StatsColumns {
                 *pruned = (*pruned).max(through);
             }
         }
-        // Files that only a reader still maps stay until a later sweep.
+        // Files a reader still maps stay until its last map goes (D7).
         let live = store.named()?;
-        let keep: HashSet<String> = {
-            let mut state = self.shared.lock();
-            state.cards.retain(|name, table| live.contains(name) || Arc::strong_count(table) > 1);
-            state.revlog.retain(|name, table| live.contains(name) || Arc::strong_count(table) > 1);
-            state.cards.keys().chain(state.revlog.keys()).cloned().collect()
-        };
+        let keep = self.shared.files_in_use(&live);
         for error in store.sweep(&keep) {
             tracing::warn!(%error, "deleting stats column files");
         }
@@ -614,9 +666,6 @@ impl DerivedComponent for StatsColumns {
 
 impl StatsColumns {
     fn capture_rows(&self, commit: &ObservedCommit<'_>, rows: Option<&ObserverRows<'_>>) -> Capture<ColumnsDelta> {
-        if std::mem::take(&mut self.shared.lock().rebuild) {
-            return Capture::Rebuild;
-        }
         let changes = commit.changes;
         if changes.cards.is_empty() && changes.revlog_added.is_empty() && changes.revlog_removed.is_empty() {
             return Capture::Nothing;
