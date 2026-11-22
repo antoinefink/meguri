@@ -61,16 +61,24 @@ public struct CloudSyncStatusButton: View {
     public var body: some View {
         // N23.6: one plain toolbar symbol, like its neighbours. A tap syncs at once
         // in the ordinary states and opens the panel only where a sync cannot
-        // resolve the state; a long press (a secondary click on the Mac) shows
-        // the status line, Sync Now and Sync Settings. No text beside it and
+        // resolve the state; a long press (click and hold on the Mac) shows the
+        // status line, Sync Now and Sync Settings. A secondary click on a Mac
+        // toolbar is the system's own toolbar menu. No text beside it and
         // no view around it, so the system draws it as one item of its group.
         Menu {
             menuItems
         } label: {
-            // N23.2: the moving symbol turns exactly while the panel's bar shows.
-            SyncStatusSymbol(status: main, iCloud: collection.sync.symbolsAreICloud,
-                turning: !reduceMotion && collection.sync.panelProgress != nil,
-                accented: feedback.accented)
+            // A Label, as Search and Add have: the toolbar shows its icon alone, and
+            // the system's own bar button takes the title, so no inner element is
+            // left without a name. N23.2: the moving symbol turns exactly while the
+            // panel's bar shows.
+            Label {
+                Text(SyncText.value("sync.button.accessibilityLabel"))
+            } icon: {
+                SyncStatusSymbol(status: main, iCloud: collection.sync.symbolsAreICloud,
+                    turning: !reduceMotion && collection.sync.panelProgress != nil,
+                    accented: feedback.accented)
+            }
         } primaryAction: {
             tap()
         }
@@ -81,10 +89,6 @@ public struct CloudSyncStatusButton: View {
         .help([SyncText.value(titleKey), SyncStatusCopy.detail(collection.sync, now: clock.now())]
             .compactMap { $0 }.joined(separator: "\n"))
         .accessibilityIdentifier("sync.status.button")
-        #if os(macOS)
-        // A secondary click shows the same menu as a long press (N23.6).
-        .contextMenu { menuItems }
-        #endif
         .disabled(collection.syncPresentation.statusHandoffPending)
         .popover(isPresented: presented(compact: false)) {
             // N23.1: 320 points wide, as tall as its content.
