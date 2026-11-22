@@ -308,6 +308,12 @@ public final class BrowseModel {
         if visible, ready() { reload() }
     }
 
+    /// The scheduler day or the time zone changed: day values count again.
+    public func dayChanged() {
+        stale = true
+        if visible, ready() { reload() }
+    }
+
     /// The collection became ready again (a new generation): its names and
     /// counts are read again.
     public func collectionReady() {
@@ -376,7 +382,8 @@ public final class BrowseModel {
             if let notetypeList { self.notetypes = notetypeList }
             if let tagTree { self.tags = tagTree; tagExpansion = [:] }
             if let flagList { flagNames = flagList }
-            refreshCounts()
+            // Hidden meanwhile: the counts are read when Browse shows again.
+            if visible { refreshCounts() } else { stale = true }
         }
     }
 

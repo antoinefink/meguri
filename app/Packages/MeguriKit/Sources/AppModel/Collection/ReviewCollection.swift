@@ -1159,6 +1159,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         case .rolledOver, .timeZoneChanged:
             refreshCounts()
             studyWarmup.invalidate()
+            // Day values (Due Today, Added in Last 7 Days) count another day now.
+            browseOwner?.dayChanged()
         case .changes(let changes):
             refreshCounts()
             // Any change, a sync's or an options save included, may move the first card;
