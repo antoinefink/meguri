@@ -24,7 +24,7 @@ final class TapZoneUITests: XCTestCase {
         XCTAssertEqual(answered(app), 0)
 
         // The card's link is the card's: no reveal.
-        let link = app.links["more 1"]
+        let link = moreLink(app)
         XCTAssertTrue(link.waitForExistence(timeout: 10), "The front's link")
         link.tap()
         XCTAssertFalse(waitForAnswer(app, timeout: 2), "A tap on the card's link does not reveal")
@@ -41,7 +41,7 @@ final class TapZoneUITests: XCTestCase {
         play.tap()
         XCTAssertFalse(waitForAnswered(app, 1, timeout: 2), "A tap on the audio control does not answer")
         XCTAssertTrue(isAnswer(app))
-        let answerLink = app.links["more 1"]
+        let answerLink = moreLink(app)
         XCTAssertTrue(answerLink.waitForExistence(timeout: 10))
         answerLink.tap()
         XCTAssertFalse(waitForAnswered(app, 1, timeout: 2), "A tap on the card's link does not answer")
@@ -88,6 +88,11 @@ final class TapZoneUITests: XCTestCase {
     }
 
     // MARK: Helpers
+
+    /// The front's link ("more N": the session's card order is the scheduler's).
+    private func moreLink(_ app: XCUIApplication) -> XCUIElement {
+        app.links.matching(NSPredicate(format: "label BEGINSWITH %@", "more ")).firstMatch
+    }
 
     private func tap(_ card: XCUIElement, x: CGFloat) {
         // Double Tap Prevention (250 ms after an answer, and after the answer
@@ -164,6 +169,8 @@ final class TapZoneUITests: XCTestCase {
         guard build.hasHooks, try build.bundleIdentifier.hasSuffix(".dev") else {
             throw XCTSkip("The generated recipe requires an isolated development test container")
         }
+        // A pool simulator can be left turned by an earlier run.
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/tap-zones-1"),
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false,
