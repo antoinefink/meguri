@@ -2,9 +2,11 @@ import Foundation
 
 /// Edit › Undo and Redo (R173, R174, N20.4): one item each, titled after what
 /// it undoes. A text input that owns undo keeps it; during review the answers
-/// are the target while the card owns the keys; otherwise the collection's history.
+/// are the target while the card owns the keys; while Note Types shows and its
+/// draft has steps, the draft's own undo (`notetypes/workspace` W13); otherwise
+/// the collection's history.
 public nonisolated enum EditUndoRouting {
-    public enum Target: Equatable, Sendable { case text, review, collection }
+    public enum Target: Equatable, Sendable { case text, review, draft, collection }
     public enum Title: Equatable, Sendable {
         /// The text input's own title ("Undo Typing").
         case text(String)
@@ -27,6 +29,8 @@ public nonisolated enum EditUndoRouting {
         public var reviewOwnsKeys = false
         /// The review's newest step while it can be undone (or redone).
         public var reviewStep: String?
+        /// The Note Types draft's newest step while Note Types shows (W13).
+        public var draftStep: String?
         /// The collection's newest step while it can be undone (or redone).
         public var collectionStep: String?
         public init(textOwnsUndo: Bool = false, textAvailable: Bool = false, textTitle: String? = nil,
@@ -49,6 +53,7 @@ public nonisolated enum EditUndoRouting {
             }
             return Route(target: .review, title: .named(step), enabled: true)
         }
+        if let step = inputs.draftStep { return Route(target: .draft, title: .named(step), enabled: true) }
         guard let step = inputs.collectionStep else { return Route(target: .collection, title: .plain, enabled: false) }
         return Route(target: .collection, title: .named(step), enabled: true)
     }

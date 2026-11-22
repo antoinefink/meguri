@@ -1,0 +1,85 @@
+{
+  "golden": "conformance/goldens/render/image-occlusion/review/fixtures.json",
+  "copies": [
+    {
+      "file": "IO1-question.html",
+      "pointer": "/observations/steps/0/template/0/question"
+    },
+    {
+      "file": "IO1-answer.html",
+      "pointer": "/observations/steps/0/template/0/answer"
+    },
+    {
+      "file": "IO2-question.html",
+      "pointer": "/observations/steps/0/template/1/question"
+    },
+    {
+      "file": "IO2-answer.html",
+      "pointer": "/observations/steps/0/template/1/answer"
+    },
+    {
+      "file": "IO3-question.html",
+      "pointer": "/observations/steps/0/template/2/question"
+    },
+    {
+      "file": "IO3-answer.html",
+      "pointer": "/observations/steps/0/template/2/answer"
+    },
+    {
+      "file": "IO4-question.html",
+      "pointer": "/observations/steps/0/template/3/question"
+    },
+    {
+      "file": "IO4-answer.html",
+      "pointer": "/observations/steps/0/template/3/answer"
+    },
+    {
+      "file": "IO5-question.html",
+      "pointer": "/observations/steps/0/template/4/question"
+    },
+    {
+      "file": "IO5-answer.html",
+      "pointer": "/observations/steps/0/template/4/answer"
+    },
+    {
+      "file": "IO6-question.html",
+      "pointer": "/observations/steps/0/template/5/question"
+    },
+    {
+      "file": "IO6-answer.html",
+      "pointer": "/observations/steps/0/template/5/answer"
+    },
+    {
+      "file": "IO7-question.html",
+      "pointer": "/observations/steps/0/template/6/question"
+    },
+    {
+      "file": "IO7-answer.html",
+      "pointer": "/observations/steps/0/template/6/answer"
+    },
+    {
+      "file": "IO8-question.html",
+      "pointer": "/observations/steps/0/template/7/question"
+    },
+    {
+      "file": "IO8-answer.html",
+      "pointer": "/observations/steps/0/template/7/answer"
+    },
+    {
+      "file": "IO9-question.html",
+      "pointer": "/observations/steps/0/template/8/question"
+    },
+    {
+      "file": "IO9-answer.html",
+      "pointer": "/observations/steps/0/template/8/answer"
+    },
+    {
+      "file": "IO10-question.html",
+      "pointer": "/observations/steps/1/template/0/question"
+    },
+    {
+      "file": "IO10-answer.html",
+      "pointer": "/observations/steps/1/template/0/answer"
+    }
+  ]
+}

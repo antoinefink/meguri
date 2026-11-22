@@ -3,7 +3,8 @@
 //! sessions that hold result handles (`search`, `browser/result-sets`), and
 //! the filter counts of the sidebar and the suggestions (`counts`,
 //! `search/filter-tokens` T12.4), and the counts of a selection
-//! (`search::selection_counts`, `browser/workspace` V7, V8.1).
+//! (`search::selection_counts`, `browser/workspace` V7, V8.1), and Find
+//! Duplicates (`search::find_duplicates`, V10).
 pub mod counts;
 mod excerpts;
 pub mod name_index;
@@ -15,5 +16,5 @@ pub use meguri_search::browser::qa::{Answer, Question};
 pub use counts::FilterCounts;
 pub use name_index::NameIndexProvider;
 pub use rows::{Row, RowFailure, RowRequest, RowResult, rows};
-pub use search::{SelectionCounts, selection_counts};
+pub use search::{Duplicates, DuplicatesTarget, SelectionCounts, find_duplicates, selection_counts};
 pub(crate) use rows::rows_in;

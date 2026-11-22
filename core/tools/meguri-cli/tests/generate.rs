@@ -7,7 +7,7 @@ use std::process::{Command, Output};
 use serde_json::Value;
 
 fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_meguri-cli"))
+    Command::new(crate::bin_exe())
         .args(args)
         .output()
         .unwrap()
@@ -146,7 +146,7 @@ fn a_run_waits_for_its_directory_lock() {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("r");
     let lock = meguri_testkit::generate::OutputLock::acquire(&out).unwrap();
-    let mut run = Command::new(env!("CARGO_BIN_EXE_meguri-cli"))
+    let mut run = Command::new(crate::bin_exe())
         .args(["generate", "recipe", "review-ready", "--out", path(&out)])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -185,7 +185,7 @@ fn concurrent_runs_into_one_directory_leave_one_whole_output() {
         let runs: Vec<_> = ["1000", "1500", "2000", "2500"]
             .iter()
             .map(|size| {
-                Command::new(env!("CARGO_BIN_EXE_meguri-cli"))
+                Command::new(crate::bin_exe())
                     .args([
                         "generate",
                         size,

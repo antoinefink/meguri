@@ -13,6 +13,9 @@ nonisolated public enum SheetRoute: Hashable, Identifiable, Sendable {
     case cloudSync(CloudSyncEntry)
     /// Account & Sync over mobile review; closing preserves the retained card.
     case accountSync
+    /// The Note Types section's Save sheet (`notetypes/draft-save` D4), for
+    /// the question `ReviewCollection.noteTypes` holds.
+    case noteTypeSave
 
     public var id: Self { self }
 }

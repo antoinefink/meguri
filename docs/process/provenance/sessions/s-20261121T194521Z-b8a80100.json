@@ -1,0 +1,1 @@
+{"session":"s-20261121T194521Z-b8a80100","role":"infra","kind":"worktree","name":"ci-build-once","base_commit":"6e8d1a91fe42398b6345d224f7eae17d43b17af7","role_doc":null,"role_doc_blob":null,"created_at":"2026-11-21T19:45:21Z","branch":"unit/ci-build-once","worktree":"/Users/antoine/.herdr/worktrees/meguri/ci-build-once","sparse":[],"excluded_paths":[],"deny_profile":null}

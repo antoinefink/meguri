@@ -27,7 +27,7 @@ fn envelope(operation: Operation) -> Value {
     json!({"scope": scope(), "caller": caller(), "operation": operation})
 }
 fn command() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_meguri-cli"));
+    let mut command = Command::new(crate::bin_exe());
     command.arg("internal-cloud-service");
     command
 }
@@ -709,7 +709,7 @@ fn startup_errors_are_classified_without_paths_or_input_and_command_is_internal(
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     assert_eq!(output.stderr.as_slice(), b"cloud service startup-error: storage\n");
-    let output = Command::new(env!("CARGO_BIN_EXE_meguri-cli")).output().unwrap();
+    let output = Command::new(crate::bin_exe()).output().unwrap();
     assert!(
         !String::from_utf8(output.stderr)
             .unwrap()
