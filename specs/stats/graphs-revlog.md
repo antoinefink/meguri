@@ -255,7 +255,7 @@ U99's parts of the `stats` kind (`stats/graphs-common` G14), in G14's form (fiel
 
 With no counted row in the scope, the parts are: `reviews` `{}`; each `true_retention` period `{}`; each `hours` range 24 entries `{}`; each `buttons` range `{learning: [0, 0, 0, 0], young: [0, 0, 0, 0], mature: [0, 0, 0, 0]}`.
 
-Meguri's side of these four parts is U99's: its implementer adds them to the testkit's `stats` adapter (`core/crates/meguri-testkit/src/observe/stats.rs`, `conformance/stats-ops` H10), serialised as above. Until then no V10 scenario can pass on Meguri.
+Meguri's side of these four parts is U104's, as the Statistics plan assigns it (`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` §4: U104 owns the graph observation of G14, V8 and `stats/graphs-cards` C12): its implementer adds them to the testkit's `stats` executor (`core/crates/meguri-testkit/src/exec/stats.rs`, `conformance/stats-ops` H10), serialised as above, from U99's records. Until then no V10 scenario can pass on Meguri. Changed 2026-11-22: this said U99 adds them, to an adapter file that does not exist; U99 (PR #126) built the records and no observation.
 
 The Calendar's dates, `max_count` and item texts (V3.4) are not in Anki's graph data and are not observed. Meguri tests them from V3.2's table and V3.4; the item texts are Q4.2's, and the scenario `calendar-cells` (`stats/browse-queries` Q8) checks what they find.
 
