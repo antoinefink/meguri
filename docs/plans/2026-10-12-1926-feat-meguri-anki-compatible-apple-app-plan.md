@@ -3860,9 +3860,9 @@ Each active unit belongs to the earliest milestone that needs it. Frozen server 
 |---|---|---|---|
 | **M0 Foundations** | U1, U2, U3, U4, U5, U6, U7, U8, U8b, U8c, U9, U10, U11, U12, U19, U20, U21, U22, U23, U240, U241 | The oracle image builds and records the first goldens: the 10k fuzz table, id allocation and a rollover×TZ subset (U3, U4). T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1R. The similarity scan and provenance-trailer check are enforced (U2). The XCFramework builds, and the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy (U6–U8). The `lint-ui` gate is active (U9). A stub screen emits a named interval that U241 evaluates (U12). | Xcode license, simulator runtime and Xcode agent access (R1969) |
 | **M1R Reviews first** | U8d, U19b, U240r, U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U36, U37, U38, U40, U41, U42, U43, U44, U45, U46, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80, U82a, U85a, U113, U114, U117, U118, U124a, U126, U127, U132, U133a, U150, U151, U152, U153, U154, U155, U157, U158, U160, U161, U163a, U166, U175, U176, U177, U178, U179, U180, U181, U182, U185, U186, U187, U188, U228a, U243, U246, U248, U249, U250, U251, U256 | U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 CloudKit convergence soak with signed development-container evidence (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, backup (AE86). U251's M1R legs: kill during review and during a CloudKit exchange, background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag. | Final hands-on batch: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with CloudKit, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248 CloudKit lane, U250 cloud sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, existing imported cards) |
-| **M1 Daily review driver** | U18, U33, U34, U35, U47, U81, U82, U83, U84, U85, U88, U92, U95, U96, U97, U98, U99, U100, U101, U103, U120, U121, U122, U123, U124, U128, U129, U130, U131, U133, U156, U159, U162, U163, U183, U184, U190, U191, U192, U193, U195, U210, U222, U225, U227, U228, U229, U232, U242, U244, U245, U252, U253, U254 | Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 CloudKit convergence soak with signed development-container evidence, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag. | U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home, deck page and review (U254). A 7-day trial: all reviews and new cards in Meguri, no data incident, logged |
+| **M1 Daily review driver** | U18, U33, U34, U35, U47, U81, U82, U83, U84, U85, U88, U92, U95, U96, U97, U98, U99, U100, U101, U103, U120, U121, U122, U123, U124, U128, U129, U130, U131, U133, U156, U159, U162, U163, U183, U184, U190, U191, U192, U193, U195, U210, U222, U227, U228, U229, U232, U242, U244, U245, U252, U253, U254, U288, U293 | Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 CloudKit convergence soak with signed development-container evidence, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag. | U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home, deck page and review (U254). A 7-day trial: all reviews and new cards in Meguri, no data incident, logged |
 | **M2 Creation and maintenance** | U69, U71, U86, U87, U90, U91, U194, U196, U197, U200, U201, U202, U203, U205, U206, U207, U211, U212, U213, U214, U215, U216, U217, U218, U219, U220, U221, U223, U247 | U246: areas search (R1916–R1920), packages and maintenance (R1922–R1925), notes and rendering of editor previews. U249 adds saved searches, browser sorts and apkg/colpkg round trips. U244 browser, search and editor groups (R1824–R1836). U242 bulk, import, backup and Check DB (R1831, R1832, R1846–R1848). U250 classes: edit, bulk, import, export, Check DB. U251 disk-full and kill during import. U252–U254 for browser, editor, note types and IO editor. | Variant picks for browser and editor. Device run (browser and editor budgets). One-time capture of the Word, Google Docs, Safari, Chrome and Yomitan clipboard payloads for U197's paste corpus (Google Docs needs Antoine's account, a stop condition for agents) |
-| **M3 Stats graphs, widget, deck options** | U104, U165, U226, U230, U231, U233, U234, U236, U237 | U246: stats (R1921); the optimizer area (R1904, R1905) already gates M1. U249 adds stats per deck. U244 stats group (R1837–R1839, R1841). U242 memory states and optimizer (R1849, R1850). U245 widget memory (R1840). U252–U254 for stats, deck options and widget. | Variant picks for stats and deck options. Device run |
+| **M3 Stats graphs, widget, deck options** | U104, U165, U233, U234, U237, U289, U290, U291, U292, U294, U295, U296, U297, U298, U299, U300, U301, U302, U303, U304, U305, U306, U307 | U246: stats (R1921); the optimizer area (R1904, R1905) already gates M1. U249 adds stats per deck. U244 stats group (R1837–R1839, R1841). U242 memory states and optimizer (R1849, R1850). U245 widget memory (R1840). U252–U254 for stats, deck options and widget. | Variant picks for stats and deck options. Device run |
 | **M4 Mac integration servers** | U135, U136, U137, U138, U139, U140, U141, U142, U143, U144, U145, U146, U147, U164, U255 | U246: server contract suites (R1944–R1946, R1948, R1949) from the Mac-servers area. U249 Migaku routing replay (AE87). U250 class for server writes during edit and review. U255 Mac entitlement and loopback checks. | The firewall check on a clean user account (spike in the servers area). Device run (U256) on iPhone, iPad and Mac |
 | **M5 Hardening and design sign-off** | U16, U17, U167, U168, U257 | U246 full: every in-scope and preservation-only harvested scenario passes (R1880), and no undocumented deviation remains (R1889). The full snapshot matrix (U252). Every screen is "verified" (U254). U255 release configs. U256 device run on every budget. U257 release readiness. | Signature-screen sign-off (all), the monthly device session, the 30-day daily-driver run (U257) |
 
@@ -4154,19 +4154,34 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U221 | Inspector: editor pane and preview | `app/Packages/MeguriKit/Sources/Features/Browse/Inspector/`<br>`app/Packages/MeguriKit/Tests/BrowseTests/PreviewModelTests.swift`<br>`app/MeguriSnapshotTests/Browse/InspectorSnapshotTests.swift` | U60, U64, U66, U67, U190, U210, U212, U222 |
 | U222 | Card Info and Previous Card Info | `app/Packages/MeguriKit/Sources/Features/CardInfo/`<br>`app/Packages/MeguriKit/Tests/CardInfoTests/CardInfoModelTests.swift`<br>`app/MeguriSnapshotTests/CardInfo/CardInfoSnapshotTests.swift` | U9, U24, U92, U103, U157, U175, U190, U210 |
 | U223 | iPhone and compact layout, accessibility audit | `app/Packages/MeguriKit/Sources/Features/Browse/Phone/`<br>`app/Packages/MeguriKit/Tests/BrowseTests/QuickFilterChipsTests.swift`<br>`app/MeguriSnapshotTests/Browse/PhoneBrowseSnapshotTests.swift` | U10, U210, U211, U212, U213, U214, U216, U218, U219, U221, U222 |
-| U225 | Stats screen shell: entry, scope, history, layout and live refresh | `app/Packages/MeguriKit/Sources/Features/Stats/Screen/`<br>`app/Packages/MeguriKit/Sources/Features/Stats/PreviewData/StatsPreviewData.swift`<br>`app/Packages/MeguriKit/Sources/Features/Stats/Resources/Stats.xcstrings` | U6, U7, U9, U24, U40, U80, U88, U98, U103, U150, U151, U210 |
-| U226 | Stats chart foundation: binning, presentation text, interactions and chart accessibility | `app/Packages/MeguriKit/Sources/Features/Stats/Charts/`<br>`app/Packages/MeguriKit/Sources/DesignSystem/Tokens/ChartColors.swift`<br>`app/Packages/MeguriKit/Tests/StatsTests/` | U4, U9, U88, U225 |
 | U227 | Heatmap grid component: layout, modes, colours, navigation and interaction | `app/Packages/MeguriKit/Sources/Features/Stats/Heatmap/`<br>`app/Packages/MeguriKit/Sources/HeatmapKit/`<br>`app/Packages/MeguriKit/Tests/HeatmapKitTests/HeatmapGridLayoutTests.swift` | U9, U95, U96, U150, U210 |
 | U228a | Deck page counts and buried badge | `app/Packages/MeguriKit/Sources/Features/Stats/DeckPage/DeckPageStatsSection.swift`<br>`app/Packages/MeguriKit/Sources/Features/Stats/DeckPage/DeckPageCountsModel.swift`<br>`core/crates/meguri-ffi/src/deck_tree.rs` | U9, U37, U41, U151, U152 |
 | U228 | Activity section: studied-today line, heatmap host, streak stats and deck page stats | `app/Packages/MeguriKit/Sources/Features/Stats/Activity/`<br>`app/Packages/MeguriKit/Sources/Features/Stats/DeckPage/`<br>`app/Packages/MeguriKit/Tests/StatsTests/` | U41, U95, U96, U151, U152, U157, U225, U227, U228a |
 | U229 | Heatmap settings UI | `app/Packages/MeguriKit/Sources/Features/Stats/HeatmapSettings/`<br>`app/Packages/MeguriKit/Tests/StatsTests/HeatmapSettingsModelTests.swift`<br>`app/MeguriUITests/Stats/HeatmapSettingsTests.swift` | U95, U151, U160, U228 |
-| U230 | Graph cards I: Today, Future Due, Calendar, Reviews, Card Counts, Added | `app/Packages/MeguriKit/Sources/Features/Stats/Graphs/`<br>`app/Packages/MeguriKit/Tests/StatsTests/GraphCardsITests.swift`<br>`app/MeguriSnapshotTests/Stats/GraphCardsISnapshotTests.swift` | U98, U225, U226, U227 |
-| U231 | Graph cards II: Intervals, Stability, Difficulty, Retrievability, Retention, Hourly, Answer Buttons | `app/Packages/MeguriKit/Sources/Features/Stats/Graphs/`<br>`app/Packages/MeguriKit/Tests/StatsTests/GraphCardsIITests.swift`<br>`app/MeguriSnapshotTests/Stats/GraphCardsIISnapshotTests.swift` | U98, U225, U226 |
 | U232 | Deck options screen: structure, draft model, presets and save | `app/Packages/MeguriKit/Sources/Features/DeckOptions/`<br>`app/Packages/MeguriKit/Tests/DeckOptionsTests/`<br>`app/MeguriSnapshotTests/DeckOptions/DeckOptionsSnapshotTests.swift` | U6, U9, U25, U28, U49, U150, U151, U152, U155, U175 |
 | U233 | Deck options Essentials: daily limits and desired retention | `app/Packages/MeguriKit/Sources/Features/DeckOptions/Sections/`<br>`app/Packages/MeguriKit/Sources/Features/DeckOptions/Controls/`<br>`app/Packages/MeguriKit/Sources/Features/DeckOptions/DeckOptionsWarnings.swift` | U28, U49, U232 |
 | U234 | Deck options Advanced sections | `app/Packages/MeguriKit/Sources/Features/DeckOptions/Sections/`<br>`app/Packages/MeguriKit/Sources/Features/DeckOptions/Controls/StepsField.swift`<br>`app/Packages/MeguriKit/Tests/DeckOptionsTests/AdvancedSectionsTests.swift` | U28, U49, U232, U233 |
-| U236 | Stats PDF export | `app/Packages/MeguriKit/Sources/Features/Stats/Export/`<br>`app/Packages/MeguriKit/Tests/StatsTests/StatsPDFRendererTests.swift` | U150, U159, U225, U230, U231 |
 | U237 | Stats, heatmap, card info and deck options acceptance: performance and accessibility gates | `app/MeguriUITests/Accessibility/`<br>`docs/design/rubric.md` | U10, U11, U12, U222, U225, U226, U227, U228, U229, U230, U231, U232, U233, U234, U236 |
+| U288 | Statistics page parts computed per request (retention by day, By Answer, six months, the scoped extras, oldest day, activity days, scoped studied today, cards behind a day) | `core/crates/meguri-stats/tests/history_parts.rs`<br>`specs/stats/history-reads.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U99, U101, U293 |
+| U289 | The `stats_history` component and the card-state replay (Cards Over Time, Started) | `core/crates/meguri-stats/tests/history_states.rs`<br>`specs/stats/history-reads.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U98 |
+| U290 | Knowledge Over Time: the FSRS replay of every card | `core/crates/meguri-stats/tests/history_knowledge.rs`<br>`specs/stats/history-reads.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U289 |
+| U291 | By Deck: the home-deck partition and its rows | `core/crates/meguri-stats/tests/by_deck.rs`<br>`specs/stats/history-reads.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U99, U293 |
+| U292 | FFI and CoreBridge for the history parts and the day read | `specs/stats/history-reads.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U103, U289, U290, U291 |
+| U293 | The Statistics page request: one request per refresh, parts by tier, progress, cancellation | `core/crates/meguri-stats/tests/history_request.rs`<br>`specs/stats/history-reads.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U98 |
+| U294 | Statistics page model: deck and period, bins, series, figures, streaks, refresh and kept results | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U103, U292 |
+| U295 | Statistics chart system: the box, colours, one axis, selection, keys and chart accessibility | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | — |
+| U296 | Statistics page shell on the Mac and iPad: rollout flag, test routes, toolbar, strip, sections, grid, states | `app/Meguri/TestHooks/StatsRoutes.swift`<br>`specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U294, U295 |
+| U297 | Statistics Knowledge section views | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U103, U292, U296 |
+| U298 | Statistics Reviews section views and HeatmapKit year blocks | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U103, U296 |
+| U299 | Statistics Cards section views | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U292, U296 |
+| U300 | Statistics Coming Up and Answering section views | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U103, U296 |
+| U301 | Statistics Memory and Decks section views | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U292, U296 |
+| U302 | A Statistics chart's own page | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U297, U298, U299, U300, U301 |
+| U303 | Show in Browse from Statistics | `specs/stats/browse-queries.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U271, U292, U296 |
+| U304 | Statistics on the iPhone, the folded Duo and a narrow iPad | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U297, U298, U299, U300, U301 |
+| U305 | Statistics on the opened Duo | `docs/design/native-interface-contract.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U304 |
+| U306 | Deck Statistics entry points | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U296 |
+| U307 | Show Statistics in the sidebar and tabs | `specs/stats/statistics-page.md`<br>`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` | U297, U298, U299, U300, U301, U302, U304, U305, U306 |
 | U240 | Delivery milestones and milestone gate runner | `tools/scripts/gates/milestone_gate`<br>`tools/mg`<br>`tools/scripts/gates/tests/` | U1, U8, U19 |
 | U240r | Reviews-first milestone in the running manifest | `docs/process/milestones.yaml`<br>`tools/mg.d/milestone.sh` | U240 |
 | U241 | Performance budget catalog and regression gate | `tools/perf/budgets.yaml`<br>`tools/perf/baselines/<runner>/<suite>.json`<br>`tools/scripts/gates/perf_gate` | U8, U12, U240 |
@@ -4201,6 +4216,18 @@ Retained for possible reactivation; excluded from active milestones and acceptan
 | U110 | Media sync state and change tracking | `core/crates/meguri-sync/src/media/`<br>`core/crates/meguri-sync/tests/media_tracker.rs`<br>`specs/sync/media-tracking.md` | U22, U31 |
 | U111 | Media sync | `core/crates/meguri-sync/src/media/syncer.rs`<br>`core/fuzz/fuzz_targets/media_zip.rs`<br>`core/crates/meguri-sync/tests/media_sync.rs` | U24, U31, U105, U106, U110 |
 | U116 | AnkiWeb build switch and identity checks | `app/Config/Release.xcconfig`<br>`app/Config/AppStore.xcconfig`<br>`app/Meguri/AnkiWeb.xcstrings` | U6, U7, U105, U114, U150, U160 |
+
+### Superseded Unit Index
+
+Superseded 2026-11-22 by the Statistics plan (`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` §5); excluded from active milestones and acceptance, and kept for reference. A unit that names one of them as a dependency depends on its replacement: U225 on U294, U295 and U296; U226 on U295; U230 and U231 on U297 to U301. U236 is deferred with the PDF export (round 11's 9A, `stats/statistics-page` S21) and has no replacement yet.
+
+| U-ID | Title | Key files | Depends on |
+|---|---|---|---|
+| U225 | Stats screen shell: entry, scope, history, layout and live refresh | `app/Packages/MeguriKit/Sources/Features/Stats/Screen/`<br>`app/Packages/MeguriKit/Sources/Features/Stats/PreviewData/StatsPreviewData.swift`<br>`app/Packages/MeguriKit/Sources/Features/Stats/Resources/Stats.xcstrings` | U6, U7, U9, U24, U40, U80, U88, U98, U103, U150, U151, U210 |
+| U226 | Stats chart foundation: binning, presentation text, interactions and chart accessibility | `app/Packages/MeguriKit/Sources/Features/Stats/Charts/`<br>`app/Packages/MeguriKit/Sources/DesignSystem/Tokens/ChartColors.swift`<br>`app/Packages/MeguriKit/Tests/StatsTests/` | U4, U9, U88, U225 |
+| U230 | Graph cards I: Today, Future Due, Calendar, Reviews, Card Counts, Added | `app/Packages/MeguriKit/Sources/Features/Stats/Graphs/`<br>`app/Packages/MeguriKit/Tests/StatsTests/GraphCardsITests.swift`<br>`app/MeguriSnapshotTests/Stats/GraphCardsISnapshotTests.swift` | U98, U225, U226, U227 |
+| U231 | Graph cards II: Intervals, Stability, Difficulty, Retrievability, Retention, Hourly, Answer Buttons | `app/Packages/MeguriKit/Sources/Features/Stats/Graphs/`<br>`app/Packages/MeguriKit/Tests/StatsTests/GraphCardsIITests.swift`<br>`app/MeguriSnapshotTests/Stats/GraphCardsIISnapshotTests.swift` | U98, U225, U226 |
+| U236 | Stats PDF export | `app/Packages/MeguriKit/Sources/Features/Stats/Export/`<br>`app/Packages/MeguriKit/Tests/StatsTests/StatsPDFRendererTests.swift` | U150, U159, U225, U230, U231 |
 
 **Foundations and process (U1–U19)**
 
@@ -13395,7 +13422,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Stats, heatmap and deck options UI (U225–U237)**
 
-### U225. Stats screen shell: entry, scope, history, layout and live refresh
+### Superseded 2026-11-22: U225
+
+#### U225. Stats screen shell: entry, scope, history, layout and live refresh
+
+**Status:** Superseded by U294, U295 and U296 of the Statistics plan (`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` §4, §5), on 2026-11-22. Retained for reference only; no implementation or acceptance work is authorized against this section. The requirement notes say what replaced its requirements.
 
 **Goal:** Deliver the Stats screen frame (scope and history header in the window toolbar, responsive grid of graph boxes (corrected 2026-10-27), data loading, persistence, live refresh and the click-to-browse round trip) that every graph card plugs into.
 
@@ -13452,7 +13483,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** Stats screen reachable from every R1349 entry point in UI tests except the deck-page Stats action, which U228 checks; all StatsTests pass; snapshot baselines approved; collection `mod` unchanged after a viewing session (R1295).
 
-### U226. Stats chart foundation: binning, presentation text, interactions and chart accessibility
+### Superseded 2026-11-22: U226
+
+#### U226. Stats chart foundation: binning, presentation text, interactions and chart accessibility
+
+**Status:** Superseded by U295 of the Statistics plan (`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` §4, §5), on 2026-11-22. Retained for reference only; no implementation or acceptance work is authorized against this section. The requirement notes say what replaced its requirements.
 
 **Goal:** Provide the shared Swift layer that turns raw core graph data into Anki-identical bins, labels, tooltips, tables and browse queries, plus the common chart interaction and accessibility behaviour used by every graph.
 
@@ -13689,7 +13724,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** Settings UI tests pass; config byte-diff check (via test hook) shows only the edited field changed.
 
-### U230. Graph cards I: Today, Future Due, Calendar, Reviews, Card Counts, Added
+### Superseded 2026-11-22: U230
+
+#### U230. Graph cards I: Today, Future Due, Calendar, Reviews, Card Counts, Added
+
+**Status:** Superseded by U297 to U301 of the Statistics plan (`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` §4, §5), on 2026-11-22. Retained for reference only; no implementation or acceptance work is authorized against this section. The requirement notes say what replaced its requirements.
 
 **Goal:** Implement the count- and time-oriented graph cards with their controls, tables, tooltips and click-to-browse behaviour.
 
@@ -13734,7 +13773,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** Cards match presentation goldens (U226); click-to-browse UI tests pass; only the three graph-preference keys ever change in config during stats use.
 
-### U231. Graph cards II: Intervals, Stability, Difficulty, Retrievability, Retention, Hourly, Answer Buttons
+### Superseded 2026-11-22: U231
+
+#### U231. Graph cards II: Intervals, Stability, Difficulty, Retrievability, Retention, Hourly, Answer Buttons
+
+**Status:** Superseded by U297 to U301 of the Statistics plan (`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` §4, §5), on 2026-11-22. Retained for reference only; no implementation or acceptance work is authorized against this section. The requirement notes say what replaced its requirements.
 
 **Goal:** Implement the distribution, FSRS memory, retention and time-of-day graph cards.
 
@@ -13909,7 +13952,11 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 
 **Verification:** All option controls present in the order of `specs/sched/deck-options.md` O3 (corrected 2026-10-27); tests pass; a save touching every option round-trips through U28 with only edited keys changed.
 
-### U236. Stats PDF export
+### Deferred 2026-11-22: U236
+
+#### U236. Stats PDF export
+
+**Status:** Deferred on 2026-11-22 with the PDF export (round 11's 9A, `stats/statistics-page` S21; the Statistics plan, `docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` §5); no unit replaces it yet. Retained for reference only; no implementation or acceptance work is authorized against this section. The requirement notes say what replaced its requirements.
 
 **Goal:** Export the Stats screen in its current state as a PDF via the Mac File menu and the iOS/iPadOS share sheet.
 
