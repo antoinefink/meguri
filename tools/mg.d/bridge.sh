@@ -6,12 +6,46 @@ mg_job core-xcframework host mg_core_xcframework \
 mg_job swift-test host mg_swift_test \
   "swift test on a local package (--package, default MeguriCore), --config Debug|Profile (default Debug); matched core/SPM products, Profile tests under the host lease; any compiler warning fails; args after -- select tests"
 
+# mg_build_jobs: parallel jobs for a host build: MEGURI_BUILD_JOBS, else half
+# the cores (all of them on CI), at least 1.
+mg_build_jobs() {
+  local n="${MEGURI_BUILD_JOBS:-}" cores
+  case "$n" in
+    '' | *[!0-9]* | 0)
+      cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null)" || cores=2
+      n=$((${cores:-2} / 2))
+      [ -z "${CI:-}" ] || n="${cores:-2}"
+      [ "$n" -ge 1 ] || n=1
+      ;;
+  esac
+  printf '%s\n' "$n"
+}
+
+# mg_host_build <program> [args...]: a host build (xcodebuild, swift build, a
+# script running cargo) under a background QoS clamp, which every child
+# inherits, so the owner's work keeps the fast cores; with mg_build_jobs jobs:
+# xcodebuild -jobs, swift build -j, cargo CARGO_BUILD_JOBS, scripts
+# MEGURI_BUILD_JOBS.
+mg_host_build() {
+  local jobs cmd=("$1")
+  jobs="$(mg_build_jobs)"
+  shift
+  case "${cmd[0]}" in
+    xcodebuild) cmd=(xcodebuild -jobs "$jobs") ;;
+    swift) [ "${1:-}" != build ] || { cmd=(swift build -j "$jobs") && shift; } ;;
+  esac
+  set -- "${cmd[@]}" ${1+"$@"}
+  ! command -v taskpolicy >/dev/null 2>&1 || set -- taskpolicy -c "$MG_HOST_BUILD_CLAMP" "$@"
+  MEGURI_BUILD_JOBS="$jobs" CARGO_BUILD_JOBS="$jobs" "$@"
+}
+MG_HOST_BUILD_CLAMP=background
+
 # mg__xcframework <report> [script args...]: run the build script, record its
 # report, and return its exit code.
 mg__xcframework() {
   local report="$1" rc
   shift
-  /bin/bash tools/scripts/build-core-xcframework.sh ${1+"$@"} --report "$report"
+  mg_host_build /bin/bash tools/scripts/build-core-xcframework.sh ${1+"$@"} --report "$report"
   rc=$?
   [ ! -s "$report" ] || mg_detail xcframework "$(cat "$report")"
   return "$rc"
@@ -220,7 +254,7 @@ mg_swift_test() {
       '{cpu: $cpu, os: $os, os_build: $os_build, arch: $arch}')"
   fi
   local build="$MG_RUN_DIR/swift-build.log" rc
-  swift build --package-path "$dir" "${product_args[@]}" --build-tests 2>&1 | tee "$build"
+  mg_host_build swift build --package-path "$dir" "${product_args[@]}" --build-tests 2>&1 | tee "$build"
   rc=${PIPESTATUS[0]}
   mg_artifact log "$build" "swift build"
   local warnings

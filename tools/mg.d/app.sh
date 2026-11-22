@@ -126,7 +126,7 @@ mg_app_build_action() {
   MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE=""
   local action="$1" standalone_arg="" plan_arg="" personal=false real=false test_args=()
   shift
-  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=() build_command=(xcodebuild)
+  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=() build_command=(mg_host_build xcodebuild)
   case "$action" in
     build)
       standalone_arg=" --standalone"
