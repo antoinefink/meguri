@@ -103,6 +103,19 @@ struct NativeCommandContext {
 
     // MARK: View
 
+    /// N21.1, N21.8: View › Browse (⇧⌘B) selects the Browse row, which
+    /// returns to Browse's kept state (`browser/workspace` V1); disabled
+    /// while review presents a card, when Card › Show in Browse takes the
+    /// key, and while a sheet holds the window.
+    var canShowBrowse: Bool {
+        BrowseRollout.shown && host == .main && layout == .sidebar && collection.navigation.sheet == nil
+            && collection.review == nil && collection.navigation.review == nil
+    }
+    func showBrowse() {
+        guard canShowBrowse else { return }
+        collection.navigation.select(.section(.browse))
+    }
+
     /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review
     /// and with no sheet over the window.
     var canShowNoteTypes: Bool {
@@ -256,8 +269,16 @@ struct AppCommands: Commands {
         // The system's Find, Spelling, Substitutions and other text groups stay;
         // Find… comes first, so ⌘F reaches it while the deck workspace shows and
         // the text inputs' own Find otherwise (when it is disabled).
+        // N21.8: View › Browse (the Mac only: the iPad's Browse row waits for its own layout);
         // W14: View › Note Types; ⇧⌘N stays New Deck… (N22.1).
         CommandGroup(before: .sidebar) {
+            #if os(macOS)
+            if BrowseRollout.shown {
+                Button("Browse") { context?.showBrowse() }
+                    .keyboardShortcut("b", modifiers: [.command, .shift])
+                    .disabled(context?.canShowBrowse != true)
+            }
+            #endif
             Button("Note Types") { context?.showNoteTypes() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(context?.canShowNoteTypes != true)

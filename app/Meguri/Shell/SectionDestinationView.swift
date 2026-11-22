@@ -1,4 +1,5 @@
 import AppModel
+import Browse
 import DeckOptions
 import DesignSystem
 import Editor
@@ -66,6 +67,11 @@ struct ShellFeatures {
     var sidebarDecks: (AppNavigation) -> AnyView
     /// The sidebar with its deck search around it (N20.1); fixtures keep the bare list.
     var sidebarSearch: (AnyView) -> AnyView = { $0 }
+    /// N21.1, `browser/workspace` V6: the whole sidebar while Browse is
+    /// selected, around the section rows the shell gives (tagged
+    /// `BrowseSidebarTag.section`): the filters in place of the decks. Nil
+    /// keeps the decks (fixtures without Browse).
+    var browseSidebar: ((AppNavigation, AnyView) -> AnyView)?
     /// H12: Return or S while the sidebar has focus starts the selected row's review: a
     /// deck's, or Today's Study. True when the row takes the key, even to do nothing.
     var sidebarStudy: (SidebarItem) -> Bool = { _ in false }
@@ -88,7 +94,9 @@ struct ShellFeatures {
         features.today = { _ in AnyView(TodayView(collection: collection, besideDeckList: true)) }
         #if os(macOS)
         features.nativeMacWorkspace = true
-        features.availableSections = [.home, .noteTypes]
+        // N21.1: Today, then Browse; Note Types under them (N22.1). The iPad's rows wait for its own layout.
+        // Browse waits for its table (U270a): `BrowseRollout`.
+        features.availableSections = BrowseRollout.shown ? [.home, .browse, .noteTypes] : [.home, .noteTypes]
         #else
         // W14's iPad row waits for the iPad regular layout (follow-up "U281 iPad"); the view code stays.
         features.availableSections = [.home, .settings]
@@ -96,10 +104,20 @@ struct ShellFeatures {
         features.sectionRoot = { section, _ in
             switch section {
             case .settings: AnyView(SettingsView(collection: collection))
+            #if os(macOS)
+            case .browse where BrowseRollout.shown: AnyView(BrowseView(model: collection.browse))
+            #endif
             case .noteTypes: AnyView(NoteTypesView(model: collection.noteTypes))
             default: AnyView(HomeView(collection: collection))
             }
         }
+        #if os(macOS)
+        if BrowseRollout.shown {
+            features.browseSidebar = { navigation, header in
+                AnyView(BrowseSidebarHost(collection: collection, navigation: navigation, header: header))
+            }
+        }
+        #endif
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
@@ -188,6 +206,31 @@ struct SectionDestinationView: View {
         case let .deckPage(deck): features.deckPage(deck, navigation)
         case let .deckOptions(deck): features.deckOptions(deck, navigation)
         case let .settingsPage(page): features.settingsPage(page)
+        }
+    }
+}
+
+/// Browse's sidebar over the app's collection: Today's deck tree and its
+/// expansion (V6), and its reads once the collection is ready.
+private struct BrowseSidebarHost: View {
+    let collection: ReviewCollection
+    let navigation: AppNavigation
+    let header: AnyView
+
+    var body: some View {
+        BrowseSidebar(model: collection.browse, decks: collection.decks, deckExpanded: { id in
+            Binding(get: { collection.studyExpanded(deckID: id) },
+                    set: { collection.setStudyExpanded(deckID: id, expanded: $0, includingDescendants: false) })
+        }, navigate: { navigation.select(.section($0)) }) {
+            header
+        }
+        // Rows and counts are read once the collection can answer (a launch, a replacement).
+        .onChange(of: collection.browseReadable) { _, readable in
+            if readable { collection.browse.appear() }
+        }
+        // T14: a search handed to Browse while it shows (a deep link) replaces the query now.
+        .onChange(of: navigation.browseSearch) { _, search in
+            if !search.isEmpty { collection.browse.appear() }
         }
     }
 }

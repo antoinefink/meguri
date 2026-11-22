@@ -935,8 +935,8 @@ private struct HomeTodayRowView: View {
         (stacks ? AnyLayout(VStackLayout(alignment: .leading)) : AnyLayout(HStackLayout())) {
             // Not a Label: the Dynamic Type audit read its title as text that may be cut.
             HStack(spacing: Spacing.small) {
-                // The sidebar layouts' symbol for Today (N14.1).
-                Image(systemName: "sun.max")
+                // The sidebar layouts' symbol for Today (N14.1, N21.1).
+                Image(systemName: "calendar")
                     .foregroundStyle(.tint)
                     .accessibilityHidden(true)
                 Text("Today", bundle: .module)

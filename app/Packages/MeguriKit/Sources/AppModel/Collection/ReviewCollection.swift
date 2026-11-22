@@ -357,6 +357,33 @@ public final class ReviewCollection: ChangeFanoutSink {
         deckNamesAllowed(host: .main, route: nil) && deckNamesOwner?.busy != true
     }
 
+    private var browseOwner: BrowseModel?
+    /// Browse (U270): its query, sidebar rows and counts, above the layout
+    /// switch, so leaving Browse and coming back keeps them (`browser/workspace` V1).
+    public var browse: BrowseModel {
+        if let browseOwner { return browseOwner }
+        let value = BrowseModel(backend: CoreBrowseBackend(), store: BrowseDeviceStore(defaults: configuration.deviceDefaults))
+        value.ready = { [weak self] in self?.browseReadable ?? false }
+        value.takeEntrySearch = { [weak self] in
+            guard let self, !self.navigation.browseSearch.isEmpty else { return nil }
+            defer { self.navigation.browseSearch = "" }
+            return self.navigation.browseSearch
+        }
+        browseOwner = value
+        return value
+    }
+    /// T14: a replaced collection's next Browse open is a first open, whether
+    /// or not Browse has opened in this launch.
+    private func browseCollectionReplaced() {
+        if let browseOwner { browseOwner.collectionReplaced() }
+        else { BrowseDeviceStore(defaults: configuration.deviceDefaults).forgetCollection() }
+    }
+    /// Browse reads the open collection only while it is ready.
+    public var browseReadable: Bool {
+        guard state == .ready, !opening, !closed, !closing, case .ready(let current) = lifecycle else { return false }
+        return current == generation
+    }
+
     private var noteTypesOwner: NoteTypesModel?
     /// The Note Types section (U281): its list, drafts and Save, above the layout switch.
     public var noteTypes: NoteTypesModel {
@@ -1070,6 +1097,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         do {
             if candidateActive {
                 navigation.collectionReplaced()
+                browseCollectionReplaced()
                 noteTypesOwner?.invalidate()
                 previousRecord = nil; recoveryDrops.removeAll(); dropWalk()
                 try await records.remove()
@@ -1169,6 +1197,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         case .rolledOver, .timeZoneChanged:
             refreshCounts()
             studyWarmup.invalidate()
+            // Day values (Due Today, Added in Last 7 Days) count another day now.
+            browseOwner?.dayChanged()
         case .changes(let changes):
             refreshCounts()
             // Any change, a sync's or an options save included, may move the first card;
@@ -1181,6 +1211,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             // Any write may be a new step (a text-only note edit changes no count); coalesced.
             if event.generation == generation { undoOwner?.scheduleRefresh() }
             if event.generation == generation { deckOptionsOwner?.changesCommitted(changes, generation: event.generation) }
+            if event.generation == generation { browseOwner?.changesCommitted(changes) }
             if event.generation == generation { noteTypesOwner?.changesCommitted(changes) }
             if event.generation == generation,
                changes.wholeCollection || !changes.notetypes.isEmpty || !changes.decks.isEmpty {
@@ -1214,6 +1245,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             studyPreparation.collectionEnded()
             decks = []; countTimer?.invalidate(); countsTask?.cancel()
             navigation.collectionReplaced(keepingEntrySheet: opening)
+            browseCollectionReplaced()
             if !opening {
                 navigation.dismissSheet()
                 entryOwner?.destinationChanged()
@@ -1261,6 +1293,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         case .ready(let next):
             activity.generationChanged(to: next)
             activity.collectionReady()
+            let renewed = !wasReady || generation != next
             if generation != next {
                 addFlowOwner?.generationEnded()
                 editFlowOwner?.generationEnded()
@@ -1275,6 +1308,7 @@ public final class ReviewCollection: ChangeFanoutSink {
                 state = .ready
                 if let review { review.onVisibleMediaChanged?(review.visibleMediaNames) }
                 if !wasReady && foreground { Task { await day?.checkNow() } }
+                if renewed { browseOwner?.collectionReady() }
             }
         case .opening, .upgrading: invalidateDeckActions(); state = .loading
         case .exclusiveBusy: invalidateDeckActions(); state = .unavailable; review?.requestRefresh()
