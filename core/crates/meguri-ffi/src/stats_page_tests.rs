@@ -616,11 +616,10 @@ fn nothing_but_the_cancelled_end_follows_a_cancel() {
     });
     assert_eq!(end, StatsPageEnd::Cancelled);
     let relayed = recorder.taken();
-    let parts = relayed.iter().filter(|m| matches!(m, StatsPageMessage::Part { .. })).count();
-    assert_eq!(parts, 1, "{relayed:?}");
-    assert_eq!(relayed.last(), Some(&StatsPageMessage::End {
+    let first_part = relayed.iter().position(|m| matches!(m, StatsPageMessage::Part { .. })).unwrap();
+    assert_eq!(&relayed[first_part + 1..], [StatsPageMessage::End {
         end: StatsPageEnd::Cancelled
-    }));
+    }], "only the End after the cancel");
 
     // A token fired after the last part makes the End Cancelled too.
     let request = self::request(Scope::Collection, History::AllHistory);
