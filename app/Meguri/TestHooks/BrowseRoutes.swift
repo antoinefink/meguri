@@ -157,16 +157,21 @@ extension TestHooks {
         /// hold the word; a scope lists its kind's values.
         func suggestions(for query: FilterQuery, caret: Int, scope: FilterSection?, recent: [String]) async throws
             -> [FilterSuggestion] {
-            let fixed: [(FilterSection, FilterValue, String)] = FilterState.allCases.filter { $0 != .leech }.map {
-                (.cardState, .state($0), "\($0)")
-            } + [(.flag, .noFlag, "No Flag")] + (1...7).map { (.flag, .flag(UInt8($0)), Self.flagLabels[$0 - 1]) }
-                + [(.due, .due(.today), "Today"), (.due, .due(.overdue), "Overdue"), (.due, .due(.next7Days), "Next 7 Days")]
-            let decks = Self.deckCounts.keys.sorted().map { (FilterSection.decks, Self.deck($0), Self.deck($0).deckName ?? "") }
-            let tags = Self.tagCounts.keys.sorted().map { (FilterSection.tags, FilterValue.tag($0), $0) }
-            let types = Self.notetypeCounts.enumerated().map {
-                (FilterSection.notetypes, FilterValue.notetype(id: 1_700_000_100_001 + Int64($0.offset), name: $0.element.0), $0.element.0)
+            typealias Named = (section: FilterSection, value: FilterValue, label: String)
+            var all: [Named] = []
+            for state in FilterState.allCases where state != .leech {
+                all.append((.cardState, .state(state), "\(state)"))
             }
-            let all = fixed + decks + tags + types
+            all.append((.flag, .noFlag, "No Flag"))
+            for flag in 1...7 { all.append((.flag, .flag(UInt8(flag)), Self.flagLabels[flag - 1])) }
+            all.append((.due, .due(.today), "Today"))
+            all.append((.due, .due(.overdue), "Overdue"))
+            all.append((.due, .due(.next7Days), "Next 7 Days"))
+            for id in Self.deckCounts.keys.sorted() { all.append((.decks, Self.deck(id), Self.deck(id).deckName ?? "")) }
+            for name in Self.tagCounts.keys.sorted() { all.append((.tags, .tag(name), name)) }
+            for (offset, notetype) in Self.notetypeCounts.enumerated() {
+                all.append((.notetypes, .notetype(id: 1_700_000_100_001 + Int64(offset), name: notetype.0), notetype.0))
+            }
             func shown(_ value: FilterValue) -> Bool {
                 !query.tokens.contains { if case .value(let values, false) = $0 { values.contains(value) } else { false } }
             }

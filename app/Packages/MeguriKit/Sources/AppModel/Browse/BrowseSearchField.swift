@@ -37,6 +37,10 @@ public nonisolated struct SavingSearch: Hashable, Sendable {
     public var name = ""
     /// The name the question asks about ("A saved search named … already exists").
     public internal(set) var replacing: String?
+    /// The write is on its way: the sheet stays until it lands.
+    public internal(set) var saving = false
+    /// The last write failed: the sheet keeps the name and says so.
+    public internal(set) var failed = false
 }
 
 /// Contains… asking for its text (T10): of the Field token at `token`, or
@@ -156,6 +160,12 @@ extension BrowseModel {
     /// the text incomplete at the caret (the last results stay). A paste
     /// commits. The field reports no caret: it is taken at the text's end.
     public func editText(_ text: String) {
+        edit(text, pasteCommits: true)
+    }
+
+    /// An edit of the text; `pasteCommits` false for text the model puts
+    /// in itself (a syntax candidate), which commits only when it says so.
+    private func edit(_ text: String, pasteCommits: Bool) {
         guard text != query.text else { return }
         let before = query.text
         pendingSearch = nil
@@ -164,8 +174,9 @@ extension BrowseModel {
         suggestionScope = nil
         suggestedField = nil
         if fieldFocused { refreshSuggestions() }
-        // A paste: two or more characters arrive in one change (T8).
-        if text.count >= before.count + 2, Self.inserted(before, text) {
+        // A paste: two or more characters arrive in one change (T8), also
+        // over a selection the paste replaces.
+        if pasteCommits, Self.inserted(before, text) >= 2 {
             return commitText()
         }
         liveRun?.cancel()
@@ -181,11 +192,13 @@ extension BrowseModel {
         }
     }
 
-    /// Whether `after` is `before` with text put in at one place.
-    private nonisolated static func inserted(_ before: String, _ after: String) -> Bool {
-        let head = after.commonPrefix(with: before).count
-        let tail = zip(after.reversed(), before.reversed()).prefix { $0 == $1 }.count
-        return head + tail >= before.count
+    /// How many characters `after` has in place of the part of `before`
+    /// they replaced (the part between their common start and end).
+    nonisolated static func inserted(_ before: String, _ after: String) -> Int {
+        let head = zip(after, before).prefix { $0 == $1 }.count
+        let room = min(after.count, before.count) - head
+        let tail = min(zip(after.reversed(), before.reversed()).prefix { $0 == $1 }.count, room)
+        return after.count - head - tail
     }
 
     /// T8's commit (Return, a paste, accepting a suggestion, the field
@@ -256,8 +269,10 @@ extension BrowseModel {
         let recent = device.recentSuggestions ?? []
         Task {
             let rows = try? await backend.suggestions(for: query, caret: query.text.utf16.count, scope: scope, recent: recent)
-            guard token == suggestionsToken, self.epoch == epoch, let rows else { return }
-            suggestions = rows
+            guard token == suggestionsToken, self.epoch == epoch else { return }
+            // A failed read leaves no rows of an older text behind.
+            suggestions = rows ?? []
+            suggestionsText = rows == nil ? nil : query.text
         }
     }
 
@@ -281,6 +296,8 @@ extension BrowseModel {
         case .value(let value), .cardType(let value, _):
             add(value)
         case .field(let name, _):
+            // A read still on its way must not fill the list under the tests.
+            suggestionsToken &+= 1
             suggestionScope = nil
             suggestedField = SuggestedField(name: name, word: String(FilterQuery.word(of: query.text)))
             suggestions = []
@@ -294,8 +311,9 @@ extension BrowseModel {
     /// A value from the suggestions or a value list: added to its kind's
     /// token (T8: never a second token of a kind), the typed word gone.
     private func add(_ value: FilterValue) {
+        let scoped = suggestionScope != nil
         leaveLists()
-        let base = suggestionScope == nil ? query.droppingWord() : query
+        let base = scoped ? query : query.droppingWord()
         setQuery(base.adding(value))
     }
 
@@ -323,6 +341,9 @@ extension BrowseModel {
 
     /// D6: a syntax candidate's text put in place; one that completes commits.
     private func acceptSyntax(_ candidate: SyntaxCandidate) {
+        // Its range is an offset into the text it was made for; once the text
+        // changed, the row is not applied.
+        guard suggestionsText == query.text else { return }
         guard let insert = candidate.insert else {
             if candidate.kind == .asTyped { commitText() }
             return
@@ -331,7 +352,7 @@ extension BrowseModel {
         guard insert.range.lowerBound >= 0, insert.range.upperBound <= utf16.count else { return }
         let text = String(decoding: utf16[..<insert.range.lowerBound], as: UTF16.self) + insert.text
             + String(decoding: utf16[insert.range.upperBound...], as: UTF16.self)
-        editText(text)
+        edit(text, pasteCommits: false)
         if candidate.completes { commitText() }
     }
 
@@ -513,6 +534,7 @@ extension BrowseModel {
     /// first; otherwise the query's run text is saved under it.
     public func saveSearch(named name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard savingSearch?.saving != true else { return }
         guard !name.isEmpty else {
             savingSearch = nil
             return
@@ -521,11 +543,20 @@ extension BrowseModel {
             savingSearch = SavingSearch(name: name, replacing: name)
             return
         }
-        savingSearch = nil
+        // The sheet stays, with its name, until the write lands; a failed
+        // write says so and keeps the name for another try.
+        savingSearch = SavingSearch(name: name, replacing: nil, saving: true, failed: false)
         let query = query, backend = backend, epoch = epoch
         Task {
-            guard let text = try? await backend.runText(query), self.epoch == epoch else { return }
-            try? await backend.saveSearch(name: name, text: text)
+            do {
+                let text = try await backend.runText(query)
+                try await backend.saveSearch(name: name, text: text)
+                guard self.epoch == epoch, savingSearch?.saving == true else { return }
+                savingSearch = nil
+            } catch {
+                guard self.epoch == epoch, savingSearch?.saving == true else { return }
+                savingSearch = SavingSearch(name: name, replacing: nil, saving: false, failed: true)
+            }
         }
     }
 

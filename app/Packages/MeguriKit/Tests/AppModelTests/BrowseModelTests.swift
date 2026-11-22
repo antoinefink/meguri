@@ -569,7 +569,11 @@ import Testing
         return suggestionRows[scope] ?? []
     }
     var savedSearchWrites: [(String, String)] = []
-    func saveSearch(name: String, text: String) async throws { savedSearchWrites.append((name, text)) }
+    var saveFails = false
+    func saveSearch(name: String, text: String) async throws {
+        if saveFails { throw BridgeError.unavailable(reason: "sample") }
+        savedSearchWrites.append((name, text))
+    }
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
         switch section {
         case .savedSearches:

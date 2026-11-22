@@ -755,6 +755,16 @@
         }
       }
     },
+    "browse.saveSearch.failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t save the search. Try again."
+          }
+        }
+      }
+    },
     "browse.saveSearch.name": {
       "localizations": {
         "en": {

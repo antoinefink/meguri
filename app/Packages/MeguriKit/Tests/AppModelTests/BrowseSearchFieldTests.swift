@@ -180,14 +180,38 @@ import Testing
         await until { model.query == FilterQuery(tokens: [token(.tag("x"))]) }
     }
 
+    @Test func aPasteOverASelectionCommitsToo() {
+        #expect(BrowseModel.inserted("tag:old", "tag:new") == 3)
+        #expect(BrowseModel.inserted("plimb", "plimbs") == 1)
+        #expect(BrowseModel.inserted("plimb x", "plimb deck:a x") == 7)
+        #expect(BrowseModel.inserted("aa", "aaa") == 1)
+        #expect(BrowseModel.inserted("abc", "") == 0)
+    }
+
+    @Test func aSyntaxCandidateThatDoesNotCompleteNeverCommits() async {
+        let (model, core) = await makeModel()
+        model.setFieldFocused(true)
+        type(model, "de")
+        core.suggestionRows[nil] = [FilterSuggestion(section: nil, row: .syntax(SyntaxCandidate(
+            kind: .keyword, label: "deck:", detail: nil, insert: (0..<2, "deck:", 5), completes: false)), key: nil)]
+        model.editText("de ")
+        model.editText("de")
+        await until { model.suggestions.count == 1 }
+        model.accept(model.suggestions[0])
+        #expect(model.query.text == "deck:")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(core.commits.isEmpty)
+    }
+
     @Test func filterByOpensAKindsValueListAndAddsWithoutDroppingText() async {
         let (model, core) = await makeModel()
+        type(model, "plimb")
         model.setFieldFocused(true)
         model.accept(FilterSuggestion(section: .filterBy, row: .filterBy(.decks), key: nil))
         #expect(model.suggestionScope == .decks)
         await until { core.suggestionCalls.last?.2 == .decks }
         model.accept(FilterSuggestion(section: .decks, row: .value(Self.spanish), key: nil))
-        #expect(model.query.tokens == [token(Self.spanish)] && model.suggestionScope == nil)
+        #expect(model.query == FilterQuery(tokens: [token(Self.spanish)], text: "plimb") && model.suggestionScope == nil)
     }
 
     @Test func aFieldSuggestionsContainsTakesTheWordUnlessItIsTheFieldsName() async {
@@ -235,8 +259,21 @@ import Testing
         #expect(model.savingSearch != nil && model.savingSearch?.replacing == nil)
         model.saveSearch(named: "Hard Ones")
         model.saveSearch(named: "Hard Ones")
-        await until { core.savedSearchWrites.count == 2 }
-        #expect(model.savingSearch == nil)
+        await until { core.savedSearchWrites.count == 2 && model.savingSearch == nil }
+    }
+
+    @Test func aFailedSaveKeepsTheSheetAndItsName() async {
+        let (model, core) = await makeModel()
+        model.activate(.deck(10))
+        core.saveFails = true
+        model.startSavingSearch()
+        model.saveSearch(named: "Spanish")
+        #expect(model.savingSearch?.saving == true)
+        await until { model.savingSearch?.failed == true }
+        #expect(model.savingSearch?.name == "Spanish" && core.savedSearchWrites.isEmpty)
+        core.saveFails = false
+        model.saveSearch(named: "Spanish")
+        await until { model.savingSearch == nil && core.savedSearchWrites.count == 1 }
     }
 }
 

@@ -366,6 +366,11 @@ private struct SaveSearchSheet: View {
                 .focused($focused)
                 .onSubmit { model.saveSearch(named: name) }
                 .accessibilityIdentifier("browse.saveSearch.name")
+            if model.savingSearch?.failed == true {
+                Text("browse.saveSearch.failed", bundle: .module)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("browse.saveSearch.failed")
+            }
         }
         .formStyle(.grouped)
         .navigationTitle(Text("browse.saveSearch.title", bundle: .module))
