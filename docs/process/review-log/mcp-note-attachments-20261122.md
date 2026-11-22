@@ -34,3 +34,15 @@ On clean `c6304477c`, package receipt `sync-server-package/20261122T130445Z-7661
 On clean `f5215305ff`, `sync-server-package/20261122T131012Z-93993` passed the exact release-image assembly and inventory. `sync-server-package-test/20261122T131012Z-93187` passed all four smoke cases and the packaged browser run passed all 55 cases. `meguri-provider-real-server/20261122T131643Z-19995` passed six phases on the same packaged image, including review on the sender, exact media and review-record equality on the receiver, and cold reopen.
 
 CodeRabbit on PR #124 identified two valid format checks that refused JPEG application segments and MP3 ID3 metadata beyond 64 KiB. Fixer export `20261122T132515Z-47396` keeps the file-size, marker, fill-run and frame checks while allowing metadata to precede those headers. `sync-server-test/20261122T132702Z-54149` passed all 298 cases, including the three regressions for large metadata and truncated inputs.
+
+## Expanded attachment formats
+
+Independent complete-file privacy review `20261122T133721Z-98983` by `s-20261122T133702Z-023bbfaa` classified the updated plan and contracts and the new session record as PUBLIC. The orchestrator matched the exact bytes before refreshing the existing plan and MCP contract pins.
+
+| File | SHA-256 |
+|---|---|
+| `specs/servers/meguri-collection-mcp.md` | `027bf623ffb399d420722072fbcbde82a0feb7c2d5eaaf44675b8d787bf5ca26` |
+| `specs/render/card-behaviors.md` | `7e9c28e1886e1d250f21c859a6b5b4eb38c34acc66a8d7b2704793af2e513b90` |
+| `specs/render/media-serving.md` | `5d8eac20f1081ab18f64578914726bf45d916cfae0fe85b852fb859239f18264` |
+| `docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md` | `81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb` |
+| `docs/process/provenance/sessions/s-20261122T133702Z-023bbfaa.json` | `bd5ff072c55e8847ff96e6e2686d1e5bb884e5a67c74f2181cbc5ce78ec095b5` |

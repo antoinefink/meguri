@@ -1,16 +1,16 @@
 ---
-title: Attach images and audio to notes through MCP
+title: Attach images, audio and PDFs to notes through MCP
 type: feat
 status: active
 date: 2026-11-22
 product_contract_source: ce-plan-bootstrap
 ---
 
-# Attach images and audio to notes through MCP
+# Attach images, audio and PDFs to notes through MCP
 
 ## Goal Capsule
 
-A Meguri Sync member can ask their connected assistant to save a picture or a pronunciation clip in a new or existing note and study the result offline after normal sync.
+A Meguri Sync member can ask their connected assistant to save a picture, pronunciation clip or PDF in a new or existing note and study the result offline after normal sync.
 
 ## Product Contract
 
@@ -22,7 +22,7 @@ The collection MCP saves field text but cannot transfer a file. A note can there
 
 - R1. `create_note` and `edit_note` accept ChatGPT file inputs and their target note fields in one call. Keep the normal text-only calls and their results usable.
 - R2. When the client cannot pass a file, give the member a signed-in Meguri upload link. The assistant can use the resulting upload ID in one or more note writes before it expires.
-- R3. Accept JPEG, PNG, and MP3. Meguri generates the saved filenames and the field references. An upload cannot replace a different file or affect another account.
+- R3. Accept JPEG, PNG, GIF, WebP, AVIF, and HEIC or HEIF images. Accept MP3, WAV, FLAC, AAC, M4A, AIFF, CAF, Ogg Opus and Vorbis audio. Accept PDF documents. Meguri generates the saved filenames and the field references. An upload cannot replace a different file or affect another account.
 - R4. Retain the existing note revision, OAuth revocation, publication, reset, and native sync rules. A failed attachment leaves the note unchanged. A retry of the same upload reuses the media instead of adding a second copy.
 
 ### Acceptance Examples
@@ -39,7 +39,7 @@ The collection MCP saves field text but cannot transfer a file. A note can there
 
 ### Scope Boundaries
 
-Accept user-supplied image and audio files. Link import, media authoring, overwriting media, deletion, and native UI changes are outside this unit. Hosted file delivery for each client and format requires a live generated-account check before claiming support.
+Accept user-supplied image, audio and PDF files. Native card rendering handles the new references. Link import, media authoring, overwriting media and deletion are outside this change. Hosted file delivery for each client and format requires a live generated-account check before claiming support.
 
 ## Planning Contract
 
@@ -57,6 +57,10 @@ Extend the two tool descriptors and inputs, acquire bounded files, and place ser
 ### U2. Signed-in upload fallback
 
 Add `prepare_media_upload`, a same-origin authenticated file picker and a bounded upload route. Bind expiring upload records to the requesting grant and account data epoch. Use the same validation and attachment path as U1. Verify the same-account browser journey, wrong-account and stale requests, and reuse across note writes.
+
+### U3. Expanded formats and offline PDF viewing
+
+Keep one format policy across ChatGPT file inputs and the signed-in fallback. Verify the accepted formats by their bytes and display or play them through the card media path. Keep a PDF in the collection media inventory and open its local bytes in a native viewer on explicit activation from the current card. Verify broad format acceptance, bound reader refusal and stale-card cancellation.
 
 ## Verification Contract
 

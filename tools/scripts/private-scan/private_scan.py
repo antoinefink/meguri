@@ -1178,9 +1178,9 @@ PUBLIC_ARTIFACTS = {
     "specs/servers/meguri-sync-web.md":
         '5b80364781b6b1eaa16529b666cfd1ca3e6a76098dcb8c2282e7406810640bea',
     "specs/servers/meguri-collection-mcp.md":
-        "b00adf15f47480f696314faa426bd7463d42b1a8beb99aab808d89d6df662599",
+        "027bf623ffb399d420722072fbcbde82a0feb7c2d5eaaf44675b8d787bf5ca26",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
-        "1b50dcfe066bc5ea38249c6497213d673548660320dd70adf558b681c0a8ba69",
+        "81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb",
     "specs/conformance/meguri-sync-server.md":
         '4c0e7651ab72236ad31320925e8c1c163c6dc7f1904e9c0c3e52df50e8f9e479',
     "conformance/schema/meguri-sync-server.schema.json":
