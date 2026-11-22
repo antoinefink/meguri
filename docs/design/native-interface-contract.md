@@ -1311,3 +1311,29 @@ Antoine, 2026-11-22: the Statistics page "is a bit of an exception", "it's under
 - `screen-inventory.yaml` `stats.overview`: its earlier text (the scope and history header, thirteen equal boxes in Anki's order, "the heatmap and streak stats are not here", the Stats sidebar section and tab names); and in `home.deckPage` "streak stats and the Stats action (U228) are not built" (the Activity header leads to Statistics; streaks stay off the deck page).
 - N20.2's table gains Deck Statistics; N21.1's sidebar order gains Statistics second; N21.1's iPhone tabs become four.
 - Unchanged: N11.7's toolbar header principle, Today's heatmap (N14.11, N24.6), round 10's "no streak on Today", Browse (Show in Browse uses its tokens; `search/filter-tokens` T3's Studied On token is also made by the page).
+
+## N26. The home screen on the Duo, opened and folded (2026-11-22)
+
+From Antoine's annotations on a capture of his opened iPhone Duo (`decisions.md`, row `home.deckList` of 2026-11-22): "Why squared not round?", "Too much white space" and "Should we have a delimiter between the top links and the deck?". Status: built in PR #122 for his review; N26.3's choice is pending Antoine. Where earlier text differs, this section wins.
+
+### N26.1 The selection in the list beside Today
+
+- The deck list beside Today (the Duo opened and held wide, N14.10) is a List with a selection: the Today row and every deck row are tagged, and the List draws the selected row with the system's own highlight, rounded and inset, as the iPad sidebar does. The rows' buttons still navigate; the selection only shows where the detail is (Today, the deck whose page shows, or the collapsed deck that hides it).
+- Cause of the square highlight: the rows were buttons in a list with no selection, so the selected one was painted with `listRowBackground` and the system's grey cell fill, which fills the whole cell. `lint:painted-selection` now refuses a selected row painted that way.
+- Replaces N14.10's "has the system's grey selected-cell fill". Its number still takes the primary label colour while the row is selected.
+
+### N26.2 Today's totals are the title's subtitle
+
+- On touch (the iPad's Today and Today beside the deck list on the Duo), the totals ("24 new · 3 learning · 75 to review") are the navigation title's subtitle (`navigationSubtitle`): directly under the large title, on its leading edge, in the system's subtitle style. The page's first group follows at the system's distance, and the title, the subtitle and the groups share one leading edge. Nothing shows while nothing waits, as before. The Mac keeps N14.4's toolbar subtitle, unchanged.
+- Cause of the space: the totals were a section of their own in the inset grouped list, with a clear background: a row inset from the group's edge, with a section gap above and below.
+- Replaces, on touch, N14.1's and N24.2's "the title and the totals line" as a list row; `home.today.totals` is gone (the subtitle is the navigation bar's text).
+
+### N26.3 Top destinations and the decks (pending Antoine)
+
+- Built (variant A, recommended): Today is a section of its own, then the decks in a section with the system header "Decks", as the iPad sidebar has (N14.6). The column's large title, which would repeat "Decks", is "Meguri", as Music's and Podcasts' sidebars carry the app's name over their library. The tab is still called Decks.
+- Variant B: the same two sections with the system's section spacing only, no header, and the title "Decks".
+- Recommendation and reason: Apple's sidebars with fixed destinations above the person's own list put a header over that list: Mail (Favorites, then each account), Notes (the account's folders under its name), Reminders ("My Lists" under the smart lists), Files (Locations, Favorites, Tags). A header also matches the iPad, so the Duo opened and the iPad read the same.
+
+### N26.4 Search beside Today
+
+- Beside Today, the column shows the system search field under its title, so the toolbar's Search button (N14.2), which only presented that field, is not drawn there. The compact deck list (an iPhone, the Duo folded or held tall) keeps the button, since its field stays out of the way until asked for.
