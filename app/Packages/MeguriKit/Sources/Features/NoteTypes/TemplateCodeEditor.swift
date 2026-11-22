@@ -176,11 +176,15 @@ struct TemplateCodeEditor: NSViewRepresentable {
         var key: TemplateEditorKey?
         var applied: UInt64?
         private var undoManagers: [TemplateEditorKey: UndoManager] = [:]
+        /// The text each history was recorded on, as it last stood.
+        private var historyText: [TemplateEditorKey: String] = [:]
         private var selections: [TemplateEditorKey: NSRange] = [:]
         private var generation: UInt64 = 0
         /// The colour values of the shown styling, as last coloured.
         private var colours: [NSRange] = []
         private var swatches: [NSColorWell] = []
+        /// A swatch is writing its value: its own range moves with it.
+        private var applyingSwatch = false
         /// The completion the text view is showing.
         var completion: NoteTypeTemplateEditing.CompletionContext?
 
@@ -191,8 +195,11 @@ struct TemplateCodeEditor: NSViewRepresentable {
             if let key, key != newKey { selections[key] = textView.selectedRange() }
             let sameKey = key == newKey
             key = newKey
+            // A text changed while elsewhere (Flip, Revert, a save that renumbered
+            // card types): its history was recorded on other characters.
+            if historyText[newKey] != text { undoManagers[newKey]?.removeAllActions() }
+            historyText[newKey] = text
             if textView.string != text {
-                if sameKey { undoManagers[newKey]?.removeAllActions() }
                 textView.string = text
             }
             let length = (text as NSString).length
@@ -211,6 +218,9 @@ struct TemplateCodeEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
+            if let key { historyText[key] = textView.string }
+            // The swatches' ranges are the last colouring's until the next lands.
+            if !applyingSwatch { swatches.forEach { $0.isEnabled = false } }
             parent?.onChange(textView.string)
             recolour()
             // W6: typing `{{`, `{{#`, `{{^` or a filter prefix lists the names.
@@ -225,7 +235,8 @@ struct TemplateCodeEditor: NSViewRepresentable {
         func textView(_ textView: NSTextView, completions words: [String], forPartialWordRange charRange: NSRange,
                       indexOfSelectedItem index: UnsafeMutablePointer<Int>?) -> [String] {
             guard let completion else { return [] }
-            index?.pointee = 0
+            // Nothing is preselected: typing on goes on as typed.
+            index?.pointee = -1
             return NoteTypeTemplateEditing.completions(completion, fields: parent?.fields ?? [])
         }
 
@@ -294,7 +305,7 @@ struct TemplateCodeEditor: NSViewRepresentable {
                     storage.addAttribute(.foregroundColor, value: colour.colour, range: range)
                 } else if case .colour(let value) = span.kind, span.start > 0 {
                     // Room for the well before the value: the character before it is wider.
-                    storage.addAttribute(.kern, value: Self.well + Spacing.xxSmall, range: NSRange(location: span.start - 1, length: 1))
+                    storage.addAttribute(.kern, value: Self.well + Spacing.xSmall, range: NSRange(location: span.start - 1, length: 1))
                     colours.append((range, value))
                 }
             }
@@ -320,7 +331,7 @@ struct TemplateCodeEditor: NSViewRepresentable {
                 let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: range.location, length: 1), actualCharacterRange: nil)
                 let rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
                 let origin = textView.textContainerOrigin
-                well.frame = NSRect(x: origin.x + rect.minX - Self.well - Spacing.xxSmall / 2,
+                well.frame = NSRect(x: origin.x + rect.minX - Self.well - Spacing.xSmall / 2,
                                     y: origin.y + rect.midY - Self.well / 2, width: Self.well, height: Self.well)
                 well.color = .swatch(value)
                 well.tag = index
@@ -332,7 +343,9 @@ struct TemplateCodeEditor: NSViewRepresentable {
 
         /// A colour chosen in a well rewrites only that value's characters.
         @objc private func wellChanged(_ well: NSColorWell) {
-            guard colours.indices.contains(well.tag), let colour = well.color.usingColorSpace(.sRGB) else { return }
+            guard well.isEnabled, colours.indices.contains(well.tag), let colour = well.color.usingColorSpace(.sRGB) else { return }
+            applyingSwatch = true
+            defer { applyingSwatch = false }
             let range = colours[well.tag]
             let hex = SwatchHex.string(red: colour.redComponent, green: colour.greenComponent, blue: colour.blueComponent, alpha: colour.alphaComponent)
             colours[well.tag] = NSRange(location: range.location, length: (hex as NSString).length)
@@ -369,7 +382,9 @@ final class CodeTextView: NSTextView {
         // While it previews and while it finishes, the text's changes start no other completion.
         completing = true
         defer { completing = !flag }
-        guard flag, movement != NSTextMovement.cancel.rawValue, let context = coordinator?.completion else {
+        // `}}` and the close follow only a name chosen with Return or Tab.
+        let chosen = movement == NSTextMovement.return.rawValue || movement == NSTextMovement.tab.rawValue
+        guard flag, chosen, let context = coordinator?.completion else {
             super.insertCompletion(word, forPartialWordRange: charRange, movement: movement, isFinal: flag)
             return
         }
@@ -554,19 +569,27 @@ struct TemplateCodeEditor: UIViewRepresentable {
         var key: TemplateEditorKey?
         var applied: UInt64?
         private var selections: [TemplateEditorKey: NSRange] = [:]
+        private var undoManagers: [TemplateEditorKey: UndoManager] = [:]
+        private var historyText: [TemplateEditorKey: String] = [:]
         private var generation: UInt64 = 0
         private var colours: [NSRange] = []
         private var swatches: [UIColorWell] = []
+        private var applyingSwatch = false
 
         func show(key newKey: TemplateEditorKey, text: String) {
             guard let textView else { return }
             if let key, key != newKey { selections[key] = textView.selectedRange }
             let sameKey = key == newKey
             key = newKey
+            // Each text keeps its own history; one changed while elsewhere loses it.
+            let manager = undoManagers[newKey] ?? UndoManager()
+            undoManagers[newKey] = manager
+            if historyText[newKey] != text { manager.removeAllActions() }
+            historyText[newKey] = text
+            textView.history = manager
             if textView.text != text {
                 textView.text = text
-                // Another text, or this one changed elsewhere: its history no longer applies.
-                textView.undoManager?.removeAllActions()
+                manager.removeAllActions()
             }
             let length = (text as NSString).length
             let selection = sameKey ? textView.selectedRange : (selections[newKey] ?? NSRange(location: 0, length: 0))
@@ -575,6 +598,8 @@ struct TemplateCodeEditor: UIViewRepresentable {
         }
 
         func textViewDidChange(_ textView: UITextView) {
+            if let key { historyText[key] = textView.text }
+            if !applyingSwatch { swatches.forEach { $0.isEnabled = false } }
             parent?.onChange(textView.text)
             recolour()
         }
@@ -648,7 +673,7 @@ struct TemplateCodeEditor: UIViewRepresentable {
                 if let colour = TemplateSyntaxColour(span.kind) {
                     storage.addAttribute(.foregroundColor, value: colour.colour, range: range)
                 } else if case .colour(let value) = span.kind, span.start > 0 {
-                    storage.addAttribute(.kern, value: Self.well + Spacing.xxSmall, range: NSRange(location: span.start - 1, length: 1))
+                    storage.addAttribute(.kern, value: Self.well + Spacing.xSmall, range: NSRange(location: span.start - 1, length: 1))
                     colours.append((range, value))
                 }
             }
@@ -678,18 +703,25 @@ struct TemplateCodeEditor: UIViewRepresentable {
                 let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: range.location, length: 1), actualCharacterRange: nil)
                 let rect = manager.boundingRect(forGlyphRange: glyphs, in: textView.textContainer)
                 let inset = textView.textContainerInset
-                well.frame = CGRect(x: inset.left + rect.minX - Self.well - Spacing.xxSmall / 2, y: inset.top + rect.midY - Self.well / 2,
+                well.frame = CGRect(x: inset.left + rect.minX - Self.well - Spacing.xSmall / 2, y: inset.top + rect.midY - Self.well / 2,
                                     width: Self.well, height: Self.well)
                 well.selectedColor = .swatch(value)
                 well.tag = index
                 well.isEnabled = textView.isEditable
                 well.isHidden = false
+                // One element per swatch: the well's own parts stay out of the tree.
+                well.isAccessibilityElement = true
+                well.accessibilityTraits = .button
+                well.accessibilityLabel = SwatchHex.string(red: Double(value.red) / 255, green: Double(value.green) / 255,
+                                                           blue: Double(value.blue) / 255, alpha: Double(value.alpha) / 255)
                 well.accessibilityIdentifier = "noteTypes.cards.swatch.\(index)"
             }
         }
 
         @objc private func wellChanged(_ well: UIColorWell) {
-            guard colours.indices.contains(well.tag), let colour = well.selectedColor else { return }
+            guard well.isEnabled, colours.indices.contains(well.tag), let colour = well.selectedColor else { return }
+            applyingSwatch = true
+            defer { applyingSwatch = false }
             var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
             guard colour.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return }
             let range = colours[well.tag]
@@ -704,6 +736,9 @@ struct TemplateCodeEditor: UIViewRepresentable {
 /// The editor's text view on iPad: ⌘/ comments the line.
 final class CodeTextView: UITextView {
     weak var coordinator: TemplateCodeEditor.Coordinator?
+    /// The shown text's own history (one per front, back and styling).
+    var history: UndoManager?
+    override var undoManager: UndoManager? { history ?? super.undoManager }
 
     override var keyCommands: [UIKeyCommand]? {
         let comment = UIKeyCommand(title: NoteTypesStrings.text("noteTypes.editor.toggleComment"), action: #selector(toggleComment),

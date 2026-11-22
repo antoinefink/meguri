@@ -781,6 +781,10 @@ extension NoteTypesModelTests {
         backend.records[7] = Self.twoCards
         backend.blankFronts = [NotetypeBlankFront(noteIds: [], field: nil), NotetypeBlankFront(noteIds: [3, 4, 5], field: 1)]
         let (model, _) = await open(backend)
+        // W8 reads the notes only for the Cards tab, which shows it.
+        #expect(backend.blankReads == 0)
+        model.tab = .cards
+        await model.settle()
         let first = backend.blankReads
         #expect(first == 1 && model.liveIssues(7).map(\.kind) == [.blankFront(notes: 3, field: "Back")])
         model.setText(7, card: 0, part: .back, "changed back")

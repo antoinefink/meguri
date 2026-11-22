@@ -91,23 +91,26 @@ struct NoteTypeCardTypesList: View {
 
     var body: some View {
         VStack(spacing: .zero) {
+            ListHeader(title: "noteTypes.cards.cardTypes", identifier: "noteTypes.cards.cardTypesHeader")
             List(selection: selection) {
-                Section {
-                    ForEach(model.cardTypeLines(id)) { line in
-                        CardTypeRowView(model: model, id: id, line: line)
-                            .tag(line.id)
-                            .contextMenu { menu(line) }
-                    }
-                    .onMove { offsets, destination in model.moveCardTypes(id, fromOffsets: offsets, toOffset: destination) }
-                } header: {
-                    Text("noteTypes.cards.cardTypes", bundle: .module)
+                ForEach(model.cardTypeLines(id)) { line in
+                    CardTypeRowView(model: model, id: id, line: line)
+                        .tag(line.id)
+                        .contextMenu { menu(line) }
                 }
+                .onMove { offsets, destination in model.moveCardTypes(id, fromOffsets: offsets, toOffset: destination) }
             }
             #if os(macOS)
             .listStyle(.sidebar)
             .onDeleteCommand { deleteSelected() }
             #endif
             .focused($listFocused)
+            // Return renames the selected card type in place (W5).
+            .onKeyPress(.return) {
+                guard listFocused, model.renamingCard == nil, let row = shownRow, !row.deleted else { return .ignored }
+                startRename(row.id)
+                return .handled
+            }
             .disabled(!editable)
             .accessibilityIdentifier("noteTypes.cards.list")
             Divider()
@@ -261,6 +264,24 @@ private struct CardTypeRowView: View {
     }
 }
 
+/// A list's title above it, as a sidebar section header reads.
+private struct ListHeader: View {
+    let title: LocalizedStringKey
+    let identifier: String
+
+    var body: some View {
+        Text(title, bundle: .module)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Spacing.small)
+            .padding(.top, Spacing.small)
+            .padding(.bottom, Spacing.xxSmall)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier(identifier)
+    }
+}
+
 // MARK: The Fields list (W5)
 
 /// Every draft field; the ones the shown card type does not use are grey.
@@ -276,8 +297,14 @@ struct NoteTypeCardFieldsList: View {
     }
 
     var body: some View {
+        VStack(spacing: .zero) {
+            ListHeader(title: "noteTypes.cards.fields", identifier: "noteTypes.cards.fieldsHeader")
+            fields
+        }
+    }
+
+    private var fields: some View {
         List {
-            Section {
                 ForEach(model.draft(id)?.keptRows ?? []) { row in
                     let unused = used.map { !$0.contains(row.id) } ?? false
                     Text(verbatim: row.name)
@@ -291,9 +318,6 @@ struct NoteTypeCardFieldsList: View {
                         .accessibilityAction { insert(row.name) }
                         .accessibilityIdentifier("noteTypes.cards.field.\(row.id)")
                 }
-            } header: {
-                Text("noteTypes.cards.fields", bundle: .module)
-            }
         }
         #if os(macOS)
         .listStyle(.sidebar)
@@ -339,8 +363,11 @@ struct NoteTypeTemplateEditorColumn: View {
         HStack(spacing: Spacing.small) {
             Picker(selection: $model.cardPart) {
                 Text("noteTypes.editor.front", bundle: .module).tag(NoteTypeTemplatePart.front)
+                    .accessibilityIdentifier("noteTypes.cards.part.front")
                 Text("noteTypes.editor.back", bundle: .module).tag(NoteTypeTemplatePart.back)
+                    .accessibilityIdentifier("noteTypes.cards.part.back")
                 Text("noteTypes.editor.styling", bundle: .module).tag(NoteTypeTemplatePart.styling)
+                    .accessibilityIdentifier("noteTypes.cards.part.styling")
             } label: {
                 Text("noteTypes.editor.part", bundle: .module)
             }
@@ -383,6 +410,7 @@ struct NoteTypeTemplateEditorColumn: View {
             }
         } label: {
             Text("noteTypes.insert", bundle: .module)
+                .accessibilityIdentifier("noteTypes.cards.insert.label")
         }
         .fixedSize()
         .disabled(!model.editable(id) || card.flatMap { draft?.cardRow($0)?.deleted } == true)

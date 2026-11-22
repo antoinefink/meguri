@@ -198,6 +198,9 @@ public nonisolated enum NoteTypeTemplateEditing {
         let endsWithBreak = block.hasSuffix("\n")
         var parts = block.components(separatedBy: "\n")
         if endsWithBreak { parts.removeLast() }
+        // A CR LF line keeps its CR after the comment's close.
+        let returns = parts.map { $0.utf16.last == 0x0D }
+        parts = zip(parts, returns).map { $1 ? String(String.UnicodeScalarView($0.unicodeScalars.dropLast())) : $0 }
         func split(_ line: String) -> (indent: Substring, body: Substring) {
             let indent = line.prefix { $0 == " " || $0 == "\t" }
             return (indent, line.dropFirst(indent.count))
@@ -218,10 +221,10 @@ public nonisolated enum NoteTypeTemplateEditing {
             }
             return String(indent) + open + body + close
         }
-        let replacement = rewritten.joined(separator: "\n") + (endsWithBreak ? "\n" : "")
+        let replacement = zip(rewritten, returns).map { $1 ? $0 + "\r" : $0 }.joined(separator: "\n") + (endsWithBreak ? "\n" : "")
         let range = lines.location..<(lines.location + lines.length)
         // The insertion point ends the last line it rewrote.
-        let caret = range.lowerBound + replacement.utf16.count - (endsWithBreak ? 1 : 0)
+        let caret = range.lowerBound + replacement.utf16.count - (endsWithBreak ? 1 : 0) - (endsWithBreak && returns.last == true ? 1 : 0)
         return NoteTypeTextEdit(range: range, text: replacement, caret: caret)
     }
 

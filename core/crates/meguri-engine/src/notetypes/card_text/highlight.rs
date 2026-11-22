@@ -131,6 +131,7 @@ fn declaration(tokens: &[Token], range: Range<usize>, spans: &mut Vec<(Range<usi
     comments(tokens, range.start + name + 1..range.start + colon, spans);
     let value: Vec<usize> = significant[2..].to_vec();
     if let (Some(&first), Some(&last)) = (value.first(), value.last()) {
+        comments(tokens, range.start + colon + 1..range.start + first, spans);
         spans.push((items[first].span.start..items[last].span.end, CssHighlight::Value));
         let mut at = first;
         while at <= last {
@@ -148,6 +149,7 @@ fn declaration(tokens: &[Token], range: Range<usize>, spans: &mut Vec<(Range<usi
                         if let Some(c) = colour::read(&items[at..=close]) {
                             spans.push((token.span.start..items[close].span.end, CssHighlight::Colour(c)));
                         }
+                        comments(tokens, range.start + at + 1..range.start + close, spans);
                         at = close + 1;
                         continue;
                     }
@@ -156,6 +158,9 @@ fn declaration(tokens: &[Token], range: Range<usize>, spans: &mut Vec<(Range<usi
             }
             at += 1;
         }
+        comments(tokens, range.start + last + 1..range.end, spans);
+    } else {
+        comments(tokens, range.start + colon + 1..range.end, spans);
     }
 }
 
@@ -255,5 +260,15 @@ mod tests {
         assert_eq!(coloured("}}} color: red"), vec![]);
         assert_eq!(coloured(".card { color: rgb(1,2"), vec![("color", Property), ("rgb(1,2", Value)]);
         assert_eq!(coloured("/* open"), vec![("/* open", Comment)]);
+        assert_eq!(
+            coloured("a { color: /*x*/ red /*y*/; }"),
+            vec![
+                ("color", Property),
+                ("/*x*/", Comment),
+                ("red", Value),
+                ("red", swatch(RED)),
+                ("/*y*/", Comment)
+            ]
+        );
     }
 }

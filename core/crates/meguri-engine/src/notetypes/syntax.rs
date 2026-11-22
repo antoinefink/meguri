@@ -54,6 +54,9 @@ pub fn template_highlights(source: &str) -> Vec<(Range<usize>, TemplateHighlight
 struct TagScan {
     inside: bool,
     quote: Option<u8>,
+    /// The last byte other than white space, inside the tag: a quote opens
+    /// a value only right after `=` (an apostrophe in `title=it's` does not).
+    last: u8,
 }
 
 impl TagScan {
@@ -67,7 +70,7 @@ impl TagScan {
                 match self.quote {
                     Some(q) if byte == q => self.quote = None,
                     Some(_) => {}
-                    None if byte == b'"' || byte == b'\'' => self.quote = Some(byte),
+                    None if (byte == b'"' || byte == b'\'') && self.last == b'=' => self.quote = Some(byte),
                     None if byte == b'>' => {
                         self.inside = false;
                         if let Some(s) = start.take() {
@@ -76,12 +79,16 @@ impl TagScan {
                     }
                     None => {}
                 }
+                if !byte.is_ascii_whitespace() {
+                    self.last = byte;
+                }
             } else if byte == b'<'
                 && bytes
                     .get(at + 1)
                     .is_some_and(|next| next.is_ascii_alphabetic() || matches!(next, b'/' | b'!' | b'?'))
             {
                 self.inside = true;
+                self.last = b'<';
                 start = Some(at);
             }
             at += 1;
@@ -129,6 +136,7 @@ mod tests {
             vec![("<img src=\"", Tag), ("{{Image}}", Field), ("\">", Tag)]
         );
         assert_eq!(coloured("<span title='>'>x"), vec![("<span title='>'>", Tag)]);
+        assert_eq!(coloured("<b title=it's>x</b> y'z"), vec![("<b title=it's>", Tag), ("</b>", Tag)]);
     }
 
     #[test]

@@ -146,6 +146,10 @@ import Testing
         let unwrapped = NoteTypeTemplateEditing.toggleComment(applied, selection: 0..<1, styling: false)
         #expect(unwrapped.text == "  {{Front}}\n")
         #expect(NoteTypeTemplateEditing.toggleComment("color: red;", selection: 0..<0, styling: true).text == "/* color: red; */")
+        // A CR LF line keeps its CR after the close, and uncomments again.
+        let crlf = NoteTypeTemplateEditing.toggleComment("{{Front}}\r\nkept", selection: 0..<0, styling: false)
+        #expect(crlf.text == "<!-- {{Front}} -->\r\n")
+        #expect(NoteTypeTemplateEditing.toggleComment("<!-- {{Front}} -->\r\n", selection: 0..<0, styling: false).text == "{{Front}}\r\n")
     }
 
     @Test func flipFollowsA15() {

@@ -113,7 +113,9 @@ pub fn template_issues(collection: &Collection, draft: &StructureDraft) -> Resul
 /// The byte where the first reference (T11.1) to `name` starts.
 fn first_reference(parsed: &ParsedTemplate, name: &str) -> Option<usize> {
     parsed.nodes().iter().find_map(|node| match &node.kind {
-        NodeKind::Replacement { key, .. } | NodeKind::Open { key, .. } if key == name => Some(node.span.start),
+        // T11.1: a `c<number>` section key is a card number, not a reference.
+        NodeKind::Replacement { key, .. } if key == name => Some(node.span.start),
+        NodeKind::Open { key, .. } if key == name && !super::rewrite::is_card_number(key) => Some(node.span.start),
         _ => None,
     })
 }
@@ -175,36 +177,10 @@ fn line_of(text: &str, at: usize) -> u32 {
 }
 
 /// W7's "Use “<name>”": every reference to the field `from` in `text`
-/// (replacements, section opens and closes; comments excluded) names `to`
-/// instead. Only the key's characters change; filters, spacing and every
-/// other byte stay as written.
+/// names `to` instead (`super::rewrite::replace_key`, the one module that
+/// rewrites template references).
 pub fn replace_field_references(text: &str, from: &str, to: &str) -> String {
-    let parsed = ParsedTemplate::parse(text);
-    let (open, close) = (parsed.delimiters().open(), parsed.delimiters().close());
-    let mut output = String::with_capacity(text.len());
-    let mut through = 0;
-    for node in parsed.nodes() {
-        let key = match &node.kind {
-            NodeKind::Replacement { key, .. } | NodeKind::Open { key, .. } | NodeKind::Close { key } => key,
-            _ => continue,
-        };
-        if key != from {
-            continue;
-        }
-        // The key is the last piece of the trimmed tag content (T4, T5), so
-        // it ends where that content's trailing white space starts.
-        let inner = node.span.start + open.len()..node.span.end - close.len();
-        let Some(content) = text.get(inner.clone()) else { continue };
-        let end = inner.start + content.trim_end().len();
-        let Some(start) = end.checked_sub(key.len()).filter(|s| text.get(*s..end) == Some(key.as_str())) else {
-            continue;
-        };
-        output.push_str(&text[through..start]);
-        output.push_str(to);
-        through = end;
-    }
-    output.push_str(&text[through..]);
-    output
+    super::rewrite::replace_key(text, from, to)
 }
 
 #[cfg(test)]
@@ -232,6 +208,9 @@ mod tests {
         );
         assert_eq!(replace_field_references("{{{Frnt}}}", "Frnt", "Front"), "{{{Front}}}");
         assert_eq!(replace_field_references("no tags", "a", "b"), "no tags");
+        // A card number section stays: only the field reference changes.
+        assert_eq!(replace_field_references("{{#c1}}h{{/c1}}\n{{c1}}", "c1", "C1"), "{{#c1}}h{{/c1}}\n{{C1}}");
+        assert_eq!(first_reference(&ParsedTemplate::parse("{{#c1}}h{{/c1}}\n{{c1}}"), "c1"), Some(16));
     }
 
     #[test]

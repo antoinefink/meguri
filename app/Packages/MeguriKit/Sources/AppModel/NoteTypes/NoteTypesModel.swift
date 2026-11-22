@@ -77,7 +77,9 @@ public final class NoteTypesModel {
     public var selection: Int64? {
         didSet { if selection != oldValue { selectionChanged() } }
     }
-    public var tab: Tab = .fields
+    public var tab: Tab = .fields {
+        didSet { if tab == .cards, oldValue != .cards, let id = selection, records[id] != nil { refreshIssues(id, immediately: true) } }
+    }
     /// iPad: the field whose options show in a popover.
     public var optionsField: Int?
     public private(set) var records: [Int64: NotetypeRecord] = [:]
@@ -144,6 +146,7 @@ public final class NoteTypesModel {
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var countsTask: Task<Void, Never>?
     @ObservationIgnored private var issueTasks: [Int64: Task<Void, Never>] = [:]
+    @ObservationIgnored private var referencesTask: [Int64: Task<Void, Never>] = [:]
     @ObservationIgnored private var blankTasks: [Int64: Task<Void, Never>] = [:]
     /// What W8 was last read for (the fronts and fields), so typing in a
     /// back or the styling starts no pass over the notes.
@@ -314,10 +317,12 @@ public final class NoteTypesModel {
                 guard !Task.isCancelled, self.epoch == epoch, let counts else { return }
                 typeCounts[id] = counts
             },
-            // W5: by stored ordinal, for the base the rows show.
+            // W5: by stored ordinal, for the base the rows show; a draft whose
+            // note type changed elsewhere waits for Reload or Revert, as Notes does.
             Task {
+                guard !stale.contains(id) else { return }
                 let counts = try? await backend.templateCardCounts(id)
-                guard !Task.isCancelled, self.epoch == epoch, let counts, records[id]?.base == base else { return }
+                guard !Task.isCancelled, self.epoch == epoch, let counts, records[id]?.base == base, !stale.contains(id) else { return }
                 templateCardCounts[id] = counts
                 cardCountsBase[id] = base
             },
@@ -343,7 +348,8 @@ public final class NoteTypesModel {
     /// W1's Used On for each row of the note type, by card type position;
     /// nil until the references are read.
     public func usedOn(_ id: Int64) -> [Int: [Int]]? {
-        guard let draft = draft(id), let read = references[id], read.texts == draft.referenceTexts else { return nil }
+        // The last read shows while typing's next read runs, for the same card types.
+        guard let draft = draft(id), let read = references[id], read.texts.count == draft.referenceTexts.count else { return nil }
         return draft.usedOn(references: read.references)
     }
 
@@ -471,7 +477,9 @@ public final class NoteTypesModel {
     /// W5's count for a card type: its base ordinal's cards (0 for a new
     /// one); nil until known.
     public func cardCount(_ id: Int64, row: NoteTypeCardTypeRow) -> UInt64? {
-        guard let counts = templateCardCounts[id], let base = draft(id)?.base.base, cardCountsBase[id] == base else { return nil }
+        guard !stale.contains(id), let counts = templateCardCounts[id], let base = draft(id)?.base.base, cardCountsBase[id] == base else {
+            return nil
+        }
         guard let origin = row.origin else { return 0 }
         return counts[safe: Int(origin)] ?? 0
     }
@@ -509,16 +517,17 @@ public final class NoteTypesModel {
         edit(id) { $0.setText(card, part, text) }
     }
 
-    /// A15's Flip of a card type's front and back; `flipRefused` when the
-    /// back has no separator with text on both sides.
+    /// A15's Flip of a card type's front and back, from the Back's context
+    /// menu; `flipRefused` when the back has no separator with text on both sides.
     public func flip(_ id: Int64, card: Int) {
         guard editable(id), let texts = draft(id)?.texts(card) else { return }
         guard let flipped = NoteTypeTemplateEditing.flip(front: texts.front, back: texts.back) else { flipRefused = true; return }
-        edit(id) { draft in
-            let front = draft.setText(card, .front, flipped.front)
-            let back = draft.setText(card, .back, flipped.back)
-            return front || back
-        }
+        // The back, which shows, changes through the text view so its undo
+        // records it; the front, not shown, takes its new text directly.
+        edit(id) { $0.setText(card, .front, flipped.front) }
+        selectedCard[id] = card
+        cardPart = .back
+        request(id, card: card, part: .back, .replaceAll(flipped.back))
     }
 
     /// Asks the template editor to apply `command` on a card type's part.
@@ -607,7 +616,10 @@ public final class NoteTypesModel {
             issueReads[id] = found.map { NoteTypeIssueRead(cards: cards, fields: fields, issues: $0) }
         }
         guard !draft.isCloze else { blankReads[id] = nil; return }
+        // W8 reads every note of the type: only for the Cards tab, which shows it.
+        guard tab == .cards else { return }
         let key = structure.templates.map(\.front) + ["\u{0}"] + structure.fields.map { "\($0.origin.map(String.init) ?? "+")\u{1}\($0.name)" }
+            + ["\u{0}"] + cards.map(String.init)
         guard key != blankKeys[id] else { return }
         blankKeys[id] = key
         blankTasks[id]?.cancel()
@@ -684,7 +696,12 @@ public final class NoteTypesModel {
                   self.epoch == epoch, revisions[id] == revision else { return }
             summaries[id] = (revision, summary)
         }
-        Task { await readReferences(id) }
+        referencesTask[id]?.cancel()
+        referencesTask[id] = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await readReferences(id)
+        }
     }
 
     // MARK: Save (D3, D5)
@@ -912,6 +929,8 @@ public final class NoteTypesModel {
     /// D5 step 6: the draft is gone and the detail shows the saved note type.
     private func saved(_ id: Int64) {
         drafts[id] = nil
+        // The saved card types have other rows: W8 reads again for them.
+        blankKeys[id] = nil
         // No edit starts from the pre-save version while the saved one is read.
         records[id] = nil
         summaries[id] = nil
@@ -949,7 +968,12 @@ public final class NoteTypesModel {
         let notesMoved = changes.notes.contains { $0.change != .updated }
         // A note edited elsewhere can fill or empty a field: the shown type's Notes column reads again.
         if !notesMoved, changes.notetypes.isEmpty, !changes.wholeCollection, !changes.notes.isEmpty {
-            if let id = selection, records[id] != nil { readCounts(id) }
+            if let id = selection, records[id] != nil {
+                readCounts(id)
+                // An edited note can fill or empty a front's field (W8).
+                blankKeys[id] = nil
+                refreshIssues(id, immediately: true)
+            }
             // Other loaded note types read theirs when they are shown again; reads
             // already running are cancelled, so no pre-change count lands.
             for id in records.keys where id != selection {
@@ -980,6 +1004,11 @@ public final class NoteTypesModel {
         }
         if notesMoved, !changes.wholeCollection {
             for id in records.keys where !touched.contains(id) { readCounts(id) }
+        }
+        // Notes added or removed change W8's notes: the shown type reads it again.
+        if notesMoved || changes.wholeCollection, let id = selection, records[id] != nil {
+            blankKeys[id] = nil
+            refreshIssues(id, immediately: true)
         }
     }
 
@@ -1018,6 +1047,8 @@ public final class NoteTypesModel {
         for task in countTasks.values.flatMap({ $0 }) { task.cancel() }
         for task in issueTasks.values { task.cancel() }
         for task in blankTasks.values { task.cancel() }
+        for task in referencesTask.values { task.cancel() }
+        referencesTask = [:]
         summaryTasks = [:]; detailTasks = [:]; countTasks = [:]; fieldCountsBase = [:]; renameTokens = [:]
         issueTasks = [:]; blankTasks = [:]; blankKeys = [:]; cardCountsBase = [:]
         selectedCard = [:]; renamingCard = nil; templateCardCounts = [:]; issueReads = [:]; blankReads = [:]; editorRequest = nil
@@ -1054,6 +1085,7 @@ public final class NoteTypesModel {
         for task in detailTasks.values { await task.value }
         for task in issueTasks.values { await task.value }
         for task in blankTasks.values { await task.value }
+        for task in referencesTask.values { await task.value }
         for task in countTasks.values.flatMap({ $0 }) { await task.value }
         await countsTask?.value
         for _ in 0..<50 { await Task.yield() }
