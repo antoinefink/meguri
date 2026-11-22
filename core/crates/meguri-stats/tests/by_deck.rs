@@ -429,3 +429,40 @@ fn h10_a_deck_the_deck_list_hides_still_has_its_row() {
     assert_eq!(decks(&default), [(1, true)]);
     assert_eq!(default.rows[0].cards, 1);
 }
+
+#[test]
+fn h10_a_deck_whose_parent_is_missing_is_a_row_and_its_cards_count_once() {
+    // `Lost::Found` and `Lost::Found::Deep` exist, `Lost` does not (damaged
+    // data); `Lang::Gone::Kid` under the existing `Lang` misses `Lang::Gone`.
+    let f = Fixture::with_raw(&["DELETE FROM cards"]);
+    let found = add_deck(&f, "Lost\u{1f}Found");
+    let deep = add_deck(&f, "Lost\u{1f}Found\u{1f}Deep");
+    let kid = add_deck(&f, "Lang\u{1f}Gone\u{1f}Kid");
+    f.write_raw(move |scope| {
+        // Remove the parents the deck writes created.
+        for deck in meguri_storage::ReadRows::deck_rows(&*scope)? {
+            if deck.name == "Lost" || deck.name == "Lang\u{1f}Gone" {
+                scope.restore(Table::Decks, &RowKey::Id(deck.id.0), None)?;
+            }
+        }
+        Ok(())
+    });
+    put_cards(&f, &[(1, found, 0), (2, deep, 0), (3, kid, 0), (4, LANG, 0)]);
+    let n = f.next_day_at();
+    put_rows(&f, &[
+        (1, ((n - 3_600) * 1_000, 3, 30, 2_500, 1_000, 1)),
+        (2, ((n - 3_500) * 1_000, 1, 30, 2_500, 2_000, 1)),
+        (3, ((n - 3_400) * 1_000, 3, 30, 2_500, 3_000, 1)),
+    ]);
+    let all = by_deck(&f, Scope::Collection, History::Last12Months);
+    let found_row = all.rows.iter().find(|row| row.deck.0 == found).expect("a row for the orphan");
+    assert_eq!((found_row.cards, found_row.windows.one_month.reviews), (2, 2));
+    assert!(!all.rows.iter().any(|row| row.deck.0 == deep));
+    let lang_row = all.rows.iter().find(|row| row.deck.0 == LANG).unwrap();
+    assert_eq!((lang_row.cards, lang_row.windows.one_month.reviews), (2, 1));
+    assert_eq!(all.rows.iter().map(|row| row.cards).sum::<u64>(), 4);
+    // Under `Lang`, the orphan is a row of its own beside the own cards.
+    let lang = by_deck(&f, Scope::Deck(DeckId(LANG)), History::Last12Months);
+    assert_eq!(decks(&lang), [(LANG, true), (kid, false)]);
+    assert_eq!(lang.rows.iter().map(|row| row.cards).sum::<u64>(), 2);
+}

@@ -2,7 +2,7 @@
 //! decks, its cards partitioned by home deck so the rows add up, unlike the
 //! page's other parts, which follow G2.1's deck rule.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use meguri_model::ids::DeckId;
 
@@ -88,15 +88,24 @@ fn layout(scope: &Scope, decks: &[DeckEntry]) -> (Vec<(DeckId, bool)>, BTreeMap<
     const SEPARATOR: char = '\u{1f}';
     let mut rows: Vec<(DeckId, bool)> = Vec::new();
     let mut of_home: BTreeMap<i64, usize> = BTreeMap::new();
+    let normal: HashSet<&str> = decks.iter().filter(|deck| !deck.filtered).map(|deck| deck.folded.as_str()).collect();
     // The normal decks one level below `parent` (none: the top level), in
-    // order, each with its subtree.
+    // order, each with its subtree. A deck whose parent is missing (damaged
+    // data) is a row of the nearest level where a normal deck exists above
+    // it, so its cards are still in exactly one row (H10.1).
     let mut add_level = |parent: Option<&str>, rows: &mut Vec<(DeckId, bool)>| {
         for deck in decks.iter().filter(|deck| !deck.filtered) {
             let rest = match parent {
                 None => Some(deck.folded.as_str()),
                 Some(parent) => deck.folded.strip_prefix(parent).and_then(|rest| rest.strip_prefix(SEPARATOR)),
             };
-            if rest.is_none_or(|rest| rest.contains(SEPARATOR)) {
+            let Some(rest) = rest else { continue };
+            // A normal deck between `parent` and this one holds it instead.
+            let base = deck.folded.len() - rest.len();
+            let held = rest
+                .match_indices(SEPARATOR)
+                .any(|(at, _)| normal.contains(&deck.folded[..base + at]));
+            if held {
                 continue;
             }
             let mut prefix = deck.folded.clone();
