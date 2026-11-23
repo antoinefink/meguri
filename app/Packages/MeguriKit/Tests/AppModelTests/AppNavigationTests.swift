@@ -20,8 +20,9 @@ import AppModel
     // MARK: Structure (R17, R18)
 
     @Test func theCompactLayoutHasFourTabsAndNoteTypesIsNotOne() {
-        #expect(CompactTab.allCases == [.decks, .browse, .stats, .settings])
-        #expect(CompactTab.allCases.map(\.section) == [.home, .browse, .stats, .settings])
+        // N25.1: Statistics between Decks and Browse.
+        #expect(CompactTab.allCases == [.decks, .stats, .browse, .settings])
+        #expect(CompactTab.allCases.map(\.section) == [.home, .stats, .browse, .settings])
         // Note Types lives in the Settings tab (R18).
         #expect(AppSection.noteTypes.tab == .settings)
     }

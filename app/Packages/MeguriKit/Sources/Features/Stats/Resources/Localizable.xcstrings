@@ -1,6 +1,26 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "stats.activity.showAllYears": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show All Years"
+          }
+        }
+      }
+    },
+    "stats.activity.showLess": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Less"
+          }
+        }
+      }
+    },
     "stats.activity.today %@": {
       "localizations": {
         "en": {
@@ -1059,6 +1079,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ a day on average"
+          }
+        }
+      }
+    },
+    "stats.jump": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go to Section"
           }
         }
       }

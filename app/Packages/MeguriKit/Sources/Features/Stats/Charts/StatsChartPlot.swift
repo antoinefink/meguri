@@ -562,7 +562,9 @@ struct StatsChartPlot: View {
                 rows: format.calloutRows(data, bin: bin),
                 showInBrowse: data.browsable.contains(bin) && showInBrowse != nil && selection.pinned ? { browse(bin) } : nil
             )
-            .fixedSize()
+            // Its own size, but never wider than the chart: on a narrow box or at a large text
+            // size its lines wrap rather than run off the screen (N25.6).
+            .fixedSize(horizontal: false, vertical: true)
             .alignmentGuide(.leading) { dimensions in
                 // Beside the rule, never over it: to its right in the left half,
                 // to its left in the right half, kept inside the chart.

@@ -105,6 +105,9 @@ struct StatsText {
     var figureAverageOnDaysStudied: String { text("stats.figure.averageOnDaysStudied") }
     var figureTimePerCard: String { text("stats.figure.timePerCard") }
     var figureCurrentStreak: String { text("stats.figure.currentStreak") }
+    /// The narrow page's Activity control (the coordinator's decision of 2026-11-23).
+    var activityShowAllYears: String { text("stats.activity.showAllYears") }
+    var activityShowLess: String { text("stats.activity.showLess") }
     var figureLongestStreak: String { text("stats.figure.longestStreak") }
     var figureDaysStudiedThisYear: String { text("stats.figure.daysStudiedThisYear") }
     var figureAllReviews: String { text("stats.figure.allReviews") }

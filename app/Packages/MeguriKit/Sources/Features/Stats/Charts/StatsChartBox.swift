@@ -71,6 +71,8 @@ public struct StatsChartBox<Accessory: View>: View {
     @Environment(\.calendar) private var calendar
     @Environment(\.appClock) private var clock
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.statsNarrow) private var statsNarrow
+    @ScaledMetric(relativeTo: .subheadline) private var figureMinimum = StatsNarrowLayout.figureMinimum
 
     /// - Parameters:
     ///   - box: the box's id in `stats.box.<box>` (S15), e.g. `reviewsOverTime`.
@@ -109,6 +111,8 @@ public struct StatsChartBox<Accessory: View>: View {
 
     private var isReady: Bool { phase == .ready }
     private var stacks: Bool { dynamicTypeSize.isAccessibilitySize }
+    /// N25.6's narrow page: the page says so; outside it the size class does.
+    private var narrow: Bool { statsNarrow ?? (horizontalSizeClass == .compact) }
     private var selection: Binding<StatsChartSelection> { externalSelection ?? $ownSelection }
 
     private var plotPhase: StatsPlotPhase {
@@ -145,7 +149,27 @@ public struct StatsChartBox<Accessory: View>: View {
 
     // MARK: Parts
 
-    private var header: some View {
+    /// The header (N25.4 part 1). On the narrow page the switches stay segmented while they fit
+    /// beside the title and become menus where they do not (N25.6): the header tries each style
+    /// of `StatsNarrowLayout.switchStyles` in turn, in the same layout pass.
+    @ViewBuilder private var header: some View {
+        if narrow {
+            let styles = StatsNarrowLayout.switchStyles(accessibilitySize: stacks)
+            if styles.count > 1 {
+                ViewThatFits(in: .horizontal) {
+                    ForEach(styles, id: \.self) { style in
+                        headerRow.environment(\.statsSwitchStyle, style)
+                    }
+                }
+            } else {
+                headerRow.environment(\.statsSwitchStyle, styles.first ?? .menu)
+            }
+        } else {
+            headerRow
+        }
+    }
+
+    private var headerRow: some View {
         let layout = stacks
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xSmall))
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Spacing.xSmall))
@@ -217,20 +241,15 @@ public struct StatsChartBox<Accessory: View>: View {
         )
     }
 
-    /// The small figures in one row; two to a row at compact width when there
-    /// are four (decided by width class and count, never by the values, so the
-    /// box keeps its size when they arrive); one column at the accessibility sizes.
+    /// The small figures in one row; on the narrow page in a row where they fit at their
+    /// minimum width, else two to a row (`StatsNarrowLayout.figureColumns`: decided by the
+    /// width, the count and the text size, never by the values, so the box keeps its size when
+    /// they arrive); one column at the accessibility sizes.
     @ViewBuilder private var figuresView: some View {
         if stacks {
             VStack(alignment: .leading, spacing: Spacing.xSmall) { figureCells }
-        } else if horizontalSizeClass == .compact, figures.count > 3 {
-            Grid(alignment: .topLeading, horizontalSpacing: Spacing.medium, verticalSpacing: Spacing.xSmall) {
-                ForEach(Array(stride(from: 0, to: figures.count, by: 2)), id: \.self) { start in
-                    GridRow {
-                        ForEach(figures[start..<min(start + 2, figures.count)]) { figureCell($0) }
-                    }
-                }
-            }
+        } else if narrow {
+            StatsColumnsLayout(minimum: figureMinimum, spacing: Spacing.medium, rowSpacing: Spacing.xSmall) { figureCells }
         } else {
             HStack(alignment: .top, spacing: Spacing.medium) { figureCells }
         }
@@ -293,9 +312,9 @@ public struct StatsChartBox<Accessory: View>: View {
 
 /// A box's frame (N25.3, N25.6), shared by the chart boxes and the boxes that are not charts
 /// (Activity, the tables): the system group box on the Mac and the iPad at regular width, which
-/// takes the height its row gives it, so the boxes of a row share it; at compact width (iPhone,
-/// the folded Duo, a narrow iPad) a section-like group on the grouped background, as inset
-/// grouped lists draw their sections.
+/// takes the height its row gives it, so the boxes of a row share it; on the narrow page (iPhone,
+/// the folded Duo, the Duo held tall, a narrow iPad) a section-like group on the grouped
+/// background, as inset grouped lists draw their sections.
 ///
 /// Every box keeps one even inset of about 16 points on all four sides, as the touch group box
 /// and the grouped sections draw theirs (Antoine, 2026-11-23: "not enough internal margin around
@@ -305,6 +324,7 @@ public struct StatsChartBox<Accessory: View>: View {
 struct StatsBoxContainer<Content: View>: View {
     private let content: Content
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.statsNarrow) private var statsNarrow
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -318,7 +338,9 @@ struct StatsBoxContainer<Content: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         #else
-        if horizontalSizeClass == .regular {
+        // The narrow page (N25.6) is the shell's tab layout, the Duo held tall included, whose
+        // size class can be regular; outside the page the size class decides.
+        if !(statsNarrow ?? (horizontalSizeClass == .compact)) {
             GroupBox {
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

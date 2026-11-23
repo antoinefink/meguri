@@ -36,9 +36,10 @@ nonisolated public enum AppSection: String, CaseIterable, Codable, Sendable {
     }
 }
 
-/// The tab layout's tabs, in tab bar order (R18).
+/// The tab layout's tabs, in tab bar order (R18; N25.1: Decks, Statistics, Browse, Settings).
+/// A tab whose section has no compact layout yet (Browse) is left out of the bar, not moved.
 nonisolated public enum CompactTab: String, CaseIterable, Codable, Sendable {
-    case decks, browse, stats, settings
+    case decks, stats, browse, settings
 
     /// The section at the tab's root.
     public var section: AppSection {

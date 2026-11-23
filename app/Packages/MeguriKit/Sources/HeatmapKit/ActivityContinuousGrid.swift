@@ -155,13 +155,22 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
     /// How the grid wraps at a width: as many whole week columns as fit on a line, then the next
     /// line, like text. Each line is its label band (month and year labels), a small gap, then
     /// seven rows of squares; lines are a little further apart than the rows.
+    ///
+    /// A geometry made with `recentWeeks` draws only the most recent lines (the narrow page's
+    /// shorter grid, decided 2026-11-23 by the coordinator, pending the owner's look): the lines
+    /// that hold the last `recentWeeks` week columns, rounded up to whole lines, so the block shown
+    /// starts at a line's first column and today stays at the bottom right. The lines above it are
+    /// left out: no square, label, element or hit is there, and `lines` counts only those shown.
     public nonisolated struct Geometry: Sendable, Equatable {
         public let square: ActivityGrid.Square
         /// The width filled: lines start at its leading edge.
         public let width: CGFloat
         public let columns: Int
         public let perLine: Int
+        /// The lines drawn.
         public let lines: Int
+        /// The first column drawn: 0, or with `recentWeeks` a line's first column.
+        public let firstColumn: Int
         /// The label band's height: a caption line.
         public let band: CGFloat
         /// Between a line's labels and its squares.
@@ -177,6 +186,16 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
         /// A full line's drawn width: its columns and the gaps between them.
         public var lineWidth: CGFloat { CGFloat(min(perLine, columns)) * pitch - square.gap }
 
+        /// The first column of the lines holding the last `weeks` of `columns` week columns at
+        /// `perLine` a line: a line's first column, 0 when those lines hold every column.
+        public static func firstColumn(columns: Int, perLine: Int, recentWeeks weeks: Int) -> Int {
+            let perLine = max(1, perLine)
+            return (max(0, columns - max(1, weeks)) / perLine) * perLine
+        }
+
+        /// Whether the recent lines leave any column out at this width: only then is there more to show.
+        public var hidesColumns: Bool { firstColumn > 0 }
+
         /// Whole columns that fit `width` (⌊(width + gap) / pitch⌋), at least one.
         public static func perLine(width: CGFloat, square: ActivityGrid.Square) -> Int {
             guard width > 0, width.isFinite, square.side > 0 else { return 1 }
@@ -185,12 +204,13 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
         }
 
         public init(width: CGFloat, columns: Int, square: ActivityGrid.Square, band: CGFloat, labelGap: CGFloat,
-                    lineGap: CGFloat) {
+                    lineGap: CGFloat, recentWeeks: Int? = nil) {
             self.square = square
             self.width = width.isFinite ? max(0, width) : 0
             self.columns = max(1, columns)
             perLine = Self.perLine(width: width, square: square)
-            lines = (self.columns + perLine - 1) / perLine
+            firstColumn = recentWeeks.map { Self.firstColumn(columns: self.columns, perLine: perLine, recentWeeks: $0) } ?? 0
+            lines = (self.columns - firstColumn + perLine - 1) / perLine
             self.band = max(0, band)
             self.labelGap = labelGap
             self.lineGap = lineGap
@@ -199,12 +219,15 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
         /// The geometry of a grid drawn at `size` by a layout made with the same values: the
         /// band is the height left once the lines are known, so a canvas and its overlays need
         /// no measurement of their own.
-        public init(size: CGSize, columns: Int, square: ActivityGrid.Square, labelGap: CGFloat, lineGap: CGFloat) {
+        public init(size: CGSize, columns: Int, square: ActivityGrid.Square, labelGap: CGFloat, lineGap: CGFloat,
+                    recentWeeks: Int? = nil) {
             let perLine = Self.perLine(width: size.width, square: square)
-            let lines = (max(1, columns) + perLine - 1) / perLine
+            let first = recentWeeks.map { Self.firstColumn(columns: max(1, columns), perLine: perLine, recentWeeks: $0) } ?? 0
+            let lines = (max(1, columns) - first + perLine - 1) / perLine
             let rows = 7 * square.side + 6 * square.gap
             let band = (size.height - CGFloat(lines) * (labelGap + rows) - CGFloat(lines - 1) * lineGap) / CGFloat(lines)
-            self.init(width: size.width, columns: columns, square: square, band: band, labelGap: labelGap, lineGap: lineGap)
+            self.init(width: size.width, columns: columns, square: square, band: band, labelGap: labelGap, lineGap: lineGap,
+                      recentWeeks: recentWeeks)
         }
 
         /// The top of a line's label band.
@@ -213,8 +236,15 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
         /// The top of a line's first row of squares.
         public func rowsTop(_ line: Int) -> CGFloat { lineTop(line) + band + labelGap }
 
-        /// A column's line and its place on the line.
-        public func place(ofColumn column: Int) -> (line: Int, slot: Int) { (column / perLine, column % perLine) }
+        /// A column's line and its place on the line; a column before `firstColumn` has a line below 0.
+        public func place(ofColumn column: Int) -> (line: Int, slot: Int) {
+            let offset = column - firstColumn
+            guard offset >= 0 else { return (-1, 0) }
+            return (offset / perLine, offset % perLine)
+        }
+
+        /// Whether a column is drawn.
+        public func shows(column: Int) -> Bool { column >= firstColumn && column < columns }
 
         /// The leading edge of the squares in a line's slot, mirrored under right-to-left layout
         /// (lines then start at the right edge).
@@ -242,9 +272,30 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
             let x = rightToLeft ? width - point.x : point.x
             let slot = Int(((x + square.gap / 2) / pitch).rounded(.down))
             guard (0..<perLine).contains(slot) else { return nil }
-            let column = line * perLine + slot
+            let column = firstColumn + line * perLine + slot
             guard column < columns else { return nil }
             return (column, row)
+        }
+    }
+
+    /// The days a geometry draws, in days ago from today: every day, or with `recentWeeks` those of
+    /// the lines shown (the oldest shown is `upperBound - 1`).
+    public func visibleDays(_ geometry: Geometry) -> Range<Int> { visibleDays(firstColumn: geometry.firstColumn) }
+
+    /// The days drawn from `firstColumn` on, in days ago from today.
+    public func visibleDays(firstColumn: Int) -> Range<Int> {
+        let hidden = max(0, firstColumn * 7 - firstRow)
+        return 0..<max(1, days - hidden)
+    }
+
+    /// The months a geometry draws, each with its days cut to those shown, oldest first.
+    public func visibleMonths(_ geometry: Geometry) -> [Month] {
+        let shown = visibleDays(geometry)
+        return months.compactMap { month in
+            let days = month.daysAgo.clamped(to: shown)
+            guard !days.isEmpty else { return nil }
+            return Month(year: month.year, month: month.month, daysAgo: days,
+                         startsHere: month.startsHere && days.upperBound == month.daysAgo.upperBound)
         }
     }
 
@@ -330,8 +381,10 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
         let pitch = geometry.pitch
         func left(_ column: Int) -> CGFloat { CGFloat(geometry.place(ofColumn: column).slot) * pitch }
 
-        // The 1sts drawn: a year at 1 January, else the month.
-        let firsts: [Candidate] = months.filter(\.startsHere).map { month in
+        // The 1sts drawn: a year at 1 January, else the month (only on the lines shown).
+        let firsts: [Candidate] = months.filter { month in
+            month.startsHere && geometry.shows(column: cell(daysAgo: month.daysAgo.upperBound - 1).column)
+        }.map { month in
             let column = cell(daysAgo: month.daysAgo.upperBound - 1).column
             return month.month == 1
                 ? candidate(.year(month.year), column: column, rank: .year, rule: true)
@@ -349,12 +402,16 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
         let step = Self.monthSteps.first(where: fits) ?? 12
 
         var candidates = firsts.filter { if case let .month(month) = $0.kind { (month - 1) % step == 0 } else { true } }
-        if let first = months.first, !(first.startsHere && first.month == 1 && cell(daysAgo: first.daysAgo.upperBound - 1).column == 0) {
-            candidates.append(candidate(.year(first.year), column: 0, rank: .gridStart, rule: false))
-        }
         let firstColumns = Set(firsts.map(\.column))
+        // The first column drawn carries its year, unless 1 January's year is there already: the
+        // grid's first, or with `recentWeeks` the first line shown, so it says when it starts.
+        let start = geometry.firstColumn
+        if let first = start == 0 ? months.first : columnMonth(start),
+           !(firstColumns.contains(start) && firsts.contains { $0.column == start && $0.rank == .year }) {
+            candidates.append(candidate(.year(first.year), column: start, rank: .gridStart, rule: false))
+        }
         for line in 1..<max(1, geometry.lines) {
-            let column = line * geometry.perLine
+            let column = start + line * geometry.perLine
             guard column < columns, !firstColumns.contains(column), let month = columnMonth(column) else { continue }
             let end = min(columns, column + geometry.perLine)
             // Only the columns before the next 1st count, so two names never sit side by side.
