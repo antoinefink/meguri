@@ -10,7 +10,7 @@ import Foundation
 // MARK: - Shared shapes
 
 /// One day's review-log rows by kind (`stats/graphs-revlog` V1), as counts or summed milliseconds.
-public struct StatsReviewKinds: Sendable, Hashable {
+public struct StatsReviewKinds: Sendable, Hashable, Codable {
     public var learn: Int, relearn: Int, young: Int, mature: Int, filtered: Int
     public init(learn: Int, relearn: Int, young: Int, mature: Int, filtered: Int) {
         self.learn = learn; self.relearn = relearn; self.young = young; self.mature = mature; self.filtered = filtered
@@ -19,7 +19,7 @@ public struct StatsReviewKinds: Sendable, Hashable {
 }
 
 /// One day's rows by answer (`stats/history-reads` H6), as counts or summed milliseconds.
-public struct StatsAnswers: Sendable, Hashable {
+public struct StatsAnswers: Sendable, Hashable, Codable {
     public var again: Int, hard: Int, good: Int, easy: Int
     public init(again: Int, hard: Int, good: Int, easy: Int) {
         self.again = again; self.hard = hard; self.good = good; self.easy = easy
@@ -28,7 +28,7 @@ public struct StatsAnswers: Sendable, Hashable {
 }
 
 /// The five card states of `stats/history-reads` H2, as counts or their changes on a day.
-public struct StatsStateCounts: Sendable, Hashable {
+public struct StatsStateCounts: Sendable, Hashable, Codable {
     public var new: Int, learning: Int, relearning: Int, young: Int, mature: Int
     public init(new: Int, learning: Int, relearning: Int, young: Int, mature: Int) {
         self.new = new; self.learning = learning; self.relearning = relearning; self.young = young; self.mature = mature
@@ -43,7 +43,7 @@ public struct StatsStateCounts: Sendable, Hashable {
 }
 
 /// Passed and failed rows of the retention rule (`stats/graphs-revlog` V4.1), young and mature apart.
-public struct StatsRetentionCounts: Sendable, Hashable {
+public struct StatsRetentionCounts: Sendable, Hashable, Codable {
     public var youngPassed: Int, youngFailed: Int, maturePassed: Int, matureFailed: Int
     public init(youngPassed: Int, youngFailed: Int, maturePassed: Int, matureFailed: Int) {
         self.youngPassed = youngPassed; self.youngFailed = youngFailed
@@ -54,52 +54,78 @@ public struct StatsRetentionCounts: Sendable, Hashable {
 // MARK: - Anki's records (G6's table)
 
 /// `reviews` (`stats/graphs-revlog` V2.2): the same day keys in both maps.
-public struct StatsReviews: Sendable, Hashable {
+public struct StatsReviews: Sendable, Hashable, Codable {
     public let count: StatsSparseMap<StatsReviewKinds>
     public let time: StatsSparseMap<StatsReviewKinds>
+    public init(count: StatsSparseMap<StatsReviewKinds>, time: StatsSparseMap<StatsReviewKinds>) {
+        self.count = count; self.time = time
+    }
 }
 
 /// `true_retention` (V4.3): `allTime` only with all history.
-public struct StatsTrueRetention: Sendable, Hashable {
+public struct StatsTrueRetention: Sendable, Hashable, Codable {
     public let today: StatsRetentionCounts, yesterday: StatsRetentionCounts, week: StatsRetentionCounts
     public let month: StatsRetentionCounts, year: StatsRetentionCounts
     public let allTime: StatsRetentionCounts?
+    public init(today: StatsRetentionCounts, yesterday: StatsRetentionCounts, week: StatsRetentionCounts, month: StatsRetentionCounts, year: StatsRetentionCounts, allTime: StatsRetentionCounts?) {
+        self.today = today; self.yesterday = yesterday; self.week = week; self.month = month; self.year = year; self.allTime = allTime
+    }
 }
 
 /// One hour of `hours` (V5.3).
-public struct StatsHour: Sendable, Hashable {
+public struct StatsHour: Sendable, Hashable, Codable {
     public let total: Int, correct: Int
+    public init(total: Int, correct: Int) {
+        self.total = total; self.correct = correct
+    }
 }
 
 /// One hour of `retention_by_hour` (`stats/history-reads` H7).
-public struct StatsHourRetention: Sendable, Hashable {
+public struct StatsHourRetention: Sendable, Hashable, Codable {
     public let passed: Int, failed: Int
+    public init(passed: Int, failed: Int) {
+        self.passed = passed; self.failed = failed
+    }
 }
 
 /// The ranges of `hours` and `buttons` (V5.2, H7's `sixMonths`); `allTime` only with all history.
 public struct StatsRanges<Value: Sendable & Hashable>: Sendable, Hashable {
     public let oneMonth: Value, threeMonths: Value, sixMonths: Value, oneYear: Value
     public let allTime: Value?
+    public init(oneMonth: Value, threeMonths: Value, sixMonths: Value, oneYear: Value, allTime: Value?) {
+        self.oneMonth = oneMonth; self.threeMonths = threeMonths; self.sixMonths = sixMonths; self.oneYear = oneYear; self.allTime = allTime
+    }
 }
 
+extension StatsRanges: Codable where Value: Codable {}
+
 /// `hours` (V5.3) with H7's extras: each range is 24 hours, hour 0 first.
-public struct StatsHours: Sendable, Hashable {
+public struct StatsHours: Sendable, Hashable, Codable {
     public let hours: StatsRanges<[StatsHour]>
     public let retentionByHour: StatsRanges<[StatsHourRetention]>
+    public init(hours: StatsRanges<[StatsHour]>, retentionByHour: StatsRanges<[StatsHourRetention]>) {
+        self.hours = hours; self.retentionByHour = retentionByHour
+    }
 }
 
 /// One range of `buttons` (V6.2): presses of buttons 1 to 4 for learning, young and mature cards.
-public struct StatsButtonPresses: Sendable, Hashable {
+public struct StatsButtonPresses: Sendable, Hashable, Codable {
     public let learning: [Int], young: [Int], mature: [Int]
+    public init(learning: [Int], young: [Int], mature: [Int]) {
+        self.learning = learning; self.young = young; self.mature = mature
+    }
 }
 
 /// `buttons` (V6.2) with H7's `sixMonths`.
-public struct StatsButtons: Sendable, Hashable {
+public struct StatsButtons: Sendable, Hashable, Codable {
     public let ranges: StatsRanges<StatsButtonPresses>
+    public init(ranges: StatsRanges<StatsButtonPresses>) {
+        self.ranges = ranges
+    }
 }
 
 /// `future_due` (`stats/graphs-cards` C3.6) with H8's `future_due_young`.
-public struct StatsFutureDue: Sendable, Hashable {
+public struct StatsFutureDue: Sendable, Hashable, Codable {
     /// Day offset from today → cards due.
     public let due: StatsSparseMap<Int>
     public let haveBacklog: Bool
@@ -107,26 +133,35 @@ public struct StatsFutureDue: Sendable, Hashable {
     public let dueTomorrow: Int
     /// The same keys' cards with an interval under 21 days (H8).
     public let dueYoung: StatsSparseMap<Int>
+    public init(due: StatsSparseMap<Int>, haveBacklog: Bool, dailyLoad: Int, dueTomorrow: Int, dueYoung: StatsSparseMap<Int>) {
+        self.due = due; self.haveBacklog = haveBacklog; self.dailyLoad = dailyLoad; self.dueTomorrow = dueTomorrow; self.dueYoung = dueYoung
+    }
 }
 
 /// The seven counts of one Card Counts set (C4.1).
-public struct StatsCardStateCounts: Sendable, Hashable {
+public struct StatsCardStateCounts: Sendable, Hashable, Codable {
     public let new: Int, learning: Int, relearning: Int, young: Int, mature: Int, suspended: Int, buried: Int
+    public init(new: Int, learning: Int, relearning: Int, young: Int, mature: Int, suspended: Int, buried: Int) {
+        self.new = new; self.learning = learning; self.relearning = relearning; self.young = young; self.mature = mature; self.suspended = suspended; self.buried = buried
+    }
 }
 
 /// A Card Counts row's label (`stats/browse-queries` Q4.1), in the table's order.
-public enum StatsCountLabel: Int, Sendable, Hashable, CaseIterable {
+public enum StatsCountLabel: Int, Sendable, Hashable, Codable, CaseIterable {
     case new = 0, learning, relearning, young, mature, suspended, buried
 }
 
 /// A label shown, with its item's search text.
-public struct StatsCountLabelText: Sendable, Hashable {
+public struct StatsCountLabelText: Sendable, Hashable, Codable {
     public let label: StatsCountLabel
     public let itemText: String
+    public init(label: StatsCountLabel, itemText: String) {
+        self.label = label; self.itemText = itemText
+    }
 }
 
 /// `card_counts` (C4.4) with H8's `suspended_by_state`.
-public struct StatsCardCounts: Sendable, Hashable {
+public struct StatsCardCounts: Sendable, Hashable, Codable {
     public let excludingInactive: StatsCardStateCounts
     public let includingInactive: StatsCardStateCounts
     public let notes: Int
@@ -135,42 +170,57 @@ public struct StatsCardCounts: Sendable, Hashable {
     public let labelsTogether: [StatsCountLabelText]
     /// The suspended cards by state (H8).
     public let suspendedByState: StatsStateCounts
+    public init(excludingInactive: StatsCardStateCounts, includingInactive: StatsCardStateCounts, notes: Int, labelsSeparate: [StatsCountLabelText], labelsTogether: [StatsCountLabelText], suspendedByState: StatsStateCounts) {
+        self.excludingInactive = excludingInactive; self.includingInactive = includingInactive; self.notes = notes; self.labelsSeparate = labelsSeparate; self.labelsTogether = labelsTogether; self.suspendedByState = suspendedByState
+    }
 }
 
 /// `stability` (C7): rounded stability in days → cards.
-public struct StatsStability: Sendable, Hashable {
+public struct StatsStability: Sendable, Hashable, Codable {
     public let byDays: StatsSparseMap<Int>
     public let leftOut: Int
+    public init(byDays: StatsSparseMap<Int>, leftOut: Int) {
+        self.byDays = byDays; self.leftOut = leftOut
+    }
 }
 
 /// `difficulty` (C8): percent → cards, and C8.2's median.
-public struct StatsDifficulty: Sendable, Hashable {
+public struct StatsDifficulty: Sendable, Hashable, Codable {
     public let byPercent: StatsSparseMap<Int>
     public let median: Float
     public let leftOut: Int
+    public init(byPercent: StatsSparseMap<Int>, median: Float, leftOut: Int) {
+        self.byPercent = byPercent; self.median = median; self.leftOut = leftOut
+    }
 }
 
 /// `retrievability` (C9.7): percent → cards.
-public struct StatsRetrievability: Sendable, Hashable {
+public struct StatsRetrievability: Sendable, Hashable, Codable {
     public let byPercent: StatsSparseMap<Int>
     public let average: Float
     public let sumByCard: Float
     public let sumByNote: Float
     public let leftOut: Int
+    public init(byPercent: StatsSparseMap<Int>, average: Float, sumByCard: Float, sumByNote: Float, leftOut: Int) {
+        self.byPercent = byPercent; self.average = average; self.sumByCard = sumByCard; self.sumByNote = sumByNote; self.leftOut = leftOut
+    }
 }
 
 // MARK: - The page's own parts
 
 /// `by_answer` (H6): the rows `reviews` counts with an answer 1 to 4, on its day keys.
-public struct StatsByAnswer: Sendable, Hashable {
+public struct StatsByAnswer: Sendable, Hashable, Codable {
     public let count: StatsSparseMap<StatsAnswers>
     public let time: StatsSparseMap<StatsAnswers>
     /// The rows `reviews` counts with no such answer, in the window.
     public let unrated: Int
+    public init(count: StatsSparseMap<StatsAnswers>, time: StatsSparseMap<StatsAnswers>, unrated: Int) {
+        self.count = count; self.time = time; self.unrated = unrated
+    }
 }
 
 /// `card_states_over_time` (H2.4).
-public struct StatsCardStatesOverTime: Sendable, Hashable {
+public struct StatsCardStatesOverTime: Sendable, Hashable, Codable {
     /// The counts at the end of the day before the window's first day.
     public let start: StatsStateCounts
     /// The change of the counts on each day that has one (H1 days).
@@ -179,6 +229,9 @@ public struct StatsCardStatesOverTime: Sendable, Hashable {
     public let leftOut: Int
     /// The oldest day any card of the series enters.
     public let firstDay: Int?
+    public init(start: StatsStateCounts, deltas: StatsSparseMap<StatsStateCounts>, leftOut: Int, firstDay: Int?) {
+        self.start = start; self.deltas = deltas; self.leftOut = leftOut; self.firstDay = firstDay
+    }
 
     /// The counts at the end of `day`: `start` plus the deltas up to it.
     public func counts(on day: Int) -> StatsStateCounts {
@@ -187,64 +240,85 @@ public struct StatsCardStatesOverTime: Sendable, Hashable {
 }
 
 /// `started` (H2.4): cards first reviewed per day of the window.
-public struct StatsStarted: Sendable, Hashable {
+public struct StatsStarted: Sendable, Hashable, Codable {
     public let days: StatsSparseMap<Int>
     /// The oldest such day in all history.
     public let firstDay: Int?
+    public init(days: StatsSparseMap<Int>, firstDay: Int?) {
+        self.days = days; self.firstDay = firstDay
+    }
 }
 
 /// `studied_today` (H12): the strip's numbers for the page scope.
-public struct StatsStudiedToday: Sendable, Hashable {
+public struct StatsStudiedToday: Sendable, Hashable, Codable {
     public let answers: Int
     public let cards: Int
     public let timeMilliseconds: Int
+    public init(answers: Int, cards: Int, timeMilliseconds: Int) {
+        self.answers = answers; self.cards = cards; self.timeMilliseconds = timeMilliseconds
+    }
 }
 
 /// One day of `retention_by_day` (H4.2).
-public struct StatsRetentionDay: Sendable, Hashable {
+public struct StatsRetentionDay: Sendable, Hashable, Codable {
     public let youngPassed: Int, youngFailed: Int, maturePassed: Int, matureFailed: Int
     /// The retention in force of each counted row's card, summed (H3.4).
     public let desiredSum: Double
     /// The rows in `desiredSum`.
     public let desiredRows: Int
+    public init(youngPassed: Int, youngFailed: Int, maturePassed: Int, matureFailed: Int, desiredSum: Double, desiredRows: Int) {
+        self.youngPassed = youngPassed; self.youngFailed = youngFailed; self.maturePassed = maturePassed; self.matureFailed = matureFailed; self.desiredSum = desiredSum; self.desiredRows = desiredRows
+    }
     /// Forgotten on the day.
     public var forgotten: Int { youngFailed + matureFailed }
 }
 
 /// `retention_by_day` (H3.4, H4.2).
-public struct StatsRetentionByDay: Sendable, Hashable {
+public struct StatsRetentionByDay: Sendable, Hashable, Codable {
     public let days: StatsSparseMap<StatsRetentionDay>
     /// The distinct retentions in force among the scope's home decks, ascending.
     public let retentions: [Float]
     /// More than one: the dashed line is an average.
     public let several: Bool
+    public init(days: StatsSparseMap<StatsRetentionDay>, retentions: [Float], several: Bool) {
+        self.days = days; self.retentions = retentions; self.several = several
+    }
 }
 
 /// One window of a By Deck row (H10.2).
-public struct StatsDeckValues: Sendable, Hashable {
+public struct StatsDeckValues: Sendable, Hashable, Codable {
     public let reviews: Int
     public let timeMilliseconds: Int
     public let passed: Int
     public let failed: Int
+    public init(reviews: Int, timeMilliseconds: Int, passed: Int, failed: Int) {
+        self.reviews = reviews; self.timeMilliseconds = timeMilliseconds; self.passed = passed; self.failed = failed
+    }
 }
 
 /// A row of `by_deck` (H10).
-public struct StatsDeckRow: Sendable, Hashable {
+public struct StatsDeckRow: Sendable, Hashable, Codable {
     public let deckID: Int64
     /// The deck's own cards, outside its subdecks (the first row of a deck's table).
     public let ownCards: Bool
     public let cards: Int
     /// `allTime` only with all history.
     public let windows: StatsRanges<StatsDeckValues>
+    public init(deckID: Int64, ownCards: Bool, cards: Int, windows: StatsRanges<StatsDeckValues>) {
+        self.deckID = deckID; self.ownCards = ownCards; self.cards = cards; self.windows = windows
+    }
 }
 
 /// `by_deck` (H10): rows in the deck tree's order.
-public struct StatsByDeck: Sendable, Hashable {
+public struct StatsByDeck: Sendable, Hashable, Codable {
     public let rows: [StatsDeckRow]
+    public init(rows: [StatsDeckRow]) {
+        self.rows = rows
+    }
 }
 
 /// One sample of `knowledge_over_time` (H3.3).
-public struct StatsKnowledgeSample: Sendable, Hashable {
+public struct StatsKnowledgeSample: Sendable, Hashable, Codable {
     /// H1's day: −365 to −1 for a day end, earlier for a month end (All only), 0 for today's point.
     public let day: Int
     /// The sample instant, epoch milliseconds.
@@ -253,20 +327,26 @@ public struct StatsKnowledgeSample: Sendable, Hashable {
     public let knowledge: Double
     /// The cards with an estimate there.
     public let studied: Int
+    public init(day: Int, instantMilliseconds: Int64, knowledge: Double, studied: Int) {
+        self.day = day; self.instantMilliseconds = instantMilliseconds; self.knowledge = knowledge; self.studied = studied
+    }
 }
 
 /// `knowledge_over_time` (H3.3).
-public struct StatsKnowledgeOverTime: Sendable, Hashable {
+public struct StatsKnowledgeOverTime: Sendable, Hashable, Codable {
     /// Ascending by instant, today's point last; empty when no card has a memory estimate (S8.5).
     public let samples: [StatsKnowledgeSample]
     /// The cards left out for a crate error, from the first sample they failed at on.
     public let failed: Int
     /// The scope's suspended cards, left out of every sample (H2.1).
     public let leftOut: Int
+    public init(samples: [StatsKnowledgeSample], failed: Int, leftOut: Int) {
+        self.samples = samples; self.failed = failed; self.leftOut = leftOut
+    }
 }
 
 /// A part's value. A part whose value type has no case yet arrives as `StatsPartFailure.undecodable`.
-public enum StatsPartValue: Sendable, Hashable {
+public enum StatsPartValue: Sendable, Hashable, Codable {
     case cardCounts(StatsCardCounts)
     case futureDue(StatsFutureDue)
     /// Interval in days → cards (C5).

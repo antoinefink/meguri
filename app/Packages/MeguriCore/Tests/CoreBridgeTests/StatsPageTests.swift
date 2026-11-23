@@ -494,7 +494,7 @@ extension EventTests {
                 }
             }
             #expect(ends == [.complete])
-            #expect(await stream.job.outcome() == .succeeded)
+            #expect(await stream.job?.outcome() == .succeeded)
             #expect(StatsPageRelay.live.withLock { $0 } == before, "the core released the request's relay")
 
             #expect(Set(results.map(\.part)) == Set(StatsPart.allCases))
@@ -548,7 +548,8 @@ extension EventTests {
             // Once cancelled here, the end is `.cancelled` whatever the core returned; the core's own
             // stop within 50 ms is `stats_page_ffi`'s H16 test.
             #expect(last == .end(.cancelled))
-            #expect([.cancelled, .succeeded].contains(await cancelled.job.outcome()))
+            let job = try #require(cancelled.job)
+            #expect([.cancelled, .succeeded].contains(await job.outcome()))
             #expect(StatsPageRelay.live.withLock { $0 } == before)
 
             try await stats.releaseCaches()  // a job: it waits for its JobFinished
