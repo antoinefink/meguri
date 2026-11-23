@@ -412,6 +412,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         value.service = { [weak self] in self?.noteTypeSaveService ?? .other }
         value.writable = { [weak self] in self?.noteTypeWriteAllowed ?? false }
         value.hasCollection = { [weak self] in self?.hasCollection ?? false }
+        // W9: the preview binds the collection's media as review does; its toggle stays on the device.
+        value.preview.resolver = { [weak self] in await self?.mediaResolverForReview() }
+        value.preview.defaults = configuration.deviceDefaults
         // D6: Save and Upload runs Meguri Sync's structure save job (MP7) on the current coordinator.
         value.meguriSync = NoteTypesCurrentSync(owner: self)
         value.presentQuestion = { [weak self] in

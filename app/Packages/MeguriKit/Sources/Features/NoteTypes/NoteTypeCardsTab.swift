@@ -3,10 +3,10 @@ import CoreBridge
 import DesignSystem
 import SwiftUI
 
-/// The Cards tab (`notetypes/workspace` W5 to W8; N22.3): the card types
-/// list over the Fields list, then the template editor with Front | Back |
-/// Styling and the Insert menu in its bar and the live issues under it.
-/// The live preview beside them is U283's. Nothing here writes before Save.
+/// The Cards tab (`notetypes/workspace` W5 to W9; N22.3, N22.7): the card
+/// types list over the Fields list, then the template editor with Front |
+/// Back | Styling and the Insert menu in its bar and the live issues under
+/// it, then the live preview. Nothing here writes before Save.
 struct NoteTypeCardsTab: View {
     @Bindable var model: NoteTypesModel
     let id: Int64
@@ -15,27 +15,50 @@ struct NoteTypeCardsTab: View {
         #if os(macOS)
         // N22.3: the lists belong to the editor's side of the window, on the
         // same background as its bar and issues, not a second sidebar; only
-        // the app's navigation sidebar uses sidebar material.
-        HSplitView {
-            NoteTypeCardsListColumn(model: model, id: id)
-                .frame(minWidth: Self.columnMinimum, idealWidth: Self.columnIdeal, maxWidth: Self.columnMaximum)
-            NoteTypeTemplateEditorColumn(model: model, id: id)
-                .frame(minWidth: ContentWidth.primaryAction, maxWidth: .infinity, maxHeight: .infinity)
+        // the app's navigation sidebar uses sidebar material. The preview is
+        // the third column, resizable; it hides by itself while the tab is too
+        // narrow for a usable editor beside it, and its toolbar toggle is kept
+        // on the device.
+        GeometryReader { geometry in
+            let shows = NoteTypePreviewLayout.macShows(requested: model.preview.requested, width: geometry.size.width)
+            HSplitView {
+                NoteTypeCardsListColumn(model: model, id: id)
+                    .frame(minWidth: Self.columnMinimum, idealWidth: Self.columnIdeal, maxWidth: Self.columnMaximum)
+                NoteTypeTemplateEditorColumn(model: model, id: id)
+                    .frame(minWidth: NoteTypePreviewLayout.editorMinimum, maxWidth: .infinity, maxHeight: .infinity)
+                if shows {
+                    NoteTypePreviewPane(model: model, id: id)
+                        .frame(minWidth: NoteTypePreviewLayout.previewMinimum, idealWidth: NoteTypePreviewLayout.previewIdeal,
+                               maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .onChange(of: geometry.size.width, initial: true) { _, width in
+                model.preview.fits = NoteTypePreviewLayout.macShows(requested: true, width: width)
+            }
         }
         #else
-        // iPad (N22.7): the Mac's columns with touch sizes. Hiding the lists
-        // while a card type is open waits for the preview that shares the
-        // space with the code (U283).
+        // iPad (N22.7): with the preview shown, the lists step aside and the
+        // code and the preview take half each, the card type a menu in the
+        // editor's bar; without it, the Mac's columns with touch sizes.
         VStack(spacing: .zero) {
             // The navigation bar's edge, across both columns.
             Divider()
             HStack(spacing: .zero) {
-                NoteTypeCardsListColumn(model: model, id: id)
-                    .frame(width: Self.columnIdeal)
-                // The columns run to the bottom edge, under the home indicator.
-                Divider()
-                    .ignoresSafeArea(.container, edges: .bottom)
-                NoteTypeTemplateEditorColumn(model: model, id: id)
+                if model.preview.requested {
+                    NoteTypeTemplateEditorColumn(model: model, id: id, cardTypeMenu: true)
+                        .frame(maxWidth: .infinity)
+                    Divider()
+                        .ignoresSafeArea(.container, edges: .bottom)
+                    NoteTypePreviewPane(model: model, id: id)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    NoteTypeCardsListColumn(model: model, id: id)
+                        .frame(width: Self.columnIdeal)
+                    // The columns run to the bottom edge, under the home indicator.
+                    Divider()
+                        .ignoresSafeArea(.container, edges: .bottom)
+                    NoteTypeTemplateEditorColumn(model: model, id: id)
+                }
             }
         }
         #endif
@@ -43,7 +66,7 @@ struct NoteTypeCardsTab: View {
 
     private static let columnMinimum: CGFloat = 200
     #if os(macOS)
-    private static let columnIdeal: CGFloat = 240
+    private static let columnIdeal: CGFloat = NoteTypePreviewLayout.listWidth
     #else
     private static let columnIdeal: CGFloat = 280
     #endif
@@ -388,6 +411,8 @@ extension NoteTypeFieldRow {
 struct NoteTypeTemplateEditorColumn: View {
     @Bindable var model: NoteTypesModel
     let id: Int64
+    /// iPad with the preview shown: the lists step aside and the card type is a menu here (N22.7).
+    var cardTypeMenu = false
     @Environment(\.locale) private var locale
 
     private var card: Int? { model.shownCard(id) }
@@ -413,6 +438,7 @@ struct NoteTypeTemplateEditorColumn: View {
 
     private var bar: some View {
         HStack(spacing: Spacing.small) {
+            if cardTypeMenu { cardTypePicker }
             Picker(selection: $model.cardPart) {
                 Text("noteTypes.editor.front", bundle: .module).tag(NoteTypeTemplatePart.front)
                     .accessibilityIdentifier("noteTypes.cards.part.front")
@@ -448,6 +474,28 @@ struct NoteTypeTemplateEditorColumn: View {
             .opacity(0)
             .accessibilityHidden(true)
         }
+    }
+
+    /// N22.7: the card type as a menu in the bar while the lists step aside.
+    private var cardTypePicker: some View {
+        Menu {
+            Picker(selection: Binding(get: { model.shownCard(id) }, set: { model.selectedCard[id] = $0 })) {
+                ForEach(draft?.keptCardRows ?? [], id: \.id) { row in
+                    Text(verbatim: row.name).tag(Optional(row.id))
+                }
+            } label: {
+                Text("noteTypes.cards.cardType", bundle: .module)
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Text(verbatim: card.flatMap { draft?.cardRow($0)?.name } ?? "")
+                .lineLimit(1)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
+        .fixedSize()
+        .accessibilityLabel(Text("noteTypes.cards.cardType", bundle: .module))
+        .accessibilityIdentifier("noteTypes.cards.cardTypeMenu")
     }
 
     private var insertEntries: [InsertMenuEntry] {

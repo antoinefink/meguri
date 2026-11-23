@@ -125,6 +125,10 @@ public struct NoteTypesView: View {
         if !inspectorHoldsSave {
             if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
             NoteTypeSaveToolbar(model: model, running: jobShown.running(in: model))
+            // The Cards tab's preview toggle, last, as the Fields tab's inspector toggle is.
+            if model.tab == .cards, model.selection != nil {
+                ToolbarItem(placement: .primaryAction) { PreviewToggle(preview: model.preview) }
+            }
         }
     }
 

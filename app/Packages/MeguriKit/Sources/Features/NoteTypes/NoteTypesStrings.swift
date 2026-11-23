@@ -186,6 +186,16 @@ public enum NoteTypesStrings {
     public static func sortBy(_ name: String, locale: Locale) -> String {
         String(localized: "noteTypes.fields.sortBy", defaultValue: "\(name)", bundle: .module, locale: locale)
     }
+
+    /// W9's note menu: "3 of 12".
+    public static func previewPosition(_ index: Int, of count: Int, locale: Locale) -> String {
+        String(localized: "noteTypes.preview.position", defaultValue: "\(index) of \(count)", bundle: .module, locale: locale)
+    }
+
+    /// W9's Cloze Number menu: "Cloze 2".
+    public static func previewCloze(_ number: Int, locale: Locale) -> String {
+        String(localized: "noteTypes.preview.cloze", defaultValue: "Cloze \(number)", bundle: .module, locale: locale)
+    }
 }
 
 #if os(iOS)

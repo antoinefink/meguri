@@ -149,6 +149,11 @@ public struct NoteTypePage: View {
                         .accessibilityIdentifier("noteTypes.list.save")
                     }
                 }
+                // The Cards tab's preview toggle, last, as on the Mac (N22.7).
+                if model.tab == .cards {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                    ToolbarItem(placement: .topBarTrailing) { PreviewToggle(preview: model.preview) }
+                }
             }
             .task(id: model.progress?.notetypeId) { await SaveJobShown.follow(model.progress?.notetypeId, into: $jobShown) }
             .confirmationDialog(Text("noteTypes.discard.title", bundle: .module), isPresented: $model.confirmingRevert,

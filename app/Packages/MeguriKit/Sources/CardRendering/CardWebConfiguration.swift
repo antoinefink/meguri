@@ -5,6 +5,10 @@ public final class CardWebConfiguration {
     // Stable production storage, distinct from the U65 SPIKE identifier.
     public static let storeIdentifier = UUID(uuidString: "6D656775-7269-4341-5244-53544F524531")!
     public static let shared = CardWebConfiguration()
+    /// The Note Types preview's (`render/preview` V12): the same store, so
+    /// cards share their storage with review, but card media start only
+    /// from a tap in the page; replay buttons play through native audio.
+    public static let preview = CardWebConfiguration(mediaNeedsGesture: true)
     public let configuration: WKWebViewConfiguration
     public let media: MediaSchemeHandler
     public let bridge: CardBridge
@@ -13,13 +17,14 @@ public final class CardWebConfiguration {
 
     /// A store may be injected for tests; callers remove its fresh identifier
     /// even after failure. Production surfaces use `shared`.
-    public init(store: WKWebsiteDataStore = WKWebsiteDataStore(forIdentifier: storeIdentifier), media: MediaSchemeHandler = MediaSchemeHandler()) {
+    public init(store: WKWebsiteDataStore = WKWebsiteDataStore(forIdentifier: storeIdentifier), media: MediaSchemeHandler = MediaSchemeHandler(),
+                mediaNeedsGesture: Bool = false) {
         configuration = WKWebViewConfiguration()
         self.media = media
         bridge = CardBridge()
         hostBridge = CardHostBridge()
         configuration.websiteDataStore = store
-        configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.mediaTypesRequiringUserActionForPlayback = mediaNeedsGesture ? .all : []
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         configuration.setURLSchemeHandler(media, forURLScheme: MediaOrigin.scheme)
         #if !os(macOS)

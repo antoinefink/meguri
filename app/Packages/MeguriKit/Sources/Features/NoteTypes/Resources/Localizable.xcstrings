@@ -31,6 +31,16 @@
         }
       }
     },
+    "noteTypes.cards.cardType": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card Type"
+          }
+        }
+      }
+    },
     "noteTypes.cards.cardTypes": {
       "localizations": {
         "en": {
@@ -1122,7 +1132,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Filter"
+            "value": "Search"
           }
         }
       }
@@ -1163,6 +1173,236 @@
           "stringUnit": {
             "state": "translated",
             "value": "Changes Not Uploaded"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.answer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.appearance": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appearance"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.cloze": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloze %lld"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.clozeNumber": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloze Number"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.dark": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dark"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.deleted": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card type will be deleted when you save."
+          }
+        }
+      }
+    },
+    "noteTypes.preview.error.back": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The back has an error."
+          }
+        }
+      }
+    },
+    "noteTypes.preview.error.front": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The front has an error."
+          }
+        }
+      }
+    },
+    "noteTypes.preview.fillEmpty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fill Empty Fields"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.hide": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide Preview"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.light": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Light"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.narrow": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make the window wider to show the preview."
+          }
+        }
+      }
+    },
+    "noteTypes.preview.next": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.noNotes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Notes"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.note": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.position": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.previous": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.question": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Question"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.show": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Preview"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.side": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Side"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Preview"
+          }
+        }
+      }
+    },
+    "noteTypes.preview.unavailable.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card type can’t be previewed right now."
           }
         }
       }

@@ -1017,3 +1017,188 @@ extension NoteTypesModelTests {
         #expect(model.liveIssues(7).contains { $0.kind == .blankFront(notes: 1, field: "Front") })
     }
 }
+
+/// A scripted preview core: each render echoes the front or back text it
+/// was given as the side's HTML, so a test reads which draft text rendered.
+@MainActor private final class FakePreviewBackend: NoteTypePreviewBackend {
+    var notes: [Int64] = [3, 5, 9]
+    /// The first render waits this long (a slow render overtaken by a newer one).
+    var firstWait: Duration?
+    private(set) var renders: [(front: String, note: Int64?, target: UInt32, fillEmpty: Bool)] = []
+    private(set) var noteReads = 0
+
+    func render(_ draft: NotetypeStructureDraft, note: Int64?, target: UInt32, fillEmpty: Bool) async throws -> NoteTypePreviewRender {
+        let template = draft.templates[Int(target)]
+        renders.append((template.front, note, target, fillEmpty))
+        if renders.count == 1, let firstWait { try? await Task.sleep(for: firstWait) }
+        let broken = template.front.contains("{{#") && !template.front.contains("{{/")
+        return NoteTypePreviewRender(question: "Q:" + template.front, answer: "A:" + template.back,
+                                     outcome: broken ? .templateError(.unclosedConditional, side: .question) : .rendered, noteID: note)
+    }
+
+    func noteIds(_ notetype: Int64) async throws -> [Int64] {
+        noteReads += 1
+        return notes
+    }
+}
+
+/// `notetypes/workspace` W9 through the section's model: which note shows,
+/// the side following Front | Back, unsaved edits, coalesced renders, the
+/// error state, and the toggle kept on the device. The page is replaced by
+/// a recorder of what it was given.
+@MainActor @Suite struct NoteTypePreviewTests {
+    private final class Page { var shown: [String] = [] }
+
+    private func open(_ preview: FakePreviewBackend = FakePreviewBackend(),
+                      defaults: UserDefaults? = nil) async -> (NoteTypesModel, FakePreviewBackend, Page) {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = NoteTypeDraftTests.record(templates: [("Card 1", "{{Front}}", "{{FrontSide}}<hr id=answer>{{Back}}"),
+                                                                   ("Card 2", "{{Back}}", "{{FrontSide}}<hr id=answer>{{Front}}")])
+        let model = NoteTypesModel(backend: backend, preview: NoteTypePreview(backend: preview))
+        model.summaryDelay = .zero
+        model.preview.typingDelay = .milliseconds(40)
+        model.preview.defaults = defaults
+        let page = Page()
+        model.preview.present = { payload in page.shown.append(payload.question); return true }
+        model.appear()
+        await model.settle()
+        model.tab = .cards
+        model.preview.visible = true
+        await model.preview.settled()
+        return (model, preview, page)
+    }
+
+    private func settle(_ model: NoteTypesModel) async {
+        try? await Task.sleep(for: .milliseconds(80))
+        await model.preview.settled()
+    }
+
+    @Test func theNewestNoteShowsAndTheMenuStepsThroughTheTypesNotes() async {
+        let (model, core, page) = await open()
+        #expect(core.renders.last?.note == 9 && model.preview.notePosition! == (3, 3))
+        #expect(page.shown == ["Q:{{Front}}"] && !model.preview.fillEmpty)
+        model.preview.step(by: -1)
+        await model.preview.settled()
+        #expect(core.renders.last?.note == 5 && model.preview.notePosition! == (2, 3) && model.preview.canStep == (true, true))
+        model.preview.step(by: -5)
+        #expect(model.preview.notePosition! == (2, 3), "a step past the ends does nothing")
+        // A way in names its note (W14): that one shows.
+        let (named, namedCore, _) = await open(FakePreviewBackend())
+        named.preview.preferredNote[7] = 3
+        named.preview.notesChanged()
+        await named.preview.settled()
+        #expect(namedCore.renders.last?.note == 3 && named.preview.notePosition! == (1, 3))
+    }
+
+    @Test func aTypeWithoutNotesPreviewsANewNoteWithFillEmptyFieldsOn() async {
+        let core = FakePreviewBackend()
+        core.notes = []
+        let (model, _, _) = await open(core)
+        #expect(core.renders.last?.note == nil && core.renders.last?.fillEmpty == true && model.preview.notePosition == nil)
+        model.preview.setFillEmpty(false)
+        await model.preview.settled()
+        #expect(core.renders.last?.fillEmpty == false && !model.preview.fillEmpty)
+    }
+
+    @Test func theSideFollowsFrontAndBackAndStylingKeepsTheLastOne() async {
+        let (model, core, page) = await open()
+        model.cardPart = .back
+        await model.preview.settled()
+        #expect(model.preview.side == .answer && page.shown.last == "A:{{FrontSide}}<hr id=answer>{{Back}}")
+        // The same draft and note: the side comes from the render already read.
+        #expect(core.renders.count == 1)
+        model.cardPart = .styling
+        await model.preview.settled()
+        #expect(model.preview.side == .answer && page.shown.count == 2)
+        model.cardPart = .front
+        await model.preview.settled()
+        #expect(model.preview.side == .question && page.shown.last == "Q:{{Front}}")
+        // Another card type shows its own template, on the side shown.
+        model.selectedCard[7] = model.draft(7)!.cardRows[1].id
+        await model.preview.settled()
+        #expect(core.renders.last?.target == 1 && page.shown.last == "Q:{{Back}}")
+    }
+
+    @Test func unsavedEditsRenderAndRevertShowsTheSavedTemplateAgain() async {
+        let (model, _, page) = await open()
+        model.setText(7, card: 0, part: .front, "<b>{{Front}}</b>")
+        await settle(model)
+        #expect(page.shown.last == "Q:<b>{{Front}}</b>")
+        model.revert(7)
+        await settle(model)
+        #expect(page.shown.last == "Q:{{Front}}")
+    }
+
+    @Test func rapidTypingRendersTheLastTextOnce() async {
+        let (model, core, page) = await open()
+        let before = core.renders.count
+        for text in ["{", "{{", "{{B", "{{Ba", "{{Back}}"] {
+            model.setText(7, card: 0, part: .front, text)
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        await settle(model)
+        #expect(core.renders.count == before + 1 && core.renders.last?.front == "{{Back}}")
+        #expect(page.shown.last == "Q:{{Back}}" && page.shown.count == 2)
+    }
+
+    @Test func aSlowRenderOvertakenByANewerEditNeverShows() async {
+        let core = FakePreviewBackend()
+        core.firstWait = .milliseconds(150)
+        let backend = FakeNoteTypesBackend()
+        let model = NoteTypesModel(backend: backend, preview: NoteTypePreview(backend: core))
+        model.summaryDelay = .zero
+        model.preview.typingDelay = .zero
+        model.preview.defaults = nil
+        let page = Page()
+        model.preview.present = { payload in page.shown.append(payload.question); return true }
+        model.appear()
+        await model.settle()
+        model.tab = .cards
+        model.preview.visible = true
+        try? await Task.sleep(for: .milliseconds(20))
+        // The first render is still running when the front changes.
+        model.setText(7, card: 0, part: .front, "{{Back}}")
+        try? await Task.sleep(for: .milliseconds(250))
+        await model.preview.settled()
+        #expect(page.shown == ["Q:{{Back}}"], "the older render's result is dropped")
+    }
+
+    @Test func anInvalidTemplateKeepsThePageAndShowsTheErrorUntilFixed() async {
+        let (model, _, page) = await open()
+        model.setText(7, card: 0, part: .front, "{{#Front}}{{Front}}")
+        await settle(model)
+        #expect(model.preview.problem == .templateError(side: .question))
+        #expect(page.shown == ["Q:{{Front}}"], "the last card stays on the page")
+        model.setText(7, card: 0, part: .front, "{{#Front}}{{Front}}{{/Front}}")
+        await settle(model)
+        #expect(model.preview.problem == nil && page.shown.last == "Q:{{#Front}}{{Front}}{{/Front}}")
+    }
+
+    @Test func aHiddenPreviewReadsNothing() async {
+        let (model, core, _) = await open()
+        model.preview.visible = false
+        let before = core.renders.count
+        model.setText(7, card: 0, part: .front, "{{Back}}")
+        await settle(model)
+        #expect(core.renders.count == before)
+        model.preview.visible = true
+        await model.preview.settled()
+        #expect(core.renders.last?.front == "{{Back}}")
+    }
+
+    @Test func theToggleIsKeptOnTheDeviceAndTheMacHidesThePreviewWhenNarrow() async {
+        let name = "meguri.tests.notetypes.preview.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        let (model, _, _) = await open(defaults: defaults)
+        #expect(model.preview.requested, "shown until turned off")
+        model.preview.requested = false
+        let again = NoteTypePreview(backend: FakePreviewBackend())
+        again.defaults = defaults
+        #expect(!again.requested)
+        let enough = NoteTypePreviewLayout.listWidth + NoteTypePreviewLayout.editorMinimum + NoteTypePreviewLayout.previewMinimum
+        #expect(NoteTypePreviewLayout.macShows(requested: true, width: enough))
+        #expect(!NoteTypePreviewLayout.macShows(requested: true, width: enough - 1))
+        #expect(!NoteTypePreviewLayout.macShows(requested: false, width: 2_000))
+    }
+}
