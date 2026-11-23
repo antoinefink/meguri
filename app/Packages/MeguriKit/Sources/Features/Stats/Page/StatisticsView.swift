@@ -36,9 +36,14 @@ public struct StatisticsView: View {
                     StatsPeriodControl(page: page)
                 }
                 #else
-                // The iPad's navigation bar keeps the title and subtitle leading; the controls trail.
-                ToolbarItemGroup(placement: .topBarTrailing) {
+                // The iPad's navigation bar keeps the title and subtitle leading; the controls
+                // trail as two items, as on the Mac: a fixed spacer keeps the system from drawing
+                // them in one glass group, where the pop-up ran under the segments (N25.2).
+                ToolbarItem(placement: .topBarTrailing) {
                     StatsDeckPopUp(page: page)
+                }
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                ToolbarItem(placement: .topBarTrailing) {
                     StatsPeriodControl(page: page)
                 }
                 #endif
@@ -418,10 +423,25 @@ struct StatsDeckPopUp: View {
             }
             .pickerStyle(.inline)
         } label: {
+            #if os(macOS)
             Text(verbatim: shown.name)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            #else
+            // A touch menu button draws no indicator of its own: the chevrons say it is a
+            // pop-up, as the Mac's does (N25.2).
+            HStack(spacing: Spacing.xxSmall) {
+                Text(verbatim: shown.name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.up.chevron.down")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            #endif
         }
+        .menuIndicator(.visible)
         .help(Text(verbatim: shown.full))
         .disabled(!model.controlsEnabled)
         .accessibilityLabel(Text("stats.deck.label", bundle: .module))
