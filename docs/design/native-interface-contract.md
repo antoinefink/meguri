@@ -965,6 +965,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `ho
 - Table: a native `Table` with sortable, resizable, reorderable columns; the state column first (V2.5); text leading, numbers and dates trailing, tabular figures; system selection; no row tints, no alternating colours beyond the system's.
 - Status line under the table in the footnote style: V11's text at the leading edge, the column set menu at the trailing edge.
 - Under about 900 points the inspector hides itself first; Return or a double click on a row shows it over the table.
+- Built 2026-11-23 (U275; the implementer's reading, pending the coordinator): the Cards / Notes control is a `.navigation` toolbar item, which the system draws right after the title; the trailing group is declared in order as the sync button, the system search field (`DefaultToolbarItem(kind: .search)`) and the Add menu (round 6's, the Today page's own); U273's inspector toggle goes after the Add menu. Until U273 the toolbar has no inspector toggle.
 
 ### N21.4 The inspector (6A)
 
@@ -976,6 +977,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `ho
 
 - The inspector shows a title ("12 Cards Selected"), one secondary line (V7), then the commands as plain buttons in one column, each with its key at the trailing edge, Delete last in red. No toolbar change.
 - The row context menu holds the same commands with their keys, grouped: [Change Deck…, Add Tags…, Remove Tags…] | [Flag ▸, Suspend, Unsuspend, Bury, Unbury] | [Set Due Date…, Forget…] | [Change Note Type…, Edit Note Type…] | [Find and Replace…, Find Duplicates…] | [Delete].
+- Built 2026-11-23 (U275; the implementer's reading, pending the coordinator): V8.1's "Shown when" leaves a command out of the context menu (Apple's rule for context menus) and disables it in the menu bar, whose items stay put. The context menu acts on the rows it was opened on (the selection, or the one row a secondary click outlines outside it), taken as index ranges of the list at its revision when the menu is drawn: a list that moves on while the menu is open makes the core refuse them (`browser/bulk-framework` K1), so no command acts on rows the person did not choose. A Delete after its question runs on the rows it asked about at that revision; when they moved meanwhile it deletes nothing and says so. Until the counts of the rows arrive from the core (a few milliseconds), both commands of a pair show and Unsuspend and Unbury read "Unsuspend Cards" and "Unbury Cards"; in Cards mode the rows on screen give the counts at once. Commands whose sheet or pane a later unit builds are in their places, disabled: Change Deck…, Add Tags…, Remove Tags…, Set Due Date…, Forget… (U276), Find and Replace…, Find Duplicates… (U277), Change Note Type… (U284), Edit Note in Browse (U273). The flags' items carry `flag.fill` in their colours, drawn as a non-template image so the menu keeps the colour (lint allowlist entry). A command the core refuses or that fails shows one alert, "Nothing Was Changed" ("Meguri couldn’t finish the command on these rows. Try again.", OK): V8 is silent on failures.
 
 ### N21.6 Sheets
 
@@ -1017,6 +1019,7 @@ Round 6's menu bar (N20.4) gains a **Note** menu between Deck and Card, and thes
 - The Deck menu's items are disabled while Browse or Note Types is shown: Browse's deck rows are filters, not the shown deck. So ⌘⌫ is Delete Note in Browse and the focused list's Delete in Note Types, never Delete Deck.
 - Card Info stays ⌥⌘I (R1226), not ⌘I, which is Italic while a field has focus.
 - Separators: Note after Edit Note, Remove Tags… and Edit Note Type…; Card after Show in Browse, Flag, Unsuspend and Forget….
+- Built 2026-11-23 (U275; the implementer's reading, pending the coordinator): Edit Note ⌘E moves from the Card menu (N20.8) to the Note menu, as this table places it; in review it is N20.8's, in Browse it waits for U273's inspector (disabled). Bury Card ⌘J and Suspend Card ⇧⌘J stay one item each: the review's card in review, Browse's selection in Browse (titled "Bury Cards" for several), so no key is on two enabled items. The Card menu reads: Show Answer | Again, Hard, Good, Easy | Change Deck…, Flag ▸ | Bury, Unbury, Suspend, Unsuspend | Set Due Date…, Forget… | Back to Decks; Show in Browse comes with U280. ⌥⌘A is a key equivalent of the window with no menu item (as Find…'s ⇧⌘O), and Select All is the system's (⌘A selects every row while the table has the focus). View › Card Info ⌥⌘I is in its place, disabled until U273 and U274. Delete Note ⌘⌫ is enabled only while the table has the focus and no text input does.
 
 ### N21.9 Other ways in (11A)
 
