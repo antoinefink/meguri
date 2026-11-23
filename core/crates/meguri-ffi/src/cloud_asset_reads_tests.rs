@@ -629,6 +629,7 @@ fn first_conflict() -> FirstConflict {
             )
             .unwrap();
     }
+    flush_collection_wal(&fixture);
     let baseline_batch = fixture
         .workflow
         .build_batch(
@@ -726,6 +727,7 @@ fn first_conflict() -> FirstConflict {
         .unwrap();
     let local = note_facts(&fixture, id);
     assert!(local.base_payload.as_ref() == Some(&original.payload));
+    flush_collection_wal(&fixture);
     let batch = fixture
         .workflow
         .build_batch(
