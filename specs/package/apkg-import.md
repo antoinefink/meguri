@@ -13,7 +13,7 @@ Stamping terms (`usn` -1, `now_s`, `now_ms`, `col.mod`) are those of `storage/id
 
 - Entry points (U162): the Import command, drag and drop, Dock and Finder opens, Open in / share sheet, Files. Each gives a file; P18 classifies it. `Apkg` goes to this import; `Colpkg` to U124; `Unsupported` is refused before anything is copied, with a message naming the accepted types (U162). How each source delivers the file, several files at once, whole-collection names from a drop, and what happens in each lifecycle state (no collection, a damaged collection, an exclusive phase, a review session): `package/file-intake` K1 to K6. The intake reads the selected file in place, read only, under its security scope and a coordinated read; nothing is copied before I2's source copy (`package/file-intake#K3`).
 - The import adds to the target and never replaces it. It runs while a review session stays open (R52): it holds no exclusive phase (`engine/lifecycle#L9`), and its commit reaches the session as a change made elsewhere (`sched/review-session#C13`).
-- Its apply needs an open, `Ready` collection (I14). Its inspect (I3) opens no connection to the target; it uses only the collection directory, for staging (I15).
+- Its apply needs an open, `Ready` collection (I14). Its inspect (I3) opens no connection to the target; it uses only the collection directory, for staging (I15). The option values the sheet starts from are a separate read of the target (I4, I5), not part of the inspect.
 
 ## I2. The session (R1600)
 
@@ -31,7 +31,7 @@ Steps, in this order; the first failure ends the inspect with its error (I16) an
 1. **Archive and format.** Read the archive (P2) and `meta` (P3). Version 3: the latest format (P4, P5). No `meta`, version 1 or version 2: the legacy formats (P17). Any other version: `TooNew`.
 2. **Preflight** (I15) and **extract** the collection entry into the staging directory as `collection.anki2`, within P8's limits (P4 for the latest format, P17 for the legacy ones).
 3. **Open gate** on that file, as `package/container#P12` step 3, with one change: the v1-scheduler marker (`storage/open-and-connections#C2.2` step 2) does not refuse; the file goes on and step 6 converts it. This is the only place Meguri accepts a v1-scheduler collection, and only as a package collection that is read, never activated. Every other refusal stays (`TooOld`, `TooNew`, `NotACollection`, `UpgradeFailed`, `Corrupt`); schema 11 to 17 is upgraded to 18 on this copy (`storage/schema-upgrade`).
-4. **Integrity check**: `PRAGMA integrity_check` with `unicase` registered; anything but the single row `ok` is `Corrupt` (P12 step 4).
+4. **Integrity check**: `PRAGMA integrity_check` with `unicase` registered; anything but the single row `ok` is `Corrupt` (P12 step 4). Then the **size limits** of I15.1, by aggregates over the package collection before any of its rows is read: past one, `TooLarge{what, found, limit}` (changed 2026-11-23 (deck package import)).
 5. **Id repair** (I3.1).
 6. **Scheduler conversion** (I3.2).
 7. **Field count repair** (I3.3).
@@ -82,9 +82,8 @@ Returned by `inspect`, before any option is chosen:
 | `has_presets` | true when a normal deck of `decks` uses a preset other than id 1 |
 | `media_files`, `media_bytes` | the media map's entry count and the sum of its sizes (latest) or of its entries' sizes in the zip directory (legacy) |
 | `repaired` | counts of I3.1's new ids, of I3.3's notes, and whether I3.2 converted |
-| `defaults` | the five option values I5 reads from the target's config |
 
-These are facts about the package. What the options will do (new, updated, duplicate notes) is known only after the apply's plan (I14); a merge's destructive mappings come from U121's preview (I8).
+These are facts about the package. Changed 2026-11-23 (deck package import): the inspect never reads the target (I1, I3), so the five option values the sheet starts from (I5) are not among these facts. They are a separate pure read of the open collection, `read_options` (a query snapshot of its config, nothing written), made when the sheet opens; the row `defaults` that this table listed before is removed. What the options will do (new, updated, duplicate notes) is known only after the apply's plan (I14); a merge's destructive mappings come from U121's preview (I8).
 
 ## I5. Options (R1601)
 
@@ -96,7 +95,7 @@ These are facts about the package. What the options will do (new, updated, dupli
 | Import any learning progress | `withScheduling` | JSON `true` or `false` | `false` |
 | Import any deck presets | `withDeckConfigs` | JSON `true` or `false` | `false` |
 
-- Any value of another JSON type, and any other string, reads as the default. The sheet (U162) shows these values first. The labels and their order on the sheet: `package/transfer-strings#S2`, `package/transfer-sheets#X2.2`.
+- Any value of another JSON type, and any other string, reads as the default. The sheet (U162) shows these values first, read by `read_options` when it opens (I4). The labels and their order on the sheet: `package/transfer-strings#S2`, `package/transfer-sheets#X2.2`.
 - The apply writes the five chosen values to these keys at the start of its write phase, as local config changes (`storage/config-table#C4`: only a key whose value differs is written). They are part of the import's undo step: undoing the import restores them. An import that fails or is cancelled writes none.
 - The stored forms are the JSON strings `"IfNewer"`, `"Always"` and `"Never"` and the JSON booleans `true` and `false`, as Anki 26.9.3 stores them (scenario `apkg-import/options-keys`, I18.2). Its golden also shows C4's rule: a key whose value an import leaves equal keeps its earlier `mtime_secs`.
 
@@ -126,7 +125,7 @@ Each taken note type, in ascending `id` order, before any note. First its `origi
 | yes | no, and a target note type other than that one has `original_id` equal to this id and the same schema | **earlier copy**: that note type; this id maps to it for every note; updated when the rule holds against it |
 | yes | no, and no such copy | **copy added** under a new id (`storage/ids-usn-mtime#I2`); this id maps to it for every note |
 
-- **Same schema**: the same number of fields and of templates, and at each position the two fields (templates) match: when both have an `id` (`notetypes/records#N2`), the ids are equal; otherwise the names are equal byte for byte. Names, options, templates' text and CSS do not count.
+- **Same schema**: the same kind (standard or cloze: a cloze note type is one whose kind is cloze, every other kind counts as standard), the same number of fields and of templates, and at each position the two fields (templates) match: when both have an `id` (`notetypes/records#N2`), the ids are equal; otherwise the names are equal byte for byte. Names, options, templates' text and CSS do not count. Changed 2026-11-23 (deck package import): the kind was added. A standard and a cloze note type never share a schema, so an incoming note type of the other kind is an "earlier copy" or a "copy added", never "existing": updating a note type across kinds would leave its cards without a template, as `package/notetype-merge` refuses for a merge (I8, `NotetypeKindConflict`).
 - **Update note types** (no merge): `IfNewer` updates when the target's `mtime_secs` is below the incoming one; `Always` when the two differ; `Never` never.
 - When several target note types qualify as an earlier copy, the one with the smallest id.
 - **Writing.** An added note type, a copy and an update all write the incoming record (its fields and templates included, every stored value of `notetypes/records#N1` kept), normalized by `notetypes/records#N4` steps 1 to 8 as an unchecked save (`notetypes/validation#V1`; no template check). Its `usn` is -1; its `mtime_secs` stays the package's, except that a name made unique by N4 step 7 also sets it to `now_s`. Template rows keep the package's `mtime_secs` and `usn` (N3.3). An update keeps the target's id. Adding a copy sets `curModel` to the copy's id (`storage/config-table#C4`); adding under the package's id and updating do not touch `curModel`.
@@ -149,7 +148,7 @@ With Merge note types on, I7's table is replaced by U121's merge for every taken
   - a **preview** of destructive mappings (fields or templates whose content would be dropped), empty when there are none.
 - **Errors**: `NotetypeKindConflict{incoming, target}` when a standard and a cloze note type would merge (R1606). Anki 26.9.3 ends the whole import there with nothing changed; Meguri does the same.
 - **This spec then**: reorders each incoming note's fields by its field map before I9 (an unfilled position gets the empty string); with merge on, a GUID match never logs `conflicting` (I9), since U121 moved the target note to a common note type (`package/notetype-merge#J6`), and I9 step 5 compares against the `mod` that `package/notetype-merge#J11` gives; maps each added card's `ord` by the template map, and applies I11's "pair exists" test to the mapped ordinal (Meguri: Anki tests the package's ordinal, which can add a second card for one pair after a reorder; `package/notetype-merge#J14` records the case).
-- **Confirmation**: when the preview is not empty, `apply` returns `ConfirmationRequired{preview, token}` and writes nothing; the caller shows the preview (U162) and calls `apply` again with the token. Decided 2026-10-27: a token holds the session, the five options and a digest of the preview (SHA-256 of its canonical encoding, the implementer's); the plan's snapshot seq is recorded in it for diagnostics only and never checked. A later `apply` accepts the token when it names this session and its new plan has equal options and an equal preview digest, so answers committed in between never invalidate a confirmation; otherwise it returns `ConfirmationRequired` again with a new token and writes nothing. The same test runs after every replan inside one apply (I14.2): a replan whose preview digest differs ends the apply with `ConfirmationRequired` and a new token, its staged media deleted, nothing written (a safety backup already published stays).
+- **Confirmation**: when the preview is not empty, `apply` returns `ConfirmationRequired{preview, token}` and writes nothing; the caller shows the preview (U162) and calls `apply` again with the token. Decided 2026-10-27: a token holds the session, the five options and a digest of the preview (SHA-256 of its canonical encoding, the implementer's); the plan's snapshot seq is recorded in it for diagnostics only and never checked. A later `apply` accepts the token when it names this session and its new plan has equal options and an equal preview digest, so answers committed in between never invalidate a confirmation; otherwise it returns `ConfirmationRequired` again with a new token and writes nothing. The same test runs after every replan inside one apply (I14.2): a replan whose preview digest differs ends the apply with `ConfirmationRequired` and a new token, its staged media deleted, nothing written (a safety backup already published stays). Changed 2026-11-23 (deck package import): with a ready Meguri Sync binding, `sync/meguri-provider#MP7.1` also needs this step for a plan with a structural reason (I14.4) whose preview is empty, the token covering the reasons too; not built yet (MP7.1's first requirement).
 - **Backup**: a merge with a structural effect (`package/notetype-merge#J9`) is a structural edit; I14 takes its safety backup after the confirmation and before the first write. A merge without one whose preview was not empty and was confirmed takes the safety backup the same way (J9, I14.4).
 
 ## I9. Notes (R1602, R1603)
@@ -173,7 +172,7 @@ Example (AE67): target note `g1`, `mod` 100, field `<img src="cat.jpg">`; the pa
 
 ### I10.1 Presets
 
-With presets on, each taken preset in ascending id order: when the target has no preset with its id, it is added with that id, its stored values and `mtime_secs`, `usn` -1; otherwise it is skipped and the target's preset with that id stays as it is. Nothing else is written for presets.
+With presets on, each taken preset in ascending id order: when the target has no preset with its id, it is added with that id, its values bounded for use as `sched/presets#V3` reads them (every bounded option outside its range, or NaN, written as its built-in default, as a preset save writes it, V8; every other value, the FSRS lists as I6 left them, `other` and unknown fields kept), its `mtime_secs`, `usn` -1; otherwise it is skipped and the target's preset with that id stays as it is. Nothing else is written for presets. Changed 2026-11-23 (deck package import): it said "its stored values"; the golden `apkg-import/v1-scheduler` holds the bounded values, which are what the deck options screen and every other use read (`sched/deck-options`, V3).
 
 ### I10.2 Decks
 
@@ -187,6 +186,8 @@ The taken decks, sorted by the number of components of their names, then by asce
    - none: added (step 5).
 4. **Update.** The target deck keeps its id, name and `common`; a normal deck changes only in: `description` and `markdown_description` taken from the incoming deck when its `description` is not empty; `config_id` taken when the incoming one is not 1; each of `review_limit`, `new_limit`, `review_limit_today`, `new_limit_today` taken when the incoming deck has it, else kept. A filtered deck takes the incoming deck's whole filtered part. When the result equals the stored deck, nothing is written; otherwise it is written with `mtime_secs` `now_s`, `usn` -1. The package deck maps to the target deck.
 5. **Add.** When the nearest existing target ancestor of the name (`decks/decks#D3`) is a filtered deck, a new normal deck (D4) named that ancestor's name plus `S` is added first, recorded as a rename of the ancestor's name, and step 1 is applied again. Then the deck is added with a new id (`storage/ids-usn-mtime#I2`) and its package content (kind and `common` as I6 left them), `mtime_secs` `now_s`, `usn` -1, its stored name normalized (`decks/decks#D1`), made unique (D2's `+` rule), its leading components taking the nearest existing ancestor's spelling and its missing ancestors created (D3, D4). The package deck maps to it. A name past D3's nesting limit ends the import with `DeckTooDeep{name}` and nothing written (Anki fails the same way).
+
+Changed 2026-11-23 (deck package import): `DeckTooDeep` is found in the plan. I14.1 step 3 runs steps 1 to 5 once against the plan's snapshot as a dry run that writes nothing, so a name past the limit refuses there, before the merge confirmation (I8), media staging and any safety backup, at no cost. The write phase runs them again on the live rows (I14.2). A deck renamed, added or removed between the plan and the commit (an edit on another lane) can still make a name too deep only there: the write phase then ends with `DeckTooDeep{name}` and rolls back, so nothing is written and the staged media are deleted; a safety backup already published stays (I16).
 
 Examples: the package's `japanese::verbs` with a target `Japanese` gives `Japanese::verbs`; the package's normal `Kanji` with a target filtered `Kanji` gives `Kanji 1894676400` and its child `Kanji::N5` becomes `Kanji 1894676400::N5`; the package's `A::B` without `A` creates `A` (D4) and `A::B`.
 
@@ -259,6 +260,7 @@ The apply's result carries one log:
 | Member | Content |
 |---|---|
 | `found_notes` | the number of package notes |
+| `fields_omitted` | the number of entries that carry no fields because the text budget (below) was spent (Meguri) |
 | `new` | I9 step 3, with the new note's target id |
 | `updated` | I9 step 5 updated, with the target id |
 | `duplicate` | I9 steps 4 and 5, with the target id |
@@ -267,17 +269,18 @@ The apply's result carries one log:
 | `missing_deck` | I11.1, with the target note's id |
 | `first_field_match`, `empty_first_field` | always empty for a deck package; they exist for the text importers |
 
-- Each entry holds its id and every field of the note: for new and updated notes as written, for the others as in the package after I8's reorder. Each field is reduced: `text/strip-html` H5, then each U+000A replaced by U+0020, then cut to at most 80 bytes of UTF-8 at a character boundary.
+- Each entry holds its id and, within the text budget below, every field of the note: for new and updated notes as written, for the others as in the package after I8's reorder. Each field is reduced: `text/strip-html` H5, then each U+000A replaced by U+0020, then cut to at most 80 bytes of UTF-8 at a character boundary.
 - Entries are in I9's order. A note is in exactly one list, except that a new, updated or duplicate note can also be in `missing_deck`.
+- **Text budget** (R1852; changed 2026-11-23 (deck package import)). The log holds at most 16 MiB (16,777,216 bytes) of field text in all, so its size never grows with the package's text. Entries are made in I9's order, then the `missing_deck` entries in I11.1's order; each spends from one budget. An entry keeps its reduced fields only when they all fit what is left, each field counted as its reduced bytes plus a fixed allowance per field of the implementer's choice; otherwise it carries its ids only (its note id, and `existing_id` for `conflicting`) and no fields, and the log's count `fields_omitted` counts it. Once the budget is spent every later entry carries ids only; before that, an entry too large for what is left carries ids only and a later, smaller one can still keep its fields. Lists, order, ids and the counts of I14.5 are never cut.
 - The log is kept with the session's result and read in pages through U133 (category, offset, count); the UI shows each entry's first field (U162). The result's lines, their order, which offer Show in Browse, the separate line for `missing_deck`, one table row per note and its per-row Show: `package/transfer-sheets#X2.5`.
 
 ## I14. The operation
 
 ### I14.1 Steps
 
-1. **Admission.** `apply(session, options, token?)` needs an open `Ready` target and takes the long-operation slot (`engine/lifecycle#L5`; held: `Busy{running_op}`). It keeps the slot until the operation ends. It never enters an exclusive phase.
+1. **Admission.** `apply(session, options, token?)` needs an open `Ready` target and takes the long-operation slot (`engine/lifecycle#L5`; held: `Busy{running_op}`). It keeps the slot until the operation ends. It never enters an exclusive phase. Then, with Import any learning progress on, the row limit of I15.1 is checked again with the review log counted: past it, `TooLarge{what: "rows"}` before anything is planned or staged (changed 2026-11-23 (deck package import)).
 2. **Snapshot.** One read transaction on the maintenance reader (`engine/op-model#O6`) for every target read of the plan.
-3. **Plan** (cancellable, phase `Planning`): I6, then I7 or I8 (with the plan half of G9 for I7's front changes), I9, I10, I11, and I12.2's used-entry set, all in memory against the snapshot and the package collection. Also its structural reasons (I14.4) and, with a merge, U121's preview (I8).
+3. **Plan** (cancellable, phase `Planning`): I6, then I7 or I8 (with the plan half of G9 for I7's front changes), I9, I10, I11, and I12.2's used-entry set, all in memory against the snapshot and the package collection. Also its structural reasons (I14.4) and, with a merge, U121's preview (I8). I10.2 runs here as a dry run that writes nothing, so `DeckTooDeep` refuses in this step (I10.2; changed 2026-11-23 (deck package import)). Field text, cards and review-log rows are read from the package collection in pages when they are needed (media staging, the write phase), so the plan keeps per note only its id, GUID, note type, `mod` and decision (R1852).
 4. **Confirmation** (merge only, I8).
 5. **Preflight** (I15).
 6. **Media staging** (cancellable, `media` stage): I12.3 and I12.4 for every used and static entry; then I12.2's rewrites, which need the stored names.
@@ -303,10 +306,11 @@ The apply's result carries one log:
 - An import is not a schema change unless its plan marks one: `notetypes_merged` (U121, a merge with an effect, `package/notetype-merge#J9`) or `sort_field_changed` (I7). Adding note types, copies, notes, decks or presets never sets `scm` (`notetypes/schema-changes#G2`).
 - **Safety backup** (`package/backup-triggers#T6.1`): an import whose plan marks neither and that needed no merge confirmation takes none (it is undoable, not "destructive, not undoable", and T6.1 has no other row for it). One that marks either is a structural edit and falls under the row "a structural edit … other than deleting a note type", with its coalescing rule. One that marks neither but whose merge preview (`package/notetype-merge#J10`) was not empty and was confirmed falls under T6.1's row for a confirmed merge preview, with the same coalescing (decided 2026-10-27, data safety: `package/notetype-merge#J9`). In both cases the backup runs as T6.2 says for a plan-and-commit op (after the plan and the merge confirmation, before the write phase; none again after a replan once one was taken in this apply, but a replan that first needs one, for example because a user edit made the merge structural, takes it then, before the write phase, as T6.1's "whenever the op's plan classifies it so" requires; T6.2's "no second one" still holds); its failure refuses the import with `SafetyBackupFailed{cause}` and nothing is written.
 - **Structure report** (`engine/change-stream#S2.5`, `sync/cloudkit-records#K19.1`): every import reports 8 `apkg_apply`. With a merge that has an effect (J9), 9 `notetypes_merged` with U121's layouts, removed note types and type changes; a merge without an effect reports no 9. An import whose I7 rewrote a sort field also reports 3 `sort_field_changed` with that note type's identity layout. An import that updates a note type whose field or template names changed (I7, same schema) reports an identity layout for it, which adds no reason code. These are the cases K19.1 and S2.5 list. The import is one op, so it is one CloudKit generation. Ids an import keeps from the package meet other devices' rows through `sync/cloudkit-records#K14`.
+- **Meguri Sync** (changed 2026-11-23 (deck package import)). With Meguri Sync as the service and a ready binding, an import whose plan marks `notetypes_merged` or `sort_field_changed` runs as `sync/meguri-provider#MP7.1`'s job: the import sheet's confirmation is the final destructive confirmation, MP7's steps run with this apply as the write step, and the safety backup is this one. MP7.1 needs the plan's structural reasons before the write phase, which this apply does not report yet: today they come only with the result (I14.5), and a structural import sets `scm`, so the next round meets the collection choice (`docs/process/verification-status.md`).
 
 ### I14.5 Result, progress and cancellation
 
-- **Result**: the op's seq, generation and undo step (O4), the log (I13), counts (notes added, updated; cards added; review-log rows added; note types added, updated, copied; with a merge, notes moved between note types and note types removed (`package/notetype-merge` J5, J6, J8); decks added, updated; presets added; media files written, reused, skipped), the safety backup's name or none. After a commit whose media publication needs recovery, `MediaCommitPending` (O4): the rows are committed and the caller never repeats the import.
+- **Result**: the op's seq, generation and undo step (O4; none when the import changed nothing), the log (I13), the summary of the structure report it committed with (I14.4: its reason codes, the note types with a layout entry and whether each is the identity, the removed note types, the type changes), counts (notes added, updated; cards added; review-log rows added; note types added, updated, copied; with a merge, notes moved between note types and note types removed (`package/notetype-merge` J5, J6, J8); decks added, updated; presets added; media files written, reused, skipped), the safety backup's name or none. After a commit whose media publication needs recovery, `MediaCommitPending` (O4): the rows are committed and the caller never repeats the import.
 - **Progress** (`engine/jobs#J5`): inspect reports the stages `extracting` (source copy and collection entry) and `analysing` (gate, repairs, preview facts); apply reports the phase `Planning` (I14.1 step 3), then the stages `media` (payloads staged of total), `backup` (when I14.4 takes one), then `Committing` for the write phase. Updates at least once per second during long stages (R1616); work runs off the main thread and off the writer except step 8.
 - **Cancellation**: during inspect, plan, media staging and backup (T6.2's cancel). It ends with `Cancelled` once the work has stopped: staged media deleted, the target, its media folder and journal unchanged; a cancelled `apply` leaves the session open (I2), a cancelled `inspect` removes it. From step 8 the import completes.
 - **Kill** (R2003): before the commit, the target holds none of the import and M13's launch recovery moves staged media to the trash; after it, all of it, and the journal's manifest completes the media publication; static entries not yet written stay unwritten (I12.4).
@@ -317,11 +321,30 @@ The apply's result carries one log:
 |---|---|---|
 | before the source copy (I2) | the collection's file system | `package/container#P10`'s source-copy row |
 | before extraction (I3 step 2) | the same | P10's inspect row (latest); for a legacy package, the collection member's uncompressed size from the zip directory + 4 MiB; then P10's pre-upgrade row when the file is below schema 18 |
-| before media staging (I14 step 5) | the media folder's file system (the collection's) | the sum of the sizes of the used and static entries + (2 × the package collection's size) + 4 MiB, plus `package/backups#B4`'s need when I14.4 takes a backup |
+| before media staging (I14 step 5) | the media folder's file system (the collection's) | the sum of the sizes of the used and static entries + (2 × the package collection's size) + 4 MiB, plus, when I14.4 takes a safety backup, that backup's need: `package/container#P10`'s row for a package written from the live collection, which `package/backups#B4` writes, 2 × (size of `collection.anki2` + size of its `-wal`) + 4 MiB. The backup is taken after staging (I14.1 step 7), so its space is checked here, in the one preflight, before anything is staged |
 
 - Too little space: `InsufficientSpace{needed, available}`, before the step writes anything. A write that still fails for space: `DiskFull`, with the same cleanup as any failure (P10).
 - Temporary files are only P9's staging directory of the session (I2) and the media store's staging (M13). Both use U32's names and are swept after a kill (R1493). No entry name or media name ever becomes a path outside them; nothing outside the package and those directories is read (R1599).
-- Limits are P8's for every entry read, legacy members included (P17); a media payload is also bounded by its declared size (I12.4's decoded-size bound). A crafted entry that decodes past one of these limits is `Corrupt`, with memory bounded and staging removed.
+- Limits are P8's for every entry read, legacy members included (P17); a media payload is also bounded by its declared size (I12.4's decoded-size bound). A crafted entry that decodes past one of these limits is `Corrupt`, with memory bounded and staging removed. What the package collection may hold is I15.1's.
+
+### I15.1 Size limits (R1852)
+
+Changed 2026-11-23 (deck package import), recording the importer's limits as built. An apply reads field text, cards and review-log rows in pages (I14.1 step 3), so its memory grows with the number of rows it brings, not with what they store: about 450 bytes per written row, most of it the op's undo journal, which every engine op pays. These limits bound it whatever the file stores. Each is far above what a deck holds. The inspect checks them after the integrity check (I3 step 4), by aggregates over the package collection (counts, sums and maxima, no row read into memory); the first one past its limit, in the table's order, refuses with `TooLarge{what, found, limit}`, `what` being the name below, and removes the session's staging directory.
+
+| `what` | Limit | Counted |
+|---|---|---|
+| `rows` | 2,000,000 | the notes and cards of the package collection together |
+| `guid bytes` | 255 | the longest note `guid`, in bytes |
+| `note bytes` | 2 MiB (2,097,152 bytes) | the largest note: its `flds`, `tags`, `data` and `sfld` together, in bytes |
+| `tag uses` | 8,000,000 (4 × the row limit) | over all notes, each note's tag uses: for tags that are not empty once trimmed of spaces, the number of spaces in them, plus one |
+| `card data bytes` | 64 KiB (65,536 bytes) | the largest card `data`, in bytes |
+| `structure rows` | 10,000 | the rows of each of `decks`, `deck_config` and `notetypes`, each table on its own |
+| `note type parts` | 5,000 | the fields of one note type, and the templates of one note type |
+| `structure bytes` | 64 MiB (67,108,864 bytes) | the names and stored blobs of every deck (`name`, `common`, `kind`), preset (`name`, `config`), note type (`name`, `config`), field and template (`name`, `config`), together |
+
+- **At the apply, with scheduling.** The review log comes only with Import any learning progress (I6), so the inspect does not count it. An apply with that option on counts the package's notes, cards and review-log rows together against the same 2,000,000 at its admission (I14.1 step 1) and refuses with `TooLarge{what: "rows"}` before anything is planned, staged or backed up; the session stays open (I2). With the option off nothing more is counted.
+- **What this means.** A very large collection exported as a deck package with its review history can be refused with Import any learning progress on: for example 500,000 notes, 1,000,000 cards and 1,000,000 review-log rows pass the inspect (1,500,000 rows) and are refused at the apply (2,500,000). The same package imports with the option off: its notes and cards come in as new cards, without their review history (I6). A package with more than 2,000,000 notes and cards together cannot be imported at all.
+- No scenario reaches these limits; Meguri's own tests check each one (I18.3).
 
 ## I16. Errors
 
@@ -336,14 +359,15 @@ The apply's result carries one log:
 | `Stale` | I14.2, after 3 replans |
 | `ConfirmationRequired{preview, token}` | I8 |
 | `NotetypeKindConflict{incoming, target}` | I8 (R1606) |
-| `DeckTooDeep{name}` | I10.2 step 5 |
+| `DeckTooDeep{name}` | I10.2 step 5: found in the plan (I14.1 step 3); in the write phase only when a deck changed after the plan, and then rolled back |
+| `TooLarge{what, found, limit}` | I15.1: at the inspect (I3 step 4), and at the apply's admission with scheduling (I14.1 step 1) |
 | `SafetyBackupFailed{cause}` | I14.4 |
 | `SessionClosed` | I2 |
 | `Cancelled` | I14.5 |
 | `MediaCommitPending` | I14.5, after a commit |
 | `Io` | any other file-system failure |
 
-Every error before the commit leaves the target, its media folder, media journal and backups as they were (a published safety backup stays). U133 maps these to its FFI error set; U162 words them.
+Every error before the commit leaves the target, its media folder, media journal and backups as they were (a published safety backup stays). U133 maps these to its FFI error set; U162 words them (`package/transfer-sheets#X2.6`). The engine returns `Busy`, `CollectionUnavailable`, `StaleGeneration` and `SafetyBackupFailed` as the engine's own errors, carried inside the import's error; U133 maps them to these kinds.
 
 For scenarios, Anki 26.9.3's deck package import errors are recorded as `too_new` (an unknown `meta` version) and `corrupt` (everything Anki reports as not a valid file, a protobuf or JSON decode error, a zip error, and its refusal of an invalid note type record, I7), as `specs/conformance/package-ops.md` E2.3 does for collection packages, plus `notetype_kind_conflict`.
 
@@ -393,7 +417,7 @@ What I18.1 asked for:
 
 ### I18.2 Scenarios to record
 
-**Which rows run on Meguri at U120.** Six rows import a fixture package and export nothing: `deck-tree`, `ids-cutoff`, `legacy-1`, `media-map-variants`, `refusals` and `v1-scheduler`. They run once E6's import exists on Meguri's executor (U120). Every other row, the two `package/notetype-merge/` rows included, builds its package with an `export` step in the session (E7, capability `export.apkg`). Meguri's executor gains that step only with U122, so until then these rows are `pending` on Meguri (`specs/conformance/dsl.md` D10). `legacy-2` also exports with L6's whole-collection form (capability `export.apkg_legacy`), whose Meguri adapter U123 adds. Until those units land, U120 checks the rules of these rows with I18.3's tests; each row must match its golden at the gate of the unit that adds its last missing step (U122, or U123 for `legacy-2`).
+**Which rows run on Meguri at U120.** Six rows import a fixture package and export nothing: `deck-tree`, `ids-cutoff`, `legacy-1`, `media-map-variants`, `refusals` and `v1-scheduler`. They run once E6's import exists on Meguri's executor (U120); since U120 (PR #172) they do, with `package/notetype-merge/by-name`, which also imports a fixture (`conformance/package-ops#E5`). Every other row, the two `package/notetype-merge/` rows included, builds its package with an `export` step in the session (E7, capability `export.apkg`). Meguri's executor gains that step only with U122, so until then these rows are `pending` on Meguri (`specs/conformance/dsl.md` D10). `legacy-2` also exports with L6's whole-collection form (capability `export.apkg_legacy`), whose Meguri adapter U123 adds. Until those units land, U120 checks the rules of these rows with I18.3's tests; each row must match its golden at the gate of the unit that adds its last missing step (U122, or U123 for `legacy-2`).
 
 | Scenario | Shows |
 |---|---|
