@@ -304,6 +304,65 @@ extension TestHooks {
         }
     }
 
+    /// The page's platform scroll view (the tallest in the key window), scrolled down and back up
+    /// in animated steps of about two thirds of its height, about three seconds in all.
+    @MainActor struct StatsNativeScroll {
+        #if os(macOS)
+        private let view: NSScrollView
+        #else
+        private let view: UIScrollView
+        #endif
+
+        init?() {
+            #if os(macOS)
+            func all(_ view: NSView) -> [NSScrollView] {
+                ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(all)
+            }
+            guard let root = NSApplication.shared.windows.first(where: { $0.isVisible && $0.canBecomeMain })?.contentView,
+                  let tallest = all(root).max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) })
+            else { return nil }
+            #else
+            func all(_ view: UIView) -> [UIScrollView] {
+                ((view as? UIScrollView).map { [$0] } ?? []) + view.subviews.flatMap(all)
+            }
+            let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+            guard let window = windows.first(where: \.isKeyWindow) ?? windows.first,
+                  let tallest = all(window).max(by: { $0.contentSize.height < $1.contentSize.height })
+            else { return nil }
+            #endif
+            view = tallest
+        }
+
+        func run() async {
+            #if os(macOS)
+            let viewport = view.contentView.bounds.height
+            let total = (view.documentView?.frame.height ?? 0) - viewport
+            #else
+            let viewport = view.bounds.height
+            let total = view.contentSize.height + view.adjustedContentInset.bottom - viewport
+            #endif
+            guard total > 0 else { return }
+            let step = viewport * 2 / 3
+            let downs = Array(stride(from: step, through: total, by: step)) + [total]
+            for offset in downs + downs.reversed().dropFirst() + [0] {
+                move(to: offset)
+                try? await Task.sleep(for: .milliseconds(220))
+            }
+        }
+
+        private func move(to offset: CGFloat) {
+            #if os(macOS)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                view.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: offset))
+            }
+            view.reflectScrolledClipView(view.contentView)
+            #else
+            view.setContentOffset(CGPoint(x: 0, y: offset - view.adjustedContentInset.top), animated: true)
+            #endif
+        }
+    }
+
     /// What the hooks' commands do to the Statistics page (`ShellCommands`: `statsReload`,
     /// `statsPeriodAll`, `statsPeriodYear`, `statsPeriodHalfYear`, `statsScroll`), for the
     /// performance tests (`StatsPerfTests`) that drive it with no synthesized input; it answers
@@ -369,10 +428,16 @@ extension TestHooks {
                 let frames = StatsFramePacing()
                 frames.start()
                 if reading { page.model.refresh() }
-                let order = StatsSectionID.allCases + StatsSectionID.allCases.reversed()
-                for section in order {
-                    page.go(to: section)
-                    try? await Task.sleep(for: .milliseconds(220))
+                if let native = StatsNativeScroll() {
+                    // The platform scroll view itself, a step at a time, as a trackpad or a finger
+                    // moves it: no SwiftUI state changes, as in a person's scroll.
+                    await native.run()
+                } else {
+                    let order = StatsSectionID.allCases + StatsSectionID.allCases.reversed()
+                    for section in order {
+                        page.go(to: section)
+                        try? await Task.sleep(for: .milliseconds(220))
+                    }
                 }
                 Signposts.end(token)
                 let pacing = frames.stop()
