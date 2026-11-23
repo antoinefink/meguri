@@ -279,8 +279,8 @@ The apply's result carries one log:
 ### I14.1 Steps
 
 1. **Admission.** `apply(session, options, token?)` needs an open `Ready` target and takes the long-operation slot (`engine/lifecycle#L5`; held: `Busy{running_op}`). It keeps the slot until the operation ends. It never enters an exclusive phase.
-2. **Snapshot.** One read transaction on the maintenance reader (`engine/op-model#O6`) for every target read of the plan.
-3. **Plan** (cancellable, phase `Planning`): first one paged read of the package's note ids and cards, then the apply's row check of I15.1 (past it, `TooLarge{what: "rows"}`, before the snapshot is read; changed 2026-11-23 (deck package import)), then I6, then I7 or I8 (with the plan half of G9 for I7's front changes), I9, I10, I11, and I12.2's used-entry set, all in memory against the snapshot and the package collection. Also its structural reasons (I14.4) and, with a merge, U121's preview (I8). I10.2 runs here as a dry run that writes nothing, so `DeckTooDeep` refuses in this step (I10.2; changed 2026-11-23 (deck package import)). Field text, cards and review-log rows are read from the package collection in pages when they are needed (media staging, the write phase), so the plan keeps per note only its id, GUID, note type, `mod` and decision (R1852).
+2. **Package read and snapshot.** First, in phase `Planning`, one paged read of the package's note ids and cards, then the apply's row check of I15.1: past it, `TooLarge{what: "rows"}`, before the target is read (changed 2026-11-23 (deck package import)). Then the snapshot: one read transaction on the maintenance reader (`engine/op-model#O6`) for every target read of the plan.
+3. **Plan** (cancellable, phase `Planning`): I6, then I7 or I8 (with the plan half of G9 for I7's front changes), I9, I10, I11, and I12.2's used-entry set, all in memory against the snapshot and the package collection. Also its structural reasons (I14.4) and, with a merge, U121's preview (I8). I10.2 runs here as a dry run that writes nothing, so `DeckTooDeep` refuses in this step (I10.2; changed 2026-11-23 (deck package import)). Field text, cards and review-log rows are read from the package collection in pages when they are needed (media staging, the write phase), so the plan keeps per note only its id, GUID, note type, `mod` and decision (R1852).
 4. **Confirmation** (merge only, I8).
 5. **Preflight** (I15).
 6. **Media staging** (cancellable, `media` stage): I12.3 and I12.4 for every used and static entry; then I12.2's rewrites, which need the stored names.
@@ -344,7 +344,7 @@ The inspect checks them after the integrity check (I3 step 4), by aggregates ove
 | `note type parts` | 5,000 | the fields of one note type, and the templates of one note type |
 | `structure bytes` | 64 MiB (67,108,864 bytes) | the names and stored blobs of every deck (`name`, `common`, `kind`), preset (`name`, `config`), note type (`name`, `config`), field and template (`name`, `config`), together |
 
-- **At the apply.** The review log comes only with Import any learning progress (I6), so the inspect does not count it. Every apply counts again at the start of its plan (I14.1 step 3), after one paged read of the package's note ids and cards and before it reads the target: the package's notes, the cards of those notes, and, with that option on, every review-log row, against the same 2,000,000. Past it, `TooLarge{what: "rows"}`, before anything is staged or backed up; the session stays open (I2). With the option off the count cannot pass the limit, since the inspect checked notes and cards.
+- **At the apply.** The review log comes only with Import any learning progress (I6), so the inspect does not count it. Every apply counts again before its plan (I14.1 step 2), after one paged read of the package's note ids and cards and before it reads the target: the package's notes, the cards of those notes, and, with that option on, every review-log row, against the same 2,000,000. Past it, `TooLarge{what: "rows"}`, before anything is staged or backed up; the session stays open (I2). With the option off the count cannot pass the limit, since the inspect checked notes and cards.
 - **What this means.** A very large collection exported as a deck package with its review history can be refused with Import any learning progress on: for example 500,000 notes, 1,000,000 cards and 1,000,000 review-log rows pass the inspect (1,500,000 rows) and are refused at the apply (2,500,000). The same package imports with the option off: its notes and cards come in as new cards, without their review history (I6). A package with more than 2,000,000 notes and cards together cannot be imported at all.
 - **R1852 is not met near the limit.** At about 450 bytes per written row, an import near 2,000,000 rows needs about 0.9 GB, above R1852's 300 MB (measured: 267 MiB at 600,000 rows, PR #179). The limit bounds memory; it does not meet R1852 for the largest packages. `docs/process/verification-status.md` keeps this gap.
 - No scenario reaches these limits; Meguri's own tests check them (I18.3).
@@ -363,7 +363,7 @@ The inspect checks them after the integrity check (I3 step 4), by aggregates ove
 | `ConfirmationRequired{preview, token}` | I8 |
 | `NotetypeKindConflict{incoming, target}` | I8 (R1606) |
 | `DeckTooDeep{name}` | I10.2 step 5: found in the plan (I14.1 step 3); in the write phase only when a deck changed after the plan, and then rolled back |
-| `TooLarge{what, found, limit}` | I15.1: at the inspect (I3 step 4), and at the start of the apply's plan (I14.1 step 3) |
+| `TooLarge{what, found, limit}` | I15.1: at the inspect (I3 step 4), and before the apply's snapshot (I14.1 step 2) |
 | `SafetyBackupFailed{cause}` | I14.4 |
 | `SessionClosed` | I2 |
 | `Cancelled` | I14.5 |
