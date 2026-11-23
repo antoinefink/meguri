@@ -210,11 +210,8 @@ private struct StatsPageScroll: View {
     let navigation: AppNavigation?
     /// Set while the page moves, read by the plots' hover (not observed: it redraws nothing).
     @State private var scrolling = StatsScrolling()
-    /// Held by its bottom for one change (`statsKeepingBelow`): Show All Years grows the
-    /// Activity grid upward from today's line, which stays put.
-    @State private var keepsBelow = false
-    /// The latest change held by the bottom: an earlier one's release leaves a later one held.
-    @State private var keepsBelowChange = 0
+    /// The scroll view's visible height, for `statsKeepInPlace` (not observed: set on a resize).
+    @State private var viewport = StatsViewport()
     @Environment(\.statsNarrow) private var statsNarrow
     private var model: StatsPageModel { page.model }
     private var narrow: Bool { statsNarrow ?? false }
@@ -252,19 +249,24 @@ private struct StatsPageScroll: View {
                 .scrollTargetLayout()
             }
             .modifier(StatsScrollPosition(navigation: navigation))
-            .defaultScrollAnchor(keepsBelow ? .bottom : nil, for: .sizeChanges)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport.height = $0 }
             .environment(\.statsScrolling, scrolling)
-            .environment(\.statsKeepingBelow, StatsKeepingBelow { change in
-                // The anchor is in place (a frame drawn with it) before the change lays out, and
-                // let go once the change has.
-                keepsBelow = true
-                keepsBelowChange &+= 1
-                let token = keepsBelowChange
+            .environment(\.statsKeepInPlace, StatsKeepInPlace { id, onScreenY, change in
+                // The change lays out, then the page scrolls so the view `id` (the control that
+                // made it) is back where it was on the screen: what is under it stays put and
+                // the grid grows or shrinks above it.
+                change()
                 Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(20))
-                    change()
-                    try? await Task.sleep(for: .milliseconds(400))
-                    if keepsBelowChange == token { keepsBelow = false }
+                    await Task.yield()
+                    var y = onScreenY()
+                    if y == nil {
+                        // The tap's own gesture may end just after the button acts.
+                        try? await Task.sleep(for: .milliseconds(30))
+                        y = onScreenY()
+                    }
+                    let height = viewport.height
+                    let unit = y.map { height > 0 ? min(max($0 / height, 0), 1) : 0.5 } ?? 0.5
+                    proxy.scrollTo(id, anchor: UnitPoint(x: 0.5, y: unit))
                 }
             })
             .onScrollPhaseChange { _, phase in

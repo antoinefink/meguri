@@ -24,8 +24,11 @@ public enum BrowseCommandText {
         case .suspend: return counted("browse.command.suspend", state.count)
         case .bury: return counted("browse.command.bury", state.count)
         case .unsuspend:
+            // Disabled in the menu bar with none suspended: plain "Unsuspend" (N21.8).
+            if state.count == 0 { return text("browse.command.unsuspend.none") }
             return state.count == nil ? text("browse.command.unsuspend.unknown") : counted("browse.command.unsuspend", state.count)
         case .unbury:
+            if state.count == 0 { return text("browse.command.unbury.none") }
             return state.count == nil ? text("browse.command.unbury.unknown") : counted("browse.command.unbury", state.count)
         case .setDueDate: return text("browse.command.setDueDate")
         case .forget: return text("browse.command.forget")

@@ -72,21 +72,37 @@ extension EnvironmentValues {
     /// The style a box's switches take in its header (`StatsNarrowLayout.switchStyles`).
     @Entry var statsSwitchStyle: StatsSwitchStyle = .segmented
     /// Runs a change that grows or shrinks a box above the place the reader is looking at (Show
-    /// All Years, Show Less) with the page held by its bottom, so what is under the change, the
-    /// line with today and the control included, stays where it was on the screen. Outside the
-    /// page it just runs the change.
-    @Entry var statsKeepingBelow: StatsKeepingBelow = StatsKeepingBelow { $0() }
+    /// All Years, Show Less), then scrolls the page so the view with the given id, the control
+    /// that made it, is back at the height it was on the screen (the tap's place in the scroll
+    /// view, read when the scroll happens): what is under the change, the line with today and
+    /// the control, stays where it was. Outside the page it just runs the change.
+    @Entry var statsKeepInPlace: StatsKeepInPlace = StatsKeepInPlace { _, _, change in change() }
 }
 
-/// See `EnvironmentValues.statsKeepingBelow`.
-struct StatsKeepingBelow: Sendable {
-    let run: @MainActor @Sendable (@escaping @MainActor () -> Void) -> Void
+/// See `EnvironmentValues.statsKeepInPlace`.
+struct StatsKeepInPlace: Sendable {
+    typealias Run = @MainActor @Sendable (_ id: String, _ onScreenY: @escaping @MainActor () -> CGFloat?,
+                                         _ change: @escaping @MainActor () -> Void) -> Void
+    let run: Run
 
-    init(_ run: @escaping @MainActor @Sendable (@escaping @MainActor () -> Void) -> Void) {
+    init(_ run: @escaping Run) {
         self.run = run
     }
 
-    @MainActor func callAsFunction(_ change: @escaping @MainActor () -> Void) { run(change) }
+    @MainActor func callAsFunction(id: String, onScreenY: @escaping @MainActor () -> CGFloat?,
+                                   _ change: @escaping @MainActor () -> Void) {
+        run(id, onScreenY, change)
+    }
+}
+
+/// The page's visible height and the last tap's height in it: plain references, not observed, so
+/// setting them redraws nothing (a resize, a tap).
+final class StatsViewport {
+    var height: CGFloat = 0
+}
+
+final class StatsTapPlace {
+    var y: CGFloat?
 }
 
 nonisolated extension StatsNarrowLayout {
