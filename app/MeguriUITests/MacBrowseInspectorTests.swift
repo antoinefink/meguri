@@ -153,6 +153,25 @@ final class MacBrowseInspectorTests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
     }
 
+    private func launch(appearance: String) throws -> (XCUIApplication, String) {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        guard build.hasHooks, bundle.hasSuffix(".dev") else {
+            throw XCTSkip("The generated recipe requires an isolated development test container")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1", directoryHint: .isDirectory),
+            now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false,
+            windowSize: "1440x900", appearance: appearance).arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+        XCTAssertTrue(element(app, "shell.root.sidebar.browse").waitForExistence(timeout: 30),
+                      "Stage the generated typical-1 fixture through tools/mg")
+        return (app, bundle)
+    }
+
     private func openBrowse(_ app: XCUIApplication, _ bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         element(app, "shell.root.sidebar.browse").click()
