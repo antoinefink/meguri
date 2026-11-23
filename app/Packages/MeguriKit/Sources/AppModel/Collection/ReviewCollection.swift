@@ -1030,10 +1030,12 @@ public final class ReviewCollection: ChangeFanoutSink {
             if var previousRecord, !recoveryDrops.isEmpty {
                 for card in recoveryDrops { previousRecord.reject(cardID: card) }
                 self.previousRecord = previousRecord
+                // Taken before the save: a drop that arrives during it applies on its own.
+                recoveryDrops.removeAll(); recordDropsApplied = true
                 do { try await records.save(previousRecord, version: 1) } catch { recordFailure = error }
             }
         }
-        recoveryDrops.removeAll()
+        if !recordDropsApplied { recoveryDrops.removeAll() }
         if loadRecord { recordDropsApplied = true }
         startupStep?("recordLoaded")
         day?.close()
@@ -1041,11 +1043,11 @@ public final class ReviewCollection: ChangeFanoutSink {
             didCheck: { [weak self] in self?.refreshCounts(); self?.review?.requestRefresh() })
         if foreground { await day?.checkNow() }
         startupStep?("dayChecked")
+        // Changes committed during the open (an open-time exchange, a rollover) cannot
+        // refresh the counts while it runs: read once more at its end if any came.
+        let countsAtRead = countsRevision
         await loadCounts()
         startupStep?("treeRead")
-        // Changes committed during the rest of the open (an open-time exchange, a rollover)
-        // cannot refresh the counts while it runs: read once more at its end if any came.
-        let countsAtRead = countsRevision
         await sync.completeOpenedHost(generation: value, startupForeground: startupForeground)
         startupStep?("syncAttached")
         if let recordFailure { throw recordFailure }
@@ -1473,6 +1475,9 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var canSaveDeckState: Bool { state == .ready && !opening && !closed && !closing && !resuming }
     /// The open has finished: a deck can be selected and studied (N27.4).
     var deckActionsReady: Bool { canSaveDeckState }
+    /// Home shows decks (kept, or read during the rest of the open) that cannot act yet: a
+    /// press waits for the read and the open's end (N27.4).
+    public var awaitingOpen: Bool { homePhase.unknown || (homePhase == .decks && opening) }
 
     private func invalidateDeckActions() {
         undoOwner?.generationEnded()
@@ -1486,8 +1491,8 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     /// Admission is synchronous so a later row/section click wins even before a task runs.
     @discardableResult public func openDeckPage(deckID: Int64) -> Task<Bool, Never> {
-        if homePhase.unknown {
-            // A row of the kept list (N27.4): the press waits for the read and opens the deck
+        if awaitingOpen {
+            // A row of the kept list, or of the read one before the open ends (N27.4): the press waits for the read and opens the deck
             // only if the read tree has it; a later press or selection supersedes it.
             let intent = navigation.beginDeckSelection()
             let task = Task { () -> Bool in
@@ -1826,8 +1831,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// What every start needs, a walk's later turns included (they start while its review shows).
     private var studyAdmissible: Bool { !sync.meguriCollectionWorkHeld && !deckNamesReserved && !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting }
     public func startStudy(deckID: Int64) async {
-        if homePhase.unknown {
-            // Study on a kept page (N27.4): after the read, for the deck the read tree has.
+        if awaitingOpen {
+            // Study on a kept page, or before the open ends (N27.4): after the read, for the deck the read tree has.
             guard await awaitFirstRead(intent: navigation.intentRevision), deck(deckID) != nil else { return }
         }
         _ = await startStudy(deckID: deckID, entry: .study)
@@ -2101,8 +2106,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// ordinary session, in one review presentation. Its availability is read again when
     /// it runs, not only when the click or key arrived.
     public func startStudyAll() async {
-        if homePhase.unknown {
-            // Today's Study on kept content (N27.4): the walk is the read tree's.
+        if awaitingOpen {
+            // Today's Study on kept content, or before the open ends (N27.4): the walk is the read tree's.
             guard await awaitFirstRead(intent: navigation.intentRevision) else { return }
         }
         guard studyAllAvailable else { return }

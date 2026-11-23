@@ -131,13 +131,13 @@ extension ReviewCollection {
 
     /// Today's Study on kept content: it looks as it will, and its press waits for the read.
     public var studyAllKept: Bool {
-        homePhase == .kept && !homeCountsHeld && !StudyWalk.decks(from: homeDecks).isEmpty
+        awaitingOpen && homePhase.showsDecks && !homeCountsHeld && !StudyWalk.decks(from: homeDecks).isEmpty
             && navigation.sheet == nil && review == nil
     }
 
     /// A deck page's Study on kept content (N27.4).
     public func studyKept(deckID: Int64) -> Bool {
-        homePhase == .kept && !homeCountsHeld && navigation.sheet == nil && review == nil
+        awaitingOpen && homePhase.showsDecks && !homeCountsHeld && navigation.sheet == nil && review == nil
             && (homeDeck(deckID).map { DeckWaiting(counts: $0.counts, filtered: $0.filtered).offersAddNote != true } ?? false)
     }
 
