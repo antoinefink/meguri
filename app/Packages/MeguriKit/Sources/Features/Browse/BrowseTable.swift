@@ -362,6 +362,30 @@ private struct BrowseScrollReporter: NSViewRepresentable {
                                                               queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.report() }
             }
+            restore(tries: 20)
+        }
+
+        /// V1: the kept row back at the table's middle, through the table itself
+        /// (the scroll view reader's scroll did not move a SwiftUI table in the
+        /// VM). Repeated until the table holds that row.
+        private func restore(tries: Int) {
+            guard let table, let scrollView = table.enclosingScrollView else { return }
+            guard let row = results.pendingRestore, row < table.numberOfRows else {
+                if tries > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.restore(tries: tries - 1) }
+                }
+                return
+            }
+            let clip = scrollView.contentView
+            let target = table.convert(table.rect(ofRow: row), to: clip.documentView ?? table)
+            let insets = clip.contentInsets
+            let visibleHeight = clip.bounds.height - insets.top - insets.bottom
+            let top = target.midY - visibleHeight / 2 - insets.top
+            let documentHeight = clip.documentView?.frame.height ?? table.frame.height
+            let y = min(max(top, -insets.top), max(documentHeight - clip.bounds.height + insets.bottom, -insets.top))
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
+            scrollView.reflectScrolledClipView(clip)
+            results.restored()
         }
 
         private func report(leaving: Bool = false) {

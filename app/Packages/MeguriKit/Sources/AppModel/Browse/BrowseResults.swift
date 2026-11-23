@@ -754,9 +754,14 @@ public final class BrowseResults {
     /// it shows is the one it left.
     public func tableAppeared() -> Int? {
         tableShown = false
-        guard let kept = keptRow, kept.token == list?.token else { return nil }
+        guard let kept = keptRow, kept.token == list?.token else { pendingRestore = nil; return nil }
+        pendingRestore = kept.index > 0 ? kept.index : nil
         return kept.index
     }
+
+    /// The Mac: the kept row its table view brings back itself, once.
+    @ObservationIgnored public private(set) var pendingRestore: Int?
+    public func restored() { pendingRestore = nil }
 
     /// The table is back at its kept row (or had none): the rows it draws
     /// from now on are kept.

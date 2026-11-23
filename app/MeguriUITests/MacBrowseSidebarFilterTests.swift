@@ -28,13 +28,18 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         XCTAssertFalse(selected(app, "browse.sidebar.state.new"))
         capture(app, "sidebar-new-removed")
 
-        // Return on the one selected row: the same as a second click.
-        new.click()
-        XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, statusText(app))
-        app.typeKey(.return, modifierFlags: [])
+        // Space, then Return, on the one selected row: the same as a second click.
         let readout = element(app, "browse.debug.responder")
-        XCTAssertTrue(waitUntil { self.statusText(app) == whole },
-                      "Return removes it: \(statusText(app)); keys at \(readout.exists ? readout.label : "unknown")")
+        // Both keys are reported, then the case stops at a failure again.
+        continueAfterFailure = true
+        for (name, key) in [("Space", " "), ("Return", XCUIKeyboardKey.return.rawValue)] {
+            new.click()
+            XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, statusText(app))
+            app.typeKey(key, modifierFlags: [])
+            XCTAssertTrue(waitUntil { self.statusText(app) == whole },
+                          "\(name) removes it: \(statusText(app)); keys at \(readout.exists ? readout.label : "unknown")")
+        }
+        continueAfterFailure = false
 
         // A saved search whose token no section lists shows selected itself.
         element(app, "browse.sidebar.saved.dueToday").click()
