@@ -27,3 +27,5 @@ Fixer export `20261123T101856Z-23605` separates OAuth mutations into fresh gener
 | `docs/process/provenance/sessions/s-20261123T101826Z-de158eb1.json` | `c13bb0e4148d289d79b90d39ec83327f1f4ca2e98e4c7ddfbbc16868f7665c71` |
 
 The corrected Docker server selection passed all 25 cases in `sync-server-test/20261123T102054Z-90808`. Server lint passed in `sync-server-lint/20261123T101942Z-51901`. The staged private scan passed in `private/20261123T102130Z-15622`. The hosted pull request runs similarity against the pinned corpus.
+
+`sync-web-verify/20261123T102055Z-91951` passed all 74 checks, including the real OAuth grant, MCP call and Chromium attachment save over the synthetic HTTPS server. Static checks passed all six checks in `static-checks/20261123T102207Z-36735`.
