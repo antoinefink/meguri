@@ -50,3 +50,10 @@ Reviewer `/root/plan_review` classified the complete revised plan PUBLIC. Review
 | `docs/process/provenance/sessions/s-20261123T103547Z-55ca5d89.json` | `6ec5827fae11e40b7aabf01f5a3f2917515d5fd2a9bc96d316af76ea87aae01d` |
 
 Independent clean-room review `20261123T103925Z-280`, session `s-20261123T103547Z-55ca5d89`, found no actionable code findings. Docker server runs `20261123T103959Z-17899` and `20261123T104306Z-78749` passed 27 and 2 tests, including automatic HTTP redemption, SQLite integrity, replay, generic authentication and deadline handling. Server lint `20261123T104057Z-17892`, web verification `20261123T103958Z-17158` (69 checks), and staged privacy `20261123T104225Z-65599` passed. GitHub CI verifies the branch and similarity gate.
+
+The review summary also identified missing WAL frame and index overhead in the temporary-byte reservation. Filtered fixer `20261123T104615Z-74065` added checked accounting for those bytes before staging. Docker run `sync-server-test/20261123T104809Z-40655` passed all 15 focused cases, including the new reservation proof. Reviewer `/root/storage_review` inspected the complete final files from the same filtered view and classified both PUBLIC.
+
+| Path | SHA-256 |
+|---|---|
+| `server/src/mcp_service/export.rs` | `de4bcaceea675b072c5b13569ec3b347c838cd359af8866326b5900b3696c551` |
+| `docs/process/provenance/sessions/s-20261123T104551Z-bf3cdc82.json` | `e2356f222776a75a84d4bb925cf1b4cc8d9bdaba07e6805d7e16a2a1d5a7e92c` |

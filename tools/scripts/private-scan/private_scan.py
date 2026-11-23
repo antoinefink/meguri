@@ -859,7 +859,7 @@ PUBLIC_ARTIFACTS = {
         'ea295605b6ca19fdb94c5a836b46819ccf788554a446508cc0efbe201ded09f7',
     # Complete-content PUBLIC review: mcp-sqlite-download, 2026-11-23.
     'server/src/mcp_service/export.rs':
-        '977e84072894916f117bf0be798e94ccb28cae691943ea84873ed8bcf0143fd2',
+        'de4bcaceea675b072c5b13569ec3b347c838cd359af8866326b5900b3696c551',
     'server/src/mcp_service/attachments/format/audio.rs':
         '1eca9c96b3c638ad66723119d54ed0537246a3fedcd3fe6fd9acb5e8fa8043a9',
     'server/src/mcp_service/attachments/format/images.rs':
