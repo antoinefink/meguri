@@ -189,6 +189,8 @@ public final class BrowseCommands {
 
     @ObservationIgnored private let results: BrowseResults
     @ObservationIgnored private var factsTarget: BrowseTarget?
+    /// The rows the core's counts in `facts` were last read for.
+    @ObservationIgnored private(set) var factsRead: BrowseTarget?
     /// The read under way, and the rows it reads.
     @ObservationIgnored private var factsTask: (target: BrowseTarget, task: Task<BrowseTargetFacts?, Never>)?
     @ObservationIgnored private var serial: UInt64 = 0
@@ -277,7 +279,10 @@ public final class BrowseCommands {
         Task {
             let read = await task.value
             reading = false
-            if let read, factsTarget == target, facts != read { facts = read }
+            if let read, factsTarget == target {
+                if facts != read { facts = read }
+                factsRead = target
+            }
             if readAgain || factsTarget != target { startRead() }
         }
     }
@@ -564,6 +569,7 @@ public final class BrowseCommands {
         generation &+= 1
         busy = false
         factsTarget = nil
+        factsRead = nil
         facts = nil
         deleteQuestion = nil
         failed = nil

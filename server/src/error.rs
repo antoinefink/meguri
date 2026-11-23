@@ -127,6 +127,9 @@ pub enum McpDiagnosticDetail {
     McpQueue, PublicationGate, NativeWriter, CollectionPath, CollectionPin,
     CollectionStorage, CollectionWorker, AuthorityStorage, CollectionOpen,
     CollectionAccess, SqliteOpen, SqliteOpenBusy, SqliteAccess, SqliteAccessBusy,
+    AttachmentClient, AttachmentUrl, AttachmentDns, AttachmentAddress,
+    AttachmentHttpClient, AttachmentHttpRequest, AttachmentHttpResponse,
+    AttachmentTimeout, AttachmentBody,
 }
 impl McpDiagnosticDetail {
     pub(crate) fn label(self) -> &'static str {
@@ -139,6 +142,12 @@ impl McpDiagnosticDetail {
             Self::CollectionAccess => "collection_access", Self::SqliteOpen => "sqlite_open",
             Self::SqliteOpenBusy => "sqlite_open_busy", Self::SqliteAccess => "sqlite_access",
             Self::SqliteAccessBusy => "sqlite_access_busy",
+            Self::AttachmentClient => "attachment_client", Self::AttachmentUrl => "attachment_url",
+            Self::AttachmentDns => "attachment_dns", Self::AttachmentAddress => "attachment_address",
+            Self::AttachmentHttpClient => "attachment_http_client",
+            Self::AttachmentHttpRequest => "attachment_http_request",
+            Self::AttachmentHttpResponse => "attachment_http_response",
+            Self::AttachmentTimeout => "attachment_timeout", Self::AttachmentBody => "attachment_body",
         }
     }
 }

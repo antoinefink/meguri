@@ -60,11 +60,14 @@ struct RootView: View {
 
     #if os(iOS)
     /// The tab layout's list beside the deck: not for the welcome (N18.3), and not
-    /// decided while the collection is still opening.
+    /// decided while the collection is still opening, unless the launch found the
+    /// collection's file or kept its last read: then it is laid out for one from the first
+    /// frame, so the opened Duo does not switch from one column to two (N27.6).
     private var besideDetail: Bool? {
         guard let collection else { return true }
         switch collection.state {
-        case .unopened, .loading: return nil
+        case .unopened, .loading:
+            return collection.keptHome != nil || collection.collectionFileAtLaunch ? true : nil
         case .noFile: return false
         case .ready, .unavailable, .creationRecovery, .failed: return true
         }
@@ -82,7 +85,8 @@ struct RootView: View {
                 case .compact:
                     #if os(iOS)
                     CompactRootView(navigation: navigation, features: features, configuration: configuration,
-                        hasDecks: collection?.decks.isEmpty == false,
+                        // Today beside the list shows its own waiting state (N27.3).
+                        hasDecks: collection.map { $0.homePhase.showsDecks || $0.homePhase == .pending } ?? false,
                         besideDetail: besideDetail)
                     #endif
                 case .sidebar:

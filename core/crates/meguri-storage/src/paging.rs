@@ -67,6 +67,17 @@ pub struct StoredConfig {
     pub is_blob: bool,
 }
 
+/// A note's identity columns, read without its text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoteIdentity {
+    pub id: NoteId,
+    /// `guid`, byte for byte.
+    pub guid: Vec<u8>,
+    pub notetype: NotetypeId,
+    /// `mod`, epoch seconds.
+    pub mtime: i64,
+}
+
 /// Typed reads (`model/row-records`): a row that cannot be read is
 /// [`StorageError::Row`]; a missing row is `None`.
 pub trait ReadRows: sealed::Connected {
@@ -906,6 +917,57 @@ pub trait ReadRows: sealed::Connected {
     /// Up to `limit` review-log rows with ids above `after`, by id.
     fn revlog_after(&self, after: Option<RevlogId>, limit: usize) -> Result<Vec<RevlogEntry>, StorageError> {
         page(self.connection(), after.map(|id| id.0), limit)
+    }
+
+    /// Up to `limit` notes above `after`, by id, as (id, `guid`, `mid`,
+    /// `mod`): what a deck package import matches incoming notes against
+    /// (`package/apkg-import` I9) without reading any field text.
+    fn note_identities_after(&self, after: Option<NoteId>, limit: usize) -> Result<Vec<NoteIdentity>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT id, guid, mid, mod FROM notes WHERE id > ?1 ORDER BY id LIMIT ?2")?;
+        let found = statement.query_map((after.map_or(i64::MIN, |id| id.0), limit_value(limit)), |row| {
+            let guid = match row.get_ref(1)? {
+                rusqlite::types::ValueRef::Text(bytes) | rusqlite::types::ValueRef::Blob(bytes) => bytes.to_vec(),
+                _ => Vec::new(),
+            };
+            Ok(NoteIdentity {
+                id: NoteId(row.get(0)?),
+                guid,
+                notetype: NotetypeId(row.get(2)?),
+                mtime: row.get(3)?,
+            })
+        })?;
+        Ok(found.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// The ids among `ids` that `table` (one with an `id` column) holds, in
+    /// id order, from one statement.
+    fn ids_present(&self, table: Table, ids: &[i64]) -> Result<Vec<i64>, StorageError> {
+        if !table.allocates_ids() {
+            return Err(StorageError::Mode {
+                detail: format!("{table} has no id column"),
+            });
+        }
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut list = String::with_capacity(ids.len() * 14 + 2);
+        list.push('[');
+        for (at, id) in ids.iter().enumerate() {
+            if at > 0 {
+                list.push(',');
+            }
+            list.push_str(&id.to_string());
+        }
+        list.push(']');
+        let sql = format!(
+            "SELECT id FROM {} WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id",
+            table.name()
+        );
+        let mut statement = self.connection().prepare_cached(&sql)?;
+        let found = statement.query_map([list], |row| row.get(0))?;
+        Ok(found.collect::<rusqlite::Result<Vec<i64>>>()?)
     }
 
     /// Up to `limit` ids of `table` (one with an `id` column) above `after`.

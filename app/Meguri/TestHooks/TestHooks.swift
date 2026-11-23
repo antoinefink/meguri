@@ -200,6 +200,9 @@ enum TestHooks {
                     if session.options.studyTimings {
                         StudyTimingsProbe(collection: collection)
                     }
+                    if session.options.homeTrace {
+                        HomeTraceProbe(collection: collection)
+                    }
                 }
                 #if os(iOS)
                 .background(SizeClassOverride(sizeClass: session.options.sizeClass))
@@ -227,6 +230,45 @@ enum TestHooks {
                 .background(.token(.backgroundSecondary))
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("testhooks.studyStart.timings")
+        }
+    }
+
+    /// `-MeguriHomeTrace on`: every Home phase shown since launch, in order (N27.1), so a
+    /// launch test reads from the hierarchy whether the welcome or "No Decks" ever showed
+    /// before the decks. A phase that lasted less than one update is never drawn either.
+    struct HomeTraceProbe: View {
+        let collection: ReviewCollection?
+        @State private var phases: [String] = []
+
+        var body: some View {
+            Text(verbatim: phases.joined(separator: ","))
+                .font(.caption2)
+                .dynamicTypeSize(...DynamicTypeSize.large)
+                .foregroundStyle(.token(.textSecondary))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Spacing.medium)
+                .padding(.vertical, Spacing.xxSmall)
+                .background(.token(.backgroundSecondary))
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("testhooks.home.phases")
+                .onChange(of: name, initial: true) { _, phase in
+                    if phases.last != phase { phases.append(phase) }
+                }
+        }
+
+        private var name: String {
+            guard let collection else { return "none" }
+            switch collection.homePhase {
+            case .welcome: return "welcome"
+            case .pending: return "pending"
+            case .kept: return collection.homeCountsHeld ? "keptHeld" : "kept"
+            case .decks: return "decks"
+            case .noDecks: return "noDecks"
+            case .unavailable: return "unavailable"
+            case .failed: return "failed"
+            case .creationRecovery: return "creationRecovery"
+            case .readFailed: return "readFailed"
+            }
         }
     }
 

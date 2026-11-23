@@ -1,3 +1,15 @@
 # Collection packages, local backups and backup triggers.
 area: package
-active: ["collection-package/*", "backups/*", "backup-triggers/*"]
+active:
+  - "collection-package/*"
+  - "backups/*"
+  - "backup-triggers/*"
+  # U120: the rows that import a fixture package (apkg-import I18.2).
+  - "apkg-import/deck-tree"
+  - "apkg-import/ids-cutoff"
+  - "apkg-import/legacy-1"
+  - "apkg-import/media-map-variants"
+  - "apkg-import/refusals"
+  - "apkg-import/v1-scheduler"
+  # U121.
+  - "notetype-merge/by-name"

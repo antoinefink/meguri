@@ -23,7 +23,7 @@ async fn fixture(trusted: bool) -> (tempfile::TempDir, Arc<Service>) {
 }
 
 #[tokio::test]
-async fn download_errors_hide_credentials_but_preserve_operational_failures() {
+async fn ticket_errors_hide_credentials_but_preserve_operational_failures() {
     for code in ["authentication_failed", "capability_invalid", "invalid_token"] {
         let response = api_error(Error::new(code), true);
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -222,6 +222,25 @@ async fn early_origin_error_retains_unread_receiver_and_root_through_response_li
 }
 
 #[tokio::test]
+async fn machine_upload_authentication_rejection_never_reads_the_body() {
+    let (_temp,service)=fixture(false).await;
+    let (signal,mut observed)=oneshot::channel();
+    let dropped=Arc::new(AtomicUsize::new(0));
+    let request=Request::builder().method(Method::POST).uri("/api/mcp/media-upload")
+        .header("authorization",format!("Bearer {}","A".repeat(43)))
+        .header("content-type","application/octet-stream")
+        .extension(ConnectInfo("127.0.0.1:12345".parse::<SocketAddr>().unwrap()))
+        .body(Body::new(ControlledBody {polled:Some(signal),dropped:dropped.clone()})).unwrap();
+    let response=handle(State(service),request).await;
+    assert_eq!(response.headers()["www-authenticate"],"Bearer");
+    assert_eq!(response.headers()["connection"],"close");
+    assert_eq!(dropped.load(Ordering::SeqCst),0);
+    assert!(matches!(observed.try_recv(),Err(oneshot::error::TryRecvError::Empty)));
+    code(response,StatusCode::UNAUTHORIZED,"authentication_failed").await;
+    assert_eq!(dropped.load(Ordering::SeqCst),1);
+}
+
+#[tokio::test]
 async fn single_http_boundary_for_fixture_capacity_and_effective_peer_budget() {
     for (trusted, limited_ip, expected) in [
         (false, "127.0.0.1", 429), // Socket wins over a spoofed forwarded address.
@@ -275,7 +294,16 @@ async fn single_http_boundary_for_fixture_capacity_and_effective_peer_budget() {
                 "authentication_failed"
             }
         );
-        // This second single request uses held fixture permits, not connections.
+        let response=client.post(format!("http://{address}/api/mcp/media-upload"))
+            .bearer_auth("A".repeat(43)).header("content-type","application/octet-stream")
+            .header("x-forwarded-for","192.0.2.1").header("x-forwarded-proto","https")
+            .body("unread synthetic bytes").send().await.unwrap();
+        assert_eq!(response.status().as_u16(),expected);
+        assert_eq!(response.headers()["connection"],"close");
+        assert_eq!(response.headers()["cache-control"],"no-store");
+        assert_eq!(response.json::<serde_json::Value>().await.unwrap()["error"]["code"],
+            if expected==429 {"rate_limited"} else {"authentication_failed"});
+        // This final request uses held fixture permits, not connections.
         let held = (0..ingress::CAPACITY)
             .map(|_| service.browser_ingress.enter().unwrap())
             .collect::<Vec<_>>();

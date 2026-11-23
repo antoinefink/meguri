@@ -10,6 +10,9 @@ public enum HomeDeckListPreview: PreviewStates {
             Group {
                 if state == .typical || state == .overflow {
                     HomeDeckTree(nodes: nodes(overflow: state == .overflow), select: { _ in })
+                } else if state == .loading {
+                    // N27.3: the page's own background, as after half a second of waiting.
+                    HomePendingPage(grouped: false, indicatorAtOnce: true)
                 } else {
                     if state == .empty {
                         // The live screen's three rows, enabled (N18.3).
@@ -69,7 +72,7 @@ public enum HomeDeckListPreview: PreviewStates {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.large) {
                 switch state {
-                case .loading: LoadingStateView(Text(verbatim: "Opening collection…"))
+                case .loading: EmptyView() // The pending page above (N27.3).
                 case .error: ErrorStateView(Text(verbatim: "Couldn’t Open Collection"), message: Text(verbatim: "The collection is open in another program."), retryIdentifier: "home.collection.retry", retry: {})
                 case .empty, .typical, .overflow: EmptyView() // Rendered by their own lists above.
                 }

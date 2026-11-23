@@ -1,0 +1,382 @@
+//! Deck packages (`.apkg`): classifying a file (P18), reading the three
+//! container formats (P17) and importing one into the open collection
+//! (`package/apkg-import`, `package/notetype-merge`).
+//!
+//! The surface a caller uses: [`classify`], [`inspect`] (a session with its
+//! preview facts), [`read_options`] (the five stored option values),
+//! [`apply`] (the one undoable "Import" step) and dropping or
+//! [`ImportSession::close`]-ing the session.
+mod apply;
+mod archive;
+mod classify;
+mod commit;
+mod gather;
+mod media;
+mod merge;
+mod notetypes;
+mod plan;
+mod session;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use meguri_engine::EngineError;
+use meguri_model::clock::Clock;
+use meguri_model::rng::RandomSource;
+use meguri_storage::space::SpaceProvider;
+
+pub use apply::{apply, read_options};
+pub use archive::PackageFormat;
+pub use classify::{PackageClass, classify, classify_name};
+pub use session::{ImportSession, inspect};
+
+/// What an import needs from its host besides the engine.
+#[derive(Clone)]
+pub struct ApkgContext {
+    /// The directory of `collection.anki2`: staging lives there.
+    pub collection_directory: PathBuf,
+    pub clock: Arc<dyn Clock>,
+    pub random: Arc<dyn RandomSource>,
+    pub space: Arc<dyn SpaceProvider>,
+}
+
+/// I5's three-valued options.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum UpdateCondition {
+    #[default]
+    IfNewer,
+    Always,
+    Never,
+}
+
+impl UpdateCondition {
+    /// The JSON string the config key holds.
+    pub fn stored(self) -> &'static str {
+        match self {
+            UpdateCondition::IfNewer => "IfNewer",
+            UpdateCondition::Always => "Always",
+            UpdateCondition::Never => "Never",
+        }
+    }
+
+    pub(crate) fn from_stored(text: Option<&str>) -> UpdateCondition {
+        match text {
+            Some("Always") => UpdateCondition::Always,
+            Some("Never") => UpdateCondition::Never,
+            _ => UpdateCondition::IfNewer,
+        }
+    }
+}
+
+/// I5: the five options, in the spec's order. The default is what missing
+/// keys read as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub struct ImportOptions {
+    pub merge_notetypes: bool,
+    pub update_notes: UpdateCondition,
+    pub update_notetypes: UpdateCondition,
+    pub with_scheduling: bool,
+    pub with_deck_configs: bool,
+}
+
+/// I4's `repaired`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Repaired {
+    pub note_ids: u64,
+    pub card_ids: u64,
+    pub revlog_ids: u64,
+    pub field_counts: u64,
+    pub scheduler_converted: bool,
+}
+
+/// I4: what the package holds, known before any option is chosen. The
+/// option defaults are [`read_options`]'s, read from the open collection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewFacts {
+    pub format: PackageFormat,
+    pub notes: u64,
+    pub cards: u64,
+    /// Human deck names, sorted by unicase.
+    pub decks: Vec<String>,
+    pub notetypes: Vec<String>,
+    pub has_scheduling: bool,
+    pub has_presets: bool,
+    pub media_files: u64,
+    pub media_bytes: u64,
+    pub repaired: Repaired,
+}
+
+/// One entry of the import log (I13).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogEntry {
+    /// The target note's id, or the package note's for `conflicting` and
+    /// `missing_notetype`.
+    pub note: i64,
+    /// Every field, reduced as I13 says.
+    pub fields: Vec<String>,
+    /// For `conflicting`: the target note that holds the GUID.
+    pub existing_id: Option<i64>,
+}
+
+/// I13's categories.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LogCategory {
+    New,
+    Updated,
+    Duplicate,
+    Conflicting,
+    MissingNotetype,
+    MissingDeck,
+    FirstFieldMatch,
+    EmptyFirstField,
+}
+
+/// I13: the log of one import, each list in I9's order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ImportLog {
+    pub found_notes: u64,
+    pub new: Vec<LogEntry>,
+    pub updated: Vec<LogEntry>,
+    pub duplicate: Vec<LogEntry>,
+    pub conflicting: Vec<LogEntry>,
+    pub missing_notetype: Vec<LogEntry>,
+    pub missing_deck: Vec<LogEntry>,
+    /// Always empty for a deck package.
+    pub first_field_match: Vec<LogEntry>,
+    /// Always empty for a deck package.
+    pub empty_first_field: Vec<LogEntry>,
+}
+
+impl ImportLog {
+    pub fn category(&self, category: LogCategory) -> &[LogEntry] {
+        match category {
+            LogCategory::New => &self.new,
+            LogCategory::Updated => &self.updated,
+            LogCategory::Duplicate => &self.duplicate,
+            LogCategory::Conflicting => &self.conflicting,
+            LogCategory::MissingNotetype => &self.missing_notetype,
+            LogCategory::MissingDeck => &self.missing_deck,
+            LogCategory::FirstFieldMatch => &self.first_field_match,
+            LogCategory::EmptyFirstField => &self.empty_first_field,
+        }
+    }
+
+    /// A page of one category, for the result table (U133).
+    pub fn page(&self, category: LogCategory, offset: usize, count: usize) -> &[LogEntry] {
+        let entries = self.category(category);
+        let start = offset.min(entries.len());
+        &entries[start..entries.len().min(start.saturating_add(count))]
+    }
+}
+
+/// I14.5's counts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ImportCounts {
+    pub notes_added: u64,
+    pub notes_updated: u64,
+    pub cards_added: u64,
+    pub revlog_added: u64,
+    pub notetypes_added: u64,
+    pub notetypes_updated: u64,
+    pub notetypes_copied: u64,
+    /// With a merge: target notes moved between note types.
+    pub notes_moved: u64,
+    /// With a merge: emptied note types removed.
+    pub notetypes_removed: u64,
+    pub decks_added: u64,
+    pub decks_updated: u64,
+    pub presets_added: u64,
+    pub media_written: u64,
+    pub media_reused: u64,
+    pub media_skipped: u64,
+}
+
+/// I14.5: what a committed import reports.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportResult {
+    /// The op's seq; the undo step's id.
+    pub seq: u64,
+    pub generation: u64,
+    /// The undo step's name ("Import"), when the import changed something.
+    pub undo_step: Option<&'static str>,
+    pub log: ImportLog,
+    pub counts: ImportCounts,
+    /// The safety backup's name, when one was taken or reused (I14.4).
+    pub safety_backup: Option<String>,
+    /// The rows are committed and some media files are still being put in
+    /// place by the journal's recovery (`MediaCommitPending`): never
+    /// import again.
+    pub media_pending: bool,
+}
+
+/// J10: one field position whose content an update would drop.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmptiedField {
+    pub notetype: i64,
+    pub notetype_name: String,
+    pub position: u32,
+    pub field_name: String,
+    pub notes: u64,
+}
+
+/// J10: a note type the merge removes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemovedNotetype {
+    pub notetype: i64,
+    pub name: String,
+    pub moved_to: i64,
+    pub notes: u64,
+}
+
+/// J10: notes storing more values than their note type has fields.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DroppedValues {
+    pub notetype: i64,
+    pub notes: u64,
+}
+
+/// J10: what a merge import would drop. Empty when every list is.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MergePreview {
+    pub emptied_fields: Vec<EmptiedField>,
+    pub removed_notetypes: Vec<RemovedNotetype>,
+    pub dropped_values: Vec<DroppedValues>,
+}
+
+impl MergePreview {
+    pub fn is_empty(&self) -> bool {
+        self.emptied_fields.is_empty() && self.removed_notetypes.is_empty() && self.dropped_values.is_empty()
+    }
+
+    /// SHA-256 of the preview's canonical encoding (I8's digest).
+    pub(crate) fn digest(&self) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        let mut text = |tag: &str, value: &str| {
+            hash.update(tag.as_bytes());
+            hash.update((value.len() as u64).to_le_bytes());
+            hash.update(value.as_bytes());
+        };
+        for entry in &self.emptied_fields {
+            text("e", &format!("{}:{}:{}", entry.notetype, entry.position, entry.notes));
+            text("n", &entry.notetype_name);
+            text("f", &entry.field_name);
+        }
+        for entry in &self.removed_notetypes {
+            text("r", &format!("{}:{}:{}", entry.notetype, entry.moved_to, entry.notes));
+            text("n", &entry.name);
+        }
+        for entry in &self.dropped_values {
+            text("d", &format!("{}:{}", entry.notetype, entry.notes));
+        }
+        hash.finalize().into()
+    }
+}
+
+/// I8: proof that the caller saw a merge preview. Opaque to callers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfirmationToken {
+    pub(crate) session: u64,
+    pub(crate) options: ImportOptions,
+    pub(crate) digest: [u8; 32],
+    /// Diagnostics only; never checked.
+    pub(crate) snapshot_seq: u64,
+}
+
+/// I16.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ApkgImportError {
+    /// P18 classified the file `Unsupported`.
+    UnsupportedFile,
+    TooNew,
+    Corrupt {
+        detail: String,
+    },
+    SchemaUnsupported {
+        gate: Box<meguri_storage::OpenError>,
+    },
+    InsufficientSpace {
+        needed: u64,
+        available: u64,
+    },
+    DiskFull,
+    /// After three replans (I14.2).
+    Stale,
+    ConfirmationRequired {
+        preview: Box<MergePreview>,
+        token: Box<ConfirmationToken>,
+    },
+    /// A standard and a cloze note type would merge (R1606).
+    NotetypeKindConflict {
+        incoming: i64,
+        target: i64,
+    },
+    DeckTooDeep {
+        name: String,
+    },
+    SessionClosed,
+    Cancelled,
+    /// The rows are committed; media publication finishes through recovery.
+    /// The result is the import's, with `media_pending` set.
+    MediaCommitPending(Box<ImportResult>),
+    Io {
+        detail: String,
+    },
+    /// `Busy`, `CollectionUnavailable`, `StaleGeneration`,
+    /// `SafetyBackupFailed` and any other engine refusal, as the engine
+    /// words it.
+    Engine(Box<EngineError>),
+}
+
+impl std::fmt::Display for ApkgImportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for ApkgImportError {}
+
+pub(crate) type ImportOutcome<T> = std::result::Result<T, ApkgImportError>;
+
+impl From<crate::Error> for ApkgImportError {
+    fn from(error: crate::Error) -> Self {
+        use crate::Error as E;
+        match error {
+            E::TooNew => Self::TooNew,
+            E::Corrupt { detail } => Self::Corrupt { detail },
+            E::SchemaUnsupported { gate } => Self::SchemaUnsupported { gate: Box::new(gate) },
+            E::InsufficientSpace { needed, available } => Self::InsufficientSpace { needed, available },
+            E::DiskFull => Self::DiskFull,
+            E::Cancelled => Self::Cancelled,
+            E::Io { detail } => Self::Io { detail },
+            other => Self::Corrupt {
+                detail: other.to_string(),
+            },
+        }
+    }
+}
+
+impl From<EngineError> for ApkgImportError {
+    fn from(error: EngineError) -> Self {
+        match error {
+            EngineError::Cancelled => Self::Cancelled,
+            EngineError::Stale { .. } => Self::Stale,
+            other => Self::Engine(Box::new(other)),
+        }
+    }
+}
+
+impl From<meguri_storage::StorageError> for ApkgImportError {
+    fn from(error: meguri_storage::StorageError) -> Self {
+        crate::Error::from(error).into()
+    }
+}
+
+impl From<std::io::Error> for ApkgImportError {
+    fn from(error: std::io::Error) -> Self {
+        crate::Error::from(error).into()
+    }
+}
+
+pub(crate) fn corrupt(detail: impl Into<String>) -> ApkgImportError {
+    ApkgImportError::Corrupt { detail: detail.into() }
+}

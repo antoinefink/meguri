@@ -44,6 +44,7 @@ pub struct OpenOptions<'a> {
     initializers: Initializers,
     progress: Option<&'a dyn Fn(OpenEvent)>,
     managed: bool,
+    package_v1: bool,
 }
 
 impl<'a> OpenOptions<'a> {
@@ -56,7 +57,16 @@ impl<'a> OpenOptions<'a> {
             initializers: Initializers::default(),
             progress: None,
             managed: false,
+            package_v1: false,
         }
+    }
+
+    /// Lets a v1-scheduler file through C2.2 step 2. Only for the staged
+    /// collection of a deck package, which is read and converted, never
+    /// activated (`package/apkg-import` I3 step 3). Every other refusal stays.
+    pub fn package_collection(mut self) -> Self {
+        self.package_v1 = true;
+        self
     }
 
     /// Engine-owned collection with device-only durability metadata (U32).
@@ -248,7 +258,7 @@ pub fn open_collection(path: &Path, options: &OpenOptions<'_>) -> Result<OpenedC
 
     // Phases 1 and 2.
     let probed = probe(path)?;
-    refuse::refuse(&probed)?;
+    refuse::refuse_as(&probed, options.package_v1)?;
 
     // Phase 3.
     let upgrading = probed.version < SCHEMA_VERSION;

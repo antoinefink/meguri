@@ -6,6 +6,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::sync::Semaphore;
+/// Expire one ephemeral upload without clock sleeps or a production control.
+pub fn expire_media_upload(service: &crate::Service, id: &str) {
+    service.mcp_uploads.expire_fixture(id);
+}
 #[derive(Default)]
 pub struct Hooks(Mutex<HashMap<&'static str, Arc<Pause>>>);
 pub struct Pause {

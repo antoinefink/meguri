@@ -34,6 +34,8 @@ public final class BrowseCardPreview {
     @ObservationIgnored private var token: UInt64 = 0
     /// A flip's own count, so a flip never drops a card's render under way.
     @ObservationIgnored private var flips: UInt64 = 0
+    /// Shows not finished yet; a flip waits until there are none.
+    @ObservationIgnored private(set) var showing = 0
     /// Raised by `close`: a load of a closed collection's pair lands nothing.
     @ObservationIgnored private var generation: UInt64 = 0
     @ObservationIgnored private var payload: CardPayload?
@@ -44,7 +46,9 @@ public final class BrowseCardPreview {
     func show(card id: Int64) {
         token &+= 1
         let token = token
+        showing += 1
         Task {
+            defer { showing -= 1 }
             do {
                 guard let pair = try await readyPair(), token == self.token else { return }
                 let payload = try await render(id)
@@ -64,7 +68,9 @@ public final class BrowseCardPreview {
 
     /// V12: a click flips question and answer.
     public func flip() {
-        guard let pair, let payload, card != nil else { return }
+        // A card on its way to the page goes first: a flip's own prepare would
+        // supersede it and leave the preview on the previous row's card.
+        guard showing == 0, let pair, let payload, card != nil else { return }
         flips &+= 1
         let flip = flips, token = token
         Task {

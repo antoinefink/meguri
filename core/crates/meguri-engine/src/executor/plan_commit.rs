@@ -110,7 +110,7 @@ pub fn plan_and_commit_with_replans<P, T, PF, SF, CF>(
     role: ReaderRole,
     spec: OpSpec,
     replans: u32,
-    mut plan: PF,
+    plan: PF,
     choose: SF,
     commit: CF,
 ) -> Result<OpResult<T>, EngineError>
@@ -118,6 +118,34 @@ where
     P: Send + 'static,
     T: Send + 'static,
     PF: FnMut(&PlanContext<'_>) -> Result<Plan<P>, EngineError>,
+    SF: Fn(&OpSpec, &P) -> OpSpec,
+    CF: Fn(&mut OpContext<'_, '_>, P) -> Result<T, EngineError> + Send + Sync + 'static,
+{
+    plan_stage_and_commit(collection, role, spec, replans, plan, |value, _| Ok(value), choose, commit)
+}
+
+/// [`plan_and_commit_with_replans`] with a step between the plan and the
+/// write phase: `stage(value, attempt)` runs once the plan's snapshot and
+/// reader lease are released, before the safety backup, so work that takes
+/// long and reads no collection row (an import staging its media,
+/// `package/apkg-import` I14.1 step 6) holds no read transaction. It runs
+/// again after every replan, with the new plan's value.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_stage_and_commit<P, T, PF, GF, SF, CF>(
+    collection: &Collection,
+    role: ReaderRole,
+    spec: OpSpec,
+    replans: u32,
+    mut plan: PF,
+    mut stage: GF,
+    choose: SF,
+    commit: CF,
+) -> Result<OpResult<T>, EngineError>
+where
+    P: Send + 'static,
+    T: Send + 'static,
+    PF: FnMut(&PlanContext<'_>) -> Result<Plan<P>, EngineError>,
+    GF: FnMut(P, u32) -> Result<P, EngineError>,
     SF: Fn(&OpSpec, &P) -> OpSpec,
     CF: Fn(&mut OpContext<'_, '_>, P) -> Result<T, EngineError> + Send + Sync + 'static,
 {
@@ -143,6 +171,13 @@ where
             };
             let planned = plan(&context)?;
             (planned, monotonic::now().saturating_sub(started))
+        };
+        if let Some(token) = &spec.cancel {
+            token.check()?;
+        }
+        let planned = Plan {
+            value: stage(planned.value, attempt)?,
+            preconditions: planned.preconditions,
         };
         if let Some(token) = &spec.cancel {
             token.check()?;

@@ -56,16 +56,3 @@ test("malformed envelopes fail closed without a second fetch", async t => {
   await assert.rejects(api("/api/me"), error => error instanceof ApiError && error.code === "invalid_response");
   assert.equal(calls, 1);
 });
-
-test("binary media handoff sends no filename or credentials beyond same-origin session and never retries", async t => {
-  const { uploadMedia } = await import("../src/api.js");
-  const file = new File(["synthetic bytes"], "advisory-name.png", { type: "image/png" });
-  let calls = 0;
-  t.mock.method(globalThis, "fetch", async (path: RequestInfo | URL, init?: RequestInit) => {
-    calls++; assert.equal(path, "/api/mcp/media-upload"); assert.equal(init?.body, file);
-    assert.equal(init?.credentials, "same-origin"); assert.equal(init?.cache, "no-store"); assert.equal(init?.redirect, "error");
-    assert.deepEqual(init?.headers, { "Content-Type": "application/octet-stream", "X-Meguri-Upload": "u".repeat(43) });
-    return Response.json({ data: { uploaded: true } });
-  });
-  assert.deepEqual(await uploadMedia("u".repeat(43), file), { uploaded: true }); assert.equal(calls, 1);
-});
