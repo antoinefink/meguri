@@ -500,17 +500,18 @@ public final class StatsPageModel {
         let kit = StatsSeriesKit(text: text)
         var content = StatsBoxContent(phase: phase, data: kit.skeleton(id, selection: selection),
                                       figures: kit.skeletonFigures(id, selection: selection))
-        if id == .activity, case .loading = phase, let years = activityYears() { content.detail = .activityYears(years) }
+        if id == .activity, phase != .ready, let span = activitySpan() { content.detail = .activitySpan(span) }
         return content
     }
 
-    /// Activity's year blocks from the running request's header (H9's oldest review: every year
-    /// back to it, the current one included), before `activity_days` returns (S10.3).
-    private func activityYears() -> Int? {
-        guard let running, running.scope == selection.scope, let header = running.set.header else { return nil }
-        guard case let .day(oldest) = header.oldestDay else { return nil }
-        let days = StatsDays(context: header.context, calendar: calendar)
-        return max(1, days.year(ofDay: 0) - days.year(ofDay: min(oldest, 0)) + 1)
+    /// Activity's span from a header's oldest review (H9) before `activity_days` returns, or
+    /// after it failed, so the grid keeps its final size (S10.3, S8.5): the running request's
+    /// header, else the newest kept one of the scope.
+    private func activitySpan() -> StatsActivitySpan? {
+        let running = running.flatMap { $0.scope == selection.scope ? $0.set.header : nil }
+        guard let header = running ?? kept.sets(for: selection.scope).lazy.compactMap(\.header).first,
+              case let .day(oldest) = header.oldestDay else { return nil }
+        return StatsActivitySpan(firstDay: oldest, days: StatsDays(context: header.context, calendar: calendar))
     }
 
     private func content(_ id: StatsBoxID) -> StatsBoxContent {
@@ -581,7 +582,7 @@ public final class StatsPageModel {
         }()
         if note != filteredDeckNote { filteredDeckNote = note }
         var next = boxes
-        // Activity while it has no detail yet: the first part's header sizes its years (S10.3).
+        // Activity while it has no detail yet: the first part's header sizes its grid (S10.3).
         for id in StatsBoxID.allCases where part.map({ id.reads($0, reviewsMode: selection.reviewsMode) }) ?? true
             || (id == .activity && boxes[id]?.detail == nil) {
             let content = content(id)
