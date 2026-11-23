@@ -2276,7 +2276,9 @@ public final class ReviewCollection: ChangeFanoutSink {
                     do { try await review?.pause() }
                     catch { self.error = String(describing: error) }
                     // W3: Browse's inspector saves its note before the background.
-                    await browseOwner?.inspector.flushForBackground()
+                    guard await browseOwner?.inspector.flushForBackground() != false else {
+                        throw BridgeError.unavailable(reason: "The note in Browse could not be saved. Its text has been kept.")
+                    }
                     guard await addFlowOwner?.flushForBackground() != false else {
                         throw BridgeError.unavailable(reason: "The note editor could not flush. Your draft has been kept.")
                     }
@@ -2338,8 +2340,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         return result
     }
     private func performClose(quitting: Bool) async -> Bool {
-        // W3: Browse's inspector saves its note before the collection closes.
-        await browseOwner?.inspector.flushForBackground()
+        // W3: Browse's inspector saves its note before the collection closes;
+        // a save that failed keeps the collection open, with the text.
+        if await browseOwner?.inspector.flushForBackground() == false { return false }
         closing = true
         defer { closing = false }
         if let cancelledEditor = cancelPendingEditorReplacement() {

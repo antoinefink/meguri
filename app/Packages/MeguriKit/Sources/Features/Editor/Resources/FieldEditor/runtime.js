@@ -307,17 +307,20 @@
     }
     // The selected text nodes, split at the selection's edges, in order.
     function selectedTexts(field, selected) {
-        let {startContainer, startOffset, endContainer, endOffset} = selected;
-        if (endContainer.nodeType === Node.TEXT_NODE && endOffset < endContainer.data.length) endContainer.splitText(endOffset);
-        if (startContainer.nodeType === Node.TEXT_NODE && startOffset > 0) {
-            const rest = startContainer.splitText(startOffset);
-            if (endContainer === startContainer) { endContainer = rest; endOffset -= startOffset; }
-            startContainer = rest; startOffset = 0;
+        // A live range: splitting a text node moves its boundary points with it.
+        const scope = selected.cloneRange();
+        if (scope.endContainer.nodeType === Node.TEXT_NODE && scope.endOffset < scope.endContainer.data.length) {
+            scope.endContainer.splitText(scope.endOffset);
         }
-        const scope = document.createRange();
-        scope.setStart(startContainer, startOffset); scope.setEnd(endContainer, endOffset);
+        if (scope.startContainer.nodeType === Node.TEXT_NODE && scope.startOffset > 0) {
+            const rest = scope.startContainer.splitText(scope.startOffset);
+            const end = scope.endContainer === rest.previousSibling ? null : [scope.endContainer, scope.endOffset];
+            scope.setStart(rest, 0);
+            if (end) scope.setEnd(end[0], end[1]); else scope.setEnd(rest, rest.data.length);
+        }
         return textNodes(field.rich).filter(node => scope.intersectsNode(node) &&
-            !(node === endContainer && endOffset === 0) && !(node === startContainer && startOffset === node.data.length));
+            !(node === scope.endContainer && scope.endOffset === 0) &&
+            !(node === scope.startContainer && scope.startOffset === node.data.length));
     }
     // F4 Removing, for one text node: its outermost format element is split
     // into the content before it, the node itself, and the content after it;
@@ -331,7 +334,8 @@
         const before = document.createRange(); before.setStartBefore(outer); before.setEndBefore(text);
         const after = document.createRange(); after.setStartAfter(text); after.setEndAfter(outer);
         const head = before.extractContents(), tail = after.extractContents();
-        const empty = node => node.nodeType === Node.ELEMENT_NODE && !node.textContent && !node.querySelector("img, br");
+        // Only an empty shell of the split goes; anything with unselected content stays.
+        const empty = node => node.nodeType === Node.ELEMENT_NODE && !node.textContent && node.querySelector("*") === null;
         for (const fragment of [head, tail]) for (const node of Array.from(fragment.childNodes)) if (empty(node)) node.remove();
         outer.before(head); outer.after(tail);
         for (const element of Array.from(outer.querySelectorAll("*")).reverse()) if (counts(element, kind)) strip(element, kind);

@@ -348,7 +348,7 @@ public final class BrowseCommands {
 
     /// The inspector saves its note before a command runs (W2), so a
     /// command on the edited row (Delete included) never drops the edit.
-    @ObservationIgnored var saveFirst: (@MainActor () async -> Void)?
+    @ObservationIgnored var saveFirst: (@MainActor () async -> Bool)?
     /// The inspector holds an edit not saved yet.
     @ObservationIgnored var unsavedEdit: @MainActor () -> Bool = { false }
 
@@ -357,9 +357,12 @@ public final class BrowseCommands {
         let state = menu.map { state(command, on: $0) } ?? state(command)
         guard state.enabled else { return }
         if command != .editNote, command != .editNoteType, unsavedEdit(), let saveFirst {
+            // The rows as they are now: a list that moves on during the save
+            // makes the core refuse them (K1); a failed save runs nothing.
+            let target = menu ?? results.target()
             Task {
-                await saveFirst()
-                runNow(command, menu: menu)
+                guard await saveFirst(), let target else { return }
+                runNow(command, menu: target)
             }
             return
         }

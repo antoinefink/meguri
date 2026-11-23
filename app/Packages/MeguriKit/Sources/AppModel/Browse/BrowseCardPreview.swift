@@ -32,6 +32,10 @@ public final class BrowseCardPreview {
     @ObservationIgnored private var appearance: CardRuntime.Appearance = .light
     @ObservationIgnored private var loaded = false
     @ObservationIgnored private var token: UInt64 = 0
+    /// A flip's own count, so a flip never drops a card's render under way.
+    @ObservationIgnored private var flips: UInt64 = 0
+    /// Raised by `close`: a load of a closed collection's pair lands nothing.
+    @ObservationIgnored private var generation: UInt64 = 0
     @ObservationIgnored private var payload: CardPayload?
 
     init() {}
@@ -61,16 +65,16 @@ public final class BrowseCardPreview {
     /// V12: a click flips question and answer.
     public func flip() {
         guard let pair, let payload, card != nil else { return }
-        token &+= 1
-        let token = token
+        flips &+= 1
+        let flip = flips, token = token
         Task {
             do {
                 if side == .question {
                     try await pair.showAnswer()
-                    if token == self.token { side = .answer }
+                    if flip == flips, token == self.token { side = .answer }
                 } else {
                     let update = try await pair.prepare(payload)
-                    guard token == self.token else { return }
+                    guard flip == flips, token == self.token else { return }
                     try pair.present(update)
                     side = .question
                 }
@@ -96,6 +100,8 @@ public final class BrowseCardPreview {
 
     func close() {
         token &+= 1
+        generation &+= 1
+        loading = nil
         pair?.close()
         pair = nil
         loaded = false
@@ -107,20 +113,22 @@ public final class BrowseCardPreview {
     private func readyPair() async throws -> CardPagePair? {
         if let pair, loaded { return pair }
         if let loading { return try await loading.value }
+        let generation = generation
         let work = Task { () throws -> CardPagePair? in
-            defer { loading = nil }
             if pair == nil {
-                guard let resolver = await resolver() else { return nil }
+                guard let resolver = await resolver(), generation == self.generation else { return nil }
                 let made = CardPagePair(resolver: resolver, appearance: appearance)
                 made.configureLinks(preferExternalBrowser: true, approvals: CardSchemeApprovals())
                 pair = made
             }
             guard let pair else { return nil }
             try await pair.load()
+            guard generation == self.generation else { return nil }
             loaded = true
             return pair
         }
         loading = work
+        defer { if generation == self.generation { loading = nil } }
         return try await work.value
     }
     @ObservationIgnored private var loading: Task<CardPagePair?, any Error>?

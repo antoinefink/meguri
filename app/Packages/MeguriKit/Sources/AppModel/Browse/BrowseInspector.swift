@@ -87,7 +87,7 @@ public final class BrowseInspector {
     @ObservationIgnored let backend: any BrowseInspectorBackend
     @ObservationIgnored private let results: BrowseResults
     @ObservationIgnored private let commands: BrowseCommands
-    @ObservationIgnored private var device: BrowseInspectorDevice
+    private var device: BrowseInspectorDevice
     @ObservationIgnored var store: (BrowseInspectorDevice) -> Void = { _ in }
     /// The open collection's generation, which drafts carry (S2).
     @ObservationIgnored public var generation: @MainActor () -> UInt64 = { 0 }
@@ -394,9 +394,10 @@ public final class BrowseInspector {
     public func browseLeft() { saveNow() }
 
     /// The app goes to the background (W3): the shown note is saved, waited for.
-    public func flushForBackground() async {
-        guard let note else { return }
-        _ = await save(note, hold: false)
+    /// False when the note's save failed: its text stays in the inspector.
+    @discardableResult public func flushForBackground() async -> Bool {
+        guard let note else { return true }
+        return await save(note, hold: false) != .failed
     }
 
     /// The page's pending input committed, then one patch of what differs
@@ -446,8 +447,11 @@ public final class BrowseInspector {
                 return .failed
             }
         }
+        let epoch = epoch
         saving = work
         let outcome = await work.value
+        // A save from before a reset leaves the newer state alone.
+        guard self.epoch == epoch else { return outcome }
         if saving == work { saving = nil }
         handleHeldChanges()
         if outcome == .saved, self.note === note { showPreview() }
@@ -462,6 +466,8 @@ public final class BrowseInspector {
             let old = note.notetype.fields[ord]
             guard let new = type.fields.first(where: { $0.id != nil && $0.id == old.id }) ?? type.fields.first(where: { $0.name == old.name })
             else { return false }
+            // Two edits on one field of the new layout: nothing is sent.
+            guard fields[Int(new.ord)] == nil else { return false }
             fields[Int(new.ord)] = html
         }
         let again = NoteFieldPatch(id: note.noteID, notetype: type, fields: fields, tags: patch.tags, generation: patch.generation)
@@ -491,7 +497,8 @@ public final class BrowseInspector {
     public func chooseDeck(_ id: Int64) {
         // The rows as they are now: a list that moves on meanwhile makes the core refuse them (K1).
         guard let note, note.card?.deckId != id, let shownFor, results.list?.token == shownFor.token,
-              results.selection == shownFor.selection, let target = results.target() else { return }
+              results.list?.revision == shownFor.revision, results.selection == shownFor.selection,
+              let target = results.target() else { return }
         Task {
             guard await save(note, hold: false) != .failed, self.note === note else { return }
             commands.changeDeck(to: id, on: target)
@@ -515,7 +522,8 @@ public final class BrowseInspector {
         guard let note else { return }
         if open { device.emptyFieldsOpen.insert(note.notetype.id) } else { device.emptyFieldsOpen.remove(note.notetype.id) }
         saveDevice()
-        let hidden: Set<Int> = open ? [] : Set(note.emptyFields)
+        // A field filled since it was shown stays in view.
+        let hidden: Set<Int> = open ? [] : Set(note.emptyFields.filter { FieldEmptiness.isEmpty(note.draft.values[$0]) })
         note.draft.hiddenFields = hidden
         Task { try? await note.runtime?.setHiddenFields(hidden) }
     }
@@ -541,11 +549,12 @@ public final class BrowseInspector {
     /// Every committed change set, from `BrowseModel`.
     func changesCommitted(_ changes: ChangeSet, seq: UInt64) {
         if changes.wholeCollection || !changes.decks.isEmpty { decksRead = false; Task { await readDecksOnce() } }
-        guard let note else {
-            // A note being read now may be one of these: it reloads once it shows.
-            if loop != nil { changedWhileReading.formUnion(changes.notes.map(\.id)); if changes.wholeCollection { changedAll = true } }
-            return
+        // A note being read now may be one of these: it reloads once it shows.
+        if loop != nil {
+            changedWhileReading.formUnion(changes.notes.map(\.id))
+            if changes.wholeCollection || !changes.notetypes.isEmpty { changedAll = true }
         }
+        guard let note else { return }
         let touchesNote = changes.wholeCollection || changes.notes.contains { $0.id == note.noteID }
             || changes.notetypes.contains { $0.id == note.notetype.id }
         let touchesCards = changes.wholeCollection || changes.cards.contains { card in note.cards.contains { $0.id == card.id } }
@@ -610,16 +619,18 @@ public final class BrowseInspector {
                 try? await runtime.release()
                 held = false
             } else if !note.draft.hasChanges {
-                // Another layout or note type, nothing unsaved: the note opens again.
-                try? await runtime.release()
-                held = false
-                guard let selection = shownFor else { return }
+                // Another layout or note type, nothing unsaved: the note opens again,
+                // the page held until the new draft opens in it (no input between).
+                guard let selection = shownFor else { try? await runtime.release(); return }
                 let mode = results.list?.mode ?? .cards
-                if let loaded = await readNote((note.card?.id, note.noteID), mode: mode), self.epoch == epoch, self.note === note {
+                if let loaded = await readNote((note.card?.id, note.noteID), mode: mode), self.epoch == epoch, self.note === note,
+                   !note.draft.hasChanges {
                     parked = note.runtime
                     note.runtime = nil
                     self.note = nil
                     await mount(loaded, for: selection, epoch: epoch)
+                } else {
+                    try? await runtime.release()
                 }
                 return
             } else {
@@ -652,8 +663,10 @@ public final class BrowseInspector {
 
     private func refreshCards(_ note: BrowseInspectorNote, card: Int64?, epoch: UInt64) async {
         guard let cards = try? await backend.cards(ofNote: note.noteID), self.epoch == epoch, self.note === note else { return }
+        // The card chosen meanwhile ("Card <i> of <k>") wins over the one asked for.
+        let wanted = note.card?.id ?? card
         note.cards = cards
-        note.cardIndex = card.flatMap { id in cards.firstIndex { $0.id == id } } ?? 0
+        note.cardIndex = wanted.flatMap { id in cards.firstIndex { $0.id == id } } ?? 0
     }
 
     // MARK: Decks
@@ -661,7 +674,10 @@ public final class BrowseInspector {
     private func readDecksOnce() async {
         guard !decksRead else { return }
         decksRead = true
-        if let names = try? await backend.deckNames() { decks = names } else { decksRead = false }
+        let epoch = epoch
+        let names = try? await backend.deckNames()
+        guard self.epoch == epoch else { return }
+        if let names { decks = names } else { decksRead = false }
     }
 
     /// The deck entry for `id`.
