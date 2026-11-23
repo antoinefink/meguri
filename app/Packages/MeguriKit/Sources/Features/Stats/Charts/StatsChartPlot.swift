@@ -41,6 +41,23 @@ public struct StatsChartSelection: Hashable, Sendable {
     }
 }
 
+/// Whether the page is scrolling (R2078): a plain reference, not observed, so setting it redraws
+/// nothing. While the page moves under a resting pointer, a hover would select a new bar every few
+/// frames and redraw that chart each time; hover waits until the page stops instead.
+public nonisolated final class StatsScrolling: @unchecked Sendable {
+    /// Written and read on the main actor only (the page's scroll phase, the plots' hover).
+    public nonisolated(unsafe) var active = false
+    public init() {}
+
+    /// A plot outside the page never scrolls.
+    static let never = StatsScrolling()
+}
+
+extension EnvironmentValues {
+    /// The page's scrolling state.
+    @Entry var statsScrolling = StatsScrolling.never
+}
+
 /// How tall a box's plot is (N25.4: a fixed height per box size). The plot
 /// keeps it at every text size (S15).
 public enum StatsPlotSize: Hashable, Sendable {
@@ -91,7 +108,8 @@ struct StatsChartPlot: View {
     @Binding var selection: StatsChartSelection
     /// Runs Show in Browse for a bin; nil when the caller offers none.
     let showInBrowse: ((Int) -> Void)?
-    /// Draws stacked series apart; nil follows Differentiate Without Colour.
+    /// Draws a hairline between stacked series; nil follows Differentiate Without Colour,
+    /// the only time a stack is drawn apart (a stack otherwise reads as one flat bar or band).
     let separatesSeries: Bool?
     /// Worked out once per data, not on every pointer move.
     private let isReady: Bool
@@ -129,6 +147,7 @@ struct StatsChartPlot: View {
     @Environment(\.locale) private var locale
     @Environment(\.calendar) private var calendar
     @Environment(\.appClock) private var clock
+    @Environment(\.statsScrolling) private var scrolling
     @FocusState private var focused: Bool
     /// The bins of the last ready data, kept across a loading phase.
     @State private var lastReadyBins: [StatsPeriod] = []
@@ -136,8 +155,8 @@ struct StatsChartPlot: View {
     private var format: StatsChartFormat { StatsChartFormat(locale: locale, calendar: calendar, now: clock.now()) }
     private var separated: Bool { separatesSeries ?? differentiateWithoutColor }
 
-    /// The gap between two stacked segments, in data units: about 1.5 points
-    /// of the plot's fixed height.
+    /// The separator between two stacked segments with Differentiate Without Colour, in data
+    /// units: about 1.5 points of the plot's fixed height (N25.12's separating lines).
     private var segmentGap: Double { (domain.upperBound - domain.lowerBound) * 1.5 / size.height }
 
     var body: some View {
@@ -246,8 +265,9 @@ struct StatsChartPlot: View {
             switch series.mark {
             case .stackedArea:
                 // Every bin, zeros included, so a band never joins across a
-                // zero; each band but the top keeps a gap above it.
-                let gap = segment.series != topSeries ? min(segmentGap, (segment.upper - segment.lower) / 2) : 0
+                // zero. The bands touch; with Differentiate Without Colour each
+                // band but the top keeps a separator above it.
+                let gap = separated && segment.series != topSeries ? min(segmentGap, (segment.upper - segment.lower) / 2) : 0
                 AreaMark(
                     x: .value("Period", Self.id(segment.bin)),
                     yStart: .value("From", segment.lower),
@@ -258,7 +278,10 @@ struct StatsChartPlot: View {
                 .accessibilityHidden(true)
             default:
                 if segment.upper > segment.lower {
-                    // Never more than half a thin segment, so it never vanishes.
+                    // The segments of a stack touch with square corners, so the
+                    // stack reads as one bar; only Differentiate Without Colour
+                    // separates them (never more than half a thin segment, so it
+                    // never vanishes).
                     let gap = separated && topBarSeries[segment.bin] != segment.series ? min(segmentGap, (segment.upper - segment.lower) / 2) : 0
                     BarMark(
                         x: .value("Period", Self.id(segment.bin)),
@@ -266,6 +289,7 @@ struct StatsChartPlot: View {
                         yEnd: .value("To", max(segment.lower, segment.upper - gap)),
                         width: barWidth
                     )
+                    .cornerRadius(0)
                     .foregroundStyle(by: .value("Series", series.name))
                     .opacity(opacity(at: segment.bin))
                     .accessibilityHidden(true)
@@ -289,7 +313,9 @@ struct StatsChartPlot: View {
     @ChartContentBuilder private var singles: some ChartContent {
         ForEach(data.series.filter { $0.mark == .bar }) { series in
             ForEach(Array(series.values.enumerated()).filter { $0.element != nil }, id: \.offset) { bin, value in
+                // Flat, as the stacked bars are (one bar style on the page).
                 BarMark(x: .value("Period", Self.id(bin)), y: .value("Value", value ?? 0), width: barWidth)
+                    .cornerRadius(0)
                     .foregroundStyle(by: .value("Series", series.name))
                     .opacity(opacity(at: bin))
                     .accessibilityHidden(true)
@@ -435,6 +461,7 @@ struct StatsChartPlot: View {
                     if isReady {
                         interactionLayer(proxy, plot: plot)
                         StatsAccessibilityBins(data: data, format: format, browse: showInBrowse)
+                            .equatable()
                             .frame(width: plot.width, height: plot.height)
                             .offset(x: plot.minX, y: plot.minY)
                         callout(proxy, plot: plot, in: geometry.size)
@@ -493,7 +520,7 @@ struct StatsChartPlot: View {
             // Mac: the pointer shows the callout; a click pins it; a double-click
             // runs Show in Browse (S8.3, S8.4).
             .onContinuousHover(coordinateSpace: .local) { phase in
-                guard !selection.pinned else { return }
+                guard !selection.pinned, !scrolling.active else { return }
                 switch phase {
                 case let .active(location):
                     let hovered = bin(at: location.x + plot.minX, proxy: proxy, plot: plot)

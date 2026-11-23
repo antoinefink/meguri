@@ -4,10 +4,13 @@ import CoreBridge
 import DesignSystem
 import Home
 import Instrumentation
+import QuartzCore
 import Stats
 import SwiftUI
 #if os(iOS)
 import notify
+#else
+import AppKit
 #endif
 
 extension TestHooks {
@@ -237,6 +240,138 @@ extension TestHooks {
         }
     }
 
+    /// The main thread's frame pacing while the hooks scroll the page (R2078): the display link's
+    /// callbacks, each late by however much its interval exceeds the display's frame. XCTest's
+    /// hitch metric reports nothing in the test VM (0 on its Mac, no value on its simulators), so
+    /// the scroll tests read this instead: `ratio` is the late time per second of the window, in
+    /// ms/s, as Apple's hitch time ratio counts it.
+    @MainActor final class StatsFramePacing: NSObject {
+        struct Result: CustomStringConvertible {
+            var ratio: Double
+            var frames: Int
+            var late: Int
+            var worst: Double
+            var seconds: Double
+            var description: String {
+                String(format: "ratio=%.2f;frames=%d;late=%d;worstMs=%.1f;seconds=%.2f", ratio, frames, late, worst, seconds)
+            }
+        }
+
+        private var link: AnyObject?
+        private var previous: CFTimeInterval?
+        private var started: CFTimeInterval = 0
+        private var lateTime: CFTimeInterval = 0
+        private var frames = 0
+        private var late = 0
+        private var worst: CFTimeInterval = 0
+
+        func start() {
+            started = CACurrentMediaTime()
+            #if os(iOS)
+            let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+            link.add(to: .main, forMode: .common)
+            self.link = link
+            #else
+            guard let view = NSApplication.shared.windows.first(where: { $0.isVisible })?.contentView else { return }
+            let link = view.displayLink(target: self, selector: #selector(tick(_:)))
+            link.add(to: .main, forMode: .common)
+            self.link = link
+            #endif
+        }
+
+        @objc private func tick(_ link: CADisplayLink) {
+            let now = link.timestamp
+            let frame = link.targetTimestamp - link.timestamp
+            if previous == nil, frame > 0 {
+                // Main-thread work between start() and the first callback delays it: beyond one
+                // frame and the same half-frame tolerance, that wait is late time too.
+                let over = CACurrentMediaTime() - started - frame
+                if over > frame / 2 {
+                    lateTime += over
+                    late += 1
+                }
+            }
+            if let previous, frame > 0 {
+                let interval = now - previous
+                let over = interval - frame
+                // Half a frame of jitter is not a late frame.
+                if over > frame / 2 {
+                    lateTime += over
+                    late += 1
+                }
+                worst = max(worst, interval)
+            }
+            previous = now
+            frames += 1
+        }
+
+        func stop() -> Result {
+            (link as? CADisplayLink)?.invalidate()
+            link = nil
+            let seconds = max(CACurrentMediaTime() - started, 0.001)
+            return Result(ratio: lateTime * 1_000 / seconds, frames: frames, late: late, worst: worst * 1_000, seconds: seconds)
+        }
+    }
+
+    /// The page's platform scroll view (the tallest in the key window), scrolled down and back up
+    /// in animated steps of about two thirds of its height, about three seconds in all.
+    @MainActor struct StatsNativeScroll {
+        #if os(macOS)
+        private let view: NSScrollView
+        #else
+        private let view: UIScrollView
+        #endif
+
+        init?() {
+            #if os(macOS)
+            func all(_ view: NSView) -> [NSScrollView] {
+                ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(all)
+            }
+            guard let root = NSApplication.shared.windows.first(where: { $0.isVisible && $0.canBecomeMain })?.contentView,
+                  let tallest = all(root).max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) })
+            else { return nil }
+            #else
+            func all(_ view: UIView) -> [UIScrollView] {
+                ((view as? UIScrollView).map { [$0] } ?? []) + view.subviews.flatMap(all)
+            }
+            let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+            guard let window = windows.first(where: \.isKeyWindow) ?? windows.first,
+                  let tallest = all(window).max(by: { $0.contentSize.height < $1.contentSize.height })
+            else { return nil }
+            #endif
+            view = tallest
+        }
+
+        func run() async {
+            #if os(macOS)
+            let viewport = view.contentView.bounds.height
+            let total = (view.documentView?.frame.height ?? 0) - viewport
+            #else
+            let viewport = view.bounds.height
+            let total = view.contentSize.height + view.adjustedContentInset.bottom - viewport
+            #endif
+            guard total > 0 else { return }
+            let step = viewport * 2 / 3
+            let downs = Array(stride(from: step, through: total, by: step)) + [total]
+            for offset in downs + downs.reversed().dropFirst() + [0] {
+                move(to: offset)
+                try? await Task.sleep(for: .milliseconds(220))
+            }
+        }
+
+        private func move(to offset: CGFloat) {
+            #if os(macOS)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                view.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: offset))
+            }
+            view.reflectScrolledClipView(view.contentView)
+            #else
+            view.setContentOffset(CGPoint(x: 0, y: offset - view.adjustedContentInset.top), animated: true)
+            #endif
+        }
+    }
+
     /// What the hooks' commands do to the Statistics page (`ShellCommands`: `statsReload`,
     /// `statsPeriodAll`, `statsPeriodYear`, `statsPeriodHalfYear`, `statsScroll`), for the
     /// performance tests (`StatsPerfTests`) that drive it with no synthesized input; it answers
@@ -247,6 +382,10 @@ extension TestHooks {
         private(set) weak var page: StatsPage?
         /// The page is a route's, over the sample collection.
         private var sample = false
+        #if os(iOS)
+        /// Holds `statsScrolled`'s state (the last scroll's hitch time ratio) for the test to read.
+        private var stateToken: Int32?
+        #endif
 
         /// The page of a route, or the app's (from `MeguriApp`, behind the flag).
         func attach(_ page: StatsPage?, sample: Bool) {
@@ -283,20 +422,50 @@ extension TestHooks {
             page?.selectPeriod(period)
         }
 
-        /// Scrolls the page section by section for about three seconds, animated, while it reads
-        /// (R2078's window, `stats.scrollDuringRead`).
-        func scroll() {
+        /// Scrolls the page section by section for about three seconds, animated: while it reads
+        /// (R2078's window, `stats.scrollDuringRead`), or with `reading` false over the filled page
+        /// with nothing reading (`stats.scrollSettled`, `statsScrollSettled`).
+        func scroll(reading: Bool = true) {
             guard let page else { return }
             Task { @MainActor in
-                let token = Signposts.begin(IntervalNames.statsScrollDuringRead)
-                page.model.refresh()
-                let order = StatsSectionID.allCases + StatsSectionID.allCases.reversed()
-                for section in order {
-                    page.go(to: section)
-                    try? await Task.sleep(for: .milliseconds(220))
+                // The display's own pacing with nothing moving, as a baseline for the run's machine.
+                let idle = StatsFramePacing()
+                idle.start()
+                try? await Task.sleep(for: .seconds(1))
+                let baseline = idle.stop()
+                let token = Signposts.begin(reading ? IntervalNames.statsScrollDuringRead : IntervalNames.statsScrollSettled)
+                let frames = StatsFramePacing()
+                frames.start()
+                if reading { page.model.refresh() }
+                if let native = StatsNativeScroll() {
+                    // The platform scroll view itself, a step at a time, as a trackpad or a finger
+                    // moves it: no SwiftUI state changes, as in a person's scroll.
+                    await native.run()
+                } else {
+                    let order = StatsSectionID.allCases + StatsSectionID.allCases.reversed()
+                    for section in order {
+                        page.go(to: section)
+                        try? await Task.sleep(for: .milliseconds(220))
+                    }
                 }
                 Signposts.end(token)
-                Self.answer("statsScrolled")
+                let pacing = frames.stop()
+                #if os(iOS)
+                // Darwin notifications carry no object: the frames counted (high 32 bits) and the
+                // ratio in thousandths of a ms/s (low 32) are the notification's state, read by the
+                // test. notifyd keeps a name's state only while a client holds it, so the token
+                // stays registered.
+                let name = "\(Bundle.main.bundleIdentifier ?? "").testhooks.statsScrolled"
+                if stateToken == nil {
+                    var token: Int32 = 0
+                    if notify_register_check(name, &token) == NOTIFY_STATUS_OK { stateToken = token }
+                }
+                if let stateToken {
+                    let ratio = UInt64(min(max(0, pacing.ratio * 1_000).rounded(), Double(UInt32.max)))
+                    notify_set_state(stateToken, UInt64(UInt32(clamping: pacing.frames)) << 32 | ratio)
+                }
+                #endif
+                Self.answer("statsScrolled", object: "\(pacing.description);idleRatio=\(String(format: "%.2f", baseline.ratio))")
             }
         }
 

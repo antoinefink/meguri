@@ -1289,6 +1289,7 @@ Decided by Antoine in chat on 2026-11-22 (`decisions.md`, rows `stats.overview` 
 - Mac: the window toolbar, leading to trailing: the title "Statistics" with the subtitle "1,370 cards in 4 decks" (and the status of N25.9), the deck pop-up button, the period segmented control (1M 3M 6M 1Y All), then the sync button and the Add menu as on every page. Both controls are standard toolbar items and stay put while the page scrolls.
 - iPad at regular width: the same in the navigation bar, as two trailing items kept apart (not one glass group), the pop-up's label carrying its up-and-down chevrons (U297, 2026-11-23).
 - iPhone, the Duo folded, a narrow iPad window: the inline title "Statistics" with the deck pop-up beside it (a menu button with the deck's name and a chevron) and the subtitle under it; the period segmented control pinned under the navigation bar while the page scrolls; the Jump menu (`list.bullet`) as a trailing toolbar button.
+- While the controls are disabled (no collection, no cards), the Mac's period control is dimmed with the deck pop-up: an exception, since the window toolbar draws a disabled segmented control in full colour (seen in the test VM, 2026-11-23).
 - The deck's name is visible at every scroll position on every device. A long name truncates in the middle, with the full name as help text (Mac).
 - Kept state: `stats/statistics-page` S3.3 (per window and device; first time All Decks and All).
 
@@ -1297,6 +1298,7 @@ Decided by Antoine in chat on 2026-11-22 (`decisions.md`, rows `stats.overview` 
 - One scroll view. The strip (five figures, no box: value, unit in small text, label under), then the seven sections of S5, each a plain heading in the flow: the title in bold and its question in secondary text on the same line, wrapping under it when narrow.
 - Grid of boxes: two columns up to about 1,250 points of content width, three beyond, one under about 560. A lead box spans the row; the other boxes follow side by side and wrap. Boxes in a row share the row's height.
 - A box is the system group box (`GroupBox`, the system's grouped background): no shadow, no custom border, radius or background.
+- A box's content sits about 16 points inside the box on all four sides, as the touch group box and inset grouped lists place theirs (Antoine, 2026-11-23, on the Mac: "Not enough internal margin around this grey section"). The iPad's group box and N25.6's group already do; the Mac's group box keeps only about 4 points, so its content adds `Spacing.small`. Every part of N25.4 lines up on that inset, the header's switches and marker included; the strip and the section headings stay level with the box's outside.
 - The iPad at regular width is this page in touch sizes, with the sidebar and two columns; in a narrow window or Slide Over it becomes N25.6's column.
 
 ### N25.4 The parts of a box
@@ -1305,7 +1307,7 @@ Top to bottom, at the box's inset:
 
 1. The header: a button with the title in the headline style and a trailing chevron (`chevron.right`), opening the chart's page (N25.5); trailing on the same line, the box's switches as small segmented controls (Reviews Over Time: By Type | By Answer and Count | Time; Retention: All | Young | Mature), or "Now" in secondary text for the charts of the present, or "Estimated" for Knowledge Over Time.
 2. One large figure (the title-2 style, tabular digits) and its sentence in secondary text.
-3. The plot (Swift Charts), at a fixed height per box size, y-axis labels on the trailing side as the system draws them, no second axis (S8.2).
+3. The plot (Swift Charts), at a fixed height per box size, y-axis labels on the trailing side as the system draws them, no second axis (S8.2). Bars have square corners and the parts of a stacked bar meet with no space between them, so they read as one bar; single bars match (Antoine, 2026-11-23, paraphrased: a zoomed stack did not read as one ordinary bar; decided by the coordinator). Bands of a stacked area meet too. With Differentiate Without Colour a line of about 1.5 points parts them (N25.12).
 4. The legend, in stack order, each swatch with its name (the system chart legend).
 5. Two to four small figures in a row (label in secondary text over its value), stacking at accessibility sizes.
 6. A footnote in footnote secondary text when the box has one (left-out cards).
@@ -1370,6 +1372,15 @@ Antoine, 2026-11-22: the Statistics page "is a bit of an exception", "it's under
 - `screen-inventory.yaml` `stats.overview`: its earlier text (the scope and history header, thirteen equal boxes in Anki's order, "the heatmap and streak stats are not here", the Stats sidebar section and tab names); and in `home.deckPage` "streak stats and the Stats action (U228) are not built" (the Activity header leads to Statistics; streaks stay off the deck page).
 - N20.2's table gains Deck Statistics; N21.1's sidebar order gains Statistics second; N21.1's iPhone tabs become four.
 - Unchanged: N11.7's toolbar header principle, Today's heatmap (N14.11, N24.6), round 10's "no streak on Today", Browse (Show in Browse uses its tokens; `search/filter-tokens` T3's Studied On token is also made by the page).
+
+### N25.14 Scrolling (2026-11-23)
+
+Antoine, 2026-11-23, paraphrased: after the first fill, scrolling should feel smoother; the first fill's time is fine. Checked by `StatsPerfTests` and `StatsTouchPerfTests` (R2078):
+
+- Each box's view observes its own box: the model keeps one observable cell per box for its content and its selection, so a hover, a part arriving or a progress tick redraws only the box it changes. A plot's accessibility elements are made again only when its data changes, not on a hover.
+- While the page scrolls (any scroll phase but idle), the pointer's hover selects nothing; a bar it was over when the page started to move is let go, a pinned bar stays.
+- Nothing about the page's look changes.
+- Measured (the hooks scrolling the platform scroll view in animated steps, the pointer over the page, the main thread's late time per second): the Mac on the 150k collection, settled 447 to 549 ms/s before, 0 to 37 after; while a refresh reads, 439 to 517 before, 43 to 288 after. The causes were the one dictionary of box contents and the one of selections every box read: a hover change, a part or a progress tick redrew all fifteen charts. Marks were not a cause: at All on three years no chart draws more than 185. XCTest's own hitch metric reports nothing in the test VM, so the tests assert R2078 on this measurement.
 
 ## N26. The home screen on the Duo, opened and folded (2026-11-22)
 

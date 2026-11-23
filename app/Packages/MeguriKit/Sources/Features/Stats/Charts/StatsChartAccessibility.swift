@@ -5,10 +5,19 @@ import SwiftUI
 /// each run a container named "<first> to <last>", each bin reading the
 /// callout's text, with Show in Browse as a named action where the bin offers it.
 /// Swift Charts' own mark elements are hidden in its place.
-struct StatsAccessibilityBins: View {
+///
+/// Equatable on what its texts are made of, so a hover, which redraws the plot's marks, never
+/// formats every bin's text again (R2078). Show in Browse is compared by presence only: a
+/// caller passes one action for the chart's life (the bin is its argument).
+struct StatsAccessibilityBins: View, Equatable {
     let data: StatsChartData
     let format: StatsChartFormat
     let browse: ((Int) -> Void)?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.data == rhs.data && lhs.format.locale == rhs.format.locale && lhs.format.calendar == rhs.format.calendar
+            && lhs.format.calendar.isDate(lhs.format.now, inSameDayAs: rhs.format.now) && (lhs.browse == nil) == (rhs.browse == nil)
+    }
 
     var body: some View {
         // Categories are equal bands, so equal widths sit over the bars.
