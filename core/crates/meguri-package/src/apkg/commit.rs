@@ -143,6 +143,7 @@ fn move_note(
     record: &Notetype,
     fields: &[Option<u32>],
     templates: Option<&[Option<u32>]>,
+    retired: &mut HashSet<i64>,
 ) -> Result<bool, EngineError> {
     let Some(mut note) = scope.note(id)? else {
         return Ok(false);
@@ -156,6 +157,7 @@ fn move_note(
                 scope.remove_card(card.id)?;
                 scope.add_grave(card.id.0, GraveKind::Card, Usn::PENDING)?;
                 scope.retire_card_id(card.id);
+                retired.insert(card.id.0);
             }
         }
         for card in &cards {
@@ -359,9 +361,11 @@ fn write_decks(
     Ok(map)
 }
 
-/// The id a new row takes: its package id, or + 999 until `table` has none.
-fn free_id(scope: &WriteScope<'_>, table: Table, mut id: i64) -> Result<i64, EngineError> {
-    while scope.row_image(table, &RowKey::Id(id))?.is_some() {
+/// The id a new row takes: its package id, or + 999 until `table` has none
+/// and this op retired none there (a card removed with its grave keeps its
+/// id to itself).
+fn free_id(scope: &WriteScope<'_>, table: Table, mut id: i64, retired: &HashSet<i64>) -> Result<i64, EngineError> {
+    while retired.contains(&id) || scope.row_image(table, &RowKey::Id(id))?.is_some() {
         id = id.checked_add(999).ok_or_else(|| EngineError::InvalidArgument {
             message: "no free id".into(),
         })?;
@@ -403,6 +407,8 @@ pub(crate) fn commit(
     report.reasons.insert(StructureReason::ApkgApply);
     let token = scope.start_structure_report(report)?;
     let mut copies: Vec<i64> = Vec::new();
+    let mut retired: HashSet<i64> = HashSet::new();
+    let unused: HashSet<i64> = HashSet::new();
     for write in &plan.stage.writes {
         match write {
             TypeWrite::Put { record, stamp_now } => {
@@ -420,6 +426,11 @@ pub(crate) fn commit(
                 }
                 record.usn = Usn::PENDING;
                 let id = scope.add_notetype(&record)?;
+                if plan.stage.routes.contains_key(&id.0) {
+                    // The new id is one a package note type is added
+                    // under: plan again, at another instant.
+                    return Err(stale(Table::Notetypes, id.0));
+                }
                 scope.set_config("curModel", &ConfigValue::from(id.0))?;
                 copies.push(id.0);
             }
@@ -453,7 +464,7 @@ pub(crate) fn commit(
                     }
                 };
                 for id in ids {
-                    if move_note(scope, id, record, fields, templates.as_deref())? {
+                    if move_note(scope, id, record, fields, templates.as_deref(), &mut retired)? {
                         counts.notes_moved += 1;
                     }
                 }
@@ -502,7 +513,7 @@ pub(crate) fn commit(
                 let mut note = match planned.decision {
                     Decision::Updated { target } => scope.note(target)?.ok_or_else(|| stale(Table::Notes, target.0))?,
                     _ => Note {
-                        id: NoteId(free_id(scope, Table::Notes, source.id.0)?),
+                        id: NoteId(free_id(scope, Table::Notes, source.id.0, &unused)?),
                         guid: source.guid.clone(),
                         flags: 0,
                         data: String::new(),
@@ -604,7 +615,7 @@ pub(crate) fn commit(
             }
         };
         let mut new = card.clone();
-        new.id = CardId(free_id(scope, Table::Cards, card.id.0)?);
+        new.id = CardId(free_id(scope, Table::Cards, card.id.0, &retired)?);
         new.note_id = note;
         new.ord = ord;
         new.deck_id = place(card.deck_id, false);

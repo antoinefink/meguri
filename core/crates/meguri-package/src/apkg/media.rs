@@ -19,6 +19,11 @@ use super::session::ImportSession;
 use super::{ApkgImportError, ImportOutcome, corrupt};
 
 const MARGIN: u64 = 4 * 1024 * 1024;
+/// The largest static entry the post-commit exact-name write takes: that
+/// write holds the file in memory (`MediaStore::write_static_if_absent`),
+/// so a larger one is skipped rather than read whole (R1852). Checked
+/// entries have no such limit: they stream into staging.
+const STATIC_LIMIT: u64 = 64 * 1024 * 1024;
 
 /// What staging decided, carried by the plan into the write phase.
 #[derive(Default)]
@@ -207,7 +212,7 @@ pub(crate) fn stage(
         })?;
 
     progress.set_phase(ProgressPhase::Named("media"));
-    let mut archive = DeckArchive::open(&session.source_path(), check)?;
+    let mut archive = DeckArchive::open(&session.source_path(), check, session.decoded)?;
     let mut staged = service.begin_staging()?;
     let scratch = session.staging_path().join("payload");
     // By entry index: the stored name of a checked entry that has one.
@@ -226,7 +231,7 @@ pub(crate) fn stage(
             let _ = std::fs::remove_file(&scratch);
             let free = !reserved.contains(&entry.name.to_lowercase())
                 && !service.store().case_variant_present(&entry.name).map_err(media_error)?;
-            if free && meguri_text::media_name::safe_media_name(&entry.name) == entry.name {
+            if free && entry.size <= STATIC_LIMIT && safe_media_name(&entry.name) == entry.name {
                 reserved.insert(entry.name.to_lowercase());
                 outcome.statics.push(*index);
             } else {
@@ -305,7 +310,7 @@ pub(crate) fn write_statics(
         return (0, 0);
     }
     let check: &(dyn Fn() -> bool + Sync) = &|| false;
-    let Ok(mut archive) = DeckArchive::open(&session.source_path(), check) else {
+    let Ok(mut archive) = DeckArchive::open(&session.source_path(), check, session.decoded) else {
         return (0, statics.len() as u64);
     };
     let mut written = Vec::new();

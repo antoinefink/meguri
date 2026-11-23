@@ -128,6 +128,7 @@ pub(crate) fn plan(
     targets: &BTreeMap<i64, Notetype>,
     matches: &HashMap<&[u8], NoteIdentity>,
     options: &ImportOptions,
+    now_s: i64,
     cancel: &CancelToken,
     progress: &ProgressSink,
 ) -> ImportOutcome<TypeStage> {
@@ -135,8 +136,13 @@ pub(crate) fn plan(
     // The target's note types as the pass leaves them.
     let mut state: BTreeMap<i64, Notetype> = targets.clone();
     let incoming_ids: HashSet<i64> = taken.iter().map(|nt| nt.id.0).collect();
+    // Names of note types the pass removes stay taken: their rows go only
+    // after the notes are written (J8), later than every note type write.
+    let leaving: std::cell::RefCell<Vec<(NotetypeId, String)>> = std::cell::RefCell::new(Vec::new());
     let names = |state: &BTreeMap<i64, Notetype>| -> Vec<(NotetypeId, String)> {
-        state.values().map(|nt| (nt.id, nt.name.clone())).collect()
+        let mut names: Vec<(NotetypeId, String)> = state.values().map(|nt| (nt.id, nt.name.clone())).collect();
+        names.extend(leaving.borrow().iter().cloned());
+        names
     };
     let mut pairs: Vec<Pair> = Vec::new();
     let mut effect = false;
@@ -265,6 +271,7 @@ pub(crate) fn plan(
                 origins: stored.clone(),
             });
             stage.stamped.insert(id);
+            stage.rows += reader.notetype_note_count(target.id)?;
             let extra = count_extra(reader, id, target.fields.len(), cancel)?;
             if extra > 0 {
                 *dropped.entry(id).or_default() += extra;
@@ -280,6 +287,7 @@ pub(crate) fn plan(
         let more_templates = merged.templates.len() > target.templates.len();
         if more_templates || fronts(&merged) != fronts(target) {
             let planned = regenerate::plan(reader, &merged, cancel, progress)?;
+            stage.rows += planned.notes.len() as u64;
             stage.writes.push(TypeWrite::Regenerate(Box::new(planned)));
         }
         effect |= more_templates;
@@ -318,7 +326,9 @@ pub(crate) fn plan(
                 fields,
                 templates,
             });
+            leaving.borrow_mut().push((copy.id, copy.name.clone()));
             state.remove(&copy.id.0);
+            stage.rows += notes;
             effect = true;
         }
         // J7: the maps of the incoming note type.
@@ -352,6 +362,7 @@ pub(crate) fn plan(
         }
     }
     let mut left: HashMap<i64, u64> = HashMap::new();
+    let mut moved_extra: BTreeMap<i64, u64> = BTreeMap::new();
     let mut stage_two: HashMap<NoteId, Origins> = HashMap::new();
     let mut notes_by_id: HashMap<NoteId, i64> = HashMap::new();
     for identity in matches.values() {
@@ -400,6 +411,7 @@ pub(crate) fn plan(
                 origins: (0..grown.fields.len()).map(|at| (at < base.fields.len()).then_some(at)).collect(),
             });
             if targets.contains_key(&into) {
+                stage.rows += reader.notetype_note_count(NotetypeId(into))?;
                 let extra = count_extra(reader, into, base.fields.len(), cancel)?;
                 if extra > 0 {
                     *dropped.entry(into).or_default() += extra;
@@ -428,6 +440,22 @@ pub(crate) fn plan(
         }
         *left.entry(from).or_default() += notes.len() as u64;
         let moved = notes.len() as u64;
+        stage.rows += moved * 2;
+        // J10: a moved note that stores more values than its note type has
+        // fields loses them, unless stage 1 already counted its note type.
+        let mut extra = 0_u64;
+        for chunk in notes.chunks(500) {
+            for note in reader.notes_with_ids(chunk)? {
+                let snapshot_mid = note.notetype_id.0;
+                let declared = targets.get(&snapshot_mid).map_or(usize::MAX, |nt| nt.fields.len());
+                if !dropped.contains_key(&snapshot_mid) && note.field_values().count() > declared {
+                    extra += 1;
+                }
+            }
+        }
+        if extra > 0 {
+            *moved_extra.entry(from).or_default() += extra;
+        }
         stage.writes.push(TypeWrite::MoveNotes {
             from,
             record: grown.clone(),
@@ -551,12 +579,15 @@ pub(crate) fn plan(
 
     // J10: the preview.
     stage.preview.removed_notetypes = removed.into_values().collect();
+    for (notetype, notes) in moved_extra {
+        *dropped.entry(notetype).or_default() += notes;
+    }
     stage.preview.dropped_values = dropped
         .into_iter()
         .map(|(notetype, notes)| DroppedValues { notetype, notes })
         .collect();
     stage.preview.emptied_fields =
-        emptied(reader, raw, matches, options, &stage, &state, targets, &layouts, &stage_two, cancel)?;
+        emptied(reader, raw, matches, options, now_s, &stage, &state, targets, &layouts, &stage_two, cancel)?;
     Ok(stage)
 }
 
@@ -569,6 +600,7 @@ fn emptied(
     raw: &RawPackage,
     matches: &HashMap<&[u8], NoteIdentity>,
     options: &ImportOptions,
+    now_s: i64,
     stage: &TypeStage,
     state: &BTreeMap<i64, Notetype>,
     targets: &BTreeMap<i64, Notetype>,
@@ -589,8 +621,8 @@ fn emptied(
     if open.is_empty() || options.update_notes == UpdateCondition::Never {
         return Ok(Vec::new());
     }
-    // The target notes I9 updates, by receiving note type (J11's `mod`).
-    let now_s = i64::MAX;
+    // The target notes I9 updates, by receiving note type (J11's `mod`):
+    // the same comparison `plan::build` makes.
     let mut seen: HashSet<&[u8]> = HashSet::new();
     let mut updated: BTreeMap<i64, Vec<NoteId>> = BTreeMap::new();
     for note in &raw.notes {

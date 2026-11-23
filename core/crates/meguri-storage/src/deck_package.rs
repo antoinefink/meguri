@@ -170,10 +170,22 @@ fn repair_ids(
     if ahead.is_empty() {
         return Ok(0);
     }
-    let taken: BTreeSet<i64> = conn
+    let mut taken: BTreeSet<i64> = conn
         .prepare(&format!("SELECT id FROM {table} WHERE id >= ?1 AND id <= ?2"))?
         .query_map([now_ms, cutoff], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
+    if let Some((child, column)) = child {
+        // An id some child row names without a parent stays unused, so a
+        // repaired row never adopts another row's orphans.
+        let orphaned: Vec<i64> = conn
+            .prepare(&format!(
+                "SELECT DISTINCT {column} FROM {child} WHERE {column} >= ?1 AND {column} <= ?2 \
+                 AND {column} NOT IN (SELECT id FROM {table})"
+            ))?
+            .query_map([now_ms, cutoff], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        taken.extend(orphaned);
+    }
     let mut next = now_ms;
     let mut update = conn.prepare(&format!("UPDATE {table} SET id = ?1 WHERE id = ?2"))?;
     let mut follow = match child {
@@ -331,35 +343,46 @@ fn repair_field_counts(
     context: &CandidateContext<'_>,
     repair: &DeckCandidateRepair<'_>,
 ) -> Result<u64, CandidateError> {
-    let odd: Vec<(i64, String, i64)> = conn
-        .prepare(
-            "SELECT n.id, n.flds, f.fields FROM notes n \
-             JOIN (SELECT ntid, count(*) AS fields FROM fields GROUP BY ntid) f ON f.ntid = n.mid \
-             WHERE length(CAST(n.flds AS BLOB)) - length(replace(CAST(n.flds AS BLOB), x'1f', x'')) + 1 <> f.fields \
-             ORDER BY n.id",
-        )?
-        .query_map([], |r| {
-            let text = match r.get_ref(1)? {
-                rusqlite::types::ValueRef::Text(bytes) | rusqlite::types::ValueRef::Blob(bytes) => {
-                    String::from_utf8_lossy(bytes).into_owned()
-                }
-                _ => String::new(),
-            };
-            Ok((r.get(0)?, text, r.get(2)?))
-        })?
-        .collect::<Result<_, _>>()?;
+    // Separators are counted in bytes on both sides: `length` of text
+    // counts characters, which would miscount any note with a multi-byte
+    // character. Pages keep the rows held at once bounded.
+    let mut select = conn.prepare(
+        "SELECT n.id, n.flds, f.fields FROM notes n \
+         JOIN (SELECT ntid, count(*) AS fields FROM fields GROUP BY ntid) f ON f.ntid = n.mid \
+         WHERE n.id > ?1 AND length(CAST(n.flds AS BLOB)) \
+             - length(CAST(replace(CAST(n.flds AS TEXT), char(31), '') AS BLOB)) + 1 <> f.fields \
+         ORDER BY n.id LIMIT 200",
+    )?;
     let mut update = conn.prepare("UPDATE notes SET flds = ?1 WHERE id = ?2")?;
-    for (id, fields, wanted) in &odd {
+    let mut repaired = 0;
+    let mut after = i64::MIN;
+    loop {
         cancelled(context)?;
-        let wanted = usize::try_from(*wanted).map_err(|_| corrupt("field count"))?;
-        if wanted == 0 {
-            continue;
+        let page: Vec<(i64, String, i64)> = select
+            .query_map([after], |r| {
+                let text = match r.get_ref(1)? {
+                    rusqlite::types::ValueRef::Text(bytes) | rusqlite::types::ValueRef::Blob(bytes) => {
+                        String::from_utf8_lossy(bytes).into_owned()
+                    }
+                    _ => String::new(),
+                };
+                Ok((r.get(0)?, text, r.get(2)?))
+            })?
+            .collect::<Result<_, _>>()?;
+        let Some(last) = page.last() else { break };
+        after = last.0;
+        for (id, fields, wanted) in &page {
+            let wanted = usize::try_from(*wanted).map_err(|_| corrupt("field count"))?;
+            let values: Vec<String> = fields.split('\u{1f}').map(str::to_owned).collect();
+            if wanted == 0 || values.len() == wanted {
+                continue;
+            }
+            let fixed = (repair.repair_fields)(values, wanted);
+            update.execute(params![fixed.join("\u{1f}"), id])?;
+            repaired += 1;
         }
-        let values = fields.split('\u{1f}').map(str::to_owned).collect();
-        let repaired = (repair.repair_fields)(values, wanted);
-        update.execute(params![repaired.join("\u{1f}"), id])?;
     }
-    Ok(odd.len() as u64)
+    Ok(repaired)
 }
 
 /// Opens a prepared candidate for reading its rows (the plan of an import).

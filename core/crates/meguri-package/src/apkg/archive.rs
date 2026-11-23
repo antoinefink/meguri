@@ -60,9 +60,11 @@ pub(crate) struct DeckArchive {
 
 impl DeckArchive {
     /// P2, P3 and the choice of the collection member.
-    pub fn open(path: &Path, check: &(dyn Fn() -> bool + Sync)) -> Result<DeckArchive> {
+    /// `charged` is what earlier reads of this package already decoded: P8's
+    /// 16 GiB covers every entry read from one package, across reopenings.
+    pub fn open(path: &Path, check: &(dyn Fn() -> bool + Sync), charged: u64) -> Result<DeckArchive> {
         let mut zip = inspection_zip::open_with_legacy(File::open(path)?, check)?;
-        let mut total = 0;
+        let mut total = charged;
         let version = match zip.meta {
             Some(index) => {
                 let member = zip.archive.by_index(index)?;
@@ -97,6 +99,11 @@ impl DeckArchive {
             collection,
             total,
         })
+    }
+
+    /// Decoded bytes charged so far against P8's total.
+    pub fn charged(&self) -> u64 {
+        self.total
     }
 
     /// P10's E for the extraction preflight: what the first zstd frame
@@ -191,7 +198,8 @@ impl DeckArchive {
             })?;
             Ok(entries)
         } else {
-            reader::bounded_read(member, MAP_LIMIT.min(limit.max(MAP_LIMIT)), &mut self.total, check, |part| {
+            // P17: raw JSON, at most P8's 64 MiB whatever the zip method.
+            reader::bounded_read(member, MAP_LIMIT, &mut self.total, check, |part| {
                 bytes.extend_from_slice(part)
             })?;
             let mut entries = legacy_map(&bytes, check)?;

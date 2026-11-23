@@ -37,6 +37,8 @@ pub struct ImportSession {
     staging: tempfile::TempDir,
     format: PackageFormat,
     pub(crate) media: Vec<MediaEntry>,
+    /// Decoded bytes the inspect read, charged to every later read (P8).
+    pub(crate) decoded: u64,
     facts: PreviewFacts,
     pub(crate) state: Mutex<SessionState>,
 }
@@ -178,7 +180,7 @@ pub fn inspect(
     drop(input);
 
     // Step 1: archive and format. Step 2: preflight and extraction.
-    let mut archive = DeckArchive::open(&copy, check)?;
+    let mut archive = DeckArchive::open(&copy, check, 0)?;
     let format = archive.format;
     let estimate = archive.collection_estimate(0)?;
     preflight(context, estimate.checked_add(MARGIN).ok_or_else(|| corrupt("inspect preflight"))?)?;
@@ -218,6 +220,7 @@ pub fn inspect(
 
     // Step 8: the media map.
     let media = archive.media_map(check)?;
+    let decoded = archive.charged();
     drop(archive);
     cancelled(check)?;
 
@@ -283,6 +286,7 @@ pub fn inspect(
         staging,
         format,
         media,
+        decoded,
         facts,
         state: Mutex::new(SessionState {
             result: None,

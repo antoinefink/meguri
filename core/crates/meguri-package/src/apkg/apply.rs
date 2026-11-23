@@ -86,8 +86,16 @@ pub fn apply(
             return Err(ApkgImportError::SessionClosed);
         }
     }
-    let _slot = engine.acquire_slot(LongOp::ApkgApply)?;
-    let collection = engine.collection()?;
+    let slot = engine.acquire_slot(LongOp::ApkgApply)?;
+    // The handle of the collection the slot was taken on, never one opened
+    // since; and the session's state again, now that no other apply runs.
+    let collection = slot.collection()?;
+    {
+        let state = session.lock();
+        if state.closed || state.result.is_some() {
+            return Err(ApkgImportError::SessionClosed);
+        }
+    }
     let context = session.context.clone();
     progress.set_phase(ProgressPhase::Planning);
     let check = || -> ImportOutcome<()> { cancel.check().map_err(Into::into) };
@@ -216,6 +224,7 @@ pub fn apply(
         session.lock().result = Some(result.clone());
         Some(result)
     };
+    drop(slot);
     match outcome {
         Ok(op) => finish(op.seq.0, op.generation.0, op.undo.map(|undo| undo.name), false).ok_or_else(|| {
             ApkgImportError::Io {

@@ -302,7 +302,8 @@ fn damaged_packages_are_repaired_or_logged_instead_of_failing() {
     put_notetype(&source, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
     let first = add(&source, 5000, "g-twice", &["sun", "soleil"], 1);
     source.clock.step_ms(1000);
-    let second = add(&source, 5000, "g-other", &["moon", "lune"], 1);
+    // Multi-byte text: a separator count in characters would miscount it.
+    let second = add(&source, 5000, "g-other", &["m\u{f4}me", "\u{e9}t\u{e9}"], 1);
     source.clock.step_ms(1000);
     put_notetype(&source, notetype(6000, "Gone", 100, &two_fields(), &one_template()));
     let orphan = add(&source, 6000, "g-orphan", &["star", "etoile"], 1);
@@ -329,7 +330,7 @@ fn damaged_packages_are_repaired_or_logged_instead_of_failing() {
         scope.put(&card)?;
         // A note with one value too many, and an id three days ahead.
         let mut note = scope.note(wide)?.unwrap();
-        note.fields = "rain\u{1f}pluie\u{1f}extra".into();
+        note.fields = "rain\u{1f}plu\u{ef}e\u{1f}extra".into();
         scope.put(&note)?;
         let mut card = scope.cards_of_note(wide)?.remove(0);
         scope.remove_card(card.id)?;
@@ -361,7 +362,7 @@ fn damaged_packages_are_repaired_or_logged_instead_of_failing() {
     assert!(reader.note(orphan).unwrap().is_none());
     assert_eq!(reader.cards_of_note(lost).unwrap()[0].deck_id.0, 1);
     assert_eq!(fixed.id.0, now, "an id past the cutoff is repaired from now upward");
-    assert_eq!(fixed.fields, "rain\u{1f}pluie; extra");
+    assert_eq!(fixed.fields, "rain\u{1f}plu\u{ef}e; extra");
     assert_eq!(reader.cards_of_note(fixed.id).unwrap().len(), 1);
 }
 

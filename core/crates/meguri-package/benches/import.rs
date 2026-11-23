@@ -78,12 +78,13 @@ fn main() -> ExitCode {
                 for _ in 0..iters {
                     // A new empty collection for every sample.
                     round += 1;
-                    let directory = scratch.path().join(format!("target-{round}"));
-                    std::fs::create_dir(&directory).unwrap();
+                    let root = scratch.path().join(format!("target-{round}"));
+                    let directory = root.join("collection");
+                    std::fs::create_dir_all(&directory).unwrap();
                     let path = directory.join("collection.anki2");
                     meguri_engine::bootstrap::create(&path, clock.as_ref(), random.as_ref()).unwrap();
                     let host =
-                        fixtures::open_engine_collection_with_backups(&path, &directory.join("backups"), clock.clone())
+                        fixtures::open_engine_collection_with_backups(&path, &root.join("backups"), clock.clone())
                             .unwrap();
                     let context = ApkgContext {
                         collection_directory: directory.clone(),
@@ -116,7 +117,7 @@ fn main() -> ExitCode {
                     assert_eq!(imported, session.facts().notes);
                     drop(session);
                     host.close().unwrap();
-                    std::fs::remove_dir_all(&directory).unwrap();
+                    std::fs::remove_dir_all(&root).unwrap();
                 }
                 total
             })

@@ -87,6 +87,9 @@ pub(crate) struct TypeStage {
     pub added: u64,
     pub updated: u64,
     pub copied: u64,
+    /// Target rows the note type writes touch besides the note type rows:
+    /// rewritten and moved notes, regenerated cards (I14.2's threshold).
+    pub rows: u64,
 }
 
 impl TypeStage {
@@ -176,6 +179,8 @@ pub(crate) fn plan_without_merge(
     let mut stage = TypeStage::default();
     let mut others: Vec<(NotetypeId, String)> = targets.values().map(|nt| (nt.id, nt.name.clone())).collect();
     let mut copies = 0_usize;
+    // By target id: the record the last update of this pass leaves there.
+    let mut finals: HashMap<i64, Notetype> = HashMap::new();
     for incoming in taken {
         cancel.check()?;
         let id = incoming.id.0;
@@ -248,6 +253,7 @@ pub(crate) fn plan_without_merge(
             stage.reasons.push(SchemaReason::SortFieldChanged);
             stage.report.reasons.insert(StructureReason::SortFieldChanged);
             stage.stamped.insert(target.id.0);
+            stage.rows += reader.notetype_note_count(target.id)?;
             stage.writes.push(TypeWrite::RewriteNotes {
                 notetype: target.id.0,
                 record: record.clone(),
@@ -263,8 +269,10 @@ pub(crate) fn plan_without_merge(
         });
         if fronts(target) != fronts(&record) {
             let planned = regenerate::plan(reader, &record, cancel, progress)?;
+            stage.rows += planned.notes.len() as u64;
             stage.writes.push(TypeWrite::Regenerate(Box::new(planned)));
         }
+        finals.insert(target.id.0, record.clone());
         stage.updated += 1;
         stage.routes.insert(
             id,
@@ -275,6 +283,16 @@ pub(crate) fn plan_without_merge(
                 template_map: None,
             },
         );
+    }
+    // Two package note types can go to one target (an earlier copy and the
+    // note type of that copy's own id): every route reads the record the
+    // target ends with.
+    for route in stage.routes.values_mut() {
+        if let TypeTarget::Id(id) = route.target
+            && let Some(record) = finals.get(&id)
+        {
+            route.record = record.clone();
+        }
     }
     Ok(stage)
 }

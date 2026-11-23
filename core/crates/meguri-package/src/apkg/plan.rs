@@ -59,7 +59,11 @@ impl ImportPlan {
             .iter()
             .filter(|note| matches!(note.decision, Decision::New | Decision::Updated { .. }))
             .count();
-        notes + self.taken.cards.len() + self.taken.revlog.len() + self.stage.writes.len() * 100
+        notes
+            + self.taken.cards.len()
+            + self.taken.revlog.len()
+            + self.stage.writes.len()
+            + usize::try_from(self.stage.rows).unwrap_or(usize::MAX / 2)
     }
 }
 
@@ -133,7 +137,7 @@ pub(crate) fn build(
         .collect();
     let matches = matching_notes(reader, raw, cancel)?;
     let stage = if options.merge_notetypes {
-        super::merge::plan(reader, raw, &taken.notetypes, &targets, &matches, options, cancel, progress)?
+        super::merge::plan(reader, raw, &taken.notetypes, &targets, &matches, options, now_s, cancel, progress)?
     } else {
         plan_without_merge(&taken.notetypes, &targets, options, reader, cancel, progress)?
     };
