@@ -7,7 +7,7 @@ import Testing
 /// The logic the section views of U299 to U301 add on top of the model's values, against
 /// hand-computed fixtures: Reviews Due's axis labels beside Overdue and Later (S7.9; the labels
 /// ran into them in a small box), Retrievability's desired-retention marker (S7.12), the
-/// segmented bars of Card Counts and Answers (S7.7, S7.10), Time of Day's shared callout
+/// Card Counts' donut and Answers' shares (S7.7, S7.10), Time of Day's shared callout
 /// (S7.11) and By Deck's sorting (S7.15).
 @MainActor
 @Suite struct StatsSectionViewsTests {
@@ -116,79 +116,84 @@ import Testing
         #expect(!Self.format.calloutText(unknown, bin: 19).contains("Desired"))
     }
 
-    // MARK: Segmented bars (S7.7, S7.10)
+    // MARK: Card Counts' donut (S7.7) and Answers' shares (S7.10)
 
-    static let bar = StatsBarRow(id: "g", name: "Young", segments: [
-        .init(id: "again", name: "Again", color: .again, value: 1, text: "1 (10.0%)"),
-        .init(id: "hard", name: "Hard", color: .hard, value: 0, text: "0 (0.0%)"),
-        .init(id: "good", name: "Good", color: .good, value: 6, text: "6 (60.0%)"),
-        .init(id: "easy", name: "Easy", color: .easy, value: 3, text: "3 (30.0%)"),
-    ])
-
-    @Test func aBarsSegmentsSpanItsWidthInOrder() {
-        #expect(Self.bar.total == 10)
-        #expect(Self.bar.spans.map(\.start) == [0, 0.1, 0.1, 0.7])
-        #expect(Self.bar.spans.map(\.width) == [0.1, 0, 0.6, 0.3])
-        // An empty segment is never under the pointer.
-        #expect(Self.bar.segment(at: 0.05) == 0)
-        #expect(Self.bar.segment(at: 0.1) == 2)
-        #expect(Self.bar.segment(at: 0.69) == 2)
-        #expect(Self.bar.segment(at: 0.7) == 3)
-        #expect(Self.bar.segment(at: 1) == 3)
-        #expect(Self.bar.segment(at: 1.1) == nil)
-        let empty = StatsBarRow(id: "e", name: "Mature", segments: [.init(id: "again", name: "Again", color: .again, value: 0, text: "")])
-        #expect(empty.segment(at: 0.5) == nil)
-        #expect(Self.bar.spoken(locale: Self.locale) == "Young, Again 1 (10.0%), Hard 0 (0.0%), Good 6 (60.0%), Easy 3 (30.0%)")
+    /// A turn from 12 o'clock clockwise among 50, 0, 25 and 25 cards: the first half is the
+    /// first state, the empty one takes nothing, then a quarter each.
+    @Test func theDonutsSectorsFollowTheTurnFromTwelveOClock() {
+        let counts = [50, 0, 25, 25]
+        #expect(StatsCardCountsDonut.state(atFraction: 0, counts: counts) == 0)
+        #expect(StatsCardCountsDonut.state(atFraction: 0.49, counts: counts) == 0)
+        #expect(StatsCardCountsDonut.state(atFraction: 0.5, counts: counts) == 2)
+        #expect(StatsCardCountsDonut.state(atFraction: 0.75, counts: counts) == 3)
+        #expect(StatsCardCountsDonut.state(atFraction: 1, counts: counts) == 3)
+        #expect(StatsCardCountsDonut.state(atFraction: 0.5, counts: [0, 0]) == nil)
+        // A donut 100 points across: four points on its ring, one in its centre and one beyond it.
+        let size = CGSize(width: 100, height: 100)
+        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 50, y: 5), in: size, counts: counts) == 0)
+        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 95, y: 50), in: size, counts: counts) == 0)
+        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 50, y: 95), in: size, counts: counts) == 2)
+        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 5, y: 50), in: size, counts: counts) == 3)
+        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 50, y: 50), in: size, counts: counts) == nil)
+        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 2, y: 2), in: size, counts: counts) == nil)
     }
 
-    /// Left and Right move along the segments with a value, bar after bar, and stop at the ends.
-    @Test func theKeysMoveAlongTheSegmentsWithAValue() {
-        let rows = [Self.bar, StatsBarRow(id: "m", name: "Mature", segments: Self.bar.segments)]
-        var selection = StatsBarSelection.moved(.none, by: 1, in: rows)
-        #expect(selection == StatsChartSelection(bin: 0, pinned: true, segment: 0))
-        selection = StatsBarSelection.moved(selection, by: 1, in: rows)
-        #expect(selection.segment == 2)
-        selection = StatsBarSelection.moved(selection, by: 2, in: rows)
-        #expect(selection.bin == 1 && selection.segment == 0)
-        #expect(StatsBarSelection.moved(.none, by: -1, in: rows) == StatsChartSelection(bin: 1, pinned: true, segment: 3))
-        let last = StatsChartSelection(bin: 1, pinned: true, segment: 3)
-        #expect(StatsBarSelection.moved(last, by: 1, in: rows) == last)
-    }
-
-    /// A refresh that keeps the bars keeps the pinned segment (S10.2).
-    @Test func aCarriedSelectionKeepsItsSegment() {
-        let bins: [StatsPeriod] = [.bucket("Learning"), .bucket("Young"), .bucket("Mature")]
-        let pinned = StatsChartSelection(bin: 1, pinned: true, segment: 2)
-        #expect(pinned.carried(from: bins, to: bins) == pinned)
-        #expect(pinned.carried(from: bins, to: Array(bins.suffix(2))) == StatsChartSelection(bin: 0, pinned: true, segment: 2))
-    }
-
-    /// Answers' bars come from the model's table: a bar per group, the four buttons in the
-    /// series' order with their names and colours, each segment's callout its count and share.
-    @Test func answersBarsComeFromTheTable() throws {
+    /// Answers stack each kind to 100%: Young's 1, 1, 6 and 2 presses are 10%, 10%, 60% and 20%,
+    /// each written with its count, and the kind's 10 answers end its callout.
+    @Test func answersAreSharesOfEachKind() throws {
         let content = try #require(Fixture.content(.answers, Fixture.presenter(Fixture.set())))
-        guard case let .answers(table)? = content.detail else { Issue.record("no table"); return }
-        let bars = StatsAnswersBox.bars(table, data: content.data, text: StatsText(locale: Self.locale))
-        #expect(bars.map(\.name) == ["Learning", "Young", "Mature"])
-        #expect(bars.map(\.id) == ["learning", "young", "mature"])
-        #expect(bars[1].segments.map(\.name) == ["Again", "Hard", "Good", "Easy"])
-        #expect(bars[1].segments.map(\.color) == [.again, .hard, .good, .easy])
-        #expect(bars[1].segments.map(\.value) == [1, 1, 6, 2])
-        #expect(bars[1].segments.map(\.text) == ["1 (10.0%)", "1 (10.0%)", "6 (60.0%)", "2 (20.0%)"])
-        #expect(StatsAnswersBox.spoken("Young", buttons: ["Again", "Hard"], counts: ["1"], text: StatsText(locale: Self.locale),
-                                       locale: Self.locale) == "Young, Again 1, Hard —")
+        let data = StatsAnswersBox.shares(content.data, text: StatsText(locale: Self.locale), format: Self.format)
+        #expect(data.unit == .fraction)
+        #expect(data.series.map(\.id) == ["again", "hard", "good", "easy"])
+        #expect(data.series.map { $0.values[1] } == [0.1, 0.1, 0.6, 0.2])
+        #expect(data.bins.indices.allSatisfy { data.stackTotal(at: $0) > 0.999 && data.stackTotal(at: $0) < 1.001 })
+        #expect(data.yDomain == 0...1)
+        #expect(Self.format.calloutText(data, bin: 1)
+            == "Young, Again 10.0% (1), Hard 10.0% (1), Good 60.0% (6), Easy 20.0% (2), 10 answers")
+        #expect(data.keepsOneFamily)
+        // Before the part arrives: the four answers' series, so the legend is in place.
+        let waiting = StatsAnswersBox.shares(StatsChartData(bins: [], series: []), text: StatsText(locale: Self.locale),
+                                             format: Self.format)
+        #expect(waiting.legendNames == ["Again", "Hard", "Good", "Easy"] && waiting.bins.isEmpty)
     }
 
-    /// Card Counts' bar has a segment per state in the table's order, its Audio Graph a
-    /// category per state.
-    @Test func cardCountsBarHasASegmentPerState() throws {
-        let content = try #require(Fixture.content(.cardCounts, Fixture.presenter(Fixture.set())))
-        guard case let .cardCounts(table)? = content.detail else { Issue.record("no table"); return }
-        let bar = StatsCardCountsBox.bar(table, title: "Card Counts", text: StatsText(locale: Self.locale))
-        #expect(bar.segments.map(\.id) == ["mature", "young", "relearning", "learning", "new", "suspended", "buried"])
-        #expect(bar.segments.first?.text == "60 (60.0%)")
-        let graph = StatsCardCountsBox.values(table, series: "Cards")
-        #expect(graph.bins.count == 7 && graph.series.first?.values.first == 60)
+    // MARK: Knowledge's likely forgotten band (S7.1)
+
+    /// The band runs only where both lines have a value, ordered low to high, and a gap in
+    /// either breaks it into pieces.
+    @Test func aBandFollowsTheGapsInItsLines() {
+        let data = StatsChartData(
+            bins: (0..<6).map { StatsPeriod.bucket("b\($0)") },
+            series: [
+                StatsSeries(id: "known", name: "Known", color: .remembered, mark: .line(), values: [8, 9, nil, 7, 8, 9]),
+                StatsSeries(id: "studied", name: "Studied", color: .reference, mark: .line(dashed: true),
+                            values: [10, 10, 10, nil, 9, 8]),
+            ],
+            bands: [StatsBand(id: "gap", name: "Likely forgotten", color: .forgotten, lower: "known", upper: "studied")])
+        let pieces = data.bandPieces(data.bands[0])
+        #expect(pieces.map { $0.map(\.bin) } == [[0, 1], [4, 5]])
+        #expect(pieces[0].map(\.lower) == [8, 9] && pieces[0].map(\.upper) == [10, 10])
+        // Known above Studied at the last bin: the band still runs from the lower to the higher.
+        #expect(pieces[1].last.map { [$0.lower, $0.upper] } == [8, 9])
+        #expect(data.legendNames == ["Known", "Studied", "Likely forgotten"])
+        #expect(data.keepsOneFamily)
+        #expect(data.bandPieces(StatsBand(id: "x", name: "", color: .forgotten, lower: "none", upper: "studied")).isEmpty)
+    }
+
+    /// Knowledge Over Time's chart carries the band between Known and Studied in Forgotten's
+    /// orange, its legend entry after the two lines, and the callout's likely forgotten line
+    /// with the same swatch.
+    @Test func knowledgeShadesWhatIsLikelyForgotten() throws {
+        let content = try #require(Fixture.content(.knowledgeOverTime, Fixture.presenter(Fixture.set())))
+        let band = try #require(content.data.bands.first)
+        #expect(band.color == .forgotten && band.lower == "known" && band.upper == "studied")
+        #expect(band.spoken?.contains("stats.") == false)
+        #expect(content.data.legendNames == ["Known", "Studied", "Likely forgotten"])
+        #expect(content.data.calloutLines.first?.color == .forgotten)
+        let rows = Self.format.calloutRows(content.data, bin: content.data.bins.count - 1)
+        #expect(rows.last?.name == "Likely forgotten" && rows.last?.color == .forgotten)
+        // The box keeps its legend while loading.
+        #expect(content.data.skeleton().legendNames.last == "Likely forgotten")
     }
 
     // MARK: Time of Day (S7.11)

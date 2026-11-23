@@ -348,7 +348,7 @@ import Testing
                 figure: StatsBoxFigure(value: "41,233 reviews", sentence: "23 days in a row"),
                 data: samples.reviewsByType(browsable: false), phase: phase, size: size,
                 figures: [.init(label: "Days Studied", value: "318 of 330"), .init(label: "Average a Day", value: "125")],
-                footnoteLines: 1, open: {}
+                footnoteLines: 1
             )
             .frame(width: 520)
             .environment(\.locale, Self.locale)

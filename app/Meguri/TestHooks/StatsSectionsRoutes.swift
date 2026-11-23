@@ -30,7 +30,7 @@ extension TestHooks.StatsRoutes {
         registry.registerShell("stats/chart/cards-over-time/pinned") { _ in
             section(.cardsOverTime, period: .oneMonth, pins: [
                 (.cardsOverTime, { StatsChartSelection(bin: max(0, $0.data.bins.count - 6), pinned: true) }),
-                (.cardCounts, { _ in StatsChartSelection(bin: 0, pinned: true, segment: 1) }),
+                (.cardCounts, { _ in StatsChartSelection(bin: 1, pinned: true) }),
                 (.addedAndStarted, { StatsChartSelection(bin: max(0, $0.data.bins.count - 3), pinned: true) }),
             ])
         }
@@ -58,7 +58,7 @@ extension TestHooks.StatsRoutes {
         registry.registerShell("stats/chart/time-of-day/failed") { _ in section(.answers, .ending(.partFails(.hours))) }
         registry.registerShell("stats/chart/answers/pinned") { _ in
             section(.answers, pins: [
-                (.answers, { _ in StatsChartSelection(bin: 1, pinned: true, segment: 2) }),
+                (.answers, { _ in StatsChartSelection(bin: 2, pinned: true) }),
                 (.timeOfDay, { _ in StatsChartSelection(bin: 9, pinned: true) }),
             ])
         }

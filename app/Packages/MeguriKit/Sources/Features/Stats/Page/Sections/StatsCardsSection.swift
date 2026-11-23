@@ -1,3 +1,5 @@
+import AppModel
+import Charts
 import CoreBridge
 import DesignSystem
 import SwiftUI
@@ -62,13 +64,18 @@ struct StatsAddedAndStartedBox: View {
     }
 }
 
-/// S7.7: today's cards by state, suspended and buried always their own rows (C4.1's
-/// `excluding_inactive`): one horizontal bar divided by state (no donut), then the table, a row
-/// per state with its swatch, name, count and share (a row with none stays, in grey), then
-/// Total and Notes. The header says "Now"; the period never changes it. The Mature figure
-/// shows only at compact width, where the strip has no Mature tile (S6). The table is always
-/// drawn at its final size: while loading its names show with dashes and the bar's place holds
-/// the progress indicator (S10.3).
+/// S7.7, as Antoine changed it on 2026-11-23 (a pie chart instead of the single stacked bar):
+/// today's cards by state, suspended and buried always their own rows (C4.1's
+/// `excluding_inactive`), as a donut (Swift Charts' sectors, the states in their colours and
+/// the table's order from 12 o'clock clockwise, the total in its centre with "cards" under it)
+/// beside the table when the box is wide, above it when narrow. The table has a row per state
+/// with its swatch, name, count and share of all cards (a state with none stays, in grey, and
+/// takes no sector), then Total and Notes; it is the chart's accessible form. The sectors keep
+/// their true angles: a very small state is a thin sector and the table carries it. Hovering
+/// or clicking a sector or a row highlights both. The header says "Now"; the period never
+/// changes it. The Mature figure shows only at compact width, where the strip has no Mature
+/// tile (S6). While loading, the ring is a grey track with the progress indicator in its
+/// centre and the table shows its names with dashes (S10.3).
 struct StatsCardCountsBox: View {
     let slot: StatsBoxSlot
     /// Show in Browse for a state's row, given its label and Q4.1's search text; nil offers none.
@@ -78,31 +85,35 @@ struct StatsCardCountsBox: View {
     /// The count and share columns, wide enough for "150,000" and "100.0%" at the text size.
     @ScaledMetric(relativeTo: .subheadline) private var countWidth: CGFloat = 64
     @ScaledMetric(relativeTo: .subheadline) private var shareWidth: CGFloat = 52
+    @State private var hoveredRow: Int?
+
+    /// The donut's side: the regular plot's height, at every text size (S15).
+    static let side = StatsPlotSize.regular.height
 
     var body: some View {
         let content = slot.content
         let ready = content.phase == .ready
         let title = slot.title(locale: locale)
         let table: StatsCardCountsTable? = if ready, case let .cardCounts(value)? = content.detail { value } else { nil }
+        let selection = slot.selection
+        let highlighted = selection.wrappedValue.bin ?? hoveredRow
         StatsBoxContainer {
             VStack(alignment: .leading, spacing: Spacing.small) {
                 StatsBoxHeader(box: slot.id.rawValue, title: title, open: slot.open) { StatsBoxMarker.now }
                 StatsBoxFigureView(figure: content.figure, ready: ready)
-                Group {
-                    if let table {
-                        StatsSegmentedBars(box: slot.id.rawValue, rows: [Self.bar(table, title: title, text: StatsText(locale: locale))], showsNames: false,
-                                           selection: slot.selection,
-                                           summary: StatsSectionText.summary(title, content.figure) ?? title,
-                                           audioGraph: Self.values(table, series: StatsText(locale: locale).cardsSeries))
-                    } else {
-                        StatsBoxPhaseView(phase: content.phase)
-                            .frame(maxWidth: .infinity, minHeight: StatsSegmentedBars.barHeight)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: Spacing.large) {
+                        donut(table, phase: content.phase, highlighted: highlighted, summary: title)
+                        rows(table, highlighted: highlighted)
+                            .frame(minWidth: 200)
+                    }
+                    VStack(alignment: .leading, spacing: Spacing.medium) {
+                        donut(table, phase: content.phase, highlighted: highlighted, summary: title)
+                            .frame(maxWidth: .infinity)
+                        rows(table, highlighted: highlighted)
                     }
                 }
-                // The callout floats over the table under the bar.
-                .zIndex(1)
-                .contextMenu { if let table { exportMenu(table, title: title) } }
-                rows(table)
+                .contextMenu { if let table { exportMenu(table) } }
                 if horizontalSizeClass == .compact {
                     StatsBoxSmallFigures(figures: content.figures, ready: ready)
                 }
@@ -112,43 +123,44 @@ struct StatsCardCountsBox: View {
         .accessibilityIdentifier("stats.box.\(slot.id.rawValue)")
     }
 
-    /// The one bar: a segment per state, in the table's order.
-    static func bar(_ table: StatsCardCountsTable, title: String, text: StatsText) -> StatsBarRow {
-        StatsBarRow(id: "states", name: title, segments: table.rows.map { row in
-            .init(id: "\(row.label)", name: row.name, color: row.color, value: Double(row.count),
-                  text: text.withShare(row.countText, row.shareText))
-        })
+    private func donut(_ table: StatsCardCountsTable?, phase: StatsBoxPhase, highlighted: Int?, summary: String) -> some View {
+        let text = StatsText(locale: locale)
+        return StatsCardCountsDonut(
+            table: table, phase: phase, highlighted: highlighted,
+            unit: table.map { text.cardsUnit(Self.total($0)) } ?? "",
+            summary: StatsSectionText.summary(summary, slot.content.figure) ?? summary,
+            selection: slot.selection, hovered: $hoveredRow
+        )
+        .frame(width: Self.side, height: Self.side)
     }
 
-    /// The table as a chart's data, a category per state: the Audio Graph's.
-    static func values(_ table: StatsCardCountsTable, series: String) -> StatsChartData {
-        StatsChartData(bins: table.rows.map { .bucket($0.name) },
-                       series: [StatsSeries(id: "cards", name: series, color: .measure, mark: .bar,
-                                            values: table.rows.map { Double($0.count) })])
-    }
+    static func total(_ table: StatsCardCountsTable) -> Int { table.rows.reduce(0) { $0 + $1.count } }
 
-    @ViewBuilder private func exportMenu(_ table: StatsCardCountsTable, title: String) -> some View {
+    @ViewBuilder private func exportMenu(_ table: StatsCardCountsTable) -> some View {
         let text = StatsText(locale: locale)
         let lines = table.rows.map { "\($0.name)\t\($0.countText)\t\($0.shareText)" }
             + ["\(text.figureTotal)\t\(table.total)", "\(text.figureNotes)\t\(table.notes)"]
         StatsExportMenu(values: lines.joined(separator: "\n")) {
-            StatsSegmentedBars(box: slot.id.rawValue, rows: [Self.bar(table, title: title, text: StatsText(locale: locale))], showsNames: false,
-                               selection: .constant(.none), summary: title, audioGraph: Self.values(table, series: StatsText(locale: locale).cardsSeries))
+            StatsCardCountsDonut(table: table, phase: .ready, highlighted: nil, unit: text.cardsUnit(Self.total(table)),
+                                 summary: "", selection: .constant(.none), hovered: .constant(nil))
+                .frame(width: Self.side, height: Self.side)
         }
     }
 
     /// The state rows, then Total and Notes: names in every phase, values once ready.
-    private func rows(_ table: StatsCardCountsTable?) -> some View {
+    private func rows(_ table: StatsCardCountsTable?, highlighted: Int?) -> some View {
         let text = StatsText(locale: locale)
         let names: [(StatsCountLabel, String, StatsSeriesColor)] = [
             (.mature, text.mature, .mature), (.young, text.young, .young), (.relearning, text.relearning, .relearning),
             (.learning, text.learning, .learning), (.new, text.new, .new), (.suspended, text.suspended, .suspended),
             (.buried, text.buried, .buried),
         ]
-        return VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-            ForEach(names, id: \.0) { label, name, color in
-                let row = table?.rows.first { $0.label == label }
-                stateRow(label: label, name: row?.name ?? name, color: row?.color ?? color, row: row)
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(names.enumerated()), id: \.offset) { index, item in
+                let (label, name, color) = item
+                let row = table?.rows.firstIndex { $0.label == label }.map { (index: $0, row: table!.rows[$0]) }
+                stateRow(label: label, name: row?.row.name ?? name, color: row?.row.color ?? color, row: row?.row,
+                         index: row?.index ?? index, highlighted: highlighted == (row?.index ?? index) && table != nil)
             }
             Divider()
                 .padding(.vertical, Spacing.xxSmall)
@@ -161,7 +173,8 @@ struct StatsCardCountsBox: View {
     }
 
     @ViewBuilder
-    private func stateRow(label: StatsCountLabel, name: String, color: StatsSeriesColor, row: StatsCardCountsTable.Row?) -> some View {
+    private func stateRow(label: StatsCountLabel, name: String, color: StatsSeriesColor, row: StatsCardCountsTable.Row?,
+                          index: Int, highlighted: Bool) -> some View {
         // A state with no card stays, in grey (S7.7).
         let grey = row == nil || row?.count == 0
         let cells = HStack(spacing: Spacing.small) {
@@ -181,11 +194,29 @@ struct StatsCardCountsBox: View {
                 .lineLimit(1)
                 .frame(minWidth: shareWidth, alignment: .trailing)
         }
+        .padding(.vertical, Spacing.xxSmall / 2)
+        .padding(.horizontal, Spacing.xxSmall)
+        .background(highlighted ? AnyShapeStyle(HierarchicalShapeStyle.quaternary) : AnyShapeStyle(Color.clear),
+                    in: Radius.rounded(Radius.small))
+        .padding(.horizontal, -Spacing.xxSmall)
+        .contentShape(Rectangle())
+        #if os(macOS)
+        .onHover { inside in
+            guard row != nil, (row?.count ?? 0) > 0 else { return }
+            if inside { hoveredRow = index } else if hoveredRow == index { hoveredRow = nil }
+        }
+        #endif
+        .onTapGesture {
+            guard let row, row.count > 0 else { return }
+            let selection = slot.selection
+            let pinned = StatsChartSelection(bin: index, pinned: true)
+            selection.wrappedValue = selection.wrappedValue == pinned ? .none : pinned
+        }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("stats.box.cardCounts.row.\(label)")
         if let row, let item = row.itemText, let showInBrowse {
-            Button { showInBrowse(label, item) } label: { cells.contentShape(Rectangle()) }
-                .buttonStyle(.plain)
+            cells
+                .accessibilityAddTraits(.isButton)
                 .accessibilityAction(named: Text("stats.chart.showInBrowse", bundle: .module)) { showInBrowse(label, item) }
         } else {
             cells
@@ -205,9 +236,162 @@ struct StatsCardCountsBox: View {
                 .foregroundStyle(value == nil ? .secondary : .primary)
                 .lineLimit(1)
                 .frame(minWidth: countWidth, alignment: .trailing)
-            Color.clear.frame(width: shareWidth, height: 1)
+            Color.clear.frame(minWidth: shareWidth, maxHeight: 1)
         }
+        .padding(.vertical, Spacing.xxSmall / 2)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("stats.box.cardCounts.row.\(id)")
+    }
+}
+
+/// Card Counts' donut (S7.7): a sector per state with cards, in the table's order from 12
+/// o'clock clockwise with their true angles, flat and meeting (a thin gap only with
+/// Differentiate Without Colour); the total in the centre. A highlighted state keeps its colour
+/// and the others fade, as a chart's other bars do. The pointer over a sector highlights it, a
+/// click (a tap) pins it and a second one clears it; Left and Right move a pinned state, Esc
+/// clears (S14). One element with the box's sentence: the table beside it is the chart's
+/// accessible form, so it has no Audio Graph of its own (S15).
+struct StatsCardCountsDonut: View {
+    let table: StatsCardCountsTable?
+    let phase: StatsBoxPhase
+    let highlighted: Int?
+    /// "cards" under the total, in its plural form.
+    let unit: String
+    let summary: String
+    @Binding var selection: StatsChartSelection
+    @Binding var hovered: Int?
+
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.statsScrolling) private var scrolling
+    @FocusState private var focused: Bool
+
+    /// The ring's inner radius as a share of its outer one.
+    static let innerRatio = 0.62
+
+    var body: some View {
+        ZStack {
+            if let table, StatsCardCountsBox.total(table) > 0 {
+                chart(table)
+                VStack(spacing: 0) {
+                    Text(verbatim: table.total)
+                        .font(.title3.weight(.semibold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                    Text(verbatim: unit)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, Spacing.large)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            } else {
+                Circle()
+                    .stroke(.quaternary, lineWidth: StatsPlotSize.regular.height * (1 - Self.innerRatio) / 2)
+                    .padding(StatsPlotSize.regular.height * (1 - Self.innerRatio) / 4)
+                    .accessibilityHidden(true)
+                StatsBoxPhaseView(phase: phase == .ready ? .empty("", detail: nil) : phase)
+            }
+        }
+        #if os(macOS)
+        .focusable(table != nil, interactions: .activate)
+        #else
+        .focusable(table != nil)
+        #endif
+        .focused($focused)
+        .onKeyPress(.leftArrow) { move(-1) }
+        .onKeyPress(.rightArrow) { move(1) }
+        .onKeyPress(.escape) { clear() }
+        #if os(macOS)
+        .onChange(of: focused) {
+            if StatsChartSelection.unpinsOnFocusLoss(focused: focused, pinned: selection.pinned, ready: table != nil) {
+                selection = .none
+            }
+        }
+        #endif
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: summary))
+        .accessibilityIdentifier("stats.box.cardCounts.plot")
+    }
+
+    private var fadedOpacity: Double { contrast == .increased ? 0.5 : 0.3 }
+
+    private func chart(_ table: StatsCardCountsTable) -> some View {
+        let rows = Array(table.rows.enumerated()).filter { $0.element.count > 0 }
+        return Chart(rows, id: \.offset) { index, row in
+            SectorMark(angle: .value("Cards", row.count), innerRadius: .ratio(Self.innerRatio),
+                       angularInset: differentiateWithoutColor ? 1 : 0)
+                .foregroundStyle(row.color.color)
+                .opacity(highlighted == nil || highlighted == index ? 1 : fadedOpacity)
+                .accessibilityHidden(true)
+        }
+        .chartLegend(.hidden)
+        .overlay {
+            GeometryReader { geometry in
+                let counts = table.rows.map(\.count)
+                Color.clear
+                    .contentShape(Rectangle())
+                    #if os(macOS)
+                    .onContinuousHover(coordinateSpace: .local) { phase in
+                        guard !scrolling.active else { return }
+                        switch phase {
+                        case let .active(location):
+                            let next = Self.state(at: location, in: geometry.size, counts: counts)
+                            if next != hovered { hovered = next }
+                        case .ended:
+                            if hovered != nil { hovered = nil }
+                        }
+                    }
+                    #endif
+                    .gesture(SpatialTapGesture(coordinateSpace: .local).onEnded { value in
+                        let next = Self.state(at: value.location, in: geometry.size, counts: counts)
+                            .map { StatsChartSelection(bin: $0, pinned: true) } ?? .none
+                        selection = next == selection ? .none : next
+                        focused = next != .none
+                    })
+            }
+        }
+    }
+
+    /// The state under a point: its angle from 12 o'clock clockwise among the cumulative counts,
+    /// inside the ring (between the inner and outer radius), or nil.
+    static func state(at point: CGPoint, in size: CGSize, counts: [Int]) -> Int? {
+        let radius = min(size.width, size.height) / 2
+        let dx = point.x - size.width / 2, dy = point.y - size.height / 2
+        let distance = (dx * dx + dy * dy).squareRoot()
+        guard radius > 0, distance <= radius, distance >= radius * innerRatio else { return nil }
+        var angle = atan2(dx, -dy)
+        if angle < 0 { angle += 2 * .pi }
+        return state(atFraction: angle / (2 * .pi), counts: counts)
+    }
+
+    /// The state whose sector holds a fraction of the turn from 12 o'clock clockwise.
+    static func state(atFraction fraction: Double, counts: [Int]) -> Int? {
+        let total = counts.reduce(0) { $0 + max(0, $1) }
+        guard total > 0, fraction >= 0, fraction <= 1 else { return nil }
+        var start = 0.0
+        for (index, count) in counts.enumerated() where count > 0 {
+            let end = start + Double(count) / Double(total)
+            if fraction < end || index == counts.lastIndex(where: { $0 > 0 }) { return index }
+            start = end
+        }
+        return nil
+    }
+
+    private func move(_ step: Int) -> KeyPress.Result {
+        guard let table else { return .ignored }
+        let states = table.rows.indices.filter { table.rows[$0].count > 0 }
+        guard !states.isEmpty else { return .ignored }
+        let current = selection.bin.flatMap { states.firstIndex(of: $0) }
+        let next = current.map { min(max($0 + step, 0), states.count - 1) } ?? (step > 0 ? 0 : states.count - 1)
+        selection = StatsChartSelection(bin: states[next], pinned: true)
+        return .handled
+    }
+
+    private func clear() -> KeyPress.Result {
+        guard selection != .none else { return .ignored }
+        selection = .none
+        return .handled
     }
 }

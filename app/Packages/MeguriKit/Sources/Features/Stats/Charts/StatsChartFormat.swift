@@ -242,14 +242,15 @@ public struct StatsChartFormat: Sendable {
         var rows: [(name: String, value: String, color: StatsSeriesColor?)] = []
         for series in data.series {
             guard let value = data.value(series, at: bin) else { continue }
-            rows.append((series.name, self.value(value, unit: data.unit), series.color))
+            let written = series.valueTexts.flatMap { $0.indices.contains(bin) ? $0[bin] : nil } ?? self.value(value, unit: data.unit)
+            rows.append((series.name, written, series.color))
             if series.openPoints.contains(bin) {
                 rows.append((String(localized: "stats.chart.openPoint", bundle: .module), "", nil))
             }
         }
         for line in data.calloutLines {
             guard let text = line.text(at: bin, format: self, unit: data.unit) else { continue }
-            rows.append((line.name, text, nil))
+            rows.append((line.name, text, line.color))
         }
         for rule in data.rules {
             rows.append((rule.name, self.value(rule.value, unit: data.unit), rule.color))
@@ -265,7 +266,9 @@ public struct StatsChartFormat: Sendable {
     /// (S15: "each reading the callout's text").
     public func calloutText(_ data: StatsChartData, bin: Int) -> String {
         guard data.bins.indices.contains(bin) else { return "" }
-        let rows = calloutRows(data, bin: bin).map { $0.value.isEmpty ? $0.name : "\($0.name) \($0.value)" }
+        let rows = calloutRows(data, bin: bin).map { row in
+            row.value.isEmpty ? row.name : row.name.isEmpty ? row.value : "\(row.name) \(row.value)"
+        }
         return ([name(data.bins[bin])] + rows).joined(separator: ", ")
     }
 

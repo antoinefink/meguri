@@ -13,14 +13,10 @@ import UIKit
 public struct StatsChartSelection: Hashable, Sendable {
     public var bin: Int?
     public var pinned: Bool
-    /// The segment of the bin's stacked bar, where a box selects one (Answers' buttons, S7.10);
-    /// nil selects the whole bin.
-    public var segment: Int?
 
-    public init(bin: Int? = nil, pinned: Bool = false, segment: Int? = nil) {
+    public init(bin: Int? = nil, pinned: Bool = false) {
         self.bin = bin
         self.pinned = pinned
-        self.segment = segment
     }
 
     public static let none = StatsChartSelection()
@@ -41,9 +37,7 @@ public struct StatsChartSelection: Hashable, Sendable {
             return new.indices.contains(bin) ? self : .none
         }
         guard old.indices.contains(bin), let moved = new.firstIndex(of: old[bin]) else { return .none }
-        var carried = self
-        carried.bin = moved
-        return carried
+        return StatsChartSelection(bin: moved, pinned: pinned)
     }
 }
 
@@ -267,7 +261,8 @@ struct StatsChartPlot: View {
     static func bin(_ id: String) -> Int? { id.hasPrefix("b") ? Int(id.dropFirst()) : nil }
 
     private var legendColors: [Color] {
-        data.series.map(\.color.color) + data.rules.map(\.color.color) + data.markers.map(\.color.color)
+        data.series.map(\.color.color) + data.bands.map(\.color.color) + data.rules.map(\.color.color)
+            + data.markers.map(\.color.color)
     }
 
     private var fadedOpacity: Double { contrast == .increased ? 0.5 : 0.3 }
@@ -281,6 +276,7 @@ struct StatsChartPlot: View {
         Chart {
             if isReady {
                 stacked
+                bands
                 singles
                 rules
                 selectionRule
@@ -345,6 +341,27 @@ struct StatsChartPlot: View {
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityHidden(true)
+        }
+    }
+
+    /// The bands between two lines, under them: a soft tint of the band's colour, at the faded
+    /// opacity a chart's other bars take (more with Increase Contrast). With Differentiate
+    /// Without Colour it keeps its fill: its edges are the two lines, which differ in more
+    /// than colour (solid and dashed), and the legend and the callout name it.
+    @ChartContentBuilder private var bands: some ChartContent {
+        ForEach(data.bands) { band in
+            ForEach(Array(data.bandPieces(band).enumerated()), id: \.offset) { index, piece in
+                ForEach(piece, id: \.bin) { point in
+                    AreaMark(
+                        x: .value("Period", Self.id(point.bin)),
+                        yStart: .value("From", point.lower),
+                        yEnd: .value("To", point.upper),
+                        series: .value("Piece", "\(band.id)#\(index)")
+                    )
+                    .foregroundStyle(band.color.color.opacity(fadedOpacity))
+                    .accessibilityHidden(true)
+                }
+            }
         }
     }
 

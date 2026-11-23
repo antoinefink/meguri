@@ -5,8 +5,8 @@ import SwiftUI
 
 /// The Answering section's boxes (plan U300; `stats/statistics-page` S7.10, S7.11, S15, S16):
 /// Answers and Time of Day, side by side (no lead). The model writes every value; these views
-/// draw Answers' three bars and table and Time of Day's two aligned panels. Neither offers Show
-/// in Browse (S8.4).
+/// draw Answers' shares and Time of Day's two aligned panels. Neither offers Show in Browse
+/// (S8.4).
 enum StatsAnsweringSection {
     @MainActor @ViewBuilder static func box(_ slot: StatsBoxSlot) -> some View {
         switch slot.id {
@@ -16,129 +16,56 @@ enum StatsAnsweringSection {
     }
 }
 
-/// S7.10: presses in the period window (S4.3) as one full-width bar for each of Learning, Young
-/// and Mature, divided Again, Hard, Good, Easy in that order, the segments meeting as one bar
-/// (N25.4; S7.10's gap between segments gave way to the owner's flat bars of 2026-11-23, and
-/// only Differentiate Without Colour parts them); under it the table repeats the four counts as
-/// columns per group, its header the legend. The figure, "<p>% Good" and each group's Again
-/// share. A segment's callout gives its count and its share of the group.
+/// S7.10, as Antoine changed it on 2026-11-23 ("percentages instead of counts"): one vertical
+/// bar per card kind (Learning, Young, Mature), stacked to 100% by answer from the baseline
+/// Again, Hard, Good, Easy on a 0 to 100% axis, so a kind with few answers reads as well as
+/// one with many. The callout names the kind, each answer's share with its count, and the
+/// kind's answers ("15,880 answers"); the figure stays the presses with "<p>% Good", and the
+/// three Again shares stay. The segments meet, as every stacked bar on the page does.
 struct StatsAnswersBox: View {
     let slot: StatsBoxSlot
     @Environment(\.locale) private var locale
-    @Environment(\.calendar) private var calendar
-    @Environment(\.appClock) private var clock
-    /// A button's column, wide enough for its legend entry and "12,345".
-    @ScaledMetric(relativeTo: .subheadline) private var countWidth: CGFloat = 64
 
     var body: some View {
         let content = slot.content
-        let ready = content.phase == .ready
         let title = slot.title(locale: locale)
-        let table: StatsAnswersTable? = if ready, case let .answers(value)? = content.detail { value } else { nil }
-        let bars = table.map { Self.bars($0, data: content.data, text: StatsText(locale: locale)) } ?? []
-        StatsBoxContainer {
-            VStack(alignment: .leading, spacing: Spacing.small) {
-                StatsBoxHeader(box: slot.id.rawValue, title: title, open: slot.open) { EmptyView() }
-                StatsBoxFigureView(figure: content.figure, ready: ready)
-                Group {
-                    if !bars.isEmpty {
-                        StatsSegmentedBars(box: slot.id.rawValue, rows: bars, showsNames: true, selection: slot.selection,
-                                           summary: StatsSectionText.summary(title, content.figure) ?? title,
-                                           audioGraph: content.data)
-                    } else {
-                        StatsBoxPhaseView(phase: content.phase)
-                            .frame(maxWidth: .infinity, minHeight: Self.barsHeight)
-                    }
-                }
-                .frame(minHeight: Self.barsHeight, alignment: .top)
-                // The callout floats over the table under the bars.
-                .zIndex(1)
-                .contextMenu {
-                    if ready {
-                        StatsExportMenu(values: StatsChartFormat(locale: locale, calendar: calendar, now: clock.now()).tabSeparatedValues(content.data)) {
-                            StatsSegmentedBars(box: slot.id.rawValue, rows: bars, showsNames: true, selection: .constant(.none),
-                                               summary: title, audioGraph: content.data)
-                        }
-                    }
-                }
-                tableView(table, data: content.data)
-                StatsBoxSmallFigures(figures: content.figures, ready: ready)
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("stats.box.\(slot.id.rawValue)")
+        StatsChartBox(
+            box: slot.id.rawValue, title: title, figure: content.figure,
+            data: Self.shares(content.data, text: StatsText(locale: locale), format: StatsChartFormat(locale: locale, now: .distantPast)),
+            phase: content.phase, size: slot.size, figures: content.figures, footnote: content.footnote,
+            footnoteLines: slot.id.footnoteLines, selection: slot.selection, open: slot.open,
+            summary: StatsSectionText.summary(title, content.figure)
+        )
     }
 
-    /// The groups' identifier parts, `stats.box.answers.bar.<group>` and `.row.<group>`: stable
-    /// in every language.
-    static let groupIDs = ["learning", "young", "mature"]
-
-    /// Three bars and the space between them: the plot's place in every phase.
-    static var barsHeight: CGFloat { 3 * StatsSegmentedBars.barHeight + 2 * Spacing.xSmall }
-
-    /// A bar per group, its segments the four buttons with the series' names and colours.
-    static func bars(_ table: StatsAnswersTable, data: StatsChartData, text: StatsText) -> [StatsBarRow] {
-        table.rows.enumerated().map { group, row in
-            StatsBarRow(id: groupIDs[min(group, groupIDs.count - 1)], name: row.name, segments: data.series.indices.map { button in
-                let series = data.series[button]
-                let count = row.counts.indices.contains(button) ? row.counts[button] : 0
-                let countText = row.countTexts.indices.contains(button) ? row.countTexts[button] : ""
-                let share = row.shareTexts.indices.contains(button) ? row.shareTexts[button] : ""
-                return .init(id: series.id, name: series.name, color: series.color, value: Double(count),
-                             text: text.withShare(countText, share))
-            })
+    /// The model's presses per kind and answer as shares of each kind's presses, each written
+    /// with its count, and each kind's answers as a callout line. With no data yet the four
+    /// answers' series stay, so the legend is in place while the box loads (S10.3).
+    static func shares(_ data: StatsChartData, text: StatsText, format: StatsChartFormat) -> StatsChartData {
+        let answers: [(String, String, StatsSeriesColor)] = [
+            ("again", text.again, .again), ("hard", text.hard, .hard), ("good", text.good, .good), ("easy", text.easy, .easy),
+        ]
+        guard !data.series.isEmpty else {
+            return StatsChartData(bins: [], series: answers.map { StatsSeries(id: $0.0, name: $0.1, color: $0.2, mark: .stackedBar, values: []) },
+                                  unit: .fraction, yScale: .fraction(lower: 0))
         }
-    }
-
-    /// The table: a column per button (its header the legend, in stack order), a row per group.
-    private func tableView(_ table: StatsAnswersTable?, data: StatsChartData) -> some View {
-        let text = StatsText(locale: locale)
-        let buttons: [(String, StatsSeriesColor)] = data.series.isEmpty
-            ? [(text.again, .again), (text.hard, .hard), (text.good, .good), (text.easy, .easy)]
-            : data.series.map { ($0.name, $0.color) }
-        let groups = table?.rows.map { ($0.name, $0.countTexts) }
-            ?? [text.learning, text.young, text.mature].map { ($0, [String]()) }
-        return VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-            HStack(spacing: Spacing.small) {
-                Spacer(minLength: 0)
-                ForEach(buttons, id: \.0) { name, color in
-                    StatsLegendEntry(name: name, color: color)
-                        .minimumScaleFactor(0.8)
-                        .frame(width: countWidth, alignment: .trailing)
-                }
+        let totals = data.bins.indices.map { bin in data.series.reduce(0) { $0 + max(0, data.value($1, at: bin) ?? 0) } }
+        let series = data.series.map { series in
+            var share = series
+            share.values = data.bins.indices.map { bin in
+                totals[bin] > 0 ? (data.value(series, at: bin) ?? 0) / totals[bin] : nil
             }
-            .accessibilityHidden(true)
-            ForEach(Array(groups.enumerated()), id: \.offset) { group, row in
-                let (name, counts) = row
-                HStack(spacing: Spacing.small) {
-                    Text(verbatim: name)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(buttons.indices, id: \.self) { index in
-                        Text(verbatim: counts.indices.contains(index) ? counts[index] : "—")
-                            .monospacedDigit()
-                            .foregroundStyle(counts.isEmpty ? .secondary : .primary)
-                            .lineLimit(1)
-                            .frame(width: countWidth, alignment: .trailing)
-                    }
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text(verbatim: Self.spoken(name, buttons: buttons.map(\.0), counts: counts, text: text,
-                                                               locale: locale)))
-                .accessibilityIdentifier("stats.box.answers.row.\(Self.groupIDs[min(group, Self.groupIDs.count - 1)])")
+            share.valueTexts = data.bins.indices.map { bin in
+                guard totals[bin] > 0, let count = data.value(series, at: bin) else { return nil }
+                return text.withShare(format.percent(count / totals[bin]), format.count(count))
             }
+            return share
         }
-        .font(.subheadline)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("stats.box.answers.table")
-    }
-
-    /// A group's row for VoiceOver: "Young, Again 12, Hard 3, Good 200, Easy 50".
-    static func spoken(_ group: String, buttons: [String], counts: [String], text: StatsText, locale: Locale) -> String {
-        let labelled = StatsSectionText(locale: locale)
-        return ([group] + buttons.indices.map { labelled.labelled(buttons[$0], counts.indices.contains($0) ? counts[$0] : text.noValue) })
-            .joined(separator: ", ")
+        let answered = totals.map { total -> String? in text.answers(Int(total), format.count(total)) }
+        // A fraction axis from 0 to 100%, whatever a sum of shares rounds to.
+        return StatsChartData(bins: data.bins, series: series, unit: .fraction, yScale: .fraction(lower: 0),
+                              calloutLines: [StatsCalloutLine(id: "answers", name: "", values: totals.map { $0 }, texts: answered)],
+                              unitName: data.unitName)
     }
 }
 

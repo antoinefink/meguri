@@ -2,17 +2,19 @@ import DesignSystem
 import SwiftUI
 
 // The parts of a box (contract N25.4) that every box draws the same way, whether its plot is a
-// chart, a segmented bar with its table (Card Counts, Answers) or a table (By Deck): the header,
+// chart, a donut with its table (Card Counts) or a table (By Deck): the header,
 // the figure and its sentence, the small figures and the footnote. Each keeps its size in every
 // phase (S8.5), so the boxes of a row line up and nothing moves when the numbers arrive.
 
-/// The header (N25.4 part 1): a button with the title and a chevron, opening the chart's page
-/// (S9), then the box's switches or marker trailing on the same line; stacked at the
-/// accessibility text sizes. Every header is as tall as one with a small switch.
+/// The header (N25.4 part 1): the title, then the box's switches or marker trailing on the same
+/// line; stacked at the accessibility text sizes. Every header is as tall as one with a small
+/// switch. The title is a plain heading while the box has no page to open (Antoine, 2026-11-23:
+/// the carets served no purpose); once a chart's own page exists (S9, U302) its `open` makes the
+/// title a button with a chevron again.
 struct StatsBoxHeader<Accessory: View>: View {
     let box: String
     let title: String
-    let open: () -> Void
+    let open: (() -> Void)?
     @ViewBuilder let accessory: () -> Accessory
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -22,23 +24,7 @@ struct StatsBoxHeader<Accessory: View>: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xSmall))
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Spacing.xSmall))
         layout {
-            Button(action: open) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.xxSmall) {
-                    Text(verbatim: title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .multilineTextAlignment(.leading)
-                    Image(systemName: "chevron.right")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(title)
-            .accessibilityHint(Text("stats.chart.openHint", bundle: .module))
-            .accessibilityIdentifier("stats.box.\(box).header")
+            StatsBoxTitle(box: box, title: title, open: open)
             if !stacks {
                 Spacer(minLength: Spacing.xSmall)
                 // Every header as tall as one with a small switch, aligned on its baseline, so
@@ -56,6 +42,44 @@ struct StatsBoxHeader<Accessory: View>: View {
             accessory()
                 .controlSize(.small)
         }
+    }
+}
+
+/// A box's title (N25.4 part 1), `stats.box.<box>.header`: a plain heading, or with `open` a
+/// button with a trailing chevron that opens the chart's page (S9).
+struct StatsBoxTitle: View {
+    let box: String
+    let title: String
+    let open: (() -> Void)?
+
+    var body: some View {
+        if let open {
+            Button(action: open) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xxSmall) {
+                    text
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityHint(Text("stats.chart.openHint", bundle: .module))
+            .accessibilityIdentifier("stats.box.\(box).header")
+        } else {
+            text
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("stats.box.\(box).header")
+        }
+    }
+
+    private var text: some View {
+        Text(verbatim: title)
+            .font(.headline)
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(.leading)
     }
 }
 

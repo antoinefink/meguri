@@ -59,7 +59,7 @@ public struct StatsChartBox<Accessory: View>: View {
     private let footnoteLines: Int
     private let separatesSeries: Bool?
     private let externalSelection: Binding<StatsChartSelection>?
-    private let open: () -> Void
+    private let open: (() -> Void)?
     private let showInBrowse: ((Int) -> Void)?
     private let spokenSummary: String?
 
@@ -85,7 +85,7 @@ public struct StatsChartBox<Accessory: View>: View {
         phase: StatsBoxPhase = .ready, size: StatsPlotSize = .regular,
         figures: [StatsSmallFigure] = [], footnote: String? = nil, footnoteLines: Int = 0,
         separatesSeries: Bool? = nil, selection: Binding<StatsChartSelection>? = nil,
-        open: @escaping () -> Void, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil,
+        open: (() -> Void)? = nil, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil,
         @ViewBuilder accessory: () -> Accessory
     ) {
         spokenSummary = summary
@@ -248,7 +248,7 @@ extension StatsChartBox where Accessory == EmptyView {
         phase: StatsBoxPhase = .ready, size: StatsPlotSize = .regular,
         figures: [StatsSmallFigure] = [], footnote: String? = nil, footnoteLines: Int = 0,
         separatesSeries: Bool? = nil, selection: Binding<StatsChartSelection>? = nil,
-        open: @escaping () -> Void, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil
+        open: (() -> Void)? = nil, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil
     ) {
         self.init(
             box: box, title: title, figure: figure, data: data, phase: phase, size: size,

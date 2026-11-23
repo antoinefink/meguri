@@ -39,36 +39,20 @@ struct StatsReviewsOverTimeBox: View {
     }
 }
 
-/// A box's frame for a box that is not a chart (Activity): the header button with its chevron
-/// (N25.4 part 1) over the content, in the system group box on the Mac and the iPad at regular
+/// A box's frame for a box that is not a chart (Activity): the title (N25.4 part 1; a plain
+/// heading until the chart's page exists, `StatsBoxTitle`) over the content, in the system group box on the Mac and the iPad at regular
 /// width, and a section-like group on the grouped background at compact width (N25.6), as
 /// `StatsChartBox` draws its own.
 struct StatsBoxChrome<Content: View>: View {
     let box: String
     let title: String
-    let open: () -> Void
+    let open: (() -> Void)?
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         container {
             VStack(alignment: .leading, spacing: Spacing.small) {
-                Button(action: open) {
-                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xxSmall) {
-                        Text(verbatim: title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .multilineTextAlignment(.leading)
-                        Image(systemName: "chevron.right")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(title)
-                .accessibilityHint(Text("stats.chart.openHint", bundle: .module))
-                .accessibilityIdentifier("stats.box.\(box).header")
+                StatsBoxTitle(box: box, title: title, open: open)
                 content()
             }
         }

@@ -82,7 +82,9 @@ struct StatsAudioGraph: AXChartDescriptorRepresentable {
                 }
             )
         }
-        return AXChartDescriptor(title: summary, summary: nil, xAxis: xAxis, yAxis: yAxis, additionalAxes: [], series: series)
+        let described = data.bands.compactMap(\.spoken)
+        return AXChartDescriptor(title: summary, summary: described.isEmpty ? nil : described.joined(separator: " "),
+                                 xAxis: xAxis, yAxis: yAxis, additionalAxes: [], series: series)
     }
 
     static func unitName(_ unit: StatsValueUnit) -> String {

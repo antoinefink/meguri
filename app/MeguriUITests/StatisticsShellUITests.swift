@@ -175,8 +175,10 @@ final class StatisticsShellUITests: XCTestCase {
             let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
             order.append(focused.exists ? focused.identifier : "")
         }
-        let expected = ["stats.toolbar.deck", "stats.toolbar.period", "stats.box.knowledgeOverTime.header",
-                        "stats.box.retention.header", "stats.boxSwitch.retentionKind", "stats.box.forgotten.header"]
+        // The box titles are plain headings until a chart's page exists (U302): Tab goes from the
+        // toolbar to each box's switches and plot (S14 without its header buttons).
+        let expected = ["stats.toolbar.deck", "stats.toolbar.period", "stats.box.knowledgeOverTime.plot",
+                        "stats.boxSwitch.retentionKind", "stats.box.retention.plot", "stats.box.forgotten.plot"]
         if order.allSatisfy(\.isEmpty) {
             // iPadOS moves Tab focus between buttons only with Full Keyboard Access, a device
             // setting the simulator pool leaves off: nothing here can be read.
