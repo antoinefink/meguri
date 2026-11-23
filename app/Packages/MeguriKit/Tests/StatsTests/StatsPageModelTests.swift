@@ -290,8 +290,9 @@ import Testing
         #expect(second.scope == .allDecks)
     }
 
-    /// A closed or replaced collection's deck tree is never offered for the next one: the pop-up
-    /// and every deck name wait for the tree read for the collection that opens.
+    /// The model's side of a closed or replaced collection: it forgets the deck tree, so the
+    /// pop-up and every deck name wait for the tree the host reads for the collection that opens.
+    /// (The host re-offers a tree only after the collection has handled the replacement.)
     @Test func anotherCollectionNeverShowsTheOldDeckTree() {
         let model = model()
         #expect(!model.deckMenu.isEmpty)
@@ -304,7 +305,7 @@ import Testing
         // Replaced while open (CollectionReplaced, then the new identity).
         model.receive(.collectionReplaced)
         model.collectionOpened(identity: "collection-b")
-        #expect(model.deckMenu.isEmpty && model.subtitle == nil)
+        #expect(model.deckMenu.isEmpty && !model.decks.isKnown)
         // The same collection told again keeps its tree.
         model.decksChanged(Fixture.nodes())
         model.collectionOpened(identity: "collection-b")
@@ -401,6 +402,42 @@ import Testing
         #expect(service.requests.count == 2)
         model.appear()
         _ = try await request(3)
+    }
+
+    /// The Mac UI test's case at the model and plot level (U295's deferred case): a pinned bar
+    /// stays pinned while its box shows a loading phase (the kept results dropped, as on
+    /// `CollectionReplaced`), and is still pinned on the same period once the box is ready again;
+    /// the plot, which loses its focus while loading, does not unpin it either.
+    @Test func aPinnedSelectionSurvivesALoadingPhase() async throws {
+        let model = model()
+        model.appear()
+        let first = try await request(1)
+        await complete(first, model)
+        let pin = StatsChartSelection(bin: 20, pinned: true)
+        model.select(pin, in: .knowledgeOverTime)
+        model.receive(.collectionReplaced)
+        #expect(model.box(.knowledgeOverTime).isLoading)
+        #expect(model.selection(for: .knowledgeOverTime) == pin)
+        // The plot is unfocusable while loading: losing its focus then never unpins.
+        #expect(!StatsChartSelection.unpinsOnFocusLoss(focused: false, pinned: true, ready: false))
+        // An empty loading phase carries the selection unchanged.
+        #expect(pin.carried(from: model.box(.knowledgeOverTime).data.bins, to: []) == pin)
+        timers.advance(0.5)
+        let second = try await request(2)
+        await complete(second, model)
+        #expect(model.box(.knowledgeOverTime).phase == .ready)
+        #expect(model.selection(for: .knowledgeOverTime) == pin)
+    }
+
+    /// A click outside every chart unpins every box and leaves a hover alone (S8.3).
+    @Test func aClickOutsideUnpinsEveryBox() {
+        let model = model()
+        model.select(StatsChartSelection(bin: 3, pinned: true), in: .retention)
+        model.select(StatsChartSelection(bin: 5, pinned: true), in: .forgotten)
+        model.select(StatsChartSelection(bin: 7), in: .knowledgeOverTime)
+        model.unpinAll()
+        #expect(model.selection(for: .retention) == .none && model.selection(for: .forgotten) == .none)
+        #expect(model.selection(for: .knowledgeOverTime) == StatsChartSelection(bin: 7))
     }
 
     @Test func theSelectionIsCarriedAcrossARefreshAndClearedByAPeriodChange() async throws {
