@@ -402,7 +402,7 @@ public final class BrowseInspector {
     /// The page's pending input committed, then one patch of what differs
     /// from what is stored, or nothing. One at a time.
     private func save(_ note: BrowseInspectorNote, hold: Bool) async -> SaveOutcome {
-        while let saving { _ = await saving.value }
+        await saved()
         guard let runtime = note.runtime, note.error == nil else { return .unchanged }
         let work = Task { () -> SaveOutcome in
             do { try await runtime.flush(hold: hold) } catch {
@@ -472,6 +472,16 @@ public final class BrowseInspector {
         if result.written, result.summary.undoName != nil { stepRecorded(result.summary.seq, "Edit Note") }
         reloadWanted = true
         return true
+    }
+
+    /// Waits until no save or reload runs. A finished one is cleared here
+    /// too: awaiting a finished task does not suspend, so its owner might
+    /// not get the main actor back to clear it.
+    private func saved() async {
+        while let current = saving {
+            _ = await current.value
+            if saving == current { saving = nil }
+        }
     }
 
     // MARK: The Deck row and Edit Note (V12, N21.8)
@@ -568,7 +578,7 @@ public final class BrowseInspector {
             if reload {
                 // One at a time with the saves: a save never lands between the
                 // reload's read and its loading of the unedited fields.
-                while let saving { _ = await saving.value }
+                await saved()
                 let work = Task { () -> SaveOutcome in await self.reload(note, epoch: epoch); return .unchanged }
                 saving = work
                 _ = await work.value
@@ -701,7 +711,7 @@ public final class BrowseInspector {
     /// Waits until the inspector has followed the selection (tests).
     func settled() async {
         while let loop { await loop.value }
-        while let saving { _ = await saving.value }
+        await saved()
     }
 }
 
