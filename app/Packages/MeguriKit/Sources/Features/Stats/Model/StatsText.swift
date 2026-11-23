@@ -106,10 +106,20 @@ struct StatsText {
     var figureAverageADay: String { text("stats.figure.averageADay") }
     var figureAverageOnDaysStudied: String { text("stats.figure.averageOnDaysStudied") }
     var figureTimePerCard: String { text("stats.figure.timePerCard") }
-    var figureCurrentStreak: String { text("stats.figure.currentStreak") }
-    var figureLongestStreak: String { text("stats.figure.longestStreak") }
-    var figureDaysStudiedThisYear: String { text("stats.figure.daysStudiedThisYear") }
-    var figureAllReviews: String { text("stats.figure.allReviews") }
+    /// Activity's headline and sentence (the owner's Option B, 2026-11-23).
+    func inARow(_ n: Int, _ nText: String) -> String { text("stats.activity.inARow \(n) \(nText)") }
+    var noStreak: String { text("stats.activity.noStreak") }
+    func studiedThisYear(_ studied: String, _ days: Int, _ daysText: String) -> String {
+        text("stats.activity.studiedThisYear \(studied) \(days) \(daysText)")
+    }
+    func yourLongest(_ studied: String) -> String { text("stats.activity.yourLongest \(studied)") }
+    func longest(_ days: String, _ studied: String) -> String { text("stats.activity.longest \(days) \(studied)") }
+    /// A year's total after its label on the grid: "· 87,634 reviews", "· 87,634".
+    func totalFull(_ n: Int, _ nText: String) -> String { text("stats.activity.totalFull \(n) \(nText)") }
+    func totalNumber(_ nText: String) -> String { text("stats.activity.totalNumber \(nText)") }
+    /// The narrow page's Activity control (the coordinator's decision of 2026-11-23).
+    var activityShowAllYears: String { text("stats.activity.showAllYears") }
+    var activityShowLess: String { text("stats.activity.showLess") }
     func yearTotal(_ year: String, _ n: Int, _ nText: String) -> String { text("stats.activity.yearTotal \(year) \(n) \(nText)") }
 
     // MARK: Cards (S7.6 to S7.8)

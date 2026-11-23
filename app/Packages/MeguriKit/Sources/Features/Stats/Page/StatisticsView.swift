@@ -3,16 +3,23 @@ import CoreBridge
 import DesignSystem
 import SwiftUI
 
-/// The Statistics page on the Mac and the iPad at regular width (plan U296; `stats/statistics-page`
-/// S5, S6, S10, S12, S14; contract N25.1 to N25.3, N25.9 to N25.11): the window's title
-/// "Statistics" with the subtitle and its status, the toolbar's deck pop-up and period control
-/// and the shell's sync button; then one scroll view with the strip and the seven sections, each
-/// a heading and its grid of boxes; or one of S12's states in their place.
+/// The Statistics page (plan U296, U304; `stats/statistics-page` S5, S6, S10, S12, S14; contract
+/// N25.1 to N25.3, N25.6, N25.9 to N25.11): the title "Statistics" with the subtitle and its
+/// status, the deck pop-up and the period control, the shell's sync button; then one scroll view
+/// with the strip and the seven sections, each a heading and its grid of boxes; or one of S12's
+/// states in their place.
+///
+/// The Mac and the iPad at regular width put both controls in the toolbar. The narrow page
+/// (N25.6: the shell's tab layout on the iPhone, the folded Duo, the Duo held tall and a narrow
+/// iPad window) has the inline title with the deck pop-up beside it and the subtitle under it,
+/// the period control pinned under the navigation bar, the sync button and the Jump menu
+/// trailing, and the sections in one column on the grouped background.
 public struct StatisticsView: View {
     private let page: StatsPage
     private let navigation: AppNavigation?
     @Environment(\.syncStatusItem) private var syncStatusItem
     @Environment(\.locale) private var locale
+    @Environment(\.shellLayout) private var shellLayout
 
     /// - Parameter navigation: keeps the page's scroll position across a layout switch (R5).
     public init(page: StatsPage, navigation: AppNavigation? = nil) {
@@ -21,6 +28,16 @@ public struct StatisticsView: View {
     }
 
     private var model: StatsPageModel { page.model }
+
+    /// N25.6's narrow page: the shell's tab layout (on the iPhone always, unfolded included; on the
+    /// iPad at compact width). The Mac has none.
+    private var narrow: Bool {
+        #if os(iOS)
+        shellLayout == .compact
+        #else
+        false
+        #endif
+    }
 
     public var body: some View {
         content
@@ -35,21 +52,41 @@ public struct StatisticsView: View {
                 ToolbarItem(placement: .principal) {
                     StatsPeriodControl(page: page)
                 }
-                #else
-                // The iPad's navigation bar keeps the title and subtitle leading; the controls
-                // trail as two items, as on the Mac: a fixed spacer keeps the system from drawing
-                // them in one glass group, where the pop-up ran under the segments (N25.2).
-                ToolbarItem(placement: .topBarTrailing) {
-                    StatsDeckPopUp(page: page)
-                }
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
-                ToolbarItem(placement: .topBarTrailing) {
-                    StatsPeriodControl(page: page)
-                }
-                #endif
                 // N23.6: the shell's sync button, in its trailing place.
                 if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
+                #else
+                if narrow {
+                    // N25.2: the deck pop-up beside the inline title, the period pinned under the
+                    // bar (below); trailing, one group: the shell's sync button first (N23.6), then
+                    // the Jump menu.
+                    ToolbarItem(placement: .topBarLeading) {
+                        StatsDeckPopUp(page: page)
+                    }
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        if let syncStatusItem { syncStatusItem }
+                        StatsJumpMenu(page: page)
+                    }
+                } else {
+                    // The iPad's navigation bar keeps the title and subtitle leading; the controls
+                    // trail as two items, as on the Mac: a fixed spacer keeps the system from
+                    // drawing them in one glass group, where the pop-up ran under the segments
+                    // (N25.2).
+                    ToolbarItem(placement: .topBarTrailing) {
+                        StatsDeckPopUp(page: page)
+                    }
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                    ToolbarItem(placement: .topBarTrailing) {
+                        StatsPeriodControl(page: page)
+                    }
+                    // N23.6: the shell's sync button, in its trailing place.
+                    if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
+                }
+                #endif
             }
+            #if os(iOS)
+            .modifier(StatsNarrowChrome(page: page, narrow: narrow))
+            #endif
+            .environment(\.statsNarrow, narrow)
             .onAppear { page.appear() }
             .onDisappear { page.disappear() }
             .onChange(of: model.selection) { old, new in page.selectionChanged(from: old, to: new) }
@@ -94,8 +131,14 @@ public struct StatisticsView: View {
             // S12.8: the strip and the controls stay; the sections give way.
             VStack(alignment: .leading, spacing: 0) {
                 // No read can finish: a figure with nothing shows a dash, not progress.
-                StatsStrip(model: model, readsEnded: true) { _ in }
-                    .padding()
+                Group {
+                    if narrow {
+                        StatsStripTiles(model: model, readsEnded: true) { _ in }
+                    } else {
+                        StatsStrip(model: model, readsEnded: true) { _ in }
+                    }
+                }
+                .padding()
                 ContentUnavailableView {
                     Label { Text("stats.page.unavailable", bundle: .module) } icon: { Image(systemName: "exclamationmark.triangle") }
                 } description: {
@@ -112,20 +155,80 @@ public struct StatisticsView: View {
     }
 }
 
+#if os(iOS)
+/// The narrow page's chrome (N25.2, N25.6): the inline title, the grouped background under every
+/// state, and the period control pinned under the navigation bar while the page scrolls, with the
+/// bar's scroll edge effect behind it. The pinned control is the system segmented control across
+/// the column, disabled with the deck pop-up while the page has no cards or no collection.
+private struct StatsNarrowChrome: ViewModifier {
+    let page: StatsPage
+    let narrow: Bool
+
+    func body(content: Content) -> some View {
+        if narrow {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(uiColor: .systemGroupedBackground))
+                .toolbarTitleDisplayMode(.inline)
+                .safeAreaBar(edge: .top, spacing: 0) {
+                    StatsPeriodControl(page: page, fills: true)
+                        .padding(.horizontal)
+                        .padding(.bottom, Spacing.xSmall)
+                }
+        } else {
+            content
+        }
+    }
+}
+#endif
+
+/// The Jump menu (N25.6, S5): the seven sections; choosing one scrolls its heading to the top,
+/// under the pinned period control. Enabled while the page shows its sections.
+struct StatsJumpMenu: View {
+    let page: StatsPage
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        Menu {
+            ForEach(StatsSectionID.allCases, id: \.self) { section in
+                Button { page.go(to: section) } label: {
+                    Text(verbatim: StatsPageText.title(section, locale: locale))
+                }
+                .accessibilityIdentifier("stats.toolbar.jump.\(section.rawValue)")
+            }
+        } label: {
+            Label { Text("stats.jump", bundle: .module) } icon: { Image(systemName: "list.bullet") }
+        }
+        .disabled(page.model.state != .content)
+        .accessibilityIdentifier("stats.toolbar.jump")
+    }
+}
+
 /// The page's scroll view: the strip, the filtered deck's line, then the seven sections.
 private struct StatsPageScroll: View {
     let page: StatsPage
     let navigation: AppNavigation?
     /// Set while the page moves, read by the plots' hover (not observed: it redraws nothing).
     @State private var scrolling = StatsScrolling()
+    /// Held by its bottom for one change (`statsKeepingBelow`): Show All Years grows the
+    /// Activity grid upward from today's line, which stays put.
+    @State private var keepsBelow = false
+    /// The latest change held by the bottom: an earlier one's release leaves a later one held.
+    @State private var keepsBelowChange = 0
+    @Environment(\.statsNarrow) private var statsNarrow
     private var model: StatsPageModel { page.model }
+    private var narrow: Bool { statsNarrow ?? false }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.xLarge) {
                     VStack(alignment: .leading, spacing: Spacing.small) {
-                        StatsStrip(model: model) { page.go(to: $0) }
+                        if narrow {
+                            StatsStripTiles(model: model) { page.go(to: $0) }
+                        } else {
+                            StatsStrip(model: model) { page.go(to: $0) }
+                        }
                         if let note = model.filteredDeckNote {
                             Text(verbatim: note)
                                 .font(.subheadline)
@@ -149,7 +252,21 @@ private struct StatsPageScroll: View {
                 .scrollTargetLayout()
             }
             .modifier(StatsScrollPosition(navigation: navigation))
+            .defaultScrollAnchor(keepsBelow ? .bottom : nil, for: .sizeChanges)
             .environment(\.statsScrolling, scrolling)
+            .environment(\.statsKeepingBelow, StatsKeepingBelow { change in
+                // The anchor is in place (a frame drawn with it) before the change lays out, and
+                // let go once the change has.
+                keepsBelow = true
+                keepsBelowChange &+= 1
+                let token = keepsBelowChange
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(20))
+                    change()
+                    try? await Task.sleep(for: .milliseconds(400))
+                    if keepsBelowChange == token { keepsBelow = false }
+                }
+            })
             .onScrollPhaseChange { _, phase in
                 // A bar the pointer was over when the page started to move is left as it scrolls
                 // away; a pinned bar stays.
@@ -383,6 +500,76 @@ struct StatsStrip: View {
     }
 }
 
+/// The narrow page's strip (S6, N25.6): four tiles, Studied Today, Retention Today, Remaining
+/// Today and Streak (Mature is a figure of Card Counts there), each a section-like group on the
+/// grouped background: the value, its unit and detail in small text under it, then its label. A
+/// tap scrolls to the figure's section. Four in a row, two by two where four would be too narrow
+/// for their text, one per row at the largest sizes (`StatsNarrowLayout.stripColumns`); a row's
+/// tiles share its height. A figure whose part has not returned shows the small progress
+/// indicator in its value's place (S10.1), the value's line keeping its height.
+struct StatsStripTiles: View {
+    let model: StatsPageModel
+    /// No request can fill a figure that has nothing (S12.8): it shows a dash.
+    var readsEnded = false
+    let go: (StatsSectionID) -> Void
+    @Environment(\.locale) private var locale
+    @ScaledMetric(relativeTo: .title3) private var tileMinimum = StatsNarrowLayout.tileMinimum
+
+    var body: some View {
+        StatsColumnsLayout(minimum: tileMinimum, spacing: Spacing.xSmall, rowSpacing: Spacing.xSmall) {
+            ForEach(StatsStripID.narrow, id: \.self) { id in
+                tile(id)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("stats.page.strip")
+    }
+
+    private func tile(_ id: StatsStripID) -> some View {
+        var figure = model.strip(id)
+        if readsEnded, figure.loading {
+            figure = StatsStripFigure(value: "—", unit: nil, detail: nil, loading: false, spoken: nil)
+        }
+        let label = StatsPageText.label(id, locale: locale)
+        // The unit and the detail share the small line under the value ("cards · 19 min").
+        let small = figure.loading ? nil : [figure.unit, figure.detail].compactMap(\.self).joined(separator: " · ")
+        return Button { go(id.section) } label: {
+            VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                Text(verbatim: figure.value ?? "0")
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .opacity(figure.loading ? 0 : 1)
+                    .overlay(alignment: .leading) {
+                        if figure.loading { ProgressView().controlSize(.small) }
+                    }
+                Text(verbatim: small?.isEmpty == false ? small ?? " " : " ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(verbatim: label)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2, reservesSpace: true)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(Spacing.small)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            #if os(iOS)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: Radius.rounded(Radius.medium))
+            #endif
+            .contentShape(Radius.rounded(Radius.medium))
+        }
+        .buttonStyle(.plain)
+        // The button is the figure's one element (S6), read as its label and value.
+        .accessibilityLabel(Text(verbatim: label))
+        .accessibilityValue(Text(verbatim: figure.loading ? "" : figure.spoken ?? figure.value ?? ""))
+        .accessibilityIdentifier("stats.strip.\(id.rawValue)")
+    }
+}
+
 // MARK: Toolbar
 
 /// S3.1's deck pop-up: All Decks, then the deck tree indented in the deck list's order, filtered
@@ -467,6 +654,8 @@ struct StatsDeckPopUp: View {
 /// S3.2's period control: 1M, 3M, 6M, 1Y, All, read as "1 Month" to "All".
 struct StatsPeriodControl: View {
     let page: StatsPage
+    /// The narrow page's pinned control spans the column (N25.2); the toolbar's keeps its size.
+    var fills = false
     private var model: StatsPageModel { page.model }
     @Environment(\.locale) private var locale
 
@@ -483,7 +672,7 @@ struct StatsPeriodControl: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .fixedSize()
+        .fixedSize(horizontal: !fills, vertical: true)
         .disabled(!model.controlsEnabled)
         #if os(macOS)
         // Exception (verified in the test VM's captures, 2026-11-23): in the window toolbar a

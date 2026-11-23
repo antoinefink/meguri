@@ -82,6 +82,7 @@ struct StatsCardCountsBox: View {
     let showInBrowse: ((StatsCountLabel, String) -> Void)?
     @Environment(\.locale) private var locale
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.statsNarrow) private var statsNarrow
     /// The count and share columns, wide enough for "150,000" and "100.0%" at the text size.
     @ScaledMetric(relativeTo: .subheadline) private var countWidth: CGFloat = 64
     @ScaledMetric(relativeTo: .subheadline) private var shareWidth: CGFloat = 52
@@ -114,7 +115,8 @@ struct StatsCardCountsBox: View {
                     }
                 }
                 .contextMenu { if let table { exportMenu(table) } }
-                if horizontalSizeClass == .compact {
+                // The narrow page (N25.6), the Duo held tall included, whatever its size class.
+                if statsNarrow ?? (horizontalSizeClass == .compact) {
                     StatsBoxSmallFigures(figures: content.figures, ready: ready)
                 }
             }

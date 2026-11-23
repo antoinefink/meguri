@@ -72,12 +72,14 @@ struct StatsByDeckBox: View {
     @State private var hovered: String?
     @Environment(\.locale) private var locale
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.statsNarrow) private var statsNarrow
     @Environment(\.statsScrolling) private var scrolling
     @ScaledMetric(relativeTo: .subheadline) private var numberWidth: CGFloat = 76
     @ScaledMetric(relativeTo: .subheadline) private var timeWidth: CGFloat = 116
     @ScaledMetric(relativeTo: .subheadline) private var shareBarWidth: CGFloat = 44
 
-    private var compact: Bool { horizontalSizeClass == .compact }
+    /// The narrow page (N25.6), the Duo held tall included, whatever its size class.
+    private var compact: Bool { statsNarrow ?? (horizontalSizeClass == .compact) }
     /// The order shown: a column the compact table leaves out sorts as the deck order.
     private var shownSort: StatsByDeckSort { columns.contains(sort.column) ? sort : StatsByDeckSort() }
     private var columns: [StatsByDeckColumn] {

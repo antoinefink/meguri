@@ -17,13 +17,35 @@ struct StatsBoxHeader<Accessory: View>: View {
     let open: (() -> Void)?
     @ViewBuilder let accessory: () -> Accessory
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.statsNarrow) private var statsNarrow
 
+    /// On the narrow page the switches stay segmented while they fit beside the title and become
+    /// menus where they do not (N25.6): the header tries each style of
+    /// `StatsNarrowLayout.switchStyles` in turn, in the same layout pass.
     var body: some View {
+        if statsNarrow ?? (horizontalSizeClass == .compact) {
+            let styles = StatsNarrowLayout.switchStyles(accessibilitySize: dynamicTypeSize.isAccessibilitySize)
+            if styles.count > 1 {
+                ViewThatFits(in: .horizontal) {
+                    ForEach(styles, id: \.self) { style in
+                        row.environment(\.statsSwitchStyle, style)
+                    }
+                }
+            } else {
+                row.environment(\.statsSwitchStyle, styles.first ?? .menu)
+            }
+        } else {
+            row
+        }
+    }
+
+    private var row: some View {
         let stacks = dynamicTypeSize.isAccessibilitySize
         let layout = stacks
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xSmall))
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Spacing.xSmall))
-        layout {
+        return layout {
             StatsBoxTitle(box: box, title: title, open: open)
             if !stacks {
                 Spacer(minLength: Spacing.xSmall)
@@ -107,27 +129,24 @@ struct StatsBoxFigureView: View {
     }
 }
 
-/// The small figures (N25.4 part 5) in one row; two to a row at compact width when there are
-/// four (decided by width class and count, never by the values, so the box keeps its size when
-/// they arrive); one column at the accessibility sizes. Labels show in every phase, values once
-/// the box is ready.
+/// The small figures (N25.4 part 5) in one row; on the narrow page in a row where they fit at
+/// their minimum width, else two to a row (`StatsNarrowLayout.figureColumns`: decided by the
+/// width, the count and the text size, never by the values, so the box keeps its size when they
+/// arrive); one column at the accessibility sizes. Labels show in every phase, values once the
+/// box is ready.
 struct StatsBoxSmallFigures: View {
     let figures: [StatsSmallFigure]
     let ready: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.statsNarrow) private var statsNarrow
+    @ScaledMetric(relativeTo: .subheadline) private var figureMinimum = StatsNarrowLayout.figureMinimum
 
     var body: some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: Spacing.xSmall) { cells(stacked: true) }
-        } else if horizontalSizeClass == .compact, figures.count > 3 {
-            Grid(alignment: .topLeading, horizontalSpacing: Spacing.medium, verticalSpacing: Spacing.xSmall) {
-                ForEach(Array(stride(from: 0, to: figures.count, by: 2)), id: \.self) { start in
-                    GridRow {
-                        ForEach(figures[start..<min(start + 2, figures.count)]) { cell($0, stacked: false) }
-                    }
-                }
-            }
+        } else if statsNarrow ?? (horizontalSizeClass == .compact) {
+            StatsColumnsLayout(minimum: figureMinimum, spacing: Spacing.medium, rowSpacing: Spacing.xSmall) { cells(stacked: false) }
         } else {
             HStack(alignment: .top, spacing: Spacing.medium) { cells(stacked: false) }
         }
