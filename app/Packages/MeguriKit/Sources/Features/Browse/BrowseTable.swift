@@ -357,8 +357,11 @@ private struct BrowseScrollReporter: NSViewRepresentable {
                 return
             }
             clip.postsBoundsChangedNotifications = true
+            // Delivered as the clip view moves (no queue), while the event that moved
+            // it is still the application's current event: on the main queue it came
+            // later, and no scroll was ever kept (VM trace, 2026-11-23).
             observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip,
-                                                              queue: .main) { [weak self] _ in
+                                                              queue: nil) { [weak self] _ in
                 MainActor.assumeIsolated {
                     // Only the user's scrolling moves the kept row: the clip view also
                     // moves while SwiftUI takes the table down for another section
