@@ -47,7 +47,7 @@ import WebKit
         #expect(host.contentHeight > 0 && host.contentHeight < 400, "the page reports its fields' height, not its frame's")
     }
 
-    @Test func mediaNamesArePlainFileNamesOnly() {
+    @Test func mediaNamesArePlainFileNamesOnly() throws {
         #expect(MediaName.plain("kip wurl.mp3") == "kip wurl.mp3")
         #expect(MediaName.plain("kip%20wurl.mp3") == "kip wurl.mp3")
         for refused in ["", ".", "..", "../secret", "a/b.png", "a\\b.png", ".hidden", "line\nbreak.mp3", "%2E%2E%2Fsecret"] {
