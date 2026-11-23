@@ -269,12 +269,13 @@ extension TestHooks {
             if page?.model.selections.values.contains(where: \.pinned) == true { Self.answer("statsPinned") }
         }
 
-        /// Answers `statsSelected` when a box holds any selection, pinned or under the pointer,
-        /// with the selections as its object (`<box>:<bin>:<pinned>`, sorted).
+        /// Answers every query with `statsSelected`: the selections as its object
+        /// (`<box>:<bin>:<pinned>`, sorted), "none" when no box holds one, "no page" without one.
         func querySelection() {
-            guard let selections = page?.model.selections, selections.values.contains(where: { $0.bin != nil }) else { return }
-            let text = selections.map { "\($0.key.rawValue):\($0.value.bin.map(String.init) ?? "-"):\($0.value.pinned)" }.sorted()
-            Self.answer("statsSelected", object: text.joined(separator: ","))
+            guard let selections = page?.model.selections else { return Self.answer("statsSelected", object: "no page") }
+            let text = selections.filter { $0.value.bin != nil }
+                .map { "\($0.key.rawValue):\($0.value.bin.map(String.init) ?? "-"):\($0.value.pinned)" }.sorted()
+            Self.answer("statsSelected", object: text.isEmpty ? "none" : text.joined(separator: ","))
         }
 
         func select(_ period: StatsPagePeriod) {

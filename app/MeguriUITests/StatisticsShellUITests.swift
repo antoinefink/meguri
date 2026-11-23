@@ -126,9 +126,9 @@ final class StatisticsShellUITests: XCTestCase {
     }
 
     /// Asks the app for every box's selection (`statsQuerySelection`, answered `statsSelected`
-    /// with `<box>:<bin>:<pinned>` items), "none" when no box holds one.
+    /// with `<box>:<bin>:<pinned>` items, or "none" when no box holds one); a missing answer fails.
     private func selections(_ bundle: String) -> String {
-        final class Box: @unchecked Sendable { var text = "none" }
+        final class Box: @unchecked Sendable { var text = "no answer" }
         let box = Box()
         let expectation = XCTNSNotificationExpectation(name: Notification.Name("\(bundle).testhooks.statsSelected"), object: nil,
                                                        notificationCenter: DistributedNotificationCenter.default())
@@ -137,7 +137,8 @@ final class StatisticsShellUITests: XCTestCase {
             return true
         }
         post("\(bundle).testhooks.statsQuerySelection")
-        _ = XCTWaiter().wait(for: [expectation], timeout: 3)
+        let answered = XCTWaiter().wait(for: [expectation], timeout: 3) == .completed
+        XCTAssertTrue(answered, "The app answers every selection query")
         return box.text
     }
 
