@@ -699,6 +699,12 @@ screens:
       superseded; viewing writes nothing. Search scope and PDF export come later (9A).
       This replaces the earlier text of this entry (the scope and history header, the thirteen
       boxes in Anki's order, the heatmap and streaks not here, per-graph ranges and toggles).
+      Built so far (U296, PR #147): the Mac and iPad shell behind StatsRollout (off in the
+      product; routes stats/page/<state>, stats/period/<period>, stats/deck/<deck> and
+      stats/chart/<box> on sample data, -MeguriStatsRollout on|open with a collection): the
+      toolbar, the strip, the sections and grid, S12's states, and each box as the generic chart
+      box until its section unit (U297 to U301) gives it its own view. Toolbar identifiers are
+      stats.toolbar.deck and stats.toolbar.period (R1964's area.screen.element).
   - id: stats.heatmapSettings
     title: Heatmap settings
     units: [U229]
