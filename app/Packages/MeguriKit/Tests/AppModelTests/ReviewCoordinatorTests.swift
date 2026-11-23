@@ -155,8 +155,10 @@ extension ReviewCollectionStartupTests {
         _ = await fixture.model.end()
     }
 
+    /// N16.11 (Antoine, 2026-11-23): the notice "should just stay visible for as
+    /// long as you are on the card": no expiry, through every input on that card.
     @Test(arguments: [false, true])
-    func leechNoticeExpiresOnSameNextQuestion(suspended: Bool) async throws {
+    func leechNoticeStaysForTheWholeNextCard(suspended: Bool) async throws {
         let fixture = Fixture()
         fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(2), marks: [], removed: [1]),
             leech: true, suspended: suspended, rolledOver: false)
@@ -164,63 +166,67 @@ extension ReviewCollectionStartupTests {
         fixture.model.reveal(); await fixture.model.settled()
         fixture.model.rate(.again); await fixture.model.settled()
         #expect(fixture.model.notice == (suspended ? "Card was a leech. It has been suspended." : "Card was a leech."))
+        let id = try #require(fixture.model.leechNoticeID)
+        #expect(fixture.model.leechNotice?.suspended == suspended)
         #expect(fixture.model.phase == .question && fixture.model.shownItem?.cardId == 2)
-        #expect(fixture.model.canReveal && fixture.model.canUndo && fixture.model.canFinish)
         #expect(fixture.model.record.suspended.contains(1) == suspended)
-
-        // Observe real monotonic expiry with a bounded wait; no further input or refresh.
-        let deadline = ContinuousClock.now + .seconds(3)
-        while fixture.model.notice != nil, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(fixture.model.notice == nil)
-        #expect(fixture.model.phase == .question && fixture.model.shownItem?.cardId == 2)
-        #expect(fixture.surface.presented == [1, 2])
+        // Time passes, the card is refreshed and revealed: it stays, announced once (same id).
+        try await Task.sleep(for: .milliseconds(2_200))
+        fixture.model.requestRefresh(); await fixture.model.settled()
+        fixture.model.reveal(); await fixture.model.settled()
+        #expect(fixture.model.phase == .answer && fixture.model.leechNoticeID == id)
+        // Answering that card ends it; the card after shows none.
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(3), marks: [], removed: [2]),
+            leech: false, suspended: false, rolledOver: false)
+        fixture.model.rate(.good); await fixture.model.settled()
+        #expect(fixture.model.shownItem?.cardId == 3 && fixture.model.leechNotice == nil && fixture.model.notice == nil)
         #expect(await fixture.model.end())
     }
 
-    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
-    func freshLeechNoticeReplacesExpiryAndPreservesNewerError(throwsOnCancellation: Bool) async throws {
+    @Test func aNewerLeechReplacesTheOlderAndAnotherNoticeEndsIt() async throws {
         let fixture = Fixture()
-        let first = ExpiryGate(), second = ExpiryGate()
-        defer { first.release(); second.release() }
-        fixture.model.waitForLeechNoticeExpiry = {
-            await first.wait()
-            #expect(Task.isCancelled)
-            if throwsOnCancellation { try Task.checkCancellation() }
-        }
         fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(2), marks: [], removed: [1]),
             leech: true, suspended: false, rolledOver: false)
         await fixture.model.start()
         fixture.model.reveal(); await fixture.model.settled()
         fixture.model.rate(.again); await fixture.model.settled()
-        await first.requested()
-        let firstExpiry = try #require(fixture.model.leechNoticeTask)
-        let firstID = try #require(fixture.model.leechNoticeID)
-        fixture.model.waitForLeechNoticeExpiry = {
-            await second.wait()
-            #expect(Task.isCancelled)
-            if throwsOnCancellation { try Task.checkCancellation() }
-        }
+        let first = try #require(fixture.model.leechNoticeID)
         fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(3), marks: [], removed: [2]),
-            leech: true, suspended: false, rolledOver: false)
+            leech: true, suspended: true, rolledOver: false)
         fixture.model.reveal(); await fixture.model.settled()
         fixture.model.rate(.again); await fixture.model.settled()
-        await second.requested()
-        let secondExpiry = try #require(fixture.model.leechNoticeTask)
-        let secondID = try #require(fixture.model.leechNoticeID)
-        #expect(secondID != firstID)
-        // Deliver the cancelled old wait only after the identical replacement exists.
-        first.release(); await firstExpiry.value
-        #expect(fixture.model.notice == "Card was a leech.")
-        #expect(fixture.model.leechNoticeID == secondID)
-        #expect(fixture.model.phase == .question && fixture.model.shownItem?.cardId == 3)
+        let second = try #require(fixture.model.leechNoticeID)
+        #expect(second != first && fixture.model.leechNotice?.suspended == true)
+        #expect(fixture.model.shownItem?.cardId == 3)
         fixture.model.showNotice("A newer review error")
-        second.release(); await secondExpiry.value
-        #expect(fixture.model.notice == "A newer review error")
-        #expect(fixture.model.leechNoticeID == nil)
+        #expect(fixture.model.notice == "A newer review error" && fixture.model.leechNoticeID == nil)
         #expect(await fixture.model.end())
-        #expect(fixture.model.notice == "A newer review error")
+    }
+
+    /// A card that replaces the one after the leech answer without an answer
+    /// (changed elsewhere) does not inherit the notice; nor does the end screen.
+    @Test func leechNoticeNeverReachesAnotherCardOrTheEndScreen() async throws {
+        let fixture = Fixture()
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(2), marks: [], removed: [1]),
+            leech: true, suspended: false, rolledOver: false)
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.model.rate(.again); await fixture.model.settled()
+        #expect(fixture.model.leechNoticeID != nil)
+        fixture.client.currentHead = Self.head(4)
+        fixture.model.requestRefresh(question: true); await fixture.model.settled()
+        #expect(fixture.model.shownItem?.cardId == 4 && fixture.model.leechNoticeID == nil)
+
+        let ending = Fixture()
+        ending.client.summary = Self.summary(waiting: false)
+        ending.client.answerHead = .accepted(headDiff: .init(head: Self.emptyHead(.finished), marks: [], removed: [1]),
+            leech: true, suspended: false, rolledOver: false)
+        await ending.model.start()
+        ending.model.reveal(); await ending.model.settled()
+        ending.model.rate(.again); await ending.model.settled()
+        #expect(ending.model.phase == .finished && ending.model.leechNoticeID == nil)
+        #expect(await fixture.model.end())
+        #expect(await ending.model.end())
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -1540,19 +1546,6 @@ extension ReviewCollectionStartupTests {
         }
         func requested() async { for await _ in entered.stream { return } }
         func release() { held.continuation.finish(); entered.continuation.finish() }
-    }
-    // Unlike the cancellable gate, hold completion until release even after cancellation.
-    final class ExpiryGate {
-        private let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
-        private var continuation: CheckedContinuation<Void, Never>?
-        func wait() async {
-            await withCheckedContinuation {
-                continuation = $0
-                entered.continuation.yield(())
-            }
-        }
-        func requested() async { for await _ in entered.stream { return } }
-        func release() { continuation?.resume(); continuation = nil }
     }
     final class SummaryGate {
         let state: ReviewDeckStudyState
