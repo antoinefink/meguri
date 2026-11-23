@@ -231,6 +231,31 @@ final class MacBrowseCommandsTests: XCTestCase {
                       "the second Esc empties it: \(String(describing: field.value))")
     }
 
+    /// N21.8's ⌘1 to ⌘7 (Flag) and ⌘D (Change Deck…) are in the menu bar, disabled
+    /// outside Browse: Note Types' own ⌘1, ⌘2, ⌘3 (the card part) still act.
+    func testNoteTypesKeysStillWork() throws {
+        let (app, bundle) = try launch(appearance: "light")
+        try app.bringToFront(bundleIdentifier: bundle)
+        element(app, "shell.root.sidebar.noteTypes").click()
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'noteTypes.list.row.'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        row.click()
+        element(app, "noteTypes.list.tabCards").click()
+        let part = element(app, "noteTypes.cards.part")
+        XCTAssertTrue(part.waitForExistence(timeout: 10))
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("2", modifierFlags: .command)
+        let back = element(app, "noteTypes.cards.part.back")
+        XCTAssertTrue(waitUntil { back.isSelected || (back.value as? Int) == 1 }, "⌘2 shows the back")
+        app.typeKey("3", modifierFlags: .command)
+        let styling = element(app, "noteTypes.cards.part.styling")
+        XCTAssertTrue(waitUntil { styling.isSelected || (styling.value as? Int) == 1 }, "⌘3 shows the styling")
+        app.typeKey("1", modifierFlags: .command)
+        let front = element(app, "noteTypes.cards.part.front")
+        XCTAssertTrue(waitUntil { front.isSelected || (front.value as? Int) == 1 }, "⌘1 shows the front")
+        capture(app, "note-types-keys")
+    }
+
     // MARK: Support
 
     private func launch(appearance: String) throws -> (XCUIApplication, String) {
