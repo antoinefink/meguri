@@ -90,6 +90,11 @@ pub fn apply(
     // The handle of the collection the slot was taken on, never one opened
     // since; and the session's state again, now that no other apply runs.
     let collection = slot.collection()?;
+    // I2: a session belongs to the engine whose collection directory holds
+    // its staging; it never applies to another engine's collection.
+    if collection.path().parent() != Some(session.context.collection_directory.as_path()) {
+        return Err(ApkgImportError::SessionClosed);
+    }
     {
         let state = session.lock();
         if state.closed || state.result.is_some() {
@@ -119,16 +124,18 @@ pub fn apply(
         |planning| {
             // T by the pure day calculation on the snapshot: the write phase
             // makes the same computation on the live rows (I14.2).
-            let today = super::commit::today(&**planning.snapshot(), context.clock.as_ref(), context.clock.now_ms())
+            // One instant for both days of I11.2.
+            let at = context.clock.now_ms();
+            let today = super::commit::today(&**planning.snapshot(), context.clock.as_ref(), at)
                 .map_err(|error| stash(&fault, error.into()))?;
-            let now_s = context.clock.now_ms().div_euclid(1000);
+            let now_s = at.div_euclid(1000);
             let built = plan::build(
                 &**planning.snapshot(),
                 &raw,
                 &taken,
                 &options,
                 today,
-                gather::package_today(&raw, &context),
+                gather::package_today(&raw, &context, at),
                 now_s,
                 cancel,
                 progress,
@@ -209,7 +216,8 @@ pub fn apply(
         let (committed, backup) = take_kept()?;
         let mut counts = committed.counts;
         if !pending {
-            let (written, skipped) = super::media::write_statics(session, &service, &committed.statics);
+            let (written, skipped) =
+                super::media::write_statics(session, &service, &committed.statics, committed.decoded);
             counts.media_written += written;
             counts.media_skipped += skipped;
         } else {

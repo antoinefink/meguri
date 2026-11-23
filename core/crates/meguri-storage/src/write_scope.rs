@@ -92,6 +92,9 @@ pub struct WriteScope<'c> {
     /// Ids of cards removed earlier in the transaction: never given to a
     /// new card in it (`ids::allocate_avoiding`).
     retired_card_ids: BTreeSet<i64>,
+    /// A `KeepMtime` scope that stamps config keys set by key with now
+    /// ([`WriteScope::stamp_keyed_config_now`]).
+    keyed_config_now: bool,
 }
 
 /// A savepoint inside a write scope (`engine/op-model` O3): one step of a
@@ -143,6 +146,7 @@ impl<'c> WriteScope<'c> {
             normal_stage: false,
             savepoints: Vec::new(),
             retired_card_ids: BTreeSet::new(),
+            keyed_config_now: false,
         })
     }
 
@@ -667,6 +671,15 @@ impl<'c> WriteScope<'c> {
         Ok(written)
     }
 
+    /// In a `KeepMtime` scope, makes every later [`WriteScope::set_config`]
+    /// stamp the key's `mtime_secs` with now: an `.apkg` import keeps the
+    /// arriving times of notes and cards while its config keys are local
+    /// changes made now (`package/apkg-import` I5). Other `KeepMtime` scopes
+    /// (a flag change) keep a key's stored time.
+    pub fn stamp_keyed_config_now(&mut self) {
+        self.keyed_config_now = true;
+    }
+
     /// Sets a config key to a value (config-table C4): nothing is written
     /// when the stored value is the same value, whatever its bytes;
     /// otherwise the value is stored in compact form (C5) as a BLOB,
@@ -689,7 +702,7 @@ impl<'c> WriteScope<'c> {
             Some(row) => (row[1].clone(), row[2].clone()),
             None => (Cell::Integer(0), Cell::Integer(0)),
         };
-        if self.mode == StampMode::KeepMtime {
+        if self.mode == StampMode::KeepMtime && self.keyed_config_now {
             // A value set by key arrives with no time of its own: in a
             // scope that keeps arriving times it is a local change made now
             // (`package/apkg-import` I5, `storage/config-table` C4).

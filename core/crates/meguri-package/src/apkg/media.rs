@@ -37,6 +37,9 @@ pub(crate) struct MediaOutcome {
     pub written: u64,
     pub reused: u64,
     pub skipped: u64,
+    /// Decoded bytes charged to the package once staging read its
+    /// payloads (P8): where the post-commit static reads start.
+    pub decoded: u64,
 }
 
 /// I12.1: a static entry is never matched by a reference or renamed.
@@ -259,6 +262,7 @@ pub(crate) fn stage(
         }
         progress.report(done as u64 + 1, Some(total));
     }
+    outcome.decoded = archive.charged();
     drop(archive);
 
     // I12.2's rewrite, now that the stored names are known.
@@ -305,12 +309,13 @@ pub(crate) fn write_statics(
     session: &ImportSession,
     service: &MediaService,
     statics: &[usize],
+    charged: u64,
 ) -> (u64, u64) {
     if statics.is_empty() {
         return (0, 0);
     }
     let check: &(dyn Fn() -> bool + Sync) = &|| false;
-    let Ok(mut archive) = DeckArchive::open(&session.source_path(), check, session.decoded) else {
+    let Ok(mut archive) = DeckArchive::open(&session.source_path(), check, charged.max(session.decoded)) else {
         return (0, statics.len() as u64);
     };
     let mut written = Vec::new();

@@ -143,14 +143,14 @@ pub fn inspect(
     let check = || cancel.is_cancelled();
     let check: &(dyn Fn() -> bool + Sync) = &check;
     cancelled(check)?;
+    // Checked before anything opens the file: opening a FIFO would block.
+    if !std::fs::metadata(source)?.is_file() {
+        return Err(ApkgImportError::UnsupportedFile);
+    }
     if classify(source, name) == PackageClass::Unsupported {
         return Err(ApkgImportError::UnsupportedFile);
     }
     progress.set_phase(ProgressPhase::Named("extracting"));
-    // Checked before the open: opening a FIFO would block.
-    if !std::fs::metadata(source)?.is_file() {
-        return Err(ApkgImportError::UnsupportedFile);
-    }
     let mut input = File::open(source)?;
     let size = input.metadata()?.len();
     preflight(context, size.checked_add(MARGIN).ok_or_else(|| corrupt("source size"))?)?;

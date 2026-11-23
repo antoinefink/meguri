@@ -309,8 +309,7 @@ pub(crate) fn take(raw: &RawPackage, options: &ImportOptions) -> Taken {
 }
 
 /// The package collection's today (I11.2's P), writing nothing.
-pub(crate) fn package_today(raw: &RawPackage, context: &ApkgContext) -> u32 {
-    let now = context.clock.now_ms();
+pub(crate) fn package_today(raw: &RawPackage, context: &ApkgContext, now: i64) -> u32 {
     meguri_sched::timing::sched_day(&meguri_sched::timing::DayInputs {
         crt: raw.created,
         creation_offset: raw.creation_offset,

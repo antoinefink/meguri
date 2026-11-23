@@ -943,11 +943,24 @@ impl MediaStore {
     /// uncommitted op has staged one (`media/media-files` M2).
     pub fn case_variant_present(&self, name: &str) -> Result<bool> {
         self.check_changes()?;
-        let mut db = self.db()?;
-        if !self.candidates(&mut db, name)?.is_empty() {
-            return Ok(true);
+        let db = self.db()?;
+        self.occupied_locked(&db, name)
+    }
+    /// Presence only, never content: a tracked case variant whose file is
+    /// there, a name an uncommitted op staged, or anything at the exact
+    /// path (registration may not track it, M7.1).
+    fn occupied_locked(&self, db: &Connection, name: &str) -> Result<bool> {
+        for entry in journal_db::variants(db, name)? {
+            if regular(&self.media_dir().join(&entry.name))?.is_some() {
+                return Ok(true);
+            }
         }
-        // A file registration does not track (M7.1) is still in the way.
+        let mut staged = db.prepare("SELECT name FROM staged_files")?;
+        for other in staged.query_map([], |r| r.get::<_, String>(0))? {
+            if case_key(&other?) == case_key(name) {
+                return Ok(true);
+            }
+        }
         Ok(self.media_dir().join(name).symlink_metadata().is_ok())
     }
     /// An exact-name write (M6 step 4) that never replaces: `None` when a
@@ -964,7 +977,7 @@ impl MediaStore {
         // The check and the write share one hold of the journal, so no add
         // of this store can take the name in between.
         let mut db = self.db()?;
-        if !self.candidates(&mut db, name)?.is_empty() || self.media_dir().join(name).symlink_metadata().is_ok() {
+        if self.occupied_locked(&db, name)? {
             return Ok(None);
         }
         self.install_locked(&mut db, name, bytes, &[])?;

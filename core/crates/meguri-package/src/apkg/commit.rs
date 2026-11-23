@@ -32,6 +32,8 @@ pub(crate) struct Committed {
     pub counts: ImportCounts,
     /// Static media entries to write once the op committed (I12.4).
     pub statics: Vec<usize>,
+    /// Decoded bytes charged to the package so far (P8).
+    pub decoded: u64,
 }
 
 /// Where a typed refusal of the write phase waits for the caller: the op
@@ -403,6 +405,7 @@ pub(crate) fn commit(
         ..ImportLog::default()
     };
     let scope = ctx.scope();
+    scope.stamp_keyed_config_now();
     let at = scope.now().0;
     if today(&*scope, clock, at)? != plan.target_today {
         return Err(stale(Table::Col, "day"));
@@ -436,11 +439,17 @@ pub(crate) fn commit(
                     record.mtime = now;
                 }
                 record.usn = Usn::PENDING;
-                let id = scope.add_notetype(&record)?;
+                let mut id = scope.add_notetype(&record)?;
                 if plan.stage.routes.contains_key(&id.0) {
-                    // The new id is one a package note type is added
-                    // under: plan again, at another instant.
-                    return Err(stale(Table::Notetypes, id.0));
+                    // The drawn id is one a package note type is added
+                    // under later in this pass: the copy takes the next id
+                    // that no row and no such note type holds.
+                    scope.remove_notetype(id)?;
+                    while plan.stage.routes.contains_key(&id.0) || scope.notetype(id)?.is_some() {
+                        id = NotetypeId(id.0 + 1);
+                    }
+                    record.id = id;
+                    scope.put_notetype(&record)?;
                 }
                 scope.set_config("curModel", &ConfigValue::from(id.0))?;
                 copies.push(id.0);
@@ -678,5 +687,6 @@ pub(crate) fn commit(
         log,
         counts,
         statics: std::mem::take(&mut plan.media.statics),
+        decoded: plan.media.decoded,
     })
 }
