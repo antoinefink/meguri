@@ -30,9 +30,16 @@ import Foundation
 
     func sessionStarted(_ id: UInt64) { sessions.insert(id) }
 
-    /// The session's last answers go with this round, now.
-    func sessionEnded(_ id: UInt64) {
+    /// The session's last answers go with this round, now. The coordinator
+    /// follows sessions whatever the service and asks for the round only while
+    /// Meguri Sync is selected (`requestAfterSessionEnd`).
+    func sessionEnded(_ id: UInt64, request asks: Bool = true) {
         sessions.remove(id)
+        guard sessions.isEmpty else { return }
+        closeWindow()
+        if asks { request() }
+    }
+    func requestAfterSessionEnd() {
         guard sessions.isEmpty else { return }
         closeWindow()
         request()

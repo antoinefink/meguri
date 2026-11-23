@@ -60,6 +60,10 @@ import Testing
         let duration = Double(answers * 7)
         let windowRounds = rig.rounds.count
         #expect(Double(windowRounds) <= (duration / 60).rounded(.up))
+        // Each window opens at the first answer after a round and ends 60 s later,
+        // seen at the next 7 s step: rounds at 63, 126, 189 … while answers go on.
+        let expected = stride(from: 63, through: 7 * answers, by: 63).map { Duration.seconds($0) }
+        #expect(rig.rounds == expected, "every window's round runs")
         // Rounds never come closer than the window.
         for (earlier, later) in zip(rig.rounds, rig.rounds.dropFirst()) { #expect(later - earlier >= .seconds(60)) }
         rig.model.sessionEnded(5)
@@ -133,6 +137,35 @@ import Testing
         #expect(rig.model.windowOpen)
         rig.model.sessionEnded(5)
         #expect(rig.rounds.count == 1 && !rig.model.waiting)
+    }
+
+    @Test func theStatusStaysPendingWhileChangesWait() {
+        #expect(SyncCoordinator.meguriRoutine(.idle, changesWaiting: true) == .pending)
+        #expect(SyncCoordinator.meguriRoutine(.idle, changesWaiting: false) == .idle)
+        for other: MeguriRoutineState in [.pending, .exchanging, .network, .authentication, .failed, .mediaBlocked] {
+            #expect(SyncCoordinator.meguriRoutine(other, changesWaiting: true) == other, "a failure keeps its own row")
+        }
+        #expect(SyncCoordinator.meguriRoutine(nil, changesWaiting: true) == nil)
+    }
+
+    /// The background wait ends at its budget, at once when cancelled (a foreground
+    /// return, the system's expiry), and never cancels the round itself.
+    @Test(.timeLimit(.minutes(1))) func theRoundWaitIsBounded() async {
+        let round = Task { _ = try? await Task.sleep(for: .seconds(30)) }
+        defer { round.cancel() }
+        let started = ContinuousClock.now
+        await SyncCoordinator.wait(for: round, atMost: .milliseconds(200))
+        #expect(started.duration(to: .now) < .seconds(5), "the budget ends the wait")
+        #expect(!round.isCancelled)
+        let waiting = Task { await SyncCoordinator.wait(for: round, atMost: .seconds(30)) }
+        try? await Task.sleep(for: .milliseconds(50))
+        let cancelledAt = ContinuousClock.now
+        waiting.cancel(); await waiting.value
+        #expect(cancelledAt.duration(to: .now) < .seconds(5), "cancelling ends the wait")
+        #expect(!round.isCancelled)
+        let quick = Task {}
+        await SyncCoordinator.wait(for: quick, atMost: .seconds(30))
+        await SyncCoordinator.wait(for: round, atMost: .zero)
     }
 
     @Test func theBackgroundRoundLeavesTimeForTheFlush() {

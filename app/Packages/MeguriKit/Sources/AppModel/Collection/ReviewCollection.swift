@@ -2200,6 +2200,9 @@ public final class ReviewCollection: ChangeFanoutSink {
     public func setForeground(_ active: Bool) {
         guard active != foreground else { return }
         foreground = active
+        // MP6.10: back in the foreground, the background path stops waiting for a
+        // review window's round; the foreground's own round sends what is left.
+        if active { sync.endMeguriRoundWait() }
         let cancelledEditor = active ? nil : cancelPendingEditorReplacement()
         if !active { syncPresentation.cancelStatusHandoff(); meguriSignInPreparationTask?.cancel() }
         resuming = active
