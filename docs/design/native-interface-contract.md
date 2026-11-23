@@ -650,7 +650,7 @@ Decided by the coordinator on 2026-11-23, pending Antoine's look. He showed the 
 - Nothing else changes: how the card scrolls (by touch, keyboard or VoiceOver), N16.9's answer area over the card, and N16.1's progress bar.
 - An element of the card that scrolls on its own keeps whatever the card's styling gives it: that is the person's card, not Meguri's chrome.
 - The Mac keeps the system's behaviour, which follows its "Show scroll bars" setting.
-- Only the review's card pages and their warm-up use this page. Card previews elsewhere (Note Types, Browse) do not, and keep their own behaviour.
+- Only the review's card pages and their warm-up use this page. Note Types and Browse have no card web view today. A later card preview decides its indicators for itself.
 
 ## N17. Round 5 editor and file transfer decisions (2026-11-19)
 
