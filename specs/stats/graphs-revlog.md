@@ -4,7 +4,7 @@ Spec: stats/graphs-revlog
 Requirements: R1271, R1277, R1367, R1379, R1380, R1381, R1382, R1383, R1384, R1385, R1386, R1387, R1388, R1389, R1405, R1406, R1407, R1408, R1410, R1411, R1412, R1413, R1414, R1446
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/graphs/calendar/, conformance/scenarios/stats/graphs/reviews/, conformance/scenarios/stats/graphs/retention/, conformance/scenarios/stats/graphs/hourly/, conformance/scenarios/stats/graphs/buttons/
-Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). Every other section is in force and unchanged.
+Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). The lines that begin "Changed 2026-11-23" were decided by Claude (coordinator) under the same permission, after independent review (`docs/design/decisions.md`, row `stats.overview` of 2026-11-23, "Statistics specs follow the built core"). Every other section is in force and unchanged.
 
 The data of the five review-log graphs (U99): Calendar, Reviews, Retention (the True Retention table), Hourly Breakdown and Answer Buttons. They run on the machinery of `stats/graphs-common`: scope G2, history G3, row reading G4, graph order G5, aggregate shape G6, requests G8, caches G9. This file says, per graph, which review-log rows count, the keys and values of its record, and its extras. Ranges, bins, the "0–4" first-bin shift, table values, percentages, "N/A" cells, tooltip and day text, and the colour scale are `stats/graph-presentation` (U226, `stats/graphs-common` G12, item 1). The Calendar cells' item queries are `stats/browse-queries` Q4.2; the other four graphs have no browse queries.
 
@@ -70,6 +70,8 @@ Each counted row (V1) adds 1 to its kind's count and its `time` to its kind's ti
 ### V2.2 Record
 
 Changed 2026-11-22 (round 11): the record also carries the Meguri extras `count_by_answer`, `time_by_answer` and `unrated` of `stats/history-reads` H6. They are computed in the same pass, are not observed (V8) and change none of the values below (G6's list of extras).
+
+Changed 2026-11-23: the record no longer carries them. By Answer is the part `by_answer` of its own (`stats/history-reads` H6), because with its members the record of G6's size test is over G6's 262,144-byte cap. The record holds Anki's two maps only, as below.
 
 `count` and `time`: two sparse maps day index → `{learn, relearn, young, mature, filtered}`. A key is present in both maps exactly when at least one row counted on that day; a kind with nothing is 0. Nothing else is in the record (G6).
 
@@ -255,7 +257,7 @@ U99's parts of the `stats` kind (`stats/graphs-common` G14), in G14's form (fiel
 
 With no counted row in the scope, the parts are: `reviews` `{}`; each `true_retention` period `{}`; each `hours` range 24 entries `{}`; each `buttons` range `{learning: [0, 0, 0, 0], young: [0, 0, 0, 0], mature: [0, 0, 0, 0]}`.
 
-Meguri's side of these four parts is U104's, as the Statistics plan assigns it (`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` §4: U104 owns the graph observation of G14, V8 and `stats/graphs-cards` C12): its implementer adds them to the testkit's `stats` executor (`core/crates/meguri-testkit/src/exec/stats.rs`, `conformance/stats-ops` H10), serialised as above, from U99's records. Until then no V10 scenario can pass on Meguri. Changed 2026-11-22: this said U99 adds them, to an adapter file that does not exist; U99 (PR #126) built the records and no observation.
+Meguri's side of these four parts is U104's, as the Statistics plan assigns it (`docs/plans/2026-11-22-1200-feat-statistics-page-implementation-plan.md` §4: U104 owns the graph observation of G14, V8 and `stats/graphs-cards` C12). Changed 2026-11-23: built on 2026-11-22 (PR #133). The testkit's `stats` executor (`core/crates/meguri-testkit/src/exec/stats.rs`, `conformance/stats-ops` H10) runs the request, and its part serialiser (`core/crates/meguri-testkit/src/observe/stats.rs`) writes these parts as above from U99's records; Meguri's extras are not written. Every V10 scenario is active; `reviews/time-wrap` passes under the deviation `stats-review-time-no-wrap` (V9). Before, this paragraph said that until U104 no V10 scenario could pass on Meguri; on 2026-11-22 it had already corrected that U99 would add them, since U99 (PR #126) built the records and no observation.
 
 The Calendar's dates, `max_count` and item texts (V3.4) are not in Anki's graph data and are not observed. Meguri tests them from V3.2's table and V3.4; the item texts are Q4.2's, and the scenario `calendar-cells` (`stats/browse-queries` Q8) checks what they find.
 
