@@ -352,6 +352,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             guard window != nil, table == nil else { return }
             table = window?.contentView.flatMap(BrowseResponder.resultsTable(in:))
             guard let clip = table?.enclosingScrollView?.contentView else {
+                if tries == 0 { results.trace("no table found") }
                 if tries > 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.attach(tries: tries - 1) }
                 }
@@ -362,6 +363,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
                                                               queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.report() }
             }
+            results.trace("attached")
             restore(tries: 20)
         }
 
@@ -371,6 +373,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
         private func restore(tries: Int) {
             guard let table, let scrollView = table.enclosingScrollView else { return }
             guard let row = results.pendingRestore, row < table.numberOfRows else {
+                if tries == 0, let row = results.pendingRestore { results.trace("restore \(row) gave up: \(table.numberOfRows) rows") }
                 if tries > 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.restore(tries: tries - 1) }
                 }
@@ -385,6 +388,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             let y = min(max(top, -insets.top), max(documentHeight - clip.bounds.height + insets.bottom, -insets.top))
             clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
             scrollView.reflectScrolledClipView(clip)
+            results.trace("restored \(row) of \(table.numberOfRows) to y \(Int(y)), now \(Int(clip.bounds.origin.y))")
             results.restored()
         }
 

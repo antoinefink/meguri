@@ -77,8 +77,13 @@ final class MacBrowseCommandsTests: XCTestCase {
         press(table.outlineRows.element(boundBy: 1), right: true)
         XCTAssertTrue(waitUntil { (try? self.contextMenu(app))?["Unsuspend 2 Cards"] != nil },
                       "\((try? contextMenu(app))?.keys.sorted() ?? [])")
+        // One rule for the menu and the inspector's summary: Find Duplicates… waits for U277.
+        XCTAssertEqual(try contextMenu(app)["Find Duplicates…"], false)
         screen(app, "context-menu-two-rows-cards-\(appearance)")
         app.typeKey(.escape, modifierFlags: [])
+        let inspectorFind = element(app, "browse.inspector.command.findDuplicates")
+        XCTAssertTrue(inspectorFind.waitForExistence(timeout: 5))
+        XCTAssertFalse(inspectorFind.isEnabled, "the inspector's Find Duplicates… is disabled as in the menu")
 
         // Notes mode: the notes' cards.
         try app.bringToFront(bundleIdentifier: bundle)
@@ -196,7 +201,11 @@ final class MacBrowseCommandsTests: XCTestCase {
         let sheet = app.sheets.firstMatch
         // The recipe's two suspended cards are one note's: the question names it.
         XCTAssertTrue(sheet.waitForExistence(timeout: 10), "⌘⌫ in the table asks before deleting; keys at \(keysAt(app))")
-        XCTAssertTrue(sheet.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Delete' OR value BEGINSWITH 'Delete'")).firstMatch.exists)
+        // The question names the note (not the Delete button's title) and its two cards.
+        let question = sheet.staticTexts.matching(NSPredicate(format: "value BEGINSWITH 'Delete \u{201C}' OR label BEGINSWITH 'Delete \u{201C}'"))
+        XCTAssertTrue(question.firstMatch.exists, "the question names the note")
+        XCTAssertTrue(sheet.staticTexts.matching(NSPredicate(format: "value == 'Its 2 cards will also be deleted.' OR label == 'Its 2 cards will also be deleted.'"))
+            .firstMatch.exists, "and says its 2 cards go with it")
         XCTAssertTrue(sheet.buttons["Cancel"].exists && sheet.buttons["Delete"].exists)
         capture(app, "delete-question-\(appearance)")
         sheet.buttons["Cancel"].click()
@@ -236,8 +245,9 @@ final class MacBrowseCommandsTests: XCTestCase {
         XCTAssertTrue(table.waitForExistence(timeout: 20))
         RunLoop.current.run(until: Date().addingTimeInterval(1))
         capture(app, "kept-scroll")
+        let trace = element(app, "browse.debug.scroll")
         XCTAssertTrue(waitUntil(timeout: 30) { onScreen(table.outlineRows.element(boundBy: index + 10)) },
-                      "row \(index + 10) is on screen again")
+                      "row \(index + 10) is on screen again; trace: \(trace.exists ? trace.label : "unknown")")
         XCTAssertFalse(onScreen(table.outlineRows.element(boundBy: 0)), "not back at the top")
     }
 

@@ -754,9 +754,18 @@ public final class BrowseResults {
     /// it shows is the one it left.
     public func tableAppeared() -> Int? {
         tableShown = false
+        trace("appear kept=\(keptRow.map { "\($0.token):\($0.index)" } ?? "nil") list=\(list?.token ?? 0)")
         guard let kept = keptRow, kept.token == list?.token else { pendingRestore = nil; return nil }
         pendingRestore = kept.index > 0 ? kept.index : nil
         return kept.index
+    }
+
+    /// Debug builds: the last steps of the kept scroll, for the UI suites.
+    public private(set) var scrollTrace: [String] = []
+    public func trace(_ step: @autoclosure () -> String) {
+        #if DEBUG
+        scrollTrace = Array((scrollTrace + [step()]).suffix(8))
+        #endif
     }
 
     /// The Mac: the kept row its table view brings back itself, once.
@@ -775,7 +784,11 @@ public final class BrowseResults {
     public func tableScrolled(first: Int, last: Int, token: UInt64? = nil, leaving: Bool = false) {
         scrollReported = true
         // A table of an earlier list reports nothing about this one.
-        guard tableShown || leaving, let list, last >= first, token.map({ $0 == list.token }) ?? true else { return }
+        guard tableShown || leaving, let list, last >= first, token.map({ $0 == list.token }) ?? true else {
+            trace("ignored \(first)-\(last)\(leaving ? " leaving" : "") shown=\(tableShown)")
+            return
+        }
+        if leaving || first == 0 { trace("kept \(first)-\(last)\(leaving ? " leaving" : "")") }
         keptRow = (list.token, first <= 0 ? 0 : (first + last) / 2)
     }
     @ObservationIgnored private var scrollReported = false

@@ -206,7 +206,6 @@ extension BrowseModel {
 #if os(macOS)
 /// N21.8: ⌥⌘A is Select All anywhere in Browse, and ⌘A in the table:
 /// keys of the window with no menu item of their own, as Find…'s ⇧⌘O.
-/// T9: Return or Space in the sidebar on its one selected filter row.
 private struct BrowseKeys: View {
     let model: BrowseModel
     @State private var monitor = BrowseKeyMonitor()
@@ -223,6 +222,10 @@ private struct BrowseKeys: View {
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
                 .accessibilityIdentifier("browse.debug.responder")
+            Text(verbatim: model.results.scrollTrace.joined(separator: " | "))
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .accessibilityIdentifier("browse.debug.scroll")
             #endif
         }
         .onAppear {
@@ -248,6 +251,8 @@ private struct BrowseKeys: View {
     /// window's hosting view as the first responder after a click on the
     /// table or the sidebar (VM, 2026-11-23), so the keys follow the click.
     private var clicked: Area = .elsewhere
+    /// The window that click landed in: keys of any other window are left alone.
+    private weak var clickedWindow: NSWindow?
     private enum Area { case table, sidebar, elsewhere }
 
     func start(model: BrowseModel) {
@@ -258,7 +263,9 @@ private struct BrowseKeys: View {
                 guard let self, let model else { return false }
                 if event.type != .keyDown {
                     self.clicked = Self.area(of: event)
+                    self.clickedWindow = event.window
                     model.results.tableFocused = self.clicked == .table
+                    self.onKey?("click in \(self.clicked)")
                     return false
                 }
                 self.onKey?(Self.describe(event.window?.firstResponder) + " · clicked \(self.clicked)")
@@ -302,7 +309,11 @@ private struct BrowseKeys: View {
     }
 
     private func handles(_ event: NSEvent, _ model: BrowseModel) -> Bool {
-        guard let window = event.window, window.sheetParent == nil, window.attachedSheet == nil else { return false }
+        // Browse's own window only: the one holding its results table, where the
+        // last click landed; never a sheet.
+        guard let window = event.window, window.sheetParent == nil, window.attachedSheet == nil,
+              let root = window.contentView, BrowseResponder.resultsTable(in: root) != nil else { return false }
+        if window !== clickedWindow { clicked = .elsewhere }
         let flags = event.modifierFlags.intersection([.command, .option, .shift, .control])
         let key = event.charactersIgnoringModifiers?.lowercased()
         if key == "a" {
@@ -320,16 +331,7 @@ private struct BrowseKeys: View {
             model.commands.perform(.delete)
             return true
         }
-        // Return or Space on the sidebar's one selected filter row: a second click (T9).
-        // The list draws that row selected beside Browse's: a row folded away or
-        // filtered out is not acted on.
-        let sidebar = BrowseResponder.sidebar(window.firstResponder)
-            ?? (clicked == .sidebar && Self.windowHasKeys(window) ? window.contentView.flatMap(BrowseResponder.sidebarList(in:)) : nil)
-        if flags.isEmpty, key == "\r" || key == " ", (sidebar?.numberOfSelectedRows ?? 0) >= 2,
-           model.selectedRows.count == 1, let row = model.selectedRows.first, model.activationRemoves(row) {
-            model.activate(row)
-            return true
-        }
+        // The sidebar's Return and Space are the list's own (BrowseSidebar).
         return false
     }
 }
