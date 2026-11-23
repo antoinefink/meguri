@@ -244,6 +244,12 @@ extension TestHooks {
             if sample { page.model.receive(.collectionReplaced) } else { page.model.refresh() }
         }
 
+        /// Answers `statsPinned` when a box holds a pinned selection (the pin's own callout is
+        /// hidden from accessibility).
+        func queryPin() {
+            if page?.model.selections.values.contains(where: \.pinned) == true { Self.answer("statsPinned") }
+        }
+
         func select(_ period: StatsPagePeriod) {
             page?.selectPeriod(period)
         }

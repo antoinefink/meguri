@@ -36,7 +36,8 @@ final class StatisticsShellUITests: XCTestCase {
         XCTAssertEqual(element(app, "stats.toolbar.deck").value as? String, "All Decks")
         let all = element(app, "stats.toolbar.period.all")
         XCTAssertTrue(all.waitForExistence(timeout: 10))
-        XCTAssertTrue(all.isSelected, "All is the first period")
+        // A segment reads as selected, or (the Mac's radio button) with the value 1.
+        XCTAssertTrue(all.isSelected || (all.value as? Int) == 1 || (all.value as? String) == "1", "All is the first period")
         for section in ["knowledge", "reviews", "cards", "comingUp", "answering", "memory", "decks"] {
             XCTAssertTrue(element(app, "stats.section.\(section)").exists, "Section \(section)")
         }
@@ -52,23 +53,31 @@ final class StatisticsShellUITests: XCTestCase {
                                            route: "stats/page/typical").arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
-        let box = element(app, "stats.box.reviewsDue")
+        let box = element(app, "stats.box.knowledgeOverTime")
         XCTAssertTrue(box.waitForExistence(timeout: 20))
         // Every box filled: the strip's Mature figure has its value.
         XCTAssertTrue(waitForValue(element(app, "stats.strip.mature")))
         try app.bringToFront(bundleIdentifier: bundle)
         // A click in the plot pins the bar under it (S8.3).
-        box.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.55)).click()
-        // The callout names its running total (S7.9's "Total by then").
-        let callout = box.staticTexts["Total by then"]
-        XCTAssertTrue(callout.waitForExistence(timeout: 5), "The click pinned a selection")
+        let plot = element(app, "stats.box.knowledgeOverTime.plot")
+        XCTAssertTrue(plot.waitForExistence(timeout: 10))
+        plot.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5)).click()
+        XCTAssertTrue(pinned(bundle), "The click pinned a selection")
         // The kept results go (as on CollectionReplaced): the box reads again, loading.
         post("\(bundle).testhooks.statsReload")
         let mature = element(app, "stats.strip.mature")
         XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == ''"), object: mature)],
                                        timeout: 10) == .completed, "The boxes read again: a loading phase")
         XCTAssertTrue(waitForValue(mature), "The box filled again")
-        XCTAssertTrue(callout.waitForExistence(timeout: 5), "The selection stayed pinned through the loading phase")
+        XCTAssertTrue(pinned(bundle), "The selection stayed pinned through the loading phase")
+    }
+
+    /// Asks the app whether a box holds a pinned selection (`statsQueryPin`, answered `statsPinned`).
+    private func pinned(_ bundle: String) -> Bool {
+        let answer = XCTNSNotificationExpectation(name: Notification.Name("\(bundle).testhooks.statsPinned"), object: nil,
+                                                  notificationCenter: DistributedNotificationCenter.default())
+        post("\(bundle).testhooks.statsQueryPin")
+        return XCTWaiter().wait(for: [answer], timeout: 3) == .completed
     }
     #endif
 

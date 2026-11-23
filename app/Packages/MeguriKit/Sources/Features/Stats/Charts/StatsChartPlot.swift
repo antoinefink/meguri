@@ -177,7 +177,16 @@ struct StatsChartPlot: View {
             #endif
             .accessibilityElement(children: .contain)
             .accessibilityLabel(summary)
+            // The pinned period (S8.3), as the callout names it.
+            .accessibilityValue(Text(verbatim: pinnedName))
+            .accessibilityIdentifier("stats.box.\(box).plot")
             .accessibilityChartDescriptor(StatsAudioGraph(data: isReady ? data : data.skeleton(), format: format, summary: summary))
+    }
+
+    /// The pinned bin's name, empty with none (or while the box is not ready).
+    private var pinnedName: String {
+        guard isReady, selection.pinned, let bin = selection.bin, data.bins.indices.contains(bin) else { return "" }
+        return format.name(data.bins[bin])
     }
 
     // MARK: Marks
