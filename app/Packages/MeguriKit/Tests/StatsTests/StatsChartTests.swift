@@ -161,6 +161,33 @@ import Testing
         #expect(labels[9] == "Nov")
     }
 
+    /// The axis of a real collection two and a half years old read "Oct 28, Jan 29": two-digit
+    /// years after a month read as days. Every month label on an axis over two years now carries
+    /// the whole year.
+    @Test func monthsOverMoreThanOneYearCarryTheirWholeYear() {
+        let first = Self.date(2028, 8, 1)
+        let bins = (0..<18).map { StatsPeriod.month(Self.calendar.date(byAdding: .month, value: $0, to: first)!) }
+        for maximum in [4, 7] {
+            let labels = Self.format.labelledBins(bins, maximum: maximum)
+            #expect(!labels.isEmpty)
+            #expect(labels.values.allSatisfy { $0.contains("2028") || $0.contains("2029") || $0.contains("2030") }, "\(labels)")
+            #expect(labels[17] == "Jan 2030")
+        }
+        let us = StatsChartFormat(locale: Locale(identifier: "en_US"), calendar: Self.calendar, now: Self.now)
+        #expect(us.labelledBins(bins, maximum: 7)[17] == "Jan 2030")
+        // Every month labelled over a year boundary: each with its year too.
+        let short = (0..<5).map { StatsPeriod.month(Self.calendar.date(byAdding: .month, value: $0, to: Self.date(2025, 10, 1))!) }
+        #expect(Self.format.labelledBins(short, maximum: 7) == [0: "Oct 2025", 1: "Nov 2025", 2: "Dec 2025", 3: "Jan 2026", 4: "Feb 2026"])
+    }
+
+    /// 1Y and 6M are weeks: a day and a month, never a year in two digits.
+    @Test func weekAxesOverAYearBoundaryNameTheDayAndMonth() {
+        let weeks = (0..<52).map { StatsPeriod.week(start: Self.calendar.date(byAdding: .day, value: 7 * ($0 - 51), to: Self.date(2026, 11, 16))!) }
+        let labels = Self.format.labelledBins(weeks, maximum: 7)
+        #expect(labels[51] == "16 Nov")
+        #expect(labels.values.allSatisfy { $0.split(separator: " ").count == 2 && Int($0.split(separator: " ")[0]) != nil }, "\(labels)")
+    }
+
     @Test func aCalloutLineWritesItsOwnUnit() {
         let data = StatsChartData(
             bins: [.day(Self.date(2026, 11, 17))],

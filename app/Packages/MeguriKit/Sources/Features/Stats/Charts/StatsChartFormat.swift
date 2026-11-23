@@ -136,6 +136,8 @@ public struct StatsChartFormat: Sendable {
 
     /// The period's axis label: a short date for days and weeks, the month
     /// ("Mar") or the year at January ("2025") for months, the hour, the bin's name.
+    /// On an axis over more than one year every month carries its whole year
+    /// ("Oct 2028"): a two-digit year after a month reads as a day ("Oct 28").
     public func axisLabel(_ period: StatsPeriod, monthsShowYear: Bool, spansYears: Bool = false) -> String {
         switch period {
         case let .day(date), let .week(date):
@@ -145,9 +147,7 @@ public struct StatsChartFormat: Sendable {
             if monthsShowYear || (!spansYears && calendar.component(.month, from: date) == 1) {
                 return date.formatted(style.year())
             }
-            // An axis over more than one year names the year ("Nov 25"),
-            // so two Novembers are told apart.
-            return formatted(date, template: spansYears ? "MMMyy" : "MMM")
+            return formatted(date, template: spansYears ? "MMMy" : "MMM")
         case let .hour(value):
             return hour(value)
         case .bucket, .overdue, .later:
@@ -202,7 +202,7 @@ public struct StatsChartFormat: Sendable {
             return years.count > 1
         }()
         for (n, index) in regular.reversed().enumerated() where n % step == 0 {
-            labels[index] = axisLabel(bins[index], monthsShowYear: false, spansYears: spansYears && step > 1)
+            labels[index] = axisLabel(bins[index], monthsShowYear: false, spansYears: spansYears)
         }
         return labels
     }
