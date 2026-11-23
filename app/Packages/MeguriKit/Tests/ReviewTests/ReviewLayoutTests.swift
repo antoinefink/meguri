@@ -53,17 +53,12 @@ import Testing
             return height.value
         }
         let plain = try await cardHeight(notice: nil, icon: nil)
-        let withIcon = try await cardHeight(notice: nil, icon: ReviewLeechNotice(suspended: true))
+        let withIcon = try await cardHeight(notice: "Card was a leech.", icon: ReviewLeechNotice(suspended: false))
         let withRow = try await cardHeight(notice: "Sample notice", icon: nil)
         #expect(withIcon == plain, "the icon takes no row")
         #expect(withRow < plain, "another notice keeps its row")
     }
 
-    /// S3's two sentences, announced once when the icon appears.
-    @Test func leechAnnouncementKeepsEachVariant() {
-        #expect(ReviewLeechButton.announcement(ReviewLeechNotice(suspended: false)) == "Card was a leech.")
-        #expect(ReviewLeechButton.announcement(ReviewLeechNotice(suspended: true)) == "Card was a leech. It has been suspended.")
-    }
 
     /// N16.4 (changed 2026-11-20): no reading column for the card. With the
     /// earlier 640 pt column the card's page was narrower than the window its

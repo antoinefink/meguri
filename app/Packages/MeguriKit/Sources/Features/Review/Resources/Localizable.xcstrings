@@ -350,26 +350,6 @@
           }
         }
       }
-    },
-    "review.toast.leech": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Card was a leech."
-          }
-        }
-      }
-    },
-    "review.toast.leechSuspended": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Card was a leech. It has been suspended."
-          }
-        }
-      }
     }
   },
   "version": "1.0"

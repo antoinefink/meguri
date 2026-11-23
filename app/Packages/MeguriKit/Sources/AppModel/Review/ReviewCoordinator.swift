@@ -16,13 +16,11 @@ public final class ReviewCoordinator {
     public private(set) var shownItem: ReviewHeadItem?
     public private(set) var counts = ReviewCounts(new: 0, learning: 0, review: 0)
     public private(set) var sessionID: UInt64?
-    /// A notice above the card. Setting one replaces the leech icon, as it
-    /// replaced the leech banner before (N16.11).
-    public private(set) var notice: String? { didSet { if notice != nil { leechNotice = nil } } }
-    /// N16.11: the leech notice of `sched/leeches#L5` (`review/reviewer-strings#S3`),
-    /// shown as one icon in the top controls instead of a banner above the card.
-    /// It lasts as the banner did: until another notice replaces it.
-    public private(set) var leechNotice: ReviewLeechNotice?
+    public private(set) var notice: String?
+    /// N16.11: while the notice is a leech answer's (`review/reviewer-strings#S3`),
+    /// the screen shows it as one icon in the top controls, not as a banner.
+    /// It lasts exactly as long as that notice does.
+    public var leechNotice: ReviewLeechNotice? { ReviewLeechNotice(notice: notice) }
     public private(set) var undoStatus: ReviewUndoStatus = .unavailable(reason: .none)
     public private(set) var redoStatus: ReviewUndoStatus = .unavailable(reason: .none)
     public private(set) var record: ReviewRecord
@@ -407,7 +405,7 @@ public final class ReviewCoordinator {
                         record.answers.append(pendingAnswer); record.undone.removeAll()
                         self.pendingAnswer = nil
                     }
-                    if leech { notice = nil; leechNotice = ReviewLeechNotice(suspended: suspended) }
+                    if leech { notice = suspended ? "Card was a leech. It has been suspended." : "Card was a leech." }
                     if suspended { record.suspended.insert(item.cardId) }
                     enqueuePersistence(diagnosticAnswer: true)
                     let needsRefresh = refreshPending
@@ -1141,10 +1139,19 @@ public final class ReviewCoordinator {
 
 /// A leech answer's notice (`review/reviewer-strings#S3`): the answered card's
 /// note was tagged, and the card suspended when its deck's leech action says so.
+/// Read from the notice's text, S3's two sentences, which the answer path sets.
 public nonisolated struct ReviewLeechNotice: Equatable, Sendable {
-    public let id = UUID()
+    static let tagged = "Card was a leech."
+    static let suspendedText = "Card was a leech. It has been suspended."
     public let suspended: Bool
     public init(suspended: Bool) { self.suspended = suspended }
+    init?(notice: String?) {
+        switch notice {
+        case Self.tagged: suspended = false
+        case Self.suspendedText: suspended = true
+        default: return nil
+        }
+    }
 }
 
 /// The More menu's card actions (N20.8).

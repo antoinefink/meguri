@@ -75,11 +75,6 @@ public struct ReviewView: View {
             guard id != nil, let action = model.cardActionAnnouncement?.action else { return }
             AccessibilityNotification.Announcement(Self.announcement(action)).post()
         }
-        // S2, S3: VoiceOver says the leech notice once, as the toast it stands for.
-        .onChange(of: model.leechNotice?.id) { _, id in
-            guard id != nil, let leech = model.leechNotice else { return }
-            AccessibilityNotification.Announcement(ReviewLeechButton.announcement(leech)).post()
-        }
         // S5: "Answer undone", "Edit Note redone"; nothing when the restore failed.
         .onChange(of: model.restoreAnnouncement?.id) { _, id in
             guard id != nil, let restored = model.restoreAnnouncement else { return }
@@ -389,7 +384,8 @@ struct ReviewLayout<Card: View>: View {
     private var cardRegion: some View {
         GeometryReader { middle in
             VStack(spacing: 0) {
-                if let notice {
+                // N16.11: a leech answer's notice is the icon in the top controls instead.
+                if let notice, leech == nil {
                     let noticeLimit = max(0, middle.size.height) * 0.4
                     ScrollView(.vertical) {
                         Label {
@@ -847,10 +843,6 @@ struct ReviewLeechButton: View {
         .accessibilityHint(Text("review.leech.hint", bundle: .module))
         .accessibilityIdentifier("review.session.leech")
         .popover(isPresented: $shown) { ReviewLeechDetails(notice: notice) }
-    }
-    static func announcement(_ notice: ReviewLeechNotice) -> String {
-        notice.suspended ? String(localized: "review.toast.leechSuspended", bundle: .module)
-            : String(localized: "review.toast.leech", bundle: .module)
     }
 }
 

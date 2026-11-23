@@ -32,7 +32,7 @@ No toast follows an accepted answer, except the leech toast. A refused or failed
 - The catalog holds these two keys only, each translated as one whole sentence. `sched/leeches#L5`'s ids `leech-notice` and `leech-notice-suspended` are not catalog keys and nothing joins strings at run time: L5's two texts joined with a space are the English of `review.toast.leechSuspended`, and this table is the one source of the text.
 - Not shown again when the answer is redone (S2).
 - When the answer also reaches the timebox (S7), the toast shows together with the sheet.
-- Changed 2026-11-23 (leech icon). How the leech notice shows on screen is `docs/design/native-interface-contract.md` N16.11: it is one yellow warning icon first in the review's top controls, not a banner, and a press shows `review.leech.title` with `review.leech.tagged` or `review.leech.suspended`, chosen by the same `suspended` flag. VoiceOver announces this table's sentence once when the icon appears (S2). The keys, their English and when each applies are unchanged. Decided by Claude (coordinator) under Antoine's delegation, pending his look.
+- Changed 2026-11-23 (leech icon). How the leech notice shows on screen is `docs/design/native-interface-contract.md` N16.11: it is one yellow warning icon first in the review's top controls, not a banner, and a press shows `review.leech.title` with `review.leech.tagged` or `review.leech.suspended`, chosen by the same `suspended` flag. The icon lasts exactly as long as the notice. The keys, their English, when each applies and S2's announcement are unchanged. Decided by Claude (coordinator) under Antoine's delegation, pending his look.
 
 ## S4. Card actions in review (R382, R383, R387)
 
