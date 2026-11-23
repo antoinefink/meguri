@@ -132,6 +132,38 @@ public final class NoteEditorDraft {
         return NoteFieldPatch(id: noteID, notetype: notetype, fields: changed, tags: tags, generation: generation)
     }
 
+    /// Browse's inspector (`browser/workspace` V12): the changed fields as
+    /// last committed and the tags when they changed, whatever input is
+    /// still on its way in another field (that input is saved by a later
+    /// save). Nil when nothing committed differs from what is stored, so a
+    /// save then writes nothing.
+    public func committedPatch() -> NoteFieldPatch? {
+        guard let noteID else { return nil }
+        var changed: [Int: String] = [:]
+        for (ord, field) in fields.enumerated() where field.target != field.baseline { changed[ord] = field.target }
+        let tags = self.tags == baselineTags ? nil : self.tags
+        guard !changed.isEmpty || tags != nil else { return nil }
+        return NoteFieldPatch(id: noteID, notetype: notetype, fields: changed, tags: tags, generation: generation)
+    }
+
+    /// Browse's inspector: `patch` committed, so what it sent is what is
+    /// stored now. Each sent field and the sent tags become the baseline; a
+    /// field edited again since keeps its newer target and stays changed.
+    public func acknowledgeSaved(_ patch: NoteFieldPatch) {
+        guard patch.id == noteID else { return }
+        for (ord, html) in patch.fields where fields.indices.contains(ord) {
+            fields[ord].baseline = html
+            fields[ord].changed = fields[ord].target != html
+        }
+        if let tags = patch.tags { baselineTags = tags }
+        revision &+= 1
+    }
+
+    /// Browse's inspector (V12): the fields the page leaves out, behind the
+    /// "<e> Empty Fields" row. Set before the page opens the draft, or
+    /// changed through the runtime; UI state only.
+    public var hiddenFields: Set<Int> = []
+
     /// Edit mode, for a change made elsewhere (`editor/edit-flows` W5.2 with
     /// E2's rule): every field without an unsaved edit takes the stored value
     /// as its baseline and target; a changed or pending field keeps the

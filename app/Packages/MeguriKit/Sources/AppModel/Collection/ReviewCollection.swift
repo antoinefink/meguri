@@ -380,6 +380,10 @@ public final class ReviewCollection: ChangeFanoutSink {
             return self.browseReadable && self.deckNamesAllowed(host: .main, route: nil)
         }
         value.commands.stepRecorded = { [weak self] seq, title in self?.collectionUndo.name(step: seq, title) }
+        // U273: the inspector's saves are "Edit Note" steps of this collection (V8.3).
+        value.inspector.stepRecorded = { [weak self] seq, title in self?.collectionUndo.name(step: seq, title) }
+        value.inspector.generation = { [weak self] in self?.generation ?? 0 }
+        value.inspector.preview.resolver = { [weak self] in await self?.mediaResolverForReview() }
         value.commands.openNoteType = { [weak self] id in
             guard let self else { return }
             self.noteTypes.selection = id
@@ -2271,6 +2275,8 @@ public final class ReviewCollection: ChangeFanoutSink {
                 } else {
                     do { try await review?.pause() }
                     catch { self.error = String(describing: error) }
+                    // W3: Browse's inspector saves its note before the background.
+                    await browseOwner?.inspector.flushForBackground()
                     guard await addFlowOwner?.flushForBackground() != false else {
                         throw BridgeError.unavailable(reason: "The note editor could not flush. Your draft has been kept.")
                     }

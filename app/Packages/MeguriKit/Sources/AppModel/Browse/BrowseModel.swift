@@ -94,6 +94,8 @@ public final class BrowseModel {
     public let results: BrowseResults
     /// The commands on its rows (U275).
     public let commands: BrowseCommands
+    /// The pane beside the table (U273).
+    public let inspector: BrowseInspector
 
     // MARK: The search field (U271)
 
@@ -152,18 +154,31 @@ public final class BrowseModel {
     /// "with a search" replaces the query by its reading.
     @ObservationIgnored public var takeEntrySearch: @MainActor () -> String? = { nil }
 
-    public init(backend: any BrowseBackend, store: BrowseDeviceStore = BrowseDeviceStore(defaults: nil)) {
+    public init(backend: any BrowseBackend, store: BrowseDeviceStore = BrowseDeviceStore(defaults: nil),
+                inspectorBackend: any BrowseInspectorBackend = CoreBrowseInspectorBackend()) {
         self.backend = backend
         self.store = store
         let results = BrowseResults(backend: backend)
         self.results = results
         let commands = BrowseCommands(results: results)
         self.commands = commands
-        results.selectionObserver = { [weak commands] in commands?.selectionChanged() }
         let device = store.load()
+        let inspector = BrowseInspector(backend: inspectorBackend, results: results, commands: commands,
+                                        device: device.inspector ?? BrowseInspectorDevice())
+        self.inspector = inspector
+        results.selectionObserver = { [weak commands, weak inspector] in
+            commands?.selectionChanged()
+            inspector?.selectionChanged()
+        }
+        commands.editNote = { [weak inspector] in inspector?.editNote() }
         self.device = device
         folded = device.folded
         showsAllTags = device.showsAllTags
+        inspector.store = { [weak self] state in
+            guard let self else { return }
+            self.device.inspector = state
+            self.saveDevice()
+        }
     }
 
     // MARK: Showing
@@ -183,6 +198,8 @@ public final class BrowseModel {
 
     public func disappear() {
         visible = false
+        // V12: leaving Browse saves the note the inspector shows.
+        inspector.browseLeft()
         // Counts or names still on their way are read again on the next appear.
         if readsPending { stale = true }
         countsTask?.cancel()
@@ -423,6 +440,7 @@ public final class BrowseModel {
     /// and counts are read again while Browse shows, else when it next does.
     public func changesCommitted(_ changes: ChangeSet, seq: UInt64) {
         results.changesCommitted(changes, seq: seq)
+        inspector.changesCommitted(changes, seq: seq)
         // The selection's counts (suspended, buried, note types) may have changed.
         if changes.wholeCollection || !changes.cards.isEmpty || !changes.notes.isEmpty { commands.rowsChanged() }
         // Saved searches and flag names are config keys (K7, K8).
@@ -448,6 +466,7 @@ public final class BrowseModel {
         if savingSearch?.saving == true { savingSearch?.markFailed() }
         commands.reset()
         results.collectionReady()
+        inspector.reset()
         readies &+= 1
         if let unwritten = unwrittenMode, unwritten == mode { writeMode(unwritten) }
         stale = true
@@ -471,6 +490,7 @@ public final class BrowseModel {
         epoch &+= 1
         commands.reset()
         results.collectionReplaced()
+        inspector.reset()
         countsTask?.cancel()
         opened = false
         openInFlight = false

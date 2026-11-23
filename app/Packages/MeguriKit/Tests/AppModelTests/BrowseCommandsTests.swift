@@ -39,9 +39,12 @@ import Testing
         #expect(state(.suspend, plain).shown && state(.bury, plain).shown && state(.suspend, plain).count == 3)
         // Their sheets come later: shown, disabled.
         for later: BrowseCommand in [.changeDeck, .addTags, .removeTags, .setDueDate, .forget, .changeNoteType, .findReplace,
-                                     .findDuplicates, .editNote] {
+                                     .findDuplicates] {
             #expect(state(later, plain).shown && !state(later, plain).enabled, "\(later) waits for its sheet")
         }
+        // Edit Note shows one row's note in the inspector (U273): one row only.
+        #expect(state(.editNote, plain).shown && !state(.editNote, plain).enabled)
+        #expect(state(.editNote, facts(rows: 1)).enabled)
         // All suspended: Unsuspend with its count, no Suspend; a mix shows both.
         let suspended = facts(rows: 3, suspended: 3)
         #expect(!state(.suspend, suspended).shown && state(.unsuspend, suspended).enabled && state(.unsuspend, suspended).count == 3)

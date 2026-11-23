@@ -7,7 +7,7 @@
     const blocks = new Set(("address article aside blockquote details dialog dd div dl dt " +
         "fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr li main " +
         "nav ol p pre section table ul").split(" "));
-    let loadId = 0, seq = 0, held = true, fields = [];
+    let loadId = 0, seq = 0, held = true, fields = [], current = null, pageMode = "add";
     const bridge = window.webkit.messageHandlers.meguriEditor;
     const envelope = (type, payload = {}) => ({type, loadId, seq: ++seq, ...payload});
     const emit = (type, payload) => bridge.postMessage(envelope(type, payload));
@@ -82,7 +82,7 @@
         else field.caret = range(field);
     }
     function focus(field) {
-        if (!field || field.collapsed || held) return;
+        if (!field || field.collapsed || field.hidden || held) return;
         active(field).focus();
         if (field.mode === "html") {
             const [start, end] = field.sourceCaret ?? [field.source.value.length, field.source.value.length];
@@ -160,6 +160,8 @@
         if (!value) focus(field);
     }
     function show(field) {
+        // Browse's inspector leaves empty fields out (V12): the whole section goes.
+        field.section.hidden = field.hidden;
         field.host.hidden = field.collapsed || field.mode !== "rich";
         field.source.hidden = field.collapsed || field.mode !== "html";
         field.label.setAttribute("aria-expanded", String(!field.collapsed));
@@ -176,7 +178,7 @@
     }
     function tab(field, backwards) {
         saveCaret(field);
-        const available = fields.filter(value => !value.collapsed);
+        const available = fields.filter(value => !value.collapsed && !value.hidden);
         const next = available[available.indexOf(field) + (backwards ? -1 : 1)];
         if (next) focus(next);
         else { active(field).blur(); void emit("focusLeave", {direction: backwards ? "previous" : "next"}); }
@@ -218,8 +220,9 @@
         selectRange(field, caret); dirty(field); historyState(field);
     }
     function wire(field, input) {
-        input.addEventListener("focus", () => void emit("focus", {ord: field.ord, mode: field.mode}));
+        input.addEventListener("focus", () => { current = field; void emit("focus", {ord: field.ord, mode: field.mode}); });
         input.addEventListener("blur", () => {
+            if (current === field) current = null;
             saveCaret(field); field.lastKind = null; commit(field, "blur"); void emit("blur", {ord: field.ord});
         });
         input.addEventListener("beforeinput", event => {
@@ -243,6 +246,10 @@
             if (event.key === "Tab") { event.preventDefault(); tab(field, event.shiftKey); }
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") event.preventDefault();
             if (event.metaKey && event.shiftKey && event.code === "KeyX") { event.preventDefault(); toggleMode(field); }
+            // editor/formatting F14: in Browse the Format menu owns ⌘B, ⌘I and ⌘U;
+            // WebKit's own handling of them never changes field HTML.
+            if (pageMode === "browse" && event.metaKey && !event.altKey && !event.ctrlKey &&
+                ["KeyB", "KeyI", "KeyU"].includes(event.code)) event.preventDefault();
             if (event.metaKey && event.code === "KeyZ" && history(field, event.shiftKey)) event.preventDefault();
         });
         // U197 has not supplied the paste/drop pipeline. Refuse these rather
@@ -250,6 +257,173 @@
         input.addEventListener("paste", event => event.preventDefault());
         input.addEventListener("drop", event => event.preventDefault());
         input.addEventListener("dragover", event => event.preventDefault());
+    }
+    // editor/formatting F3 and F4: inline formats as the runtime's own DOM
+    // transforms. Applying wraps each run of selected inline content (never
+    // across a block) after removing the format inside it, and merges with
+    // a neighbour of the same format; removing takes the format off the
+    // selection and keeps it on the content around it.
+    const formats = {
+        bold: {tag: "b", tags: ["b", "strong"], prop: "font-weight",
+            styled: style => style.fontWeight === "bold" || Number(style.fontWeight) >= 700},
+        italic: {tag: "i", tags: ["i", "em"], prop: "font-style",
+            styled: style => style.fontStyle === "italic" || style.fontStyle === "oblique"},
+        underline: {tag: "u", tags: ["u"], prop: null, styled: () => false},
+        superscript: {tag: "sup", tags: ["sup"], prop: "vertical-align", styled: style => style.verticalAlign === "super", excludes: "subscript"},
+        subscript: {tag: "sub", tags: ["sub"], prop: "vertical-align", styled: style => style.verticalAlign === "sub", excludes: "superscript"},
+    };
+    const voids = new Set("area base br col embed hr img input link meta source track wbr".split(" "));
+    const counts = (node, kind) => node?.nodeType === Node.ELEMENT_NODE &&
+        (kind.tags.includes(node.localName) || (node.hasAttribute("style") && kind.styled(node.style)));
+    function withinFormat(field, node, kind) {
+        for (let element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+            element && element !== field.rich; element = element.parentElement) if (counts(element, kind)) return element;
+        return null;
+    }
+    function unwrap(element) { element.replaceWith(...Array.from(element.childNodes)); }
+    function stripStyle(element, kind) {
+        if (!kind.prop || !element.hasAttribute("style")) return;
+        element.style.removeProperty(kind.prop);
+        if (!element.getAttribute("style").trim()) element.removeAttribute("style");
+        if (element.localName === "span" && element.attributes.length === 0) unwrap(element);
+    }
+    // F3: an own-tag element is unwrapped, or with attributes becomes a span
+    // that keeps them; otherwise the format's property goes from its style.
+    function strip(element, kind) {
+        if (kind.tags.includes(element.localName)) {
+            if (element.attributes.length === 0) { unwrap(element); return; }
+            const span = document.createElement("span");
+            for (const attribute of Array.from(element.attributes)) span.setAttribute(attribute.name, attribute.value);
+            span.append(...Array.from(element.childNodes)); element.replaceWith(span);
+            stripStyle(span, kind); return;
+        }
+        stripStyle(element, kind);
+    }
+    function stripInside(root, kind) {
+        for (const element of Array.from(root.querySelectorAll("*")).reverse()) if (counts(element, kind)) strip(element, kind);
+    }
+    const textNodes = root => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const nodes = []; while (walker.nextNode()) if (walker.currentNode.data.length) nodes.push(walker.currentNode);
+        return nodes;
+    };
+    const isVoid = node => node.nodeType === Node.ELEMENT_NODE && voids.has(node.localName);
+    // F4 step 3: one wrapper per run of adjacent inline content with text;
+    // void elements at a run's edges stay outside it.
+    function wrapRuns(parent, tag) {
+        let run = [];
+        const close = () => {
+            while (run.length && isVoid(run[0])) run.shift();
+            while (run.length && isVoid(run[run.length - 1])) run.pop();
+            if (run.some(node => node.textContent.length > 0)) {
+                const wrapper = document.createElement(tag);
+                run[0].before(wrapper); wrapper.append(...run);
+            }
+            run = [];
+        };
+        for (const node of Array.from(parent.childNodes)) {
+            if (node.nodeType === Node.ELEMENT_NODE && (blocks.has(node.localName) ||
+                (node.hasAttribute("block") && node.getAttribute("block") !== "false"))) { close(); wrapRuns(node, tag); }
+            else run.push(node);
+        }
+        close();
+    }
+    // F4 step 5: a wrapper merges with a neighbour of the same format,
+    // past empty text nodes.
+    function mergeNeighbours(root, tag) {
+        for (const wrapper of Array.from(root.querySelectorAll(tag))) {
+            if (!wrapper.isConnected || wrapper.attributes.length) continue;
+            let previous = wrapper.previousSibling;
+            while (previous?.nodeType === Node.TEXT_NODE && previous.data === "") previous = previous.previousSibling;
+            if (previous?.nodeType === Node.ELEMENT_NODE && previous.localName === tag && previous.attributes.length === 0) {
+                previous.append(...Array.from(wrapper.childNodes)); wrapper.remove(); continue;
+            }
+            let next = wrapper.nextSibling;
+            while (next?.nodeType === Node.TEXT_NODE && next.data === "") next = next.nextSibling;
+            if (next?.nodeType === Node.ELEMENT_NODE && next.localName === tag && next.attributes.length === 0) {
+                wrapper.append(...Array.from(next.childNodes)); next.remove();
+            }
+        }
+    }
+    function selectTexts(field, texts) {
+        if (!texts.length) return;
+        const value = document.createRange();
+        value.setStart(texts[0], 0); value.setEnd(texts[texts.length - 1], texts[texts.length - 1].length);
+        selectRange(field, value);
+    }
+    function format(field, command) {
+        const kind = formats[command];
+        const selected = range(field);
+        if (held || selected.collapsed) return false;
+        beforeEdit(field, "format");
+        const before = field.rich.innerHTML;
+        const has = withinFormat(field, selected.startContainer, kind) || withinFormat(field, selected.endContainer, kind);
+        const content = selected.extractContents();
+        if (kind.excludes) stripInside(content, formats[kind.excludes]);
+        stripInside(content, kind);
+        const texts = textNodes(content);
+        if (has) {
+            // The outermost format element around the point is split there,
+            // and the selection goes between its two halves (F4 Removing).
+            let outer = null;
+            for (let element = selected.startContainer.nodeType === Node.ELEMENT_NODE ? selected.startContainer : selected.startContainer.parentElement;
+                element && element !== field.rich; element = element.parentElement) if (counts(element, kind)) outer = element;
+            if (outer) {
+                let middle = content;
+                for (let element = selected.startContainer.nodeType === Node.ELEMENT_NODE ? selected.startContainer : selected.startContainer.parentElement;
+                    element && element !== outer; element = element.parentElement) {
+                    if (counts(element, kind)) continue;
+                    const copy = element.cloneNode(false); copy.append(middle); middle = copy;
+                }
+                const kept = outer.cloneNode(false); kept.append(middle);
+                const tail = document.createRange();
+                tail.setStart(selected.startContainer, selected.startOffset); tail.setEndAfter(outer);
+                const after = tail.extractContents();
+                const halves = [outer, ...Array.from(after.childNodes)];
+                outer.after(kept, after);
+                strip(kept, kind);
+                // A half left with nothing in it goes.
+                for (const half of halves) {
+                    if (half.nodeType === Node.ELEMENT_NODE && !half.textContent && !half.querySelector("img, br")) half.remove();
+                }
+            } else selected.insertNode(content);
+        } else {
+            wrapRuns(content, kind.tag);
+            selected.insertNode(content);
+            mergeNeighbours(field.rich, kind.tag);
+        }
+        field.rich.normalize();
+        selectTexts(field, texts.filter(node => node.isConnected));
+        if (field.rich.innerHTML === before) { field.undo.pop(); return false; }
+        dirty(field); historyState(field);
+        return true;
+    }
+    // editor/cloze-wrap W4: the selection's serialization, its white space
+    // ends kept outside, wrapped in the prefix and suffix as one input.
+    const edgeSpace = "(?:[\\t-\\r \\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]|&nbsp;|&#160;)*";
+    function wrap(field, prefix, suffix) {
+        const selected = range(field);
+        beforeEdit(field, "insertCloze");
+        if (selected.collapsed) {
+            const text = document.createTextNode(prefix + suffix);
+            selected.insertNode(text);
+            const caret = document.createRange(); caret.setStart(text, prefix.length); caret.collapse(true);
+            selectRange(field, caret);
+        } else {
+            const template = document.createElement("template");
+            template.content.append(selected.cloneContents());
+            const serialized = template.innerHTML;
+            const lead = serialized.match(new RegExp("^" + edgeSpace))[0];
+            let middle = serialized.slice(lead.length), trail = "";
+            if (middle.length) { trail = middle.match(new RegExp(edgeSpace + "$"))[0]; middle = middle.slice(0, middle.length - trail.length); }
+            const replacement = lead + prefix + middle + suffix + trail;
+            selected.deleteContents();
+            const fragment = parse(replacement);
+            const last = fragment.lastChild;
+            selected.insertNode(fragment);
+            if (last) { const caret = document.createRange(); caret.setStartAfter(last); caret.collapse(true); selectRange(field, caret); }
+        }
+        dirty(field); historyState(field);
     }
     function makeField(value) {
         const section = document.createElement("section"), header = document.createElement("header");
@@ -283,7 +457,8 @@
         section.append(header, boundary, source); container.append(section);
         const field = {ord: value.ord, baseline: value.baselineHtml ?? value.html,
             changed: Object.hasOwn(value, "baselineHtml"), pending: false, mode: value.mode,
-            collapsed: value.collapsed, rich, root, host: boundary, source, label, placeholder: placeholderLabel,
+            collapsed: value.collapsed, hidden: value.hidden === true, section,
+            rich, root, host: boundary, source, label, placeholder: placeholderLabel,
             timer: null, caret: null, sourceCaret: null, undo: [], redo: [], lastKind: null, lastEdit: 0};
         label.addEventListener("click", () => collapse(field, !field.collapsed));
         // The box's own padding belongs to the field: a tap there gives it
@@ -301,13 +476,14 @@
         }
     };
     function validateField(field) {
-        keys(field, ["ord", "name", "html", "baselineHtml", "description", "fontFamily", "fontSize", "rtl", "collapsed", "mode", "clozeField"],
+        keys(field, ["ord", "name", "html", "baselineHtml", "description", "fontFamily", "fontSize", "rtl", "collapsed", "mode", "clozeField", "hidden"],
             ["ord", "name", "html", "description", "fontFamily", "fontSize", "rtl", "collapsed", "mode", "clozeField"]);
         if (!Number.isSafeInteger(field.ord) || field.ord < 0 ||
             ["name", "html", "description", "fontFamily"].some(key => typeof field[key] !== "string") ||
             (Object.hasOwn(field, "baselineHtml") && typeof field.baselineHtml !== "string") ||
             !Number.isFinite(field.fontSize) || field.fontSize <= 0 ||
             ["rtl", "collapsed", "clozeField"].some(key => typeof field[key] !== "boolean") ||
+            (Object.hasOwn(field, "hidden") && typeof field.hidden !== "boolean") ||
             !["rich", "html"].includes(field.mode)) throw new Error("Invalid field description");
     }
     async function receive(message) {
@@ -325,7 +501,7 @@
             message.fields.forEach(validateField);
             if (message.fields.some((value, index) => index > 0 && value.ord <= message.fields[index - 1].ord)) throw new Error("Invalid field order");
             for (const field of fields) clearTimeout(field.timer);
-            loadId = message.loadId; seq = 0;
+            loadId = message.loadId; seq = 0; current = null; pageMode = message.mode;
             held = true; container.replaceChildren(); fields = message.fields.map(makeField);
             held = false; container.inert = false;
             focus(fields.find(field => field.ord === message.focus));
@@ -381,6 +557,29 @@
             }
             document.getElementById("hint").textContent = message.hint ?? "";
             return {loadId};
+        case "setHidden": {
+            keys(message, ["type", "loadId", "ords"]);
+            if (!Array.isArray(message.ords) || message.ords.some(ord => !Number.isSafeInteger(ord))) throw new Error("Invalid ords");
+            for (const value of fields) {
+                const hidden = message.ords.includes(value.ord);
+                if (hidden && current === value) active(value).blur();
+                value.hidden = hidden; show(value);
+            }
+            return {loadId};
+        }
+        case "format": {
+            keys(message, ["type", "loadId", "command"]);
+            if (!Object.hasOwn(formats, message.command)) throw new Error("Unknown format");
+            if (held || !current || current.mode !== "rich") return {applied: false};
+            return {applied: format(current, message.command)};
+        }
+        case "wrap": {
+            keys(message, ["type", "loadId", "prefix", "suffix"]);
+            if (typeof message.prefix !== "string" || typeof message.suffix !== "string") throw new Error("Invalid wrap");
+            if (held || !current || current.mode !== "rich") return {applied: false};
+            wrap(current, message.prefix, message.suffix);
+            return {applied: true};
+        }
         case "undo": case "redo":
             keys(message, ["type", "loadId", "ord"]); if (!field) throw new Error("Unknown field");
             return {applied: history(field, message.type === "redo")};

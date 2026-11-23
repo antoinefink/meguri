@@ -103,6 +103,15 @@ struct NativeCommandContext {
         #endif
     }
     var canSelectSiblings: Bool { browseCommands?.canSelectSiblings == true }
+
+    // MARK: The inspector (U273, N21.3, N21.4, N21.8)
+
+    /// The inspector while Browse shows in the main window.
+    var browseInspector: BrowseInspector? { browseCommands == nil ? nil : collection.browse.inspector }
+    /// N21.8: Note › Edit Note in Browse: the inspector's first field.
+    var canEditBrowseNote: Bool { browseEnabled(.editNote) && browseInspector?.canEditNote == true }
+    /// The focused field page of the inspector's note, for the Format menu.
+    var formattingHost: FieldEditorHost? { browseInspector?.note?.runtime as? FieldEditorHost }
     /// The flags' shown names (`tags/flags-and-marked` F4).
     var flagNames: [String] { collection.browse.flagNames }
 
@@ -373,6 +382,12 @@ struct AppCommands: Commands {
             Button("Cards and Notes") { context?.toggleBrowseMode() }
                 .keyboardShortcut("t", modifiers: [.command, .option])
                 .disabled(context?.canToggleBrowseMode != true)
+            // N21.3: the inspector's toggle, ⌃⌘I as in the system's InspectorCommands.
+            Button(LocalizedStringKey(context?.browseInspector?.shown == true ? "Hide Inspector" : "Show Inspector")) {
+                context?.browseInspector?.toggle()
+            }
+                .keyboardShortcut("i", modifiers: [.command, .control])
+                .disabled(context?.browseInspector == nil)
             // The inspector's Info tab comes with U273 and U274: disabled until then.
             Button("Card Info") {}
                 .keyboardShortcut("i", modifiers: [.command, .option])
@@ -428,12 +443,15 @@ struct AppCommands: Commands {
         // N21.8: the Note menu, between Deck and Card. Edit Note is the review's
         // (N20.8) or, in Browse, the inspector's first field (U273: disabled until then).
         CommandMenu("Note") {
+            // N21.8: the review's Edit Note (N20.8) or, in Browse, the inspector's first field.
             Button("Edit Note") {
-                guard let context, context.reviewInputAvailable, context.collection.editNoteFlow.canOpen else { return }
+                guard let context else { return }
+                if context.canEditBrowseNote { return context.performBrowse(.editNote) }
+                guard context.reviewInputAvailable, context.collection.editNoteFlow.canOpen else { return }
                 Task { await context.collection.openEditNote() }
             }
             .keyboardShortcut("e", modifiers: .command)
-            .disabled(!cardEnabled(context?.collection.editNoteFlow.canOpen))
+            .disabled(!cardEnabled(context?.collection.editNoteFlow.canOpen) && context?.canEditBrowseNote != true)
             Divider()
             browseItem(.addTags, key: "a", [.command, .shift])
             browseItem(.removeTags, key: "a", [.command, .option, .shift])
@@ -448,6 +466,27 @@ struct AppCommands: Commands {
             .keyboardShortcut(.delete, modifiers: .command)
             .disabled(context?.canDeleteNotes != true)
         }
+        #if os(macOS)
+        // N21.8: the Format menu, acting on the inspector's focused rich field
+        // (`editor/formatting` F2). Highlight, Text Colour, Lists and Remove
+        // Formatting come with the editor's formatting unit (U192).
+        CommandMenu("Format") {
+            formatItem("Bold", .bold, key: "b")
+            formatItem("Italic", .italic, key: "i")
+            formatItem("Underline", .underline, key: "u")
+            Divider()
+            // F14: ⌘= Superscript, ⇧⌘= Subscript (decided 2026-10-27).
+            formatItem("Superscript", .superscript, key: "=")
+            formatItem("Subscript", .subscript, key: "=", [.command, .shift])
+            Divider()
+            Button("Cloze Deletion") { context?.formattingHost?.cloze(sameNumber: false) }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                .disabled(context?.formattingHost?.canCloze != true)
+            Button("Cloze Deletion (Same Number)") { context?.formattingHost?.cloze(sameNumber: true) }
+                .keyboardShortcut("c", modifiers: [.command, .shift, .option])
+                .disabled(context?.formattingHost?.canCloze != true)
+        }
+        #endif
         CommandMenu("Card") {
             Button("Show Answer") {
                 guard context?.reviewInputAvailable == true else { return }
@@ -511,6 +550,15 @@ struct AppCommands: Commands {
         .keyboardShortcut(key.map { KeyboardShortcut($0, modifiers: modifiers) })
         .disabled(context?.browseEnabled(command) != true)
     }
+
+    #if os(macOS)
+    private func formatItem(_ title: LocalizedStringKey, _ format: FieldEditorHost.InlineFormat, key: KeyEquivalent,
+                            _ modifiers: EventModifiers = .command) -> some View {
+        Button(title) { context?.formattingHost?.format(format) }
+            .keyboardShortcut(key, modifiers: modifiers)
+            .disabled(context?.formattingHost?.canFormat != true)
+    }
+    #endif
 
     /// Bury Card and Suspend Card: the review's title in review, Browse's
     /// ("Bury Cards" for several) otherwise.

@@ -1,5 +1,7 @@
 import AppModel
 import CoreBridge
+import DesignSystem
+import Editor
 import SwiftUI
 
 /// Browse's detail beside its sidebar (N21.1, N21.3): the window title
@@ -34,7 +36,7 @@ public struct BrowseView: View {
     private var results: BrowseResults { model.results }
 
     public var body: some View {
-        content
+        detail
             .navigationTitle(Text("browse.title", bundle: .module))
             .toolbar {
                 #if os(macOS)
@@ -46,6 +48,8 @@ public struct BrowseView: View {
                 if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
                 DefaultToolbarItem(kind: .search, placement: .primaryAction)
                 if let addMenu { ToolbarItem(placement: .primaryAction) { addMenu } }
+                // N21.3: the inspector toggle, last.
+                ToolbarItem(placement: .primaryAction) { inspectorToggle }
                 #else
                 ToolbarItem(placement: .principal) { modePicker }
                 #endif
@@ -58,9 +62,61 @@ public struct BrowseView: View {
             .onChange(of: formatterKey) { setFormatter() }
             .onAppear {
                 setFormatter()
+                #if os(macOS)
+                if model.inspector.makeRuntime == nil {
+                    model.inspector.makeRuntime = { draft, current in
+                        let host = try FieldEditorHost(draft: draft, isCurrent: current)
+                        // `browser/inspector` I3: a row change opens the note with no field focused.
+                        host.browsing = true
+                        return host
+                    }
+                }
+                #endif
                 model.appear()
             }
     }
+
+    /// N21.3, N21.4: the table and its status line with the inspector
+    /// beside them; under about 900 points the inspector hides itself, and
+    /// Return or a double click shows it over the table.
+    @ViewBuilder private var detail: some View {
+        #if os(macOS)
+        content
+            .overlay(alignment: .trailing) {
+                if inspector.narrow, inspector.overlay {
+                    HStack(spacing: 0) {
+                        Divider()
+                        BrowseInspectorPane(model: model)
+                            .frame(width: BrowseViewMetrics.overlayWidth)
+                            .background(.background)
+                    }
+                    .onExitCommand { inspector.toggle() }
+                }
+            }
+            .inspector(isPresented: Binding(get: { !inspector.narrow && inspector.presented },
+                                            set: { if !inspector.narrow { inspector.presented = $0 } })) {
+                BrowseInspectorPane(model: model)
+                    .inspectorColumnWidth(min: BrowseViewMetrics.inspectorMinimum, ideal: BrowseViewMetrics.overlayWidth,
+                                          max: BrowseViewMetrics.inspectorMaximum)
+            }
+            .onGeometryChange(for: Double.self) { Double($0.frame(in: .global).maxX) } action: { inspector.widthChanged($0) }
+        #else
+        content
+        #endif
+    }
+
+    private var inspector: BrowseInspector { model.inspector }
+
+    #if os(macOS)
+    /// N21.3: `sidebar.trailing`, after the Add menu.
+    private var inspectorToggle: some View {
+        Button { inspector.toggle() } label: {
+            Label { Text("browse.inspector.toggle", bundle: .module) } icon: { Image(systemName: "sidebar.trailing") }
+        }
+        .help(Text(inspector.shown ? "browse.inspector.hide" : "browse.inspector.show", bundle: .module))
+        .accessibilityIdentifier("browse.toolbar.inspector")
+    }
+    #endif
 
     @ViewBuilder private var content: some View {
         switch results.content {
@@ -126,6 +182,13 @@ public struct BrowseView: View {
     private func setFormatter() {
         model.useFormatter(locale: locale, timeZone: timeZone, clock: clock)
     }
+}
+
+enum BrowseViewMetrics {
+    /// The inspector's width beside the table and over it (N21.4).
+    static let overlayWidth: CGFloat = 320
+    static let inspectorMinimum: CGFloat = 280
+    static let inspectorMaximum: CGFloat = 460
 }
 
 extension BrowseModel {
