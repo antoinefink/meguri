@@ -146,7 +146,7 @@ fn utf16_offset(text: &str, chars: usize) -> u64 {
     units + (chars - seen) as u64
 }
 
-fn search_error(error: &meguri_search::SearchError, text: &str) -> BrowseSearchError {
+pub(crate) fn search_error(error: &meguri_search::SearchError, text: &str) -> BrowseSearchError {
     let range = error.range();
     BrowseSearchError {
         kind: error.code().to_owned(),

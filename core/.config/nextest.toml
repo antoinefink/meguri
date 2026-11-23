@@ -44,6 +44,11 @@ threads-required = "num-test-threads"
 filter = 'package(meguri-stats) and test(=history_request::h16_a_cancel_during_the_build_stops_the_request_within_50_ms_and_the_build_goes_on)'
 threads-required = "num-test-threads"
 
+# stats/history-reads H16: a page request cancelled through its FFI handle ends within 50 ms.
+[[profile.default.overrides]]
+filter = 'package(meguri-ffi) and binary(ffi_it) and test(=stats_page_ffi::h16_a_cancel_through_the_handle_ends_the_request_within_50_ms_with_nothing_after_it)'
+threads-required = "num-test-threads"
+
 # Tests named `*_at_150k` hold wall-clock budgets (p95 read latencies) on the
 # 150k-card collection. They run alone: beside a workspace run that keeps
 # every core busy, their percentiles measure the scheduler, not the code.

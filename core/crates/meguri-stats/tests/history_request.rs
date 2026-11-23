@@ -362,6 +362,21 @@ fn h18_a_search_scope_fails_only_the_meguri_parts() {
 }
 
 #[test]
+fn g2_a_white_space_search_is_all_decks_for_every_part_history_and_knowledge_included() {
+    let f = studied();
+    let (all, end) = run(&f.host, &page_request(Scope::Collection, History::AllHistory, &every_part()));
+    assert_eq!(end, PageEnd::Complete);
+    let (blank, end) = run(&f.host, &page_request(Scope::Search(" \t ".into()), History::AllHistory, &every_part()));
+    assert_eq!(end, PageEnd::Complete);
+    for part in Part::all() {
+        match (outcome(&all, part), outcome(&blank, part)) {
+            (PartOutcome::Data(a), PartOutcome::Data(b)) => assert_eq!(comparable(a), comparable(b), "{part:?}"),
+            other => panic!("{part:?}: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn h15_an_unreadable_row_in_the_window_fails_every_part_outside_only_the_history_ones() {
     let f = Fixture::new();
     let old = NOW_MS - 400 * DAY_MS;

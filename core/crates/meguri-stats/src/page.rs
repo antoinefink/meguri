@@ -661,8 +661,10 @@ fn read_history(
     parts: &[Part],
     out: &mut Sink<'_>,
 ) -> Result<HistoryRead, PageEnd> {
+    // G2: a Search of White_Space only is the Collection scope, as for
+    // every other part of the request.
     let read = HistoryRequest {
-        scope: request.scope.clone(),
+        scope: request.scope.effective().clone(),
         history: request.history,
         cancel: Arc::clone(&request.cancel),
     };
@@ -706,7 +708,7 @@ fn read_knowledge(
     out: &mut Sink<'_>,
 ) -> Result<PartOutcome, PageEnd> {
     let read = KnowledgeRequest {
-        scope: request.scope.clone(),
+        scope: request.scope.effective().clone(),
         history: request.history,
         // H3.2's months reach back to H9's day when it is known; the part
         // never stops short of its oldest sample with an estimate.
