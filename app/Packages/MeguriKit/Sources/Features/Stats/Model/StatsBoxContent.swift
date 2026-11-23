@@ -109,6 +109,9 @@ public enum StatsBoxDetail: Hashable, Sendable {
     case timeOfDay(retention: StatsChartData)
     case byDeck(StatsByDeckTable)
     case activity(StatsActivity)
+    /// Activity's year blocks while its part is not back yet, from the header's oldest review
+    /// (H9), so the box is drawn at its final height (S10.3).
+    case activityYears(Int)
     /// The desired retention the Memory boxes mark on their axis (S7.12), as a fraction.
     case retrievability(desiredRetention: Double?)
 }

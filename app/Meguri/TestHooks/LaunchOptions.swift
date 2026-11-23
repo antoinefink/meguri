@@ -31,7 +31,7 @@ extension TestHooks {
     /// | `-MeguriRoute` | a route registered in `RouteRegistry`, e.g. `sample/sheet` |
     /// | `-MeguriBackgroundLaunch` | Mac only: `YES` or `NO`; in Debug, `YES` keeps the app out of the Dock and never active (`BackgroundLaunch`, which reads it itself; Profile ignores it). Not a UI-state option: it changes neither the restored state nor the window size |
     /// | `-MeguriStudyTimings` | `on` or `off` (default): a strip below the shell gives the last Study's way to its first card (`StudyStartTrace`, R1813) as `testhooks.studyStart.timings` |
-    /// | `-MeguriStatsRollout` | `off` (default), `on` or `open`: turns `StatsRollout` on (U296), so the sidebar's Statistics row and View › Statistics (⇧⌘S) show; `open` also opens the window on Statistics once the shell starts (captures and performance tests over `-MeguriFixture`). A `stats/…` route turns it on by itself |
+    /// | `-MeguriStatsRollout` | `off` (default), `on` or `open`: turns `StatsRollout` on (U296), so the sidebar's Statistics row and View › Statistics (⇧⌘S) show; `open` also opens the window on Statistics once the shell starts (captures and performance tests over `-MeguriFixture`); `open:<section>` then scrolls the page to that section (`knowledge`, `reviews`, `cards`, `comingUp`, `answering`, `memory`, `decks`), for Mac captures, which cannot scroll. A `stats/…` route turns it on by itself |
     /// | `-MeguriSyncRender` | a `SyncCoordinator.RenderState` name (`meguriConnected`, `meguriSyncing`, …), optionally followed by `+justFinished`: with `-MeguriFixture`, once the collection opens the shell shows that synthetic sync status in place of the real one; with a shell route, the shell gets the sync button over that status (captures of the sync button; nothing syncs) |
     struct LaunchOptions: Equatable {
         enum WindowSize: Equatable {
@@ -69,11 +69,16 @@ extension TestHooks {
         var route: Route?
         var studyTimings = false
         var statsRollout: StatsRolloutOption?
+        /// The section `open:<section>` scrolls to (a `StatsSectionID` raw value).
+        var statsSection: String?
 
         /// `-MeguriStatsRollout`'s values beyond `off`.
         enum StatsRolloutOption: String, Equatable {
             case on, open
         }
+
+        /// The sections `open:<section>` names (`stats/statistics-page` S5).
+        static let statsSections: Set<String> = ["knowledge", "reviews", "cards", "comingUp", "answering", "memory", "decks"]
         var syncRender: SyncRender?
 
         /// `-MeguriSyncRender`: the synthetic status the shell shows, and
@@ -222,10 +227,13 @@ extension TestHooks {
                 route = try Route(value)
             }
             if let value = values["StatsRollout"], value != "off" {
-                guard let option = StatsRolloutOption(rawValue: value) else {
-                    throw TestHookError("-MeguriStatsRollout takes off, on or open, got '\(value)'")
+                let parts = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                guard let option = StatsRolloutOption(rawValue: parts[0]),
+                      parts.count == 1 || (option == .open && Self.statsSections.contains(parts[1])) else {
+                    throw TestHookError("-MeguriStatsRollout takes off, on, open or open:<section>, got '\(value)'")
                 }
                 statsRollout = option
+                statsSection = parts.count == 2 ? parts[1] : nil
             }
             if let value = values["SyncRender"] {
                 let parts = value.split(separator: "+", maxSplits: 1).map(String.init)
