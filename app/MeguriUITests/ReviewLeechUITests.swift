@@ -118,8 +118,8 @@ final class ReviewLeechUITests: XCTestCase {
         #if os(macOS)
         app.typeKey(.escape, modifierFlags: [])
         #else
-        // A popover or, at compact width, a medium sheet: swipe it away.
-        details.swipeDown(velocity: .fast)
+        // A popover on every width: a tap outside it closes it, and only it.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
         #endif
         let closed = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
                                                                       object: details)], timeout: 10)
