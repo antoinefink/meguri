@@ -490,10 +490,12 @@ struct NoteTypeTemplateEditorColumn: View {
         } label: {
             Text(verbatim: card.flatMap { draft?.cardRow($0)?.name } ?? "")
                 .lineLimit(1)
+                .truncationMode(.tail)
         }
         .menuStyle(.button)
         .buttonStyle(.borderless)
-        .fixedSize()
+        // The name gives way first: the parts and Insert keep their size.
+        .layoutPriority(-1)
         .accessibilityLabel(Text("noteTypes.cards.cardType", bundle: .module))
         .accessibilityIdentifier("noteTypes.cards.cardTypeMenu")
     }

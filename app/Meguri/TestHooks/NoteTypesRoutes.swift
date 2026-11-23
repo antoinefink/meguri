@@ -1,5 +1,6 @@
 #if MEGURI_TEST_HOOKS
 @_spi(MeguriTestHooks) import AppModel
+import CardRendering
 import CoreBridge
 import DesignSystem
 import Home
@@ -115,6 +116,12 @@ extension TestHooks {
             // The preview's toggle is not kept from one run to the next.
             model.preview.defaults = nil
             if case .cards(.previewHidden) = state { model.preview.requested = false }
+            // An empty media folder of its own: the sample cards name no media.
+            model.preview.resolver = {
+                let root = FileManager.default.temporaryDirectory.appending(path: "notetypes-preview-\(UUID())", directoryHint: .isDirectory)
+                try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                return try? await MediaPathResolver.open(root: root, trackedNames: [])
+            }
             if case .question(let service) = state { model.service = { service } }
             if case .progress = state { model.service = { .meguriSync } }
             model.meguriSync = sync

@@ -37,39 +37,61 @@ struct NoteTypePreviewPane: View {
 
     // MARK: The bar
 
+    /// The bar's controls; where half a screen is too narrow for all of
+    /// them (iPad in portrait), Light | Dark moves into the note menu.
     private var bar: some View {
-        HStack(spacing: Spacing.small) {
-            noteMenu
-            if model.draft(id)?.isCloze == true { clozeMenu }
-            Spacer(minLength: Spacing.xSmall)
-            Picker(selection: Binding(get: { preview.side }, set: { preview.side = $0 })) {
-                Text("noteTypes.preview.question", bundle: .module).tag(CardRenderSide.question)
-                Text("noteTypes.preview.answer", bundle: .module).tag(CardRenderSide.answer)
-            } label: {
-                Text("noteTypes.preview.side", bundle: .module)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .accessibilityIdentifier("noteTypes.cards.preview.side")
-            Picker(selection: Binding(get: { preview.appearance }, set: { preview.appearanceChoice = $0 })) {
-                Label { Text("noteTypes.preview.light", bundle: .module) } icon: { Image(systemName: "sun.max") }
-                    .labelStyle(.iconOnly)
-                    .tag(CardRuntime.Appearance.light)
-                Label { Text("noteTypes.preview.dark", bundle: .module) } icon: { Image(systemName: "moon") }
-                    .labelStyle(.iconOnly)
-                    .tag(CardRuntime.Appearance.dark)
-            } label: {
-                Text("noteTypes.preview.appearance", bundle: .module)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .accessibilityIdentifier("noteTypes.cards.preview.appearance")
+        ViewThatFits(in: .horizontal) {
+            barLine(appearanceInMenu: false)
+            barLine(appearanceInMenu: true)
         }
     }
 
-    private var noteMenu: some View {
+    private func barLine(appearanceInMenu: Bool) -> some View {
+        HStack(spacing: Spacing.small) {
+            noteMenu(appearanceInMenu: appearanceInMenu)
+            if model.draft(id)?.isCloze == true { clozeMenu }
+            Spacer(minLength: Spacing.xSmall)
+            sidePicker
+            if !appearanceInMenu { appearancePicker }
+        }
+    }
+
+    private var sidePicker: some View {
+        Picker(selection: Binding(get: { preview.side }, set: { preview.side = $0 })) {
+            Text("noteTypes.preview.question", bundle: .module).tag(CardRenderSide.question)
+            Text("noteTypes.preview.answer", bundle: .module).tag(CardRenderSide.answer)
+        } label: {
+            Text("noteTypes.preview.side", bundle: .module)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .accessibilityIdentifier("noteTypes.cards.preview.side")
+    }
+
+    /// Light | Dark, a sun and a moon in the bar (or named, in the note menu).
+    private func appearanceChoices(iconsOnly: Bool) -> some View {
+        Picker(selection: Binding(get: { preview.appearance }, set: { preview.appearanceChoice = $0 })) {
+            Label { Text("noteTypes.preview.light", bundle: .module) } icon: { Image(systemName: "sun.max") }
+                .labelStyle(iconsOnly ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon))
+                .tag(CardRuntime.Appearance.light)
+            Label { Text("noteTypes.preview.dark", bundle: .module) } icon: { Image(systemName: "moon") }
+                .labelStyle(iconsOnly ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon))
+                .tag(CardRuntime.Appearance.dark)
+        } label: {
+            Text("noteTypes.preview.appearance", bundle: .module)
+        }
+        .accessibilityIdentifier("noteTypes.cards.preview.appearance")
+    }
+
+    private var appearancePicker: some View {
+        appearanceChoices(iconsOnly: true)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+    }
+
+    private func noteMenu(appearanceInMenu: Bool) -> some View {
         Menu {
             Button { preview.step(by: -1) } label: { Text("noteTypes.preview.previous", bundle: .module) }
                 .disabled(!preview.canStep.previous)
@@ -78,6 +100,10 @@ struct NoteTypePreviewPane: View {
             Divider()
             Toggle(isOn: Binding(get: { preview.fillEmpty }, set: { preview.setFillEmpty($0) })) {
                 Text("noteTypes.preview.fillEmpty", bundle: .module)
+            }
+            if appearanceInMenu {
+                Divider()
+                appearanceChoices(iconsOnly: false).pickerStyle(.inline)
             }
         } label: {
             if let position = preview.notePosition {
@@ -196,4 +222,11 @@ struct PreviewToggle: View {
         .help(fits ? Text(key, bundle: .module) : Text("noteTypes.preview.narrow", bundle: .module))
         .accessibilityIdentifier("noteTypes.cards.previewToggle")
     }
+}
+
+/// A label style chosen at run time.
+private struct AnyLabelStyle: LabelStyle {
+    private let make: (Configuration) -> AnyView
+    init<S: LabelStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
+    func makeBody(configuration: Configuration) -> some View { make(configuration) }
 }
