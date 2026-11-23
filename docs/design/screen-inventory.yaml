@@ -681,7 +681,7 @@ screens:
       period (1M 3M 6M 1Y All), kept per window and device, first time All Decks and All, never
       synced or written to the collection; opening from a deck replaces the deck. Grid: 2 columns
       up to about 1,250 pt, 3 beyond, 1 under about 560; lead boxes span the row; boxes are system
-      group boxes; a box's header opens the chart's own page (full chart, every row, About This
+      group boxes; once U302 lands a box's header opens the chart's own page (full chart, every row, About This
       Chart; ⌘[ back; contract stats.chartPage added with its unit). iPhone, folded Duo, narrow
       iPad: one column, four strip tiles, the period pinned under the bar, a Jump menu. Duo opened:
       a section per screenful, lead box left of the fold, the other boxes right. Ways in: the sidebar
