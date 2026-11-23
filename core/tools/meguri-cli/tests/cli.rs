@@ -68,6 +68,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "grade_now",
             "handoff",
             "import",
+            "import.apkg",
             "import.colpkg",
             "legacy_update",
             "media_outside",

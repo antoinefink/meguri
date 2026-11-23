@@ -25,13 +25,15 @@ public struct HomeView: View {
     public init(collection: ReviewCollection, deckID: Int64? = nil) { self.collection = collection; self.deckID = deckID }
     public var body: some View {
         Group {
-            if showsRootDeckList, showsToday {
+            // N27.1: the welcome and "No Decks" only once they are known; until the first read
+            // the last read (or the page's own background) holds the page.
+            if deckID == nil, showsToday, phase.showsDecks || phase == .pending {
                 TodayView(collection: collection)
             } else if showsRootDeckList, let query = activeSearch {
                 HomeDeckSearchResults(collection: collection, search: DeckSearchFocus.search(collection.navigation), query: query)
             } else if showsRootDeckList {
-                HomeDeckTree(nodes: collection.decks, navigation: collection.navigation, collection: collection,
-                    previousAnswerCount: showsPreviousSession ? collection.previousRecord?.answers.count : nil, error: collection.error,
+                HomeDeckTree(nodes: collection.homeDecks, navigation: collection.navigation, collection: collection,
+                    previousAnswerCount: showsPreviousSession ? collection.homePreviousAnswerCount : nil, error: collection.error,
                     isExpanded: { collection.studyExpanded(deckID: $0) },
                     isExpansionPending: { collection.isStudyExpansionPending(deckID: $0) },
                     setExpanded: { id, expanded, descendants in
@@ -42,8 +44,11 @@ public struct HomeView: View {
                     activityActive: collection.heatmapRefreshes) { id in
                     collection.navigation.select(.deck(DeckID(id)))
                 }
-            } else if collection.state == .noFile {
+            } else if phase == .welcome {
                 welcome
+            } else if phase.unknown, deckPageDetail == nil || collection.homeCountsHeld {
+                // Not known yet: no state view, no text (N27.3).
+                HomePendingPage(grouped: deckID != nil)
             } else {
                 if let deck = deckPageDetail {
                     // Keeps the screen's and the page's identifiers on separate elements.
@@ -180,8 +185,9 @@ public struct HomeView: View {
     private var todayRow: HomeTodayRow? {
         guard todayBesideDeckList else { return nil }
         let navigation = collection.navigation
-        return HomeTodayRow(waiting: TodayDecks(nodes: collection.decks).totals.waiting,
-            selection: DeckListSelection(homeDeckPage: navigation.homeDeckPage)) { navigation.openHome() }
+        return HomeTodayRow(waiting: TodayDecks(nodes: collection.homeDecks).totals.waiting,
+            selection: DeckListSelection(homeDeckPage: navigation.homeDeckPage),
+            countsHeld: collection.homeCountsHeld) { navigation.openHome() }
     }
     /// Today beside the list (N14.1) already shows the previous session.
     private var showsPreviousSession: Bool {
@@ -200,28 +206,35 @@ public struct HomeView: View {
         guard let deckID else {
             #if !os(macOS)
             // N18.3: the welcome names itself in the content; the tab layout's bar repeats nothing over it.
-            if collection.state == .noFile, shellLayout == .compact { return "" }
+            if phase == .welcome, shellLayout == .compact { return "" }
             #endif
             return HomeHeading.rootTitle(showsToday: showsToday)
         }
         #if os(macOS)
-        return HomeHeading.deckTitle(deckPageDetail?.name ?? collection.deck(deckID)?.name ?? "")
+        return HomeHeading.deckTitle(deckPageDetail?.name ?? collection.homeDeck(deckID)?.name ?? "")
         #else
         return ""
         #endif
     }
     #if os(macOS)
     private var pageSubtitle: String {
-        if let deck = deckPageDetail, let waiting = collection.deckWaiting(deck.id) {
+        // Held counts name nothing until the read (N27.3).
+        guard !collection.homeCountsHeld else { return "" }
+        if let deck = deckPageDetail {
+            let waiting = collection.deckWaiting(deck.id) ?? DeckWaiting(counts: deck.counts,
+                filtered: collection.homeDeck(deck.id)?.filtered == true)
             return HomeHeading.deckSubtitle(waiting, locale: locale)
         }
         guard deckID == nil, showsRootDeckList else { return "" }
-        return HomeHeading.todaySubtitle(TodayDecks(nodes: collection.decks).totals, locale: locale)
+        return HomeHeading.todaySubtitle(TodayDecks(nodes: collection.homeDecks).totals, locale: locale)
     }
     #endif
     /// N14.3: a regular deck with nothing waiting says so and offers Add Note in Study's place.
     private func nothingDue(_ deck: ReviewCollection.DeckPageDetail) -> Bool {
-        !collection.offersStudy(deckID: deck.id)
+        if phase == .kept {
+            return DeckWaiting(counts: deck.counts, filtered: collection.homeDeck(deck.id)?.filtered == true).offersAddNote
+        }
+        return !collection.offersStudy(deckID: deck.id)
     }
     #if os(macOS)
     private var homeKeyboardActive: Bool {
@@ -232,13 +245,15 @@ public struct HomeView: View {
             collection.navigation.sheet == nil
     }
     #endif
+    private var phase: HomePhase { collection.homePhase }
     private var showsRootDeckList: Bool {
-        guard case .ready = collection.state, !collection.decks.isEmpty else { return false }
-        return deckID.flatMap { collection.deckPage($0) } == nil
+        guard phase.showsDecks, !collection.homeDecks.isEmpty else { return false }
+        // A deck page whose deck the kept tree lacks waits for the read, not on the list.
+        return deckPageDetail == nil && (deckID == nil || !phase.unknown)
     }
     /// N2: every state view is centred in the pane; only the deck list starts at the top.
     private var centersContent: Bool {
-        if case .ready = collection.state { return collection.decks.isEmpty }
+        if phase == .decks { return false }
         return true
     }
     private func scrollContent(availableHeight: CGFloat) -> some View {
@@ -273,12 +288,13 @@ public struct HomeView: View {
     }
     private var hasFailed: Bool {
         if case .failed = collection.state { return true }
-        return false
+        return phase == .readFailed
     }
     @ViewBuilder private var content: some View {
-        switch collection.state {
-        case .unopened, .loading: LoadingStateView(Text("Opening collection…", bundle: .module))
-        case .noFile: EmptyView() // The welcome owns the page (N18.3).
+        switch phase {
+        // Not known yet: the pending page owns these (N27.3); nothing is drawn for them here.
+        case .pending, .kept: EmptyView()
+        case .welcome: EmptyView() // The welcome owns the page (N18.3).
         case .unavailable:
             LoadingStateView(Text("Collection is busy…", bundle: .module))
         case .creationRecovery:
@@ -290,11 +306,17 @@ public struct HomeView: View {
                 #if DEBUG
                 .debugRetryAccessibilityValue(collection.openFailureDiagnosticValue ?? "")
                 #endif
-        case .ready:
-            if deckPageDetail == nil, collection.decks.isEmpty {
+        case .noDecks:
+            // N27.1: only after a finished read found no deck.
+            if deckPageDetail == nil {
                 EmptyStateView(Text("No Decks", bundle: .module), systemImage: "rectangle.stack",
                     description: Text("This collection has no decks to study.", bundle: .module))
             }
+        case .readFailed:
+            // N27.1: the first read failed; Try Again reads the tree again.
+            ErrorStateView(Text("Couldn’t Open Collection", bundle: .module), message: Text(verbatim: collection.error ?? ""),
+                retryIdentifier: "home.collection.retry", retry: { collection.refreshCounts() })
+        case .decks: EmptyView()
         }
     }
 
@@ -320,9 +342,9 @@ public struct HomeView: View {
             previousAnswerCount: collection.previousRecord?.answers.count)
     }
 
+    /// The read page, or the kept deck's while nothing is known yet (N27.2).
     private var deckPageDetail: ReviewCollection.DeckPageDetail? {
-        guard case .ready = collection.state else { return nil }
-        return deckID.flatMap { collection.deckPage($0) }
+        deckID.flatMap { collection.homeDeckPage($0) }
     }
     private func children(of id: Int64, in nodes: [CountedDeckNode]) -> [CountedDeckNode] {
         for node in nodes {
@@ -335,7 +357,7 @@ public struct HomeView: View {
     /// The album page (Music, Podcasts): the deck, what is due and Study, then its subdecks.
     private func deckPage(_ deck: ReviewCollection.DeckPageDetail) -> some View {
         let path = deck.name.components(separatedBy: "::")
-        let subdecks = children(of: deck.id, in: collection.decks)
+        let subdecks = children(of: deck.id, in: collection.homeDecks)
         let empty = nothingDue(deck)
         return List {
             deckSummary(deck, empty: empty)
@@ -399,11 +421,13 @@ public struct HomeView: View {
             .buttonStyle(.borderedProminent)
             .frame(minHeight: ControlMetrics.minimumTarget)
             .contentShape(Rectangle())
-            // While Study starts, the button keeps its look until the card shows (N16.8).
-            .disabled(!(collection.canStudy || collection.studyStarting) || collection.navigation.sheet != nil
-                || collection.addNotePresentation.opening)
+            // While Study starts, the button keeps its look until the card shows (N16.8); on a
+            // kept page it looks as it will, and its press waits for the read (N27.4).
+            .disabled(!(collection.canStudy || collection.studyStarting || collection.studyKept(deckID: deck.id))
+                || collection.navigation.sheet != nil || collection.addNotePresentation.opening)
             .accessibilityIdentifier("home.deck.study")
-            .modifier(StudyActionTarget(collection: collection, deckID: deck.id))
+            // The first card is prepared for the read tree's deck only.
+            .modifier(StudyActionTarget(collection: collection, deckID: collection.deckTreeRead ? deck.id : nil))
         }
     }
     #if os(macOS)
@@ -843,7 +867,9 @@ private struct HomeDeckBranch: View {
         // Keep the row action distinct from its native disclosure control.
         .buttonStyle(.plain)
         .accessibilityLabel(Text(verbatim: spokenPath))
-        .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
+        // Held counts are not spoken as zeros (N27.3).
+        .accessibilityValue(collection?.homeCountsHeld == true ? Text(verbatim: "")
+            : Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
         .accessibilityIdentifier("home.deck.row.\(node.id)")
         .accessibilityAddTraits(selected ? .isSelected : [])
         #if os(macOS)
@@ -939,9 +965,12 @@ public struct HomeTodayRow {
     public let waiting: Int
     public let selection: DeckListSelection
     public let open: () -> Void
+    /// The kept counts are an earlier study day's: no number is drawn or spoken (N27.3).
+    public var countsHeld = false
     public var selected: Bool { selection.today }
-    public init(waiting: Int, selection: DeckListSelection = DeckListSelection(deck: nil), open: @escaping () -> Void) {
-        self.waiting = waiting; self.selection = selection; self.open = open
+    public init(waiting: Int, selection: DeckListSelection = DeckListSelection(deck: nil), countsHeld: Bool = false,
+                open: @escaping () -> Void) {
+        self.waiting = waiting; self.selection = selection; self.countsHeld = countsHeld; self.open = open
     }
 }
 
@@ -960,7 +989,8 @@ private struct HomeTodayRowView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text("Today", bundle: .module))
-        .accessibilityValue(Text("\(row.waiting) cards waiting", bundle: .module))
+        // Held counts are not spoken (N27.3).
+        .accessibilityValue(row.countsHeld ? Text(verbatim: "") : Text("\(row.waiting) cards waiting", bundle: .module))
         .accessibilityAddTraits(row.selected ? .isSelected : [])
         .accessibilityIdentifier("home.today.row")
         #if !os(macOS)
@@ -1014,7 +1044,11 @@ public struct HomeSidebarDecks: View {
     public let collection: ReviewCollection
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
-        if collection.decks.isEmpty {
+        let nodes = collection.homeDecks
+        if nodes.isEmpty, collection.homePhase != .noDecks {
+            // Only a finished read says there is no deck (N27.1).
+            EmptyView()
+        } else if nodes.isEmpty {
             emptyGuidance
                 #if !os(macOS)
                 .font(.subheadline)
@@ -1025,7 +1059,7 @@ public struct HomeSidebarDecks: View {
                 #endif
                 .accessibilityIdentifier("home.sidebar.guidance")
         } else {
-            ForEach(collection.decks, id: \.id) { node in
+            ForEach(nodes, id: \.id) { node in
                 HomeSidebarBranch(collection: collection, node: node, ancestors: [])
                     // The list reads the selection tag here: a top-level deck without
                     // subdecks otherwise never showed as selected.
@@ -1046,14 +1080,16 @@ private struct HomeSidebarBranch: View {
     var previewSelection: SidebarItem? = nil
     @Environment(\.locale) private var locale
     private var name: String { node.name.components(separatedBy: "::").last ?? node.name }
+    /// Held counts are neither shown nor spoken until the read (N27.3).
+    private var countsHeld: Bool { collection?.homeCountsHeld == true }
     /// N24.4: the full path, then the three counts, zeros included.
-    private var helpTag: Text { Text(verbatim: path + "\n" + node.counts.summary(locale: locale)) }
+    private var helpTag: Text { Text(verbatim: countsHeld ? path : path + "\n" + node.counts.summary(locale: locale)) }
     /// N24.4: the same three counts, "to review" in place of "due".
-    private var countsValue: Text { Text(verbatim: node.counts.summary(locale: locale)) }
+    private var countsValue: Text { Text(verbatim: countsHeld ? "" : node.counts.summary(locale: locale)) }
     /// N20.3: shown and spoken paths join their components with " › ".
     private var path: String { (ancestors + [name]).joined(separator: " › ") }
     private var quiet: Bool {
-        DeckWaiting(counts: node.counts, filtered: node.filtered)
+        !countsHeld && DeckWaiting(counts: node.counts, filtered: node.filtered)
             .quietInSidebar(selected: (collection?.navigation.sidebarSelection ?? previewSelection) == .deck(DeckID(node.id)))
     }
     private var expanded: Binding<Bool> {
@@ -1196,7 +1232,8 @@ public enum DeckListStudy {
     /// Today's Study (N24.3) from its keys: nothing while nothing waits or Study is unavailable,
     /// when the key arrives and again when the start runs.
     public static func startAll(collection: ReviewCollection) {
-        guard collection.studyAllAvailable else { return }
+        // On kept content the start waits for the read (N27.4).
+        guard collection.studyAllAvailable || collection.studyAllKept else { return }
         Task { await collection.startStudyAll() }
     }
 }

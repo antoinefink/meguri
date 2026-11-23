@@ -35,14 +35,6 @@ async function responseData<T>(response: Response): Promise<T> {
   if (!value || !Object.hasOwn(value, "data")) throw new ApiError("invalid_response", response.status);
   return value.data as T;
 }
-export async function uploadMedia(uploadId: string, file: File, signal?: AbortSignal): Promise<{ uploaded: boolean }> {
-  let response: Response;
-  try {
-    response = await fetch("/api/mcp/media-upload", { method: "POST", credentials: "same-origin", cache: "no-store", redirect: "error",
-      headers: { "Content-Type": "application/octet-stream", "X-Meguri-Upload": uploadId }, body: file, ...(signal ? { signal } : {}) });
-  } catch { throw new ApiError("connection_lost"); }
-  return responseData(response);
-}
 export function asError(error: unknown): ApiError { return error instanceof ApiError ? error : new ApiError("internal_error"); }
 export function errorMessage(error: ApiError, claim = false): string {
   const messages: Record<string, string> = {

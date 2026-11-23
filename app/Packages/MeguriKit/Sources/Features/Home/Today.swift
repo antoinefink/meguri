@@ -98,31 +98,37 @@ public struct TodayView: View {
     }
 
     public var body: some View {
-        let totals = TodayDecks(nodes: collection.decks).totals
-        TodaySummaryContent(
-            summary: TodaySummary(nodes: collection.decks, studied: collection.studiedToday, previous: previous),
-            nextLearningReadyAt: collection.nextLearningReadyAt, totals: totals,
-            error: besideDeckList ? nil : collection.error,
-            // While Study starts, the button keeps its look until the card shows (N16.8).
-            canStudy: collection.studyAllAvailable || collection.studyStarting,
-            study: { Task { await collection.startStudyAll() } },
-            activity: collection.activity, widths: collection.navigation.activityRowWidths)
-            .activityLoading(collection.activity, scope: .collection, active: collection.heatmapRefreshes,
-                             widths: collection.navigation.activityRowWidths, page: .today)
-            .modifier(TodayTitle(enabled: besideDeckList))
-            // Study starts the walk's first deck: its first card waits beneath (N16.8).
-            .modifier(StudyActionTarget(collection: collection, deckID: collection.studyAllDecks.first?.id))
+        let phase = collection.homePhase
+        if phase == .pending || collection.homeCountsHeld || !phase.showsDecks {
+            // Not known yet, or kept from an earlier study day: nothing here would be true
+            // yet, so the page waits for the read in its own background (N27.3).
+            HomePendingPage(grouped: true)
+                .modifier(TodayTitle(enabled: besideDeckList))
+        } else {
+            let decks = collection.homeDecks
+            let totals = TodayDecks(nodes: decks).totals
+            TodaySummaryContent(
+                summary: TodaySummary(nodes: decks, studied: collection.homeStudiedToday, previous: previous),
+                nextLearningReadyAt: collection.homeNextLearningReadyAt, totals: totals,
+                error: besideDeckList ? nil : collection.error,
+                // While Study starts, the button keeps its look until the card shows (N16.8);
+                // on kept content it looks as it will, and its press waits for the read (N27.4).
+                canStudy: collection.studyAllAvailable || collection.studyStarting || collection.studyAllKept,
+                study: { Task { await collection.startStudyAll() } },
+                activity: collection.activity, widths: collection.navigation.activityRowWidths)
+                .activityLoading(collection.activity, scope: .collection, active: collection.heatmapRefreshes,
+                                 widths: collection.navigation.activityRowWidths, page: .today)
+                .modifier(TodayTitle(enabled: besideDeckList))
+                // Study starts the walk's first deck: its first card waits beneath (N16.8).
+                .modifier(StudyActionTarget(collection: collection, deckID: collection.studyAllDecks.first?.id))
+        }
     }
 
     /// The walk's in this launch, else the last deck's session the store keeps (N24.2).
     private var previous: TodaySummary.PreviousSession? {
-        if let walk = collection.previousWalk {
-            return .init(deckNames: walk.decks.compactMap { collection.fullDeckName($0) }, walk: true,
-                         cards: walk.cards, endedAt: walk.endedAt)
+        collection.homePreviousSession.map {
+            .init(deckNames: $0.deckNames, walk: $0.walk, cards: $0.cards, endedAt: $0.endedAt)
         }
-        guard let record = collection.previousRecord, let last = record.answers.last else { return nil }
-        return .init(deckNames: collection.fullDeckName(record.deckID).map { [$0] } ?? [], walk: false,
-                     cards: Set(record.answers.map(\.cardID)).count, endedAt: record.endedAt ?? last.answeredAt)
     }
 }
 

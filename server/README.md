@@ -124,6 +124,18 @@ tools/mg sync-server-local start
 Remove the private password file after recovery. Keep failed MG evidence. This
 workflow does not publish, deploy, upgrade, back up or restore a service.
 
+MCP note attachments use `files` with matching `file_fields` first where the
+client supports the official OpenAI file path. When direct transfer is unavailable,
+call `prepare_media_upload` for each local file, then POST its bytes to the returned
+canonical `/api/mcp/media-upload` URL with one `Authorization: Bearer upload_id`
+header and `Content-Type: application/octet-stream`. Use `upload_id` from structured
+output; keep it out of URLs and chat. Then call `create_note` or `edit_note` with
+`uploads` containing the ID and target field. No browser, cookies, sign-in or user
+action is needed. An ID stages one file, expires after ten minutes and is redeemable
+only by the requesting OAuth grant; staged bytes may be reused until expiry.
+Restart discards uploads. Grant invalidation, data reset and collection replacement
+fence them. The former `/mcp/upload` page is removed.
+
 MCP paged search builds an optional in-memory candidate index in a separate
 blocking job. One build and two retained snapshots are allowed per service;
 there is no queue or persisted index. Builds have a five-second cooperative
@@ -148,10 +160,16 @@ For MCP, `off` emits nothing and `info` records failures and rejections.
 `debug` emits one `mcp_response_ready` record per prepared MCP response.
 Records contain a fixed stage, operation or tool name, HTTP status, outcome
 and reason. An optional typed `detail` field uses only these fixed labels:
-`publication_gate`, `native_writer`, `collection_path`, `collection_pin`,
+`mcp_queue`, `publication_gate`, `native_writer`, `collection_path`, `collection_pin`,
 `collection_storage`, `collection_worker`, `authority_storage`, `collection_open`,
 `collection_access`, `sqlite_open`, `sqlite_open_busy`, `sqlite_access`,
-`sqlite_access_busy`. The `sqlite_*` labels identify directly observed SQLite
+`sqlite_access_busy`, `attachment_client`, `attachment_url`, `attachment_dns`,
+`attachment_address`, `attachment_http_client`, `attachment_http_request`,
+`attachment_http_response`, `attachment_timeout`, `attachment_body`.
+The attachment labels identify the observed direct-acquisition stage, without
+including URLs, input hosts, filenames, headers, credentials, sizes, bytes or
+arbitrary error text. `prepare_media_upload` has its own operation label.
+The `sqlite_*` labels identify directly observed SQLite
 failures; `*_busy` identifies BUSY/LOCKED. Phase labels for helpers that erased
 the cause make no claim about the underlying cause. Details never enter tool
 responses. Debug records also include elapsed milliseconds. HTTP 200
