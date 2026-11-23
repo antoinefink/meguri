@@ -504,7 +504,8 @@ private struct StatsActivityCanvas: View, Equatable {
                 .foregroundStyle(.primary))
         }
         let unbounded = CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
-        let labels = grid.labels(geometry, rightToLeft: rightToLeft,
+        // At least 8 pt between two labels, so a year and the month after it read as two.
+        let labels = grid.labels(geometry, rightToLeft: rightToLeft, spacing: Spacing.xSmall,
                                  monthWidth: { months[$0 - 1].measure(in: unbounded).width },
                                  yearWidth: { years[$0]?.measure(in: unbounded).width ?? 0 })
         for label in labels.items {
