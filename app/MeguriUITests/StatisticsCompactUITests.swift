@@ -15,6 +15,8 @@ final class StatisticsCompactUITests: XCTestCase {
         throw XCTSkip("The narrow page is the iPhone's and the narrow iPad's")
         #else
         guard UIDevice.current.userInterfaceIdiom == .phone else { throw XCTSkip("Run on an iPhone (N25.6)") }
+        // The sample routes are the test hooks' (Debug and Profile only).
+        guard try BuildUnderTest.current().hasHooks else { throw XCTSkip("The stats/… routes need a build with test hooks") }
         continueAfterFailure = false
         #endif
     }

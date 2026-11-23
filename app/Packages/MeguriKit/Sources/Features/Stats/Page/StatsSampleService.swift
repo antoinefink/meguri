@@ -294,8 +294,10 @@ nonisolated struct StatsSampleCollection {
                 average: reviewed ? 91 : 0, sumByCard: Float(scaled(3_512)), sumByNote: Float(scaled(2_140)),
                 leftOut: reviewed ? scaled(120) : 0))
         case .studiedToday:
-            return .studiedToday(StatsStudiedToday(answers: reviewed ? scaled(164) : 0, cards: reviewed ? scaled(128) : 0,
-                                                   timeMilliseconds: reviewed ? scaled(1_140_000) : 0))
+            // `lapsed` studied nothing today, as its Activity says.
+            let today = reviewed && shape != .lapsed
+            return .studiedToday(StatsStudiedToday(answers: today ? scaled(164) : 0, cards: today ? scaled(128) : 0,
+                                                   timeMilliseconds: today ? scaled(1_140_000) : 0))
         case .reviews:
             return .reviews(StatsReviews(count: map(window) { reviewKinds($0, time: false) },
                                          time: map(window) { reviewKinds($0, time: true) }))

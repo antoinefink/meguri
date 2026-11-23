@@ -213,6 +213,8 @@ private struct StatsPageScroll: View {
     /// Held by its bottom for one change (`statsKeepingBelow`): Show All Years grows the
     /// Activity grid upward from today's line, which stays put.
     @State private var keepsBelow = false
+    /// The latest change held by the bottom: an earlier one's release leaves a later one held.
+    @State private var keepsBelowChange = 0
     @Environment(\.statsNarrow) private var statsNarrow
     private var model: StatsPageModel { page.model }
     private var narrow: Bool { statsNarrow ?? false }
@@ -256,11 +258,13 @@ private struct StatsPageScroll: View {
                 // The anchor is in place (a frame drawn with it) before the change lays out, and
                 // let go once the change has.
                 keepsBelow = true
+                keepsBelowChange &+= 1
+                let token = keepsBelowChange
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(20))
                     change()
                     try? await Task.sleep(for: .milliseconds(400))
-                    keepsBelow = false
+                    if keepsBelowChange == token { keepsBelow = false }
                 }
             })
             .onScrollPhaseChange { _, phase in
