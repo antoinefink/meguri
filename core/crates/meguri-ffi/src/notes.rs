@@ -222,6 +222,42 @@ pub fn card_deck(card_id: i64) -> Result<i64, CoreError> {
     })?;
     Ok(card.deck_id.0)
 }
+/// One card of a note, as Browse's inspector shows it (`browser/workspace`
+/// V7, V12): its ordinal, the deck it is in now and, for a card in a
+/// filtered deck, its home deck (0 otherwise).
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct NoteCard {
+    pub id: i64,
+    pub ord: u32,
+    pub deck_id: i64,
+    pub original_deck_id: i64,
+}
+/// The cards of a note by ordinal, then id: in Notes mode the inspector
+/// shows the first (V7), and "Card <i> of <k>" steps through them (V12).
+/// A pure read of one query snapshot; it writes nothing. A note with no
+/// card gives an empty list; a missing note gives `NoteNotFound`.
+#[uniffi::export]
+pub fn note_cards(note_id: i64) -> Result<Vec<NoteCard>, CoreError> {
+    callback::enter("note_cards");
+    let c = runtime::host()?.collection()?;
+    let r = c.reader(ReaderRole::Query)?;
+    let snapshot = r.snapshot()?;
+    if snapshot.note(NoteId(note_id))?.is_none() {
+        return Err(meguri_engine::EngineError::NoteNotFound { id: NoteId(note_id) }.into());
+    }
+    let mut cards: Vec<NoteCard> = snapshot
+        .cards_of_note(NoteId(note_id))?
+        .into_iter()
+        .map(|card| NoteCard {
+            id: card.id.0,
+            ord: u32::from(card.ord),
+            deck_id: card.deck_id.0,
+            original_deck_id: card.original_deck_id.0,
+        })
+        .collect();
+    cards.sort_by_key(|card| (card.ord, card.id));
+    Ok(cards)
+}
 #[uniffi::export]
 pub fn read_note(id: i64) -> Result<NoteRecord, CoreError> {
     callback::enter("read_note");

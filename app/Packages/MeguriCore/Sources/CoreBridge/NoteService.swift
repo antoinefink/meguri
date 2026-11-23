@@ -122,6 +122,24 @@ public struct NoteMutation: Sendable, Hashable {
     }
 }
 
+/// One card of a note: its ordinal and the deck it is in now; for a card in
+/// a filtered deck, its home deck (0 otherwise).
+public struct NoteCard: Sendable, Hashable {
+    public let id: Int64
+    public let ord: UInt32
+    public let deckId: Int64
+    public let originalDeckId: Int64
+    public init(id: Int64, ord: UInt32, deckId: Int64, originalDeckId: Int64) {
+        self.id = id
+        self.ord = ord
+        self.deckId = deckId
+        self.originalDeckId = originalDeckId
+    }
+    init(_ value: MeguriCoreBindings.NoteCard) {
+        self.init(id: value.id, ord: value.ord, deckId: value.deckId, originalDeckId: value.originalDeckId)
+    }
+}
+
 public struct NoteRecord: Sendable, Hashable {
     public let id: Int64
     public let notetypeId: Int64
@@ -251,6 +269,11 @@ public actor CoreNoteService: NoteService {
     /// The deck the card is in now.
     public func cardDeck(cardId: Int64) async throws(BridgeError) -> Int64 {
         try await QueryLane.shared.call(.cardDeck) { try MeguriCoreBindings.cardDeck(cardId: cardId) }
+    }
+    /// The note's cards by ordinal, then id, each with its deck now
+    /// (Browse's inspector, `browser/workspace` V7, V12). A pure read.
+    public func noteCards(noteId: Int64) async throws(BridgeError) -> [NoteCard] {
+        try await QueryLane.shared.call(.noteCards) { try MeguriCoreBindings.noteCards(noteId: noteId).map(NoteCard.init) }
     }
     public func readNote(id: Int64) async throws(BridgeError) -> NoteRecord {
         try await QueryLane.shared.call(.readNote) { NoteRecord(try MeguriCoreBindings.readNote(id: id)) }
