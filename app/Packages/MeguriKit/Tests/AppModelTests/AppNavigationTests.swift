@@ -27,7 +27,22 @@ import AppModel
     }
 
     @Test func theSidebarListsItsSectionsInOrder() {
-        #expect(AppSection.sidebar == [.home, .browse, .stats, .noteTypes, .settings])
+        // N25.1: Statistics second, under Today.
+        #expect(AppSection.sidebar == [.home, .stats, .browse, .noteTypes, .settings])
+    }
+
+    /// Statistics shows where its page has a layout (the Mac, the iPad), second under Today
+    /// (N25.1, plan U307's part for those platforms); the iPhone waits for U304.
+    @Test func statisticsShowsOnTheMacAndTheIPadSecondUnderToday() {
+        #expect(AppSection.statisticsShown(on: .mac))
+        #expect(AppSection.statisticsShown(on: .pad))
+        #expect(!AppSection.statisticsShown(on: .phone))
+        #expect(AppSection.productSidebar(on: .mac, statistics: true) == [.home, .stats, .browse, .noteTypes])
+        #expect(AppSection.productSidebar(on: .pad, statistics: true) == [.home, .stats, .noteTypes, .settings])
+        #expect(AppSection.productSidebar(on: .phone, statistics: false) == [.home, .noteTypes, .settings])
+        // The flag off (`-MeguriStatsRollout off`) gives the rows Statistics had joined.
+        #expect(AppSection.productSidebar(on: .mac, statistics: false) == [.home, .browse, .noteTypes])
+        #expect(AppSection.productSidebar(on: .pad, statistics: false) == [.home, .noteTypes, .settings])
     }
 
     @Test func aNewNavigationOpensOnHomeWithTheSidebarShown() {

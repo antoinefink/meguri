@@ -11,8 +11,9 @@ public struct StatsBoxSlot {
     public let model: StatsPageModel
     /// `.lead` for a section's lead box, else `.regular` (N25.3).
     public let size: StatsPlotSize
-    /// The header's button: the chart's own page (S9, U302; nothing until it lands).
-    public let open: () -> Void
+    /// What the header opens: the chart's own page (S9, U302). nil until it lands, and the
+    /// header is then a plain title with no chevron (Antoine, 2026-11-23).
+    public let open: (() -> Void)?
 
     /// The box's content from the model; every box always has one (S8.5).
     public var content: StatsBoxContent { model.box(id) }

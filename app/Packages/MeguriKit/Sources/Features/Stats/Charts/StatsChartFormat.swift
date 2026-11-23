@@ -155,33 +155,38 @@ public struct StatsChartFormat: Sendable {
         }
     }
 
-    /// The bins that carry an axis label, at most about `maximum` of them,
-    /// counted back from the last bin so the current period is always labelled.
-    /// Overdue and Later are always labelled; hours keep even hours when not all
-    /// fit (S7.11); a long run of months labels only Januaries.
+    /// The bins that carry an axis label, at most about `maximum` of them, counted back from
+    /// the last bin so the current period is always labelled; on an axis with Overdue or Later
+    /// (Reviews Due, S4.2, which looks ahead) counted on from the first bin, the current one there.
+    /// Overdue and Later are always labelled, and take a label's room: no date stands right
+    /// beside them, so in a small box a date never touches them. Hours keep even hours when not
+    /// all fit (S7.11); a long run of months labels only Januaries.
     public func labelledBins(_ bins: [StatsPeriod], maximum: Int) -> [Int: String] {
         guard !bins.isEmpty, maximum > 0 else { return [:] }
         var labels: [Int: String] = [:]
-        let regular = bins.indices.filter {
+        let specials = bins.indices.filter {
             switch bins[$0] {
-            case .overdue, .later: false
-            default: true
+            case .overdue, .later: true
+            default: false
             }
         }
-        for index in bins.indices where !regular.contains(index) {
+        let regular = bins.indices.filter { !specials.contains($0) }
+        for index in specials {
             labels[index] = axisLabel(bins[index], monthsShowYear: false)
         }
+        // The room the special labels leave the others.
+        let room = max(1, maximum - specials.count)
         let months = regular.allSatisfy { if case .month = bins[$0] { true } else { false } }
         let januaries = regular.filter {
             if case let .month(date) = bins[$0] { calendar.component(.month, from: date) == 1 } else { false }
         }
         if months, regular.count > maximum, januaries.count >= 3 {
             // Many years of months: the years, at each January.
-            let step = max(1, Int((Double(januaries.count) / Double(maximum)).rounded(.up)))
+            let step = max(1, Int((Double(januaries.count) / Double(room)).rounded(.up)))
             for (n, index) in januaries.reversed().enumerated() where n % step == 0 {
                 labels[index] = axisLabel(bins[index], monthsShowYear: true)
             }
-            return labels
+            return clearingSpecials(labels, specials: specials, fallback: 12 * step)
         }
         let hours = regular.allSatisfy { if case .hour = bins[$0] { true } else { false } }
         if hours, regular.count > maximum {
@@ -202,12 +207,29 @@ public struct StatsChartFormat: Sendable {
         }()
         // A label with its year is about twice as wide: fewer of them, so they fit a lead box
         // at compact width.
-        let fitting = spansYears ? min(maximum, max(3, maximum * 3 / 5)) : maximum
-        let step = max(1, Int((Double(regular.count) / Double(fitting)).rounded(.up)))
-        for (n, index) in regular.reversed().enumerated() where n % step == 0 {
+        let fitting = spansYears ? min(room, max(3, maximum * 3 / 5)) : room
+        let step = max(1, Int((Double(regular.count) / Double(max(1, fitting))).rounded(.up)))
+        // Overdue and Later belong to Reviews Due, which looks ahead: its current period is the first.
+        let order = specials.isEmpty ? regular.reversed() : regular
+        for (n, index) in order.enumerated() where n % step == 0 {
             labels[index] = axisLabel(bins[index], monthsShowYear: false, spansYears: spansYears)
         }
-        return labels
+        return clearingSpecials(labels, specials: specials, fallback: step)
+    }
+
+    /// The labels without those that would touch Overdue or Later: within two thirds of the
+    /// distance the labels keep from each other (at least two bins), where a date and "Overdue"
+    /// would touch.
+    private func clearingSpecials(_ labels: [Int: String], specials: [Int], fallback: Int) -> [Int: String] {
+        guard !specials.isEmpty else { return labels }
+        let chosen = labels.keys.filter { !specials.contains($0) }.sorted()
+        let spacing = zip(chosen, chosen.dropFirst()).map { $1 - $0 }.min() ?? fallback
+        let clearance = max(2, (spacing * 2 + 2) / 3)
+        var kept = labels
+        for index in chosen where specials.contains(where: { abs($0 - index) < clearance }) {
+            kept[index] = nil
+        }
+        return kept
     }
 
     // MARK: Callout and values
@@ -220,17 +242,22 @@ public struct StatsChartFormat: Sendable {
         var rows: [(name: String, value: String, color: StatsSeriesColor?)] = []
         for series in data.series {
             guard let value = data.value(series, at: bin) else { continue }
-            rows.append((series.name, self.value(value, unit: data.unit), series.color))
+            let written = series.valueTexts.flatMap { $0.indices.contains(bin) ? $0[bin] : nil } ?? self.value(value, unit: data.unit)
+            rows.append((series.name, written, series.color))
             if series.openPoints.contains(bin) {
                 rows.append((String(localized: "stats.chart.openPoint", bundle: .module), "", nil))
             }
         }
         for line in data.calloutLines {
             guard let text = line.text(at: bin, format: self, unit: data.unit) else { continue }
-            rows.append((line.name, text, nil))
+            rows.append((line.name, text, line.color))
         }
         for rule in data.rules {
             rows.append((rule.name, self.value(rule.value, unit: data.unit), rule.color))
+        }
+        for marker in data.markers {
+            guard marker.position != nil, let text = marker.valueText else { continue }
+            rows.append((marker.name, text, marker.color))
         }
         return rows
     }
@@ -239,7 +266,9 @@ public struct StatsChartFormat: Sendable {
     /// (S15: "each reading the callout's text").
     public func calloutText(_ data: StatsChartData, bin: Int) -> String {
         guard data.bins.indices.contains(bin) else { return "" }
-        let rows = calloutRows(data, bin: bin).map { $0.value.isEmpty ? $0.name : "\($0.name) \($0.value)" }
+        let rows = calloutRows(data, bin: bin).map { row in
+            row.value.isEmpty ? row.name : row.name.isEmpty ? row.value : "\(row.name) \(row.value)"
+        }
         return ([name(data.bins[bin])] + rows).joined(separator: ", ")
     }
 
