@@ -149,8 +149,9 @@ extension TestHooks {
                         statsPage.go(to: StatsSectionID.allCases.first { $0.boxes.contains(box) } ?? .knowledge)
                     }
                     if case .updating = sample {
-                        // The first refresh kept; a change makes the page read again over it.
-                        try? await Task.sleep(for: .milliseconds(800))
+                        // Once the first refresh is complete and kept, a change makes the page read
+                        // again over it.
+                        for _ in 0..<100 where !statsPage.filled { try? await Task.sleep(for: .milliseconds(100)) }
                         model.receive(.graphsStale)
                     }
                 }

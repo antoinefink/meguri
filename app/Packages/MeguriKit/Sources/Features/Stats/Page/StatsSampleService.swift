@@ -223,6 +223,12 @@ nonisolated struct StatsSampleCollection {
 
     private func scaled(_ value: Int) -> Int { Int((Double(value) * weight).rounded()) }
 
+    /// The scope's reviews on `day`; none for a shape with no review.
+    private func reviews(on day: Int) -> Int { reviewed ? scaled(Self.reviews(day)) : 0 }
+
+    /// The scope's reviews on an average day, for the windows with no time axis.
+    private var dailyReviews: Int { reviewed ? scaled(150) : 0 }
+
     private func map<Value>(_ days: [Int], _ value: (Int) -> Value?) -> StatsSparseMap<Value> {
         var keys: [Int] = []
         var values: [Value] = []
@@ -272,7 +278,7 @@ nonisolated struct StatsSampleCollection {
                                            time: map(window) { answers($0, time: true) }, unrated: 0))
         case .retention:
             func counts(_ days: Int) -> StatsRetentionCounts {
-                let total = (-days + 1...0).reduce(0) { $0 + scaled(Self.reviews($1)) }
+                let total = (-days + 1...0).reduce(0) { $0 + reviews(on: $1) }
                 return StatsRetentionCounts(youngPassed: total * 30 / 100, youngFailed: total * 4 / 100,
                                             maturePassed: total * 60 / 100, matureFailed: total * 6 / 100)
             }
@@ -280,7 +286,7 @@ nonisolated struct StatsSampleCollection {
                                                  year: counts(365), allTime: history == .allHistory ? counts(-Self.firstDay + 1) : nil))
         case .retentionByDay:
             return .retentionByDay(StatsRetentionByDay(days: map(window) { day in
-                let total = scaled(Self.reviews(day))
+                let total = reviews(on: day)
                 guard total > 0 else { return nil }
                 let fail = 0.06 + 0.06 * Self.noise(day, 3)
                 let young = total * 35 / 100, mature = total - young
@@ -291,7 +297,7 @@ nonisolated struct StatsSampleCollection {
         case .hours:
             let curve: [Double] = [0, 0, 0, 0, 0, 0, 1, 4, 8, 9, 6, 4, 5, 6, 3, 2, 2, 3, 5, 8, 10, 9, 6, 2]
             func hours(_ days: Int) -> [StatsHour] {
-                let total = Double(min(days, -windowStart) * scaled(150))
+                let total = Double(min(days, -windowStart) * dailyReviews)
                 return curve.map { StatsHour(total: Int(total * $0 / 93), correct: Int(total * $0 / 93 * 0.9)) }
             }
             func retention(_ days: Int) -> [StatsHourRetention] {
@@ -303,7 +309,7 @@ nonisolated struct StatsSampleCollection {
             return .hours(StatsHours(hours: windowValues(hours), retentionByHour: windowValues(retention)))
         case .buttons:
             return .buttons(StatsButtons(ranges: windowValues { days in
-                let n = Double(min(days, -windowStart) * scaled(150))
+                let n = Double(min(days, -windowStart) * dailyReviews)
                 return StatsButtonPresses(learning: [Int(n * 0.03), Int(n * 0.01), Int(n * 0.09), Int(n * 0.01)],
                                           young: [Int(n * 0.03), Int(n * 0.02), Int(n * 0.22), Int(n * 0.03)],
                                           mature: [Int(n * 0.04), Int(n * 0.03), Int(n * 0.43), Int(n * 0.06)])
@@ -426,7 +432,7 @@ nonisolated struct StatsSampleCollection {
         return children.map { id in
             let share = (Self.weight(id) ?? 0) / weight
             return StatsDeckRow(deckID: id, ownCards: false, cards: Int(Double(scaled(4_210)) * share), windows: windowValues { days in
-                let reviews = Int(Double(min(days, -windowStart) * scaled(150)) * share)
+                let reviews = Int(Double(min(days, -windowStart) * dailyReviews) * share)
                 return StatsDeckValues(reviews: reviews, timeMilliseconds: reviews * 7_500,
                                        passed: Int(Double(reviews) * 0.9), failed: Int(Double(reviews) * 0.1))
             })
