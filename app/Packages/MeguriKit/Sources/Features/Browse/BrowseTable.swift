@@ -325,6 +325,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
         var token: UInt64?
         private weak var table: NSTableView?
         private var observer: NSObjectProtocol?
+        private var liveObserver: NSObjectProtocol?
 
         init(results: BrowseResults) {
             self.results = results
@@ -336,7 +337,9 @@ private struct BrowseScrollReporter: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             if let observer { NotificationCenter.default.removeObserver(observer) }
+            if let liveObserver { NotificationCenter.default.removeObserver(liveObserver) }
             observer = nil
+            liveObserver = nil
             table = nil
             guard window != nil else { return }
             attach(tries: 100)
@@ -366,13 +369,19 @@ private struct BrowseScrollReporter: NSViewRepresentable {
                     // Only the user's scrolling moves the kept row: the clip view also
                     // moves while SwiftUI takes the table down for another section
                     // (a click in the sidebar), and that must not keep its top.
-                    switch NSApp.currentEvent?.type {
+                    let type = NSApp.currentEvent?.type
+                    switch type {
                     case .scrollWheel, .keyDown, .leftMouseDragged, .swipe: self?.report()
-                    default: break
+                    default: self?.skipped(type)
                     }
                 }
             }
-            results.trace("attached")
+            // A gesture or a scroller drag ends with its own notice: that position is kept too.
+            liveObserver = NotificationCenter.default.addObserver(forName: NSScrollView.didEndLiveScrollNotification,
+                                                                  object: table?.enclosingScrollView, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.report() }
+            }
+            results.trace("attached \(table.map { "\($0.numberOfRows) rows" } ?? "")")
             restore(tries: 20)
         }
 
@@ -399,6 +408,14 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             scrollView.reflectScrolledClipView(clip)
             results.trace("restored \(row) of \(table.numberOfRows) to y \(Int(y)), now \(Int(clip.bounds.origin.y))")
             results.restored()
+        }
+
+        private var lastSkipped: NSEvent.EventType?? = .none
+        /// Debug trace: the first bounds change of a run of non-scroll events.
+        private func skipped(_ type: NSEvent.EventType?) {
+            if case .some(let last) = lastSkipped, last == type { return }
+            lastSkipped = .some(type)
+            results.trace("moved on \(type.map { "\($0.rawValue)" } ?? "no event")")
         }
 
         private func report() {
