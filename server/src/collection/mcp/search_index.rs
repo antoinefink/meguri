@@ -115,6 +115,14 @@ impl SearchIndex {
         Self::build_with_limits(c, deadline, Limits::default())
     }
 
+    #[cfg(test)]
+    pub(super) fn test_with_posting_capacity(c: &Connection, deadline: Instant, slots: usize) -> Result<Self> {
+        let mut limits = Limits::default();
+        limits.tag.slots = slots;
+        limits.text.slots = slots;
+        Self::build_with_limits(c,deadline,limits)
+    }
+
     fn build_with_limits(c: &Connection, deadline: Instant, limits: Limits) -> Result<Self> {
         // Prevent an accidental build from mixing independent autocommit reads.
         if c.is_autocommit() { return Err(unsupported()); }

@@ -75,7 +75,9 @@ pub struct NoteType {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum ToolOutput {
-    Notes { notes: Vec<Note>, next_cursor: Option<String> },
+    Notes { notes: Vec<Note>, next_cursor: Option<String>,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        scan_incomplete: bool },
     Catalog { decks: Vec<Deck>, note_types: Vec<NoteType>, next_cursor: Option<String> },
     Changed { note_id: String, revision: String },
     Upload { upload_id: String, upload_url: String, expires_at: String },
@@ -85,7 +87,8 @@ impl ToolOutput {
         let text = |s: &str| s.len() <= MAX_STRING_BYTES;
         let handle = |v: &Option<String>| v.as_ref().is_none_or(|s| s.len() <= MAX_HANDLE_BYTES);
         match self {
-            Self::Notes { notes, next_cursor } => notes.len() <= MAX_PAGE_ITEMS && handle(next_cursor)
+            Self::Notes { notes, next_cursor, scan_incomplete } => notes.len() <= MAX_PAGE_ITEMS && handle(next_cursor)
+                && (!scan_incomplete || next_cursor.is_some())
                 && notes.iter().all(|n| n.fields.len() <= MAX_FIELDS && n.tags.len() <= MAX_TAGS
                     && n.revision.len() <= MAX_HANDLE_BYTES
                     && n.fields.iter().all(|(k,v)| text(k) && text(v))

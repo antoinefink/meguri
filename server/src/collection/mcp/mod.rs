@@ -76,7 +76,11 @@ pub struct NoteResult {
     pub revision: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SearchResult { pub notes: Vec<NoteResult>, pub next_cursor: Option<String> }
+pub struct SearchResult {
+    pub notes: Vec<NoteResult>, pub next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scan_incomplete: bool,
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeckResult { pub deck_id: String, pub name: String, pub filtered: bool }
 #[derive(Debug, Serialize, Deserialize)]

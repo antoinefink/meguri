@@ -35,14 +35,19 @@ impl Backend<FixtureAuthority> for Fixture {
         Box::pin(async move {
             let (name, result) = match call {
                 ToolCall::SearchNotes(input) => {
-                    assert_eq!(input.note_id.as_deref(), Some("9007199254740993"));
-                    ("search_notes", Ok(ToolOutput::Notes {
-                        notes:vec![Note {
-                            note_id:"9007199254740993".into(), note_type_id:"1".into(),
-                            fields:BTreeMap::from([("Front".into(), format!("generated {} <b>data</b>", authority.0))]),
-                            tags:vec!["generated".into()], revision:"generated-revision".into(),
-                        }], next_cursor:None,
-                    }))
+                    if input.query.as_deref()==Some("generated sparse") {
+                        ("search_notes", Ok(ToolOutput::Notes { notes:vec![],
+                            next_cursor:Some("generated-next-cursor".into()), scan_incomplete:true }))
+                    } else {
+                        assert_eq!(input.note_id.as_deref(), Some("9007199254740993"));
+                        ("search_notes", Ok(ToolOutput::Notes {
+                            notes:vec![Note {
+                                note_id:"9007199254740993".into(), note_type_id:"1".into(),
+                                fields:BTreeMap::from([("Front".into(), format!("generated {} <b>data</b>", authority.0))]),
+                                tags:vec!["generated".into()], revision:"generated-revision".into(),
+                            }], next_cursor:None, scan_incomplete:false,
+                        }))
+                    }
                 }
                 ToolCall::ListDecksAndNoteTypes(_) => ("list_decks_and_note_types", Ok(ToolOutput::Catalog {
                     decks:vec![Deck { deck_id:"1".into(), name:"Generated deck".into(), filtered:false }],
@@ -201,11 +206,34 @@ async fn both_lifecycles_list_real_descriptors_and_bind_each_call_to_its_bearer(
             assert_eq!(result["result"]["structuredContent"]["notes"][0]["note_id"], "9007199254740993");
             assert_eq!(result["result"]["structuredContent"]["notes"][0]["fields"]["Front"],
                 format!("generated {account} <b>data</b>"));
+            assert!(result["result"]["structuredContent"].get("scan_incomplete").is_none());
             same_content(&result);
         }
     }
     assert_eq!(*r.fixture.calls.lock().unwrap(), vec![("a","search_notes"), ("b","search_notes"),
         ("a","search_notes"), ("b","search_notes")]);
+    r.stop().await;
+}
+
+#[tokio::test]
+async fn incomplete_search_wire_requires_cursor_and_guides_continuation() {
+    let r=Running::start().await;
+    for revision in SUPPORTED_REVISIONS {
+        let result=rpc(&r,revision,"generated-fixture-a","tools/call",
+            json!({"name":"search_notes","arguments":{"query":"generated sparse"}})).await;
+        assert_eq!(result["result"]["isError"],false);
+        assert_eq!(result["result"]["structuredContent"],json!({"notes":[],
+            "next_cursor":"generated-next-cursor","scan_incomplete":true}));
+        same_content(&result);
+        let listed=rpc(&r,revision,"generated-fixture-a","tools/list",json!({})).await;
+        let tool=listed["result"]["tools"].as_array().unwrap().iter()
+            .find(|t|t["name"]=="search_notes").unwrap();
+        let description=tool["description"].as_str().unwrap();
+        for guidance in ["scan_incomplete", "More matches may remain, even when notes is empty.", "same filters and limit"] {
+            assert!(description.contains(guidance));
+        }
+    }
+    assert!(!ToolOutput::Notes {notes:vec![],next_cursor:None,scan_incomplete:true}.bounded());
     r.stop().await;
 }
 

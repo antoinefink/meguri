@@ -5,6 +5,20 @@ use rusqlite::{OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, atomic::{AtomicBool, AtomicU32, Ordering}};
 use unicase::UniCase;
+use std::time::{Duration, Instant};
+
+const MAX_SCAN_CANDIDATES: usize = 32_768;
+const MAX_SCAN_BYTES: usize = 32 * 1024 * 1024;
+const SCAN_FOR: Duration = Duration::from_millis(500);
+
+// Private inputs let unit tests force each stop without timing assertions.
+#[derive(Clone, Copy)]
+pub(super) struct ScanLimits { pub candidates: usize, pub bytes: usize, pub duration: Duration }
+impl Default for ScanLimits {
+    fn default() -> Self {
+        Self { candidates: MAX_SCAN_CANDIDATES, bytes: MAX_SCAN_BYTES, duration: SCAN_FOR }
+    }
+}
 
 pub(super) struct StoredNote {
     pub id: i64, pub mid: i64, pub fields: String, pub tags: String,
@@ -166,6 +180,15 @@ impl Backend {
     // This callback runs only for paged search, inside its committed snapshot.
     pub(crate) fn search_notes_with_index<A: Authority>(&self, path: &Path, a: &A, input: SearchInput,
         index: impl FnOnce(&Connection) -> Option<Arc<SearchIndex>>) -> Result<SearchResult> {
+        self.search_notes_with_scan_limits(path,a,input,index,ScanLimits::default())
+    }
+    #[cfg(test)]
+    pub(super) fn test_search_notes_with_scan_limits<A: Authority>(&self, path: &Path, a: &A,
+        input: SearchInput, scan: ScanLimits) -> Result<SearchResult> {
+        self.search_notes_with_scan_limits(path,a,input,|_|None,scan)
+    }
+    fn search_notes_with_scan_limits<A: Authority>(&self, path: &Path, a: &A, input: SearchInput,
+        index: impl FnOnce(&Connection) -> Option<Arc<SearchIndex>>, scan: ScanLimits) -> Result<SearchResult> {
         input::bounded_input(&input)?;
         if let Some(ref id) = input.note_id {
             let id = input::id(id)?;
@@ -174,7 +197,7 @@ impl Backend {
                 let notes = match stored_note(c,id)? {
                     None => vec![], Some(note) => vec![self.note_result(a.context(),&note,&notetype(c,note.mid)?)?],
                 };
-                let result = SearchResult { notes, next_cursor:None };
+                let result = SearchResult { notes, next_cursor:None, scan_incomplete:false };
                 Self::result_json(&result)?;
                 Ok(result)
             });
@@ -204,52 +227,127 @@ impl Backend {
                 match (deck_id,budget) { (Some(d),Some(b)) => deck_candidates(c,d,after,b)?, _ => None }
             } else { None };
             let scoped = indexed.or(cold.as_deref());
-            let mut result = SearchResult { notes:vec![], next_cursor:None };
-            let mut position = after; let mut work = 0;
-            for candidate in 0..MAX_CANDIDATES {
-                let id = match &scoped {
-                    Some(ids) => ids.get(candidate).copied(),
-                    None => c.query_row("SELECT id FROM notes WHERE id>?1 ORDER BY id LIMIT 1",[position],|r|r.get(0)).optional().map_err(sql_error)?,
-                };
-                let Some(id) = id else { break; };
-                // Global fallback must establish membership before decoding
-                // unrelated scheduling data. Probe only with the qualified nid
-                // index and the existing sibling bound; an invalid index still
-                // reaches the authoritative siblings error below.
-                // Selected matching notes retain the complete sibling read and
-                // validation, including cards whose home is another deck.
-                let matches_deck = match deck_id {
-                    None => true,
-                    Some(d) if scoped.is_none() && eligible && !generation::has_home_deck(c,id,d)? => false,
-                    Some(d) => generation::siblings(c,id)?.iter().any(|s|s.home == d),
-                };
-                if !matches_deck { position=id; continue; }
-                let note = stored_note(c,id)?.ok_or_else(unsupported)?;
-                let bytes = note.fields.len()+note.tags.len();
-                if work + bytes > MAX_PAGE_WORK_BYTES { break; }
-                work += bytes;
-                let matches_tag = tag.as_ref().is_none_or(|tag|tag_list(&note.tags).iter().any(|t|UniCase::new(t.as_str()) == UniCase::new(tag.as_str())));
-                let matches_text = query.as_ref().is_none_or(|q|super::super::notes::fields(&note.fields).any(|f|q.is_match(f)));
-                if matches_tag && matches_text {
-                    let record = self.note_result(a.context(),&note,&notetype(c,note.mid)?)?;
-                    result.notes.push(record);
-                    if size(&result)? + TOKEN_RESERVE > MAX_RESULT_BYTES {
-                        result.notes.pop();
-                        if result.notes.is_empty() { return Err(too_large()); }
-                        break; // Do not advance past the match that did not fit.
+            let (mut result,position,more) = if deck_id.is_none() && scoped.is_none() {
+                self.streamed_search(c,a.context(),after,tag.as_deref(),query.as_ref(),limit,scan)?
+            } else {
+                let mut result = SearchResult { notes:vec![], next_cursor:None, scan_incomplete:false };
+                let mut position = after; let mut work = 0;
+                let mut fit_stop = false;
+                for candidate in 0..MAX_CANDIDATES {
+                    let id = match &scoped {
+                        Some(ids) => ids.get(candidate).copied(),
+                        None => c.query_row("SELECT id FROM notes WHERE id>?1 ORDER BY id LIMIT 1",[position],|r|r.get(0)).optional().map_err(sql_error)?,
+                    };
+                    let Some(id) = id else { break; };
+                    // Global fallback must establish membership before decoding
+                    // unrelated scheduling data. Probe only with the qualified nid
+                    // index and the existing sibling bound; an invalid index still
+                    // reaches the authoritative siblings error below.
+                    // Selected matching notes retain the complete sibling read and
+                    // validation, including cards whose home is another deck.
+                    let matches_deck = match deck_id {
+                        None => true,
+                        Some(d) if scoped.is_none() && eligible && !generation::has_home_deck(c,id,d)? => false,
+                        Some(d) => generation::siblings(c,id)?.iter().any(|s|s.home == d),
+                    };
+                    if !matches_deck { position=id; continue; }
+                    let note = stored_note(c,id)?.ok_or_else(unsupported)?;
+                    let bytes = note.fields.len()+note.tags.len();
+                    if work + bytes > MAX_PAGE_WORK_BYTES { break; }
+                    work += bytes;
+                    let matches_tag = tag.as_ref().is_none_or(|tag|tag_list(&note.tags).iter().any(|t|UniCase::new(t.as_str()) == UniCase::new(tag.as_str())));
+                    let matches_text = query.as_ref().is_none_or(|q|super::super::notes::fields(&note.fields).any(|f|q.is_match(f)));
+                    if matches_tag && matches_text {
+                        let record = self.note_result(a.context(),&note,&notetype(c,note.mid)?)?;
+                        result.notes.push(record);
+                        if size(&result)? + TOKEN_RESERVE > MAX_RESULT_BYTES {
+                            result.notes.pop();
+                            if result.notes.is_empty() { return Err(too_large()); }
+                            fit_stop = true;
+                            break; // Do not advance past the match that did not fit.
+                        }
                     }
+                    position=id;
+                    if result.notes.len() == limit { break; }
                 }
-                position=id;
-                if result.notes.len() == limit { break; }
-            }
-            let more = match &scoped {
-                Some(ids) => ids.iter().any(|id|*id>position),
-                None => c.query_row("SELECT id FROM notes WHERE id>?1 ORDER BY id LIMIT 1",[position],|r|r.get::<_,i64>(0)).optional().map_err(sql_error)?.is_some(),
+                let more = match &scoped {
+                    Some(ids) => ids.iter().any(|id|*id>position),
+                    None => c.query_row("SELECT id FROM notes WHERE id>?1 ORDER BY id LIMIT 1",[position],|r|r.get::<_,i64>(0)).optional().map_err(sql_error)?.is_some(),
+                };
+                result.scan_incomplete = more && result.notes.len()<limit && !fit_stop;
+                (result,position,more)
             };
             if more { result.next_cursor=Some(self.page_token(a.context(),"search_notes",&shape,0,position)?); }
             Self::result_json(&result)?;
             Ok(result)
         },None)
+    }
+    // One authoritative keyset cursor. CASE guards reject oversized records
+    // before SQLite returns their text, even when they contain embedded NULs.
+    // Only actual matches pay the existing full record/hash/layout reads.
+    fn streamed_search(&self, c: &Connection, context: &Context, after: i64,
+        tag: Option<&str>, query: Option<&regex::Regex>, limit: usize, scan: ScanLimits)
+        -> Result<(SearchResult,i64,bool)> {
+        let deadline = Instant::now() + scan.duration;
+        let mut q = c.prepare(
+            "SELECT id,
+             coalesce(octet_length(guid),0)+coalesce(octet_length(tags),0)+coalesce(octet_length(flds),0)+coalesce(octet_length(sfld),0)+coalesce(octet_length(data),0),
+             octet_length(flds)+octet_length(tags),
+             CASE WHEN octet_length(flds)+octet_length(tags)<=?2
+               AND coalesce(octet_length(guid),0)+coalesce(octet_length(tags),0)+coalesce(octet_length(flds),0)+coalesce(octet_length(sfld),0)+coalesce(octet_length(data),0)<=?3
+               THEN flds END,
+             CASE WHEN octet_length(flds)+octet_length(tags)<=?2
+               AND coalesce(octet_length(guid),0)+coalesce(octet_length(tags),0)+coalesce(octet_length(flds),0)+coalesce(octet_length(sfld),0)+coalesce(octet_length(data),0)<=?3
+               THEN tags END,
+             typeof(mid)='integer'
+             FROM notes WHERE id>?1 ORDER BY id LIMIT ?4").map_err(sql_error)?;
+        let mut rows = q.query(params![after,MAX_RECORD_BYTES as i64,MAX_OBJECT_BYTES as i64,
+            scan.candidates.max(1).saturating_add(1) as i64]).map_err(sql_error)?;
+        let mut result = SearchResult { notes:vec![], next_cursor:None, scan_incomplete:false };
+        let mut position = after;
+        let mut count = 0;
+        let mut work = 0usize;
+        while let Some(row) = rows.next().map_err(sql_error)? {
+            // Always examine at least one row, even if the deadline has passed.
+            // The clock is checked per bounded record, separate from admission.
+            if count>0 && (count>=scan.candidates || Instant::now()>=deadline) {
+                result.scan_incomplete = true;
+                return Ok((result,position,true));
+            }
+            let raw = usize::try_from(row.get::<_,i64>(1).map_err(sql_error)?).map_err(|_|too_large())?;
+            let bytes = usize::try_from(row.get::<_,i64>(2).map_err(sql_error)?).map_err(|_|too_large())?;
+            if raw>MAX_OBJECT_BYTES || bytes>MAX_RECORD_BYTES { return Err(too_large()); }
+            if count>0 && work.saturating_add(bytes)>scan.bytes {
+                result.scan_incomplete = true;
+                return Ok((result,position,true));
+            }
+            count += 1;
+            work += bytes;
+            let id = row.get(0).map_err(sql_error)?;
+            if !row.get::<_,bool>(5).map_err(sql_error)? {
+                return Err(unsupported().with_mcp_detail(Detail::SqliteAccess));
+            }
+            let fields = row.get_ref(3).map_err(sql_error)?.as_str().map_err(|_|unsupported())?;
+            let tags = row.get_ref(4).map_err(sql_error)?.as_str().map_err(|_|unsupported())?;
+            let matches_tag = tag.is_none_or(|tag|tags.split([' ','\u{3000}']).filter(|t|!t.is_empty())
+                .any(|t|UniCase::new(t)==UniCase::new(tag)));
+            let matches_text = query.is_none_or(|q|super::super::notes::fields(fields).any(|f|q.is_match(f)));
+            if matches_tag && matches_text {
+                let note = stored_note(c,id)?.ok_or_else(unsupported)?;
+                result.notes.push(self.note_result(context,&note,&notetype(c,note.mid)?)?);
+                if size(&result)? + TOKEN_RESERVE > MAX_RESULT_BYTES {
+                    result.notes.pop();
+                    if result.notes.is_empty() { return Err(too_large()); }
+                    return Ok((result,position,true)); // Retry the confirmed match.
+                }
+            }
+            position = id;
+            if result.notes.len()==limit {
+                let more = rows.next().map_err(sql_error)?.is_some();
+                return Ok((result,position,more));
+            }
+        }
+        Ok((result,position,false))
     }
     pub fn list_decks_and_note_types<A: Authority>(&self, path: &Path, a: &A, input: CatalogInput) -> Result<CatalogResult> {
         input::bounded_input(&input)?;
