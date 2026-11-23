@@ -125,12 +125,23 @@ public struct StatsCalloutLine: Identifiable, Hashable, Sendable {
     /// The line's own unit when it differs from the chart's (Retention's
     /// remembered and forgotten counts on a percentage chart); nil for the chart's.
     public var unit: StatsValueUnit?
+    /// The line's values already written, per bin, where a value is more than one number
+    /// (Knowledge's "Likely forgotten 547 (6.5%)", S7.1); nil writes `values` in the unit.
+    public var texts: [String?]?
 
-    public init(id: String, name: String, values: [Double?], unit: StatsValueUnit? = nil) {
+    public init(id: String, name: String, values: [Double?], unit: StatsValueUnit? = nil, texts: [String?]? = nil) {
         self.id = id
         self.name = name
         self.values = values
         self.unit = unit
+        self.texts = texts
+    }
+
+    /// The line's text at `bin`, or nil where it has no value.
+    func text(at bin: Int, format: StatsChartFormat, unit chartUnit: StatsValueUnit) -> String? {
+        guard values.indices.contains(bin), let value = values[bin] else { return nil }
+        if let texts, texts.indices.contains(bin), let text = texts[bin] { return text }
+        return format.value(value, unit: unit ?? chartUnit)
     }
 }
 

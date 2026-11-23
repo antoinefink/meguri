@@ -61,6 +61,7 @@ public struct StatsChartBox<Accessory: View>: View {
     private let externalSelection: Binding<StatsChartSelection>?
     private let open: () -> Void
     private let showInBrowse: ((Int) -> Void)?
+    private let spokenSummary: String?
 
     @State private var ownSelection = StatsChartSelection.none
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -79,14 +80,17 @@ public struct StatsChartBox<Accessory: View>: View {
     ///     period, Time of Day's two panels); nil keeps the box's own.
     ///   - showInBrowse: runs Show in Browse for a bin `data.browsable` lists
     ///     (S8.4); nil offers none.
+    ///   - summary: the chart element's label and Audio Graph title when ready
+    ///     (S15); nil reads the figure and its sentence.
     public init(
         box: String, title: String, figure: StatsBoxFigure?, data: StatsChartData,
         phase: StatsBoxPhase = .ready, size: StatsPlotSize = .regular,
         figures: [StatsSmallFigure] = [], footnote: String? = nil, footnoteLines: Int = 0,
         separatesSeries: Bool? = nil, selection: Binding<StatsChartSelection>? = nil,
-        open: @escaping () -> Void, showInBrowse: ((Int) -> Void)? = nil,
+        open: @escaping () -> Void, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil,
         @ViewBuilder accessory: () -> Accessory
     ) {
+        spokenSummary = summary
         self.box = box
         self.title = title
         self.accessory = accessory()
@@ -163,7 +167,20 @@ public struct StatsChartBox<Accessory: View>: View {
             .accessibilityLabel(title)
             .accessibilityHint(Text("stats.chart.openHint", bundle: .module))
             .accessibilityIdentifier("stats.box.\(box).header")
-            if !stacks { Spacer(minLength: Spacing.xSmall) }
+            if !stacks {
+                Spacer(minLength: Spacing.xSmall)
+                // Every header as tall as one with a small switch, aligned on its baseline, so
+                // the figures, plots and axes of the boxes in a row line up (Retention's switch
+                // beside Forgotten's bare title).
+                Picker(selection: .constant(0)) { Text(verbatim: " ").tag(0) } label: { EmptyView() }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+                    .frame(width: 0)
+                    .hidden()
+                    .accessibilityHidden(true)
+            }
             accessory
                 .controlSize(.small)
         }
@@ -193,7 +210,7 @@ public struct StatsChartBox<Accessory: View>: View {
             data: isReady ? data : data.skeleton(),
             phase: plotPhase,
             size: size,
-            summary: isReady ? [figure?.value, figure?.sentence].compactMap(\.self).joined(separator: ", ") : title,
+            summary: isReady ? spokenSummary ?? [figure?.value, figure?.sentence].compactMap(\.self).joined(separator: ", ") : title,
             selection: selection,
             showInBrowse: showInBrowse,
             separatesSeries: separatesSeries
@@ -303,12 +320,13 @@ extension StatsChartBox where Accessory == EmptyView {
         phase: StatsBoxPhase = .ready, size: StatsPlotSize = .regular,
         figures: [StatsSmallFigure] = [], footnote: String? = nil, footnoteLines: Int = 0,
         separatesSeries: Bool? = nil, selection: Binding<StatsChartSelection>? = nil,
-        open: @escaping () -> Void, showInBrowse: ((Int) -> Void)? = nil
+        open: @escaping () -> Void, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil
     ) {
         self.init(
             box: box, title: title, figure: figure, data: data, phase: phase, size: size,
             figures: figures, footnote: footnote, footnoteLines: footnoteLines,
-            separatesSeries: separatesSeries, selection: selection, open: open, showInBrowse: showInBrowse
+            separatesSeries: separatesSeries, selection: selection, open: open, showInBrowse: showInBrowse,
+            summary: summary
         ) { EmptyView() }
     }
 }

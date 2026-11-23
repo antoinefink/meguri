@@ -28,6 +28,9 @@ extension TestHooks {
     ///   `loading`: the present tier back, the review log and knowledge still reading;
     ///   `loading-knowledge`: only Knowledge Over Time still reading, its progress determinate.
     /// - `updating`: a kept result shown while a refresh reads (S10.2, "Updating…").
+    /// - `slow`: two seconds between tiers (the loading-phase UI test).
+    /// - `pinned`: 1M with a pinned selection and its callout in each Knowledge box (S8.3),
+    ///   Retention's on its open point.
     /// - `deleted-deck` (S12.7), `unavailable` (S12.8), `failed-box` (S12.8: Retention and
     ///   Forgotten's part fails alone).
     /// - `stats/period/<period>` (`1m`, `3m`, `6m`, `1y`): the page at that period.
@@ -61,6 +64,8 @@ extension TestHooks {
             registry.registerShell("stats/page/deleted-deck") { _ in page(.typical, deck: 1_700_000_000_999) }
             registry.registerShell("stats/page/unavailable") { _ in page(.ending(.unreadable)) }
             registry.registerShell("stats/page/failed-box") { _ in page(.ending(.partFails(.retentionByDay))) }
+            registry.registerShell("stats/page/slow") { _ in page(.slow) }
+            registry.registerShell("stats/page/pinned") { _ in page(.typical, period: .oneMonth, pins: true) }
             registry.registerShell("stats/period/1m") { _ in page(.typical, period: .oneMonth) }
             registry.registerShell("stats/period/3m") { _ in page(.typical, period: .threeMonths) }
             registry.registerShell("stats/period/6m") { _ in page(.typical, period: .sixMonths) }
@@ -114,6 +119,8 @@ extension TestHooks {
             case shape(StatsSampleService.Shape)
             case ending(StatsSampleService.Ending)
             case updating
+            /// Two seconds between tiers, so a loading phase lasts long enough for a UI test to see.
+            case slow
             /// No collection open: the page never hears of one.
             case noCollection
         }
@@ -122,13 +129,14 @@ extension TestHooks {
 
         /// The shell with Statistics selected over the sample collection.
         @MainActor static func page(_ sample: Sample, period: StatsPagePeriod = .all, deck: Int64? = nil,
-                                    box: StatsBoxID? = nil, option: Option = .none) -> ShellLaunch {
+                                    box: StatsBoxID? = nil, option: Option = .none, pins: Bool = false) -> ShellLaunch {
             StatsRollout.enabled = true
             let service: StatsSampleService = switch sample {
             case .typical, .noCollection: StatsSampleService()
             case let .shape(shape): StatsSampleService(shape: shape)
             case let .ending(ending): StatsSampleService(ending: ending)
             case .updating: StatsSampleService(ending: .laterStall)
+            case .slow: StatsSampleService(tierDelay: .seconds(2))
             }
             let model = StatsPageModel(service: service, kept: StatsKeptResults(directory: nil),
                                        store: StatsSelectionStore(defaults: nil),
@@ -148,6 +156,17 @@ extension TestHooks {
                         // Once the boxes are drawn, the box's section at the top.
                         try? await Task.sleep(for: .milliseconds(600))
                         statsPage.go(to: StatsSectionID.allCases.first { $0.boxes.contains(box) } ?? .knowledge)
+                    }
+                    if pins {
+                        // Once every box is filled, a pinned bar in each Knowledge box: Retention's
+                        // on its last open point, the others a few days back.
+                        for _ in 0..<100 where !statsPage.filled { try? await Task.sleep(for: .milliseconds(100)) }
+                        for id in [StatsBoxID.knowledgeOverTime, .retention, .forgotten] {
+                            let data = model.box(id).data
+                            let open = data.series.first?.openPoints.last
+                            let bin = (id == .retention ? open : nil) ?? max(0, data.bins.count - (id == .forgotten ? 4 : 8))
+                            model.select(StatsChartSelection(bin: bin, pinned: true), in: id)
+                        }
                     }
                     if case .updating = sample {
                         // Once the first refresh is complete and kept, a change makes the page read
@@ -251,6 +270,15 @@ extension TestHooks {
             if page?.model.selections.values.contains(where: \.pinned) == true { Self.answer("statsPinned") }
         }
 
+        /// Answers every query with `statsSelected`: the selections as its object
+        /// (`<box>:<bin>:<pinned>`, sorted), "none" when no box holds one, "no page" without one.
+        func querySelection() {
+            guard let selections = page?.model.selections else { return Self.answer("statsSelected", object: "no page") }
+            let text = selections.filter { $0.value.bin != nil }
+                .map { "\($0.key.rawValue):\($0.value.bin.map(String.init) ?? "-"):\($0.value.pinned)" }.sorted()
+            Self.answer("statsSelected", object: text.isEmpty ? "none" : text.joined(separator: ","))
+        }
+
         func select(_ period: StatsPagePeriod) {
             page?.selectPeriod(period)
         }
@@ -272,10 +300,10 @@ extension TestHooks {
             }
         }
 
-        private static func answer(_ name: String) {
+        private static func answer(_ name: String, object: String? = nil) {
             let full = "\(Bundle.main.bundleIdentifier ?? "").testhooks.\(name)"
             #if os(macOS)
-            DistributedNotificationCenter.default().postNotificationName(Notification.Name(full), object: nil, userInfo: nil,
+            DistributedNotificationCenter.default().postNotificationName(Notification.Name(full), object: object, userInfo: nil,
                                                                          deliverImmediately: true)
             #else
             notify_post(full)

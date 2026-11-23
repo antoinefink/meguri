@@ -150,7 +150,16 @@ struct StatsChartPlot: View {
             .chartXAxis { xAxis }
             .chartYAxis { yAxis }
             .chartOverlay { proxy in overlay(proxy) }
+            #if os(macOS)
+            // Not `.focusable()`'s click-to-focus (edit) interaction: on the Mac it takes the
+            // mouse-down, so the plot's own click never pinned a bar (seen in the VM: a click
+            // focused the plot and cleared the hover, and no tap gesture fired). The plot is
+            // reached by Tab with keyboard navigation on, as buttons are, and a click focuses
+            // it from its tap handler.
+            .focusable(isReady, interactions: .activate)
+            #else
             .focusable(isReady)
+            #endif
             .focused($focused)
             .onKeyPress(.leftArrow) { move(-1) }
             .onKeyPress(.rightArrow) { move(1) }

@@ -136,6 +136,8 @@ public struct StatsChartFormat: Sendable {
 
     /// The period's axis label: a short date for days and weeks, the month
     /// ("Mar") or the year at January ("2025") for months, the hour, the bin's name.
+    /// On an axis over more than one year every month carries its whole year
+    /// ("Oct 2028"): a two-digit year after a month reads as a day ("Oct 28").
     public func axisLabel(_ period: StatsPeriod, monthsShowYear: Bool, spansYears: Bool = false) -> String {
         switch period {
         case let .day(date), let .week(date):
@@ -145,9 +147,7 @@ public struct StatsChartFormat: Sendable {
             if monthsShowYear || (!spansYears && calendar.component(.month, from: date) == 1) {
                 return date.formatted(style.year())
             }
-            // An axis over more than one year names the year ("Nov 25"),
-            // so two Novembers are told apart.
-            return formatted(date, template: spansYears ? "MMMyy" : "MMM")
+            return formatted(date, template: spansYears ? "MMMy" : "MMM")
         case let .hour(value):
             return hour(value)
         case .bucket, .overdue, .later:
@@ -193,7 +193,6 @@ public struct StatsChartFormat: Sendable {
             }
             return labels
         }
-        let step = max(1, Int((Double(regular.count) / Double(maximum)).rounded(.up)))
         let spansYears: Bool = {
             let years = Set(regular.compactMap { index -> Int? in
                 if case let .month(date) = bins[index] { return calendar.component(.year, from: date) }
@@ -201,28 +200,37 @@ public struct StatsChartFormat: Sendable {
             })
             return years.count > 1
         }()
+        // A label with its year is about twice as wide: fewer of them, so they fit a lead box
+        // at compact width.
+        let fitting = spansYears ? min(maximum, max(3, maximum * 3 / 5)) : maximum
+        let step = max(1, Int((Double(regular.count) / Double(fitting)).rounded(.up)))
         for (n, index) in regular.reversed().enumerated() where n % step == 0 {
-            labels[index] = axisLabel(bins[index], monthsShowYear: false, spansYears: spansYears && step > 1)
+            labels[index] = axisLabel(bins[index], monthsShowYear: false, spansYears: spansYears)
         }
         return labels
     }
 
     // MARK: Callout and values
 
-    /// One line per series that has a value at `bin`, in legend order, then the
-    /// callout lines: `(name, value text, colour)`.
+    /// One line per series that has a value at `bin`, in legend order; a series whose point
+    /// there is open says it has too few reviews to trust (S7.2); then the callout lines, then
+    /// the rules (Retention: the period's retention, its counts, then the desired retention):
+    /// `(name, value text, colour)`.
     func calloutRows(_ data: StatsChartData, bin: Int) -> [(name: String, value: String, color: StatsSeriesColor?)] {
         var rows: [(name: String, value: String, color: StatsSeriesColor?)] = []
         for series in data.series {
             guard let value = data.value(series, at: bin) else { continue }
             rows.append((series.name, self.value(value, unit: data.unit), series.color))
+            if series.openPoints.contains(bin) {
+                rows.append((String(localized: "stats.chart.openPoint", bundle: .module), "", nil))
+            }
+        }
+        for line in data.calloutLines {
+            guard let text = line.text(at: bin, format: self, unit: data.unit) else { continue }
+            rows.append((line.name, text, nil))
         }
         for rule in data.rules {
             rows.append((rule.name, self.value(rule.value, unit: data.unit), rule.color))
-        }
-        for line in data.calloutLines {
-            guard line.values.indices.contains(bin), let value = line.values[bin] else { continue }
-            rows.append((line.name, self.value(value, unit: line.unit ?? data.unit), nil))
         }
         return rows
     }
@@ -231,7 +239,7 @@ public struct StatsChartFormat: Sendable {
     /// (S15: "each reading the callout's text").
     public func calloutText(_ data: StatsChartData, bin: Int) -> String {
         guard data.bins.indices.contains(bin) else { return "" }
-        let rows = calloutRows(data, bin: bin).map { "\($0.name) \($0.value)" }
+        let rows = calloutRows(data, bin: bin).map { $0.value.isEmpty ? $0.name : "\($0.name) \($0.value)" }
         return ([name(data.bins[bin])] + rows).joined(separator: ", ")
     }
 
@@ -255,9 +263,7 @@ public struct StatsChartFormat: Sendable {
         let header = ([period] + data.series.map(\.name) + data.calloutLines.map(\.name)).joined(separator: "\t")
         let rows = data.bins.indices.map { bin in
             let values = data.series.map { series in data.value(series, at: bin).map { value($0, unit: data.unit) } ?? "" }
-            let extras = data.calloutLines.map { line in
-                line.values.indices.contains(bin) ? line.values[bin].map { value($0, unit: line.unit ?? data.unit) } ?? "" : ""
-            }
+            let extras = data.calloutLines.map { $0.text(at: bin, format: self, unit: data.unit) ?? "" }
             return ([name(data.bins[bin])] + values + extras).joined(separator: "\t")
         }
         return ([header] + rows).joined(separator: "\n")

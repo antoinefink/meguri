@@ -40,7 +40,17 @@ public final class StatsCollectionHost {
         if staleness == .collectionReplaced {
             identity.renew()
             appliedTree = nil
-            if open { page.model.collectionOpened(identity: identity.current) }
+            if open {
+                page.model.collectionOpened(identity: identity.current)
+                // The model forgot the replaced collection's decks. The collection tells this
+                // before it handles the replacement itself (its old tree is still there now),
+                // so the tree is offered again only once it has: the new tree when the
+                // collection already holds it, else nothing until it reads it.
+                Task { @MainActor [weak self] in
+                    guard let self, self.open, let observed = self.observe() else { return }
+                    self.apply(observed)
+                }
+            }
         }
     }
 

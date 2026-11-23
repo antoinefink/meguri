@@ -395,6 +395,16 @@
         }
       }
     },
+    "stats.chart.openPoint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too few reviews to trust"
+          }
+        }
+      }
+    },
     "stats.chart.overdue": {
       "localizations": {
         "en": {
@@ -1043,6 +1053,16 @@
         }
       }
     },
+    "stats.knowledge.estimatedHelp": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An estimate: each day is worked out again from your reviews up to that day, with today’s memory parameters."
+          }
+        }
+      }
+    },
     "stats.knowledge.sentence %@ %lld %@": {
       "localizations": {
         "en": {
@@ -1071,6 +1091,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "stats.knowledge.spokenTitle": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated knowledge"
           }
         }
       }
