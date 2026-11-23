@@ -39,7 +39,7 @@ pub struct DeckCandidateLimits {
     pub rows: u64,
     /// One note's GUID, in bytes.
     pub guid_bytes: u64,
-    /// One note's fields, tags and data together, in bytes.
+    /// One note's fields, tags, data and sort field together, in bytes.
     pub note_bytes: u64,
     /// One card's data, in bytes.
     pub card_data_bytes: u64,
@@ -69,7 +69,8 @@ fn check_limits(conn: &rusqlite::Connection, limits: &DeckCandidateLimits) -> Re
     let (notes, guid, note, tags): (i64, i64, i64, i64) = conn.query_row(
         "SELECT count(*), \
                 coalesce(max(length(CAST(guid AS BLOB))), 0), \
-                coalesce(max(length(CAST(flds AS BLOB)) + length(CAST(tags AS BLOB)) + length(CAST(data AS BLOB))), 0), \
+                coalesce(max(length(CAST(flds AS BLOB)) + length(CAST(tags AS BLOB)) + length(CAST(data AS BLOB)) \
+                    + length(CAST(sfld AS BLOB))), 0), \
                 coalesce(sum(CASE WHEN trim(CAST(tags AS TEXT)) = '' THEN 0 ELSE \
                     length(trim(CAST(tags AS TEXT))) - length(replace(trim(CAST(tags AS TEXT)), ' ', '')) + 1 END), 0) \
          FROM notes",
