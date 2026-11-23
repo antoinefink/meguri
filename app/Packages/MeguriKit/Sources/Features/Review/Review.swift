@@ -838,15 +838,21 @@ struct ReviewLeechButton: View {
     var body: some View {
         Button { shown = true } label: {
             Label { Text("review.leech.title", bundle: .module) } icon: {
-                // The symbol's own colours: the system's yellow triangle in light,
-                // dark and Increase Contrast.
+                // Asked for in the symbol's own colours, the system's yellow
+                // triangle. Known gap (captures, 2026-11-23): the iOS glass
+                // toolbar group still draws it as a template, black in light
+                // and white in dark.
                 Image(systemName: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
             }
         }
         .help(Text("review.leech.title", bundle: .module))
         .accessibilityHint(Text("review.leech.hint", bundle: .module))
         .accessibilityIdentifier("review.session.leech")
-        .popover(isPresented: $shown) { ReviewLeechDetails(notice: notice) }
+        .popover(isPresented: $shown) {
+            ReviewLeechDetails(notice: notice)
+                // A popover sized to its text at compact width too (N16.11).
+                .presentationCompactAdaptation(.popover)
+        }
     }
 }
 
@@ -866,9 +872,6 @@ struct ReviewLeechDetails: View {
         .frame(idealWidth: ContentWidth.primaryAction, maxWidth: ContentWidth.readable, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review.session.leech.details")
-        #if !os(macOS)
-        .presentationDetents([.medium])
-        #endif
     }
 }
 
