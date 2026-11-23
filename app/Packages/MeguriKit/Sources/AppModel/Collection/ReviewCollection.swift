@@ -384,6 +384,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         value.inspector.stepRecorded = { [weak self] seq, title in self?.collectionUndo.name(step: seq, title) }
         value.inspector.generation = { [weak self] in self?.generation ?? 0 }
         value.inspector.preview.resolver = { [weak self] in await self?.mediaResolverForReview() }
+        value.inspector.mediaDirectory = configuration.collectionLocation.directory.appending(path: "collection.media",
+                                                                                           directoryHint: .isDirectory)
         value.commands.openNoteType = { [weak self] id in
             guard let self else { return }
             self.noteTypes.selection = id

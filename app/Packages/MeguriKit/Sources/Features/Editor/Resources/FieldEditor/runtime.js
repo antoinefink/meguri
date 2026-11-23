@@ -7,7 +7,7 @@
     const blocks = new Set(("address article aside blockquote details dialog dd div dl dt " +
         "fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr li main " +
         "nav ol p pre section table ul").split(" "));
-    let loadId = 0, seq = 0, held = true, fields = [], current = null;
+    let loadId = 0, seq = 0, held = true, fields = [], current = null, browsing = false;
     const bridge = window.webkit.messageHandlers.meguriEditor;
     const envelope = (type, payload = {}) => ({type, loadId, seq: ++seq, ...payload});
     const emit = (type, payload) => bridge.postMessage(envelope(type, payload));
@@ -20,8 +20,44 @@
     };
     const inline = node => !Array.from(node.querySelectorAll("*")).some(element =>
         blocks.has(element.localName) || (element.hasAttribute("block") && element.getAttribute("block") !== "false"));
+    // Browse's inspector shows a sound reference as a chip that plays on a
+    // click; the chip stands for its reference's exact text, which is what
+    // serialization writes back, so the field's bytes never change by it.
+    const soundReference = /\[sound:([^\]]+)\]/g;
+    const middle = name => name.length <= 28 ? name : `${name.slice(0, 13)}…${name.slice(-12)}`;
+    function chips(root) {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const texts = []; while (walker.nextNode()) texts.push(walker.currentNode);
+        for (const text of texts) {
+            if (text.parentElement?.closest?.("[data-meguri-chip]")) continue;
+            const value = text.data;
+            soundReference.lastIndex = 0;
+            if (!soundReference.test(value)) continue;
+            soundReference.lastIndex = 0;
+            const fragment = document.createDocumentFragment();
+            let at = 0, match;
+            while ((match = soundReference.exec(value))) {
+                if (match.index > at) fragment.append(document.createTextNode(value.slice(at, match.index)));
+                const chip = document.createElement("span");
+                chip.setAttribute("data-meguri-chip", "sound");
+                chip.setAttribute("data-meguri-text", match[0]);
+                chip.setAttribute("data-meguri-name", match[1]);
+                chip.setAttribute("contenteditable", "false");
+                chip.setAttribute("role", "button");
+                chip.setAttribute("aria-label", match[1]);
+                chip.title = match[1];
+                chip.textContent = middle(match[1]);
+                fragment.append(chip);
+                at = match.index + match[0].length;
+            }
+            if (at < value.length) fragment.append(document.createTextNode(value.slice(at)));
+            text.replaceWith(fragment);
+        }
+        return root;
+    }
     const loadParse = html => {
         const fragment = parse(html);
+        if (browsing) chips(fragment);
         if (inline(fragment)) fragment.append(document.createElement("br"));
         return fragment;
     };
@@ -31,6 +67,11 @@
             copy.lastChild.remove();
         }
         for (const element of copy.querySelectorAll("[data-meguri-editor]")) element.removeAttribute("data-meguri-editor");
+        // A chip is its reference's text again (and adjacent text joins it).
+        for (const chip of copy.querySelectorAll("[data-meguri-chip]")) {
+            chip.replaceWith(document.createTextNode(chip.getAttribute("data-meguri-text") ?? ""));
+        }
+        if (copy.normalize) copy.normalize();
         const template = document.createElement("template");
         template.content.append(...Array.from(copy.childNodes));
         return template.innerHTML;
@@ -165,6 +206,7 @@
         field.host.hidden = field.collapsed || field.mode !== "rich";
         field.source.hidden = field.collapsed || field.mode !== "html";
         field.label.setAttribute("aria-expanded", String(!field.collapsed));
+        if (browsing && field.mode === "html" && !field.collapsed) requestAnimationFrame(() => grow(field.source));
         placeholder(field);
     }
     function placeholder(field) {
@@ -405,6 +447,21 @@
         }
         dirty(field); historyState(field);
     }
+    // The inspector's page never scrolls: the host's scroll view does, so it
+    // is told where the caret is, and the source box grows with its text.
+    let caretFrame = 0;
+    function reportCaret(field) {
+        if (caretFrame) return;
+        caretFrame = requestAnimationFrame(() => {
+            caretFrame = 0;
+            const box = field.mode === "html" ? field.source.getBoundingClientRect() : (() => {
+                const value = range(field); const rects = value.getClientRects();
+                return rects.length ? rects[rects.length - 1] : field.host.getBoundingClientRect();
+            })();
+            void emit("caret", {top: Math.max(0, box.top), bottom: Math.max(0, box.bottom)});
+        });
+    }
+    function grow(source) { source.style.height = "auto"; source.style.height = `${source.scrollHeight}px`; }
     function makeField(value) {
         const section = document.createElement("section"), header = document.createElement("header");
         // N17.1: the name is the section's header; it still collapses the field (F3).
@@ -418,7 +475,12 @@
         const root = host.attachShadow({mode: "closed"});
         const style = document.createElement("style");
         style.textContent = ":host { display:block; position:relative } meguri-field-content { display:block; min-height:1.3em; outline:none; overflow-wrap:anywhere } " +
-            ".placeholder { position:absolute; inset-block-start:0; inset-inline-start:0; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; color:GrayText } [hidden] { display:none !important }";
+            ".placeholder { position:absolute; inset-block-start:0; inset-inline-start:0; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; color:GrayText } [hidden] { display:none !important }" +
+            (browsing ? " meguri-field-content { min-height:1.2em } img { max-height:64px; max-width:100%; vertical-align:middle; border-radius:4px; cursor:zoom-in }" +
+                " [data-meguri-chip] { display:inline-flex; align-items:center; gap:4px; max-width:100%; padding:1px 8px 1px 6px; margin:1px 0;" +
+                " border-radius:999px; font-size:12px; line-height:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle;" +
+                " cursor:default; user-select:none; color:-apple-system-label; background:-apple-system-quaternary-label }" +
+                " [data-meguri-chip]::before { content:'\\266A'; color:-apple-system-control-accent }" : "");
         const rich = document.createElement("meguri-field-content");
         rich.contentEditable = "true"; rich.setAttribute("role", "textbox"); rich.setAttribute("aria-multiline", "true");
         rich.setAttribute("aria-label", value.name); rich.id = `editor.field.${value.ord}`;
@@ -426,8 +488,12 @@
         placeholderLabel.className = "placeholder"; placeholderLabel.textContent = value.description;
         placeholderLabel.setAttribute("aria-hidden", "true");
         // CSS properties are assigned as data. A field font cannot inject CSS.
-        host.style.fontFamily = value.fontFamily; host.style.fontSize = `${value.fontSize}px`;
-        host.style.direction = value.rtl ? "rtl" : "ltr";
+        // In Browse's inspector the text takes the system font at the body size;
+        // the note type's fonts belong to the card (its preview), and an
+        // unmarked field reads in its own content's direction.
+        if (!browsing) { host.style.fontFamily = value.fontFamily; host.style.fontSize = `${value.fontSize}px`; }
+        host.style.direction = value.rtl ? "rtl" : browsing ? "" : "ltr";
+        if (browsing && !value.rtl) rich.dir = "auto";
         rich.replaceChildren(loadParse(value.html)); root.append(style, rich, placeholderLabel);
         const source = document.createElement("textarea"); source.id = `editor.field.${value.ord}`;
         source.setAttribute("aria-label", value.name); source.value = value.html;
@@ -447,6 +513,19 @@
             if (event.target === boundary && !held && !field.collapsed) active(field).focus();
         });
         wire(field, rich); wire(field, source); show(field);
+        if (browsing) {
+            // A chip plays its sound; a thumbnail opens the larger view (the host does both).
+            rich.addEventListener("click", event => {
+                const chip = event.target.closest?.("[data-meguri-chip]");
+                if (chip) { event.preventDefault(); void emit("playMedia", {name: chip.getAttribute("data-meguri-name")}); return; }
+                if (event.target.localName === "img" && event.target.getAttribute("src")) {
+                    void emit("openMedia", {name: event.target.getAttribute("src")});
+                }
+            });
+            const follow = () => reportCaret(field);
+            for (const type of ["input", "keyup", "mouseup", "focus"]) rich.addEventListener(type, follow);
+            source.addEventListener("input", () => { grow(source); follow(); });
+        }
         return field;
     }
     const keys = (object, allowed, required = allowed) => {
@@ -482,6 +561,8 @@
             if (message.fields.some((value, index) => index > 0 && value.ord <= message.fields[index - 1].ord)) throw new Error("Invalid field order");
             for (const field of fields) clearTimeout(field.timer);
             loadId = message.loadId; seq = 0; current = null;
+            browsing = message.mode === "browse";
+            document.documentElement.classList.toggle("inspector", browsing);
             held = true; container.replaceChildren(); fields = message.fields.map(makeField);
             held = false; container.inert = false;
             focus(fields.find(field => field.ord === message.focus));
@@ -577,7 +658,8 @@
     }, true);
     document.addEventListener("submit", event => event.preventDefault(), true);
     new ResizeObserver(() => {
-        if (loadId) void emit("contentHeight", {height: document.documentElement.scrollHeight});
+        if (loadId) void emit("contentHeight", {height: browsing ? Math.ceil(document.body.getBoundingClientRect().height)
+            : document.documentElement.scrollHeight});
     }).observe(document.body);
     void bridge.postMessage({type: "ready", protocol});
 })();

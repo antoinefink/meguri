@@ -7,40 +7,67 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 
-/// The inspector's Note tab (`browser/workspace` V12, N21.4): the card
-/// preview, which folds with its header; Deck and Type as round 5's form
-/// rows; the note's filled fields in the round 5 editor's page, then one
-/// "<e> Empty Fields" row; Tags as a token field; the formatting bar under
-/// the fields. The page scrolls the fields itself (the editor owns its
-/// scrolling and focus), so a long note scrolls inside the pane.
+/// The inspector's Note tab (`browser/workspace` V12, N21.4; Option A, the
+/// owner's choice of 2026-11-23): one scroll view holds the card preview
+/// (folding with its header), Deck and Type as label and pop-up rows, the
+/// fields as a plain list (name small and secondary, text at the body size,
+/// no box until edited), the "<e> Empty Fields" row and a Tags section; the
+/// formatting bar stays at the pane's bottom edge. The fields' page grows
+/// with its content and never scrolls itself; the scroll view follows the
+/// caret.
 struct BrowseNoteTab: View {
     let model: BrowseModel
     let note: BrowseInspectorNote
     @Environment(\.locale) private var locale
+    @State private var position = ScrollPosition(edge: .top)
+    @State private var visible: CGRect = .zero
+    @State private var fieldsTop: CGFloat = 0
 
     private var inspector: BrowseInspector { model.inspector }
     private var host: FieldEditorHost? { note.runtime as? FieldEditorHost }
 
     var body: some View {
         VStack(spacing: 0) {
-            BrowsePreviewSection(inspector: inspector, note: note)
-            Divider()
-            if let error = note.error {
-                ContentUnavailableView {
-                    Label { Text("browse.inspector.editorUnavailable", bundle: .module) } icon: { Image(systemName: "exclamationmark.triangle") }
-                } description: { Text(verbatim: error) }
-            } else {
-                selectionRows
-                fields
-                emptyFieldsRow
-                tagsRow
-                if let failure = note.saveFailure { saveFailure(failure) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    BrowsePreviewSection(inspector: inspector, note: note)
+                    Divider()
+                    if let error = note.error {
+                        ContentUnavailableView {
+                            Label { Text("browse.inspector.editorUnavailable", bundle: .module) } icon: { Image(systemName: "exclamationmark.triangle") }
+                        } description: { Text(verbatim: error) }
+                    } else {
+                        selectionRows
+                        Divider().padding(.horizontal)
+                        fields
+                        emptyFieldsRow
+                        Divider().padding(.horizontal)
+                        tagsSection
+                        if let failure = note.saveFailure { saveFailure(failure) }
+                    }
+                }
+                .coordinateSpace(.named(Self.content))
+            }
+            .scrollPosition($position)
+            .onScrollGeometryChange(for: CGRect.self) { $0.visibleRect } action: { _, rect in visible = rect }
+            .onChange(of: host?.caret) { _, caret in follow(caret) }
+            if note.error == nil {
                 Divider()
                 BrowseFormattingBar(host: host, cloze: note.isCloze)
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("browse.inspector.note")
+    }
+
+    private static let content = "browse.inspector.content"
+
+    /// The caret's line stays in sight while typing in a long field.
+    private func follow(_ caret: ClosedRange<Double>?) {
+        guard let caret, visible.height > 0 else { return }
+        let top = fieldsTop + caret.lowerBound, bottom = fieldsTop + caret.upperBound, margin = Spacing.small
+        if bottom > visible.maxY - margin { position.scrollTo(y: bottom - visible.height + margin) }
+        else if top < visible.minY + margin { position.scrollTo(y: max(0, top - margin)) }
     }
 
     // MARK: Deck and Type (N17.1's rows)
@@ -52,6 +79,7 @@ struct BrowseNoteTab: View {
                     Text(verbatim: Self.deckName(deck, home: homeDeck(for: deck))).tag(deck.id)
                 }
             } label: { Text("browse.inspector.deck", bundle: .module) }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier("browse.inspector.deck")
             LabeledContent {
                 Menu {
@@ -65,7 +93,7 @@ struct BrowseNoteTab: View {
                     }
                     .accessibilityIdentifier("browse.inspector.type.editNoteType")
                 } label: { Text(verbatim: note.notetype.name) }
-                .fixedSize()
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("browse.inspector.type")
             } label: { Text("browse.inspector.type", bundle: .module) }
         }
@@ -103,9 +131,10 @@ struct BrowseNoteTab: View {
             FieldEditorView(host: host)
                 // The page, not the note: the next note opens in the same web view.
                 .id(ObjectIdentifier(host.webView))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            Spacer()
+                // As tall as its fields: the page never scrolls, the pane does.
+                .frame(maxWidth: .infinity)
+                .frame(height: max(BrowseInspectorMetrics.fieldsMinimum, host.contentHeight))
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.content)).minY } action: { fieldsTop = $0 }
         }
     }
 
@@ -133,18 +162,20 @@ struct BrowseNoteTab: View {
 
     // MARK: Tags
 
-    private var tagsRow: some View {
-        Form {
-            LabeledContent {
-                BrowseTagField(tags: note.draft.tags, names: tagNames) { [note] in inspector.setTags($0, for: note) }
-                    // A field per note: what was typed for one note never reaches the next.
-                    .id(note.noteID)
-                    .accessibilityIdentifier("browse.inspector.tags")
-            } label: { Text("browse.inspector.tags", bundle: .module) }
+    /// Option A: Tags as a section of its own, its small header over a
+    /// token field that wraps onto as many lines as it needs.
+    private var tagsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            Text("browse.inspector.tags", bundle: .module)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            BrowseTagField(tags: note.draft.tags, names: tagNames) { [note] in inspector.setTags($0, for: note) }
+                // A field per note: what was typed for one note never reaches the next.
+                .id(note.noteID)
+                .accessibilityIdentifier("browse.inspector.tags")
         }
-        .formStyle(.columns)
         .padding(.horizontal)
-        .padding(.vertical, Spacing.xSmall)
+        .padding(.vertical, Spacing.small)
     }
 
     /// Every tag's full name, for the token field's completion.
@@ -195,6 +226,15 @@ struct BrowsePreviewSection: View {
                 .accessibilityValue(Text(verbatim: inspector.previewFolded ? "collapsed" : "expanded"))
                 .accessibilityIdentifier("browse.inspector.preview.header")
                 Spacer()
+                if inspector.preview.hasAudio {
+                    Button { inspector.preview.replay() } label: {
+                        Label { Text("browse.inspector.preview.play", bundle: .module) } icon: { Image(systemName: "speaker.wave.2") }
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .help(Text("browse.inspector.preview.play", bundle: .module))
+                    .accessibilityIdentifier("browse.inspector.preview.play")
+                }
                 if note.cards.count > 1 {
                     Button { inspector.showCard((note.cardIndex + 1) % note.cards.count) } label: {
                         HStack(spacing: Spacing.xxSmall) {
@@ -228,8 +268,10 @@ struct BrowsePreviewSection: View {
 }
 
 enum BrowseInspectorMetrics {
-    /// The preview's height: a card's question at its own size, with room around it.
-    static let previewHeight: CGFloat = 200
+    /// Option A: the preview's height, small enough that the fields below it stay in reach.
+    static let previewHeight: CGFloat = 160
+    /// The fields' page before it reports its height.
+    static let fieldsMinimum: CGFloat = 44
 }
 
 /// The preview's page pair, with a click that flips the card. The click
@@ -306,7 +348,7 @@ struct BrowseFormattingBar: View {
                     }
                 }
                 .toggleStyle(.button)
-                .disabled(host.focusedMode == nil)
+                .disabled(!host.canToggleSource)
                 .help(Text("browse.inspector.format.html", bundle: .module))
                 .accessibilityIdentifier(host.modeControlIdentifier)
             }

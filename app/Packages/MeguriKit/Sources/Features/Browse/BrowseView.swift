@@ -3,6 +3,9 @@ import CoreBridge
 import DesignSystem
 import Editor
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// Browse's detail beside its sidebar (N21.1, N21.3): the window title
 /// "Browse", the Cards / Notes control right after it, then the trailing
@@ -71,6 +74,11 @@ public struct BrowseView: View {
                         let host = try FieldEditorHost(draft: draft, isCurrent: current)
                         // `browser/inspector` I3: a row change opens the note with no field focused.
                         host.browsing = true
+                        // Option A: the fields' thumbnails and sound chips.
+                        let inspector = model.inspector
+                        host.mediaDirectory = inspector.mediaDirectory
+                        host.onPlayMedia = { inspector.playSound($0) }
+                        host.onOpenMedia = { name in if let url = inspector.mediaFile(name) { NSWorkspace.shared.open(url) } }
                         return host
                     }
                 }

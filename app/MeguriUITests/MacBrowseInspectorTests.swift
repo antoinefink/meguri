@@ -1,8 +1,8 @@
 import Foundation
 import XCTest
 
-/// Browse's inspector on the Mac (U273; `browser/workspace` V7, V12; N21.3,
-/// N21.4, N21.5, N21.8), over the generated typical recipe on the real core:
+/// Browse's inspector on the Mac (U273, restyled as Option A; `browser/workspace`
+/// V7, V12; N21.3, N21.4, N21.5, N21.8), over the generated typical recipe on the real core:
 /// the toggle last in the toolbar; one card with its preview, Deck and Type,
 /// fields and tags; the empty fields opened; the formatting bar in use; an
 /// edit saved when another row is chosen, as Edit › Undo's "Undo Edit Note";
@@ -26,8 +26,23 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertTrue(toggle.waitForExistence(timeout: 10) && add.exists)
         XCTAssertLessThan(add.frame.maxX, toggle.frame.minX + 1, "the inspector toggle comes last: \(add.frame) \(toggle.frame)")
 
-        // One card: its note in the pane.
+        // No Selection.
         try app.bringToFront(bundleIdentifier: bundle)
+        table.tableRows.element(boundBy: 0).click()
+        XCUIElement.perform(withKeyModifiers: .command) { table.tableRows.element(boundBy: 0).click() }
+        XCTAssertTrue(element(app, "browse.inspector.empty").waitForExistence(timeout: 10), "No Selection")
+        capture(app, "no-selection-\(appearance)")
+
+        // Several rows: the summary and the commands.
+        try app.bringToFront(bundleIdentifier: bundle)
+        table.tableRows.element(boundBy: 0).click()
+        XCUIElement.perform(withKeyModifiers: .shift) { table.tableRows.element(boundBy: 3).click() }
+        XCTAssertTrue(element(app, "browse.inspector.summary.title").waitForExistence(timeout: 10), "V7's summary")
+        sleep(1)
+        capture(app, "several-rows-\(appearance)")
+
+        // A card with a sound and an image (the Español deck's notes).
+        try showDeck(app, bundle, containing: "Español")
         table.tableRows.element(boundBy: 0).click()
         let note = element(app, "browse.inspector.note")
         XCTAssertTrue(note.waitForExistence(timeout: 10), "the Note tab")
@@ -35,24 +50,42 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertTrue(element(app, "browse.inspector.tags").exists && element(app, "browse.inspector.formatting").exists)
         let fields = note.textViews
         XCTAssertTrue(waitUntil { fields.count > 0 }, "the note's fields")
+        XCTAssertFalse(element(app, "browse.inspector.format.bold").isEnabled, "Option A: the bar is dimmed until a field has the focus")
+        sleep(2)
+        capture(app, "sound-and-image-\(appearance)")
+
+        // Right to left, then CJK with a sound.
+        try showDeck(app, bundle, containing: "العربية")
+        table.tableRows.element(boundBy: 0).click()
+        XCTAssertTrue(waitUntil { fields.count > 0 })
         sleep(1)
-        capture(app, "one-card-\(appearance)")
-
-        // V12: the empty fields behind their row, then shown.
-        let empty = element(app, "browse.inspector.emptyFields")
-        if empty.exists {
-            let shown = fields.count
-            try app.bringToFront(bundleIdentifier: bundle)
-            empty.click()
-            XCTAssertTrue(waitUntil { fields.count > shown }, "every field shows: \(fields.count) after \(shown)")
-            capture(app, "empty-fields-open-\(appearance)")
-            empty.click()
-            XCTAssertTrue(waitUntil { fields.count == shown })
-        }
-
-        // The formatting bar: a word typed, selected and made bold.
+        capture(app, "right-to-left-\(appearance)")
+        // V12: a field emptied, then behind its row on the note's next showing, then shown.
         try app.bringToFront(bundleIdentifier: bundle)
-        let first = fields.element(boundBy: 0)
+        fields.element(boundBy: 1).click()
+        app.typeKey("a", modifierFlags: [.command])
+        app.typeKey(.delete, modifierFlags: [])
+        table.tableRows.element(boundBy: 1).click()
+        XCTAssertTrue(waitUntil { fields.count > 0 })
+        table.tableRows.element(boundBy: 0).click()
+        let empty = element(app, "browse.inspector.emptyFields")
+        XCTAssertTrue(empty.waitForExistence(timeout: 10), "the emptied field hides behind its row")
+        let shown = fields.count
+        try app.bringToFront(bundleIdentifier: bundle)
+        empty.click()
+        XCTAssertTrue(waitUntil { fields.count > shown }, "every field shows: \(fields.count) after \(shown)")
+        sleep(1)
+        capture(app, "empty-fields-open-\(appearance)")
+        empty.click()
+        try showDeck(app, bundle, containing: "語彙")
+        table.tableRows.element(boundBy: 0).click()
+        XCTAssertTrue(waitUntil { fields.count > 0 })
+        sleep(2)
+        capture(app, "cjk-with-sound-\(appearance)")
+
+        // A field being edited, the formatting bar in use and ⌘I (F14) reaching the field.
+        try app.bringToFront(bundleIdentifier: bundle)
+        let first = fields.element(boundBy: 1)
         first.click()
         app.typeKey(.downArrow, modifierFlags: [.command])
         app.typeText(" kerplunk")
@@ -60,72 +93,60 @@ final class MacBrowseInspectorTests: XCTestCase {
         let bold = element(app, "browse.inspector.format.bold")
         XCTAssertTrue(waitUntil { bold.isEnabled }, "Bold acts on the focused field")
         bold.click()
-        capture(app, "formatting-bar-\(appearance)")
-        // F14: ⌘I reaches Format › Italic (the menu's key equivalent) while the field has the focus.
         app.typeKey(.rightArrow, modifierFlags: [])
         app.typeText(" vintor")
         app.typeKey(.leftArrow, modifierFlags: [.option, .shift])
         app.typeKey("i", modifierFlags: [.command])
-        capture(app, "format-key-cmd-i-\(appearance)")
+        capture(app, "field-being-edited-\(appearance)")
+
+        // Many tags, wrapping in their section.
+        try app.bringToFront(bundleIdentifier: bundle)
+        element(app, "browse.inspector.tags").click()
+        app.typeText("alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima ")
+        app.typeKey(.tab, modifierFlags: [])
+        sleep(1)
+        capture(app, "many-tags-\(appearance)")
 
         // V12, W2: choosing another row saves the edit first, one "Edit Note" step.
         try app.bringToFront(bundleIdentifier: bundle)
         table.tableRows.element(boundBy: 1).click()
         try app.bringToFront(bundleIdentifier: bundle)
         app.menuBars.menuBarItems["Edit"].click()
-        let undo = app.menuItems["Undo Edit Note"]
-        XCTAssertTrue(undo.waitForExistence(timeout: 10), "V8.3: the save's step")
-        screen(app, "edit-menu-undo-edit-note-\(appearance)")
+        XCTAssertTrue(app.menuItems["Undo Edit Note"].waitForExistence(timeout: 10), "V8.3: the save's step")
         app.typeKey(.escape, modifierFlags: [])
 
-        // A long note: many lines typed; the fields scroll inside the pane.
+        // A long note: many lines typed; one scroll view for the whole pane.
         try app.bringToFront(bundleIdentifier: bundle)
         fields.element(boundBy: 0).click()
         app.typeKey(.downArrow, modifierFlags: [.command])
-        for line in 1...40 { app.typeText("\rline \(line)") }
+        for line in 1...30 { app.typeText("\rline \(line) of a long field that wraps across the pane") }
         capture(app, "long-note-\(appearance)")
         XCTAssertTrue(note.frame.maxY <= app.windows.firstMatch.frame.maxY + 1, "the pane stays in the window")
 
-        // Several rows: the summary and the commands.
-        try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 2).click()
-        XCUIElement.perform(withKeyModifiers: .shift) { table.tableRows.element(boundBy: 5).click() }
-        let title = element(app, "browse.inspector.summary.title")
-        XCTAssertTrue(title.waitForExistence(timeout: 10), "V7's summary")
-        XCTAssertTrue(title.label.contains("Selected"), title.label)
-        sleep(1)
-        capture(app, "several-rows-\(appearance)")
-
-        // No selection.
-        try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 2).click()
-        XCUIElement.perform(withKeyModifiers: .command) { table.tableRows.element(boundBy: 2).click() }
-        XCTAssertTrue(element(app, "browse.inspector.empty").waitForExistence(timeout: 10), "No Selection")
-        capture(app, "no-selection-\(appearance)")
-
-        // A card with an image: the search finds the notes that reference one.
-        try app.bringToFront(bundleIdentifier: bundle)
-        let search = app.toolbars.searchFields.firstMatch.exists ? app.toolbars.searchFields.firstMatch : app.searchFields.element(boundBy: 1)
-        search.click()
-        app.typeText("png\r")
-        XCTAssertTrue(waitUntil { table.tableRows.count > 0 })
-        sleep(1)
+        // N21.3: under about 900 points the pane hides; Return shows it over the table.
         try app.bringToFront(bundleIdentifier: bundle)
         table.tableRows.element(boundBy: 0).click()
-        XCTAssertTrue(note.waitForExistence(timeout: 10))
-        sleep(2)
-        capture(app, "card-with-image-\(appearance)")
-
-        // N21.3: under about 900 points the pane hides; Return shows it over the table.
         try resize(app, bundle: bundle, to: "820x700")
         XCTAssertTrue(waitUntil { !note.exists }, "the pane hid itself")
-        capture(app, "narrow-hidden-\(appearance)")
         try app.bringToFront(bundleIdentifier: bundle)
         table.tableRows.element(boundBy: 0).click()
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(note.waitForExistence(timeout: 10), "Return shows it over the table")
         sleep(1)
         capture(app, "narrow-over-table-\(appearance)")
+    }
+
+    /// Browse's sidebar: the deck row whose name holds `name` sets the Deck token.
+    private func showDeck(_ app: XCUIApplication, _ bundle: String, containing name: String) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
+        let row = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "browse.sidebar.deck.", name)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the deck row \(name)")
+        row.click()
+        let table = app.tables["browse.results.table"]
+        XCTAssertTrue(waitUntil { table.tableRows.count > 0 })
+        sleep(1)
+        try app.bringToFront(bundleIdentifier: bundle)
     }
 
     private func launch(appearance: String) throws -> (XCUIApplication, String) {

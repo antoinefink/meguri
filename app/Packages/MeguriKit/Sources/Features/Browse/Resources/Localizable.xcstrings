@@ -1545,6 +1545,16 @@
         }
       }
     },
+    "browse.inspector.preview.play": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play Sound"
+          }
+        }
+      }
+    },
     "browse.inspector.saveFailed.checkDatabase": {
       "localizations": {
         "en": {
