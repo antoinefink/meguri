@@ -101,6 +101,7 @@ fn candidate_error(error: CandidateError) -> Error {
             other => other.into(),
         },
         CandidateError::Corrupt { detail } => corrupt(detail),
+        CandidateError::TooLarge { what, .. } => corrupt(format!("candidate past a limit: {what}")),
         CandidateError::InsufficientSpace { needed, available } => Error::InsufficientSpace { needed, available },
         CandidateError::DiskFull => Error::DiskFull,
         CandidateError::Cancelled => Error::Cancelled,

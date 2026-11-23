@@ -14,7 +14,8 @@ use meguri_text::media_name::safe_media_name;
 use meguri_text::media_refs::{media_tags, sound_tags};
 
 use super::archive::{DeckArchive, MediaEntry};
-use super::plan::{Decision, ImportPlan};
+use super::gather::PackageRows;
+use super::plan::{Decision, ImportPlan, routed_fields};
 use super::session::ImportSession;
 use super::{ApkgImportError, ImportOutcome, corrupt};
 
@@ -30,8 +31,13 @@ const STATIC_LIMIT: u64 = 64 * 1024 * 1024;
 pub(crate) struct MediaOutcome {
     /// The staged checked entries, bound to the op at its commit.
     pub stage: Option<StagedOp>,
-    /// The plan indices of the notes whose final fields name a staged file.
-    pub witnesses: Vec<usize>,
+    /// By transformed name (F1): the stored name of the checked entry it
+    /// selects, when that entry has one. The write phase rewrites each new
+    /// and updated note's references with it (I12.2).
+    pub names: HashMap<String, String>,
+    /// The names this op staged: a note whose final fields name one is a
+    /// witness of the commit.
+    pub staged: HashSet<String>,
     /// Static entries decided "written": indices into the session's map.
     pub statics: Vec<usize>,
     pub written: u64,
@@ -156,6 +162,44 @@ fn decode(
     }
 }
 
+/// `package/backups` B4's need (P10's live-collection row) when the plan
+/// takes a safety backup (I14.4, I15): twice the collection and its `-wal`,
+/// plus the margin.
+fn backup_need(session: &ImportSession, plan: &ImportPlan) -> u64 {
+    if plan.stage.reasons.is_empty() && plan.stage.preview.is_empty() {
+        return 0;
+    }
+    let live = session.context.collection_directory.join("collection.anki2");
+    let size = |path: &Path| std::fs::metadata(path).map_or(0, |m| m.len());
+    let mut wal = live.clone().into_os_string();
+    wal.push("-wal");
+    size(&live)
+        .saturating_add(size(Path::new(&wal)))
+        .saturating_mul(2)
+        .saturating_add(MARGIN)
+}
+
+/// I12.2 on a note's fields with the stored names staging decided. Returns
+/// whether the final fields name a file this op staged.
+pub(crate) fn rewrite_note(outcome: &MediaOutcome, fields: &mut [String]) -> bool {
+    let replacement = |decoded: &str, transformed: &str| -> Option<String> {
+        let name = outcome.names.get(transformed).map_or(transformed, String::as_str);
+        (name != decoded).then(|| name.to_owned())
+    };
+    let mut witness = false;
+    for field in fields {
+        if let Some(rewritten) = rewrite_field(field, &replacement) {
+            *field = rewritten;
+        }
+        if !outcome.staged.is_empty() && !witness {
+            witness = meguri_text::media_refs::local_references(field)
+                .iter()
+                .any(|name| outcome.staged.contains(name));
+        }
+    }
+    witness
+}
+
 /// I14.1 steps 5 and 6: preflight, the stored name of every used and static
 /// entry with its payload staged, then the reference rewrite of the new and
 /// updated notes. A failure or a cancel leaves nothing staged.
@@ -176,15 +220,35 @@ pub(crate) fn stage(
             by_name.entry(safe_media_name(&entry.name)).or_insert(index);
         }
     }
+    // The fields of the new and updated notes, read a page at a time from
+    // the staged package collection: no note text is kept.
     let mut used: BTreeSet<usize> = BTreeSet::new();
-    for note in &plan.notes {
-        if matches!(note.decision, Decision::New | Decision::Updated { .. }) {
-            for field in &note.fields {
-                wanted(field, |name| {
-                    if let Some(index) = by_name.get(&name) {
-                        used.insert(*index);
-                    }
-                });
+    if !by_name.is_empty() {
+        let package = PackageRows::open(&session.collection_path(), &session.context)?;
+        let mut at = 0_usize;
+        let mut after = None;
+        loop {
+            cancel.check()?;
+            let page = package.notes_after(after)?;
+            let Some(last) = page.last() else { break };
+            after = Some(last.id.0);
+            for note in &page {
+                let planned = plan.notes.get(at).filter(|_| plan.raw.notes.get(at).is_some_and(|head| head.id == note.id.0));
+                at += 1;
+                let Some(planned) = planned else {
+                    return Err(corrupt("the package collection changed under its plan"));
+                };
+                if !matches!(planned.decision, Decision::New | Decision::Updated { .. }) {
+                    continue;
+                }
+                let Some(route) = plan.stage.routes.get(&planned.package_type) else { continue };
+                for field in routed_fields(&note.fields, route.field_map.as_ref(), &route.record) {
+                    wanted(&field, |name| {
+                        if let Some(index) = by_name.get(&name) {
+                            used.insert(*index);
+                        }
+                    });
+                }
             }
         }
     }
@@ -199,6 +263,7 @@ pub(crate) fn stage(
         .try_fold(0_u64, |sum, index| sum.checked_add(entries[*index].size))
         .and_then(|sum| sum.checked_add(session.collection_size().checked_mul(2)?))
         .and_then(|sum| sum.checked_add(MARGIN))
+        .and_then(|sum| sum.checked_add(backup_need(session, plan)))
         .ok_or_else(|| corrupt("media preflight overflow"))?;
     meguri_storage::space::require_space(session.context.space.as_ref(), &session.context.collection_directory, bytes)
         .map_err(|error| match error {
@@ -265,38 +330,17 @@ pub(crate) fn stage(
     outcome.decoded = archive.charged();
     drop(archive);
 
-    // I12.2's rewrite, now that the stored names are known.
-    let replacement = |decoded: &str, transformed: &str| -> Option<String> {
-        let name = match by_name.get(transformed).and_then(|index| stored.get(index)) {
-            Some(stored) => stored.as_str(),
-            None => transformed,
-        };
-        (name != decoded).then(|| name.to_owned())
-    };
     let names: HashSet<String> = staged.names().map_err(media_error)?.into_iter().collect();
-    for (index, note) in plan.notes.iter_mut().enumerate() {
-        if !matches!(note.decision, Decision::New | Decision::Updated { .. }) {
-            continue;
-        }
-        let mut witness = false;
-        for field in &mut note.fields {
-            if let Some(rewritten) = rewrite_field(field, &replacement) {
-                *field = rewritten;
-            }
-            if !names.is_empty() && !witness {
-                witness = meguri_text::media_refs::local_references(field)
-                    .iter()
-                    .any(|name| names.contains(name));
-            }
-        }
-        if witness {
-            outcome.witnesses.push(index);
+    for (transformed, index) in &by_name {
+        if let Some(name) = stored.get(index) {
+            outcome.names.insert(transformed.clone(), name.clone());
         }
     }
     if names.is_empty() {
         staged.rollback().map_err(media_error)?;
     } else {
         outcome.stage = Some(staged);
+        outcome.staged = names;
     }
     plan.media = outcome;
     Ok(())

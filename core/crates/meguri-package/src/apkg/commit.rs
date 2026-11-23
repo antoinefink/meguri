@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use meguri_engine::cardgen::regenerate;
 use meguri_engine::decks::{self, names};
 use meguri_engine::{EngineError, OpContext, SchemaReason};
-use meguri_model::deck::normalize_native_name;
+use meguri_model::deck::{Deck, normalize_native_name};
 use meguri_model::grave::GraveKind;
 use meguri_model::ids::{CardId, DeckId, NoteId, NotetypeId};
 use meguri_model::note::Note;
@@ -22,7 +22,8 @@ use meguri_storage::{ConfigValue, ReadRows, Record, RowKey, Table, WriteScope};
 use meguri_text::normalize::field_as_saved;
 
 use super::notetypes::{TypeTarget, TypeWrite};
-use super::plan::{Decision, ImportPlan};
+use super::gather::PackageRows;
+use super::plan::{Decision, ImportPlan, routed_fields};
 use super::{ApkgImportError, ImportCounts, ImportLog, ImportOptions, LogEntry};
 
 /// What the write phase hands back.
@@ -31,6 +32,9 @@ pub(crate) struct Committed {
     pub log: ImportLog,
     pub counts: ImportCounts,
     /// Static media entries to write once the op committed (I12.4).
+    /// The structure report the op committed with (`engine/change-stream`
+    /// S2.5), which the storage guard checked against the rows.
+    pub structure: meguri_storage::journal::StructureReport,
     pub statics: Vec<usize>,
     /// Decoded bytes charged to the package so far (P8).
     pub decoded: u64,
@@ -64,11 +68,36 @@ fn reduced(field: &str) -> String {
     text[..end].to_owned()
 }
 
-fn entry(note: i64, fields: &[String], existing: Option<i64>) -> LogEntry {
-    LogEntry {
-        note,
-        fields: fields.iter().map(|field| reduced(field)).collect(),
-        existing_id: existing,
+/// What the log's field texts may hold in all (R1852): past it, an entry
+/// keeps its ids and no fields, and `ImportLog::fields_omitted` counts it.
+/// A note type of many fields would otherwise make the log grow with the
+/// package's text.
+pub(crate) const LOG_TEXT_BUDGET: usize = 16 * 1024 * 1024;
+
+struct LogBudget {
+    left: usize,
+    omitted: u64,
+}
+
+impl LogBudget {
+    fn entry(&mut self, note: i64, fields: &[String], existing: Option<i64>) -> LogEntry {
+        let mut kept: Vec<String> = Vec::new();
+        if self.left > 0 {
+            kept = fields.iter().map(|field| reduced(field)).collect();
+        }
+        let cost: usize = kept.iter().map(|field| field.len() + std::mem::size_of::<String>()).sum();
+        // Kept only when the whole entry fits what is left.
+        if self.left > 0 && cost <= self.left {
+            self.left -= cost;
+        } else {
+            kept = Vec::new();
+            self.omitted += 1;
+        }
+        LogEntry {
+            note,
+            fields: kept,
+            existing_id: existing,
+        }
     }
 }
 
@@ -217,30 +246,91 @@ fn with_suffix(name: &str, suffix: &str) -> String {
     format!("{name}{suffix}")
 }
 
-/// I10: presets, then decks, against the live rows. Returns the map from
-/// package deck ids to target deck ids.
-fn write_decks(
-    scope: &mut WriteScope<'_>,
-    plan: &ImportPlan,
-    fault: &Fault,
-    counts: &mut ImportCounts,
-) -> Result<HashMap<i64, i64>, EngineError> {
-    for preset in &plan.taken.presets {
-        if scope.deck_config(preset.id)?.is_none() {
-            // The golden `package/apkg-import/v1-scheduler` shows the added
-            // row holding the bounded values of a preset save
-            // (`sched/presets` V3), not the bytes the package stores.
-            scope.put(&preset.for_use())?;
-            counts.presets_added += 1;
-        }
+/// Where I10.2 writes: the live scope in the write phase, nothing in the
+/// plan's dry run (which only looks for `DeckTooDeep`).
+pub(crate) trait DeckSink {
+    /// Writes a changed deck and returns it as stored.
+    fn put(&mut self, deck: &Deck) -> Result<Deck, EngineError>;
+    /// Adds a deck under a new id and returns it as stored.
+    fn add(&mut self, deck: &Deck) -> Result<Deck, EngineError>;
+}
+
+struct LiveDecks<'s, 'c> {
+    scope: &'s mut WriteScope<'c>,
+}
+
+impl DeckSink for LiveDecks<'_, '_> {
+    fn put(&mut self, deck: &Deck) -> Result<Deck, EngineError> {
+        self.scope.put(deck)?;
+        Ok(self.scope.deck(deck.id)?.unwrap_or_else(|| deck.clone()))
     }
-    let now = scope.now().whole_secs();
+
+    fn add(&mut self, deck: &Deck) -> Result<Deck, EngineError> {
+        let id = self.scope.add_deck(deck)?;
+        self.scope.deck(id)?.ok_or_else(|| stale(Table::Decks, id.0))
+    }
+}
+
+/// The plan's sink: decks get placeholder ids no row has.
+pub(crate) struct DryDecks {
+    next: i64,
+}
+
+impl DryDecks {
+    pub fn new() -> DryDecks {
+        DryDecks { next: -1 }
+    }
+}
+
+impl DeckSink for DryDecks {
+    fn put(&mut self, deck: &Deck) -> Result<Deck, EngineError> {
+        Ok(deck.clone())
+    }
+
+    fn add(&mut self, deck: &Deck) -> Result<Deck, EngineError> {
+        let mut added = deck.clone();
+        added.id = DeckId(self.next);
+        self.next -= 1;
+        Ok(added)
+    }
+}
+
+/// Why I10.2 stopped.
+pub(crate) enum DeckFault {
+    /// D3's nesting limit: the human name.
+    TooDeep(String),
+    Engine(EngineError),
+}
+
+impl From<EngineError> for DeckFault {
+    fn from(error: EngineError) -> Self {
+        DeckFault::Engine(error)
+    }
+}
+
+/// What I10.2 did, for the result's counts.
+#[derive(Default)]
+pub(crate) struct DeckCounts {
+    pub added: u64,
+    pub updated: u64,
+}
+
+/// I10.2 over `rows`, the target's decks as the caller reads them (the
+/// plan's snapshot or the live rows), writing through `sink`. Returns the
+/// map from package deck ids to target deck ids.
+pub(crate) fn place_decks(
+    mut rows: Vec<Deck>,
+    taken: &[Deck],
+    today: u32,
+    theirs: u32,
+    now: EpochSecs,
+    sink: &mut dyn DeckSink,
+    counts: &mut DeckCounts,
+) -> Result<HashMap<i64, i64>, DeckFault> {
     let suffix = format!(" {}", now.0);
-    let (today, theirs) = (plan.target_today, plan.package_today);
-    let mut rows = scope.deck_rows()?;
     let mut renames: Vec<(String, String)> = Vec::new();
     let mut map = HashMap::new();
-    for taken in &plan.taken.decks {
+    for taken in taken {
         let mut deck = taken.clone();
         deck.name = normalize_native_name(&deck.name);
         apply_renames(&mut deck.name, &renames);
@@ -289,11 +379,11 @@ fn write_decks(
                 map.insert(taken.id.0, found.id.0);
                 if updated.to_cells() != found.to_cells() {
                     updated.mtime = now;
-                    scope.put(&updated)?;
-                    counts.decks_updated += 1;
+                    let stored = sink.put(&updated)?;
+                    counts.updated += 1;
                     let id = updated.id;
                     if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
-                        *row = scope.deck(id)?.unwrap_or(updated);
+                        *row = stored;
                     }
                 }
                 continue;
@@ -320,10 +410,10 @@ fn write_decks(
             let mut stand_in = decks::new_deck(with_suffix(&ancestor.name, &suffix));
             stand_in.name = names::unique(&rows, DeckId(0), stand_in.name);
             stand_in.mtime = now;
-            let id = scope.add_deck(&stand_in)?;
-            counts.decks_added += 1;
+            let stored = sink.add(&stand_in)?;
+            counts.added += 1;
             renames.push((ancestor.name.clone(), stand_in.name.clone()));
-            rows.push(scope.deck(id)?.ok_or_else(|| stale(Table::Decks, id.0))?);
+            rows.push(stored);
             let before = deck.name.clone();
             apply_renames(&mut deck.name, &renames[renames.len() - 1..]);
             if deck.name == before {
@@ -340,14 +430,9 @@ fn write_decks(
         let name = match names::prepare(&rows, deck.name.clone()) {
             Ok(name) => name,
             Err(EngineError::DeckRefused(decks::Refusal::TooDeep)) => {
-                return Err(refuse(
-                    fault,
-                    ApkgImportError::DeckTooDeep {
-                        name: native_human(&deck.name),
-                    },
-                ));
+                return Err(DeckFault::TooDeep(native_human(&deck.name)));
             }
-            Err(other) => return Err(other),
+            Err(other) => return Err(other.into()),
         };
         // D4: missing ancestors, the nearest first.
         let mut parent = names::parent(&name);
@@ -357,20 +442,58 @@ fn write_decks(
             }
             let mut created = decks::new_deck(missing.to_owned());
             created.mtime = now;
-            let id = scope.add_deck(&created)?;
-            counts.decks_added += 1;
-            rows.push(scope.deck(id)?.ok_or_else(|| stale(Table::Decks, id.0))?);
+            let stored = sink.add(&created)?;
+            counts.added += 1;
+            rows.push(stored);
             parent = names::parent(missing);
         }
         deck.name = names::unique(&rows, DeckId(0), name);
         deck.mtime = now;
         deck.usn = Usn::PENDING;
-        let id = scope.add_deck(&deck)?;
-        counts.decks_added += 1;
-        rows.push(scope.deck(id)?.ok_or_else(|| stale(Table::Decks, id.0))?);
-        map.insert(taken.id.0, id.0);
+        let stored = sink.add(&deck)?;
+        counts.added += 1;
+        map.insert(taken.id.0, stored.id.0);
+        rows.push(stored);
     }
     Ok(map)
+}
+
+/// I10: presets, then decks, against the live rows. Returns the map from
+/// package deck ids to target deck ids.
+fn write_decks(
+    scope: &mut WriteScope<'_>,
+    plan: &ImportPlan,
+    fault: &Fault,
+    counts: &mut ImportCounts,
+) -> Result<HashMap<i64, i64>, EngineError> {
+    for preset in &plan.taken.presets {
+        if scope.deck_config(preset.id)?.is_none() {
+            // The golden `package/apkg-import/v1-scheduler` shows the added
+            // row holding the bounded values of a preset save
+            // (`sched/presets` V3), not the bytes the package stores.
+            scope.put(&preset.for_use())?;
+            counts.presets_added += 1;
+        }
+    }
+    let now = scope.now().whole_secs();
+    let rows = scope.deck_rows()?;
+    let mut placed = DeckCounts::default();
+    let outcome = place_decks(
+        rows,
+        &plan.taken.decks,
+        plan.target_today,
+        plan.package_today,
+        now,
+        &mut LiveDecks { scope },
+        &mut placed,
+    );
+    counts.decks_added += placed.added;
+    counts.decks_updated += placed.updated;
+    match outcome {
+        Ok(map) => Ok(map),
+        Err(DeckFault::TooDeep(name)) => Err(refuse(fault, ApkgImportError::DeckTooDeep { name })),
+        Err(DeckFault::Engine(error)) => Err(error),
+    }
 }
 
 /// The id a new row takes: its package id, or + 999 until `table` has none
@@ -388,9 +511,11 @@ fn free_id(scope: &WriteScope<'_>, table: Table, mut id: i64, retired: &HashSet<
 pub(crate) fn commit(
     ctx: &mut OpContext<'_, '_>,
     mut plan: ImportPlan,
-    clock: &dyn meguri_model::clock::Clock,
+    package_path: &std::path::Path,
+    context: &super::ApkgContext,
     fault: &Fault,
 ) -> Result<Committed, EngineError> {
+    let clock = context.clock.as_ref();
     let mut counts = ImportCounts {
         notetypes_added: plan.stage.added,
         notetypes_updated: plan.stage.updated,
@@ -399,6 +524,10 @@ pub(crate) fn commit(
         media_reused: plan.media.reused,
         media_skipped: plan.media.skipped,
         ..ImportCounts::default()
+    };
+    let mut budget = LogBudget {
+        left: LOG_TEXT_BUDGET,
+        omitted: 0,
     };
     let mut log = ImportLog {
         found_notes: plan.raw.notes.len() as u64,
@@ -419,6 +548,7 @@ pub(crate) fn commit(
     meguri_engine::mark_schema_change(scope, &reasons)?;
     let mut report = plan.stage.report.clone();
     report.reasons.insert(StructureReason::ApkgApply);
+    let authored = report.clone();
     let token = scope.start_structure_report(report)?;
     let mut copies: Vec<i64> = Vec::new();
     let mut retired: HashSet<i64> = HashSet::new();
@@ -500,68 +630,94 @@ pub(crate) fn commit(
         }
     };
 
-    // Notes (I9).
+    // Notes (I9), read a page at a time from the staged package collection.
+    let package = PackageRows::open(package_path, context).map_err(|error| refuse(fault, error))?;
     let mut targets: Vec<Option<NoteId>> = vec![None; plan.notes.len()];
     let mut written: HashSet<usize> = HashSet::new();
-    for index in 0..plan.notes.len() {
-        let planned = &plan.notes[index];
-        let source = &plan.raw.notes[index];
-        match planned.decision {
-            Decision::MissingNotetype => log.missing_notetype.push(entry(source.id.0, &planned.fields, None)),
-            Decision::Conflicting { existing } => {
-                log.conflicting.push(entry(source.id.0, &planned.fields, Some(existing.0)));
+    let mut witnesses: Vec<NoteId> = Vec::new();
+    let mut index = 0_usize;
+    let mut after = None;
+    loop {
+        let page = package.notes_after(after).map_err(|error| refuse(fault, error))?;
+        let Some(last) = page.last() else { break };
+        after = Some(last.id.0);
+        for source in page {
+            let (Some(planned), Some(head)) = (plan.notes.get(index), plan.raw.notes.get(index)) else {
+                return Err(stale(Table::Notes, source.id.0));
+            };
+            if head.id != source.id.0 {
+                return Err(stale(Table::Notes, source.id.0));
             }
-            Decision::Duplicate { target } => {
-                log.duplicate.push(entry(target.0, &planned.fields, None));
-                targets[index] = Some(target);
-            }
-            Decision::DuplicateOf { earlier, same_type } => {
-                let target = targets[earlier].ok_or_else(|| stale(Table::Notes, source.id.0))?;
-                log.duplicate.push(entry(target.0, &planned.fields, None));
-                if same_type {
+            let route = plan.stage.routes.get(&planned.package_type);
+            let mut fields = match route {
+                Some(route) => routed_fields(&source.fields, route.field_map.as_ref(), &route.record),
+                None => source.fields.split('\u{1f}').map(str::to_owned).collect(),
+            };
+            match planned.decision {
+                Decision::MissingNotetype => log.missing_notetype.push(budget.entry(source.id.0, &fields, None)),
+                Decision::Conflicting { existing } => {
+                    log.conflicting.push(budget.entry(source.id.0, &fields, Some(existing.0)));
+                }
+                Decision::Duplicate { target } => {
+                    log.duplicate.push(budget.entry(target.0, &fields, None));
                     targets[index] = Some(target);
                 }
-            }
-            Decision::New | Decision::Updated { .. } => {
-                let route = plan
-                    .stage
-                    .routes
-                    .get(&planned.package_type)
-                    .ok_or_else(|| stale(Table::Notetypes, planned.package_type))?;
-                let mid = resolve(route.target)?;
-                let tags = meguri_engine::tags::note_tags_for_save(scope, &[plan.taken.tags[index].as_str()])?;
-                let mut note = match planned.decision {
-                    Decision::Updated { target } => scope.note(target)?.ok_or_else(|| stale(Table::Notes, target.0))?,
-                    _ => Note {
-                        id: NoteId(free_id(scope, Table::Notes, source.id.0, &unused)?),
-                        guid: source.guid.clone(),
-                        flags: 0,
-                        data: String::new(),
-                        ..Note::default()
-                    },
-                };
-                if matches!(planned.decision, Decision::Updated { .. }) && note.notetype_id.0 != mid {
-                    return Err(stale(Table::Notes, note.id.0));
+                Decision::DuplicateOf { earlier, same_type } => {
+                    let target = targets[earlier].ok_or_else(|| stale(Table::Notes, source.id.0))?;
+                    log.duplicate.push(budget.entry(target.0, &fields, None));
+                    if same_type {
+                        targets[index] = Some(target);
+                    }
                 }
-                note_row(&mut note, &route.record, &planned.fields, normalize);
-                note.notetype_id = NotetypeId(mid);
-                note.tags = tags;
-                note.mtime = EpochSecs(source.mtime.0);
-                note.usn = Usn::PENDING;
-                scope.put(&note)?;
-                let stored: Vec<String> = note.fields.split('\u{1f}').map(str::to_owned).collect();
-                if matches!(planned.decision, Decision::New) {
-                    log.new.push(entry(note.id.0, &stored, None));
-                    counts.notes_added += 1;
-                } else {
-                    log.updated.push(entry(note.id.0, &stored, None));
-                    counts.notes_updated += 1;
+                Decision::New | Decision::Updated { .. } => {
+                    let route = route.ok_or_else(|| stale(Table::Notetypes, planned.package_type))?;
+                    let mid = resolve(route.target)?;
+                    // I12.2, with the stored names staging decided.
+                    let witness = super::media::rewrite_note(&plan.media, &mut fields);
+                    let tags = meguri_engine::tags::note_tags_for_save(scope, &[plan.taken.tags(&source.tags).as_str()])?;
+                    let mut note = match planned.decision {
+                        Decision::Updated { target } => {
+                            scope.note(target)?.ok_or_else(|| stale(Table::Notes, target.0))?
+                        }
+                        _ => Note {
+                            id: NoteId(free_id(scope, Table::Notes, source.id.0, &unused)?),
+                            guid: source.guid.clone(),
+                            flags: 0,
+                            data: String::new(),
+                            ..Note::default()
+                        },
+                    };
+                    if matches!(planned.decision, Decision::Updated { .. }) && note.notetype_id.0 != mid {
+                        return Err(stale(Table::Notes, note.id.0));
+                    }
+                    note_row(&mut note, &route.record, &fields, normalize);
+                    note.notetype_id = NotetypeId(mid);
+                    note.tags = tags;
+                    note.mtime = EpochSecs(source.mtime.0);
+                    note.usn = Usn::PENDING;
+                    scope.put(&note)?;
+                    let stored: Vec<String> = note.fields.split('\u{1f}').map(str::to_owned).collect();
+                    if matches!(planned.decision, Decision::New) {
+                        log.new.push(budget.entry(note.id.0, &stored, None));
+                        counts.notes_added += 1;
+                    } else {
+                        log.updated.push(budget.entry(note.id.0, &stored, None));
+                        counts.notes_updated += 1;
+                    }
+                    if witness {
+                        witnesses.push(note.id);
+                    }
+                    targets[index] = Some(note.id);
+                    written.insert(index);
                 }
-                targets[index] = Some(note.id);
-                written.insert(index);
             }
+            index += 1;
         }
     }
+    if index != plan.notes.len() {
+        return Err(stale(Table::Notes, "package"));
+    }
+    meguri_model::faultpoint!("package.apkg.write_phase").map_err(meguri_storage::StorageError::from)?;
 
     // J8: merged note types no note uses any more.
     let mut removed = false;
@@ -581,111 +737,141 @@ pub(crate) fn commit(
 
     let decks = write_decks(scope, &plan, fault, &mut counts)?;
 
-    // Cards (I11.1) and review log (I11.3).
-    let index_of: HashMap<i64, usize> = plan.raw.notes.iter().enumerate().map(|(i, note)| (note.id.0, i)).collect();
+    // Cards (I11.1) and review log (I11.3), a page at a time.
+    let index_of: HashMap<i64, usize> = plan.raw.notes.iter().enumerate().map(|(i, note)| (note.id, i)).collect();
     let shift = i64::from(plan.package_today) - i64::from(plan.target_today);
-    let mut pairs: HashMap<NoteId, HashSet<u16>> = HashMap::new();
+    // The (note, ordinal) pairs seen: one flat set, and the target notes
+    // whose existing cards were read into it.
+    let mut pairs: HashSet<(i64, u16)> = HashSet::new();
+    let mut loaded: HashSet<i64> = HashSet::new();
     let mut added_cards: HashMap<i64, i64> = HashMap::new();
-    let mut missing_deck: HashSet<usize> = HashSet::new();
-    for card in &plan.taken.cards {
-        let Some(&index) = index_of.get(&card.note_id.0) else {
-            continue;
-        };
-        let Some(note) = targets[index] else { continue };
-        let route = plan
-            .stage
-            .routes
-            .get(&plan.notes[index].package_type)
-            .ok_or_else(|| stale(Table::Notetypes, card.note_id.0))?;
-        let ord = match &route.template_map {
-            None => card.ord,
-            Some(map) => match map.get(usize::from(card.ord)) {
-                Some(to) => *to,
-                // An ordinal without an entry keeps its value only when
-                // the final list has no template there.
-                None if usize::from(card.ord) >= route.record.templates.len() => card.ord,
-                None => continue,
-            },
-        };
-        let seen = match pairs.entry(note) {
-            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                let existing = if written.contains(&index) && matches!(plan.notes[index].decision, Decision::New) {
-                    HashSet::new()
-                } else {
-                    scope.cards_of_note(note)?.iter().map(|card| card.ord).collect()
-                };
-                entry.insert(existing)
-            }
-        };
-        if !seen.insert(ord) {
-            continue;
-        }
-        let mut place = |id: DeckId, home: bool| -> DeckId {
-            if home && id.0 == 0 {
-                return id;
-            }
-            match decks.get(&id.0) {
-                Some(mapped) => DeckId(*mapped),
-                None if id.0 == 1 => id,
-                None => {
-                    missing_deck.insert(index);
-                    DeckId(1)
+    let mut missing_deck: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    let mut shaper = plan.taken.shaper();
+    let mut after = None;
+    loop {
+        let page = package.cards_after(after).map_err(|error| refuse(fault, error))?;
+        let Some(last) = page.last() else { break };
+        after = Some(last.id.0);
+        for mut card in page {
+            // I6: only the cards of the package's notes are taken.
+            let Some(&index) = index_of.get(&card.note_id.0) else {
+                continue;
+            };
+            shaper.shape(&mut card);
+            let Some(note) = targets[index] else { continue };
+            let route = plan
+                .stage
+                .routes
+                .get(&plan.notes[index].package_type)
+                .ok_or_else(|| stale(Table::Notetypes, card.note_id.0))?;
+            let ord = match &route.template_map {
+                None => card.ord,
+                Some(map) => match map.get(usize::from(card.ord)) {
+                    Some(to) => *to,
+                    // An ordinal without an entry keeps its value only when
+                    // the final list has no template there.
+                    None if usize::from(card.ord) >= route.record.templates.len() => card.ord,
+                    None => continue,
+                },
+            };
+            // A note this import added has no card but those added here.
+            let fresh = written.contains(&index) && matches!(plan.notes[index].decision, Decision::New);
+            if !fresh && loaded.insert(note.0) {
+                for existing in scope.cards_of_note(note)? {
+                    pairs.insert((note.0, existing.ord));
                 }
             }
-        };
-        let mut new = card.clone();
-        new.id = CardId(free_id(scope, Table::Cards, card.id.0, &retired)?);
-        new.note_id = note;
-        new.ord = ord;
-        new.deck_id = place(card.deck_id, false);
-        new.original_deck_id = place(card.original_deck_id, true);
-        if plan.options.with_scheduling {
-            let review = card.card_type == meguri_model::card::CardType::Review;
-            if matches!(card.queue.stored(), 2 | 3) || review {
-                new.due = i32::try_from(i64::from(card.due) - shift).unwrap_or(card.due);
+            if !pairs.insert((note.0, ord)) {
+                continue;
             }
-            if review && card.original_due != 0 {
-                new.original_due = i32::try_from(i64::from(card.original_due) - shift).unwrap_or(card.original_due);
-            }
-        }
-        new.usn = Usn::PENDING;
-        scope.put(&new)?;
-        added_cards.insert(card.id.0, new.id.0);
-        counts.cards_added += 1;
-    }
-    for (index, planned) in plan.notes.iter().enumerate() {
-        if missing_deck.contains(&index)
-            && let Some(target) = targets[index]
-        {
-            let stored: Vec<String> = match scope.note(target)? {
-                Some(note) if written.contains(&index) => note.fields.split('\u{1f}').map(str::to_owned).collect(),
-                _ => planned.fields.clone(),
+            let mut place = |id: DeckId, home: bool| -> DeckId {
+                if home && id.0 == 0 {
+                    return id;
+                }
+                match decks.get(&id.0) {
+                    Some(mapped) => DeckId(*mapped),
+                    None if id.0 == 1 => id,
+                    None => {
+                        missing_deck.insert(index);
+                        DeckId(1)
+                    }
+                }
             };
-            log.missing_deck.push(entry(target.0, &stored, None));
+            let mut new = card.clone();
+            new.id = CardId(free_id(scope, Table::Cards, card.id.0, &retired)?);
+            new.note_id = note;
+            new.ord = ord;
+            new.deck_id = place(card.deck_id, false);
+            new.original_deck_id = place(card.original_deck_id, true);
+            if plan.options.with_scheduling {
+                let review = card.card_type == meguri_model::card::CardType::Review;
+                if matches!(card.queue.stored(), 2 | 3) || review {
+                    new.due = i32::try_from(i64::from(card.due) - shift).unwrap_or(card.due);
+                }
+                if review && card.original_due != 0 {
+                    new.original_due = i32::try_from(i64::from(card.original_due) - shift).unwrap_or(card.original_due);
+                }
+            }
+            new.usn = Usn::PENDING;
+            scope.put(&new)?;
+            added_cards.insert(card.id.0, new.id.0);
+            counts.cards_added += 1;
         }
     }
-    for row in &plan.taken.revlog {
-        let Some(card) = added_cards.get(&row.card_id.0) else {
-            continue;
-        };
-        let mut row = row.clone();
-        row.card_id = CardId(*card);
-        row.usn = Usn::PENDING;
-        if scope.insert_revlog(&row)?.changed() {
-            counts.revlog_added += 1;
+    // `missing_deck` entries, in I9's order: the note as written, or as the
+    // package holds it when this import wrote nothing for it.
+    let missing_deck: Vec<usize> = missing_deck.into_iter().collect();
+    for chunk in missing_deck.chunks(200) {
+        let ids: Vec<NoteId> = chunk.iter().map(|index| NoteId(plan.raw.notes[*index].id)).collect();
+        let held = package.rows().notes_with_ids(&ids)?;
+        for index in chunk {
+            let Some(target) = targets[*index] else { continue };
+            let stored: Vec<String> = match scope.note(target)? {
+                Some(note) if written.contains(index) => note.fields.split('\u{1f}').map(str::to_owned).collect(),
+                _ => {
+                    let source = held.iter().find(|note| note.id.0 == plan.raw.notes[*index].id);
+                    let route = plan.stage.routes.get(&plan.notes[*index].package_type);
+                    match (source, route) {
+                        (Some(source), Some(route)) => {
+                            routed_fields(&source.fields, route.field_map.as_ref(), &route.record)
+                        }
+                        _ => Vec::new(),
+                    }
+                }
+            };
+            log.missing_deck.push(budget.entry(target.0, &stored, None));
         }
     }
+    if plan.options.with_scheduling {
+        let mut after = None;
+        loop {
+            let page = package.revlog_after(after).map_err(|error| refuse(fault, error))?;
+            let Some(last) = page.last() else { break };
+            after = Some(last.id.0);
+            for mut row in page {
+                let Some(card) = added_cards.get(&row.card_id.0) else {
+                    continue;
+                };
+                row.card_id = CardId(*card);
+                row.usn = Usn::PENDING;
+                if scope.insert_revlog(&row)?.changed() {
+                    counts.revlog_added += 1;
+                }
+            }
+        }
+    }
+    drop(package);
 
     // The staged media travel with the commit (M13); their witnesses are
     // the notes whose fields name them.
     if let Some(stage) = plan.media.stage.take() {
-        let witnesses: Vec<NoteId> = plan.media.witnesses.iter().filter_map(|index| targets[*index]).collect();
         ctx.commit_media(stage, &witnesses)?;
     }
+    log.fields_omitted = budget.omitted;
     Ok(Committed {
         log,
         counts,
+        structure: authored,
         statics: std::mem::take(&mut plan.media.statics),
         decoded: plan.media.decoded,
     })

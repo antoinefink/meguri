@@ -754,15 +754,31 @@ public final class BrowseResults {
     /// it shows is the one it left.
     public func tableAppeared() -> Int? {
         tableShown = false
-        guard let kept = keptRow, kept.token == list?.token else { return nil }
+        guard let kept = keptRow, kept.token == list?.token else { pendingRestore = nil; return nil }
+        pendingRestore = kept.index > 0 ? kept.index : nil
         return kept.index
     }
+
+    /// The Mac: the kept row its table view brings back itself, once.
+    @ObservationIgnored public private(set) var pendingRestore: Int?
+    public func restored() { pendingRestore = nil }
 
     /// The table is back at its kept row (or had none): the rows it draws
     /// from now on are kept.
     public func tableSettled() {
         tableShown = true
     }
+
+    /// The rows the table's scroll view shows, as it reports them (the Mac:
+    /// its rows' appear and disappear events do not follow a scroll there).
+    /// At its top, the table comes back unscrolled: the kept row is 0.
+    public func tableScrolled(first: Int, last: Int, token: UInt64? = nil, leaving: Bool = false) {
+        scrollReported = true
+        // A table of an earlier list reports nothing about this one.
+        guard tableShown || leaving, let list, last >= first, token.map({ $0 == list.token }) ?? true else { return }
+        keptRow = (list.token, first <= 0 ? 0 : (first + last) / 2)
+    }
+    @ObservationIgnored private var scrollReported = false
 
     public func tableDisappeared() {
         tableShown = false
@@ -779,11 +795,13 @@ public final class BrowseResults {
     /// drawn rows around the one that appeared: rows drawn before a jump
     /// whose disappearance has not come yet are not part of it.
     private func keepCenter(around index: Int) {
-        guard tableShown, let list, onScreen.contains(index) else { return }
+        guard !scrollReported, tableShown, let list, onScreen.contains(index) else { return }
         var low = index, high = index
         while onScreen.contains(low - 1) { low -= 1 }
         while onScreen.contains(high + 1) { high += 1 }
-        keptRow = (list.token, (low + high) / 2)
+        // At its top, the table comes back unscrolled: centring a row there
+        // drew the first row under the column header (owner's Mac, 2026-11-23).
+        keptRow = (list.token, low == 0 ? 0 : (low + high) / 2)
     }
 
     // MARK: Rows
