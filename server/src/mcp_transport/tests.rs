@@ -621,7 +621,9 @@ async fn prepared_dispatch_carries_success_and_tool_failure_without_consuming_re
 #[tokio::test]
 async fn transport_rejections_keep_busy_retry_and_body_boundary() {
     let r = Running::start().await;
-    let permits = r.control.0.slots.clone().acquire_many_owned(CAPACITY as u32).await.unwrap();
+    assert_eq!(CAPACITY,12);
+    let permits:Vec<_>=(0..CAPACITY).map(|_|r.control.0.slots.clone().try_acquire_owned().unwrap()).collect();
+    assert!(r.control.0.slots.clone().try_acquire_owned().is_err());
     let response = r.message(SUPPORTED_REVISIONS[1], "generated-fixture-a", "ping", json!({})).send().await.unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(response.headers()["retry-after"], "1");
@@ -656,6 +658,7 @@ async fn diagnosed_failures_keep_access_specific_envelopes_and_fixed_terminal_de
         ("create_note",json!({"deck_id":"1","note_type_id":"1","fields":{}}),Access::Write),
     ] {
         for (failure,detail,label) in [
+            (ToolFailure::Busy,Detail::McpQueue,"mcp_queue"),
             (ToolFailure::Busy,Detail::PublicationGate,"publication_gate"),
             (ToolFailure::Busy,Detail::NativeWriter,"native_writer"),
             (ToolFailure::Busy,Detail::SqliteOpenBusy,"sqlite_open_busy"),

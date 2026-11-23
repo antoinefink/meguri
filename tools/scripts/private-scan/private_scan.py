@@ -855,7 +855,7 @@ PUBLIC_ARTIFACTS = {
         'f0f5d92a2f3d79056c19d1d4953d2d9376c4633f3ab198380db38c5ba48d82be',
     # Complete-content PUBLIC review: mcp-search-budget, 2026-11-23.
     'server/src/collection/mcp/read.rs':
-        'f09f1ee57a1935968d52db4f26621afae69cb773d3a81375563d56070d48cd0d',
+        '9a46822ad1682fee5b4226c231efd779b9171e883e75610c1bb0276933c9536d',
     'server/src/collection/mcp/search_index.rs':
         '22ba70723d6e216a853814908300f82a1b8e7eecee8b90e82398b8dd92da27b8',
     'server/src/mcp_service/authority_tests.rs':
@@ -1200,7 +1200,7 @@ PUBLIC_ARTIFACTS = {
     "specs/servers/meguri-sync-web.md":
         '5b80364781b6b1eaa16529b666cfd1ca3e6a76098dcb8c2282e7406810640bea',
     "specs/servers/meguri-collection-mcp.md":
-        "98d13329bf646bb5eac4c637cd5bdc362e8ce89f5328c6e3b5b900d7507b4a8a",
+        "7dcfcbc8665087094f0fe9b7d6ec29d608b14bfda2a7696bee21eef464b087e5",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
         "81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb",
     "specs/conformance/meguri-sync-server.md":

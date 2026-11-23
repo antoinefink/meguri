@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 
 #[path = "search_tests.rs"]
 mod search_tests;
+#[cfg(feature="test-hooks")]
+mod queue_tests;
 
 const ORIGIN: &str = "https://mcp-generated.example.test";
 struct Fixture { _temp: tempfile::TempDir, service: Arc<Service>, token: String, path: PathBuf }
@@ -90,7 +92,7 @@ async fn overlapping_same_account_read_only_searches_wait_and_both_return_the_no
     let observed=tokio::time::timeout(Duration::from_secs(5),async {
         tokio::select! {
             result=&mut second => Some(result),
-            _=gate.waiter_pending() => None,
+            _=gate.mcp_waiter_pending() => None,
         }
     }).await;
     // Release before inspecting any outcome, including an ordering timeout.
@@ -157,13 +159,16 @@ async fn held_gate_bounds_reads_but_writes_refuse_immediately() {
 #[tokio::test]
 async fn queued_reads_release_worker_capacity_and_recheck_authorities() {
     use transport::Backend as _;
-    for name in ["search_notes","list_decks_and_note_types"] {
+    for (mcp_queue,name) in [
+        (false,"search_notes"),(false,"list_decks_and_note_types"),
+        (true,"search_notes"),(true,"list_decks_and_note_types"),
+    ] {
         for mutation in [None,Some("UPDATE oauth_grants SET revoked=1"),Some("UPDATE oauth_tokens SET expires_at=1")] {
             let f=Fixture::new(false).await;
             let bridge=McpService::new(f.service.clone());
             let authority=f.service.mcp_authority(&f.token,false).await.unwrap();
             let gate=f.service.mcp_publication_barrier(&authority).await.unwrap();
-            let held=gate.enter().await;
+            let held=if mcp_queue {gate.enter_mcp().await} else {gate.enter().await};
             let args=if name=="search_notes" {json!({"note_id":"1"})} else {json!({})};
             let call=transport::inputs::parse(name,args.as_object().unwrap().clone()).unwrap();
             let queued=bridge.dispatch(authority,call);
@@ -171,7 +176,7 @@ async fn queued_reads_release_worker_capacity_and_recheck_authorities() {
             tokio::time::timeout(Duration::from_secs(5),async {
                 tokio::select! {
                     _=&mut queued => panic!("read must join the held gate"),
-                    _=gate.waiter_pending() => {},
+                    _=async { if mcp_queue {gate.mcp_waiter_pending().await} else {gate.waiter_pending().await} } => {},
                 }
             }).await.unwrap();
             // All metadata/files permits are available during the gate wait.
@@ -404,14 +409,15 @@ async fn media_blob_durability_failure_rolls_back_note_before_metadata_commit() 
     let root=f.service.metadata.owner();
     let value=Arc::new(attachments::Validated::new(generated_audio()).unwrap());
     let mut prepared=media::prepare_insert(&root,original.account_id(),vec![value],f.service.temp.clone()).unwrap();
-    let barrier=f.service.mcp_publication_barrier(&original).await.unwrap();let guard=barrier.try_enter().unwrap();
+    let barrier=f.service.mcp_publication_barrier(&original).await.unwrap();
+    let queue=barrier.enter_mcp().await;let guard=barrier.try_enter().unwrap();
     let before=f.snapshot();
     let path=f.path.clone();let sessions=f.service.normal_sessions.clone();let backend=Backend::new(f.service.mcp_key);
     let result=f.service.metadata.files(move |_| {
         let pin=root.pin_collection(&path)?;
         let publication=path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_owned();
         let context=Context {account:original.account_id().to_owned(),publication:original.publication_context(&publication)};
-        let held=Arc::new(HeldPublication {root:root.clone(),path:path.clone(),_pin:pin,_barrier:barrier,_guard:guard});
+        let held=Arc::new(HeldPublication {root:root.clone(),path:path.clone(),_pin:pin,_barrier:barrier,_guard:guard,_queue:queue});
         let authority=CollectionAuthority {original,context,held,sessions,write:true,probe:None};
         let mut install=||crate::test_hooks::storage_failure("media_before_blob_durability",||media::install_insert(&root,&authority.original,&mut prepared));
         backend.create_note_with_media(&path,&authority,CreateInput {deck_id:"1".into(),note_type_id:"10".into(),

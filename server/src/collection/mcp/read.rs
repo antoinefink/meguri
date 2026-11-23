@@ -7,8 +7,8 @@ use std::sync::{Arc, atomic::{AtomicBool, AtomicU32, Ordering}};
 use unicase::UniCase;
 use std::time::{Duration, Instant};
 
-const MAX_SCAN_CANDIDATES: usize = 32_768;
-const MAX_SCAN_BYTES: usize = 32 * 1024 * 1024;
+const MAX_SCAN_CANDIDATES: usize = 150_000;
+const MAX_SCAN_BYTES: usize = 128 * 1024 * 1024;
 const SCAN_FOR: Duration = Duration::from_millis(500);
 
 // Private inputs let unit tests force each stop without timing assertions.

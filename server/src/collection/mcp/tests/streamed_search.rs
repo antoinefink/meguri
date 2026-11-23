@@ -28,33 +28,59 @@ fn small_fixture() -> Fixture {
 }
 
 #[test]
-fn cold_first_page_finds_late_literal_in_twelve_thousand_notes_and_absence_exhausts() {
-    let f=Fixture::new();
-    f.create(&"x".repeat(650),vec!["unrelated".into()],1000).unwrap();
-    f.db.execute_batch("WITH RECURSIVE n(id) AS (VALUES(1001) UNION ALL SELECT id+1 FROM n WHERE id<13598)
-        INSERT INTO notes SELECT n.id,printf('generated-%d',n.id),mid,mod,usn,tags,flds,sfld,csum,flags,data
-        FROM n CROSS JOIN notes WHERE notes.id=1000;").unwrap();
-    f.create("ΣSK [a.b] deck:1",vec!["Straße".into()],13599).unwrap();
-    // Unrelated layouts must not be read by the streaming filter.
-    f.db.execute("UPDATE notes SET mid=999 WHERE id<13599",[]).unwrap();
-    let (count,bytes):(i64,i64)=f.db.query_row("SELECT count(*),sum(octet_length(flds)+octet_length(tags)) FROM notes",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
-    assert_eq!(count,12_600);assert!((8_000_000..9_000_000).contains(&bytes));
-    let stamp=f.stamp();
-    for input in [
-        SearchInput {query:Some("σsk [A.B] DECK:1".into()),..Default::default()},
-        SearchInput {tag:Some("STRASSE".into()),..Default::default()}, request(),
-    ] {
-        // Real production limits, no warm posting and no timing assertion.
-        let page=f.backend.search_notes(&f.path,&f.access,input).unwrap();
-        assert_eq!(ids(&page),["13599"]);
-        assert!(!page.scan_incomplete);assert!(page.next_cursor.is_none());
+fn cold_first_page_completeness_and_production_deadline_traversal() {
+    for count in [12_600,126_000] {
+        let f=Fixture::new();
+        f.create(&"x".repeat(650),vec!["unrelated".into()],1000).unwrap();
+        let last=1000+count-1;
+        f.db.execute("WITH RECURSIVE n(id) AS (VALUES(1001) UNION ALL SELECT id+1 FROM n WHERE id<?1)
+            INSERT INTO notes SELECT n.id,printf('generated-%d',n.id),mid,mod,usn,tags,flds,sfld,csum,flags,data
+            FROM n CROSS JOIN notes WHERE notes.id=1000",[last-1]).unwrap();
+        f.create("ΣSK [a.b] deck:1",vec!["Straße".into()],last).unwrap();
+        // Unrelated layouts must not be read by the streaming filter.
+        f.db.execute("UPDATE notes SET mid=999 WHERE id<?1",[last]).unwrap();
+        let (rows,bytes):(i64,i64)=f.db.query_row("SELECT count(*),sum(octet_length(flds)+octet_length(tags)) FROM notes",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert_eq!(rows,count);
+        if count==126_000 {
+            assert!(bytes>32*1024*1024 && bytes<128*1024*1024);
+        } else { assert!((8_000_000..9_000_000).contains(&bytes)); }
+        let stamp=f.stamp();
+        for (template,expected) in [
+            (SearchInput {query:Some("σsk [A.B] DECK:1".into()),..Default::default()},vec![last.to_string()]),
+            (SearchInput {tag:Some("STRASSE".into()),..Default::default()},vec![last.to_string()]),
+            (request(),vec![last.to_string()]),
+            (SearchInput {query:Some("absent-generated-needle".into()),..Default::default()},vec![]),
+        ] {
+            let input=||SearchInput {query:template.query.clone(),tag:template.tag.clone(),..Default::default()};
+            // Deterministic first-page proof: production candidate/byte budgets,
+            // test-only generous clock. Completeness must not depend on load.
+            let page=capped(&f,input(),read::ScanLimits {
+                duration:Duration::from_secs(60),..Default::default()
+            }).unwrap();
+            assert_eq!(ids(&page),expected);
+            assert!(!page.scan_incomplete);assert!(page.next_cursor.is_none());
+
+            // Actual production clock may split the scan anywhere. Follow every
+            // cursor to exhaustion, with at most one page per generated row.
+            let mut cursor=None;
+            let mut seen=Vec::new();
+            let mut exhausted=false;
+            for _ in 0..count {
+                let page=f.backend.search_notes(&f.path,&f.access,SearchInput {
+                    cursor:cursor.clone(),..input()
+                }).unwrap();
+                if page.scan_incomplete { assert!(page.next_cursor.is_some()); }
+                seen.extend(page.notes.into_iter().map(|n|n.note_id));
+                if page.next_cursor.is_none() { exhausted=true;break; }
+                assert_ne!(page.next_cursor,cursor,"continuation must advance");
+                cursor=page.next_cursor;
+            }
+            assert!(exhausted,"bounded production traversal must exhaust");
+            assert_eq!(seen,expected);
+        }
+        assert_eq!(f.stamp(),stamp);
+        assert_eq!(f.access.admissions.get(),f.access.checks.get());
     }
-    let page=f.backend.search_notes(&f.path,&f.access,SearchInput {
-        query:Some("absent-generated-needle".into()),..Default::default()
-    }).unwrap();
-    assert!(page.notes.is_empty());assert!(page.next_cursor.is_none());assert!(!page.scan_incomplete);
-    assert_eq!(f.stamp(),stamp);
-    assert_eq!(f.access.admissions.get(),f.access.checks.get());
 }
 
 #[test]
@@ -126,9 +152,13 @@ fn streaming_preserves_per_field_literals_record_caps_and_authority_errors() {
     f.access.fail.set(true);
     assert_eq!(capped(&f,request(),limits()).unwrap_err().code,"permission_denied");
     f.access.fail.set(false);
-    for column in ["flds","tags","data"] {
-        let value=format!("\0{}","x".repeat(if column=="data" {MAX_OBJECT_BYTES} else {MAX_RECORD_BYTES}));
-        f.db.execute(&format!("UPDATE notes SET {column}=?1 WHERE id=1000"),[value]).unwrap();
+    for (sql,cap) in [
+        ("UPDATE notes SET flds=?1 WHERE id=1000",MAX_RECORD_BYTES),
+        ("UPDATE notes SET tags=?1 WHERE id=1000",MAX_RECORD_BYTES),
+        ("UPDATE notes SET data=?1 WHERE id=1000",MAX_OBJECT_BYTES),
+    ] {
+        let value=format!("\0{}","x".repeat(cap));
+        f.db.execute(sql,[value]).unwrap();
         assert_eq!(f.backend.search_notes(&f.path,&f.access,request()).unwrap_err().code,"result_too_large");
         f.db.execute("UPDATE notes SET flds='ordinary\u{1f}answer\u{1f}',tags='',data='' WHERE id=1000",[]).unwrap();
     }

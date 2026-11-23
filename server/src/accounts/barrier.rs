@@ -14,6 +14,10 @@ pub trait RoundRetirer: Send + Sync {
 pub struct PublicationBarrier {
     lock: Arc<AsyncMutex<()>>,
     round: Mutex<Option<Arc<dyn RoundRetirer>>>,
+    // MCP collection jobs queue here before touching the publication lock.
+    mcp: Arc<AsyncMutex<()>>,
+    #[cfg(feature = "test-hooks")]
+    mcp_waiting: tokio::sync::Semaphore,
     #[cfg(feature = "test-hooks")]
     waiting: tokio::sync::Semaphore,
 }
@@ -49,6 +53,33 @@ impl PublicationBarrier {
     #[cfg(feature = "test-hooks")]
     pub async fn waiter_pending(&self) {
         self.waiting.acquire().await.unwrap().forget();
+    }
+    /// MCP-only FIFO admission. Call before enter/try_enter, never while owning
+    /// publication, metadata or worker capacity. Keep both guards in the worker.
+    pub(crate) async fn enter_mcp(&self) -> OwnedMutexGuard<()> {
+        #[cfg(not(feature = "test-hooks"))]
+        {
+            self.mcp.clone().lock_owned().await
+        }
+        #[cfg(feature = "test-hooks")]
+        {
+            let mut lock = Box::pin(self.mcp.clone().lock_owned());
+            let mut reported = false;
+            std::future::poll_fn(|cx| {
+                use std::future::Future;
+                let result = lock.as_mut().poll(cx);
+                if result.is_pending() && !reported {
+                    reported = true;
+                    self.mcp_waiting.add_permits(1);
+                }
+                result
+            }).await
+        }
+    }
+    /// Acknowledges an actually polled MCP queue waiter, once per acquisition.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) async fn mcp_waiter_pending(&self) {
+        self.mcp_waiting.acquire().await.unwrap().forget();
     }
     /// Call while owning this barrier. Retain this Arc for the round lifetime.
     pub fn set_round(&self, round: Option<Arc<dyn RoundRetirer>>) -> Result<()> {
@@ -90,6 +121,9 @@ impl Barriers {
         let gate = Arc::new(PublicationBarrier {
             lock: Arc::new(AsyncMutex::new(())),
             round: Mutex::new(None),
+            mcp: Arc::new(AsyncMutex::new(())),
+            #[cfg(feature = "test-hooks")]
+            mcp_waiting: tokio::sync::Semaphore::new(0),
             #[cfg(feature = "test-hooks")]
             waiting: tokio::sync::Semaphore::new(0),
         });
