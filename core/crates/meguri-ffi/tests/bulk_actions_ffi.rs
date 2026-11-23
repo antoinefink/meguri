@@ -15,7 +15,7 @@ use meguri_ffi::{
     },
     collection::{self, CollectionLocation, DiskCapacity, DiskSpaceProvider, HostClock},
     decks::add_deck,
-    notes::{AddNoteRequest, add_note, read_note},
+    notes::{AddNoteRequest, NoteCard, add_note, note_cards, read_note},
     notetypes::{AddNotetypeRequest, NewNotetypeTemplate, add_notetype},
     review_session::ReviewUndoScope,
     undo::start_undo,
@@ -174,6 +174,43 @@ fn bulk_actions_run_as_jobs_with_their_counts_and_steps() {
     let deleted = done(&rx, start_bulk_note_action(vec![n1], BulkNoteAction::DeleteNotes).unwrap());
     assert_eq!((deleted.affected, deleted.considered, deleted.cards_removed), (1, 1, Some(1)));
     assert_eq!(deleted.summary.undo_name.as_deref(), Some("Delete Note"));
+}
+
+/// Browse's inspector (U273, `browser/workspace` V7, V12): a note's cards by
+/// ordinal, each with its deck now and its home deck; a moved card keeps
+/// its ordinal; a missing note is `NoteNotFound`; nothing is written.
+#[test]
+fn note_cards_lists_a_notes_cards_by_ordinal_with_their_decks() {
+    let dir = tempfile::tempdir().unwrap();
+    let rx = open(&dir);
+    let notetype = add_notetype(AddNotetypeRequest {
+        name: "Pair".into(),
+        cloze: false,
+        fields: vec!["Front".into(), "Back".into()],
+        templates: vec![template("Forward", "{{Front}}"), template("Reverse", "{{Back}}")],
+        css: Some(String::new()),
+    })
+    .unwrap()
+    .id;
+    let added = add_note(AddNoteRequest {
+        notetype_id: notetype,
+        fields: vec!["zolp".into(), "quiv".into()],
+        tags: Vec::new(),
+        deck_id: 1,
+        guid: None,
+        update_add_defaults: false,
+    })
+    .unwrap();
+    assert_eq!(added.cards.len(), 2);
+    let second = *added.cards.iter().max().unwrap();
+    done(&rx, start_bulk_card_action(vec![second], BulkCardAction::ChangeDeckToName { name: "Wim".into() }).unwrap());
+    let before = read_note(added.id).unwrap();
+    let cards = note_cards(added.id).unwrap();
+    assert_eq!(cards.iter().map(|card| card.ord).collect::<Vec<_>>(), vec![0, 1]);
+    assert_eq!(cards.iter().map(|card| card.deck_id == 1).collect::<Vec<_>>(), vec![true, false]);
+    assert!(cards.iter().all(|card: &NoteCard| card.original_deck_id == 0));
+    assert_eq!(read_note(added.id).unwrap(), before, "a read writes nothing");
+    assert!(matches!(note_cards(added.id + 1_000), Err(CoreError::NoteNotFound { .. })));
 }
 
 /// What an action did, without the commit's seq: the counts, the step and
