@@ -1,5 +1,6 @@
 import CoreBridge
 import Foundation
+import HeatmapKit
 
 /// The page's boxes (`stats/statistics-page` S5), in page order; the raw value is S15's
 /// `stats.box.<box>`.
@@ -109,9 +110,9 @@ public enum StatsBoxDetail: Hashable, Sendable {
     case timeOfDay(retention: StatsChartData)
     case byDeck(StatsByDeckTable)
     case activity(StatsActivity)
-    /// Activity's year blocks while its part is not back yet, from the header's oldest review
-    /// (H9), so the box is drawn at its final height (S10.3).
-    case activityYears(Int)
+    /// Activity's span while its part is not back yet or has failed, from the header's oldest
+    /// review (H9), so the box is drawn at its final height for its width (S10.3, S8.5).
+    case activitySpan(StatsActivitySpan)
     /// The desired retention the Memory boxes mark on their axis (S7.12), as a fraction.
     case retrievability(desiredRetention: Double?)
 }
@@ -174,29 +175,83 @@ public struct StatsByDeckTable: Hashable, Sendable {
     public let note: String?
 }
 
-/// Activity's year blocks and streaks (S7.5).
+/// The days Activity's grid runs over (S7.5): from the scope's first review to today, known
+/// from the header (H9) before the counts return, so the grid's size is final from the first
+/// frame (S10.3).
+public struct StatsActivitySpan: Hashable, Sendable {
+    /// The first day drawn (H1, at most 0): the scope's oldest review.
+    public let firstDay: Int
+    /// Today's Gregorian date (day 0).
+    public let todayYear: Int
+    public let todayMonth: Int
+    public let todayDay: Int
+    /// The display calendar's first weekday, 1 Sunday to 7 Saturday (S7.5: the system's).
+    public let firstWeekday: Int
+    /// The Gregorian years drawn, the current one first.
+    public let years: [Int]
+
+    /// Days drawn, the first day through today.
+    public var dayCount: Int { 1 - firstDay }
+
+    init(firstDay: Int, days: StatsDays) {
+        self.firstDay = min(firstDay, 0)
+        let today = days.gregorianDate(ofDay: 0)
+        todayYear = today.year
+        todayMonth = today.month
+        todayDay = today.day
+        firstWeekday = days.display.firstWeekday
+        let first = days.year(ofDay: self.firstDay)
+        years = Array(stride(from: today.year, through: min(first, today.year), by: -1))
+    }
+
+    /// The grid with these days and `counts` (day → reviews, H1 days).
+    public func grid(counts: [Int: Int] = [:]) -> ActivityContinuousGrid {
+        var dense = [UInt32](repeating: 0, count: counts.isEmpty ? 0 : dayCount)
+        for (day, count) in counts where day >= firstDay && day <= 0 { dense[-day] = UInt32(clamping: count) }
+        return ActivityContinuousGrid(year: todayYear, month: todayMonth, day: todayDay, days: dayCount,
+                                      firstWeekday: firstWeekday, counts: dense)
+    }
+}
+
+/// Activity's grid, streaks and totals (S7.5).
 public struct StatsActivity: Hashable, Sendable {
+    /// A year's total, for the figures under the grid.
     public struct Year: Hashable, Sendable, Identifiable {
         public var id: Int { year }
         public let year: Int
-        /// The block's days (H1), first to last (the last is today in the current year).
-        public let firstDay: Int
-        public let lastDay: Int
-        /// Day → reviews, only days with some.
-        public let counts: [Int: Int]
         public let total: Int
         /// "2025: 41,233 reviews".
         public let totalText: String
     }
 
+    public let span: StatsActivitySpan
+    /// The grid over the span, its counts and AH7's levels over every day drawn.
+    public let grid: ActivityContinuousGrid
+    /// Day (H1) → reviews, only days with some.
+    public let counts: [Int: Int]
     /// The current year first, then every earlier year back to the scope's first review.
     public let years: [Year]
     public let currentStreak: Int
     public let longestStreak: Int
     public let daysStudiedThisYear: Int
+    /// Reviews in all history.
+    public let total: Int
     let days: StatsDays
 
-    /// The date of a day (H1), for the grid's weeks and labels.
+    init(span: StatsActivitySpan, counts: [Int: Int], years: [Year], currentStreak: Int, longestStreak: Int,
+         daysStudiedThisYear: Int, days: StatsDays) {
+        self.span = span
+        grid = span.grid(counts: counts)
+        self.counts = counts
+        self.years = years
+        self.currentStreak = currentStreak
+        self.longestStreak = longestStreak
+        self.daysStudiedThisYear = daysStudiedThisYear
+        total = counts.values.reduce(0, +)
+        self.days = days
+    }
+
+    /// The date of a day (H1), for the callout and the days' elements.
     public func date(ofDay day: Int) -> Date { days.date(ofDay: day) }
 }
 

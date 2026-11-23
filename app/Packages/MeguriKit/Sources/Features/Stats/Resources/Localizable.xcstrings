@@ -605,6 +605,16 @@
         }
       }
     },
+    "stats.figure.allReviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All Reviews"
+          }
+        }
+      }
+    },
     "stats.figure.averageADay": {
       "localizations": {
         "en": {

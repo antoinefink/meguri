@@ -153,8 +153,9 @@ import Testing
         #expect(activity.years.map(\.total) == [15, 2])
         #expect(activity.years.last?.totalText == "2025: 2 reviews")
         #expect(activity.currentStreak == 3 && activity.longestStreak == 3 && activity.daysStudiedThisYear == 3)
-        #expect(activity.years.first?.lastDay == 0)
-        #expect(Self.figures(box) == ["Current Streak": "3 days", "Longest Streak": "3 days", "Days Studied This Year": "3"])
+        #expect(activity.span.firstDay == -400 && activity.total == 17)
+        #expect(Self.figures(box) == ["Current Streak": "3 days", "Longest Streak": "3 days", "Days Studied This Year": "3",
+                                      "All Reviews": "17"])
         // The period never changes it.
         #expect(try Self.box(.activity, Fixture.presenter(Fixture.set(), period: .oneYear)).detail == box.detail)
     }

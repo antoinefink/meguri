@@ -107,6 +107,7 @@ struct StatsText {
     var figureCurrentStreak: String { text("stats.figure.currentStreak") }
     var figureLongestStreak: String { text("stats.figure.longestStreak") }
     var figureDaysStudiedThisYear: String { text("stats.figure.daysStudiedThisYear") }
+    var figureAllReviews: String { text("stats.figure.allReviews") }
     func yearTotal(_ year: String, _ n: Int, _ nText: String) -> String { text("stats.activity.yearTotal \(year) \(n) \(nText)") }
 
     // MARK: Cards (S7.6 to S7.8)

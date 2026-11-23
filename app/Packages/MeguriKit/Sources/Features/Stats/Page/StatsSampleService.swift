@@ -18,6 +18,8 @@ nonisolated public final class StatsSampleService: StatsService {
         /// Cards and reviews only since 1 January, at most the last 120 days: Activity's one
         /// partial year.
         case recent
+        /// Cards and about seven years of reviews: Activity's long history.
+        case long
     }
 
     /// How its requests end.
@@ -154,8 +156,11 @@ nonisolated struct StatsSampleCollection {
         }
     }
 
-    /// The first review, about three years ago.
-    static let firstDay = -1_090
+    /// The first review of the typical collection, about three years ago.
+    static let typicalFirstDay = -1_090
+
+    /// The history's first day: about three years back, or seven for `long`.
+    let firstDay: Int
 
     let shape: StatsSampleService.Shape
     let scope: StatsPageScope
@@ -172,20 +177,21 @@ nonisolated struct StatsSampleCollection {
         case .allDecks, .search: 1
         case let .deck(id): Self.weight(id) ?? 0
         }
+        firstDay = shape == .long ? -2_560 : Self.typicalFirstDay
         if shape == .recent {
             let days = StatsDays(context: Self.context(), calendar: Calendar(identifier: .gregorian))
             firstReviewDay = max(-120, days.firstDay(ofYear: days.year(ofDay: 0)) ?? -120)
         } else {
-            firstReviewDay = Self.firstDay
+            firstReviewDay = firstDay
         }
     }
 
-    private var reviewed: Bool { shape == .typical || shape == .recent }
+    private var reviewed: Bool { shape == .typical || shape == .recent || shape == .long }
     private var hasCards: Bool { shape != .noCards }
     /// The days with reviews in the window, for the windows with no time axis: `recent` has
     /// none before its first review.
     private var reviewSpan: Int { min(-windowStart, -firstReviewDay + 1) }
-    private var windowStart: Int { history == .allHistory ? Self.firstDay : -366 }
+    private var windowStart: Int { history == .allHistory ? firstDay : -366 }
 
     func header(refresh: UInt64) -> StatsPageHeader {
         StatsPageHeader(refresh: refresh, history: history, context: Self.context(),
@@ -220,15 +226,15 @@ nonisolated struct StatsSampleCollection {
     }
 
     /// Whether `day` was studied: most days, with a gap now and then and a run up to today.
-    private static func studied(_ day: Int) -> Bool {
+    private static func studied(_ day: Int, first firstDay: Int) -> Bool {
         guard day >= firstDay, day <= 0 else { return false }
         if day >= -46 { return true }
         return noise(day, 1) < 0.86
     }
 
     /// The collection's reviews on `day`, before the deck's share.
-    private static func reviews(_ day: Int) -> Int {
-        guard studied(day) else { return 0 }
+    private static func reviews(_ day: Int, first firstDay: Int) -> Int {
+        guard studied(day, first: firstDay) else { return 0 }
         let age = Double(day - firstDay) / Double(-firstDay)
         let base = 70 + 110 * age
         let weekly = [0.7, 1.1, 1.05, 1.0, 1.1, 0.85, 0.6][((day % 7) + 7) % 7]
@@ -238,7 +244,7 @@ nonisolated struct StatsSampleCollection {
     private func scaled(_ value: Int) -> Int { Int((Double(value) * weight).rounded()) }
 
     /// The scope's reviews on `day`; none for a shape with no review.
-    private func reviews(on day: Int) -> Int { reviewed && day >= firstReviewDay ? scaled(Self.reviews(day)) : 0 }
+    private func reviews(on day: Int) -> Int { reviewed && day >= firstReviewDay ? scaled(Self.reviews(day, first: firstDay)) : 0 }
 
     /// The scope's reviews on an average day, for the windows with no time axis.
     private var dailyReviews: Int { reviewed ? scaled(150) : 0 }
@@ -258,7 +264,7 @@ nonisolated struct StatsSampleCollection {
 
     private func windowValues<Value>(_ make: (Int) -> Value) -> StatsRanges<Value> {
         StatsRanges(oneMonth: make(30), threeMonths: make(90), sixMonths: make(182), oneYear: make(365),
-                    allTime: history == .allHistory ? make(-Self.firstDay + 1) : nil)
+                    allTime: history == .allHistory ? make(-firstDay + 1) : nil)
     }
 
     // MARK: Parts
@@ -297,7 +303,7 @@ nonisolated struct StatsSampleCollection {
                                             maturePassed: total * 60 / 100, matureFailed: total * 6 / 100)
             }
             return .retention(StatsTrueRetention(today: counts(1), yesterday: counts(2), week: counts(7), month: counts(30),
-                                                 year: counts(365), allTime: history == .allHistory ? counts(-Self.firstDay + 1) : nil))
+                                                 year: counts(365), allTime: history == .allHistory ? counts(-firstDay + 1) : nil))
         case .retentionByDay:
             return .retentionByDay(StatsRetentionByDay(days: map(window) { day in
                 let total = reviews(on: day)
@@ -329,7 +335,7 @@ nonisolated struct StatsSampleCollection {
                                           mature: [Int(n * 0.04), Int(n * 0.03), Int(n * 0.43), Int(n * 0.06)])
             }))
         case .added:
-            return .added(hasCards ? map(Array(Self.firstDay - 30...0)) { day in
+            return .added(hasCards ? map(Array(firstDay - 30...0)) { day in
                 let n = Self.noise(day, 5) < 0.3 ? scaled(Int(18 * Self.noise(day, 6))) : 0
                 return n > 0 ? n : nil
             } : map([]) { _ in 0 })
@@ -337,12 +343,12 @@ nonisolated struct StatsSampleCollection {
             return .cardStatesOverTime(cardStatesOverTime)
         case .started:
             return .started(StatsStarted(days: reviewed ? map(window) { day in
-                Self.studied(day) ? scaled(Int(14 * Self.noise(day, 7))) : nil
-            } : map([]) { _ in 0 }, firstDay: hasCards ? Self.firstDay - 30 : nil))
+                Self.studied(day, first: firstDay) ? scaled(Int(14 * Self.noise(day, 7))) : nil
+            } : map([]) { _ in 0 }, firstDay: hasCards ? firstDay - 30 : nil))
         case .byDeck:
             return .byDeck(StatsByDeck(rows: byDeckRows))
         case .activityDays:
-            return .activityDays(map(Array(Self.firstDay...0)) { day in
+            return .activityDays(map(Array(firstDay...0)) { day in
                 let n = reviews(on: day)
                 return n > 0 ? n : nil
             })
@@ -410,7 +416,7 @@ nonisolated struct StatsSampleCollection {
         }
         let start = windowStart
         // The collection grows from about 1,000 cards three years ago; cards mature over time.
-        let age = Double(start - Self.firstDay) / Double(-Self.firstDay)
+        let age = Double(start - firstDay) / Double(-firstDay)
         let total = Double(scaled(4_100)) * (0.25 + 0.75 * age)
         let begin = StatsStateCounts(new: Int(total * 0.3), learning: Int(total * 0.03), relearning: Int(total * 0.01),
                                      young: Int(total * 0.26), mature: Int(total * (0.4 * age)))
@@ -420,14 +426,14 @@ nonisolated struct StatsSampleCollection {
             return StatsStateCounts(new: Self.noise(day, 9) < 0.5 ? -grow : grow, learning: 0, relearning: 0,
                                     young: Self.noise(day, 10) < 0.5 ? grow : -1, mature: grow)
         }
-        return StatsCardStatesOverTime(start: begin, deltas: deltas, leftOut: scaled(126), firstDay: Self.firstDay - 30)
+        return StatsCardStatesOverTime(start: begin, deltas: deltas, leftOut: scaled(126), firstDay: firstDay - 30)
     }
 
     private var knowledge: StatsKnowledgeOverTime {
         guard reviewed else { return StatsKnowledgeOverTime(samples: [], failed: 0, leftOut: 0) }
-        let days = history == .allHistory ? Array(Self.firstDay...0) : Array(-366...0)
+        let days = history == .allHistory ? Array(firstDay...0) : Array(-366...0)
         let samples = days.map { day in
-            let age = Double(day - Self.firstDay) / Double(-Self.firstDay)
+            let age = Double(day - firstDay) / Double(-firstDay)
             let studied = Double(scaled(3_950)) * (0.2 + 0.8 * age)
             let known = studied * (0.84 + 0.05 * age + 0.01 * Self.noise(day, 11))
             return StatsKnowledgeSample(day: day, instantMilliseconds: 0, knowledge: known, studied: Int(studied))

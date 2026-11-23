@@ -706,8 +706,12 @@ screens:
       stats/period/<period>, stats/deck/<deck>, stats/chart/<box>; the Reviews section's
       states stats/chart/reviews-over-time/<state> and stats/chart/activity/<state>; over a
       fixture, -MeguriStatsRollout open:<section> scrolls to a section). Toolbar identifiers are
-      stats.toolbar.deck and stats.toolbar.period (R1964's area.screen.element). Activity's
-      identifiers: stats.box.activity.plot, stats.activity.block.<year>,
+      stats.toolbar.deck and stats.toolbar.period (R1964's area.screen.element). Activity
+      (changed 2026-11-23, the owner's Option E): one grid for all of history, a column per
+      week, wrapped onto lines like text, never scrolled sideways; a rule and the year at each
+      1 January; the figures and the year totals under it; routes stats/chart/activity/long,
+      long-pinned and ax5 add about seven years of sample history and the largest text size.
+      Identifiers: stats.box.activity.plot, stats.box.activity.figures,
       stats.activity.yearTotal.<year>.
       Knowledge section (U297): Knowledge Over Time's Estimated marker explains, as help, that
       each day is worked out again with today's memory parameters; an open Retention point's
