@@ -42,7 +42,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         capture(app, "several-rows-\(appearance)")
 
         // A card with a sound and an image (the Español deck's notes).
-        try showDeck(app, bundle, containing: "Español", firstField: "palabra")
+        try showDeck(app, bundle, containing: "Español")
         press(table.outlineRows.element(boundBy: 0))
         let note = element(app, "browse.inspector.note")
         XCTAssertTrue(note.waitForExistence(timeout: 10), "the Note tab")
@@ -55,7 +55,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         capture(app, "sound-and-image-\(appearance)")
 
         // Right to left, then CJK with a sound.
-        try showDeck(app, bundle, containing: "العربية", firstField: "كلمة")
+        try showDeck(app, bundle, containing: "العربية")
         press(table.outlineRows.element(boundBy: 0))
         XCTAssertTrue(shows(fields, "كلمة"), "the selected row's note")
         sleep(1)
@@ -78,7 +78,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         sleep(1)
         capture(app, "empty-fields-open-\(appearance)")
         empty.click()
-        try showDeck(app, bundle, containing: "語彙", firstField: "単語")
+        try showDeck(app, bundle, containing: "語彙")
         press(table.outlineRows.element(boundBy: 0))
         XCTAssertTrue(shows(fields, "単語"), "the selected row's note")
         sleep(2)
@@ -137,38 +137,20 @@ final class MacBrowseInspectorTests: XCTestCase {
         capture(app, "narrow-over-table-\(appearance)")
     }
 
-    /// Browse's sidebar: the deck row whose name holds `name` sets the Deck token; the
-    /// table has that deck's results once its first row's sort field holds `firstField`
+    /// Browse's sidebar: the deck row whose name holds `name` sets the Deck token. The
+    /// table has that deck's results once the status line counts what the row counts
     /// (the previous results stay shown while a search runs).
-    private func showDeck(_ app: XCUIApplication, _ bundle: String, containing name: String, firstField: String) throws {
+    private func showDeck(_ app: XCUIApplication, _ bundle: String, containing name: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         let row = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "browse.sidebar.deck.", name)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the deck row \(name)")
-        press(row)
-        let table = resultsTable(app)
-        let first = table.outlineRows.element(boundBy: 0).descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", firstField))
-        XCTAssertTrue(waitUntil(timeout: 30) { first.count > 0 }, "the deck's own results: \(name)")
+        let count = row.value as? String ?? ""
+        row.click()
+        let status = element(app, "browse.status.text")
+        XCTAssertTrue(waitUntil(timeout: 30) { !count.isEmpty && (status.value as? String ?? "").hasPrefix(count) },
+                      "the deck's own results: \(name) \(count) \(status.value as? String ?? "")")
         try app.bringToFront(bundleIdentifier: bundle)
-    }
-
-    private func launch(appearance: String) throws -> (XCUIApplication, String) {
-        continueAfterFailure = false
-        let build = try BuildUnderTest.current()
-        let bundle = try build.bundleIdentifier
-        guard build.hasHooks, bundle.hasSuffix(".dev") else {
-            throw XCTSkip("The generated recipe requires an isolated development test container")
-        }
-        let app = XCUIApplication()
-        app.launchArguments = MeguriLaunch(
-            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/typical-1", directoryHint: .isDirectory),
-            now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false,
-            windowSize: "1440x900", appearance: appearance).arguments
-        app.launch()
-        addTeardownBlock { @MainActor in app.terminate() }
-        XCTAssertTrue(element(app, "shell.root.sidebar.browse").waitForExistence(timeout: 30),
-                      "Stage the generated typical-1 fixture through tools/mg")
-        return (app, bundle)
     }
 
     private func openBrowse(_ app: XCUIApplication, _ bundle: String) throws {
