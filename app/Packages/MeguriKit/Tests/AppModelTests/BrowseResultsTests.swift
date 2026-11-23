@@ -692,6 +692,98 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
         return result
     }
 
+    // The commands (U275): the counts and actions of a target, over the
+    // card states the test gives; an action records what it was given.
+    struct Action: Equatable { let card: BulkCardAction?; let note: BulkNoteAction?; let target: BrowseTarget }
+    var suspendedCards: Set<Int64> { get { locked { _suspended } } set { locked { _suspended = newValue } } }
+    private var _suspended: Set<Int64> = []
+    var buriedCards: Set<Int64> { get { locked { _buried } } set { locked { _buried = newValue } } }
+    private var _buried: Set<Int64> = []
+    /// Note → its cards in the collection (default: the cards the results find).
+    var cardsOfNote: [Int64: [Int64]] { get { locked { _cardsOfNote } } set { locked { _cardsOfNote = newValue } } }
+    private var _cardsOfNote: [Int64: [Int64]] = [:]
+    /// The revision each handle is at now; a target of another is refused (K1).
+    var revisions: [UInt64: UInt64] { get { locked { _revisions } } set { locked { _revisions = newValue } } }
+    private var _revisions: [UInt64: UInt64] = [:]
+    private(set) var actions: [Action] { get { locked { _actions } } set { locked { _actions = newValue } } }
+    private var _actions: [Action] = []
+    var actionFails = false
+
+    private func check(_ target: BrowseTarget) throws -> [Int64] {
+        lock.lock(); defer { lock.unlock() }
+        guard let entry = handles[target.handle.rawValue] else { throw BridgeError.browse(.unknownHandle) }
+        guard (_revisions[target.handle.rawValue] ?? 0) == target.revision else {
+            throw BridgeError.invalidArgument("stale selection")
+        }
+        return target.ranges.flatMap { $0.map { entry.ids[Int($0)] } }
+    }
+
+    private func notes(_ ids: [Int64], _ mode: BrowseMode) -> [Int64] {
+        locked { mode == .notes ? ids : ids.map { note($0) } }.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
+    }
+
+    private func cards(_ ids: [Int64], _ mode: BrowseMode) -> [Int64] {
+        guard mode == .notes else { return ids }
+        return locked { ids.flatMap { note in _cardsOfNote[note] ?? _results.values.flatMap { $0 }.filter { self.note($0) == note } } }
+    }
+
+    func counts(of target: BrowseTarget) async throws -> BrowseSelectionCounts {
+        let ids = try check(target)
+        let cards = cards(ids, target.mode)
+        return locked {
+            BrowseSelectionCounts(cards: UInt64(cards.count), notes: UInt64(notes(ids, target.mode).count),
+                                  suspended: UInt64(cards.filter(_suspended.contains).count),
+                                  buried: UInt64(cards.filter(_buried.contains).count), decks: 1, deck: 1, notetypes: [8])
+        }
+    }
+
+    func cardsOfNotes(of target: BrowseTarget) async throws -> UInt64 {
+        let notes = notes(try check(target), target.mode)
+        return UInt64(locked { notes.flatMap { note in _cardsOfNote[note] ?? [note] } }.count)
+    }
+
+    func siblingRows(of target: BrowseTarget) async throws -> [Range<UInt64>] {
+        let notes = Set(notes(try check(target), target.mode))
+        return locked {
+            let ids = handles[target.handle.rawValue]?.ids ?? []
+            return BrowseResults.ranges(Set(ids.indices.filter { notes.contains(note(ids[$0])) }))
+        }
+    }
+
+    func run(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BulkActionResult {
+        let cards = cards(try check(target), target.mode)
+        actions.append(Action(card: action, note: nil, target: target))
+        if actionFails { throw BridgeError.unavailable(reason: "sample") }
+        let affected: Int = locked {
+            switch action {
+            case .suspend: defer { _suspended.formUnion(cards) }; return cards.filter { !_suspended.contains($0) }.count
+            case .unsuspend: defer { _suspended.subtract(cards) }; return cards.filter(_suspended.contains).count
+            case .bury: defer { _buried.formUnion(cards) }; return cards.filter { !_buried.contains($0) }.count
+            case .unbury: defer { _buried.subtract(cards) }; return cards.filter(_buried.contains).count
+            default: return cards.count
+            }
+        }
+        return Self.result(affected: affected, considered: cards.count, undo: affected > 0 ? "Suspend" : nil)
+    }
+
+    func run(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BulkActionResult {
+        let notes = notes(try check(target), target.mode)
+        actions.append(Action(card: nil, note: action, target: target))
+        if actionFails { throw BridgeError.unavailable(reason: "sample") }
+        return Self.result(affected: notes.count, considered: notes.count, undo: "Delete Note")
+    }
+
+    private static func result(affected: Int, considered: Int, undo: String?) -> BulkActionResult {
+        BulkActionResult(affected: UInt64(affected), considered: UInt64(considered), cardsRemoved: nil,
+                         summary: MutationSummary(seq: 500, generation: 1, undoName: undo,
+                                                  changes: ChangeSet(wholeCollection: false, source: .userUndoable, cards: [], notes: [],
+                                                                     notetypes: [], decks: [], deckConfigs: [], configKeys: [], tags: [],
+                                                                     revlogAdded: [], revlogRemoved: [], mediaAdded: [], mediaRemoved: [],
+                                                                     skippedIncomingCards: [], skippedIncomingNotes: [],
+                                                                     skippedIncomingDecks: [], collectionRow: false),
+                                                  pastCancelPoint: false))
+    }
+
     func mapSelection(from source: BrowseMapSource, selected: BrowseSelected, current: Int64?, to target: BrowseHandle,
                       targetRevision: UInt64) async throws -> BrowseMappedSelection {
         locked {

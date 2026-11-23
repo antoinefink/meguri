@@ -14,7 +14,6 @@ import Testing
         #expect(FilterBuiltIn.allCases.map { BrowseStrings.builtIn($0, locale: english) } == ["Due Today", "Added in Last 7 Days", "Leeches"])
         #expect(BrowseStrings.text("browse.flag.none", locale: english) == "No Flag")
         #expect(BrowseStrings.text("browse.title", locale: english) == "Browse")
-        #expect(BrowseStrings.text("browse.sidebar.filter", locale: english) == "Filter")
         #expect(BrowseStrings.showAll(46, locale: english) == "Show All 46…")
         #expect(BrowseStrings.showAll(1_204, locale: english) == "Show All 1,204…")
     }

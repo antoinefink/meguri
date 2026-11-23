@@ -64,6 +64,9 @@ public final class BrowseResults {
         didSet {
             let released = list?.released ?? false
             if released != isDimmed { isDimmed = released }
+            if list?.token != oldValue?.token || list?.revision != oldValue?.revision || list?.released != oldValue?.released {
+                selectionObserver?()
+            }
         }
     }
     /// The rows shown belong to a search that went (superseded, failed):
@@ -72,7 +75,9 @@ public final class BrowseResults {
     /// The rows read, by page; replaced with the list, so every cell draws again.
     public private(set) var store = BrowseRowStore()
     /// Indexes of `list`'s rows (R1152).
-    public private(set) var selection: Set<Int> = []
+    public private(set) var selection: Set<Int> = [] {
+        didSet { if selection != oldValue { selectionObserver?() } }
+    }
     /// The current row (R1152, H12): the row last chosen.
     public private(set) var currentIndex: Int?
     /// A search has run for half a second without its rows shown or whole.
@@ -95,6 +100,8 @@ public final class BrowseResults {
     }
 
     public private(set) var scrollTarget: ScrollTarget?
+    /// The table has the keyboard focus: ⌘⌫ is Note › Delete then (N21.8).
+    public var tableFocused = false
     @ObservationIgnored private var scrollSerial: UInt64 = 0
 
     public var content: Content {
@@ -118,6 +125,9 @@ public final class BrowseResults {
     @ObservationIgnored public var ready: @MainActor () -> Bool = { true }
     /// How long a search runs before "Searching…" shows.
     @ObservationIgnored public var progressDelay: Duration = .milliseconds(500)
+    /// Told when the selection, or the list it indexes, changes (the
+    /// commands' counts follow it, U275).
+    @ObservationIgnored var selectionObserver: (@MainActor () -> Void)?
 
     // MARK: Internals
 
@@ -148,6 +158,9 @@ public final class BrowseResults {
         var ended = false
         /// Change sets received since it started (H10).
         var changes: [SequencedChangeSet] = []
+        /// The ids this request's list selects in place of the selection
+        /// shown (rows an undo brought back, V8.3).
+        var selecting: [Int64]?
 
         init(kind: Kind, text: String, mode: BrowseMode, sort: BrowseSort, columns: [String], queryIsEmpty: Bool) {
             self.kind = kind
@@ -162,6 +175,7 @@ public final class BrowseResults {
         var asSearch: Request {
             let search = Request(kind: .search, text: text, mode: mode, sort: sort, columns: columns, queryIsEmpty: queryIsEmpty)
             search.queryRevision = queryRevision
+            search.selecting = selecting
             return search
         }
     }
@@ -197,6 +211,8 @@ public final class BrowseResults {
     @ObservationIgnored private var sortOverride: (mode: BrowseMode, sort: BrowseSort)?
     /// The set's sort writes, one after another.
     @ObservationIgnored private var sortWrite: Task<Void, Never>?
+    /// Ids of rows change sets removed while this query showed (`restoreRows`).
+    @ObservationIgnored private var goneIDs: Set<Int64> = []
     /// The page whose neighbours were last kept.
     @ObservationIgnored private var keptCenter: Int?
     @ObservationIgnored private var queued: Request?
@@ -235,7 +251,7 @@ public final class BrowseResults {
     /// A query or mode to show: its run text (T4) searched with the column
     /// set's sort for the mode (V2.2, V4.3).
     public func run(_ query: FilterQuery, mode: BrowseMode) {
-        if query != lastQuery { sortOverride = nil }
+        if query != lastQuery { sortOverride = nil; goneIDs = [] }
         rejected = false
         lastQuery = query
         lastMode = mode
@@ -507,8 +523,10 @@ public final class BrowseResults {
         let epoch = epoch, revision = request.revision, presenter = presenter
         let first = 0..<UInt64(min(request.count, BrowseRowStore.pageSize))
         let columns = request.columns, mode = request.mode
-        // The selection as it is now: rows chosen, or pruned, since the request began count.
-        request.mapping = mapping()
+        // The selection as it is now: rows chosen, or pruned, since the request began count;
+        // or the rows an undo brought back.
+        request.mapping = request.selecting.map { Mapping(from: .mode(request.mode), selected: .ids($0), current: $0.first) }
+            ?? mapping()
         request.mappedWhole = request.complete
         request.mappingRevision = selectionRevision
         let selectionAtShow = selectionRevision
@@ -653,6 +671,104 @@ public final class BrowseResults {
         selectionRevision &+= 1
     }
 
+    /// V7, R1153: Select All: every row of the results, rows not read yet
+    /// included. The current row stays when it is one of them.
+    public func selectAll() {
+        guard let list, list.count > 0 else { return }
+        select(Set(0..<list.count))
+    }
+
+    /// Selects the rows of `ranges` of the list shown at `revision` (Select
+    /// Sibling Cards), keeping the current row when it is one of them;
+    /// nothing changes when another list or revision shows now.
+    func select(_ ranges: [Range<UInt64>], token: UInt64, revision: UInt64) {
+        guard let list, list.token == token, list.revision == revision else { return }
+        var rows = Set<Int>()
+        for range in ranges {
+            rows.formUnion(Int(clamping: range.lowerBound)..<Int(clamping: min(range.upperBound, UInt64(list.count))))
+        }
+        guard !rows.isEmpty else { return }
+        select(rows)
+    }
+
+    /// The rows `indexes` (the selection when nil) as a command takes them
+    /// (H12): nil when there are none, or when the list shown cannot take a
+    /// command (a released handle: its rows show dimmed, R1108).
+    public func target(_ indexes: Set<Int>? = nil) -> BrowseTarget? {
+        guard let list, !list.released, !isDimmed else { return nil }
+        let rows = (indexes ?? selection).filter { $0 >= 0 && $0 < list.count }
+        guard !rows.isEmpty else { return nil }
+        return BrowseTarget(handle: list.handle, revision: list.revision, ranges: Self.ranges(rows), mode: list.mode)
+    }
+
+    /// The session commands run in, once one is open.
+    var commandSession: (any BrowseSearching)? { session }
+
+    /// Raised by every selection the user makes.
+    var userSelections: UInt64 { selectionRevision }
+
+    /// The Sort Field text of the row at `index` (V8.2's question), from
+    /// the rows read when the list shows that column, else read for it.
+    func sortFieldText(at index: Int) async -> String? {
+        guard let list else { return nil }
+        if let column = list.columns.firstIndex(of: "noteFld"), let row = row(at: index), row.cells.indices.contains(column),
+           case .text(let text) = row.cells[column] {
+            return text
+        }
+        guard let session, !list.released else { return nil }
+        let range = UInt64(index)..<UInt64(index + 1)
+        guard let read = try? await session.rows(list.handle, revision: list.revision, range: range, columns: ["noteFld"]),
+              case .row(let row)? = read.first, case .text(let text)? = row.cells.first else { return nil }
+        return text
+    }
+
+    // MARK: Kept scroll (V1)
+
+    /// The row at the middle of the table when Browse was left, in the list
+    /// it belongs to: coming back shows it there again (V1).
+    @ObservationIgnored private(set) var keptRow: (token: UInt64, index: Int)?
+    /// The rows the table draws now.
+    @ObservationIgnored private var onScreen: Set<Int> = []
+    /// The table is on screen and has been brought back to its kept row:
+    /// only then do the rows it draws move the kept row.
+    @ObservationIgnored private var tableShown = false
+
+    /// The table appeared: the row to bring back to its middle, if the list
+    /// it shows is the one it left.
+    public func tableAppeared() -> Int? {
+        tableShown = false
+        guard let kept = keptRow, kept.token == list?.token else { return nil }
+        return kept.index
+    }
+
+    /// The table is back at its kept row (or had none): the rows it draws
+    /// from now on are kept.
+    public func tableSettled() {
+        tableShown = true
+    }
+
+    public func tableDisappeared() {
+        tableShown = false
+        onScreen = []
+    }
+
+    /// A row left the screen.
+    public func rowDisappeared(_ index: Int) {
+        onScreen.remove(index)
+    }
+
+    /// Kept on appear only: when Browse is left every row disappears, and
+    /// that must not move the row kept. The rows on screen are the run of
+    /// drawn rows around the one that appeared: rows drawn before a jump
+    /// whose disappearance has not come yet are not part of it.
+    private func keepCenter(around index: Int) {
+        guard tableShown, let list, onScreen.contains(index) else { return }
+        var low = index, high = index
+        while onScreen.contains(low - 1) { low -= 1 }
+        while onScreen.contains(high + 1) { high += 1 }
+        keptRow = (list.token, (low + high) / 2)
+    }
+
     // MARK: Rows
 
     /// The row at `index`, nil until its page is read.
@@ -664,6 +780,8 @@ public final class BrowseResults {
     /// the visible rows plus a page each side).
     public func rowAppeared(_ index: Int) {
         visibleIndex = index
+        onScreen.insert(index)
+        keepCenter(around: index)
         readNearRows()
     }
 
@@ -782,6 +900,7 @@ public final class BrowseResults {
     /// is.
     public func changesCommitted(_ changes: ChangeSet, seq: UInt64) {
         let sequenced = SequencedChangeSet(seq: seq, changes: changes)
+        defer { restoreRows(changes) }
         if let newest, !newest.shown, !newest.ended { newest.changes.append(sequenced) }
         if changes.configKeys.contains(where: { $0.name == "meguriBrowserColumnSets" }) || !changes.notetypes.isEmpty
             || changes.wholeCollection {
@@ -868,6 +987,28 @@ public final class BrowseResults {
             again = true
         }
     }
+
+    /// V8.3: Undo of a Delete brings its rows back. H10 never adds a row, so
+    /// a change set that adds back an id a change set removed while this
+    /// query showed runs the search again, with those rows selected.
+    private func restoreRows(_ changes: ChangeSet) {
+        let mode = list?.mode ?? lastMode
+        let rows = mode == .cards ? changes.cards.map { ($0.id, $0.change) } : changes.notes.map { ($0.id, $0.change) }
+        let back = rows.compactMap { $0.1 == .added && goneIDs.contains($0.0) ? $0.0 : nil }
+        if goneIDs.count < Self.goneLimit {
+            goneIDs.formUnion(rows.lazy.filter { $0.1 == .removed }.map(\.0))
+        }
+        guard !back.isEmpty else { return }
+        goneIDs.subtract(back)
+        guard let list, !runPending, newest?.shown != false, ready() else { return }
+        let request = Request(kind: .search, text: list.text, mode: list.mode, sort: list.sort, columns: list.columns,
+                              queryIsEmpty: list.queryIsEmpty)
+        request.selecting = back
+        issue(request)
+    }
+
+    /// The ids kept for `restoreRows`, at most.
+    static let goneLimit = 100_000
 
     /// The index `index` takes when the rows at `removed` (ascending) go;
     /// nil when it is one of them.
@@ -997,6 +1138,8 @@ public final class BrowseResults {
         failed = false
         rejected = false
         hasRun = false
+        goneIDs = []
+        keptRow = nil
     }
 
     private func resetRequests() {

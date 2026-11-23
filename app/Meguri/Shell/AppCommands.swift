@@ -1,4 +1,5 @@
 import AppModel
+import Browse
 import CoreBridge
 import Editor
 import Home
@@ -71,6 +72,39 @@ struct NativeCommandContext {
         layout == .sidebar && collection.navigation.section == .browse && collection.navigation.sheet == nil
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
+
+    // MARK: Browse (U275, N21.8)
+
+    /// Browse shows in the main window, with no sheet or review: the Note
+    /// and Card menus' Browse items act on its selection (N21.8); outside it
+    /// they are disabled.
+    var browseCommands: BrowseCommands? {
+        host == .main && canFindInBrowse ? collection.browse.commands : nil
+    }
+    func browseState(_ command: BrowseCommand) -> BrowseCommandState? { browseCommands?.state(command) }
+    func browseEnabled(_ command: BrowseCommand) -> Bool { browseState(command)?.enabled == true }
+    func performBrowse(_ command: BrowseCommand) {
+        guard browseEnabled(command) else { return }
+        browseCommands?.perform(command)
+    }
+    /// The menu bar's title of a Browse command for the selection.
+    func browseTitle(_ command: BrowseCommand) -> String {
+        let state = browseState(command) ?? BrowseCommandState.of(command, facts: nil, available: false)
+        return BrowseCommandText.title(command, state)
+    }
+    /// N21.8: ⌘⌫ deletes notes only while the table has the focus, and never
+    /// takes the key from a text input (H9.2).
+    var canDeleteNotes: Bool {
+        guard browseEnabled(.delete), collection.browse.results.tableFocused else { return false }
+        #if os(macOS)
+        return !(MacUndoResponder.shared.firstResponder is NSText)
+        #else
+        return true
+        #endif
+    }
+    var canSelectSiblings: Bool { browseCommands?.canSelectSiblings == true }
+    /// The flags' shown names (`tags/flags-and-marked` F4).
+    var flagNames: [String] { collection.browse.flagNames }
 
     // MARK: Deck
 
@@ -326,23 +360,39 @@ struct AppCommands: Commands {
                 .disabled(context?.canGoToSection != true)
                 .accessibilityIdentifier("stats.goToSection")
             }
+            // N21.8's order: Browse, Note Types, Cards and Notes, Card Info.
             #if os(macOS)
             Button("Browse") { context?.showBrowse() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
                 .disabled(context?.canShowBrowse != true)
-            Button("Cards and Notes") { context?.toggleBrowseMode() }
-                .keyboardShortcut("t", modifiers: [.command, .option])
-                .disabled(context?.canToggleBrowseMode != true)
             #endif
             Button("Note Types") { context?.showNoteTypes() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(context?.canShowNoteTypes != true)
+            #if os(macOS)
+            Button("Cards and Notes") { context?.toggleBrowseMode() }
+                .keyboardShortcut("t", modifiers: [.command, .option])
+                .disabled(context?.canToggleBrowseMode != true)
+            // The inspector's Info tab comes with U273 and U274: disabled until then.
+            Button("Card Info") {}
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .disabled(true)
+            #endif
             Divider()
+        }
+        // N21.8: Select All (the system's, ⌘A in the table) is followed by
+        // Select Sibling Cards.
+        CommandGroup(after: .pasteboard) {
+            Button(BrowseCommandText.selectSiblings()) { context?.browseCommands?.selectSiblings() }
+                .disabled(context?.canSelectSiblings != true)
         }
         CommandGroup(before: .textEditing) {
             Button("Find…") { context?.find() }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(context?.canFind != true)
+            // N21.8: their sheets come with U277; disabled until then.
+            browseItem(.findReplace, key: "f", [.command, .option])
+            browseItem(.findDuplicates)
         }
         CommandMenu("Deck") {
             Button("Study") {
@@ -375,6 +425,29 @@ struct AppCommands: Commands {
                 .keyboardShortcut(.delete, modifiers: .command)
                 .disabled(context?.canDeleteShownDeck != true)
         }
+        // N21.8: the Note menu, between Deck and Card. Edit Note is the review's
+        // (N20.8) or, in Browse, the inspector's first field (U273: disabled until then).
+        CommandMenu("Note") {
+            Button("Edit Note") {
+                guard let context, context.reviewInputAvailable, context.collection.editNoteFlow.canOpen else { return }
+                Task { await context.collection.openEditNote() }
+            }
+            .keyboardShortcut("e", modifiers: .command)
+            .disabled(!cardEnabled(context?.collection.editNoteFlow.canOpen))
+            Divider()
+            browseItem(.addTags, key: "a", [.command, .shift])
+            browseItem(.removeTags, key: "a", [.command, .option, .shift])
+            Divider()
+            browseItem(.changeNoteType, key: "m", [.command, .shift])
+            browseItem(.editNoteType)
+            Divider()
+            Button(context?.browseTitle(.delete) ?? BrowseCommandText.title(.delete, .of(.delete, facts: nil, available: false))) {
+                guard context?.canDeleteNotes == true else { return }
+                context?.performBrowse(.delete)
+            }
+            .keyboardShortcut(.delete, modifiers: .command)
+            .disabled(context?.canDeleteNotes != true)
+        }
         CommandMenu("Card") {
             Button("Show Answer") {
                 guard context?.reviewInputAvailable == true else { return }
@@ -388,25 +461,37 @@ struct AppCommands: Commands {
             rating("Good", .good, key: "3")
             rating("Easy", .easy, key: "4")
             Divider()
-            // N20.8: the review's card actions, with the More menu's keys.
-            Button("Edit Note") {
-                guard let context, context.reviewInputAvailable, context.collection.editNoteFlow.canOpen else { return }
-                Task { await context.collection.openEditNote() }
-            }
-            .keyboardShortcut("e", modifiers: .command)
-            .disabled(!cardEnabled(context?.collection.editNoteFlow.canOpen))
-            Button("Bury Card") {
-                guard context?.reviewInputAvailable == true else { return }
-                context?.review?.act(.bury)
+            // N21.8: Browse's card commands (Change Deck… comes with U276's sheet).
+            browseItem(.changeDeck, key: "d", [.command])
+            flagMenu
+            Divider()
+            // N20.8 and N21.8: one item per command and key, the review's card in
+            // review, Browse's selection in Browse (the two never show together).
+            Button(reviewOrBrowse(.bury, review: "Bury Card")) {
+                if context?.review != nil {
+                    guard context?.reviewInputAvailable == true else { return }
+                    context?.review?.act(.bury)
+                } else {
+                    context?.performBrowse(.bury)
+                }
             }
             .keyboardShortcut("j", modifiers: .command)
-            .disabled(!cardEnabled(context?.review?.canActOnCard))
-            Button("Suspend Card") {
-                guard context?.reviewInputAvailable == true else { return }
-                context?.review?.act(.suspend)
+            .disabled(!cardEnabled(context?.review?.canActOnCard) && context?.browseEnabled(.bury) != true)
+            browseItem(.unbury)
+            Button(reviewOrBrowse(.suspend, review: "Suspend Card")) {
+                if context?.review != nil {
+                    guard context?.reviewInputAvailable == true else { return }
+                    context?.review?.act(.suspend)
+                } else {
+                    context?.performBrowse(.suspend)
+                }
             }
             .keyboardShortcut("j", modifiers: [.command, .shift])
-            .disabled(!cardEnabled(context?.review?.canActOnCard))
+            .disabled(!cardEnabled(context?.review?.canActOnCard) && context?.browseEnabled(.suspend) != true)
+            browseItem(.unsuspend)
+            Divider()
+            browseItem(.setDueDate, key: "d", [.command, .shift])
+            browseItem(.forget, key: "n", [.command, .option])
             Divider()
             Button("Back to Decks") {
                 guard let context, context.reviewInputAvailable, context.review?.canFinish == true else { return }
@@ -415,6 +500,43 @@ struct AppCommands: Commands {
             .keyboardShortcut(cardKey(.escape))
             .disabled(!cardEnabled(context?.review?.canFinish))
         }
+    }
+
+    /// A Browse command in the menu bar (N21.8): its title for the selection,
+    /// its key, enabled as V8.1 says while Browse shows, disabled elsewhere.
+    private func browseItem(_ command: BrowseCommand, key: KeyEquivalent? = nil, _ modifiers: EventModifiers = []) -> some View {
+        Button(context?.browseTitle(command) ?? BrowseCommandText.title(command, .of(command, facts: nil, available: false))) {
+            context?.performBrowse(command)
+        }
+        .keyboardShortcut(key.map { KeyboardShortcut($0, modifiers: modifiers) })
+        .disabled(context?.browseEnabled(command) != true)
+    }
+
+    /// Bury Card and Suspend Card: the review's title in review, Browse's
+    /// ("Bury Cards" for several) otherwise.
+    private func reviewOrBrowse(_ command: BrowseCommand, review title: String) -> String {
+        guard let context, context.review == nil, context.browseCommands != nil else { return title }
+        return context.browseTitle(command)
+    }
+
+    /// Flag ▸ (N21.8): No Flag ⌘0, then the seven flags by shown name, ⌘1 to ⌘7.
+    private var flagMenu: some View {
+        Menu(BrowseCommandText.title(.flag(1), .of(.flag(1), facts: nil, available: false))) {
+            ForEach(Array(UInt8(0)...7), id: \.self) { flag in
+                Button { context?.performBrowse(.flag(flag)) } label: {
+                    if flag == 0 {
+                        Text(verbatim: BrowseCommandText.flag(0, names: context?.flagNames ?? []))
+                    } else {
+                        Label { Text(verbatim: BrowseCommandText.flag(flag, names: context?.flagNames ?? [])) }
+                            icon: { BrowseFlagSymbol(flag: flag) }
+                    }
+                }
+                    .keyboardShortcut(KeyEquivalent(Character(String(flag))), modifiers: .command)
+                    .disabled(context?.browseEnabled(.flag(flag)) != true)
+                if flag == 0 { Divider() }
+            }
+        }
+        .disabled(context?.browseCommands == nil)
     }
 
     /// R173: "Undo <operation>" while one can be undone, plain "Undo" otherwise.

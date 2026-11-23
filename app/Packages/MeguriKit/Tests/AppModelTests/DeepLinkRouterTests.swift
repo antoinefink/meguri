@@ -97,6 +97,18 @@ import AppModel
         #expect(lookup.asked == [DeckID(999)])
     }
 
+    /// R320: where Browse is not shown yet (the iPad's and iPhone's layouts,
+    /// U278, U279), a Browse link is refused and changes nothing, rather
+    /// than leaving the person on Today with the search kept for later.
+    @Test func aBrowseLinkWhereBrowseIsNotShownIsRefusedAndChangesNothing() async throws {
+        let navigation = AppNavigation()
+        navigation.select(.section(.stats))
+        let outcome = await DeepLinkRouter.open(try url("meguri://browse?search=deck:Japanese"), in: navigation,
+                                                browseAvailable: false, deckExists: Lookup([existing]).exists)
+        #expect(outcome == .refused(.browseUnavailable))
+        #expect(navigation.section == .stats && navigation.browseSearch.isEmpty)
+    }
+
     @Test func aLinkToAMissingDeckLeavesAReviewRunning() async throws {
         let navigation = AppNavigation()
         let session = Session()

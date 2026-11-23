@@ -580,10 +580,15 @@ import Testing
         if saveFails { throw BridgeError.unavailable(reason: "sample") }
         savedSearchWrites.append((name, text))
     }
+    var extraSaved: [FilterSuggestionRow] = []
+    var renames: [(String, String)] = []
+    func renameSavedSearch(_ old: String, to name: String) async throws { renames.append((old, name)) }
+    var deletedSearches: [String] = []
+    func deleteSavedSearch(_ name: String) async throws { deletedSearches.append(name) }
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
         switch section {
         case .savedSearches:
-            FilterBuiltIn.allCases.map { .builtIn($0) } + [.savedSearch(name: "Hard Ones", text: "is:due -tag:x")]
+            FilterBuiltIn.allCases.map { .builtIn($0) } + [.savedSearch(name: "Hard Ones", text: "is:due -tag:x")] + extraSaved
         case .decks:
             [.value(.deck(id: 10, native: "Languages\u{1F}Español", tree: [10, 11])),
              .value(.deck(id: 20, native: "Languages\u{1F}日本語", tree: [20]))]
