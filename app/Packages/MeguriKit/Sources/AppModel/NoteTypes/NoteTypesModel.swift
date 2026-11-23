@@ -75,7 +75,7 @@ public final class NoteTypesModel {
     /// W2's filter: a simple case-folded substring of the name.
     public var filter = ""
     public var selection: Int64? {
-        didSet { if selection != oldValue { selectionChanged() } }
+        didSet { if selection != oldValue { selectionChanged(); preview.subjectChanged() } }
     }
     /// The note type the Mac's detail shows: the selection once its first
     /// complete render can draw (its record read, or its read failed). Until
@@ -91,7 +91,10 @@ public final class NoteTypesModel {
     /// cache: dropping cached counts after a change elsewhere leaves it as it is.
     public private(set) var headerCounts: NotetypeRemovalCounts?
     public var tab: Tab = .fields {
-        didSet { if tab == .cards, oldValue != .cards, let id = selection, records[id] != nil { refreshIssues(id, immediately: true) } }
+        didSet {
+            if tab == .cards, oldValue != .cards, let id = selection, records[id] != nil { refreshIssues(id, immediately: true) }
+            if tab != oldValue { preview.subjectChanged() }
+        }
     }
     /// iPad: the field whose options show in a popover.
     public var optionsField: Int?
@@ -111,8 +114,12 @@ public final class NoteTypesModel {
     public private(set) var renameRefusal: RenameRefusal?
     /// The Cards tab: the selected card type's row per note type (W5), the
     /// part the editor shows (W6), and the card type renamed in place.
-    public var selectedCard: [Int64: Int] = [:]
-    public var cardPart: NoteTypeTemplatePart = .front
+    public var selectedCard: [Int64: Int] = [:] {
+        didSet { if selection.map({ selectedCard[$0] != oldValue[$0] }) == true { preview.subjectChanged() } }
+    }
+    public var cardPart: NoteTypeTemplatePart = .front {
+        didSet { if cardPart != oldValue { preview.follow(part: cardPart) } }
+    }
     public var renamingCard: Int?
     /// W5's counts per stored template ordinal, as read for the base.
     public private(set) var templateCardCounts: [Int64: [UInt64]] = [:]
@@ -185,6 +192,8 @@ public final class NoteTypesModel {
     // MARK: Seams
 
     @ObservationIgnored let backend: any NoteTypesBackend
+    /// The Cards tab's live preview (W9); it reads only while its pane shows.
+    public let preview: NoteTypePreview
     /// D3: the service and its binding, read at Save (and for the button's title).
     @ObservationIgnored public var service: @MainActor () -> NoteTypeSaveService = { .other }
     /// Whether a collection exists to read: false on first run, before one
@@ -231,8 +240,10 @@ public final class NoteTypesModel {
     /// How long a summary read waits after the last change (W7's pause).
     @ObservationIgnored var summaryDelay: Duration = .milliseconds(300)
 
-    public init(backend: any NoteTypesBackend) {
+    public init(backend: any NoteTypesBackend, preview: NoteTypePreview = NoteTypePreview()) {
         self.backend = backend
+        self.preview = preview
+        preview.subject = { [weak self] in self?.previewSubject() }
     }
 
     // MARK: The list (W2)
@@ -421,7 +432,11 @@ public final class NoteTypesModel {
     /// detail swaps to it in one step if it is the selection.
     private func finishLoading(_ id: Int64) {
         loaded.insert(id)
-        if selection == id { showSelectionWhenReady() }
+        if selection == id {
+            showSelectionWhenReady()
+            // The record the preview waited for (a selection not read ahead, or the saved version).
+            preview.subjectChanged()
+        }
         readCounts(id)
         refreshIssues(id, immediately: true)
         referencesTask[id]?.cancel()
@@ -817,6 +832,14 @@ public final class NoteTypesModel {
         blankOwners[id] = generation
     }
 
+    /// What the preview shows (W9): the selected note type's draft and its
+    /// shown card type, on the Cards tab; nil for a crossed-out card type.
+    func previewSubject() -> NoteTypePreview.Subject? {
+        guard tab == .cards, let id = selection, let draft = draft(id), let row = shownCard(id),
+              let position = draft.keptCardRows.firstIndex(where: { $0.id == row }) else { return nil }
+        return NoteTypePreview.Subject(notetype: id, draft: draft.structureDraft(), position: position, cloze: draft.isCloze)
+    }
+
     // MARK: The editor's own undo (W13)
 
     /// The draft step Edit › Undo names while Note Types shows ("Delete
@@ -868,6 +891,7 @@ public final class NoteTypesModel {
     private func draftChanged(_ id: Int64) {
         revisions[id, default: 0] &+= 1
         refreshIssues(id)
+        if id == selection { preview.draftEdited() }
         // Used On reads again for the texts shown, a reverted draft's too.
         let delay = summaryDelay
         referencesTask[id]?.cancel()
@@ -1152,6 +1176,8 @@ public final class NoteTypesModel {
     /// draft that changed elsewhere shows D1's row.
     public func changesCommitted(_ changes: ChangeSet) {
         guard phase != .idle else { return }
+        // A note added, removed or edited elsewhere changes what the preview's notes show.
+        if changes.wholeCollection || !changes.notes.isEmpty { preview.notesChanged() }
         let notesMoved = changes.notes.contains { $0.change != .updated }
         // A note edited elsewhere can fill or empty a field: the shown type's Notes column reads again.
         if !notesMoved, changes.notetypes.isEmpty, !changes.wholeCollection, !changes.notes.isEmpty {
@@ -1237,12 +1263,15 @@ public final class NoteTypesModel {
             records[id] = record
             readCounts(id)
             if drafts[id] == nil { refreshIssues(id, immediately: true) }
+            // The newer version is what the preview shows now.
+            if selection == id { preview.subjectChanged() }
             await readReferences(id)
         }
     }
 
     /// The collection closed or was replaced: every draft and read goes.
     public func invalidate() {
+        preview.close()
         listToken &+= 1
         epoch &+= 1
         saveTask?.cancel()

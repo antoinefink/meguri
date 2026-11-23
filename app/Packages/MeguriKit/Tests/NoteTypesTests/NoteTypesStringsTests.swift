@@ -38,6 +38,8 @@ import Testing
             == "Meguri saves on this Mac now and asks you to upload this collection when the server can be reached.")
         #expect(NoteTypesStrings.notUploaded(device: "iPad", locale: english)
             == "The changes are saved on this iPad. The sync status shows what to do next.")
+        #expect(NoteTypesStrings.previewPosition(3, of: 12, locale: Locale(identifier: "en")) == "3 of 12")
+        #expect(NoteTypesStrings.previewCloze(2, locale: Locale(identifier: "en")) == "Cloze 2")
         let bundle = NoteTypesStrings.bundle
         let expected = [
             "noteTypes.save.sync.title": "Meguri Sync will be replaced.",
@@ -48,7 +50,9 @@ import Testing
             "noteTypes.discard.keepEditing": "Keep Editing", "noteTypes.changed.message": "This note type changed on another device.",
             "noteTypes.changed.reload": "Reload", "noteTypes.changed.keepEditing": "Keep Editing",
             "noteTypes.title": "Note Types", "noteTypes.tab.fields": "Fields", "noteTypes.tab.cards": "Cards",
-            "noteTypes.list.filter": "Filter", "noteTypes.list.edited": "Edited",
+            "noteTypes.list.filter": "Search", "noteTypes.list.edited": "Edited",
+            "noteTypes.preview.question": "Question", "noteTypes.preview.answer": "Answer",
+            "noteTypes.preview.fillEmpty": "Fill Empty Fields", "noteTypes.preview.clozeNumber": "Cloze Number",
             "noteTypes.fields.name": "Name", "noteTypes.fields.sort": "Sort", "noteTypes.fields.usedOn": "Used On",
             "noteTypes.fields.notes": "Notes", "noteTypes.fields.notUsed": "Not Used", "noteTypes.fields.restore": "Restore",
             "noteTypes.inspector.collapsed": "Collapsed in Editor", "noteTypes.inspector.collapsedHelp": "Closed in Add Note until you open it",

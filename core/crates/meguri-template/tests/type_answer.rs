@@ -237,3 +237,27 @@ fn modifiers_use_first_source_replacement_even_inside_an_inactive_section() {
         "<code id=typeans><span class=typeGood>Café, Té</span></code>"
     );
 }
+
+/// A11.1 (`render/preview` V9): the preview's simulated type-in, with the
+/// spec's C0 and box literals.
+#[test]
+fn the_preview_simulates_example_typed_as_sample() {
+    let c0 = "<code id=typeans><span class=typeBad>s</span><span class=typeGood>ample</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>ex</span><span class=typeGood>ample</span></code>";
+    let boxed = "<center><input id='typeans' type=text value='example' readonly='readonly'></center>";
+    let warning = "<center><b>Only the first type-in box of a card template works.</b></center>";
+    // A side without `[[type:` is unchanged, its rule included.
+    assert_eq!(ta::simulate_preview("a<hr id=answer>b", true), "a<hr id=answer>b");
+    // Question: the rule goes; the first marker is the box, later ones the warning.
+    assert_eq!(
+        ta::simulate_preview("x<hr id=answer>[[type:Back]] [[type:nc:Extra]]", false),
+        format!("x{boxed} {warning}")
+    );
+    // Answer: C0 after the rule when the side had one; the field plays no part.
+    assert_eq!(
+        ta::simulate_preview("q<hr id=answer>[[type:Zzz]]", true),
+        format!("q<hr id=answer>{c0}")
+    );
+    assert_eq!(ta::simulate_preview("[[type:A]][[type:B]]", true), format!("{c0}{warning}"));
+    // `[[type:` with no whole marker: only the rules go.
+    assert_eq!(ta::simulate_preview("a<hr id=answer>[[type:", true), "a[[type:");
+}

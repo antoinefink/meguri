@@ -96,6 +96,8 @@ pub mod name_index;
 pub mod note_patch;
 #[path = "notetype_card_text.rs"]
 pub mod notetype_card_text;
+#[path = "notetype_draft_render.rs"]
+pub mod notetype_draft_render;
 #[path = "notetype_field_rename.rs"]
 pub mod notetype_field_rename;
 #[path = "notetype_reads.rs"]

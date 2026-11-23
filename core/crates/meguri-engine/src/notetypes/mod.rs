@@ -24,6 +24,7 @@ pub mod card_text;
 pub mod change;
 pub mod clone;
 pub mod counts;
+pub mod draft_render;
 pub mod import;
 pub mod issues;
 pub mod names;

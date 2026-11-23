@@ -1,5 +1,6 @@
 #if MEGURI_TEST_HOOKS
 @_spi(MeguriTestHooks) import AppModel
+import CardRendering
 import CoreBridge
 import DesignSystem
 import Home
@@ -35,6 +36,18 @@ extension TestHooks {
     ///   field that does not exist and whose Recognition back leaves a
     ///   section open: two red issues with their fixes, Save held.
     /// - `notetypes/cards/styling`: the shared styling with its colour swatches.
+    ///
+    /// The Cards tab's preview (U283) shows on each Cards route, from a
+    /// sample page made of the draft's styling and fixed sample text (no
+    /// collection is open, so the core cannot render):
+    /// - `notetypes/cards/preview-back`: Recognition's Back, the answer shown.
+    /// - `notetypes/cards/preview-error`: an unknown field on Production's
+    ///   front before the preview's first render: the issue's words where the
+    ///   card would be (after an edit, the last card stays faded under them).
+    /// - `notetypes/cards/preview-empty`: Phrases, a type with no notes: the
+    ///   sample note with Fill Empty Fields on.
+    /// - `notetypes/cards/preview-cloze`: the Cloze type's card 2.
+    /// - `notetypes/cards/preview-hidden`: the preview turned off.
     enum NoteTypesRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.registerShell("notetypes/fields/typical") { _ in launch(.typical) }
@@ -50,6 +63,11 @@ extension TestHooks {
             registry.registerShell("notetypes/cards/typical") { _ in launch(.cards(.typical)) }
             registry.registerShell("notetypes/cards/issues") { _ in launch(.cards(.issues)) }
             registry.registerShell("notetypes/cards/styling") { _ in launch(.cards(.styling)) }
+            registry.registerShell("notetypes/cards/preview-back") { _ in launch(.cards(.previewBack)) }
+            registry.registerShell("notetypes/cards/preview-error") { _ in launch(.cards(.previewError)) }
+            registry.registerShell("notetypes/cards/preview-empty") { _ in launch(.cards(.previewEmpty)) }
+            registry.registerShell("notetypes/cards/preview-cloze") { _ in launch(.cards(.previewCloze)) }
+            registry.registerShell("notetypes/cards/preview-hidden") { _ in launch(.cards(.previewHidden)) }
         }
 
         /// No collection: only Today (and, on iPad, Settings) is offered.
@@ -90,11 +108,20 @@ extension TestHooks {
             case cards(Cards)
         }
 
-        enum Cards { case typical, issues, styling }
+        enum Cards { case typical, issues, styling, previewBack, previewError, previewEmpty, previewCloze, previewHidden }
 
         @MainActor static func launch(_ state: State, sync: SampleMeguriSync = .init()) -> ShellLaunch {
             let backend = SampleNoteTypesBackend()
-            let model = NoteTypesModel(backend: backend)
+            let model = NoteTypesModel(backend: backend, preview: NoteTypePreview(backend: SamplePreviewBackend()))
+            // The preview's toggle is not kept from one run to the next.
+            model.preview.defaults = nil
+            if case .cards(.previewHidden) = state { model.preview.requested = false }
+            // An empty media folder of its own: the sample cards name no media.
+            model.preview.resolver = {
+                let root = FileManager.default.temporaryDirectory.appending(path: "notetypes-preview-\(UUID())", directoryHint: .isDirectory)
+                try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                return try? await MediaPathResolver.open(root: root, trackedNames: [])
+            }
             if case .question(let service) = state { model.service = { service } }
             if case .progress = state { model.service = { .meguriSync } }
             model.meguriSync = sync
@@ -122,8 +149,12 @@ extension TestHooks {
                 model.dismissQuestion = { if navigation.sheet == .noteTypeSave { navigation.dismissSheet() } }
                 navigation.select(.section(.noteTypes))
                 Task { @MainActor in
-                    await model.prepareForTestHooks(select: SampleNoteTypesBackend.vocabulary)
-                    let id = SampleNoteTypesBackend.vocabulary
+                    let id: Int64 = switch state {
+                    case .cards(.previewEmpty): SampleNoteTypesBackend.phrases
+                    case .cards(.previewCloze): SampleNoteTypesBackend.cloze
+                    default: SampleNoteTypesBackend.vocabulary
+                    }
+                    await model.prepareForTestHooks(select: id)
                     #if os(iOS)
                     if case .list = state {} else { navigation.push(.noteType(id)) }
                     #endif
@@ -142,6 +173,19 @@ extension TestHooks {
                             model.cardPart = .back
                         case .styling:
                             model.cardPart = .styling
+                        case .previewBack:
+                            model.cardPart = .back
+                        case .previewError:
+                            model.selectedCard[id] = 1
+                            model.stage(id) { draft in
+                                draft.setText(1, .front, "<div class=\"meaning\">{{Meaning}}</div>\n<div class=\"pos\">{{Part of Speech}}</div>\n{{Wrod}}")
+                            }
+                            model.cardPart = .front
+                        case .previewEmpty, .previewHidden:
+                            model.cardPart = .front
+                        case .previewCloze:
+                            model.cardPart = .front
+                            model.preview.setClozeNumber(2)
                         }
                         await model.settleForTestHooks()
                     case .list, .typical, .inspectorHidden:
@@ -189,6 +233,8 @@ extension TestHooks {
     /// A made-up collection's note types, in memory (sample content only).
     @MainActor final class SampleNoteTypesBackend: NoteTypesBackend {
         static let vocabulary: Int64 = 1_700_000_100_009
+        static let cloze: Int64 = 1_700_000_100_004
+        static let phrases: Int64 = 1_700_000_100_007
         private static let names: [(String, UInt64)] = [
             ("Basic", 1204), ("Basic (and reversed card)", 86), ("Basic (type in the answer)", 12), ("Cloze", 318),
             ("Image Occlusion", 24), ("Glyphs", 2136), ("Phrases", 640), ("Verb Forms", 96), ("Vocabulary", 412),
@@ -232,12 +278,13 @@ extension TestHooks {
         }
         func read(_ id: Int64) async throws -> NotetypeRecord {
             let name = Self.names[safe: Int(id - 1_700_000_100_001)]?.0 ?? "Basic"
-            let fields = id == Self.vocabulary ? Self.fields.map(\.0) : ["Front", "Back"]
+            let fields = id == Self.vocabulary ? Self.fields.map(\.0) : id == Self.cloze ? ["Text", "Back Extra"] : ["Front", "Back"]
             let templates: [(String, String, String)] = id == Self.vocabulary
                 ? [("Recognition", Self.recognitionFront, Self.recognitionBack), ("Production", Self.productionFront, Self.productionBack)]
+                : id == Self.cloze ? [("Cloze", "{{cloze:Text}}", "{{cloze:Text}}\n<br>\n{{Back Extra}}")]
                 : [("Card 1", "{{Front}}", "{{FrontSide}}\n<hr id=answer>\n{{Back}}")]
             return NotetypeRecord(
-                id: id, name: name, kind: 0, sortField: 0, css: Self.css, base: [UInt8(truncatingIfNeeded: id)],
+                id: id, name: name, kind: id == Self.cloze ? 1 : 0, sortField: 0, css: Self.css, base: [UInt8(truncatingIfNeeded: id)],
                 fields: fields.enumerated().map { ord, field in
                     NotetypeField(ord: UInt32(ord), id: nil, name: field, sticky: false, rtl: false, fontName: "Arial", fontSize: 20,
                                   description: "", plainText: false, collapsed: field == "Reading", excludeFromSearch: false)
@@ -324,6 +371,53 @@ extension TestHooks {
                     return key.trimmingCharacters(in: .whitespaces)
                 }
             }
+        }
+    }
+}
+
+extension TestHooks {
+    /// The preview's sample page: the draft's own styling around fixed
+    /// sample text for each sample card type and side (no collection is
+    /// open here, so the core cannot render). A draft text the sample's
+    /// issues name is a template error, as the core would report it.
+    @MainActor final class SamplePreviewBackend: NoteTypePreviewBackend {
+        func noteIds(_ notetype: Int64) async throws -> [Int64] {
+            switch notetype {
+            case SampleNoteTypesBackend.vocabulary: (1...412).map { 1_700_000_200_000 + Int64($0) }
+            case SampleNoteTypesBackend.cloze: (1...318).map { 1_700_000_300_000 + Int64($0) }
+            default: []
+            }
+        }
+
+        func render(_ draft: NotetypeStructureDraft, note: Int64?, target: UInt32, fillEmpty: Bool) async throws -> NoteTypePreviewRender {
+            let cloze = draft.notetypeId == SampleNoteTypesBackend.cloze
+            let template = draft.templates[safe: cloze ? 0 : Int(target)]
+            let front = template?.front ?? "", back = template?.back ?? ""
+            func broken(_ text: String) -> Bool {
+                text.contains("{{Wrod}}") || text.matches(of: /\{\{#([^}]*)\}\}/).contains { !text.contains("{{/\($0.1)}}") }
+            }
+            let style = "<style>\(draft.css)</style>"
+            let question: String, answer: String
+            if draft.notetypeId == SampleNoteTypesBackend.vocabulary, target == 0 {
+                question = "<div class=\"word\">(Word)</div>\n<div class=\"reading\">(Reading)</div>"
+                answer = question + "\n<hr id=\"answer\">\n<div class=\"meaning\">(Meaning)</div>\n"
+                    + "<div class=\"example\">(Example Sentence)</div>"
+            } else if draft.notetypeId == SampleNoteTypesBackend.vocabulary {
+                question = "<div class=\"meaning\">(Meaning)</div>\n<div class=\"pos\">(Part of Speech)</div>"
+                answer = question + "\n<hr id=\"answer\">\n<div class=\"word\">(Word)</div>"
+            } else if cloze {
+                question = target == 1 ? "This is a sample <span class=\"cloze\">[...]</span> deletion."
+                    : "This is a <span class=\"cloze\">[...]</span> cloze deletion."
+                answer = target == 1 ? "This is a sample <span class=\"cloze\">cloze</span> deletion."
+                    : "This is a <span class=\"cloze\">sample</span> cloze deletion."
+            } else {
+                question = fillEmpty ? "(Front)" : ""
+                answer = question + "\n<hr id=answer>\n" + (fillEmpty ? "(Back)" : "")
+            }
+            let outcome: CardRenderOutcome = broken(front) ? .templateError(.unknownField, side: .question)
+                : broken(back) ? .templateError(.unclosedConditional, side: .answer) : .rendered
+            return NoteTypePreviewRender(question: style + question, answer: style + answer, outcome: outcome, noteID: note,
+                                         clozeNumbers: cloze ? [1, 2] : [])
         }
     }
 }

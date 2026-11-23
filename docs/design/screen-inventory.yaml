@@ -515,7 +515,11 @@ screens:
     purpose: >-
       The live preview beside the code (round 9): notetypes/workspace W9. A real
       note with a note menu, Question or Answer, Light or Dark, a Cloze Number menu for cloze
-      types; no device picker; updates about 300 ms after typing pauses.
+      types; no device picker; updates about 300 ms after typing pauses. The Mac Cards tab's
+      third column with a toolbar toggle kept on the device, hidden by itself below 900 points
+      of tab; on iPad, code and preview half each with the card type as a menu (N22.7).
+      Identifiers noteTypes.cards.preview.*. Routes
+      notetypes/cards/preview-back, -error, -empty, -cloze, -hidden.
   - id: noteTypes.changeNoteType
     title: Change Note Type
     units: [U35, U284]
