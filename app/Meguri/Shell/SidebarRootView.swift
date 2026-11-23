@@ -80,7 +80,7 @@ struct SidebarRootView: View {
                     }
                     // N23.6: screens that place the sync button in their own trailing
                     // group read it here: Home's pages (both platforms) and, on the
-                    // Mac, Browse, after its Cards / Notes control.
+                    // Mac, Browse, after its Cards / Notes control, and Statistics.
                     .environment(\.syncStatusItem, sectionPlacesSyncItem ? features.syncStatus?() : nil)
                     // Each sidebar row has its own stack: a new selection
                     // starts from its root rather than animating from the
@@ -96,6 +96,7 @@ struct SidebarRootView: View {
     private var sectionPlacesSyncItem: Bool {
         #if os(macOS)
         navigation.section == .home || navigation.section == .browse || navigation.section == .noteTypes
+            || navigation.section == .stats
         #else
         navigation.section == .home || navigation.section == .noteTypes
         #endif

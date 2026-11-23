@@ -1190,6 +1190,11 @@ public enum HomeSidebarPreview {
 
     /// The rows, each tagged as the live list tags them; `selection` marks one.
     public static func decks(selection: SidebarItem?) -> some View {
+        decks(nodes, selection: selection)
+    }
+
+    /// The rows of another sample tree (another feature's route, its decks).
+    public static func decks(_ nodes: [CountedDeckNode], selection: SidebarItem?) -> some View {
         ForEach(nodes, id: \.id) { node in
             HomeSidebarBranch(collection: nil, node: node, ancestors: [], previewSelection: selection)
                 .tag(SidebarItem.deck(DeckID(node.id)))

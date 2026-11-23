@@ -914,7 +914,9 @@ class RealCatalog(unittest.TestCase):
 
     def test_every_r1807_to_r1855_budget_and_r1583_has_exactly_one_entry(self):
         ids = [b["id"] for b in self.raw["budgets"]]
-        expected = ["R%d" % n for n in range(1807, 1856)] + ["R1583"]
+        # R1583 and the Statistics page's R2076-R2079 are extra budgets past the range (U296).
+        expected = ["R%d" % n for n in range(1807, 1856)] + ["R1583", "R2076", "R2077", "R2078", "R2079"]
+        self.assertEqual(self.raw["extra_budgets"], ["R1583", "R2076", "R2077", "R2078", "R2079"])
         self.assertEqual(sorted(ids), sorted(expected))
         self.assertEqual(len(ids), len(set(ids)))
 

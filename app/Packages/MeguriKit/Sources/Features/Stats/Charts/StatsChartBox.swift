@@ -269,7 +269,8 @@ public struct StatsChartBox<Accessory: View>: View {
 
     // MARK: Container
 
-    /// N25.3: the system group box on the Mac and the iPad at regular width. At
+    /// N25.3: the system group box on the Mac and the iPad at regular width; it
+    /// takes the height its row gives it, so the boxes of a row share it. At
     /// compact width (iPhone, the folded Duo, a narrow iPad) the box is a
     /// section-like group on the grouped background, as inset grouped lists
     /// draw their sections (N25.6).
@@ -277,18 +278,18 @@ public struct StatsChartBox<Accessory: View>: View {
         #if os(macOS)
         GroupBox {
             content()
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         #else
         if horizontalSizeClass == .regular {
             GroupBox {
                 content()
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         } else {
             content()
                 .padding(Spacing.medium)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(Color(uiColor: .secondarySystemGroupedBackground), in: Radius.rounded(Radius.large))
         }
         #endif

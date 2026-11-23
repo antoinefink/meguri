@@ -39,6 +39,10 @@ enum TestHooks {
             }
             #endif
             shell?.prepare(navigation)
+            if options.statsRollout == .open {
+                // After the app's own launch selection (Today), once the shell starts.
+                Task { @MainActor in navigation.select(.section(.stats)) }
+            }
             if let render = options.syncRender, let collection {
                 SyncRoutes.showRender(render, over: collection, clock: collection.configuration.clock)
             }
@@ -122,6 +126,7 @@ enum TestHooks {
                 ownedProvider: ownedProvider
             )
             AppearanceOverrides.applyProcessWide(options)
+            if options.statsRollout != nil { StatsRollout.enabled = true }
             return Session(options: options, shell: shell, ownedProvider: ownedProvider)
         } catch {
             return Session(error: error)

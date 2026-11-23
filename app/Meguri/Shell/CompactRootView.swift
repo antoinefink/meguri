@@ -25,7 +25,9 @@ struct CompactRootView: View {
         // The setter also runs when the selected tab is tapped again: that
         // pops its stack, then scrolls its root to the top (R19).
         TabView(selection: Binding(get: { navigation.compactTab }, set: { navigation.selectTab($0) })) {
-            ForEach(CompactTab.allCases.filter { features.availableSections.contains($0.section) }, id: \.self) { tab in
+            // Statistics' tab waits for its compact page (U304), whatever the sidebar shows.
+            ForEach(CompactTab.allCases.filter { features.availableSections.contains($0.section) && ($0 != .stats || features.statsTab) },
+                    id: \.self) { tab in
                 Tab(value: tab) {
                     stack(tab)
                 } label: {
@@ -38,6 +40,10 @@ struct CompactRootView: View {
             }
         }
         .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width } action: { isUpright = $0 }
+        // Statistics has no tab yet (U304): a window that narrows on it shows Decks.
+        .onChange(of: navigation.section == .stats && !features.statsTab, initial: true) { _, orphaned in
+            if orphaned { navigation.select(.section(.home)) }
+        }
         // N23.1: the status panel's sheet opens at its measured height; the panel is
         // measured here, out of sight, not in the toolbar item (N23.6).
         .background { features.syncPanelMeasure?() }

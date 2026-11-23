@@ -103,7 +103,7 @@ let package = Package(
     ] + features.map { name in
         .target(
             name: name,
-            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (name == "Home" ? ["HeatmapKit"] : []) + (["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (name == "Editor" ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
+            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (name == "Home" ? ["HeatmapKit"] : []) + (["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (["Editor", "Stats"].contains(name) ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
             path: "Sources/Features/\(name)",
             resources: ["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats"].contains(name) ? [.process("Resources")] : [],
             swiftSettings: settings
