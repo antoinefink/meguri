@@ -253,11 +253,14 @@ private struct StatsPageScroll: View {
             .defaultScrollAnchor(keepsBelow ? .bottom : nil, for: .sizeChanges)
             .environment(\.statsScrolling, scrolling)
             .environment(\.statsKeepingBelow, StatsKeepingBelow { change in
-                // The anchor is in place before the change lays out, and let go once it has.
+                // The anchor is in place (a frame drawn with it) before the change lays out, and
+                // let go once the change has.
                 keepsBelow = true
-                DispatchQueue.main.async {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(20))
                     change()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { keepsBelow = false }
+                    try? await Task.sleep(for: .milliseconds(400))
+                    keepsBelow = false
                 }
             })
             .onScrollPhaseChange { _, phase in

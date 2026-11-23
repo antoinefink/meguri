@@ -55,7 +55,7 @@ import Testing
         }
     }
 
-    @Test func onlyTheDaysShownCanBeHitAndAreElements() {
+    @Test func onlyTheDaysShownCanBeHitAndAreElements() throws {
         let grid = Self.sixYears
         let geometry = Self.geometry(width: 311, columns: grid.columns)
         // Column 256 holds the week of Monday 2025-10-20: 399 days ago, the oldest day shown.
@@ -72,8 +72,9 @@ import Testing
         }
         // The months shown begin with October 2025 cut at the 20th; none before it.
         let months = grid.visibleMonths(geometry)
-        #expect(months.first.map { ($0.year, $0.month, $0.startsHere, $0.daysAgo.upperBound) } == (2025, 10, false, 400))
-        #expect(months.last.map { ($0.year, $0.month) } == (2026, 11))
+        let first = try #require(months.first)
+        #expect(first.year == 2025 && first.month == 10 && !first.startsHere && first.daysAgo.upperBound == 400)
+        #expect(months.last?.year == 2026 && months.last?.month == 11)
         #expect(months.reduce(0) { $0 + $1.daysAgo.count } == 400)
     }
 

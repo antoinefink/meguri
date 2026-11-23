@@ -39,9 +39,9 @@ struct StatsActivityBox: View {
 
     /// N24.6's fixed square, as on Today: it never grows with the width or the text size.
     #if os(macOS)
-    static let square = ActivityGrid.Square.mac
+    nonisolated static let square = ActivityGrid.Square.mac
     #else
-    static let square = ActivityGrid.Square.touch
+    nonisolated static let square = ActivityGrid.Square.touch
     #endif
 
     private var text: StatsText { StatsText(locale: locale) }

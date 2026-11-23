@@ -55,14 +55,14 @@ nonisolated enum StatsNarrowLayout {
 }
 
 /// How a box's switch is drawn (N25.4, N25.6).
-enum StatsSwitchStyle: Hashable, Sendable {
+nonisolated enum StatsSwitchStyle: Hashable, Sendable {
     case segmented
     case menu
 }
 
 extension StatsStripID {
     /// The narrow page's strip (S6): Mature is a figure of Card Counts there.
-    static let narrow: [StatsStripID] = allCases.filter { $0 != .mature }
+    nonisolated static let narrow: [StatsStripID] = allCases.filter { $0 != .mature }
 }
 
 extension EnvironmentValues {
@@ -79,17 +79,17 @@ extension EnvironmentValues {
 }
 
 /// See `EnvironmentValues.statsKeepingBelow`.
-struct StatsKeepingBelow {
-    let run: (@escaping @MainActor () -> Void) -> Void
+struct StatsKeepingBelow: Sendable {
+    let run: @MainActor @Sendable (@escaping @MainActor () -> Void) -> Void
 
-    init(_ run: @escaping (@escaping @MainActor () -> Void) -> Void) {
+    init(_ run: @escaping @MainActor @Sendable (@escaping @MainActor () -> Void) -> Void) {
         self.run = run
     }
 
     @MainActor func callAsFunction(_ change: @escaping @MainActor () -> Void) { run(change) }
 }
 
-extension StatsNarrowLayout {
+nonisolated extension StatsNarrowLayout {
     /// The narrow page's Activity grid shows the lines holding the last 53 weeks (a year's
     /// weeks, as Today's grid) until Show All Years (the coordinator's decision of 2026-11-23,
     /// pending the owner's look: six years at phone width are about 17 lines).

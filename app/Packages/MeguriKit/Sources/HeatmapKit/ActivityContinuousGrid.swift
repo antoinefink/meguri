@@ -207,10 +207,13 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
                     lineGap: CGFloat, recentWeeks: Int? = nil) {
             self.square = square
             self.width = width.isFinite ? max(0, width) : 0
-            self.columns = max(1, columns)
-            perLine = Self.perLine(width: width, square: square)
-            firstColumn = recentWeeks.map { Self.firstColumn(columns: self.columns, perLine: perLine, recentWeeks: $0) } ?? 0
-            lines = (self.columns - firstColumn + perLine - 1) / perLine
+            let columns = max(1, columns)
+            let perLine = Self.perLine(width: width, square: square)
+            let first = recentWeeks.map { Self.firstColumn(columns: columns, perLine: perLine, recentWeeks: $0) } ?? 0
+            self.columns = columns
+            self.perLine = perLine
+            firstColumn = first
+            lines = (columns - first + perLine - 1) / perLine
             self.band = max(0, band)
             self.labelGap = labelGap
             self.lineGap = lineGap

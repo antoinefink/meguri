@@ -13,9 +13,9 @@ import Testing
 @Suite struct StatsNarrowLayoutTests {
     /// A phone's column: 16 points of inset on each side of 375 or 393 points; a small one; the
     /// box's content inside its 16-point inset.
-    private static let phoneColumn: CGFloat = 343
-    private static let smallColumn: CGFloat = 288
-    private static let boxContent: CGFloat = 311
+    private nonisolated static let phoneColumn: CGFloat = 343
+    private nonisolated static let smallColumn: CGFloat = 288
+    private nonisolated static let boxContent: CGFloat = 311
 
     @Test func theNarrowStripHasFourTilesWithoutMature() {
         #expect(StatsStripID.narrow == [.studiedToday, .retentionToday, .remainingToday, .streak])
@@ -102,7 +102,7 @@ import Testing
     @Test func theDuoHeldTallPutsTheSmallBoxesTwoAbreast() {
         // The Duo held tall: 669 points less the column's insets. A phone or the folded Duo: one.
         #expect(StatsBoxGrid.columns(for: 669 - 32) == 2)
-        #expect(StatsBoxGrid.columns(for: phoneColumn) == 1)
+        #expect(StatsBoxGrid.columns(for: Self.phoneColumn) == 1)
         #expect(StatsBoxGrid.columns(for: 430 - 32) == 1)
     }
 }
