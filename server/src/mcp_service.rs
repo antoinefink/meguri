@@ -4,6 +4,8 @@
 //! Handle keys are owned by Service and survive every request/router for it. Parse raw arguments with Backend::parse at the transport.
 //! Checkpoint maintenance belongs outside these bounded point operations.
 mod transport;
+pub(crate) use transport::bearer;
+pub(crate) mod export;
 pub(crate) mod attachments;
 #[cfg(test)]
 #[path = "../tests/support/attachment_formats.rs"]

@@ -215,9 +215,9 @@ for (const status of [200, 410]) {
 
 test("permission descriptions select the whole labeled row without replacing native radios", async ({ page, baseURL }) => {
   const state = await synthetic(page, baseURL!); await entry(page);
-  await page.getByText("Read your collection, add and edit notes, and attach images and audio.", { exact: true }).click();
+  await page.getByText("Read and download your collection database, add and edit notes, and attach images and audio.", { exact: true }).click();
   await expect(page.getByRole("radio", { name: "Read and edit collection", exact: true })).toBeChecked();
-  await page.getByText("Find notes and see decks and note types.", { exact: true }).click();
+  await page.getByText("Find notes, see decks and note types, and download the full collection database.", { exact: true }).click();
   await expect(page.getByRole("radio", { name: "Read collection", exact: true })).toBeChecked();
   for (const row of await page.locator(".consent-option").all()) {
     const bounds = await row.boundingBox(); expect(bounds!.height).toBeGreaterThanOrEqual(44);

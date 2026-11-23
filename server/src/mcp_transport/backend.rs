@@ -78,6 +78,7 @@ pub enum ToolOutput {
     Notes { notes: Vec<Note>, next_cursor: Option<String> },
     Catalog { decks: Vec<Deck>, note_types: Vec<NoteType>, next_cursor: Option<String> },
     Changed { note_id: String, revision: String },
+    Download { download_url: String, download_token: String, expires_at: String },
     Upload { upload_id: String, upload_url: String, expires_at: String },
 }
 impl ToolOutput {
@@ -96,6 +97,8 @@ impl ToolOutput {
                 && note_types.iter().all(|n| text(&n.name) && n.field_names.len() <= MAX_FIELDS
                     && n.field_names.iter().all(|s| text(s))),
             Self::Changed { revision, .. } => revision.len() <= MAX_HANDLE_BYTES,
+            Self::Download { download_url, download_token, expires_at } => download_url.len() <= MAX_HANDLE_BYTES
+                && download_token.len() == 43 && crate::crypto::bearer(download_token).is_ok() && expires_at.len() <= 64,
             Self::Upload { upload_id,upload_url,expires_at } => upload_id.len() == 43 && upload_url.len() <= MAX_HANDLE_BYTES && expires_at.len() <= 64,
         }
     }

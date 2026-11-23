@@ -119,11 +119,12 @@ pub enum ToolCall {
     CreateNote(CreateNote),
     EditNote(EditNote),
     PrepareMediaUpload,
+    DownloadCollection,
 }
 impl ToolCall {
     pub fn access(&self) -> Access {
         match self {
-            Self::SearchNotes(_) | Self::ListDecksAndNoteTypes(_) => Access::Read,
+            Self::DownloadCollection | Self::SearchNotes(_) | Self::ListDecksAndNoteTypes(_) => Access::Read,
             Self::CreateNote(_) | Self::EditNote(_) | Self::PrepareMediaUpload => Access::Write,
         }
     }
@@ -194,6 +195,7 @@ pub fn parse(name: &str, arguments: Map<String, Value>) -> Result<ToolCall, Vali
             validate_attachments(&v.files,&v.file_fields,&v.uploads)?;
             ToolCall::EditNote(v)
         }
+        "download_collection" if value.as_object().is_some_and(|v|v.is_empty()) => ToolCall::DownloadCollection,
         "prepare_media_upload" if value.as_object().is_some_and(|v|v.is_empty()) => ToolCall::PrepareMediaUpload,
         _ => return Err(V::Arguments),
     };
