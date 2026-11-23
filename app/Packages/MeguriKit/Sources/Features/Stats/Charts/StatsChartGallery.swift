@@ -85,20 +85,20 @@ public struct StatsChartGallery: View {
                     StatsChartBox(
                         box: "reviewsOverTime", title: "Reviews Over Time", figure: nil,
                         data: samples.reviewsByType(browsable: false), phase: .loading(fraction: 0.4), size: .lead,
-                        figures: reviewFigures(nil), open: {}
+                        figures: reviewFigures(nil)
                     ) { StatsGallerySwitch(id: "loadingKind", options: ["By Type", "By Answer"]) }
                 },
                 .regular {
                     StatsChartBox(
                         box: "retention", title: "Retention", figure: nil, data: samples.retention, phase: .loading(fraction: nil),
-                        figures: retentionFigures(nil), open: {}
+                        figures: retentionFigures(nil)
                     ) { StatsGallerySwitch(id: "loadingRetention", options: ["All", "Young", "Mature"]) }
                 },
                 .regular {
                     StatsChartBox(
                         box: "forgotten", title: "Forgotten", figure: nil, data: samples.forgotten,
                         phase: .empty(StatsEmptyReason.noReviews(in: period.span ?? .lastMonth, deck: nil).text),
-                        figures: [.init(label: "Young", value: nil), .init(label: "Mature", value: nil)], open: {}
+                        figures: [.init(label: "Young", value: nil), .init(label: "Mature", value: nil)]
                     )
                 },
                 .regular {
@@ -106,7 +106,7 @@ public struct StatsChartGallery: View {
                         box: "reviewsByAnswer", title: "Reviews Over Time",
                         figure: StatsBoxFigure(value: "41,233 reviews", sentence: "Differentiate Without Colour: segments drawn apart"),
                         data: samples.reviewsByAnswer, figures: Array(reviewFigures("").prefix(2)),
-                        separatesSeries: true, open: {}
+                        separatesSeries: true
                     )
                 },
             ]
@@ -116,7 +116,7 @@ public struct StatsChartGallery: View {
                     StatsChartBox(
                         box: "stability", title: "Stability", figure: nil, data: StatsChartSamples.stability, phase: .failed,
                         figures: [.init(label: "Median Interval", value: nil), .init(label: "Over 1 Year", value: nil)],
-                        footnoteLines: 1, open: {}
+                        footnoteLines: 1
                     ) { StatsBoxMarker.now }
                 },
                 .regular { addedAndStarted(sparse: true) },
@@ -125,14 +125,14 @@ public struct StatsChartGallery: View {
                         box: "knowledgeOverTime", title: "Knowledge Over Time", figure: nil, data: samples.knowledge,
                         phase: .empty(StatsEmptyReason.noReviewsYet.text, detail: "This fills in as you study."),
                         figures: [.init(label: "Studied", value: nil), .init(label: "Likely Forgotten", value: nil)],
-                        footnoteLines: 2, open: {}
+                        footnoteLines: 2
                     ) { StatsBoxMarker.estimated }
                 },
                 .regular {
                     StatsChartBox(
                         box: "reviewsDue", title: "Reviews Due", figure: nil, data: samples.reviewsDue,
                         phase: .empty(StatsEmptyReason.noCardsDue.text),
-                        figures: [.init(label: "Overdue", value: nil), .init(label: "Due Tomorrow", value: nil)], open: {}
+                        figures: [.init(label: "Overdue", value: nil), .init(label: "Due Tomorrow", value: nil)]
                     )
                 },
             ]
@@ -162,7 +162,7 @@ public struct StatsChartGallery: View {
         StatsChartBox(
             box: "retention", title: "Retention",
             figure: StatsBoxFigure(value: "90.4%", sentence: "Desired retention 90%"),
-            data: samples.retention, figures: retentionFigures(true), selection: selection, open: {}
+            data: samples.retention, figures: retentionFigures(true), selection: selection
         ) { StatsGallerySwitch(id: "retention", options: ["All", "Young", "Mature"]) }
     }
 
@@ -172,7 +172,7 @@ public struct StatsChartGallery: View {
             figure: StatsBoxFigure(value: "3,956", sentence: "11 a day on average"),
             data: samples.forgotten,
             figures: [.init(label: "Young", value: "2,418"), .init(label: "Mature", value: "1,538")],
-            selection: selection, open: {}, showInBrowse: { _ in }
+            selection: selection, showInBrowse: { _ in }
         )
     }
 
@@ -182,7 +182,7 @@ public struct StatsChartGallery: View {
             figure: StatsBoxFigure(value: "3,512 cards", sentence: "88.9% of the 3,950 cards with an estimate, up 612 since 1 Jan"),
             data: samples.knowledge, size: .lead,
             figures: [.init(label: "Studied", value: "3,950"), .init(label: "Likely Forgotten", value: "438 (11.1%)"), .init(label: "Change in Period", value: "+612")],
-            footnote: "12 suspended cards are not included.", selection: selection, open: {}
+            footnote: "12 cards could not be estimated.", selection: selection
         ) { StatsBoxMarker.estimated }
     }
 
@@ -192,7 +192,7 @@ public struct StatsChartGallery: View {
             figure: StatsBoxFigure(value: "4,236 cards", sentence: "2,612 mature, up 1,204 in the period"),
             data: samples.cardsOverTime, size: .lead,
             figures: [.init(label: "New", value: "521 (−379)"), .init(label: "Learning", value: "180 (+50)"), .init(label: "Young", value: "903 (+203)"), .init(label: "Mature", value: "2,612 (+1,204)")],
-            footnote: "12 suspended cards are not shown.", open: {}
+            footnote: "12 suspended cards are not shown."
         )
     }
 
@@ -202,7 +202,7 @@ public struct StatsChartGallery: View {
             figure: StatsBoxFigure(value: sparse ? "200" : "2,410", sentence: sparse ? "77 started" : "1,960 started"),
             data: samples.addedAndStarted(sparse: sparse),
             figures: [.init(label: "Added a Day", value: sparse ? "6.7" : "8.6"), .init(label: "Started a Day", value: sparse ? "2.6" : "7.0")],
-            open: {}, showInBrowse: { _ in }
+            showInBrowse: { _ in }
         )
     }
 
@@ -212,7 +212,7 @@ public struct StatsChartGallery: View {
             figure: StatsBoxFigure(value: "2.3 months", sentence: "Median stability"),
             data: StatsChartSamples.stability,
             figures: [.init(label: "Median Interval", value: "38 days"), .init(label: "Over 1 Year", value: "350")],
-            footnote: "41 cards have no memory state.", open: {}, showInBrowse: { _ in }
+            footnote: "41 cards have no memory state.", showInBrowse: { _ in }
         ) { StatsBoxMarker.now }
     }
 
@@ -222,7 +222,7 @@ public struct StatsChartGallery: View {
             figure: StatsBoxFigure(value: "2,904", sentence: "128 remaining today · 96 tomorrow"),
             data: samples.reviewsDue, size: .lead,
             figures: [.init(label: "Overdue", value: "42"), .init(label: "Due Tomorrow", value: "96"), .init(label: "Next 30 Days", value: "2,904"), .init(label: "Daily Load", value: "97")],
-            selection: selection, open: {}, showInBrowse: { _ in }
+            selection: selection, showInBrowse: { _ in }
         )
     }
 }
@@ -308,7 +308,7 @@ private struct StatsGalleryReviewsBox: View {
             figure: StatsBoxFigure(value: time ? "103 hr, 4 min" : "41,233 reviews", sentence: "23 days in a row"),
             data: data, size: .lead,
             figures: [.init(label: "Days Studied", value: "318 of 330"), .init(label: "Average a Day", value: "125"), .init(label: "Average on Days Studied", value: "130")],
-            selection: $selection, open: {}, showInBrowse: { _ in }
+            selection: $selection, showInBrowse: { _ in }
         ) {
             HStack(spacing: Spacing.xSmall) {
                 Picker(selection: $byAnswer) {
@@ -398,7 +398,7 @@ private struct StatsGallerySelection: View {
                         figure: StatsBoxFigure(value: "41,233 reviews", sentence: "23 days in a row"),
                         data: samples.reviewsByType(browsable: true), size: .lead,
                         figures: [.init(label: "Days Studied", value: "318 of 330"), .init(label: "Average a Day", value: "125")],
-                        selection: $reviews, open: {}, showInBrowse: { _ in }
+                        selection: $reviews, showInBrowse: { _ in }
                     )
                 },
                 .regular {
@@ -407,7 +407,7 @@ private struct StatsGallerySelection: View {
                         figure: StatsBoxFigure(value: "90.4%", sentence: "Desired retention 90%"),
                         data: samples.retention,
                         figures: [.init(label: "Remembered", value: "37,277"), .init(label: "Forgotten", value: "3,956")],
-                        selection: $retention, open: {}
+                        selection: $retention
                     )
                 },
                 .regular {
@@ -416,7 +416,7 @@ private struct StatsGallerySelection: View {
                         figure: StatsBoxFigure(value: "2,904", sentence: "128 remaining today · 96 tomorrow"),
                         data: samples.reviewsDue,
                         figures: [.init(label: "Overdue", value: "42"), .init(label: "Due Tomorrow", value: "96")],
-                        selection: $due, open: {}, showInBrowse: { _ in }
+                        selection: $due, showInBrowse: { _ in }
                     )
                 },
                 .regular {
@@ -425,7 +425,7 @@ private struct StatsGallerySelection: View {
                         figure: StatsBoxFigure(value: "3,512 cards", sentence: "Hover, not pinned: no Show in Browse"),
                         data: samples.knowledge,
                         figures: [.init(label: "Studied", value: "3,950"), .init(label: "Likely Forgotten", value: "438")],
-                        selection: $knowledge, open: {}
+                        selection: $knowledge
                     ) { StatsBoxMarker.estimated }
                 },
             ])
