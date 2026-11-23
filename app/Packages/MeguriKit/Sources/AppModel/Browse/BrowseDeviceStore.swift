@@ -16,6 +16,8 @@ nonisolated public struct BrowseDeviceState: Codable, Equatable, Sendable {
     /// The suggestions accepted, newest first (`search/editing-services`
     /// D6.5 step 4); nil before the first.
     public var recentSuggestions: [String]?
+    /// The inspector's own (U273, `browser/inspector` I8, V12); nil before.
+    public var inspector: BrowseInspectorDevice?
 
     public init(runText: String? = nil, notesMode: Bool? = nil, folded: Set<BrowseSidebarSection> = BrowseSidebarSection.foldedByDefault,
                 showsAllTags: Bool = false) {

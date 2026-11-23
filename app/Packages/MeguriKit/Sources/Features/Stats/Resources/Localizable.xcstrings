@@ -1,12 +1,158 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "stats.activity.inARow %lld %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@days@"
+          },
+          "substitutions": {
+            "days": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ day in a row"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ days in a row"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "stats.activity.longest %@ %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Longest streak %1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "stats.activity.noStreak": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No streak today"
+          }
+        }
+      }
+    },
+    "stats.activity.showAllYears": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show All Years"
+          }
+        }
+      }
+    },
+    "stats.activity.showLess": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Less"
+          }
+        }
+      }
+    },
+    "stats.activity.studiedThisYear %@ %lld %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "studied %1$@ of %#@days@"
+          },
+          "substitutions": {
+            "days": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%3$@ day this year"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%3$@ days this year"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "stats.activity.today %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Today, %@"
+          }
+        }
+      }
+    },
+    "stats.activity.totalFull %lld %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "· %#@reviews@"
+          },
+          "substitutions": {
+            "reviews": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ review"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ reviews"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "stats.activity.totalNumber %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "· %@"
           }
         }
       }
@@ -39,6 +185,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "stats.activity.yourLongest %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your longest streak · %@"
           }
         }
       }
@@ -685,16 +841,6 @@
         }
       }
     },
-    "stats.figure.allReviews": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "All Reviews"
-          }
-        }
-      }
-    },
     "stats.figure.averageADay": {
       "localizations": {
         "en": {
@@ -755,16 +901,6 @@
         }
       }
     },
-    "stats.figure.currentStreak": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Current Streak"
-          }
-        }
-      }
-    },
     "stats.figure.dailyLoad": {
       "localizations": {
         "en": {
@@ -781,16 +917,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Days Studied"
-          }
-        }
-      }
-    },
-    "stats.figure.daysStudiedThisYear": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Days Studied This Year"
           }
         }
       }
@@ -831,16 +957,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Likely Forgotten"
-          }
-        }
-      }
-    },
-    "stats.figure.longestStreak": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Longest Streak"
           }
         }
       }
@@ -1139,6 +1255,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ a day on average"
+          }
+        }
+      }
+    },
+    "stats.jump": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go to Section"
           }
         }
       }

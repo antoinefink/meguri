@@ -62,6 +62,8 @@ Ids U98, U99, U101, U103 and U104 are the parent plan's. U288 onwards are new. "
 
 Progress (2026-11-22): U98 is done (PR #125), U99 is done (PR #126), U101 is done (PR #127). U289 is in progress, and so are U104 and U288. The other units have not started.
 
+Progress (2026-11-23): U304 is in review (PR #162): the narrow page, the Statistics tab on the iPhone and the Duo (with `StatsRollout` on there too), Activity's recent lines with Show All Years (the coordinator's decision of 2026-11-23) and Activity's headline and year totals on the grid on every device (the owner's Option B).
+
 ### Lane A: core reads
 
 | Unit | Scope | Spec sections | Side | Verify | Must not touch |

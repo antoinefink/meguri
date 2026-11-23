@@ -2,8 +2,8 @@
 import AppModel
 import SwiftUI
 
-/// The tab layout (R3, R18, R19, R23), at compact width: Decks, Browse,
-/// Stats and Settings, each with its own `NavigationStack`. A review covers
+/// The tab layout (R3, R18, R19, R23), at compact width: Decks, Statistics,
+/// Browse and Settings (N25.1), each with its own `NavigationStack`. A review covers
 /// the whole screen, tab bar included, for the whole session. Every piece of
 /// state lives in `AppNavigation`, so the sidebar layout can take over at
 /// any moment (R5).
@@ -25,9 +25,7 @@ struct CompactRootView: View {
         // The setter also runs when the selected tab is tapped again: that
         // pops its stack, then scrolls its root to the top (R19).
         TabView(selection: Binding(get: { navigation.compactTab }, set: { navigation.selectTab($0) })) {
-            // Statistics' tab waits for its compact page (U304), whatever the sidebar shows.
-            ForEach(CompactTab.allCases.filter { features.availableSections.contains($0.section) && ($0 != .stats || features.statsTab) },
-                    id: \.self) { tab in
+            ForEach(tabs, id: \.self) { tab in
                 Tab(value: tab) {
                     stack(tab)
                 } label: {
@@ -40,10 +38,6 @@ struct CompactRootView: View {
             }
         }
         .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width } action: { isUpright = $0 }
-        // Statistics has no tab yet (U304): a window that narrows on it shows Decks.
-        .onChange(of: navigation.section == .stats && !features.statsTab, initial: true) { _, orphaned in
-            if orphaned { navigation.select(.section(.home)) }
-        }
         // N23.1: the status panel's sheet opens at its measured height; the panel is
         // measured here, out of sight, not in the toolbar item (N23.6).
         .background { features.syncPanelMeasure?() }
@@ -58,6 +52,14 @@ struct CompactRootView: View {
                 // Sheets over the review (Add, R90) present from the cover.
                 .modifier(PresentationHost(navigation: navigation, features: features, configuration: configuration, isActive: true))
         }
+    }
+
+    /// The tab bar's tabs, in N25.1's order (Decks, Statistics, Browse, Settings): those of the
+    /// sections this device offers, and of those only the ones shown now. With no collection
+    /// (first run, N18.3) Statistics, like Browse, reads none, so its tab is not offered (S12.1);
+    /// the shell then shows Decks.
+    private var tabs: [CompactTab] {
+        CompactTab.allCases.filter { features.availableSections.contains($0.section) && features.sectionShown($0.section) }
     }
 
     /// Unfolded and held wide, Decks shows the list beside the deck. Held tall the
@@ -130,8 +132,9 @@ struct CompactRootView: View {
         // N23.6: every screen of the Decks stack (the list, a deck page, a subdeck's)
         // puts the sync button first in its own trailing group with search and Add, so
         // the system keeps it in that group: never a separate item, which it moved
-        // to the bottom when the large title scrolled away.
-        .environment(\.syncStatusItem, tab == .decks ? features.syncStatus?() : nil)
+        // to the bottom when the large title scrolled away. Statistics puts it first in
+        // its trailing group too, before the Jump menu (N25.2, as on the iPad and the Mac).
+        .environment(\.syncStatusItem, tab == .decks || tab == .stats ? features.syncStatus?() : nil)
     }
 }
 

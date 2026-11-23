@@ -64,6 +64,9 @@ struct BrowseTable: View {
             // or a row outside it, which a secondary click outlines).
             .contextMenu(forSelectionType: Int.self) { rows in
                 BrowseRowMenu(model: model, rows: rows)
+            } primaryAction: { _ in
+                // N21.3: Return or a double click on a row shows the inspector.
+                model.inspector.show()
             }
             .focused($focused)
             // Another handle shown is another table: no diff of its rows with the last list's.

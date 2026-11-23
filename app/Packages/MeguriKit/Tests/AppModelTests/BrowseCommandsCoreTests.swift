@@ -15,7 +15,8 @@ extension ReviewCollectionStartupTests {
             @MainActor func row(_ index: Int) -> BrowseShownRow? { results.row(at: index) }
             @MainActor func pick(_ rows: Set<Int>, sourceLocation: SourceLocation = #_sourceLocation) async {
                 results.select(rows)
-                await waitFor({ commands.facts?.rows == rows.count && commands.facts?.notetypes != nil && !commands.busy },
+                // The core's counts of these rows, not those of the rows chosen before.
+                await waitFor({ commands.factsRead != nil && commands.factsRead == results.target() && !commands.busy },
                                  sourceLocation: sourceLocation)
             }
             @MainActor func undoTitle(_ title: String, sourceLocation: SourceLocation = #_sourceLocation) async {

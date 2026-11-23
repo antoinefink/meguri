@@ -62,6 +62,19 @@ public final class StatsPageModel {
     /// reading every box.
     public private(set) var boxesVersion = 0
 
+    /// The narrow page's Activity grid shows every year (Show All Years) rather than its recent
+    /// lines; kept per device, never synced or written to the collection (S17). Observed on its
+    /// own: only the Activity box reads it.
+    public private(set) var activityShowsAllYears = false
+
+    /// Show All Years or Show Less (the coordinator's decision of 2026-11-23, pending the owner's
+    /// look): the device keeps the choice for the next page.
+    public func setActivityShowsAllYears(_ value: Bool) {
+        guard value != activityShowsAllYears else { return }
+        activityShowsAllYears = value
+        store.saveActivityAllYears(value)
+    }
+
     /// The toolbar's controls respond (S12.1, S12.2 disable them).
     public var controlsEnabled: Bool { state != .noCollection && state != .noCards }
 
@@ -146,6 +159,7 @@ public final class StatsPageModel {
         self.calendar = calendar
         self.locale = locale
         self.selection = selection ?? store.load()
+        activityShowsAllYears = store.loadActivityAllYears()
         rebuild()
     }
 
