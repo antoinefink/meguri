@@ -1152,6 +1152,7 @@ fn selection_counts_take_b1_targets_home_decks_and_both_buried_queues() {
             buried: 2,
             decks: 2,
             deck: None,
+            deck_ids: vec![DeckId(1), DeckId(888)],
             notetypes: vec![fx.kind],
         }
     );
@@ -1177,6 +1178,7 @@ fn selection_counts_take_b1_targets_home_decks_and_both_buried_queues() {
             buried: 0,
             decks: 0,
             deck: None,
+            deck_ids: Vec::new(),
             notetypes: vec![fx.kind],
         }
     );
@@ -1196,6 +1198,110 @@ fn selection_counts_take_b1_targets_home_decks_and_both_buried_queues() {
     cancelled.cancel();
     assert_eq!(
         selection_counts(&fx.session.selection(by_card, 0, vec![0..6]), &cancelled),
+        Err(BrowseError::Engine(EngineError::Cancelled))
+    );
+}
+
+/// U276: the reads of a selection besides its counts, in the core: V7's
+/// Select Sibling Cards (the handle's rows of the selected rows' notes, and
+/// no row the query does not find), V8.2's cards of a Delete (every card of
+/// the target notes, those the query did not find included) and V8.1's
+/// Remove Tags suggestions (the tags the target notes store, each once
+/// whatever its case, sorted by `unicase`).
+#[test]
+fn selection_reads_give_sibling_rows_the_cards_of_the_target_notes_and_their_tags() {
+    use meguri_engine::browse::{selection_note_cards, selection_tags};
+    let fx = fixture(3);
+    let Fx { h, kind, notes, cards, .. } = fx;
+    let Harness { dir, path, engine, .. } = h;
+    engine.close().unwrap();
+    let clock = meguri_model::clock::StepClock::new(common::NOW_MS, meguri_model::clock::UtcOffset::UTC, "UTC");
+    let note = |k: usize| meguri_storage::raw::SqlValue::Integer(notes[k].0);
+    common::day::raw(
+        &path,
+        &clock,
+        &[
+            ("UPDATE notes SET tags = ' Verb::past idiom ' WHERE id = ?1", vec![note(0)]),
+            ("UPDATE notes SET tags = ' VERB  zeta idiom ' WHERE id = ?1", vec![note(1)]),
+            ("UPDATE notes SET tags = '' WHERE id = ?1", vec![note(2)]),
+        ],
+    );
+    let h = Harness::open_path(dir, path);
+    let (session, events) = session(&h);
+    let fx = Fx {
+        h,
+        kind,
+        notes,
+        cards,
+        session,
+        events,
+    };
+    let token = CancelToken::new();
+    // The note of each card: the fixture adds two cards per note, in order.
+    let note_of = |card: i64| fx.cards.iter().position(|c| c.0 == card).map(|at| fx.notes[at / 2].0).unwrap();
+
+    // Every card: the siblings of row 0 are the rows of its note, wherever
+    // the sort put them.
+    let (every, count) = fx.search("", SearchMode::Cards, asc("cardDue"));
+    assert_eq!(count, 6);
+    let ids = fx.ids(every);
+    let first = note_of(ids[0]);
+    let mut expected: Vec<Range<u64>> = Vec::new();
+    for (index, card) in ids.iter().enumerate() {
+        if note_of(*card) == first {
+            let index = index as u64;
+            match expected.last_mut() {
+                Some(last) if last.end == index => last.end += 1,
+                _ => expected.push(index..index + 1),
+            }
+        }
+    }
+    let siblings = fx.session.selection(every, 0, vec![0..1]).sibling_rows().unwrap();
+    assert_eq!(siblings, expected);
+    assert_eq!(siblings.iter().map(|range| range.end - range.start).sum::<u64>(), 2);
+
+    // One card of each note: a row's sibling is not in the results, so it
+    // selects only itself, yet a Delete of it removes both cards.
+    let (firsts, count) = fx.search("card:1", SearchMode::Cards, asc("noteFld"));
+    assert_eq!(count, 3);
+    let one = fx.session.selection(firsts, 0, vec![1..2]);
+    assert_eq!(one.sibling_rows().unwrap(), vec![1..2]);
+    assert_eq!(selection_note_cards(&one, &token).unwrap(), 2);
+    assert_eq!(selection_note_cards(&fx.session.selection(firsts, 0, vec![0..3]), &token).unwrap(), 6);
+
+    // The tags of the target notes: n0000 and n0001 (rows 0 and 1 by
+    // Sort Field), each once whatever its case; the third note has none.
+    let tags = selection_tags(&fx.session.selection(firsts, 0, vec![0..2]), &token).unwrap();
+    assert_eq!(tags.len(), 4, "{tags:?}");
+    assert_eq!(
+        tags.iter().map(|tag| tag.to_lowercase()).collect::<Vec<_>>(),
+        ["idiom", "verb", "verb::past", "zeta"]
+    );
+    assert_eq!(selection_tags(&fx.session.selection(firsts, 0, vec![2..3]), &token).unwrap(), Vec::<String>::new());
+
+    // Notes mode: the notes' cards; siblings are the selection itself.
+    let (by_note, count) = fx.search("", SearchMode::Notes, asc("noteFld"));
+    assert_eq!(count, 3);
+    let two = fx.session.selection(by_note, 0, vec![0..1, 2..3]);
+    assert_eq!(selection_note_cards(&two, &token).unwrap(), 4);
+    assert_eq!(two.sibling_rows().unwrap(), vec![0..1, 2..3]);
+
+    // A stale revision, rows past the end, a superseded handle and a
+    // cancelled token are refused.
+    assert_eq!(
+        fx.session.selection(by_note, 4, vec![0..1]).sibling_rows(),
+        Err(BrowseError::StaleRevision { current: 0 })
+    );
+    assert_eq!(fx.session.selection(by_note, 0, vec![2..5]).sibling_rows(), Err(BrowseError::OutOfRange));
+    assert_eq!(
+        selection_note_cards(&fx.session.selection(by_note, 4, vec![0..1]), &token),
+        Err(BrowseError::StaleRevision { current: 0 })
+    );
+    assert_eq!(fx.session.selection(every, 0, vec![0..1]).sibling_rows(), Err(BrowseError::UnknownHandle));
+    let cancelled = CancelToken::new();
+    cancelled.cancel();
+    assert_eq!(
+        selection_tags(&fx.session.selection(by_note, 0, vec![0..3]), &cancelled),
         Err(BrowseError::Engine(EngineError::Cancelled))
     );
 }

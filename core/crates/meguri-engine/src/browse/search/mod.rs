@@ -17,6 +17,7 @@ mod page;
 mod registry;
 mod selection;
 mod selection_counts;
+mod selection_reads;
 mod worker;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -39,6 +40,7 @@ pub use one_shot::search_ids;
 pub use page::{QaCells, QaWhich};
 pub use selection::{MapFrom, Mapped, Selection};
 pub use selection_counts::{SelectionCounts, selection_counts};
+pub use selection_reads::{selection_note_cards, selection_tags};
 pub(crate) use registry::{SearchRegistry, bridge};
 pub(crate) use worker::{OWNER, cells, context};
 

@@ -16,5 +16,7 @@ pub use meguri_search::browser::qa::{Answer, Question};
 pub use counts::FilterCounts;
 pub use name_index::NameIndexProvider;
 pub use rows::{Row, RowFailure, RowRequest, RowResult, rows};
-pub use search::{Duplicates, DuplicatesTarget, SelectionCounts, find_duplicates, selection_counts};
+pub use search::{
+    Duplicates, DuplicatesTarget, SelectionCounts, find_duplicates, selection_counts, selection_note_cards, selection_tags,
+};
 pub(crate) use rows::rows_in;

@@ -661,6 +661,15 @@ impl BrowseSelection {
         callback::enter("BrowseSelection::resolve");
         Ok(self.selection.resolve(target.into())?)
     }
+
+    /// V7's Select Sibling Cards: the handle's rows whose note is a selected
+    /// row's, as ascending merged ranges of the handle at the selection's
+    /// revision (in notes mode the selection's own rows). Read from the
+    /// handle in memory; refused as `resolve` is.
+    pub fn sibling_rows(&self) -> Result<Vec<BrowseIndexRange>, CoreError> {
+        callback::enter("BrowseSelection::sibling_rows");
+        Ok(self.selection.sibling_rows()?.into_iter().map(Into::into).collect())
+    }
 }
 
 /// One Browse session (H1, H2). Dropping it, or `close`, cancels its
