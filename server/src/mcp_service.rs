@@ -90,6 +90,9 @@ impl McpService {
             .map_err(|e| e.mcp_storage_detail(Detail::AuthorityStorage))?;
         // Metadata resolution has finished. Wait without a connection, a files
         // worker permit or a SQLite transaction; transport admission stays held.
+        // Single lock order: MCP queue, publication barrier, collection state.
+        let queue = tokio::time::timeout(Duration::from_secs(6), barrier.enter_mcp()).await
+            .map_err(|_| mcp::busy().with_mcp_detail(Detail::McpQueue))?;
         let gate_busy = || mcp::busy().with_mcp_detail(Detail::PublicationGate);
         let guard = if write {
             barrier.try_enter().ok_or_else(gate_busy)?
@@ -105,7 +108,7 @@ impl McpService {
         self.service.metadata.files(move |_| {
             // All ownership moves into this worker before its first await can
             // be cancelled. It cannot release the gate before SQLite finishes.
-            let _publication = (barrier, guard);
+            let _publication = (barrier, guard, queue);
             check_oauth(&root, &original, write)?;
             let path = root.collection_path(original.account_id())
                 .map_err(|e| e.mcp_storage_detail(Detail::CollectionPath))?;
@@ -117,7 +120,7 @@ impl McpService {
                 .and_then(|name| name.to_str()).ok_or_else(|| Error::new("storage_unavailable").with_mcp_detail(Detail::CollectionPath))?.to_owned();
             let context = Context { account: original.account_id().into(), publication: original.publication_context(&publication) };
             let held = Arc::new(HeldPublication { root, path: path.clone(), _pin: pin,
-                _barrier: _publication.0, _guard: _publication.1 });
+                _barrier: _publication.0, _guard: _publication.1, _queue: _publication.2 });
             let authority = CollectionAuthority { original, context, held, sessions, write,
                 #[cfg(any(test, feature = "test-hooks"))]
                 probe,
@@ -136,6 +139,7 @@ struct HeldPublication {
     _pin: ReadPin,
     _barrier: Arc<PublicationBarrier>,
     _guard: OwnedMutexGuard<()>,
+    _queue: OwnedMutexGuard<()>,
 }
 
 struct CollectionAuthority {

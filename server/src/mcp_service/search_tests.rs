@@ -346,8 +346,8 @@ async fn builder_scan_holds_only_snapshot_pin_and_root_not_barrier_or_metadata_s
     }));
     let result = search(&bridge, &f, SearchInput { tag:Some("strasse".into()), ..Default::default() }).await.unwrap();
     finished(start).await;
-    assert!(result.notes.is_empty());
-    assert!(result.next_cursor.is_some());
+    assert_eq!(ids(&result),["1000","1001"]);
+    assert!(result.next_cursor.is_none());assert!(!result.scan_incomplete);
     let held = gate.try_enter().expect("scan must release the request publication barrier");
     let slots = f.service.metadata.test_hold_capacity();
     assert_eq!(slots.len(), 8, "builder must not acquire a metadata/files permit");
@@ -381,8 +381,8 @@ async fn reset_reusing_initial_path_and_stamps_fences_inflight_index_cursors_and
         }
         BuildBoundary::Completed => { let _ = ended.lock().unwrap().take().unwrap().send(()); }
     }));
-    let old_page = search(&bridge, &f, SearchInput { tag:Some("strasse".into()), ..Default::default() }).await.unwrap();
-    assert!(old_page.notes.is_empty());
+    let old_page = search(&bridge, &f, SearchInput { tag:Some("strasse".into()), limit:Some(1), ..Default::default() }).await.unwrap();
+    assert_eq!(ids(&old_page),["1000"]);
     let old_cursor = old_page.next_cursor.unwrap();
     finished(start).await;
     let stamp = f.snapshot();
@@ -409,7 +409,7 @@ async fn reset_reusing_initial_path_and_stamps_fences_inflight_index_cursors_and
         db.execute("UPDATE notes SET flds='after reset',tags=' reset-tag ' WHERE id=1",[]).unwrap();
     }
     assert_eq!((f.snapshot().3,f.snapshot().4), (stamp.3,stamp.4));
-    assert_eq!(search(&bridge, &f, SearchInput { tag:Some("strasse".into()), cursor:Some(old_cursor), ..Default::default() }).await.unwrap_err().code, "conflict");
+    assert_eq!(search(&bridge, &f, SearchInput { tag:Some("strasse".into()), limit:Some(1), cursor:Some(old_cursor), ..Default::default() }).await.unwrap_err().code, "conflict");
     let new_note = search(&bridge, &f, SearchInput { note_id:Some("1001".into()), ..Default::default() }).await.unwrap().notes.remove(0);
     assert_eq!(new_note.fields, old_note.fields);
     assert_ne!(new_note.revision, old_note.revision, "epoch must bind identical persisted state");
@@ -480,18 +480,8 @@ async fn unavailable_text_or_tag_facet_uses_original_scan_and_other_usable_facet
             SearchInput {query:Some("[a.b]".into()),..Default::default()}
         };
         let first = search(&bridge,&f,input()).await.unwrap();
-        assert!(first.notes.is_empty());
-        assert!(first.next_cursor.is_some());
-        let mut cursor=first.next_cursor;
-        let mut seen=Vec::new();
-        for _ in 0..4 {
-            let page=search(&bridge,&f,SearchInput {cursor,..input()}).await.unwrap();
-            seen.extend(page.notes.into_iter().map(|n|n.note_id));
-            cursor=page.next_cursor;
-            if cursor.is_none() { break; }
-        }
-        assert!(cursor.is_none());
-        assert_eq!(seen,["1000","1001"]);
+        assert_eq!(ids(&first),["1000","1001"]);
+        assert!(first.next_cursor.is_none());assert!(!first.scan_incomplete);
         // Available deck membership still wins over the unavailable facet.
         let page=search(&bridge,&f,SearchInput {deck_id:Some("2".into()),..input()}).await.unwrap();
         assert_eq!(ids(&page),["1000","1001"]);
@@ -514,7 +504,7 @@ async fn indexed_deck_combination_empty_progress_continues_through_cold_driver()
     let input=||SearchInput {deck_id:Some("2".into()),tag:Some("strasse".into()),query:Some("[a.b]".into()),..Default::default()};
     let first=cached_search(&bridge,&f,input()).await;
     assert!(first.notes.is_empty());
-    assert!(first.next_cursor.is_some());
+    assert!(first.next_cursor.is_some());assert!(first.scan_incomplete);
     let a=f.service.mcp_authority(&f.token,false).await.unwrap();
     f.service.mcp_search_cache.invalidate(a.account_id());
     let done=completion(&f);

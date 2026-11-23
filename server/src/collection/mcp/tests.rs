@@ -10,6 +10,9 @@ use std::{cell::Cell, os::unix::fs::OpenOptionsExt, path::PathBuf};
 #[path = "tests/size_scaling.rs"]
 mod size_scaling;
 
+#[path = "tests/streamed_search.rs"]
+mod streamed_search;
+
 struct Access { context: Context, fail: Cell<bool>, checks: Cell<usize>, admissions: Cell<usize> }
 impl Access {
     fn new() -> Self { Self { context:Context { account:"generated-account".into(),publication:"generated-publication".into() },fail:Cell::new(false),checks:Cell::new(0),admissions:Cell::new(0) } }
@@ -212,9 +215,8 @@ fn paging_advances_examined_candidates_and_never_skips_a_match_for_fit() {
     let f=Fixture::new();
     for i in 0..205 { f.create(if i==204 {"needle"} else {"other"},vec![],1000+i).unwrap(); }
     let first=f.backend.search_notes(&f.path,&f.access,SearchInput {query:Some("NEEDLE".into()),..Default::default()}).unwrap();
-    assert!(first.notes.is_empty());assert!(first.next_cursor.is_some());
-    let second=f.backend.search_notes(&f.path,&f.access,SearchInput {query:Some("NEEDLE".into()),cursor:first.next_cursor,..Default::default()}).unwrap();
-    assert_eq!(second.notes.len(),1);assert!(second.next_cursor.is_none());
+    assert_eq!(first.notes.len(),1);assert_eq!(first.notes[0].note_id,"1204");
+    assert!(first.next_cursor.is_none());assert!(!first.scan_incomplete);
     // JSON escaping makes three of these records exceed a page's byte budget.
     let g=Fixture::new();let text="\"".repeat(120000);
     for i in 0..3 { g.create(&text,vec![],2000+i).unwrap(); }
@@ -279,7 +281,7 @@ fn deck_candidates_keep_empty_combined_pages_resumable_and_fallback_local() {
         INSERT INTO cards SELECT n.id,n.id,2,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,0,flags,data FROM n CROSS JOIN cards WHERE cards.id=2001;").unwrap();
     let input=||SearchInput {deck_id:Some("2".into()),tag:Some("Chosen".into()),query:Some("NEEDLE [A.B] DECK:1".into()),..Default::default()};
     let first=f.backend.search_notes(&f.path,&f.access,input()).unwrap();
-    assert!(first.notes.is_empty());assert!(first.next_cursor.is_some());
+    assert!(first.notes.is_empty());assert!(first.next_cursor.is_some());assert!(first.scan_incomplete);
     let second=f.backend.search_notes(&f.path,&f.access,SearchInput {cursor:first.next_cursor,..input()}).unwrap();
     assert_eq!(second.notes.iter().map(|n|n.note_id.as_str()).collect::<Vec<_>>(),["2000","2002","2004"]);
     assert!(second.next_cursor.is_none());
@@ -320,7 +322,7 @@ fn deck_candidates_keep_empty_combined_pages_resumable_and_fallback_local() {
             tx.commit().unwrap();
         }
         let page=f.backend.search_notes(&f.path,&f.access,input()).unwrap();
-        assert!(page.notes.is_empty());assert!(page.next_cursor.is_some());
+        assert!(page.notes.is_empty());assert!(page.next_cursor.is_some());assert!(page.scan_incomplete);
         let mut cursor=page.next_cursor;let mut seen=Vec::new();
         for _ in 0..5 {
             let page=f.backend.search_notes(&f.path,&f.access,SearchInput {cursor,..input()}).unwrap();

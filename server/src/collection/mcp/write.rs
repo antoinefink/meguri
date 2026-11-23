@@ -216,7 +216,7 @@ impl Backend {
         let note=stored_note(c,id)?.ok_or_else(unsupported)?;
         // The row must remain readable with complete fields/tags after saving.
         let result=self.note_result(context,&note,nt)?;
-        let single=SearchResult { notes:vec![result],next_cursor:None };Self::result_json(&single)?;
+        let single=SearchResult { notes:vec![result],next_cursor:None,scan_incomplete:false };Self::result_json(&single)?;
         Ok(WriteResult { note_id:id.to_string(),revision:single.notes.into_iter().next().ok_or_else(unsupported)?.revision })
     }
 }
