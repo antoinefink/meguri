@@ -238,7 +238,7 @@ private struct BrowseKeys: View {
             #if DEBUG
             focus.onFocus = { responder = $0 }
             #endif
-            focus.start(results: model.results)
+            focus.start(model: model)
         }
         .onDisappear { focus.stop() }
     }
@@ -251,26 +251,30 @@ private struct BrowseKeys: View {
 /// responder, its own keys, the menu bar's Select All and Delete Note, and
 /// its primary action (Return opens the inspector, N21.3) all work natively.
 /// Exception to the native contract, for that functional need: a local
-/// monitor of mouse-downs, live only while Browse shows; it never consumes
-/// an event.
+/// monitor of mouse-downs (never consumed) and of ⌘⌫ (below), live only
+/// while Browse shows.
 @MainActor private final class BrowseClickFocus {
     private var token: Any?
     var onFocus: ((String) -> Void)?
 
-    func start(results: BrowseResults) {
+    func start(model: BrowseModel) {
         stop()
-        token = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self, weak results] event in
+        let results = model.results
+        token = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self, weak results, weak model] event in
             // Local monitors run on the main thread; the view is focused once
             // the click itself has been handled.
+            if event.type == .keyDown {
+                return MainActor.assumeIsolated { Self.deletesNotes(event, model) } ? nil : event
+            }
             MainActor.assumeIsolated {
-                guard let window = event.window, window.attachedSheet == nil, let root = window.contentView else { return }
-                let point = event.locationInWindow
-                let candidates: [NSTableView?] = [BrowseResponder.resultsTable(in: root), BrowseResponder.sidebarList(in: root)]
-                let hit = candidates.compactMap { $0 }.first { view in
-                    let area = view.enclosingScrollView ?? view
-                    return area.convert(area.bounds, to: nil).contains(point)
-                }
-                guard let view = hit else { return }
+                // The view under the click (the window's frame view hit-tests in window
+                // coordinates, the toolbar included), then the table view holding it: a
+                // click in the toolbar's search field over the table is not the table's.
+                guard let window = event.window, window.attachedSheet == nil,
+                      let frame = window.contentView?.superview ?? window.contentView,
+                      var view: NSView = frame.hitTest(event.locationInWindow) else { return }
+                while !(view is NSTableView), let parent = view.superview { view = parent }
+                guard let view = view as? NSTableView else { return }
                 let isTable = view.headerView != nil
                 DispatchQueue.main.async { [weak self, weak results] in
                     MainActor.assumeIsolated {
@@ -282,6 +286,18 @@ private struct BrowseKeys: View {
             }
             return event
         }
+    }
+
+    /// ⌘⌫ while the results table has the keys: Note › Delete Note (N21.8).
+    /// With the table the first responder and the menu item enabled, the key
+    /// still did not reach the menu item in the VM (2026-11-23), so it is
+    /// taken here; ⌘A, Return and the arrows take their native paths.
+    private static func deletesNotes(_ event: NSEvent, _ model: BrowseModel?) -> Bool {
+        guard let model, let window = event.window, window.attachedSheet == nil, event.keyCode == 51,
+              event.modifierFlags.intersection([.command, .option, .shift, .control]) == .command,
+              BrowseResponder.tableIsFirst(window.firstResponder), model.commands.state(.delete).enabled else { return false }
+        model.commands.perform(.delete)
+        return true
     }
 
     func stop() {

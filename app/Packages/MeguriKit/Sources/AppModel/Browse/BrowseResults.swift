@@ -760,12 +760,11 @@ public final class BrowseResults {
         return kept.index
     }
 
-    /// Debug builds: the last steps of the kept scroll, for the UI suites.
+    /// The last steps of the kept scroll (eight short lines), which Debug
+    /// builds show to the UI suites.
     public private(set) var scrollTrace: [String] = []
     public func trace(_ step: @autoclosure () -> String) {
-        #if DEBUG
         scrollTrace = Array((scrollTrace + [step()]).suffix(8))
-        #endif
     }
 
     /// The Mac: the kept row its table view brings back itself, once.

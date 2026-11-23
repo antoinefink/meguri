@@ -18,8 +18,8 @@ final class MacBrowseInspectorTests: XCTestCase {
     private func inspector(appearance: String) throws {
         let (app, bundle) = try launch(appearance: appearance)
         try openBrowse(app, bundle)
-        let table = app.tables["browse.results.table"]
-        XCTAssertTrue(waitUntil { table.tableRows.count > 3 }, "rows: \(table.tableRows.count)")
+        let table = app.outlines.matching(identifier: "browse.results.table").firstMatch
+        XCTAssertTrue(waitUntil { table.outlineRows.count > 3 }, "rows: \(table.outlineRows.count)")
 
         // N21.3: the toggle is the toolbar's last item, after the Add menu.
         let toggle = element(app, "browse.toolbar.inspector"), add = element(app, "home.collection.add")
@@ -28,7 +28,7 @@ final class MacBrowseInspectorTests: XCTestCase {
 
         // One card: its note in the pane.
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
+        press(table.outlineRows.element(boundBy: 0))
         let note = element(app, "browse.inspector.note")
         XCTAssertTrue(note.waitForExistence(timeout: 10), "the Note tab")
         XCTAssertTrue(element(app, "browse.inspector.deck").exists && element(app, "browse.inspector.type").exists)
@@ -70,7 +70,7 @@ final class MacBrowseInspectorTests: XCTestCase {
 
         // V12, W2: choosing another row saves the edit first, one "Edit Note" step.
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 1).click()
+        press(table.outlineRows.element(boundBy: 1))
         try app.bringToFront(bundleIdentifier: bundle)
         app.menuBars.menuBarItems["Edit"].click()
         let undo = app.menuItems["Undo Edit Note"]
@@ -88,8 +88,8 @@ final class MacBrowseInspectorTests: XCTestCase {
 
         // Several rows: the summary and the commands.
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 2).click()
-        XCUIElement.perform(withKeyModifiers: .shift) { table.tableRows.element(boundBy: 5).click() }
+        press(table.outlineRows.element(boundBy: 2))
+        XCUIElement.perform(withKeyModifiers: .shift) { press(table.outlineRows.element(boundBy: 5)) }
         let title = element(app, "browse.inspector.summary.title")
         XCTAssertTrue(title.waitForExistence(timeout: 10), "V7's summary")
         XCTAssertTrue(title.label.contains("Selected"), title.label)
@@ -98,8 +98,8 @@ final class MacBrowseInspectorTests: XCTestCase {
 
         // No selection.
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 2).click()
-        XCUIElement.perform(withKeyModifiers: .command) { table.tableRows.element(boundBy: 2).click() }
+        press(table.outlineRows.element(boundBy: 2))
+        XCUIElement.perform(withKeyModifiers: .command) { press(table.outlineRows.element(boundBy: 2)) }
         XCTAssertTrue(element(app, "browse.inspector.empty").waitForExistence(timeout: 10), "No Selection")
         capture(app, "no-selection-\(appearance)")
 
@@ -108,10 +108,10 @@ final class MacBrowseInspectorTests: XCTestCase {
         let search = app.toolbars.searchFields.firstMatch.exists ? app.toolbars.searchFields.firstMatch : app.searchFields.element(boundBy: 1)
         search.click()
         app.typeText("png\r")
-        XCTAssertTrue(waitUntil { table.tableRows.count > 0 })
+        XCTAssertTrue(waitUntil { table.outlineRows.count > 0 })
         sleep(1)
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
+        press(table.outlineRows.element(boundBy: 0))
         XCTAssertTrue(note.waitForExistence(timeout: 10))
         sleep(2)
         capture(app, "card-with-image-\(appearance)")
@@ -121,7 +121,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertTrue(waitUntil { !note.exists }, "the pane hid itself")
         capture(app, "narrow-hidden-\(appearance)")
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
+        press(table.outlineRows.element(boundBy: 0))
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(note.waitForExistence(timeout: 10), "Return shows it over the table")
         sleep(1)
@@ -147,10 +147,16 @@ final class MacBrowseInspectorTests: XCTestCase {
         return (app, bundle)
     }
 
+    /// A row is clicked at its point: XCTest's hit test reads a SwiftUI table's
+    /// rows as not hittable (SwiftUI's Table is an outline in the Mac's tree).
+    private func press(_ row: XCUIElement) {
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
+    }
+
     private func openBrowse(_ app: XCUIApplication, _ bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         element(app, "shell.root.sidebar.browse").click()
-        XCTAssertTrue(app.tables["browse.results.table"].waitForExistence(timeout: 20), "Browse's table")
+        XCTAssertTrue(app.outlines.matching(identifier: "browse.results.table").firstMatch.waitForExistence(timeout: 20), "Browse's table")
     }
 
     private func resize(_ app: XCUIApplication, bundle: String, to size: String) throws {
