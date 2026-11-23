@@ -34,12 +34,11 @@ const USAGE: &str = "usage: meguri-cli timing run <dir> --out <dir> [--scratch <
                      [--now <instant>] [--tz <zone>] [--repeat <n>]";
 
 /// The operations Meguri times, each through the entry point the app's
-/// bridge calls (T4.1). Every one starts from an open collection, and the
-/// bridge opens collections through `CoreHost::open` (U38), which does not
-/// exist yet: until it does, the table is empty and every operation is
-/// `unsupported`. An area unit adds its operation here once that entry
-/// point and the operation's own exist.
-static IMPLEMENTED: &[(Operation, &(dyn TimedOperation + Sync))] = &[];
+/// bridge calls (T4.1), on a collection opened through `CoreHost::open`
+/// (U38). Every other operation is `unsupported`. An area unit adds its
+/// operation here once its entry point exists.
+static IMPLEMENTED: &[(Operation, &(dyn TimedOperation + Sync))] =
+    &[(Operation::PackageApkgImport, &timing::ApkgImport)];
 
 fn implementation(op: Operation) -> Option<&'static dyn TimedOperation> {
     IMPLEMENTED

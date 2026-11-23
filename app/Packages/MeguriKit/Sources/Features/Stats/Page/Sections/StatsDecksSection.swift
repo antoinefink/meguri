@@ -174,10 +174,14 @@ struct StatsByDeckBox: View {
             }
         }
         .padding(.vertical, Spacing.xxSmall)
-        .padding(.horizontal, Spacing.xxSmall)
-        .background(hovered == row.id && !row.ownCards ? AnyShapeStyle(HierarchicalShapeStyle.quaternary) : AnyShapeStyle(Color.clear),
-                    in: Radius.rounded(Radius.small))
-        .padding(.horizontal, -Spacing.xxSmall)
+        // The hover fill reaches a little past the row without widening it (a wider row would
+        // push the box past its inset).
+        .background {
+            Radius.rounded(Radius.small)
+                .fill(hovered == row.id && !row.ownCards ? AnyShapeStyle(HierarchicalShapeStyle.quaternary)
+                      : AnyShapeStyle(Color.clear))
+                .padding(.horizontal, -Spacing.xxSmall)
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: spoken(row)))
         .accessibilityIdentifier("stats.box.byDeck.row.\(row.id)")

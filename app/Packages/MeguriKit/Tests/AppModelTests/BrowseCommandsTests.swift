@@ -315,6 +315,23 @@ import Testing
         // Coming back: the table first draws its first rows, then is brought back.
         for index in 0...30 { results.rowAppeared(index) }
         #expect(results.tableAppeared() == 325)
+        // Left at its top, the table comes back unscrolled: no row to centre.
+        results.tableSettled()
+        for index in 31...341 { results.rowDisappeared(index) }
+        for index in 0...30 { results.rowAppeared(index) }
+        for index in 0...30 { results.rowDisappeared(index) }
+        results.tableDisappeared()
+        #expect(results.tableAppeared() == 0)
+        // The Mac reports the rows its scroll view shows; then those decide.
+        results.tableSettled()
+        results.tableScrolled(first: 200, last: 230)
+        for index in 0...30 { results.rowAppeared(index) }
+        results.tableDisappeared()
+        #expect(results.tableAppeared() == 215)
+        results.tableSettled()
+        results.tableScrolled(first: 0, last: 30)
+        results.tableDisappeared()
+        #expect(results.tableAppeared() == 0)
     }
 
     // MARK: Saved searches (T13)

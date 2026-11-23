@@ -30,6 +30,30 @@ pub use archive::PackageFormat;
 pub use classify::{PackageClass, classify, classify_name};
 pub use session::{ImportSession, inspect};
 
+/// The most rows an import may bring: the package's notes and cards, and
+/// its review log when learning progress is included. An apply reads every
+/// text in pages, so its memory does not grow with what the rows store; it
+/// grows with their number (its own identity and decision per note, and the
+/// op's undo journal, which indexes every written row), and this bounds it
+/// (R1852).
+pub const MAX_ROWS: u64 = 2_000_000;
+
+/// What else a package may hold; with [`MAX_ROWS`] these keep an import's
+/// memory and time bounded whatever the file stores. Each is far above
+/// what a deck holds. A package past one is refused at the inspect, by
+/// aggregates, before any row is read.
+pub const LIMITS: meguri_storage::deck_package::DeckCandidateLimits = meguri_storage::deck_package::DeckCandidateLimits {
+    rows: MAX_ROWS,
+    guid_bytes: 255,
+    // A page of notes is `gather::NOTE_PAGE` of these at most.
+    note_bytes: 2 * 1024 * 1024,
+    card_data_bytes: 64 * 1024,
+    tag_uses: 4 * MAX_ROWS,
+    structure_rows: 10_000,
+    notetype_parts: 5000,
+    structure_bytes: 64 * 1024 * 1024,
+};
+
 /// What an import needs from its host besides the engine.
 #[derive(Clone)]
 pub struct ApkgContext {
@@ -112,7 +136,8 @@ pub struct LogEntry {
     /// The target note's id, or the package note's for `conflicting` and
     /// `missing_notetype`.
     pub note: i64,
-    /// Every field, reduced as I13 says.
+    /// Every field, reduced as I13 says; empty once the log's text budget
+    /// is spent (`ImportLog::fields_omitted`).
     pub fields: Vec<String>,
     /// For `conflicting`: the target note that holds the GUID.
     pub existing_id: Option<i64>,
@@ -135,6 +160,9 @@ pub enum LogCategory {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ImportLog {
     pub found_notes: u64,
+    /// Entries that carry no field text: the log holds 16 MiB of it in all
+    /// (R1852), and later entries keep their ids only.
+    pub fields_omitted: u64,
     pub new: Vec<LogEntry>,
     pub updated: Vec<LogEntry>,
     pub duplicate: Vec<LogEntry>,
@@ -201,12 +229,39 @@ pub struct ImportResult {
     pub undo_step: Option<&'static str>,
     pub log: ImportLog,
     pub counts: ImportCounts,
+    /// What the op reported about note type structure (I14.4).
+    pub structure: StructureSummary,
     /// The safety backup's name, when one was taken or reused (I14.4).
     pub safety_backup: Option<String>,
     /// The rows are committed and some media files are still being put in
     /// place by the journal's recovery (`MediaCommitPending`): never
     /// import again.
     pub media_pending: bool,
+}
+
+/// The structure report an import committed with (`engine/change-stream`
+/// S2.5, `sync/cloudkit-records` K19.1): its reason codes, the note types
+/// with a layout entry, the removed ones and the (old, new) type changes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StructureSummary {
+    /// 8 `apkg_apply` always; 3 `sort_field_changed`; 9 `notetypes_merged`.
+    pub reasons: Vec<u32>,
+    /// Per note type with a layout entry: its id and whether the entry is
+    /// the identity (names changed, positions kept).
+    pub layouts: Vec<(i64, bool)>,
+    pub removed: Vec<i64>,
+    pub type_changes: Vec<(i64, i64)>,
+}
+
+impl StructureSummary {
+    pub(crate) fn of(report: &meguri_storage::journal::StructureReport) -> StructureSummary {
+        StructureSummary {
+            reasons: report.reasons.iter().map(|reason| *reason as u32).collect(),
+            layouts: report.layouts.iter().map(|(id, layout)| (*id, layout.is_identity())).collect(),
+            removed: report.removed.iter().copied().collect(),
+            type_changes: report.type_changes.keys().copied().collect(),
+        }
+    }
 }
 
 /// J10: one field position whose content an update would drop.
@@ -313,6 +368,15 @@ pub enum ApkgImportError {
     },
     DeckTooDeep {
         name: String,
+    },
+    /// The package is past one of [`LIMITS`], which `what` names: refused
+    /// at the inspect before any row is read, or, for the rows with the
+    /// review log counted, at the start of an apply, before anything is
+    /// planned or staged.
+    TooLarge {
+        what: &'static str,
+        found: u64,
+        limit: u64,
     },
     SessionClosed,
     Cancelled,

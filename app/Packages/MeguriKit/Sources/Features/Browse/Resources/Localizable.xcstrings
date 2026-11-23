@@ -589,6 +589,16 @@
         }
       }
     },
+    "browse.command.unbury.none": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unbury"
+          }
+        }
+      }
+    },
     "browse.command.unbury.unknown": {
       "localizations": {
         "en": {
@@ -627,6 +637,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "browse.command.unsuspend.none": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unsuspend"
           }
         }
       }
@@ -2155,6 +2175,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "No Matches"
+          }
+        }
+      }
+    },
+    "browse.sidebar.row.removeHint": {
+      "comment": "VoiceOver hint on a selected Browse sidebar filter row: activating it again removes its filter.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activate again to remove this filter."
           }
         }
       }

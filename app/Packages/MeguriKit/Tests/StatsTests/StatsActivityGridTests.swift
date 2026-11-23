@@ -13,7 +13,8 @@ import Testing
     /// The fixture: today is Monday 2026-10-12 (day 0); reviews on days −3, −2 and −1, and
     /// 400 days back (H9's oldest review too); weeks start on Monday.
     static func activity() throws -> StatsActivity {
-        let box = try #require(Fixture.content(.activity, Fixture.presenter(Fixture.set())))
+        // All: the whole history (1M to 1Y show their window, `activityFollowsThePeriod`).
+        let box = try #require(Fixture.content(.activity, Fixture.presenter(Fixture.set(), period: .all)))
         guard case let .activity(activity)? = box.detail else { throw Missing() }
         return activity
     }
@@ -37,7 +38,7 @@ import Testing
     }
 
     @Test func theWeekStartFollowsTheCalendar() throws {
-        let presenter = Fixture.presenter(Fixture.set(), calendar: Fixture.calendar(firstWeekday: 1))
+        let presenter = Fixture.presenter(Fixture.set(), period: .all, calendar: Fixture.calendar(firstWeekday: 1))
         let box = try #require(Fixture.content(.activity, presenter))
         guard case let .activity(activity)? = box.detail else { Issue.record("no activity"); return }
         #expect(activity.span.firstWeekday == 1 && activity.grid.firstRow == 0 && activity.grid.todayRow == 1)

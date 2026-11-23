@@ -28,6 +28,9 @@ pub enum CandidateError {
     Corrupt { detail: String },
     DiskFull,
     Cancelled,
+    /// A deck package past one of the caller's limits
+    /// (`DeckCandidateLimits`): `what` names it.
+    TooLarge { what: &'static str, found: u64, limit: u64 },
 }
 impl std::fmt::Display for CandidateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

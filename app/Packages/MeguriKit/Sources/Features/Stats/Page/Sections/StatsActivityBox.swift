@@ -24,7 +24,9 @@ struct StatsActivityBox: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.statsNarrow) private var statsNarrow
-    @Environment(\.statsKeepingBelow) private var keepingBelow
+    @Environment(\.statsKeepInPlace) private var keepInPlace
+    /// Where the control was tapped in the page's scroll view, for `keepInPlace`.
+    @State private var tapPlace = StatsTapPlace()
     @FocusState private var focused: Bool
     /// Counts the keys' moves, so the page scrolls the newly selected day into view.
     @State private var revealRequest = 0
@@ -34,8 +36,10 @@ struct StatsActivityBox: View {
 
     /// N25.6's narrow page: its grid shows the recent lines until Show All Years.
     private var narrow: Bool { statsNarrow ?? (horizontalSizeClass == .compact) }
+    /// The recent lines and Show All Years apply to All only: a shorter period's window fits.
     private var recentWeeks: Int? {
-        StatsNarrowLayout.activityRecentWeeks(narrow: narrow, showsAllYears: slot.model.activityShowsAllYears)
+        if case let .activity(activity)? = slot.content.detail, activity.windowed { return nil }
+        return StatsNarrowLayout.activityRecentWeeks(narrow: narrow, showsAllYears: slot.model.activityShowsAllYears)
     }
 
     /// N24.6's fixed square, as on Today: it never grows with the width or the text size.
@@ -66,8 +70,10 @@ struct StatsActivityBox: View {
                     .onChange(of: recentWeeks) { dropHiddenPin(activity) }
                     // A refresh that adds a week (a rollover, new history) can move the lines shown.
                     .onChange(of: activity?.grid.columns) { dropHiddenPin(activity) }
+                    // A shorter period can keep the column count and move the first day drawn.
+                    .onChange(of: activity?.span.firstDay) { dropHiddenPin(activity) }
                     .zIndex(1)
-                if narrow, let columns = (activity?.grid.columns ?? span?.grid().columns), perLine > 0,
+                if narrow, activity?.windowed != true, let columns = (activity?.grid.columns ?? span?.grid().columns), perLine > 0,
                    ActivityContinuousGrid.Geometry.firstColumn(columns: columns, perLine: perLine,
                                                                recentWeeks: StatsNarrowLayout.activityRecentWeeks) > 0 {
                     allYearsButton(activity)
@@ -134,14 +140,16 @@ struct StatsActivityBox: View {
 
     /// Under the narrow page's grid while its recent lines leave years out: Show All Years, then
     /// Show Less, which grow and shrink the grid above today's line, the line and the control
-    /// staying where they are on the screen (`statsKeepingBelow`). Collapsing lets go of a day
+    /// staying where they are on the screen (`statsKeepInPlace`). Collapsing lets go of a day
     /// pinned on a line it hides.
     private func allYearsButton(_ activity: StatsActivity?) -> some View {
         let all = slot.model.activityShowsAllYears
+        let place = tapPlace
         return Button {
             let model = slot.model
             let selection = slot.selection
-            keepingBelow {
+            // VoiceOver's activation has no tap: the control is then centred.
+            keepInPlace(id: Self.allYearsID, onScreenY: { defer { place.y = nil }; return place.y }) {
                 if all, let activity, let day = selection.wrappedValue.bin.map(activity.day(ofAbsoluteDay:)),
                    day < StatsActivityBox.oldestShownDay(activity.grid, perLine: perLine) {
                     selection.wrappedValue = .none
@@ -153,8 +161,13 @@ struct StatsActivityBox: View {
         }
         .buttonStyle(.borderless)
         .font(.subheadline)
+        // The tap's place in the page's scroll view, read after the button acts.
+        .simultaneousGesture(SpatialTapGesture(coordinateSpace: .scrollView).onEnded { place.y = $0.location.y })
+        .id(Self.allYearsID)
         .accessibilityIdentifier("stats.box.activity.showAllYears")
     }
+
+    static let allYearsID = "stats.activity.showAllYears"
 
     /// Whether a day (H1) is on a line drawn: with the recent lines, from their oldest day.
     private func shows(_ day: Int, activity: StatsActivity) -> Bool {
@@ -167,7 +180,7 @@ struct StatsActivityBox: View {
     private func dropHiddenPin(_ activity: StatsActivity?) {
         let selection = slot.selection
         guard let activity, let day = selection.wrappedValue.bin.map(activity.day(ofAbsoluteDay:)),
-              !shows(day, activity: activity) else { return }
+              !shows(day, activity: activity) || day < activity.span.firstDay else { return }
         selection.wrappedValue = .none
     }
 

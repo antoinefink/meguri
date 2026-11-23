@@ -263,7 +263,7 @@ fn candidate_error(error: CandidateError) -> ReplaceError {
             required: needed,
             available,
         }),
-        CandidateError::Corrupt { .. } => ReplaceError::StagingCorrupt,
+        CandidateError::Corrupt { .. } | CandidateError::TooLarge { .. } => ReplaceError::StagingCorrupt,
         CandidateError::DiskFull => ReplaceError::Io(std::io::Error::from(std::io::ErrorKind::StorageFull).into()),
         CandidateError::Cancelled => ReplaceError::Io(StorageError::Io {
             detail: "candidate probe cancelled".into(),

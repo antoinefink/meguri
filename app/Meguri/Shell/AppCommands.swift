@@ -95,11 +95,14 @@ struct NativeCommandContext {
     /// N21.8: ⌘⌫ deletes notes only while the table has the focus, and never
     /// takes the key from a text input (H9.2).
     var canDeleteNotes: Bool {
-        guard browseEnabled(.delete), collection.browse.results.tableFocused else { return false }
+        guard browseEnabled(.delete) else { return false }
         #if os(macOS)
-        return !(MacUndoResponder.shared.firstResponder is NSText)
+        // The results table is the first responder (its outline view carries the
+        // table's identifier): never a text input, the sidebar or the inspector.
+        return BrowseResponder.tableIsFirst(MacUndoResponder.shared.firstResponder)
+            || (collection.browse.results.tableFocused && !(MacUndoResponder.shared.firstResponder is NSText))
         #else
-        return true
+        return collection.browse.results.tableFocused
         #endif
     }
     var canSelectSiblings: Bool { browseCommands?.canSelectSiblings == true }

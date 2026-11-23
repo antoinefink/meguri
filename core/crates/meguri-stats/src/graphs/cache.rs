@@ -677,6 +677,10 @@ impl StatsColumns {
         if changes.cards.is_empty() && changes.revlog_added.is_empty() && changes.revlog_removed.is_empty() {
             return Capture::Nothing;
         }
+        if crate::bulk_commit(commit) {
+            // An overlay entry holds every touched row: rebuilt instead.
+            return Capture::Rebuild;
+        }
         match change_of(commit, rows) {
             Some(change) if change.is_empty() => Capture::Nothing,
             Some(change) => Capture::Delta(ColumnsDelta(Entry {

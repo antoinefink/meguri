@@ -660,3 +660,355 @@ fn a_filtered_ancestor_matched_only_by_case_folding_gets_its_stand_in() {
     assert!(name.ends_with("::x") && name.contains(&suffix.to_string()), "{name}");
     assert!(matches!(reader.deck(deck).unwrap().unwrap().kind.kind, DeckKind::Normal(_)));
 }
+
+fn backup_count(f: &Fixture) -> usize {
+    std::fs::read_dir(f.dir.path().join("backups")).map_or(0, |entries| entries.count())
+}
+
+/// A package and a target whose import changes note type 5000's sort field:
+/// a structural import that takes the safety backup.
+fn sort_field_case() -> (Fixture, std::path::PathBuf, Fixture) {
+    let source = Fixture::new(0);
+    let mut incoming = notetype(5000, "Pair", 200, &two_fields(), &one_template());
+    incoming.config.sort_field_idx = 1;
+    put_notetype(&source, incoming);
+    add(&source, 5000, "g-one", &["<img src=\"a.png\">", "soleil"], 1);
+    let package = crate::apkg_import::with_media(&export(&source, "deck.apkg"), "media.apkg", &[("a.png", b"pixels")]);
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    add(&target, 5000, "g-two", &["moon", "lune"], 1);
+    target.clock.step_ms(30_000);
+    (source, package, target)
+}
+
+#[test]
+fn the_structure_report_carries_reason_8_and_what_the_note_types_went_through() {
+    // An import that adds notes only: reason 8 alone.
+    let source = Fixture::new(1);
+    source.clock.step_ms(1000);
+    crate::apkg_import::add_note(&source, source.notetype, &["fresh", "back"]);
+    let target = Fixture::new(1);
+    let plain = import(&target, &export(&source, "deck.apkg"), ALL_OFF).unwrap().structure;
+    assert_eq!(plain.reasons, [8]);
+    assert!(plain.layouts.is_empty() && plain.removed.is_empty() && plain.type_changes.is_empty());
+
+    // A sort field change without a merge: 8 and 3, with that note type's layout.
+    let (_source, package, target) = sort_field_case();
+    let sorted = import(&target, &package, ALL_OFF).unwrap().structure;
+    assert_eq!(sorted.reasons, [3, 8]);
+    assert_eq!(sorted.layouts.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [5000]);
+
+    // An update that only renames a field: 8 and an identity layout.
+    let source = Fixture::new(0);
+    let renamed = [("Front", Some(11)), ("Answer", Some(12))];
+    put_notetype(&source, notetype(5000, "Pair", 200, &renamed, &one_template()));
+    add(&source, 5000, "g-one", &["sun", "soleil"], 1);
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    let rename = import(&target, &export(&source, "deck.apkg"), ALL_OFF).unwrap().structure;
+    assert_eq!(rename.reasons, [8]);
+    assert_eq!(rename.layouts, [(5000, true)]);
+
+    let merge = ImportOptions {
+        merge_notetypes: true,
+        ..ALL_OFF
+    };
+    // A merge without an effect (equal layouts, same names): 8 alone.
+    let source = Fixture::new(0);
+    put_notetype(&source, notetype(5000, "Pair", 200, &two_fields(), &one_template()));
+    add(&source, 5000, "g-one", &["sun", "soleil"], 1);
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    let quiet = import(&target, &export(&source, "deck.apkg"), merge).unwrap().structure;
+    assert_eq!(quiet.reasons, [8]);
+    assert!(quiet.layouts.is_empty());
+
+    // A merge that adds a field: 8 and 9, with T's layout.
+    let source = Fixture::new(0);
+    let wider = [("Front", Some(11)), ("Back", Some(12)), ("Extra", Some(13))];
+    put_notetype(&source, notetype(5000, "Pair", 200, &wider, &one_template()));
+    add(&source, 5000, "g-one", &["sun", "soleil", "more"], 1);
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    let grown = import(&target, &export(&source, "deck.apkg"), merge).unwrap().structure;
+    assert_eq!(grown.reasons, [8, 9]);
+    assert_eq!(grown.layouts, [(5000, false)]);
+}
+
+#[test]
+fn the_safety_backup_is_written_before_the_import_commits() {
+    let (_source, package, target) = sort_field_case();
+    let notes_before = note_ids(&target).len() as u64;
+    let stores = backup_count(&target);
+    let result = import(&target, &package, ALL_OFF).unwrap();
+    assert_eq!(backup_count(&target), stores + 1);
+    let name = result.safety_backup.unwrap();
+    // The backup holds the collection as it was before the op: none of the
+    // import's notes, and the note type's old sort field.
+    let inspected = meguri_package::inspect_collection_package(
+        &target.dir.path().join("backups").join(&name),
+        &meguri_package::CollectionPackageInspectContext {
+            collection_directory: target.collection.path().parent().unwrap(),
+            live_collection_size: 0,
+            reserved_space_bytes: 0,
+            clock: target.clock.as_ref(),
+            random: target.random.as_ref(),
+            space: &meguri_storage::space::StatvfsSpace,
+            is_cancelled: &|| false,
+        },
+    )
+    .unwrap();
+    assert_eq!(inspected.facts().notes, notes_before);
+    assert_eq!(note_ids(&target).len() as u64, notes_before + 1);
+    assert!(inspected.facts().modified < target.collection.reader(ReaderRole::Query).unwrap().col().unwrap().modified.0);
+}
+
+#[test]
+fn a_cancel_at_the_backup_stage_writes_nothing() {
+    let (_source, package, target) = sort_field_case();
+    let before = dump(&target);
+    let stores = backup_count(&target);
+    let session = inspect(&target, &package).unwrap();
+    let cancel = meguri_engine::CancelToken::new();
+    let stop = cancel.clone();
+    let (sink, _) = crate::apkg_import::at_stage("backup", move || stop.cancel());
+    let refusal = meguri_package::apkg::apply(target.host.engine(), &session, ALL_OFF, None, &cancel, &sink);
+    assert!(matches!(refusal, Err(ApkgImportError::Cancelled)), "{refusal:?}");
+    assert_eq!(dump(&target), before);
+    assert_eq!(backup_count(&target), stores);
+    assert!(crate::apkg_import::media_files(&target).is_empty());
+    // The session is still open.
+    assert!(apply(&target, &session, ALL_OFF).unwrap().safety_backup.is_some());
+}
+
+#[test]
+fn a_deck_name_past_the_nesting_limit_is_refused_in_the_plan_at_no_cost() {
+    let (source, _, target) = sort_field_case();
+    // A deck thirteen levels deep whose ancestors the package lacks.
+    let deep = meguri_engine::decks::ops::add(&source.collection, "deep".into()).unwrap().value;
+    let name: Vec<String> = (1..=13).map(|level| format!("level{level}")).collect();
+    let (id, native) = (deep.id, name.join("\u{1f}"));
+    raw(&source, move |scope| {
+        let mut deck = scope.deck(id)?.unwrap();
+        deck.name.clone_from(&native);
+        scope.put(&deck)?;
+        Ok(())
+    });
+    add(&source, 5000, "g-deep", &["<img src=\"a.png\">", "profond"], deep.id.0);
+    let package = crate::apkg_import::with_media(&export(&source, "deck.apkg"), "deep.apkg", &[("a.png", b"pixels")]);
+    let before = dump(&target);
+    let stores = backup_count(&target);
+    let session = inspect(&target, &package).unwrap();
+    let staged = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = staged.clone();
+    let (sink, _) = crate::apkg_import::at_stage("media", move || seen.store(true, std::sync::atomic::Ordering::SeqCst));
+    let refusal =
+        meguri_package::apkg::apply(target.host.engine(), &session, ALL_OFF, None, &meguri_engine::CancelToken::new(), &sink);
+    let Err(ApkgImportError::DeckTooDeep { name }) = refusal else {
+        panic!("a nesting refusal, not {refusal:?}");
+    };
+    assert!(name.starts_with("level1::level2"), "{name}");
+    assert!(!staged.load(std::sync::atomic::Ordering::SeqCst), "refused before media staging");
+    assert_eq!(backup_count(&target), stores, "and before any safety backup");
+    assert_eq!(dump(&target), before);
+}
+
+/// Enough space until `low` is set, then almost none.
+struct Switch(std::sync::atomic::AtomicBool, std::sync::atomic::AtomicUsize, usize);
+impl meguri_storage::space::SpaceProvider for Switch {
+    fn available_bytes(&self, _: &std::path::Path) -> Result<u64, meguri_storage::StorageError> {
+        let call = self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let low = self.0.load(std::sync::atomic::Ordering::SeqCst) || call >= self.2;
+        Ok(if low { 1024 } else { u64::MAX / 4 })
+    }
+}
+
+#[test]
+fn low_space_at_the_extraction_and_at_the_media_preflight_refuses_before_writing() {
+    let (_source, package, target) = sort_field_case();
+    let before = dump(&target);
+    let files = crate::apkg_import::listing(&target);
+    // The second check of an inspect is the extraction's.
+    let mut context = crate::apkg_import::context(&target);
+    context.space = std::sync::Arc::new(Switch(false.into(), 0.into(), 1));
+    let refusal = meguri_package::apkg::inspect(
+        &package,
+        "media.apkg",
+        &context,
+        &meguri_engine::CancelToken::new(),
+        &meguri_engine::ProgressSink::new(),
+    );
+    assert!(matches!(refusal, Err(ApkgImportError::InsufficientSpace { available: 1024, .. })));
+    assert_eq!(crate::apkg_import::listing(&target), files, "the source copy is removed");
+    // The third: the media preflight of the apply.
+    let space = std::sync::Arc::new(Switch(false.into(), 0.into(), usize::MAX));
+    context.space = space.clone();
+    let session = meguri_package::apkg::inspect(
+        &package,
+        "media.apkg",
+        &context,
+        &meguri_engine::CancelToken::new(),
+        &meguri_engine::ProgressSink::new(),
+    )
+    .unwrap();
+    space.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    let stores = backup_count(&target);
+    let refusal = apply(&target, &session, ALL_OFF);
+    assert!(matches!(refusal, Err(ApkgImportError::InsufficientSpace { available: 1024, .. })), "{refusal:?}");
+    assert_eq!(dump(&target), before);
+    assert_eq!(backup_count(&target), stores);
+    assert!(crate::apkg_import::media_files(&target).is_empty());
+    space.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(apply(&target, &session, ALL_OFF).unwrap().counts.notes_added, 1);
+}
+
+/// Reports the free space it was last given.
+struct Level(std::sync::atomic::AtomicU64);
+impl meguri_storage::space::SpaceProvider for Level {
+    fn available_bytes(&self, _: &std::path::Path) -> Result<u64, meguri_storage::StorageError> {
+        Ok(self.0.load(std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
+#[test]
+fn the_media_preflight_counts_the_safety_backup_a_structural_import_takes() {
+    use std::sync::atomic::Ordering::SeqCst;
+    // What the media preflight asks for, read from its refusal.
+    let needed = |target: &Fixture, package: &std::path::Path| -> (u64, meguri_package::apkg::ImportSession, std::sync::Arc<Level>) {
+        let space = std::sync::Arc::new(Level(u64::MAX.into()));
+        let mut context = crate::apkg_import::context(target);
+        context.space = space.clone();
+        let session = meguri_package::apkg::inspect(
+            package,
+            "media.apkg",
+            &context,
+            &meguri_engine::CancelToken::new(),
+            &meguri_engine::ProgressSink::new(),
+        )
+        .unwrap();
+        space.0.store(1024, SeqCst);
+        let Err(ApkgImportError::InsufficientSpace { needed, available: 1024 }) = apply(target, &session, ALL_OFF) else {
+            panic!("a space refusal at the media preflight");
+        };
+        (needed, session, space)
+    };
+    let (_source, package, structural) = sort_field_case();
+    // The same package into a target without the note type: it is added,
+    // nothing structural changes, and no backup is taken.
+    let plain = Fixture::new(0);
+    let (without, ..) = needed(&plain, &package);
+    let size = |path: std::path::PathBuf| std::fs::metadata(path).map_or(0, |m| m.len());
+    let live = structural.collection.path().to_owned();
+    let mut wal = live.clone().into_os_string();
+    wal.push("-wal");
+    let backup = 2 * (size(live) + size(wal.into())) + 4 * 1024 * 1024;
+    let (with, session, space) = needed(&structural, &package);
+    assert_eq!(with, without + backup, "the backup's need on top of the media's");
+
+    // One byte short refuses before the backup; the exact need imports.
+    let stores = backup_count(&structural);
+    space.0.store(with - 1, SeqCst);
+    assert!(matches!(apply(&structural, &session, ALL_OFF), Err(ApkgImportError::InsufficientSpace { .. })));
+    assert_eq!(backup_count(&structural), stores);
+    space.0.store(with, SeqCst);
+    assert!(apply(&structural, &session, ALL_OFF).unwrap().safety_backup.is_some());
+}
+
+#[test]
+fn a_package_past_a_size_limit_is_refused_at_the_inspect_and_leaves_no_staging() {
+    use meguri_package::apkg::LIMITS;
+    // Each case edits one stored value of an otherwise small package.
+    type Edit = fn(&mut WriteScope<'_>, NoteId) -> Result<(), EngineError>;
+    let cases: [(&str, u64, Edit); 4] = [
+        ("guid bytes", LIMITS.guid_bytes, |scope, id| {
+            let mut note = scope.note(id)?.unwrap();
+            note.guid = "g".repeat(256);
+            scope.put_note_forced(&note)?;
+            Ok(())
+        }),
+        ("note bytes", LIMITS.note_bytes, |scope, id| {
+            let mut note = scope.note(id)?.unwrap();
+            note.fields = format!("{}\u{1f}back", "w".repeat(2 * 1024 * 1024));
+            scope.put_note_forced(&note)?;
+            Ok(())
+        }),
+        ("note bytes", LIMITS.note_bytes, |scope, id| {
+            let mut note = scope.note(id)?.unwrap();
+            note.tags = format!(" {} ", "t".repeat(2 * 1024 * 1024));
+            scope.put_note_forced(&note)?;
+            Ok(())
+        }),
+        ("card data bytes", LIMITS.card_data_bytes, |scope, id| {
+            let mut card = scope.cards_of_note(id)?.remove(0);
+            card.data = meguri_model::card_data::CardData::parse(&format!("{{\"pad\":\"{}\"}}", "d".repeat(70_000)));
+            scope.put(&card)?;
+            Ok(())
+        }),
+    ];
+    for (name, limit, edit) in cases {
+        let source = Fixture::new(0);
+        let id = crate::apkg_import::add_note(&source, source.notetype, &["front", "back"]);
+        raw(&source, move |scope| edit(scope, id));
+        let package = export(&source, "deck.apkg");
+        let target = Fixture::new(0);
+        let files = crate::apkg_import::listing(&target);
+        let before = dump(&target);
+        let refusal = inspect(&target, &package);
+        let Err(ApkgImportError::TooLarge { what, found, limit: stated }) = refusal else {
+            panic!("{name}: a size refusal, not {:?}", refusal.map(|_| ()));
+        };
+        assert_eq!((what, stated), (name, limit));
+        assert!(found > limit, "{name}: {found}");
+        assert_eq!(crate::apkg_import::listing(&target), files, "{name}: the staging is removed");
+        assert_eq!(dump(&target), before);
+    }
+}
+
+#[test]
+fn tag_uses_count_tags_and_not_their_bytes_or_padding() {
+    // One note with four tags of two-byte letters, stored padded.
+    let source = Fixture::new(0);
+    let id = crate::apkg_import::add_note(&source, source.notetype, &["front", "back"]);
+    raw(&source, move |scope| {
+        let mut note = scope.note(id)?.unwrap();
+        // The first holds a NUL, where a text length would stop counting.
+        note.tags = format!(" {0}\0z {0}a {0}b {0}c ", "é".repeat(100));
+        scope.put_note_forced(&note)?;
+        Ok(())
+    });
+    let package = export(&source, "deck.apkg");
+    let staged = tempfile::tempdir().unwrap();
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(&package).unwrap()).unwrap();
+    let bytes = zstd::decode_all(&crate::apkg_import::entry(&mut archive, "collection.anki21b")[..]).unwrap();
+    let path = staged.path().join("collection.anki2");
+    std::fs::write(&path, bytes).unwrap();
+    let limits = |tag_uses| meguri_storage::deck_package::DeckCandidateLimits {
+        tag_uses,
+        ..meguri_package::apkg::LIMITS
+    };
+    let prepare = |tag_uses| {
+        meguri_storage::deck_package::prepare_deck_candidate(
+            &path,
+            &meguri_storage::package_inspection::CandidateContext {
+                clock: source.clock.as_ref(),
+                random: source.random.as_ref(),
+                space: &meguri_storage::space::StatvfsSpace,
+                is_cancelled: &|| false,
+            },
+            &meguri_storage::deck_package::DeckCandidateRepair {
+                minutes_west_at: &|_| 0,
+                repair_fields: &|fields, _| fields,
+                limits: limits(tag_uses),
+            },
+        )
+    };
+    assert!(matches!(
+        prepare(3),
+        Err(meguri_storage::package_inspection::CandidateError::TooLarge {
+            what: "tag uses",
+            found: 4,
+            limit: 3
+        })
+    ));
+    assert_eq!(prepare(4).unwrap().notes, 1);
+}

@@ -54,14 +54,11 @@ extension StatsBoxID {
         }
     }
 
-    /// The footnote lines the box keeps in every phase, so it never grows when one arrives (S8.5).
-    var footnoteLines: Int {
-        switch self {
-        case .knowledgeOverTime: 1
-        case .cardsOverTime, .retrievability, .stability, .difficulty: 1
-        default: 0
-        }
-    }
+    /// The footnote lines a box keeps when it has no footnote: none (Antoine, 2026-11-23: "a lot
+    /// of white space" under Knowledge and the Memory boxes). A box shows its footnote's line only
+    /// when its content has one (a Memory box's cards with no memory state, Knowledge's cards it
+    /// could not estimate); the boxes of a row still share the row's height.
+    var footnoteLines: Int { 0 }
 }
 
 /// The page's own strings (S16) beside the model's (`StatsText`).

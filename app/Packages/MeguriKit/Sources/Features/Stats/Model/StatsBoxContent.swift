@@ -213,6 +213,26 @@ public struct StatsActivitySpan: Hashable, Sendable {
     }
 }
 
+extension StatsPagePeriod {
+    /// The days Activity's grid shows ending today, as the charts with no time axis read their
+    /// window (S4.3, H1's 30, 90, 182 and 365 days); nil for All, every day back to the first
+    /// review (Antoine, 2026-11-23: "with 3M selected it showed two years").
+    public var activityWindowDays: Int? {
+        switch self {
+        case .oneMonth: 30
+        case .threeMonths: 90
+        case .sixMonths: 182
+        case .oneYear: 365
+        case .all: nil
+        }
+    }
+
+    /// The first day (H1) of the window, from `oldest`: the later of the two.
+    public func activityFirstDay(oldest: Int) -> Int {
+        max(min(oldest, 0), activityWindowDays.map { 1 - $0 } ?? Int.min)
+    }
+}
+
 /// Activity's grid, streaks and totals (S7.5).
 public struct StatsActivity: Hashable, Sendable {
     /// A year's total, beside its label on the grid (the owner's Option B, 2026-11-23) and in
@@ -242,6 +262,9 @@ public struct StatsActivity: Hashable, Sendable {
     public var daysThisYear: Int = 1
     /// Reviews in all history.
     public let total: Int
+    /// The grid shows a period's window, not all history (1M to 1Y): the narrow page shows it
+    /// whole, with no Show All Years.
+    public var windowed = false
     let days: StatsDays
 
     init(span: StatsActivitySpan, counts: [Int: Int], years: [Year], currentStreak: Int, longestStreak: Int,
