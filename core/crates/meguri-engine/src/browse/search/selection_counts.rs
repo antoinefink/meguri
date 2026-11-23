@@ -123,7 +123,7 @@ pub(super) fn read_selection<T>(
             notes_of_cards,
         }
     };
-    let result = read(&*snapshot, picked, &token)?;
+    let result = read(&snapshot, picked, &token)?;
     if token.is_cancelled() {
         return Err(cancelled());
     }
@@ -135,7 +135,7 @@ pub(super) fn read_selection<T>(
 /// `StaleRevision`, `OutOfRange`); `Cancelled` once `cancel` or a stop
 /// cancels it.
 pub fn selection_counts(selection: &HandleSelection, cancel: &CancelToken) -> Result<SelectionCounts, BrowseError> {
-    read_selection(selection, cancel, |snapshot, picked, token| counts_in(snapshot, picked, token))
+    read_selection(selection, cancel, counts_in)
 }
 
 fn counts_in(snapshot: &ReadSnapshot<'_>, picked: Picked, token: &CancelToken) -> Result<SelectionCounts, BrowseError> {

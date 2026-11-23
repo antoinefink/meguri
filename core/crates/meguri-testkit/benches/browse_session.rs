@@ -294,7 +294,7 @@ fn main() -> ExitCode {
             });
             push(&mut suite, measurement);
             let name = "browse.sibling_rows.cards";
-            let first = session.selection(handle, state.revision, vec![0..1]);
+            let first = session.selection(handle, state.revision, std::iter::once(0..1).collect());
             black_box(first.sibling_rows().expect("the rows"));
             let mut measurement = Measurement::start(name, Some(&size));
             criterion.bench_function(&format!("{name}/{size}"), |b| {
