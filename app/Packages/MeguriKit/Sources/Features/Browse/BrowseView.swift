@@ -43,11 +43,13 @@ public struct BrowseView: View {
             .navigationTitle(Text("browse.title", bundle: .module))
             .toolbar {
                 #if os(macOS)
-                // N21.3: Cards / Notes first, held to the leading side by a spacer.
-                ToolbarItem(placement: .primaryAction) { modePicker }
-                ToolbarSpacer(placement: .primaryAction)
-                // N23.6: sync, Add, then the inspector toggle (macOS puts search last).
-                if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
+                // N21.3, N23.6 (VM probe of every placement, 2026-11-23): the title,
+                // then Cards / Notes and the sync button as secondary actions, which
+                // macOS draws after the title and before the principal search field;
+                // the Add menu and the inspector toggle trail it. A navigation item
+                // stands before the title; a primary one after the search field.
+                ToolbarItem(placement: .secondaryAction) { modePicker }
+                if let syncStatusItem { ToolbarItem(placement: .secondaryAction) { syncStatusItem } }
                 if let addMenu { ToolbarItem(placement: .primaryAction) { addMenu } }
                 // N21.3: the inspector toggle, last.
                 ToolbarItem(placement: .primaryAction) { inspectorToggle }
@@ -58,7 +60,7 @@ public struct BrowseView: View {
             .browseSearchField(model)
             .modifier(BrowseCommandFeedback(model: model))
             #if os(macOS)
-            .background { BrowseSelectAllKey(commands: model.commands) }
+            .background { BrowseKeys(model: model) }
             #endif
             .onChange(of: formatterKey) { setFormatter() }
             .onAppear {
@@ -202,32 +204,60 @@ extension BrowseModel {
 }
 
 #if os(macOS)
-/// N21.8: ⌥⌘A is Select All anywhere in Browse (⌘A is the system's Select
-/// All, which selects every row while the table has the focus): a key
-/// equivalent of the window with no menu item of its own, as Find…'s ⇧⌘O.
-private struct BrowseSelectAllKey: View {
-    let commands: BrowseCommands
+/// N21.8: ⌥⌘A is Select All anywhere in Browse, and ⌘A in the table:
+/// keys of the window with no menu item of their own, as Find…'s ⇧⌘O.
+/// T9: Return or Space in the sidebar on its one selected filter row.
+private struct BrowseKeys: View {
+    let model: BrowseModel
+    @State private var monitor = BrowseKeyMonitor()
 
     var body: some View {
-        Group {
-            Button { commands.selectAll() } label: { EmptyView() }
-                .keyboardShortcut("a", modifiers: [.command, .option])
-            // ⌘A: the table's Select All (V7), while the table has the focus: a
-            // SwiftUI table did not answer the system's Select All in the VM.
-            Button {
-                if BrowseResponder.tableIsFirst(NSApp.keyWindow?.firstResponder) {
-                    commands.selectAll()
-                } else {
-                    // Any other focus (a field, the inspector's editor) keeps its own Select All.
-                    NSApp.sendAction(#selector(NSResponder.selectAll(_:)), to: nil, from: nil)
-                }
-            } label: { EmptyView() }
-                .keyboardShortcut("a", modifiers: .command)
+        Color.clear
+            .accessibilityHidden(true)
+            .onAppear { monitor.start(model: model) }
+            .onDisappear { monitor.stop() }
+    }
+}
+
+/// Exception to the native contract, for a functional need (VM, 2026-11-23):
+/// AppKit's Select All reached the outline view but not the SwiftUI table's
+/// selection, hidden buttons' key equivalents never fired (the menu bar's
+/// Select All took ⌘A), and the sidebar list's key handler never saw Return.
+/// A local key monitor, live only while Browse shows, runs before them; any
+/// other focus keeps its keys, and sheets keep them all.
+@MainActor private final class BrowseKeyMonitor {
+    private var token: Any?
+
+    func start(model: BrowseModel) {
+        stop()
+        token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak model] event in
+            // Local monitors run on the main thread.
+            MainActor.assumeIsolated { Self.handles(event, model) } ? nil : event
         }
-        .disabled(!commands.canSelectAll)
-        .opacity(0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+    }
+
+    func stop() {
+        if let token { NSEvent.removeMonitor(token) }
+        token = nil
+    }
+
+    private static func handles(_ event: NSEvent, _ model: BrowseModel?) -> Bool {
+        guard let model, let window = event.window, window.sheetParent == nil, window.attachedSheet == nil else { return false }
+        let flags = event.modifierFlags.intersection([.command, .option, .shift, .control])
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if key == "a" {
+            let take = flags == [.command, .option] || (flags == .command && BrowseResponder.tableIsFirst(window.firstResponder))
+            guard take, model.commands.canSelectAll else { return false }
+            model.commands.selectAll()
+            return true
+        }
+        // Return or Space on the sidebar's one selected filter row: a second click (T9).
+        if flags.isEmpty, key == "\r" || key == " ", BrowseResponder.sidebarIsFirst(window.firstResponder),
+           model.selectedRows.count == 1, let row = model.selectedRows.first {
+            model.activate(row)
+            return true
+        }
+        return false
     }
 }
 #endif
@@ -237,7 +267,15 @@ private struct BrowseSelectAllKey: View {
 /// first responder (SwiftUI gives it the table's accessibility identifier).
 public enum BrowseResponder {
     public static func tableIsFirst(_ responder: NSResponder?) -> Bool {
-        (responder as? NSTableView)?.accessibilityIdentifier() == "browse.results.table"
+        guard let table = responder as? NSTableView else { return false }
+        // The sidebar is an outline view too, without a column header.
+        return table.accessibilityIdentifier() == "browse.results.table" || table.headerView != nil
+    }
+
+    /// The sidebar's list (an outline view with no column header) has the keys.
+    public static func sidebarIsFirst(_ responder: NSResponder?) -> Bool {
+        guard let outline = responder as? NSOutlineView else { return false }
+        return outline.accessibilityIdentifier() == "browse.sidebar.list" || outline.headerView == nil
     }
 }
 #endif

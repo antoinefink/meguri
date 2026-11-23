@@ -8,7 +8,14 @@ import SwiftUI
 /// with its menu, and the system's suggestions list in sections.
 struct BrowseSearchField: ViewModifier {
     let model: BrowseModel
+    /// The Mac: the principal placement, the one that puts the field after the
+    /// title and Cards / Notes and lets it take the toolbar's free width (N21.2;
+    /// VM probe of every placement, 2026-11-23). Elsewhere: the toolbar's.
+    #if os(macOS)
+    static let placement: SearchFieldPlacement = .toolbarPrincipal
+    #else
     static let placement: SearchFieldPlacement = .toolbar
+    #endif
     @FocusState private var focused: Bool
     @Environment(\.locale) private var locale
 

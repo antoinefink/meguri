@@ -52,14 +52,6 @@ public struct BrowseSidebar<Header: View>: View {
             notetypes
             tags
         }
-        // T9: Return or Space on the one selected filter row acts as a second
-        // click on it: its filter is removed. On the list only, not its field.
-        .onKeyPress(keys: [.return, .space]) { _ in
-            let rows = model.selectedRows
-            guard rows.count == 1, let row = rows.first else { return .ignored }
-            model.activate(row)
-            return .handled
-        }
         // N20.6 (2026-11-22): the system's own prompt, "Search", as with Today selected.
         .searchable(text: $model.filter, placement: .sidebar)
         .accessibilityIdentifier("browse.sidebar.list")

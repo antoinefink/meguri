@@ -26,18 +26,21 @@ final class MacBrowseCommandsTests: XCTestCase {
         let sync = element(app, "sync.status.button")
         let add = element(app, "home.collection.add")
         let search = app.toolbars.searchFields.firstMatch.exists ? app.toolbars.searchFields.firstMatch : app.searchFields.element(boundBy: 1)
-        XCTAssertTrue(mode.waitForExistence(timeout: 10) && sync.exists && add.exists && search.exists,
-                      "mode \(mode.exists), sync \(sync.exists), add \(add.exists), search \(search.exists)")
+        let inspector = element(app, "browse.toolbar.inspector")
+        XCTAssertTrue(mode.waitForExistence(timeout: 10) && sync.exists && add.exists && search.exists && inspector.exists,
+                      "mode \(mode.exists), sync \(sync.exists), add \(add.exists), search \(search.exists), inspector \(inspector.exists)")
         capture(app, "toolbar-\(appearance)")
         // Wrong places are reported, and the captures still made.
         continueAfterFailure = true
-        let title = app.toolbars.staticTexts["Browse"]
-        if title.exists {
-            XCTAssertLessThan(title.frame.maxX, mode.frame.minX, "The Cards / Notes control after the title: \(title.frame) \(mode.frame)")
+        // N21.2, N21.3, N23.6: the title, Cards / Notes, the sync button, the
+        // search field, the Add menu, the inspector toggle, left to right.
+        let title = try XCTUnwrap(windowTitle(app, beside: mode), "the title \"Browse\" in the toolbar")
+        let order: [(String, CGRect)] = [("title", title), ("Cards / Notes", mode.frame), ("sync", sync.frame),
+                                         ("search", search.frame), ("Add", add.frame), ("inspector", inspector.frame)]
+        for (left, right) in zip(order, order.dropFirst()) {
+            XCTAssertLessThanOrEqual(left.1.maxX, right.1.minX + 1, "\(left.0) \(left.1) before \(right.0) \(right.1)")
         }
-        XCTAssertLessThan(mode.frame.maxX, sync.frame.minX, "Then the sync button")
-        XCTAssertLessThan(sync.frame.maxX, add.frame.minX + 1, "Then the Add menu: \(sync.frame) \(add.frame)")
-        XCTAssertLessThan(add.frame.maxX, search.frame.minX + 1, "The system's search field trails: \(add.frame) \(search.frame)")
+        XCTAssertGreaterThan(search.frame.width, 300, "the search field takes the free width (N21.2): \(search.frame)")
 
         let sidebarField = app.searchFields.element(boundBy: 0)
         XCTAssertTrue(sidebarField.exists)
@@ -53,12 +56,12 @@ final class MacBrowseCommandsTests: XCTestCase {
 
         // One row: Unsuspend shows, Suspend does not; the later sheets are there, disabled.
         press(table.outlineRows.element(boundBy: 0), right: true)
-        let unsuspend = menuItem(app, "Unsuspend")
-        XCTAssertTrue(unsuspend.waitForExistence(timeout: 5))
-        XCTAssertFalse(menuItem(app, "Suspend Card").exists, "V8.1: Suspend is not shown for a suspended card")
-        XCTAssertEqual(unsuspend.title, "Unsuspend Card")
-        XCTAssertFalse(menuItem(app, "Change Deck…").isEnabled, "Change Deck… waits for U276")
-        XCTAssertTrue(menuItem(app, "Bury Card").isEnabled)
+        XCTAssertTrue(waitUntil { (try? self.contextMenu(app))?["Unsuspend Card"] != nil })
+        let one = try contextMenu(app)
+        XCTAssertEqual(one["Unsuspend Card"], true)
+        XCTAssertNil(one["Suspend Card"], "V8.1: Suspend is not shown for a suspended card: \(one.keys.sorted())")
+        XCTAssertEqual(one["Change Deck…"], false, "Change Deck… waits for U276")
+        XCTAssertEqual(one["Bury Card"], true)
         screen(app, "context-menu-one-row-cards-\(appearance)")
         app.typeKey(.escape, modifierFlags: [])
 
@@ -70,23 +73,24 @@ final class MacBrowseCommandsTests: XCTestCase {
         XCTAssertTrue(waitUntil { self.statusText(app).contains("2 selected") },
                       statusText(app))
         press(table.outlineRows.element(boundBy: 1), right: true)
-        XCTAssertTrue(menuItem(app, "Unsuspend").waitForExistence(timeout: 5))
-        XCTAssertEqual(menuItem(app, "Unsuspend").title, "Unsuspend 2 Cards")
+        XCTAssertTrue(waitUntil { (try? self.contextMenu(app))?["Unsuspend 2 Cards"] != nil },
+                      "\((try? contextMenu(app))?.keys.sorted() ?? [])")
         screen(app, "context-menu-two-rows-cards-\(appearance)")
         app.typeKey(.escape, modifierFlags: [])
 
         // Notes mode: the notes' cards.
         try app.bringToFront(bundleIdentifier: bundle)
-        mode.buttons.element(boundBy: 1).click()
+        mode.descendants(matching: .any).matching(NSPredicate(format: "label == 'Notes' OR title == 'Notes' OR value == 'Notes'"))
+            .firstMatch.click()
         XCTAssertTrue(waitUntil { table.outlineRows.count >= 1 })
         press(table.outlineRows.element(boundBy: 0))
         press(table.outlineRows.element(boundBy: 0), right: true)
-        XCTAssertTrue(menuItem(app, "Delete").waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil { (try? self.contextMenu(app))?.keys.contains { $0.hasPrefix("Delete") } == true })
         screen(app, "context-menu-one-row-notes-\(appearance)")
         app.typeKey(.escape, modifierFlags: [])
         app.typeKey("a", modifierFlags: [.command, .option])
         press(table.outlineRows.element(boundBy: 0), right: true)
-        XCTAssertTrue(menuItem(app, "Delete").waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil { (try? self.contextMenu(app))?.keys.contains { $0.hasPrefix("Delete") } == true })
         screen(app, "context-menu-rows-notes-\(appearance)")
         app.typeKey(.escape, modifierFlags: [])
     }
@@ -205,24 +209,32 @@ final class MacBrowseCommandsTests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
         for _ in 0..<8 { table.scroll(byDeltaX: 0, deltaY: -600) }
         // The rows on screen are found by their frames (XCTest reads a SwiftUI
-        // table's rows as not hittable), probing only around where 4,800 points
-        // of scrolling lands: walking every row of the outline takes minutes.
+        // table's rows as not hittable). Rows lie in index order, so a binary
+        // search finds the first one below the table's top in a few queries:
+        // each query of the outline takes seconds in the VM.
         let visible = table.frame
         func onScreen(_ element: XCUIElement) -> Bool {
             let frame = element.frame
             return element.exists && frame.minY >= visible.minY && frame.maxY <= visible.maxY
         }
-        let shown = (120..<320).lazy.filter { onScreen(table.outlineRows.element(boundBy: $0)) }.first
-        let index = try XCTUnwrap(shown, "a row between 120 and 320 is on screen after scrolling")
+        var low = 0, high = table.outlineRows.count - 1
+        while low < high {
+            let middle = (low + high) / 2
+            if table.outlineRows.element(boundBy: middle).frame.minY < visible.minY { low = middle + 1 } else { high = middle }
+        }
+        XCTAssertGreaterThan(low, 20, "scrolled well past the first rows")
+        let index = low
         let middle = table.outlineRows.element(boundBy: index + 10)
         XCTAssertTrue(onScreen(middle))
         element(app, "shell.root.sidebar.home").click()
         XCTAssertTrue(waitUntil { !table.exists })
         element(app, "shell.root.sidebar.browse").click()
-        XCTAssertTrue(waitUntil { onScreen(table.outlineRows.element(boundBy: index + 10)) },
+        XCTAssertTrue(table.waitForExistence(timeout: 20))
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        capture(app, "kept-scroll")
+        XCTAssertTrue(waitUntil(timeout: 30) { onScreen(table.outlineRows.element(boundBy: index + 10)) },
                       "row \(index + 10) is on screen again")
         XCTAssertFalse(onScreen(table.outlineRows.element(boundBy: 0)), "not back at the top")
-        capture(app, "kept-scroll")
     }
 
     /// N21.2, T10: Esc first closes the suggestions, then empties the query.
@@ -315,6 +327,28 @@ final class MacBrowseCommandsTests: XCTestCase {
     /// not carry their identifiers in the Mac's tree.
     private func menuItem(_ app: XCUIApplication, _ title: String) -> XCUIElement {
         app.menus.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", title)).firstMatch
+    }
+
+    /// The open context menu's items (title: enabled), read in one snapshot:
+    /// the menu bar's menus hold items of the same titles, which a query of
+    /// the app's menus also finds.
+    private func contextMenu(_ app: XCUIApplication) throws -> [String: Bool] {
+        var items: [String: Bool] = [:]
+        func walk(_ node: XCUIElementSnapshot, inBar: Bool) {
+            let bar = inBar || node.elementType == .menuBar
+            if !bar, node.elementType == .menuItem, !node.title.isEmpty { items[node.title] = node.isEnabled }
+            node.children.forEach { walk($0, inBar: bar) }
+        }
+        walk(try app.snapshot(), inBar: false)
+        return items
+    }
+
+    /// The window's title in the toolbar: the "Browse" text level with `item`
+    /// (the sidebar's Browse row sits lower).
+    private func windowTitle(_ app: XCUIApplication, beside item: XCUIElement) -> CGRect? {
+        let row = item.frame
+        return app.staticTexts.matching(NSPredicate(format: "label == 'Browse' OR value == 'Browse'")).allElementsBoundByIndex
+            .map(\.frame).first { abs($0.midY - row.midY) < row.height }
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {

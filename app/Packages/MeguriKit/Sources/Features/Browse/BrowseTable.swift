@@ -87,6 +87,12 @@ struct BrowseTable: View {
                 guard kept != nil || target != nil else { return results.tableSettled() }
                 Task { @MainActor in
                     if let kept { proxy.scrollTo(kept, anchor: .center) } else if let target { proxy.scrollTo(target) }
+                    // A table shown again may not have laid its rows out yet: the
+                    // scroll is repeated once they are (VM, 2026-11-23: it came back
+                    // at its top).
+                    await Task.yield()
+                    try? await Task.sleep(for: .milliseconds(60))
+                    if let kept { proxy.scrollTo(kept, anchor: .center) }
                     results.tableSettled()
                 }
             }
