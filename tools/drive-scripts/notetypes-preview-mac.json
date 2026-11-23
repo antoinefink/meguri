@@ -1,0 +1,423 @@
+{
+ "name": "preview-mac",
+ "description": "U283 preview captures, Mac light and dark",
+ "platforms": [
+  "mac"
+ ],
+ "steps": [
+  {
+   "launch": {
+    "route": "notetypes/cards/typical",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-light-front"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-back",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-light-back"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/styling",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-light-styling"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-edited",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-light-edited"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-error",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.error",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-light-error"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-cloze",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-light-cloze"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-empty",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-light-empty"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-hidden",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.part",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-light-hidden"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/typical",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-dark-front"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-back",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-dark-back"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/styling",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-dark-styling"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-edited",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-dark-edited"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-error",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.error",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-dark-error"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-cloze",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-dark-cloze"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-empty",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-dark-empty"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-hidden",
+    "animations": false,
+    "windowSize": "1440x900",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.part",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "mac-dark-hidden"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/typical",
+    "animations": false,
+    "windowSize": "1000x700",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.part",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:2"
+  },
+  {
+   "snapshot": "mac-light-narrow"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/typical",
+    "animations": false,
+    "windowSize": "1000x700",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.part",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:2"
+  },
+  {
+   "snapshot": "mac-dark-narrow"
+  }
+ ]
+}

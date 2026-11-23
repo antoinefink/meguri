@@ -204,6 +204,8 @@ extension TestHooks {
                             model.cardPart = .front
                         case .previewCloze:
                             model.cardPart = .front
+                            // The note list resets the number when the type is read: choose it after.
+                            await previewDrawn(model)
                             model.preview.setClozeNumber(2)
                         }
                         await model.settleForTestHooks()

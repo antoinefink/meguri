@@ -1,0 +1,87 @@
+{
+ "name": "preview-ipad",
+ "description": "U283 preview captures, iPad",
+ "platforms": [
+  "ios"
+ ],
+ "steps": [
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-back",
+    "animations": false
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "ipad-light-back"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-error",
+    "animations": false
+   }
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.error",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "ipad-light-error"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-back",
+    "animations": false
+   }
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.page",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "ipad-dark-back"
+  },
+  {
+   "launch": {
+    "route": "notetypes/cards/preview-error",
+    "animations": false
+   }
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "wait": {
+    "id": "noteTypes.cards.preview.error",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:1"
+  },
+  {
+   "snapshot": "ipad-dark-error"
+  }
+ ]
+}

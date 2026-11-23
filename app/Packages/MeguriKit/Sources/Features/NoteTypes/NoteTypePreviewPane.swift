@@ -37,19 +37,23 @@ struct NoteTypePreviewPane: View {
 
     // MARK: The bar
 
-    /// The bar's controls; where half a screen is too narrow for all of
-    /// them (iPad in portrait), Light | Dark moves into the note menu.
+    /// The bar's controls. Where the column is too narrow for all of them,
+    /// Light | Dark and then the Cloze Number move into the note menu, so
+    /// the bar never runs past its column.
     private var bar: some View {
         ViewThatFits(in: .horizontal) {
-            barLine(appearanceInMenu: false)
-            barLine(appearanceInMenu: true)
+            barLine(appearanceInMenu: false, clozeInMenu: false)
+            barLine(appearanceInMenu: true, clozeInMenu: false)
+            barLine(appearanceInMenu: true, clozeInMenu: true)
         }
     }
 
-    private func barLine(appearanceInMenu: Bool) -> some View {
+    private var cloze: Bool { model.draft(id)?.isCloze == true }
+
+    private func barLine(appearanceInMenu: Bool, clozeInMenu: Bool) -> some View {
         HStack(spacing: Spacing.small) {
-            noteMenu(appearanceInMenu: appearanceInMenu)
-            if model.draft(id)?.isCloze == true { clozeMenu }
+            noteMenu(appearanceInMenu: appearanceInMenu, clozeInMenu: clozeInMenu && cloze)
+            if cloze && !clozeInMenu { clozeMenu }
             Spacer(minLength: Spacing.xSmall)
             sidePicker
             if !appearanceInMenu { appearancePicker }
@@ -91,7 +95,7 @@ struct NoteTypePreviewPane: View {
             .fixedSize()
     }
 
-    private func noteMenu(appearanceInMenu: Bool) -> some View {
+    private func noteMenu(appearanceInMenu: Bool, clozeInMenu: Bool) -> some View {
         Menu {
             Button { preview.step(by: -1) } label: { Text("noteTypes.preview.previous", bundle: .module) }
                 .disabled(!preview.canStep.previous)
@@ -100,6 +104,10 @@ struct NoteTypePreviewPane: View {
             Divider()
             Toggle(isOn: Binding(get: { preview.fillEmpty }, set: { preview.setFillEmpty($0) })) {
                 Text("noteTypes.preview.fillEmpty", bundle: .module)
+            }
+            if clozeInMenu {
+                Divider()
+                clozeChoices
             }
             if appearanceInMenu {
                 Divider()
@@ -122,16 +130,20 @@ struct NoteTypePreviewPane: View {
         .accessibilityIdentifier("noteTypes.cards.preview.note")
     }
 
+    private var clozeChoices: some View {
+        Picker(selection: Binding(get: { preview.clozeNumber }, set: { preview.setClozeNumber($0) })) {
+            ForEach(preview.clozeNumbers, id: \.self) { number in
+                Text(verbatim: NoteTypesStrings.previewCloze(Int(number), locale: locale)).tag(number)
+            }
+        } label: {
+            Text("noteTypes.preview.clozeNumber", bundle: .module)
+        }
+        .pickerStyle(.inline)
+    }
+
     private var clozeMenu: some View {
         Menu {
-            Picker(selection: Binding(get: { preview.clozeNumber }, set: { preview.setClozeNumber($0) })) {
-                ForEach(preview.clozeNumbers, id: \.self) { number in
-                    Text(verbatim: NoteTypesStrings.previewCloze(Int(number), locale: locale)).tag(number)
-                }
-            } label: {
-                Text("noteTypes.preview.clozeNumber", bundle: .module)
-            }
-            .pickerStyle(.inline)
+            clozeChoices
         } label: {
             Text(verbatim: NoteTypesStrings.previewCloze(Int(preview.clozeNumber), locale: locale))
                 .monospacedDigit()
@@ -153,15 +165,19 @@ struct NoteTypePreviewPane: View {
 
     @ViewBuilder private var page: some View {
         ZStack {
-            if let pair = preview.pair, preview.shown != nil {
+            if let pair = preview.pair {
+                // The pages are in the window from the start: a page out of any
+                // window never finishes drawing (its frames do not run), so the
+                // first card would never be ready. Until it is, nothing shows.
+                let drawn = preview.shown != nil
                 CardWebView(pair: pair)
                     // Under an error the last card stays, faded, so the place keeps its shape.
-                    .opacity(covered ? 0.25 : 1)
-                    .allowsHitTesting(!covered)
+                    .opacity(drawn ? (covered ? 0.25 : 1) : 0)
+                    .allowsHitTesting(drawn && !covered)
                     .accessibilityElement(children: .contain)
-                    // Present once a card is on the page: tests and captures wait for it.
-                    .accessibilityIdentifier("noteTypes.cards.preview.page")
-                    .accessibilityHidden(covered)
+                    // Tests and captures wait for the drawn card's identifier.
+                    .accessibilityIdentifier(drawn ? "noteTypes.cards.preview.page" : "noteTypes.cards.preview.loading")
+                    .accessibilityHidden(!drawn || covered)
             }
             if deleted {
                 message(Text("noteTypes.preview.deleted", bundle: .module), detail: nil, symbol: "trash")
@@ -194,6 +210,7 @@ struct NoteTypePreviewPane: View {
                 message(fallback, detail: nil, symbol: "exclamationmark.triangle")
             }
         }
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("noteTypes.cards.preview.error")
     }
 
