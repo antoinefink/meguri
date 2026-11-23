@@ -41,6 +41,8 @@ struct MeguriApp: App {
         TestHooks.BackgroundLaunch.apply()
         #endif
         var configuration = LaunchConfiguration()
+        // Home's last read, drawn at once by the next launch (N27.2); hook launches keep none unless asked.
+        configuration.homeSnapshotFile = HomeSnapshotStore.standardFile
         var features = ShellFeatures.standard
         var uiStateStore = UIStateStore.standard
         #if MEGURI_TEST_HOOKS

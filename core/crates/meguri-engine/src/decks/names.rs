@@ -36,7 +36,7 @@ pub fn unique(rows: &[Deck], id: DeckId, mut name: String) -> String {
 }
 
 /// Refuse before any missing parent is written; adopt the nearest ancestor.
-pub(crate) fn prepare(rows: &[Deck], mut name: String) -> Result<String, EngineError> {
+pub fn prepare(rows: &[Deck], mut name: String) -> Result<String, EngineError> {
     let mut next = parent(&name);
     let mut missing = 0;
     while let Some(p) = next {

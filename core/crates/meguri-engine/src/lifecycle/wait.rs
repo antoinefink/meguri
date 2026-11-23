@@ -503,6 +503,26 @@ impl SlotGuard {
         }
     }
 
+    /// The collection this guard holds the slot of, read under the
+    /// lifecycle lock: `CollectionUnavailable` once a close freed the slot,
+    /// `StaleGeneration` once another collection was opened (L5). A long
+    /// operation that never replaces the collection (an `.apkg` apply)
+    /// takes its handle here, so it can never write to a collection opened
+    /// after its admission.
+    pub fn collection(&self) -> Result<Collection, EngineError> {
+        let state = self.engine.lock_state();
+        self.check_held(&state)?;
+        match &state.current {
+            Some(current) => Ok(Collection {
+                core: std::sync::Arc::clone(&current.core),
+                generation: self.engine.generation(),
+                privilege: None,
+                undo_session: None,
+            }),
+            None => Err(EngineError::unavailable(state.state.describe())),
+        }
+    }
+
     /// Enters the exclusive phase (L7); only for the replacement ops.
     pub fn enter_exclusive(&self, cancellable: bool) -> Result<Exclusive<'_>, EngineError> {
         Exclusive::enter(self, cancellable)

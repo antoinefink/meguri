@@ -154,9 +154,81 @@ pub(crate) struct NeededArchive {
     pub collection: Option<usize>,
     pub media: Option<usize>,
     pub payloads: BTreeMap<u32, usize>,
+    /// P17's collection members, read only by a deck package import: the
+    /// index, or why the member cannot be read.
+    pub legacy21: Option<Result<usize>>,
+    pub legacy2: Option<Result<usize>>,
+    /// Numbered members a deck package cannot read, by number.
+    pub bad_payloads: BTreeMap<u32, crate::Error>,
+    /// Per needed index: the member's compressed and declared decoded size.
+    pub sizes: Vec<(u64, u64)>,
 }
 
-pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<NeededArchive> {
+pub(crate) fn open(file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<NeededArchive> {
+    open_as(file, check, false)
+}
+
+/// [`open`] that also keeps P17's legacy collection members.
+pub(crate) fn open_with_legacy(file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<NeededArchive> {
+    open_as(file, check, true)
+}
+
+/// Checks one needed member's central and local records. Returns its
+/// compressed size, declared decoded size and absolute local offset.
+fn needed_record(
+    file: &mut File,
+    dir: &Directory,
+    position: u64,
+    record: &mut [u8; 46],
+    name: &[u8],
+    extra_len: u16,
+) -> Result<(u64, u64, u64)> {
+    let name_len = name.len() as u16;
+    // Required payloads are ordinary files; archive modes never grant
+    // authority to create a link or directory in owned staging.
+    let mode = u32_at(record, 38) >> 16;
+    if record[5] == 3 && !matches!(mode & 0o170000, 0 | 0o100000) {
+        return Err(corrupt("nonregular needed ZIP entry"));
+    }
+    if u16_at(record, 8) & 1 != 0 || !matches!(u16_at(record, 10), 0 | 8) {
+        return Err(corrupt("encrypted or unsupported needed ZIP entry"));
+    }
+    if !matches!(u16_at(record, 34), 0 | 0xffff) {
+        return Err(corrupt("multi-disk ZIP entry"));
+    }
+    let mut extra = vec![0; usize::from(extra_len)];
+    read_at(file, position + 46 + u64::from(name_len), &mut extra)?;
+    let (compressed, decoded, local) = entry_sizes(record, &extra)?;
+    let local = local
+        .checked_add(dir.prefix)
+        .filter(|o| *o < dir.start)
+        .ok_or_else(|| corrupt("ZIP local offset"))?;
+    // The virtual suffix must never become entry data. Validate the
+    // physical local extent before handing any decoder its reader.
+    let mut header = [0; 30];
+    read_at(file, local, &mut header)?;
+    if !header.starts_with(b"PK\x03\x04")
+        || u16_at(&header, 6) & 1 != 0
+        || u16_at(&header, 8) != u16_at(record, 10)
+        || u16_at(&header, 26) != name_len
+    {
+        return Err(corrupt("needed ZIP local header"));
+    }
+    let data = local
+        .checked_add(30 + u64::from(name_len) + u64::from(u16_at(&header, 28)))
+        .ok_or_else(|| corrupt("ZIP local extent"))?;
+    if data.checked_add(compressed).is_none_or(|end| end > dir.start) {
+        return Err(corrupt("ZIP data crosses central directory"));
+    }
+    let mut local_name = vec![0; usize::from(name_len)];
+    read_at(file, local + 30, &mut local_name)?;
+    if local_name != name {
+        return Err(corrupt("ZIP local/central name mismatch"));
+    }
+    Ok((compressed, decoded, local))
+}
+
+fn open_as(mut file: File, check: &(dyn Fn() -> bool + Sync), legacy: bool) -> Result<NeededArchive> {
     cancelled(check)?;
     let dir = directory(&mut file, check)?;
     let mut position = dir.start;
@@ -166,6 +238,9 @@ pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<
     let mut names = BTreeMap::<[u8; 32], (u64, u16)>::new();
     let mut suffix = Vec::new();
     let (mut meta, mut collection, mut media) = (None, None, None);
+    let (mut legacy21, mut legacy2) = (None, None);
+    let mut sizes = Vec::new();
+    let mut bad_payloads = BTreeMap::new();
     let mut payloads = BTreeMap::new();
     let mut needed = 0_u64;
     while position < dir.end {
@@ -221,60 +296,65 @@ pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<
         } else {
             None
         };
-        let mut payload_slot = None;
+        #[derive(Clone, Copy)]
+        enum Slot {
+            Meta,
+            Collection,
+            Media,
+            Payload,
+            Legacy21,
+            Legacy2,
+        }
         let slot = match name.as_slice() {
-            b"meta" => Some(&mut meta),
-            b"collection.anki21b" => Some(&mut collection),
-            b"media" => Some(&mut media),
-            _ if numeric => Some(&mut payload_slot),
+            b"meta" => Some(Slot::Meta),
+            b"collection.anki21b" => Some(Slot::Collection),
+            b"media" => Some(Slot::Media),
+            b"collection.anki21" if legacy => Some(Slot::Legacy21),
+            b"collection.anki2" if legacy => Some(Slot::Legacy2),
+            _ if numeric => Some(Slot::Payload),
             _ => None,
         };
         if let Some(slot) = slot {
-            // Required payloads are ordinary files; archive modes never grant
-            // authority to create a link or directory in owned staging.
-            let mode = u32_at(&record, 38) >> 16;
-            if record[5] == 3 && !matches!(mode & 0o170000, 0 | 0o100000) {
-                return Err(corrupt("nonregular needed ZIP entry"));
+            let checked = needed_record(&mut file, &dir, position, &mut record, &name, extra_len);
+            let (compressed, decoded, local) = match (checked, slot) {
+                (Ok(sizes), _) => sizes,
+                // Which legacy member is the collection is known only once
+                // `meta` is read: a bad one fails only when it is needed.
+                (Err(fault), Slot::Legacy21) => {
+                    legacy21 = Some(Err(fault));
+                    position = next;
+                    continue;
+                }
+                (Err(fault), Slot::Legacy2) => {
+                    legacy2 = Some(Err(fault));
+                    position = next;
+                    continue;
+                }
+                // A deck package reads only the payloads its notes use; one
+                // that cannot be read fails when it is asked for (P17).
+                (Err(fault), Slot::Payload) if legacy => {
+                    if let Some(number) = number {
+                        bad_payloads.insert(number, fault);
+                    }
+                    position = next;
+                    continue;
+                }
+                (Err(fault), _) => return Err(fault),
+            };
+            let index = needed as usize;
+            match slot {
+                Slot::Meta => meta = Some(index),
+                Slot::Collection => collection = Some(index),
+                Slot::Media => media = Some(index),
+                Slot::Legacy21 => legacy21 = Some(Ok(index)),
+                Slot::Legacy2 => legacy2 = Some(Ok(index)),
+                Slot::Payload => {
+                    if let Some(number) = number {
+                        payloads.insert(number, index);
+                    }
+                }
             }
-            if u16_at(&record, 8) & 1 != 0 || !matches!(u16_at(&record, 10), 0 | 8) {
-                return Err(corrupt("encrypted or unsupported needed ZIP entry"));
-            }
-            if !matches!(u16_at(&record, 34), 0 | 0xffff) {
-                return Err(corrupt("multi-disk ZIP entry"));
-            }
-            let mut extra = vec![0; usize::from(extra_len)];
-            read_at(&mut file, position + 46 + u64::from(name_len), &mut extra)?;
-            let (compressed, decoded, local) = entry_sizes(&record, &extra)?;
-            let local = local
-                .checked_add(dir.prefix)
-                .filter(|o| *o < dir.start)
-                .ok_or_else(|| corrupt("ZIP local offset"))?;
-            // The virtual suffix must never become entry data. Validate the
-            // physical local extent before handing any decoder its reader.
-            let mut header = [0; 30];
-            read_at(&mut file, local, &mut header)?;
-            if !header.starts_with(b"PK\x03\x04")
-                || u16_at(&header, 6) & 1 != 0
-                || u16_at(&header, 8) != u16_at(&record, 10)
-                || u16_at(&header, 26) != name_len
-            {
-                return Err(corrupt("needed ZIP local header"));
-            }
-            let data = local
-                .checked_add(30 + u64::from(name_len) + u64::from(u16_at(&header, 28)))
-                .ok_or_else(|| corrupt("ZIP local extent"))?;
-            if data.checked_add(compressed).is_none_or(|end| end > dir.start) {
-                return Err(corrupt("ZIP data crosses central directory"));
-            }
-            let mut local_name = vec![0; usize::from(name_len)];
-            read_at(&mut file, local + 30, &mut local_name)?;
-            if local_name != name {
-                return Err(corrupt("ZIP local/central name mismatch"));
-            }
-            *slot = Some(needed as usize);
-            if let Some(number) = number {
-                payloads.insert(number, needed as usize);
-            }
+            sizes.push((compressed, decoded));
             needed += 1;
             // Canonical bounded central metadata, with absolute local offset.
             // Preserve CRC, flags, method and decoded sizes for zip's checks.
@@ -333,6 +413,10 @@ pub(crate) fn open(mut file: File, check: &(dyn Fn() -> bool + Sync)) -> Result<
         collection,
         media,
         payloads,
+        legacy21,
+        legacy2,
+        bad_payloads,
+        sizes,
     })
 }
 fn entry_sizes(record: &[u8], mut extra: &[u8]) -> Result<(u64, u64, u64)> {

@@ -255,7 +255,7 @@ pub(crate) fn check_authority(c: &Connection, original: &Authority, write: bool)
     if write && !a.write { return Err(Error::new("insufficient_scope")); }
     Ok(())
 }
-/// Pending browser uploads survive access-token rotation, but never their grant,
+/// Pending machine uploads survive access-token rotation, but never their grant,
 /// credential generation, reset epoch, or grant expiry. No bearer is substituted.
 pub(crate) fn check_upload_binding(c: &Connection, original: &Authority) -> Result<()> {
     admission(c)?;

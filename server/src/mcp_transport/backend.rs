@@ -102,7 +102,8 @@ impl ToolOutput {
             Self::Changed { revision, .. } => revision.len() <= MAX_HANDLE_BYTES,
             Self::Download { download_url, download_token, expires_at } => download_url.len() <= MAX_HANDLE_BYTES
                 && download_token.len() == 43 && crate::crypto::bearer(download_token).is_ok() && expires_at.len() <= 64,
-            Self::Upload { upload_id,upload_url,expires_at } => upload_id.len() == 43 && upload_url.len() <= MAX_HANDLE_BYTES && expires_at.len() <= 64,
+            Self::Upload { upload_id,upload_url,expires_at } => upload_id.len() == 43 && crate::crypto::bearer(upload_id).is_ok()
+                && upload_url.len() <= MAX_HANDLE_BYTES && expires_at.len() <= 64,
         }
     }
 }
@@ -149,7 +150,7 @@ impl ToolFailure {
             Self::UnsupportedCollection => "This collection is not supported for this operation. Use a supported collection.",
             Self::Busy => "The collection is busy. The write did not commit. Retry after one second.",
             Self::AttachmentInvalid => "Use a supported image, audio file or PDF within 8 MiB per file and 16 MiB per call. The note was not changed.",
-            Self::AttachmentUnavailable => "The attachment is unavailable. Attach the file again or use prepare_media_upload and return to chat before it expires. The note was not changed.",
+            Self::AttachmentUnavailable => "The attachment is unavailable. Use files + file_fields first where supported. If direct transfer is unavailable, call prepare_media_upload for each file, POST its local bytes to upload_url with exactly one Authorization: Bearer upload_id header and Content-Type: application/octet-stream, then create_note or edit_note with uploads before expires_at. Keep upload_id out of URLs and chat. No browser, sign-in or user action is needed. The note was not changed.",
             Self::AttachmentConflict => "The media state changed or its saved name is occupied. The note was not changed. Check the collection before trying again.",
             Self::Internal => "The operation could not be completed. Check the current collection state before deciding whether to try again.",
         };

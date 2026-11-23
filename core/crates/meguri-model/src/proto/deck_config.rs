@@ -95,6 +95,14 @@ impl DeckConfigMessage {
         &self.fsrs_params_6
     }
 
+    /// Empties the three FSRS parameter lists and nothing else: a preset
+    /// carried without scheduling (`package/apkg-export` A7).
+    pub fn clear_fsrs_params(&mut self) {
+        self.fsrs_params_4.clear();
+        self.fsrs_params_5.clear();
+        self.fsrs_params_6.clear();
+    }
+
     /// Replaces the FSRS-6 list and nothing else (P8, R1486).
     pub fn set_fsrs_params_6(&mut self, params: Vec<f32>) {
         self.fsrs_params_6 = params;

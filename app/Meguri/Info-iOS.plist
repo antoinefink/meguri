@@ -63,5 +63,13 @@
 	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>
+	<!-- N27.7: the launch screen is the background of the first frame, a grouped list on
+	     every touch layout (the deck list, Today, the welcome): the system grouped
+	     background, light and dark (LaunchScreen.xcassets). -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 </dict>
 </plist>

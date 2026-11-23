@@ -531,8 +531,9 @@ struct StatsStripTiles: View {
             figure = StatsStripFigure(value: "—", unit: nil, detail: nil, loading: false, spoken: nil)
         }
         let label = StatsPageText.label(id, locale: locale)
-        // The unit and the detail share the small line under the value ("cards · 19 min").
-        let small = figure.loading ? nil : [figure.unit, figure.detail].compactMap(\.self).joined(separator: " · ")
+        // The unit and the detail share the small text under the value: "cards", then "19 min" on
+        // the next line, so a narrow tile never cuts either short.
+        let small = figure.loading ? nil : [figure.unit, figure.detail].compactMap(\.self).joined(separator: "\n")
         return Button { go(id.section) } label: {
             VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                 Text(verbatim: figure.value ?? "0")
@@ -544,18 +545,22 @@ struct StatsStripTiles: View {
                     .overlay(alignment: .leading) {
                         if figure.loading { ProgressView().controlSize(.small) }
                     }
+                // Two lines where a tile is narrow ("cards" over "19 min"), never cut short.
                 Text(verbatim: small?.isEmpty == false ? small ?? " " : " ")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.9)
+                Spacer(minLength: 0)
                 Text(verbatim: label)
-                    .font(.footnote)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2, reservesSpace: true)
+                    .minimumScaleFactor(0.85)
                     .multilineTextAlignment(.leading)
             }
-            .padding(Spacing.small)
+            .padding(.horizontal, Spacing.xSmall)
+            .padding(.vertical, Spacing.small)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             #if os(iOS)
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: Radius.rounded(Radius.medium))
