@@ -64,6 +64,8 @@ struct StatsActivityBox: View {
                     } action: { perLine = $0 }
                     .onChange(of: perLine) { dropHiddenPin(activity) }
                     .onChange(of: recentWeeks) { dropHiddenPin(activity) }
+                    // A refresh that adds a week (a rollover, new history) can move the lines shown.
+                    .onChange(of: activity?.grid.columns) { dropHiddenPin(activity) }
                     .zIndex(1)
                 if narrow, let columns = (activity?.grid.columns ?? span?.grid().columns), perLine > 0,
                    ActivityContinuousGrid.Geometry.firstColumn(columns: columns, perLine: perLine,
