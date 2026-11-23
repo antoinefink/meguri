@@ -38,6 +38,8 @@ extension TestHooks.StatsRoutes {
         registry.registerShell("stats/chart/activity/failed") { _ in reviews(.ending(.partFails(.activityDays))) }
         registry.registerShell("stats/chart/activity/recent") { _ in reviews(.shape(.recent)) }
         registry.registerShell("stats/chart/activity/long") { _ in reviews(.shape(.long)) }
+        // Option B's headline with no current streak.
+        registry.registerShell("stats/chart/activity/no-streak") { _ in reviews(.shape(.lapsed)) }
         registry.registerShell("stats/chart/activity/long-pinned") { _ in reviews(.shape(.long), pin: (.activity, { content in
                 // A day of the first line, a few years back.
                 if case let .activity(activity)? = content.detail { activity.absoluteDay(ofDay: activity.span.firstDay + 200) } else { -2 }

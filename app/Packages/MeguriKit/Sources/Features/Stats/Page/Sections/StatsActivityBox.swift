@@ -52,9 +52,11 @@ struct StatsActivityBox: View {
         let span: StatsActivitySpan? = if let activity { activity.span }
             else if case let .activitySpan(value)? = content.detail { value } else { nil }
         StatsBoxChrome(box: slot.id.rawValue, title: slot.title(locale: locale), open: slot.open) {
-            // The figures under the grid, so the lines keep the box's whole width (N25.8).
-            VStack(alignment: .leading, spacing: Spacing.medium) {
-                // Over the figures, so a callout that runs past the grid stays on top.
+            // The headline over the grid (the owner's Option B): nothing under the grid but, on
+            // the narrow page, Show All Years.
+            VStack(alignment: .leading, spacing: Spacing.small) {
+                headline(content)
+                // Over the control, so a callout that runs past the grid stays on top.
                 grid(activity, span: span, phase: content.phase)
                     .onGeometryChange(for: Int.self) {
                         ActivityContinuousGrid.Geometry.perLine(width: $0.size.width, square: Self.square)
@@ -65,7 +67,6 @@ struct StatsActivityBox: View {
                                                                recentWeeks: StatsNarrowLayout.activityRecentWeeks) > 0 {
                     allYearsButton(activity)
                 }
-                figures(content, activity: activity, span: span)
             }
         }
     }
@@ -118,16 +119,10 @@ struct StatsActivityBox: View {
         }
     }
 
-    /// The grid's value: the streaks, all reviews and the year totals, as the figures under it say.
+    /// The grid's value: its headline and sentence, the box's summary (Option B); each year's
+    /// total is in its year's container.
     private func summary(_ activity: StatsActivity) -> String {
-        let format = StatsChartFormat(locale: locale, calendar: calendar, now: activity.date(ofDay: 0))
-        let figures = [
-            "\(text.figureCurrentStreak), \(text.days(activity.currentStreak, format.count(Double(activity.currentStreak))))",
-            "\(text.figureLongestStreak), \(text.days(activity.longestStreak, format.count(Double(activity.longestStreak))))",
-            "\(text.figureDaysStudiedThisYear), \(format.count(Double(activity.daysStudiedThisYear)))",
-            "\(text.figureAllReviews), \(format.count(Double(activity.total)))",
-        ]
-        return (figures + activity.years.reversed().map(\.totalText)).joined(separator: "; ")
+        [slot.content.figure?.value, slot.content.figure?.sentence].compactMap(\.self).joined(separator: ", ")
     }
 
     // MARK: Show All Years
@@ -163,56 +158,27 @@ struct StatsActivityBox: View {
         return -(grid.visibleDays(firstColumn: first).upperBound - 1)
     }
 
-    // MARK: The figures
+    // MARK: The headline
 
-    /// The small figures (labels in every phase, values once ready), then each year's total,
-    /// oldest first as the grid reads; each a row that wraps.
-    private func figures(_ content: StatsBoxContent, activity: StatsActivity?, span: StatsActivitySpan?) -> some View {
+    /// The current streak and its sentence (the owner's Option B, 2026-11-23), as every box's
+    /// figure: title-2 style with tabular digits over the sentence in secondary text, which keeps
+    /// two lines in every phase so the grid never moves down when the numbers arrive (S10.3).
+    /// The grid's element reads them (S15), so they are not elements of their own.
+    private func headline(_ content: StatsBoxContent) -> some View {
         let ready = content.phase == .ready
-        // While loading, each year the header knows with a dash, as wide as a six-figure total, so
-        // the row keeps its lines when the counts arrive (S10.3).
-        let reserve = 888_888
-        let reserveText = reserve.formatted(.number.locale(locale))
-        let years: [(year: Int, text: String, reserve: String?)] = activity.map { $0.years.map { ($0.year, $0.totalText, nil) } }
-            ?? (span?.years ?? []).map { ($0, text.yearTotal(String($0), 0, text.noValue), text.yearTotal(String($0), reserve, reserveText)) }
-        // At the accessibility sizes, one under another (S15), as the other boxes' figures.
-        let stacked = dynamicTypeSize.isAccessibilitySize
-        let row = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xSmall))
-            : AnyLayout(StatsWrappingRow(spacing: Spacing.large, lineSpacing: Spacing.small))
-        return VStack(alignment: .leading, spacing: Spacing.small) {
-            row {
-                ForEach(content.figures) { item in
-                    VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-                        Text(verbatim: item.label)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(verbatim: ready ? item.value ?? text.noValue : text.noValue)
-                            .font(.subheadline.weight(.medium))
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .foregroundStyle(ready && item.value != nil ? .primary : .secondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-            if !years.isEmpty {
-                StatsWrappingRow(spacing: Spacing.medium, lineSpacing: Spacing.xxSmall) {
-                    ForEach(years.reversed(), id: \.year) { year in
-                        ZStack(alignment: .leading) {
-                            if let reserve = year.reserve { Text(verbatim: reserve).hidden().accessibilityHidden(true) }
-                            Text(verbatim: year.text)
-                        }
-                        .font(.subheadline)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("stats.activity.yearTotal.\(year.year)")
-                    }
-                }
-            }
+        return VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            Text(verbatim: ready ? content.figure?.value ?? text.noValue : text.noValue)
+                .font(.title2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(ready && content.figure != nil ? .primary : .secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(verbatim: ready ? content.figure?.sentence ?? " " : " ")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2, reservesSpace: true)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("stats.box.activity.figures")
+        .accessibilityHidden(true)
     }
 
     // MARK: Keys (S14)
@@ -396,7 +362,8 @@ private struct StatsActivityGrid: View {
         StatsActivityLayout(columns: grid.columns, square: square, recentWeeks: recentWeeks) {
             StatsActivityBandProbe()
             StatsActivityCanvas(grid: grid, square: square, recentWeeks: recentWeeks, rightToLeft: rightToLeft, size: size,
-                                labels: StatsActivityDayLabels(days: activity.days, locale: locale, calendar: calendar))
+                                labels: StatsActivityDayLabels(days: activity.days, locale: locale, calendar: calendar),
+                                years: activity.years)
                 .equatable()
                 .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
                 .overlay(alignment: .topLeading) { interaction }
@@ -523,6 +490,8 @@ private struct StatsActivityCanvas: View, Equatable {
     /// The drawn size, for the days' elements (the canvas reads its own).
     let size: CGSize
     let labels: StatsActivityDayLabels
+    /// Each year's total, after its label on the grid and in its container's label (Option B).
+    let years: [StatsActivity.Year]
 
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
@@ -533,7 +502,7 @@ private struct StatsActivityCanvas: View, Equatable {
     /// right-to-left layout the width. A live resize between two line breaks rebuilds nothing.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.grid == rhs.grid && lhs.square == rhs.square && lhs.recentWeeks == rhs.recentWeeks && lhs.rightToLeft == rhs.rightToLeft
-            && lhs.labels == rhs.labels && lhs.placesKey == rhs.placesKey
+            && lhs.labels == rhs.labels && lhs.years == rhs.years && lhs.placesKey == rhs.placesKey
     }
 
     private nonisolated var placesKey: [CGFloat] {
@@ -593,17 +562,33 @@ private struct StatsActivityCanvas: View, Equatable {
             years[month.year] = context.resolve(Text(verbatim: String(month.year)).font(.caption.weight(.semibold))
                 .foregroundStyle(.primary))
         }
+        // Each year's total after it, in caption secondary text (Option B): whole, or the number.
+        var totals: [Int: (full: GraphicsContext.ResolvedText, number: GraphicsContext.ResolvedText)] = [:]
+        for year in self.years where years[year.year] != nil {
+            totals[year.year] = (context.resolve(Text(verbatim: year.totalFull).font(.caption).foregroundStyle(secondary)),
+                                 context.resolve(Text(verbatim: year.totalNumber).font(.caption).foregroundStyle(secondary)))
+        }
         let unbounded = CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
-        // At least 8 pt between two labels, so a year and the month after it read as two.
-        let labels = grid.labels(geometry, rightToLeft: rightToLeft, spacing: Spacing.xSmall,
+        // At least 8 pt between two labels, so a year and the month after it read as two; a
+        // year's total 4 pt after it, as a word space.
+        let labels = grid.labels(geometry, rightToLeft: rightToLeft, spacing: Spacing.xSmall, totalSpacing: Spacing.xxSmall,
                                  monthWidth: { months[$0 - 1].measure(in: unbounded).width },
-                                 yearWidth: { years[$0]?.measure(in: unbounded).width ?? 0 })
+                                 yearWidth: { years[$0]?.measure(in: unbounded).width ?? 0 },
+                                 yearTotal: { year in
+                                     totals[year].map {
+                                         ActivityContinuousGrid.TotalWidths(full: $0.full.measure(in: unbounded).width,
+                                                                            number: $0.number.measure(in: unbounded).width)
+                                     }
+                                 })
         for label in labels.items {
             let top = geometry.lineTop(label.line)
             switch label.kind {
             case let .month(month): context.draw(months[month - 1], at: CGPoint(x: label.x, y: top), anchor: .topLeading)
             case let .year(year):
                 if let resolved = years[year] { context.draw(resolved, at: CGPoint(x: label.x, y: top), anchor: .topLeading) }
+                if let x = label.totalX, let total = totals[year] {
+                    context.draw(label.total == .full ? total.full : total.number, at: CGPoint(x: x, y: top), anchor: .topLeading)
+                }
             }
             if let rule = label.rule {
                 // From the band's top down to the squares, at the column holding 1 January.
@@ -617,9 +602,26 @@ private struct StatsActivityCanvas: View, Equatable {
     /// canvas, so only when the counts or the size change; each date is formatted when read.
     private var dayElements: some View {
         let geometry = StatsActivityMetrics.geometry(size: size, columns: grid.columns, square: square, recentWeeks: recentWeeks)
-        // Only the days drawn: the lines the recent lines leave out have no element.
+        // Only the days drawn: the lines the recent lines leave out have no element. A container
+        // per year, labelled with its total (Option B), holds a container per month.
+        let months = grid.visibleMonths(geometry)
+        let shownYears = Array(Set(months.map(\.year))).sorted()
         return ZStack(alignment: .topLeading) {
-            ForEach(grid.visibleMonths(geometry)) { month in
+            ForEach(shownYears, id: \.self) { year in
+                ZStack(alignment: .topLeading) {
+                    ForEach(months.filter { $0.year == year }) { month in
+                        monthElement(month, geometry: geometry)
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text(verbatim: years.first { $0.year == year }?.totalText ?? String(year)))
+                .accessibilityIdentifier("stats.activity.yearTotal.\(year)")
+            }
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    private func monthElement(_ month: ActivityContinuousGrid.Month, geometry: ActivityContinuousGrid.Geometry) -> some View {
                 ZStack(alignment: .topLeading) {
                     ForEach(month.daysAgo.reversed(), id: \.self) { daysAgo in
                         let rect = grid.rect(daysAgo: daysAgo, geometry: geometry, rightToLeft: rightToLeft)
@@ -633,9 +635,6 @@ private struct StatsActivityCanvas: View, Equatable {
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(labels.month(-(month.daysAgo.upperBound - 1)))
-            }
-        }
-        .frame(width: size.width, height: size.height, alignment: .topLeading)
     }
 }
 

@@ -154,10 +154,35 @@ import Testing
         #expect(activity.years.last?.totalText == "2025: 2 reviews")
         #expect(activity.currentStreak == 3 && activity.longestStreak == 3 && activity.daysStudiedThisYear == 3)
         #expect(activity.span.firstDay == -400 && activity.total == 17)
-        #expect(Self.figures(box) == ["Current Streak": "3 days", "Longest Streak": "3 days", "Days Studied This Year": "3",
-                                      "All Reviews": "17"])
+        // Option B (2026-11-23): the streak is the headline, nothing under the grid; each year's
+        // total goes beside its label on the grid.
+        #expect(box.figure == StatsBoxFigure(value: "3 days in a row", sentence: "Your longest streak · studied 3 of 285 days this year"))
+        #expect(box.figures.isEmpty)
+        #expect(activity.daysThisYear == 285, "1 January to 12 October 2026")
+        #expect(activity.years.last?.totalFull == "· 2 reviews" && activity.years.last?.totalNumber == "· 2")
         // The period never changes it.
         #expect(try Self.box(.activity, Fixture.presenter(Fixture.set(), period: .oneYear)).detail == box.detail)
+    }
+
+    /// Option B's four headlines: the current streak that is the longest, one shorter than the
+    /// longest, none today, and a single day (the catalog's plural rules).
+    @Test func activityHeadlines() throws {
+        let days = StatsDays(context: Fixture.context(), calendar: Fixture.calendar())
+        func figure(current: Int, longest: Int, studied: Int, ofDays: Int) -> StatsBoxFigure {
+            var activity = StatsActivity(span: StatsActivitySpan(firstDay: -10, days: days), counts: [:], years: [],
+                                         currentStreak: current, longestStreak: longest, daysStudiedThisYear: studied, days: days)
+            activity.daysThisYear = ofDays
+            let format = StatsChartFormat(locale: Fixture.locale, calendar: Fixture.calendar(), now: Date())
+            return StatsPresenter.activityFigure(activity, text: StatsText(locale: Fixture.locale)) { format.count(Double($0)) }
+        }
+        #expect(figure(current: 12, longest: 12, studied: 200, ofDays: 285)
+            == StatsBoxFigure(value: "12 days in a row", sentence: "Your longest streak · studied 200 of 285 days this year"))
+        #expect(figure(current: 4, longest: 41, studied: 210, ofDays: 365)
+            == StatsBoxFigure(value: "4 days in a row", sentence: "Longest streak 41 days · studied 210 of 365 days this year"))
+        #expect(figure(current: 0, longest: 41, studied: 3, ofDays: 9)
+            == StatsBoxFigure(value: "No streak today", sentence: "Longest streak 41 days · studied 3 of 9 days this year"))
+        #expect(figure(current: 1, longest: 1, studied: 1, ofDays: 1)
+            == StatsBoxFigure(value: "1 day in a row", sentence: "Your longest streak · studied 1 of 1 day this year"))
     }
 
     @Test func cardsOverTime() throws {

@@ -20,6 +20,9 @@ nonisolated public final class StatsSampleService: StatsService {
         case recent
         /// Cards and about seven years of reviews: Activity's long history.
         case long
+        /// The typical history with nothing studied today or the two days before: no current
+        /// streak (Activity's "No streak today").
+        case lapsed
     }
 
     /// How its requests end.
@@ -186,7 +189,7 @@ nonisolated struct StatsSampleCollection {
         }
     }
 
-    private var reviewed: Bool { shape == .typical || shape == .recent || shape == .long }
+    private var reviewed: Bool { shape == .typical || shape == .recent || shape == .long || shape == .lapsed }
     private var hasCards: Bool { shape != .noCards }
     /// The days with reviews in the window, for the windows with no time axis: `recent` has
     /// none before its first review.
@@ -244,7 +247,10 @@ nonisolated struct StatsSampleCollection {
     private func scaled(_ value: Int) -> Int { Int((Double(value) * weight).rounded()) }
 
     /// The scope's reviews on `day`; none for a shape with no review.
-    private func reviews(on day: Int) -> Int { reviewed && day >= firstReviewDay ? scaled(Self.reviews(day, first: firstDay)) : 0 }
+    private func reviews(on day: Int) -> Int {
+        guard reviewed, day >= firstReviewDay, shape != .lapsed || day < -2 else { return 0 }
+        return scaled(Self.reviews(day, first: firstDay))
+    }
 
     /// The scope's reviews on an average day, for the windows with no time axis.
     private var dailyReviews: Int { reviewed ? scaled(150) : 0 }

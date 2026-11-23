@@ -324,6 +324,12 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
             case year(Int)
         }
 
+        /// How much of a year's total follows the year (the owner's Option B, 2026-11-23): all of
+        /// it ("· 87,634 reviews"), the number alone ("· 87,634"), or none where neither fits.
+        public enum Total: Sendable, Equatable {
+            case none, number, full
+        }
+
         public let kind: Kind
         public let line: Int
         public let column: Int
@@ -332,6 +338,19 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
         public let width: CGFloat
         /// The year rule's left edge, after mirroring: the column's leading edge; nil for no rule.
         public let rule: CGFloat?
+        /// A year's total after it, and the total's leading edge after mirroring.
+        public var total: Total = .none
+        public var totalX: CGFloat? = nil
+    }
+
+    /// A year's total in its two lengths, as drawn: "· 87,634 reviews" and "· 87,634".
+    public nonisolated struct TotalWidths: Sendable, Equatable {
+        public let full: CGFloat
+        public let number: CGFloat
+        public init(full: CGFloat, number: CGFloat) {
+            self.full = full
+            self.number = number
+        }
     }
 
     /// The labels and the month step they keep.
@@ -357,12 +376,19 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
     /// which is never left out: past the edge its rule stays at its column and its text ends
     /// just before the rule. A line's first month follows the step too. Under right-to-left
     /// layout everything mirrors.
+    ///
+    /// With `yearTotal`, each year placed (at 1 January, or the first column drawn) is followed by
+    /// its total, `totalSpacing` after it: the whole total where it fits before the next label
+    /// already placed and the line's end, else the number alone, else none; a total never
+    /// overlaps or runs past the edge, and the months give way to it (the owner's Option B).
     /// - Parameters:
     ///   - ruleWidth: the rule's width; the year's text starts `ruleSpacing` after it.
     ///   - spacing: the least space between two labels.
     ///   - monthWidth, yearWidth: the drawn widths of a month's name and a year.
+    ///   - yearTotal: a year's total in its two lengths; nil for a year without one.
     public func labels(_ geometry: Geometry, rightToLeft: Bool = false, ruleWidth: CGFloat = 1, ruleSpacing: CGFloat = 2,
-                       spacing: CGFloat = 4, monthWidth: (Int) -> CGFloat, yearWidth: (Int) -> CGFloat) -> Labels {
+                       spacing: CGFloat = 4, totalSpacing: CGFloat = 4, monthWidth: (Int) -> CGFloat, yearWidth: (Int) -> CGFloat,
+                       yearTotal: (Int) -> TotalWidths? = { _ in nil }) -> Labels {
         struct Candidate {
             enum Rank: Int { case year, gridStart, lineStart, month }
             let kind: Label.Kind
@@ -424,34 +450,61 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
             if same >= 3, !yearsOnly, (month.month - 1) % step == 0 { candidates.append(candidate(.month(month.month), column: column, rank: .lineStart, rule: false)) }
         }
 
-        // Each placed label's span on its line (rule and text), its text's left edge and its rule.
-        var placed: [(candidate: Candidate, line: Int, start: CGFloat, end: CGFloat, text: CGFloat, rule: CGFloat?)] = []
-        for item in candidates.sorted(by: { ($0.rank.rawValue, $0.column) < ($1.rank.rawValue, $1.column) }) {
+        // Each placed label's span on its line (rule, text and total), its text's left edge, its
+        // rule and its total.
+        typealias Placed = (candidate: Candidate, line: Int, start: CGFloat, end: CGFloat, text: CGFloat, rule: CGFloat?,
+                            total: Label.Total, totalWidth: CGFloat)
+        var placed: [Placed] = []
+        func overlaps(_ line: Int, _ start: CGFloat, _ end: CGFloat, except: Int? = nil) -> Bool {
+            placed.indices.contains { index in
+                let other = placed[index]
+                return index != except && other.line == line && start < other.end + spacing && other.start < end + spacing
+            }
+        }
+        func place(_ item: Candidate) {
             let line = geometry.place(ofColumn: item.column).line
             let left = left(item.column)
             var start = left, end = left + item.extent
             var text = item.rule ? left + ruleWidth + ruleSpacing : left
             if end > geometry.width {
                 // Only a year stays: its rule keeps 1 January's column and its text ends before it.
-                guard item.rank == .year else { continue }
+                guard item.rank == .year else { return }
                 text = max(0, left - ruleSpacing - item.width)
                 start = text
                 end = left + ruleWidth
             }
-            let overlaps = placed.contains { other in
-                other.line == line && start < other.end + spacing && other.start < end + spacing
-            }
-            if overlaps && item.rank != .year { continue }
-            placed.append((item, line, start, end, text, item.rule ? left : nil))
+            if overlaps(line, start, end) && item.rank != .year { return }
+            placed.append((item, line, start, end, text, item.rule ? left : nil, .none, 0))
         }
+        let sorted = candidates.sorted(by: { ($0.rank.rawValue, $0.column) < ($1.rank.rawValue, $1.column) })
+        // The years first, then their totals, then the months, which give way to the totals.
+        for item in sorted where item.rank == .year || item.rank == .gridStart { place(item) }
+        for index in placed.indices {
+            let item = placed[index]
+            // Never after a year whose text had to end before its rule at the edge.
+            guard case let .year(year) = item.candidate.kind, item.rule.map({ item.text > $0 }) ?? true,
+                  let widths = yearTotal(year) else { continue }
+            for (kind, width) in [(Label.Total.full, widths.full), (.number, widths.number)] {
+                let totalEnd = item.text + item.candidate.width + totalSpacing + width
+                if totalEnd <= geometry.width, !overlaps(item.line, item.start, totalEnd, except: index) {
+                    placed[index].total = kind
+                    placed[index].totalWidth = width
+                    placed[index].end = totalEnd
+                    break
+                }
+            }
+        }
+        for item in sorted where item.rank != .year && item.rank != .gridStart { place(item) }
         let items = placed.sorted { ($0.line, $0.start) < ($1.line, $1.start) }.map { item -> Label in
+            let totalX: CGFloat? = item.total == .none ? nil : item.text + item.candidate.width + totalSpacing
             guard rightToLeft else {
                 return Label(kind: item.candidate.kind, line: item.line, column: item.candidate.column, x: item.text,
-                             width: item.candidate.width, rule: item.rule)
+                             width: item.candidate.width, rule: item.rule, total: item.total, totalX: totalX)
             }
             return Label(kind: item.candidate.kind, line: item.line, column: item.candidate.column,
                          x: geometry.width - item.text - item.candidate.width, width: item.candidate.width,
-                         rule: item.rule.map { geometry.width - $0 - ruleWidth })
+                         rule: item.rule.map { geometry.width - $0 - ruleWidth }, total: item.total,
+                         totalX: totalX.map { geometry.width - $0 - item.totalWidth })
         }
         return Labels(items: items, step: step)
     }

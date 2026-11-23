@@ -151,7 +151,7 @@ final class StatisticsCompactUITests: XCTestCase {
         XCTAssertTrue(waitFor(toggle, NSPredicate(format: "label == 'Show Less'"), 5), "Show Less after expanding")
         XCTAssertGreaterThan(plot.frame.height, shortGrid + 100, "Every year is shown")
         XCTAssertEqual(toggle.frame.minY, before, accuracy: 3, "The control and today's line stay where they were")
-        XCTAssertTrue(element(app, "stats.box.activity.figures").exists, "The figures stay")
+        XCTAssertTrue(element(app, "stats.box.activity.plot").exists, "The grid stays")
         toggle.tap()
         XCTAssertTrue(waitFor(toggle, NSPredicate(format: "label == 'Show All Years'"), 5), "Show All Years after Show Less")
         XCTAssertEqual(plot.frame.height, shortGrid, accuracy: 1, "The recent lines again")
