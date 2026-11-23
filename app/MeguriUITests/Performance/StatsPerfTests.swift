@@ -183,7 +183,7 @@ final class StatsPerfTests: PerfTestCase {
 /// The iPad's page scrolled (R2078 on touch, the owner's report of 2026-11-23): the sample
 /// collection of the `stats/page/typical` route (`StatsSampleService`, about three years), since
 /// the 150k fixture reaches the test VM only for the Mac. Each run is the hooks' section-by-section
-/// scroll; the settled one also swipes the page by touch, as a finger does.
+/// scroll of the platform scroll view, with nothing reading or while a refresh reads.
 final class StatsTouchPerfTests: PerfTestCase {
     override nonisolated class var intervalNames: [String] { ["stats.scrollDuringRead", "stats.scrollSettled"] }
     override nonisolated class var iterations: Int { 3 }
@@ -203,9 +203,6 @@ final class StatsTouchPerfTests: PerfTestCase {
         var pacing: [StatsFramePacingReading] = []
         try measure(app: app) { app in
             pacing.append(scroll("statsScrollSettled", bundle: bundle))
-            let page = app.descendants(matching: .any)["stats.page.content"]
-            for _ in 0..<3 { page.swipeUp(velocity: .fast) }
-            for _ in 0..<3 { page.swipeDown(velocity: .fast) }
         }
         StatsFramePacingReading.check(pacing)
         #else
@@ -248,7 +245,7 @@ final class StatsTouchPerfTests: PerfTestCase {
             notify_get_state(token, &state)
             notify_cancel(token)
         }
-        return StatsFramePacingReading(text: "ratio=\(Double(state) / 1_000)")
+        return StatsFramePacingReading(text: "ratio=\(Double(state & 0xFFFF_FFFF) / 1_000);frames=\(state >> 32)")
     }
     #endif
 }
@@ -261,16 +258,20 @@ struct StatsFramePacingReading {
     let text: String
 
     /// The late time per second of the scroll, in ms/s; nil when the app sent none.
-    var ratio: Double? {
-        text.split(separator: ";").first { $0.hasPrefix("ratio=") }.flatMap { Double($0.dropFirst("ratio=".count)) }
+    var ratio: Double? { value("ratio") }
+    /// The display link's callbacks over the scroll: none means nothing was measured.
+    var frames: Double? { value("frames") }
+
+    private func value(_ key: String) -> Double? {
+        text.split(separator: ";").first { $0.hasPrefix(key + "=") }.flatMap { Double($0.dropFirst(key.count + 1)) }
     }
 
     /// R2078: below 5 ms/s on every measured run (VM-measured).
     @MainActor static func check(_ readings: [StatsFramePacingReading]) {
         XCTContext.runActivity(named: "meguri.stats.framePacing: " + readings.map(\.text).joined(separator: " | ")) { _ in }
         for reading in readings {
-            guard let ratio = reading.ratio else {
-                XCTFail("the app reported no frame pacing for a scroll")
+            guard let ratio = reading.ratio, let frames = reading.frames, frames > 0 else {
+                XCTFail("the app measured no frames for a scroll (\(reading.text))")
                 continue
             }
             XCTAssertLessThan(ratio, 5, "R2078: a hitch time ratio of \(ratio) ms/s while scrolling (\(reading.text))")

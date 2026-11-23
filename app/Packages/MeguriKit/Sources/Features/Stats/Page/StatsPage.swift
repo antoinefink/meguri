@@ -25,8 +25,6 @@ public final class StatsPage {
 
     public init(model: StatsPageModel) {
         self.model = model
-        // Heard from the model, not observed by the page's view: no view reads every box.
-        model.boxesChanged = { [weak self] in self?.boxesChanged() }
     }
 
     /// The page's views on screen: SwiftUI can show a new one before the old one goes (a

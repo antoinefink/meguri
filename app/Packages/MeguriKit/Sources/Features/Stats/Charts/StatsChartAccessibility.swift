@@ -7,7 +7,8 @@ import SwiftUI
 /// Swift Charts' own mark elements are hidden in its place.
 ///
 /// Equatable on what its texts are made of, so a hover, which redraws the plot's marks, never
-/// formats every bin's text again (R2078).
+/// formats every bin's text again (R2078). Show in Browse is compared by presence only: a
+/// caller passes one action for the chart's life (the bin is its argument).
 struct StatsAccessibilityBins: View, Equatable {
     let data: StatsChartData
     let format: StatsChartFormat

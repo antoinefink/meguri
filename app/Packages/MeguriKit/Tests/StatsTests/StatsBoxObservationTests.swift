@@ -47,12 +47,11 @@ import Testing
 
     @Test func everyChangeOfTheBoxesIsHeard() async throws {
         let model = base.model()
-        var heard = 0
-        model.boxesChanged = { heard += 1 }
+        let before = model.boxesVersion
         model.appear()
         let request = try await base.request(1)
         await base.complete(request, model)
-        #expect(heard > 0)
+        #expect(model.boxesVersion > before)
         #expect(StatsBoxID.allCases.allSatisfy { model.box($0) == model.boxes[$0] })
     }
 }

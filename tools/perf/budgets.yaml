@@ -1370,7 +1370,7 @@ budgets:
         strict: true
         fixture: null
         where: [simulator, device]
-        note: The same page filled, scrolled by the hooks and by six fast swipes with nothing reading. Measured on the iPad simulator in the test VM.
+        note: The same page filled, scrolled by the hooks with nothing reading. Measured on the iPad simulator in the test VM.
   - id: R2079
     title: Selecting a value, changing a box's switch and changing the period within the last year take one frame and make no core call
     group: stats

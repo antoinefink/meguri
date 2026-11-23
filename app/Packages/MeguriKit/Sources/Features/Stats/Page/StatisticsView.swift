@@ -53,6 +53,7 @@ public struct StatisticsView: View {
             .onAppear { page.appear() }
             .onDisappear { page.disappear() }
             .onChange(of: model.selection) { old, new in page.selectionChanged(from: old, to: new) }
+            .onChange(of: model.boxesVersion) { page.boxesChanged() }
             .onChange(of: model.state) { page.boxesChanged() }
     }
 

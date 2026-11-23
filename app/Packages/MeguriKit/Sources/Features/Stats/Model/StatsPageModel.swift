@@ -30,14 +30,14 @@ public final class StatsPageModel {
     public private(set) var state: StatsPageState = .noCollection
     /// Every box's content, always present (a box keeps its place, S8.5). Not observed as a
     /// whole: each box's view observes its own cell (`box(_:)`), so a part, a progress tick or a
-    /// switch redraws only the boxes it changes (R2078). `boxesChanged` hears every change.
+    /// switch redraws only the boxes it changes (R2078). `boxesVersion` counts every change.
     @ObservationIgnored public private(set) var boxes: [StatsBoxID: StatsBoxContent] = [:] {
         didSet {
             guard boxes != oldValue else { return }
             for id in StatsBoxID.allCases {
                 if let cell = cells[id], cell.content != boxes[id] { cell.content = boxes[id] }
             }
-            boxesChanged?()
+            boxesVersion &+= 1
         }
     }
     public private(set) var strip: [StatsStripID: StatsStripFigure] = [:]
@@ -57,8 +57,10 @@ public final class StatsPageModel {
     }
     /// Each box's content and selection, observed on their own.
     @ObservationIgnored private let cells = Dictionary(uniqueKeysWithValues: StatsBoxID.allCases.map { ($0, StatsBoxCell()) })
-    /// Runs after any box's content changed (the page's intervals and `filled`).
-    @ObservationIgnored public var boxesChanged: (@MainActor () -> Void)?
+    /// Counts the changes of any box's content: the page's view hears it after the model's
+    /// whole update (its intervals and `filled`), as it heard the dictionary itself, without
+    /// reading every box.
+    public private(set) var boxesVersion = 0
 
     /// The toolbar's controls respond (S12.1, S12.2 disable them).
     public var controlsEnabled: Bool { state != .noCollection && state != .noCards }

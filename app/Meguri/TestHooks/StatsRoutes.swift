@@ -442,15 +442,19 @@ extension TestHooks {
                 Signposts.end(token)
                 let pacing = frames.stop()
                 #if os(iOS)
-                // Darwin notifications carry no object: the ratio in thousandths of a ms/s is the
-                // notification's state, read by the test. notifyd keeps a name's state only while a
-                // client holds it, so the token stays registered.
+                // Darwin notifications carry no object: the frames counted (high 32 bits) and the
+                // ratio in thousandths of a ms/s (low 32) are the notification's state, read by the
+                // test. notifyd keeps a name's state only while a client holds it, so the token
+                // stays registered.
                 let name = "\(Bundle.main.bundleIdentifier ?? "").testhooks.statsScrolled"
                 if stateToken == nil {
                     var token: Int32 = 0
                     if notify_register_check(name, &token) == NOTIFY_STATUS_OK { stateToken = token }
                 }
-                if let stateToken { notify_set_state(stateToken, UInt64(max(0, pacing.ratio * 1_000).rounded())) }
+                if let stateToken {
+                    let ratio = UInt64(min(max(0, pacing.ratio * 1_000).rounded(), Double(UInt32.max)))
+                    notify_set_state(stateToken, UInt64(UInt32(clamping: pacing.frames)) << 32 | ratio)
+                }
                 #endif
                 Self.answer("statsScrolled", object: "\(pacing.description);idleRatio=\(String(format: "%.2f", baseline.ratio))")
             }
