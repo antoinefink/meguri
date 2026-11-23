@@ -62,6 +62,8 @@ Ids U98, U99, U101, U103 and U104 are the parent plan's. U288 onwards are new. "
 
 Progress (2026-11-22): U98 is done (PR #125), U99 is done (PR #126), U101 is done (PR #127). U289 is in progress, and so are U104 and U288. The other units have not started.
 
+Progress (2026-11-23): U299, U300 and U301 are built in PR #161 (the Cards, Coming Up, Answering, Memory and Decks sections). The same PR does the Mac and iPad part of U307, decided by Claude (coordinator) under Antoine's delegation: Statistics is shown by default on the Mac and the iPad at regular width, its sidebar row second under Today, with View › Statistics and Go to Section (`AppSection.statisticsShown`, `AppSection.productSidebar`). U307 keeps the rest: the iPhone and Duo tab and `CompactTab`'s order once U304 lands, the catalog moves of §3, and the checks of its row on every platform.
+
 ### Lane A: core reads
 
 | Unit | Scope | Spec sections | Side | Verify | Must not touch |
@@ -95,7 +97,7 @@ Progress (2026-11-22): U98 is done (PR #125), U99 is done (PR #126), U101 is don
 | **U304** | iPhone, the folded Duo and a narrow iPad: the one column, four strip tiles, the pinned period, the Jump menu, the Statistics tab behind the flag, Count and Time in Reviews' menu, Activity's wrapped grid at the column's width (more, shorter lines; the swiping year strip was withdrawn on 2026-11-23 with the owner's Option E), the Duo held tall with small boxes two abreast | `stats/statistics-page` S6, S7.5's touch line, S13 (tab); N25.6 | Swift | **first run and no collection**; simulator screenshots (`iphone`, `foldable` folded and tall, `ipad-small`) | Mac layout |
 | **U305** | The Duo opened: a section per screenful, the lead box left of the fold and the other boxes right, the two controls on either half, the side tab bar's item | N25.7 | Swift | **first run and no collection**; `foldable` opened screenshots and `hierarchy-check` on its export (no control's frame crosses the fold's centre line, a check this unit adds) | |
 | **U306** | Deck Statistics: the deck context menu item, Deck › Deck Statistics, the touch More menu, the deck page's Activity header as a button, T on Today and a deck page | `stats/statistics-page` S13; N25.1, N20.2's new row | Swift | **first run and no collection** (the items are absent with no collection); `ui-test` class `DeckStatisticsUITests` | the deck menu's other items |
-| **U307** | Show Statistics: add it to `availableSections` on every platform and reorder `AppSection.sidebar` (`[.home, .stats, .browse, .noteTypes, …]`) and `CompactTab` (Decks, Statistics, Browse, Settings), touching Browse's place; the catalog moves of §3 | `stats/statistics-page` S13; N25.1 | Swift | **first run and no collection** on every platform; `perf-ui --suite StatsPerfTests` on Mac and iPhone; `a11y` sweep | |
+| **U307** (Mac and iPad part done, PR #161) | Show Statistics: add it to `availableSections` on every platform and reorder `AppSection.sidebar` (`[.home, .stats, .browse, .noteTypes, …]`) and `CompactTab` (Decks, Statistics, Browse, Settings), touching Browse's place; the catalog moves of §3 | `stats/statistics-page` S13; N25.1 | Swift | **first run and no collection** on every platform; `perf-ui --suite StatsPerfTests` on Mac and iPhone; `a11y` sweep | |
 
 ### Dependencies and parallel work
 

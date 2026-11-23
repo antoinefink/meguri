@@ -695,14 +695,17 @@ screens:
       log, knowledge; kept results first, refreshed in place with "Updating…" in the subtitle;
       with nothing kept, each box at its final size with a small progress indicator in its plot,
       determinate where the core reports progress; no full-page spinner or shimmer). No session
-      timer, FSRS always shown, no Card Ease, no second axes, no donut. Live: refreshes itself
+      timer, FSRS always shown, no Card Ease, no second axes (Card Counts a donut with its table since
+      2026-11-23). Live: refreshes itself
       half a second after a change, a sync or a rollover; no Refresh command. Every screen unit
       checks first run and no collection. Identifiers stats.<element> (stats/statistics-page
       S15). Core: one G8 request per refresh with stats/history-reads H5's parts, cancelled when
       superseded; viewing writes nothing. Search scope and PDF export come later (9A).
       This replaces the earlier text of this entry (the scope and history header, the thirteen
       boxes in Anki's order, the heatmap and streaks not here, per-graph ranges and toggles).
-      Reached before U307 shows it through StatsRollout (routes stats/page/<state>,
+      Shown by default on the Mac and the iPad at regular width (PR #161, the Mac and iPad part of
+      U307); hidden on the iPhone, the Duo and the compact layouts until U304 (-MeguriStatsRollout
+      off hides it for tests). Reached through StatsRollout's test routes too (routes stats/page/<state>,
       stats/period/<period>, stats/deck/<deck>, stats/chart/<box>; the Reviews section's
       states stats/chart/reviews-over-time/<state> and stats/chart/activity/<state>; over a
       fixture, -MeguriStatsRollout open:<section> scrolls to a section). Toolbar identifiers are
@@ -717,6 +720,13 @@ screens:
       each day is worked out again with today's memory parameters; an open Retention point's
       callout says it has too few reviews to trust; route stats/page/pinned shows a pinned bar
       in each Knowledge box.
+      Cards, Coming Up, Answering, Memory and Decks sections (U299 to U301): routes
+      stats/chart/<box>/<state> for cards-over-time, reviews-due, answers, retrievability and
+      by-deck (1m 3m 6m 1y, deck, loading, empty, failed, pinned, contrast; cold, leaf and the
+      card-counts, time-of-day and stability failures). Identifiers: stats.box.cardCounts.plot (the
+      donut), .table and .row.<state>; stats.box.byDeck.table, .sort.<column> (deck, cards,
+      reviews, retention, time) and .row.<deck id>-<own cards>. Box titles are plain headings
+      (stats.box.<box>.header, no chevron) until U302 gives a box its page.
   - id: stats.heatmapSettings
     title: Heatmap settings
     units: [U229]

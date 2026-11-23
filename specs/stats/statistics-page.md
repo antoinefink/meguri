@@ -111,14 +111,14 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 ### S7.1 Knowledge Over Time (lead)
 
 - Data: `knowledge_over_time` (H3), sampled at each bar's end (S4.1).
-- Plot: two lines on one count axis, no fill: Known (the knowledge sum, green) and Studied (grey, dashed). The y axis starts near the lowest value, so a year's change is visible; because it does not start at zero nothing is filled.
+- Plot: two lines on one count axis: Known (the knowledge sum, green) and Studied (grey, dashed), and between them a band in Forgotten's orange at a soft tint, named "Likely forgotten" in the legend, so what is forgotten shows as an area that widens or narrows; the lines draw above it, and a gap in either line breaks it. The y axis starts near the lowest value, so a year's change is visible; because it does not start at zero nothing is filled from the axis. The callout's "Likely forgotten" line has the band's swatch, and the Audio Graph's description says what the band is. No forecast, bars or percentage switch. Changed 2026-11-23 (PR #161; Antoine's choice of option 1 from a mock, `docs/design/decisions.md`): this said "no fill".
 - Header: the title with "Estimated" in secondary text.
 - Figure: Known now, "<K> cards" (the replay at now, rounded to the nearest card); sentence: "<p>% of the <S> cards with an estimate" and "up <n> since <date>" or "down <n> since <date>", from the end of the day before the first bar. It is not Retrievability's Estimated total knowledge, which sums the stored memory states of every card (S7.12); the chart's page says how the two differ.
 - Figures: Studied, Likely Forgotten (S − K, with its share), Change in Period (since the end of the day before the first bar).
 - Callout: the period, Known, Studied, and the gap as "Likely forgotten <n> (<p>%)".
 - No Show in Browse: a past state cannot be listed.
 - Empty: no review ever, "No reviews yet" and "This fills in as you study."; reviews but no card with an estimate, "No cards with a memory estimate".
-- A footnote when H3's `left_out` or `failed` is above 0: "<n> suspended cards are not included." and "<n> cards could not be estimated."
+- A footnote when H3's `failed` is above 0: "<n> cards could not be estimated." Changed 2026-11-23 (PR #161; Antoine's feedback on his Mac, decided by Claude (coordinator) under his delegation, `docs/design/decisions.md` rows `stats.overview` of that day): this also had "<n> suspended cards are not included." for `left_out`; that fact moves off the box face, to the Estimated marker's help ("… Suspended cards are not included.") and to the chart's page's About text (S9, U302).
 
 ### S7.2 Retention
 
@@ -175,7 +175,7 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 ### S7.7 Card Counts
 
 - Data: `card_counts`' `excluding_inactive` set (C4.1), always: suspended and buried are always their own rows.
-- Plot: one horizontal bar divided by state (no donut), then the table: a row per state, Mature, Young, Relearning, Learning, New, Suspended, Buried, each with its swatch, name, count and share of the total; a row with 0 stays, in grey. Then Total and Notes (C4.2).
+- Plot: a donut (Swift Charts sectors with an inner radius), the states in their colours and in the table's order from 12 o'clock clockwise, the total in its centre with "cards" under it; beside the table when the box is wide, above it when narrow. The sectors keep their true angles (no minimum angle): a very small state keeps its small sector and the table carries it. A state with no card takes no sector. Then the table: a row per state, Mature, Young, Relearning, Learning, New, Suspended, Buried, each with its swatch, name, count and share of the total; a row with 0 stays, in grey. Then Total and Notes (C4.2). Hovering or clicking a sector or a row highlights both. Changed 2026-11-23 (PR #161; Antoine's feedback on his Mac, decided by Claude (coordinator) under his delegation, `docs/design/decisions.md` rows `stats.overview` of that day): this was one horizontal bar divided by state, "no donut".
 - Figure: "<n> cards in <m> notes". On the iPhone and the folded Duo a figure Mature ("<n> of <total>") is added, since the strip has four tiles there (S6).
 - Each state row is a button that opens Browse on that state (`stats/browse-queries` Q4.1's text for the row, Q9).
 - It always shows its table, zeros included.
@@ -201,10 +201,10 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 ### S7.10 Answers
 
 - Data: `buttons` (V6.2) for the period window (S4.3), `six_months` from H7.
-- Plot: one full-width bar for each of Learning, Young and Mature, divided Again, Hard, Good, Easy in that order with a gap between segments; the table under it repeats the four counts as columns per group.
+- Plot: one vertical bar for each of Learning, Young and Mature, stacked to 100% by answer from the baseline Again, Hard, Good, Easy, on a 0 to 100% axis, so a kind with few answers reads as well as one with many. The segments meet, as every stacked bar on the page does. Changed 2026-11-23 (PR #161; Antoine's feedback on his Mac, decided by Claude (coordinator) under his delegation, `docs/design/decisions.md` rows `stats.overview` of that day): this was one full-width bar per group divided by count "with a gap between segments", with a table of the counts under it.
 - Figure: presses in the period; sentence: "<p>% Good" (the largest share's button).
 - Figures: the share of Again for each group.
-- Callout: a segment gives its count and share of its group. No Show in Browse.
+- Callout: the kind, each answer's share with its count ("61.2% (9,718)"), and the kind's answers ("15,880 answers"). No Show in Browse.
 
 ### S7.11 Time of Day
 
@@ -290,6 +290,7 @@ The system's formatters in the app's locale: grouped counts, durations in the sh
 
 ## S9. A chart's own page
 
+- Changed 2026-11-23 (PR #161; Antoine's feedback on his Mac, decided by Claude (coordinator) under his delegation, `docs/design/decisions.md` rows `stats.overview` of that day): until a chart's own page exists, its box's header is a plain title with no chevron and is not a button (he found the carets served no purpose); each box's header becomes the button below when its page lands (U302).
 - A box's header is a button (the title and a chevron). It opens the chart's own page in the same column: the chart at full width with the same switches, every row of its table (one row per bar: the period and each series' value), "About This Chart" in two or three sentences, and a link to the setting behind it when there is one (Desired Retention: Deck Options).
 - The page keeps the toolbar's deck and period working. Back: ⌘[ or the toolbar's back button on the Mac, the navigation back on touch (pushed); it returns to the same scroll position.
 - Context menu of a chart (box or page): Copy Image, Copy Values (the table as tab-separated text).
@@ -389,11 +390,11 @@ A deck deleted while it is the filter (`unknown_deck`, G8.2), or kept from an ea
 | A row of By Deck | the same page on that deck |
 
 - Deck Statistics has no key of its own. ⇧⌘S is free: Meguri has no documents, so no Save As.
-- The section stays hidden (`availableSections`) until the units of S20's last line land, as Browse was.
+- The section stays hidden (`availableSections`) until the units of S20's last line land, as Browse was. Changed 2026-11-23 (PR #161): decided by Claude (coordinator) under Antoine's delegation (`docs/design/decisions.md`, row `stats.overview` on Statistics shown by default), the section is shown now where its page is built, the Mac and the iPad at regular width (the sidebar row, View › Statistics, Go to Section); the iPhone, the Duo and the compact layouts keep it hidden until U304, and U307 adds the tab.
 
 ## S14. Keyboard
 
-- Tab moves through the toolbar's deck pop-up and period control, then box by box (each box's header button, then its switches, then its plot).
+- Tab moves through the toolbar's deck pop-up and period control, then box by box (each box's header button, then its switches, then its plot). While a header is a plain title (S9), Tab goes from the switches to the plot.
 - In a focused plot, Left and Right move the selection one bar at a time; Return runs Show in Browse when the bar offers it; Esc clears the selection. In Activity's grid (S7.5) the keys follow the squares as drawn: Left and Right move to the square beside it (a week), Up and Down to the square above or below it (a day); a line's end continues on the next line, the selection stays between the first day and today, and under right-to-left layout Left and Right swap.
 - ⌘[ returns from a chart's page. View › Go to Section's items have no keys.
 
@@ -401,7 +402,7 @@ A deck deleted while it is the filter (`unknown_deck`, G8.2), or kept from an ea
 
 `stats/graph-presentation` P18 stays, with these changes:
 
-- Each chart is one element whose label is its figure's sentence (for example "Estimated knowledge, 3,512 of 3,950 studied cards, up 412 in a year."), with an Audio Graph (`AXChartDescriptor`: one category per bar, named by its period; one series per stacked kind or line) and one element per bar inside it, in runs of ten (P18.2), each reading the callout's text. Show in Browse is a named action on the elements that offer it.
+- Each chart is one element whose label is its figure's sentence (for example "Estimated knowledge, 3,512 of 3,950 studied cards, up 412 in a year."), with an Audio Graph (`AXChartDescriptor`: one category per bar, named by its period; one series per stacked kind or line) and one element per bar inside it, in runs of ten (P18.2), each reading the callout's text. Show in Browse is a named action on the elements that offer it. Changed 2026-11-23 (PR #161; Antoine's feedback on his Mac, decided by Claude (coordinator) under his delegation, `docs/design/decisions.md` rows `stats.overview` of that day): Card Counts' donut is a part of a whole, not a series over bins: its table is its accessible form (each row an element) and the donut one element with the box's sentence, with no Audio Graph.
 - Series are told apart by legend, order and name as well as colour, and follow Increase Contrast.
 - Text follows Dynamic Type to the largest accessibility size; at the accessibility sizes legends and figures stack under the plot and the plot keeps its height.
 - The strip's figures, the tables' rows and the Activity grid's days are elements (S6, S7.5: a container per month of the grid, as `stats/heatmap-presentation` M15 does).
@@ -421,8 +422,8 @@ Meguri's own, in the String Catalog; `<…>` marks a value. Anki's strings that 
 | Sections | S5's titles and questions |
 | Box titles | `Knowledge Over Time`, `Retention`, `Forgotten`, `Reviews Over Time`, `Activity`, `Cards Over Time`, `Card Counts`, `Added and Started`, `Reviews Due`, `Answers`, `Time of Day`, `Retrievability`, `Stability`, `Difficulty`, `By Deck` |
 | Series | `Known`, `Studied`, `Desired retention`, `Average desired retention`, `Remembered`, `Forgotten`, `New`, `Learning`, `Relearning`, `Young`, `Mature`, `Suspended`, `Buried`, `Filtered`, `Again`, `Hard`, `Good`, `Easy`, `Added`, `Started`, `Overdue`, `Total by then`, `Reviews` |
-| Markers | `Estimated`, `Now`; the Estimated marker's help (Mac tooltip, VoiceOver hint): `An estimate: each day is worked out again from your reviews up to that day, with today’s memory parameters.` (added 2026-11-23, PR #148) |
-| Figures | S7's figure labels and sentences |
+| Markers | `Estimated`, `Now`; the Estimated marker's help (Mac tooltip, VoiceOver hint): `An estimate: each day is worked out again from your reviews up to that day, with today’s memory parameters. Suspended cards are not included.` (added 2026-11-23, PR #148; its last sentence PR #161) |
+| Figures | S7's figure labels and sentences; `<n> answers` (Answers' callout, PR #161) |
 | Empty and states | `No reviews yet`, `This fills in as you study.`, `No reviews in the last month`, `… the last 3 months`, `… the last 6 months`, `… the last year`, `No reviews in <deck> in <span>`, `No cards due`, `No cards with a memory state`, `No cards with a memory estimate`, `Later`, `No Collection`, `Statistics appear once a collection is open.`, `No Cards`, `Add notes or import a collection to see statistics.`, `This deck no longer exists.`, `Show All Decks`, `This deck has no subdecks`, `A filtered deck shows the cards it holds now. Their reviews also count in their home decks.`, `Statistics Unavailable`, `A review or card record can't be read. Check Database can repair it.`, `Couldn't load this chart.`, `<n> suspended cards are not shown.`, `<n> suspended cards are not included.`, `<n> cards could not be estimated.`, `An open point has too few reviews to trust` |
 | Chart elements and callouts (added 2026-11-23, PRs #148, #149) | `Estimated knowledge` (the first words of Knowledge Over Time's element), `Too few reviews to trust` (an open Retention point's callout and element), `Today, <n> reviews` (Activity's element for today; `<n> reviews` is the day's count) |
 | Actions | `Show in Browse`, `Cards Reviewed on <date>`, `Cards Forgotten on <date>`, `About This Chart`, `Copy Image`, `Copy Values` |
