@@ -341,3 +341,59 @@ fn a_repeated_field_id_is_matched_one_to_one() {
     import(&target, &package, MERGE).unwrap();
     assert_eq!(names(&target, 5000).0, ["Front", "Back", "Again"]);
 }
+
+#[test]
+fn the_name_of_a_copy_being_removed_stays_taken_during_the_pass() {
+    let source = Fixture::new(0);
+    let wider = [("Front", Some(11)), ("Back", Some(12)), ("Extra", Some(13))];
+    put_notetype(&source, notetype(5000, "Pair", 200, &wider, &one_template()));
+    put_notetype(&source, notetype(6000, "Pair spare", 200, &two_fields(), &one_template()));
+    add(&source, 5000, "g-new", &["star", "etoile", "extra"], 1);
+    add(&source, 6000, "g-spare", &["cloud", "nuage"], 1);
+    let package = export(&source, "deck.apkg");
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    // An earlier copy of 5000 that holds the name the package's 6000 asks for.
+    let mut copy = notetype(5500, "Pair spare", 100, &wider, &one_template());
+    copy.config.original_id = Some(5000);
+    put_notetype(&target, copy);
+    add(&target, 5500, "g-held", &["moon", "lune", "kept"], 1);
+    let session = inspect(&target, &package).unwrap();
+    let ApkgImportError::ConfirmationRequired { token, .. } = apply(&target, &session, MERGE).unwrap_err() else {
+        panic!("the copy's removal needs a confirmation");
+    };
+    apkg::apply(target.host.engine(), &session, MERGE, Some(&*token), &CancelToken::new(), &ProgressSink::new())
+        .unwrap();
+    assert!(stored_notetype(&target, 5500).is_none());
+    assert_eq!(stored_notetype(&target, 6000).unwrap().name, "Pair spare+");
+    assert_eq!(note_by_guid(&target, "g-held").unwrap().fields, "moon\u{1f}lune\u{1f}kept");
+}
+
+#[test]
+fn the_preview_counts_the_notes_the_import_really_updates_after_a_layout_change() {
+    let source = Fixture::new(0);
+    let incoming = [("Front", Some(11)), ("Back", Some(12)), ("Extra", Some(14))];
+    put_notetype(&source, notetype(5000, "Pair", 200, &incoming, &one_template()));
+    let shared = add(&source, 5000, "g-shared", &["sun", "soleil", "more"], 1);
+    // An incoming `mod` ahead of the clock: newer even than the stamp the
+    // layout change gives T's notes.
+    let ahead = source.clock.now_ms() / 1000 + 1_000_000;
+    set_mtime(&source, shared, ahead);
+    let package = export(&source, "deck.apkg");
+    let target = Fixture::new(0);
+    let local = [("Front", Some(11)), ("Back", Some(12)), ("Notes", Some(13))];
+    put_notetype(&target, notetype(5000, "Pair", 100, &local, &one_template()));
+    let held = add(&target, 5000, "g-shared", &["sun", "local", "my own words"], 1);
+    let session = inspect(&target, &package).unwrap();
+    let ApkgImportError::ConfirmationRequired { preview, token } = apply(&target, &session, MERGE).unwrap_err() else {
+        panic!("the update empties a field: it needs a confirmation");
+    };
+    assert_eq!(preview.emptied_fields.len(), 1);
+    assert_eq!((preview.emptied_fields[0].field_name.as_str(), preview.emptied_fields[0].notes), ("Notes", 1));
+    let result =
+        apkg::apply(target.host.engine(), &session, MERGE, Some(&*token), &CancelToken::new(), &ProgressSink::new())
+            .unwrap();
+    assert_eq!(result.log.updated.len(), 1);
+    assert_eq!(names(&target, 5000).0, ["Front", "Back", "Notes", "Extra"]);
+    assert_eq!(note(&target, held).fields, "sun\u{1f}soleil\u{1f}\u{1f}more");
+}
