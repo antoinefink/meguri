@@ -652,6 +652,24 @@ Decided by the coordinator on 2026-11-23, pending Antoine's look. He showed the 
 - The Mac keeps the system's behaviour, which follows its "Show scroll bars" setting.
 - Only the review's card pages and their warm-up use this page. Note Types and Browse have no card web view today. A later card preview decides its indicators for itself.
 
+### N16.11 The leech notice is an icon (2026-11-23)
+
+Decided by the coordinator on 2026-11-23, pending Antoine's look. He showed "Card was a leech." drawn as a banner row above the card and asked for one yellow icon in the top controls instead. It takes no extra height, is less prominent, and can be pressed when needed.
+
+- **Placement:**
+  - No banner row: the card keeps that height on every platform.
+  - While the notice applies (`review/reviewer-strings#S3`), the review's top-trailing controls start with a button showing `exclamationmark.triangle.fill` in the symbol's own multicolour rendering, the system's yellow triangle: `[leech][undo][more]` on touch, with the opened foldable's side column in the same order. On the Mac it is the first trailing toolbar item.
+  - When no notice applies the button is absent and the group is as before.
+- **Lifetime** (Antoine, 2026-11-23: it "should just stay visible for as long as you are on the card"; this replaces the 2-second expiry #166 gave the notice, and the earlier "as long as the notice" line):
+  - It appears when the card after the leech answer is presented and stays through that whole card: question side, reveal, answer side, scrolling, the popover, audio and the More menu.
+  - It goes when that card is answered (the next card arrives), buried, suspended, or taken back by Undo (or Redo), when another card is presented in its place, when the session ends or is left, or when another notice takes the area. A newer leech answer shows the newer notice. It never reaches the card after, nor the end-of-session screen.
+  - VoiceOver announces it once when it appears, as #166 made it, and never again while it stays.
+  - No timer is left for this notice: #166's 2-second dismissal covered only the leech notice and is removed.
+- **The press:** a popover (on compact width the system's adaptation, a sheet at medium height) titled "Leech". Its text says, in plain words, that the card reached its deck's leech threshold, that its note is tagged "leech", and that the card is suspended when the answer suspended it (`sched/leeches` L1 to L3, L5's `suspended` flag).
+- **Not built: Edit Note and Suspend Card in the popover.** The leech card is the one just answered. The review's existing commands act on the card on screen, the next one, so they would edit or suspend the wrong card. Acting on the answered card would be new behaviour; this decision asked for none. Open for Antoine.
+- **Accessibility:** label "Leech", hint "Shows what this means." The notice's VoiceOver announcement is S2's and is not changed here. The toolbar gives the button its system target on touch and keyboard focus on the Mac.
+- **Other notices** (a refused or failed answer, media, a changed card, the session record) keep their banner row unchanged.
+
 ## N17. Round 5 editor and file transfer decisions (2026-11-19)
 
 Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`, `collection.import`, `settings.importExport`; round 5 options 1B, 2B, 3B and the Duo answer). Where earlier text differs, this section wins. Media is never a separate choice in any of these flows.
