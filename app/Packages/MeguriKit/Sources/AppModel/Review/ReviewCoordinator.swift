@@ -30,6 +30,9 @@ public final class ReviewCoordinator {
     /// are on the card"): the card presented after the leech answer. The notice stays
     /// through that whole card and goes when another card is presented.
     @ObservationIgnored private var leechNoticeCard: Int64?
+    /// S2, S3: each leech outcome is announced once, kept apart from the icon so
+    /// the last card's leech (whose end screen shows no icon) is still announced.
+    public private(set) var leechAnnouncement: ReviewLeechAnnouncement?
     /// N16.11: while the notice is a leech answer's (`review/reviewer-strings#S3`),
     /// the screen shows it as one icon in the top controls, not as a banner.
     public var leechNotice: ReviewLeechNotice? { leechNoticeID == nil ? nil : ReviewLeechNotice(notice: notice) }
@@ -1053,6 +1056,7 @@ public final class ReviewCoordinator {
         // follows, until that card is answered, acted on or undone, another
         // card is presented, or the session ends.
         leechNoticeID = UUID()
+        if let notice { leechAnnouncement = ReviewLeechAnnouncement(text: notice) }
     }
     /// N16.11: the first card presented after the leech answer keeps the notice;
     /// any other card presented after it ends it.
@@ -1176,6 +1180,12 @@ public final class ReviewCoordinator {
     public static func name(_ rating: ReviewRating) -> String {
         switch rating { case .again: "again"; case .hard: "hard"; case .good: "good"; case .easy: "easy" }
     }
+}
+
+/// One VoiceOver announcement of a leech outcome (`review/reviewer-strings#S2`, S3).
+public nonisolated struct ReviewLeechAnnouncement: Equatable, Sendable {
+    public let id = UUID()
+    public let text: String
 }
 
 /// A leech answer's notice (`review/reviewer-strings#S3`): the answered card's

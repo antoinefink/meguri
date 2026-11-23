@@ -70,8 +70,8 @@ public struct ReviewView: View {
             if let editNote, editNote.flow.isPresented { editNote.form }
         }
         #endif
-        .onChange(of: model.leechNoticeID) { _, id in
-            guard id != nil, let text = model.notice else { return }
+        .onChange(of: model.leechAnnouncement?.id) { _, id in
+            guard id != nil, let text = model.leechAnnouncement?.text else { return }
             AccessibilityNotification.Announcement(text).post()
         }
         // N20.8: no banner or toast; VoiceOver says what happened.

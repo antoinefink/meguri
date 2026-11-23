@@ -170,11 +170,13 @@ extension ReviewCollectionStartupTests {
         #expect(fixture.model.leechNotice?.suspended == suspended)
         #expect(fixture.model.phase == .question && fixture.model.shownItem?.cardId == 2)
         #expect(fixture.model.record.suspended.contains(1) == suspended)
+        let announced = try #require(fixture.model.leechAnnouncement)
         // Time passes, the card is refreshed and revealed: it stays, announced once (same id).
         try await Task.sleep(for: .milliseconds(2_200))
         fixture.model.requestRefresh(); await fixture.model.settled()
         fixture.model.reveal(); await fixture.model.settled()
         #expect(fixture.model.phase == .answer && fixture.model.leechNoticeID == id)
+        #expect(fixture.model.leechAnnouncement == announced, "no second announcement")
         // Answering that card ends it; the card after shows none.
         fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(3), marks: [], removed: [2]),
             leech: false, suspended: false, rolledOver: false)
@@ -225,6 +227,7 @@ extension ReviewCollectionStartupTests {
         ending.model.reveal(); await ending.model.settled()
         ending.model.rate(.again); await ending.model.settled()
         #expect(ending.model.phase == .finished && ending.model.leechNoticeID == nil)
+        #expect(ending.model.leechAnnouncement?.text == "Card was a leech.", "the last card's leech is still announced")
         #expect(await fixture.model.end())
         #expect(await ending.model.end())
     }
