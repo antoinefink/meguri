@@ -75,8 +75,19 @@ public final class StatsPageModel {
     @ObservationIgnored private var live: StatsTimerToken?
     @ObservationIgnored private var justNow: StatsTimerToken?
     @ObservationIgnored private var lastBins: [StatsBoxID: [StatsPeriod]] = [:]
-    /// One presenter per set during a rebuild: its axis and formatters are made once.
-    @ObservationIgnored private var presenters: [UUID: StatsPresenter] = [:]
+    /// The presenters of the sets shown, kept while the inputs they were made for hold: a set's
+    /// axis, formatters and streaks are made once, not on every part.
+    @ObservationIgnored private var presenters: [PresenterKey: StatsPresenter] = [:]
+    @ObservationIgnored private var inputs: UInt64 = 0
+    /// A refresh waits for the device's kept sets of its scope (S10.3 decides on them).
+    @ObservationIgnored private var refreshAfterLoad = false
+
+    private struct PresenterKey: Hashable {
+        let set: UUID
+        let parts: Int
+        let inputs: UInt64
+        let extras: [UUID]
+    }
 
     // MARK: Seams
 
@@ -110,6 +121,13 @@ public final class StatsPageModel {
         rebuild()
     }
 
+    isolated deinit {
+        kept.show(nil, by: ObjectIdentifier(self))
+        // A window that goes away without leaving the page still ends its request.
+        running?.task?.cancel()
+        if let stream = running?.stream { Task.detached { await stream.cancel() } }
+    }
+
     // MARK: Inputs from the shell
 
     /// A collection is open and ready; `identity` names it, so kept results never cross
@@ -118,6 +136,7 @@ public final class StatsPageModel {
         let changed = !collectionOpen || kept.collection != identity
         collectionOpen = true
         kept.open(collection: identity)
+        kept.show(selection.scope, by: ObjectIdentifier(self))
         guard changed else { return }
         cancelRunning()
         pageEnd = nil
@@ -134,6 +153,7 @@ public final class StatsPageModel {
         live?.cancel()
         live = nil
         collectionOpen = false
+        kept.show(nil, by: ObjectIdentifier(self))
         kept.close()
         rebuild()
     }
@@ -143,6 +163,12 @@ public final class StatsPageModel {
         let next = StatsDeckDirectory(nodes: nodes)
         guard next != decks else { return }
         decks = next
+        inputs &+= 1
+        // A deck restored (an undo, a sync) is shown again.
+        if let pageEnd, pageEnd.end == .deckMissing, case let .deck(id) = pageEnd.scope, next.deck(id) != nil {
+            self.pageEnd = nil
+            if visible, pageEnd.scope == selection.scope { refresh() }
+        }
         rebuild()
     }
 
@@ -188,7 +214,7 @@ public final class StatsPageModel {
     /// A memory warning: the core's caches go (G9.5, H14.4) through `StatsCacheSignals`; the
     /// model keeps only the shown scope's kept sets in memory.
     public func memoryWarning() {
-        kept.trim(keeping: collectionOpen ? selection.scope : nil)
+        kept.trim()
     }
 
     // MARK: Controls
@@ -199,6 +225,8 @@ public final class StatsPageModel {
         cancelRunning()
         selection.deck = id
         store.save(selection)
+        if collectionOpen { kept.show(selection.scope, by: ObjectIdentifier(self)) }
+        inputs &+= 1
         selections = [:]
         lastBins = [:]
         pageEnd = nil
@@ -216,6 +244,7 @@ public final class StatsPageModel {
         guard period != previous else { return }
         selection.period = period
         store.save(selection)
+        inputs &+= 1
         selections = [:]
         if period.needsNewRequest(after: previous) {
             cancelRunning()
@@ -246,6 +275,7 @@ public final class StatsPageModel {
 
     private func switched(_ box: StatsBoxID) {
         store.save(selection)
+        inputs &+= 1
         selections[box] = nil
         rebuild()
     }
@@ -269,8 +299,14 @@ public final class StatsPageModel {
             return
         }
         cancelRunning()
+        // S10.3 decides on what is kept: wait for the device's sets of the scope.
+        if kept.isLoading(scope) {
+            refreshAfterLoad = true
+            return
+        }
+        refreshAfterLoad = false
         // S10.3: All with nothing kept reads the last year first, then all history.
-        if selection.period == .all, !kept.hasComplete(scope, .allHistory) {
+        if selection.period == .all, !kept.hasComplete(scope, .allHistory), !kept.hasComplete(scope, .last12Months) {
             start(scope: scope, period: .oneYear, stage: .allFirst)
         } else {
             start(scope: scope, period: selection.period, stage: .single)
@@ -297,17 +333,20 @@ public final class StatsPageModel {
                 return
             }
             self?.running?.stream = stream
+            var ended = false
             for await message in stream {
                 // Held only for one message: a window that goes away is not kept by its request.
                 guard let model = self, model.running?.refresh == refresh else { break }
                 switch message {
                 case let .part(result): model.received(result, refresh: refresh)
                 case let .progress(part, progress): model.progressed(part, progress, refresh: refresh)
-                case let .end(end): model.finish(refresh, end)
+                case let .end(end):
+                    ended = true
+                    model.finish(refresh, end)
                 }
             }
-            // A stream that stopped early (the window went away) cancels its request.
-            if self?.running?.refresh != refresh { await stream.cancel() }
+            // A stream left before its end (the window went away) cancels its request.
+            if !ended { await stream.cancel() }
         }
         rebuild()
     }
@@ -325,7 +364,9 @@ public final class StatsPageModel {
         current.progress[result.part] = nil
         running = current
         kept.keep(current.set)
-        rebuild()
+        // A part returned: the scope reads again (a repaired row, a restored deck).
+        if pageEnd?.scope == current.scope { pageEnd = nil }
+        rebuild(after: result.part)
     }
 
     private func progressed(_ part: StatsPart, _ progress: StatsProgress, refresh: UInt64) {
@@ -341,6 +382,7 @@ public final class StatsPageModel {
         switch end {
         case .complete:
             set.complete = true
+            if pageEnd?.scope == current.scope { pageEnd = nil }
             kept.keep(set)
             kept.persist(current.scope)
             if current.stage == .allFirst, selection.period == .all, selection.scope == current.scope, visible {
@@ -379,7 +421,11 @@ public final class StatsPageModel {
 
     private func prepareKept() {
         guard collectionOpen else { return }
-        kept.prepare(selection.scope) { [weak self] in self?.rebuild() }
+        kept.prepare(selection.scope) { [weak self] in
+            guard let self else { return }
+            self.rebuild()
+            if self.refreshAfterLoad, self.visible, !self.kept.isLoading(self.selection.scope) { self.refresh() }
+        }
     }
 
     // MARK: Building the content
@@ -395,11 +441,20 @@ public final class StatsPageModel {
         selection.period != .all || set.history == .allHistory || !parts.contains(where: \.dependsOnWindow)
     }
 
+    /// The newest set of the scope with data for `part`: a box's extra value (Retrievability's
+    /// desired retention, Reviews' streak) when its own set lacks it.
+    private func extra(_ part: StatsPart) -> StatsPartSet? {
+        kept.sets(for: selection.scope).first { $0.value(part) != nil }
+    }
+
     private func presenter(_ set: StatsPartSet) -> StatsPresenter? {
-        if let cached = presenters[set.id] { return cached }
+        let extras = [StatsPart.retentionByDay, .activityDays].compactMap { set.value($0) == nil ? extra($0) : nil }
+        let key = PresenterKey(set: set.id, parts: set.parts.count, inputs: inputs, extras: extras.map(\.id))
+        if let cached = presenters[key] { return cached }
         let made = StatsPresenter(set: set, period: selection.period, selection: selection, decks: decks, calendar: calendar,
-                                  locale: locale)
-        presenters[set.id] = made
+                                  locale: locale, extras: extras)
+        if presenters.count > 24 { presenters = [:] }
+        presenters[key] = made
         return made
     }
 
@@ -441,18 +496,24 @@ public final class StatsPageModel {
         }
         switch presenter.box(id) {
         case .unavailable:
-            var loading = skeletonContent(id, phase: .loading(fraction: fraction(parts)))
+            var loading = skeletonContent(id, phase: unfinished(parts))
             loading.updating = updating
             return loading
         case var .content(content):
             if !isComplete(set, parts) {
                 // Partial (S10.3's first refresh of All): the values stay in `data`, the box
                 // shows its progress, never the year as all history.
-                content.phase = .loading(fraction: fraction(parts))
+                content.phase = unfinished(parts)
             }
             content.updating = updating
             return content
         }
+    }
+
+    /// A box whose value is not complete yet: its progress while a request runs, S12.8's line
+    /// once the request that would complete it has failed (the partial values stay in `data`).
+    private func unfinished(_ parts: [StatsPart]) -> StatsBoxPhase {
+        running == nil && ended == .failed ? .failed : .loading(fraction: fraction(parts))
     }
 
     private func stripFigure(_ id: StatsStripID) -> StatsStripFigure {
@@ -465,32 +526,37 @@ public final class StatsPageModel {
                 : text.none
             return StatsStripFigure(value: shown, unit: nil, detail: nil, loading: false, spoken: shown)
         }
-        guard let set = chosenSet(id.parts), let figure = presenter(set)?.strip(id) else { return .loading }
+        guard let set = chosenSet(id.parts) else { return .loading }
         if case .failed = set.parts[id.parts[0]] {
             return StatsStripFigure(value: text.noValue, unit: nil, detail: nil, loading: false, spoken: text.noValue)
         }
-        return figure
+        return presenter(set)?.strip(id) ?? .loading
     }
 
     /// Writes every value from the sets, the period, the switches and the decks.
-    private func rebuild() {
-        presenters = [:]
-        defer { presenters = [:] }
+    /// Writes every value from the sets, the period, the switches and the decks; after a part,
+    /// only the boxes and figures that read it (their "updating" mark aside, which a part never
+    /// changes for another box).
+    private func rebuild(after part: StatsPart? = nil) {
         let scope = selection.scope
-        state = pageState(scope)
-        filteredDeckNote = {
+        let nextState = pageState(scope)
+        if nextState != state { state = nextState }
+        let note: String? = {
             guard case let .deck(id) = scope, decks.deck(id)?.filtered == true else { return nil }
             return text.filteredDeckNote
         }()
-        var next: [StatsBoxID: StatsBoxContent] = [:]
-        for id in StatsBoxID.allCases {
+        if note != filteredDeckNote { filteredDeckNote = note }
+        var next = boxes
+        for id in StatsBoxID.allCases where part.map({ id.reads($0, reviewsMode: selection.reviewsMode) }) ?? true {
             let content = content(id)
             next[id] = content
             carrySelection(id, to: content)
         }
         if next != boxes { boxes = next }
-        var figures: [StatsStripID: StatsStripFigure] = [:]
-        for id in StatsStripID.allCases { figures[id] = stripFigure(id) }
+        var figures = strip
+        for id in StatsStripID.allCases where part.map({ id.parts.contains($0) || $0 == .futureDue }) ?? true {
+            figures[id] = stripFigure(id)
+        }
         if figures != strip { strip = figures }
         let line = subtitleText()
         if line != subtitle { subtitle = line }
@@ -501,15 +567,14 @@ public final class StatsPageModel {
         let bins = content.data.bins
         if let selection = selections[id] {
             let carried = selection.carried(from: lastBins[id] ?? [], to: bins)
-            selections[id] = carried == .none ? nil : carried
+            let next: StatsChartSelection? = carried == .none ? nil : carried
+            if next != selection { selections[id] = next }
         }
         lastBins[id] = bins
     }
 
     /// Progress alone moves only the boxes that are loading.
     private func updateLoadingPhases() {
-        presenters = [:]
-        defer { presenters = [:] }
         var next = boxes
         for (id, content) in boxes {
             guard case .loading = content.phase else { continue }
@@ -518,9 +583,9 @@ public final class StatsPageModel {
             next[id] = changed
         }
         if next != boxes { boxes = next }
-        for id in StatsStripID.allCases where strip[id]?.loading != false {
-            strip[id] = stripFigure(id)
-        }
+        var figures = strip
+        for id in StatsStripID.allCases where strip[id]?.loading != false { figures[id] = stripFigure(id) }
+        if figures != strip { strip = figures }
     }
 
     private func pageState(_ scope: StatsPageScope) -> StatsPageState {

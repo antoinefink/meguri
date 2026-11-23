@@ -1,5 +1,6 @@
 import CoreBridge
 import Foundation
+import Synchronization
 
 /// The parts one refresh returned (one request, `stats/history-reads` H15): every part of a set
 /// shares the request's header, so its days, its context and its scope are one. A box draws
@@ -18,12 +19,23 @@ nonisolated public struct StatsPartSet: Sendable, Hashable, Codable {
     let refresh: UInt64
     /// This set, among every window's and every launch's.
     let id: UUID
+    /// The order this launch made it in; 0 for a set read from the device. Sets of this launch
+    /// are newer than kept files whatever the clock says, so a clock set back never hides a
+    /// new result behind an old one.
+    private(set) var sequence: UInt64 = 0
+
+    private static let made = Atomic<UInt64>(0)
+
+    private enum CodingKeys: String, CodingKey {
+        case scope, history, header, parts, complete, refresh, id
+    }
 
     init(scope: StatsPageScope, history: StatsHistory, refresh: UInt64) {
         self.scope = scope
         self.history = history
         self.refresh = refresh
         id = UUID()
+        sequence = Self.made.add(1, ordering: .relaxed).newValue
         header = nil
         parts = [:]
         complete = false
@@ -45,8 +57,10 @@ nonisolated public struct StatsPartSet: Sendable, Hashable, Codable {
         header.map { Date(timeIntervalSince1970: TimeInterval($0.context.nowMilliseconds) / 1_000) }
     }
 
-    /// Whether this set was read after `other`.
+    /// Whether this set is newer than `other`: by the order this launch made them, a kept file
+    /// older than any of them, and kept files by when they were read.
     func isNewer(than other: StatsPartSet) -> Bool {
+        if sequence != other.sequence, sequence > 0 || other.sequence > 0 { return sequence > other.sequence }
         let mine = header?.context.nowMilliseconds ?? .min
         let theirs = other.header?.context.nowMilliseconds ?? .min
         return mine != theirs ? mine > theirs : refresh > other.refresh

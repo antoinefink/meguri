@@ -73,7 +73,8 @@ import Testing
         kept.open(collection: "a")
         kept.keep(Fixture.set(scope: .allDecks))
         kept.keep(Fixture.set(scope: .deck(1)))
-        kept.trim(keeping: .deck(1))
+        kept.show(.deck(1), by: ObjectIdentifier(kept))
+        kept.trim()
         #expect(kept.sets(for: .allDecks).isEmpty)
         #expect(kept.sets(for: .deck(1)).count == 1)
     }

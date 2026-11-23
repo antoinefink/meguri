@@ -61,10 +61,23 @@ public final class StatsKeptResults {
         drop(disk: true)
     }
 
-    /// A memory warning: keeps only the sets of `scope`, which a page shows.
-    public func trim(keeping scope: StatsPageScope?) {
-        for key in Array(entries.keys) where key.scope != scope { entries[key] = nil }
-        recent.removeAll { $0.scope != scope }
+    /// The scope each open page shows (one per window), which a memory warning keeps.
+    @ObservationIgnored private var shown: [ObjectIdentifier: StatsPageScope] = [:]
+
+    func show(_ scope: StatsPageScope?, by page: ObjectIdentifier) {
+        shown[page] = scope
+    }
+
+    /// A memory warning: keeps only the sets of the scopes the open pages show.
+    public func trim() {
+        let keep = Set(shown.values)
+        for key in Array(entries.keys) where !keep.contains(key.scope) { entries[key] = nil }
+        // A read still running for a scope no page shows would bring its sets back.
+        for key in Array(loading.keys) where !keep.contains(key.scope) {
+            loading[key]?.cancel()
+            loading[key] = nil
+        }
+        recent.removeAll { !keep.contains($0.scope) }
     }
 
     private func drop(disk: Bool) {
@@ -116,8 +129,13 @@ public final class StatsKeptResults {
         }
     }
 
+    /// Whether a read of `scope`'s kept sets from the device is still running.
+    func isLoading(_ scope: StatsPageScope) -> Bool {
+        loading.keys.contains { $0.scope == scope }
+    }
+
     /// Reads the kept sets of `scope` from the device into memory, off the main actor, unless
-    /// they are already there; `loaded` runs on the main actor when sets arrived.
+    /// they are already there; `loaded` runs on the main actor when each read ends.
     func prepare(_ scope: StatsPageScope, loaded: @escaping @MainActor () -> Void) {
         guard let disk, let collection else { return }
         for history in [StatsHistory.last12Months, .allHistory] {
@@ -128,9 +146,8 @@ public final class StatsKeptResults {
                 let sets = await disk.load(key: key, collection: collection, epoch: epoch)
                 guard let self, !Task.isCancelled, self.epoch == epoch, self.collection == collection else { return }
                 self.loading[key] = nil
-                guard let sets, !sets.isEmpty else { return }
                 // A set kept meanwhile (this launch's refresh) is newer; the read ones join it.
-                for set in sets.reversed() where set.scope == scope && set.history == history { self.keep(set) }
+                for set in (sets ?? []).reversed() where set.scope == scope && set.history == history { self.keep(set) }
                 loaded()
             }
         }

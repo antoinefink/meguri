@@ -62,18 +62,21 @@ nonisolated struct StatsDays: Sendable, Hashable {
         return self.day(ofCivil: moved)
     }
 
-    /// The calendar year of `day`.
+    /// The Gregorian year of `day` (Activity's blocks, All's ten-year floor): a year number with
+    /// no era, so a calendar whose era changes never breaks the count of years.
     func year(ofDay day: Int) -> Int {
-        civil.component(.year, from: civilDate(day))
+        Self.gregorian.component(.year, from: civilDate(day))
     }
 
-    /// The first day of the calendar year `year`, or nil when the calendar has no such date.
+    /// The first day of the Gregorian year `year`, or nil when there is no such date.
     func firstDay(ofYear year: Int) -> Int? {
-        var components = civil.dateComponents([.era, .year], from: dayZero)
-        components.year = year
-        components.month = 1
-        components.day = 1
-        guard let date = civil.date(from: components) else { return nil }
+        guard let date = Self.gregorian.date(from: DateComponents(year: year, month: 1, day: 1)) else { return nil }
         return day(ofCivil: date)
     }
+
+    private static let gregorian: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? calendar.timeZone
+        return calendar
+    }()
 }

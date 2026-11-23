@@ -12,6 +12,17 @@ public enum StatsBoxID: String, CaseIterable, Hashable, Sendable {
     case retrievability, stability, difficulty
     case byDeck
 
+    /// Whether the box's content reads `part`: its own parts, and the extra values it takes
+    /// from the newest set that has them (Retrievability's desired retention, Reviews' streak).
+    func reads(_ part: StatsPart, reviewsMode: StatsReviewsMode) -> Bool {
+        if parts(reviewsMode: reviewsMode).contains(part) { return true }
+        switch self {
+        case .retrievability: return part == .retentionByDay
+        case .reviewsOverTime: return part == .activityDays
+        default: return false
+        }
+    }
+
     /// The parts the box draws, all from one refresh.
     func parts(reviewsMode: StatsReviewsMode) -> [StatsPart] {
         switch self {

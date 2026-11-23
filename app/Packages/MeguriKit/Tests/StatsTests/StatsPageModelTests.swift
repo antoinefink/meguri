@@ -345,8 +345,9 @@ import Testing
         let first = try await request(1)
         await complete(first, model)
         model.selectPeriod(.all)
+        // The year is kept: All needs only the all-history read (S10.3's two reads are for nothing kept).
         let second = try await request(2)
-        #expect(second.period.history == .last12Months)
+        #expect(second.period.history == .allHistory)
         model.selectPeriod(.oneMonth)
         await settle({ service.cancelled.contains(second.refresh) }, "the All request was cancelled")
         let third = try await request(3)
@@ -415,5 +416,132 @@ import Testing
         #expect(model.filteredDeckNote == nil)
         model.selectDeck(9)
         #expect(model.filteredDeckNote == "A filtered deck shows the cards it holds now. Their reviews also count in their home decks.")
+    }
+
+    // MARK: Review findings
+
+    @Test func aPageEndClearsWhenTheScopeReadsAgain() async throws {
+        let model = model()
+        model.appear()
+        let first = try await request(1)
+        service.send(first.refresh, .end(.unreadableRow(StatsUnreadable(table: "revlog", column: "ease", key: 1))))
+        await settle { model.state == .unavailable }
+        // Check Database repaired the row: the next refresh's parts bring the page back.
+        model.receive(.graphsStale)
+        timers.advance(0.5)
+        let second = try await request(2)
+        service.answer(second, [.cardCounts])
+        await settle { model.state == .content }
+        // A deck deleted, then restored by an undo.
+        model.selectDeck(2)
+        let third = try await request(3)
+        service.send(third.refresh, .end(.scopeError(.unknownDeck)))
+        await settle { model.state == .deckMissing }
+        model.decksChanged(Array(Fixture.nodes().dropLast()))
+        #expect(model.state == .content)
+        _ = try await request(4)
+    }
+
+    @Test func aMemoryWarningKeepsEveryOpenPagesScope() async throws {
+        let first = model()
+        first.appear()
+        await complete(try await request(1), first)
+        let second = model(StatsPageSelection(deck: 2, period: .oneMonth))
+        second.appear()
+        await complete(try await request(2), second)
+        second.memoryWarning()
+        #expect(kept.sets(for: .allDecks).count == 1 && kept.sets(for: .deck(2)).count == 1)
+        #expect(first.box(.retention).phase == .ready)
+        // A window that closes no longer holds its scope.
+        first.selectDeck(1)
+        first.memoryWarning()
+        #expect(kept.sets(for: .allDecks).isEmpty)
+    }
+
+    @Test func aFailedStripPartShowsADashNotProgress() async throws {
+        let model = model()
+        model.appear()
+        let request = try await request(1)
+        service.answer(request, [.studiedToday, .retention], failing: [.studiedToday: .notBuilt, .retention: .failed("x")])
+        await settle { !model.strip(.retentionToday).loading }
+        #expect(model.strip(.studiedToday).value == "—" && model.strip(.retentionToday).value == "—")
+    }
+
+    @Test func byDeckWaitsForTheDeckTree() async throws {
+        let model = StatsPageModel(service: service, kept: kept, store: StatsSelectionStore(defaults: defaults),
+                                   selection: StatsPageSelection(deck: nil, period: .oneMonth), timers: timers,
+                                   calendar: Fixture.calendar(), locale: Fixture.locale)
+        model.collectionOpened(identity: "collection-a")
+        model.appear()
+        let request = try await request(1)
+        service.answer(request, [.byDeck])
+        await settle { model.box(.byDeck).source != nil || service.requests.count > 1 }
+        await settle()
+        #expect(model.box(.byDeck).phase == .loading(fraction: nil))
+        model.decksChanged([Fixture.nodes()[0]])
+        #expect(model.box(.byDeck).phase == .ready)
+        // A row the tree does not have yet keeps its share.
+        guard case let .byDeck(table)? = model.box(.byDeck).detail else { Issue.record("no table"); return }
+        #expect(table.rows.map(\.timeShareText) == ["75.0%", "25.0%"])
+        #expect(table.rows.last?.name == "—")
+    }
+
+    @Test func byAnswersTotalIsByTypesWithUnratedRows() throws {
+        let answers = StatsAnswers(again: 1, hard: 1, good: 5, easy: 1)
+        let set = Fixture.set(values: [.byAnswer: .byAnswer(StatsByAnswer(count: Fixture.map([-1: answers]),
+                                                                          time: Fixture.map([-1: answers]), unrated: 2))])
+        let presenter = Fixture.presenter(set, selection: StatsPageSelection(deck: nil, period: .oneMonth, reviewsMode: .byAnswer))
+        let box = try #require(Fixture.content(.reviewsOverTime, presenter))
+        #expect(box.data.series.reduce(0) { $0 + ($1.values[28] ?? 0) } == 8)
+        #expect(box.data.calloutLines.first?.values[28] == 10)
+        #expect(box.figure?.value == "15")
+    }
+
+    @Test func extraValuesComeFromTheNewestSetThatHasThem() throws {
+        // Retrievability's tier-1 set lacks the desired retention; a newer set of the scope has it.
+        let present = Fixture.set(StatsPart.allCases.filter { $0.tier == .present })
+        let log = Fixture.set([.retentionByDay, .activityDays])
+        let presenter = StatsPresenter(set: present, period: .oneMonth, selection: StatsPageSelection(deck: nil, period: .oneMonth),
+                                       decks: StatsDeckDirectory(nodes: Fixture.nodes()), calendar: Fixture.calendar(),
+                                       locale: Fixture.locale, extras: [log])!
+        let box = try #require(Fixture.content(.retrievability, presenter))
+        #expect(box.detail == .retrievability(desiredRetention: Double(Float(0.9))))
+        #expect(box.figures.first?.value == "1")
+    }
+
+    @Test func theSubtitleSaysWhenKeptNumbersWereRead() async throws {
+        let model = model()
+        model.appear()
+        let first = try await request(1)
+        // Read yesterday at 03:00: the date, not the time.
+        let yesterday = Fixture.context(nextDayAt: Fixture.nextDayAt - 86_400, now: (Fixture.nextDayAt - 86_400 - 3_600) * 1_000)
+        await complete(first, model, context: yesterday)
+        timers.advance(61)
+        #expect(model.subtitle == "100 cards in 4 decks")
+        model.disappear()
+        model.appear()
+        let second = try await request(2)
+        #expect(model.subtitle == "100 cards in 4 decks · Updating…")
+        model.disappear()
+        let format = StatsChartFormat(locale: Fixture.locale, calendar: Fixture.calendar(), now: timers.now())
+        let read = Date(timeIntervalSince1970: TimeInterval(Fixture.nextDayAt - 86_400 - 3_600))
+        #expect(model.subtitle == "100 cards in 4 decks · Updated \(format.shortDate(read))")
+        await settle({ service.cancelled.contains(second.refresh) }, "the request was cancelled")
+        // A finished stream is not cancelled again.
+        #expect(!service.cancelled.contains(first.refresh))
+    }
+
+    @Test func aPartialBoxFailsWhenTheAllHistoryRequestFails() async throws {
+        let model = model(StatsPageSelection(deck: nil, period: .all))
+        model.appear()
+        let first = try await request(1)
+        service.answer(first, StatsPart.allCases)
+        service.send(first.refresh, .end(.complete))
+        let second = try await request(2)
+        #expect(model.box(.retention).isLoading)
+        service.send(second.refresh, .end(.failed(.internal("gone"))))
+        await settle { model.box(.retention).phase == .failed }
+        #expect(model.box(.answers).phase == .failed)
+        #expect(model.box(.cardCounts).phase == .ready)
     }
 }

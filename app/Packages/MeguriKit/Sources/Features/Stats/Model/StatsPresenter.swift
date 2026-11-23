@@ -28,12 +28,17 @@ struct StatsPresenter {
 
     private final class Cache {
         var pastAxis: StatsTimeAxis?
+        var streaks: StatsStreaks??
     }
 
+    /// Newer sets of the same scope for the values a box takes beyond its own parts.
+    let extras: [StatsPartSet]
+
     init?(set: StatsPartSet, period: StatsPagePeriod, selection: StatsPageSelection, decks: StatsDeckDirectory,
-          calendar: Calendar, locale: Locale) {
+          calendar: Calendar, locale: Locale, extras: [StatsPartSet] = []) {
         guard let header = set.header else { return nil }
         self.set = set
+        self.extras = extras.filter { $0.scope == set.scope }
         self.header = header
         self.period = period
         self.selection = selection
@@ -43,6 +48,20 @@ struct StatsPresenter {
         format = StatsChartFormat(locale: locale, calendar: calendar, now: days.date(ofDay: 0))
         text = StatsText(locale: locale)
         kit = StatsSeriesKit(text: text)
+    }
+
+    /// A value the set lacks, from the newest set of the scope that has it.
+    func extraValue(_ part: StatsPart) -> StatsPartValue? {
+        set.value(part) ?? extras.lazy.compactMap { $0.value(part) }.first
+    }
+
+    /// S7.5's streaks, once per presenter (Activity, Reviews' sentence and the strip read them).
+    var streaks: StatsStreaks? {
+        if let cached = cache.streaks { return cached }
+        var made: StatsStreaks?
+        if case let .activityDays(value)? = extraValue(.activityDays) { made = StatsStreaks(value) }
+        cache.streaks = .some(made)
+        return made
     }
 
     var source: StatsBoxSource {
@@ -326,7 +345,8 @@ struct StatsPresenter {
                 axis.sums(map) { scale($0.relearn) }, axis.sums(map) { scale($0.learn) },
             ], filtered: filtered.contains { $0 > 0 } ? axis.sums(map) { scale($0.filtered) } : nil)
         }
-        let totals = axis.bins.indices.map { bin in series.reduce(0.0) { $0 + ($1.values[bin] ?? 0) } }
+        // The callout's total and the figures are By Type's, unrated rows included (H6).
+        let totals = axis.sums(time ? reviews.time : reviews.count) { scale($0.total) }
         var data = StatsChartData(bins: axis.periods, series: series, unit: time ? .duration : .count,
                                   calloutLines: [StatsCalloutLine(id: "total", name: text.total, values: totals.map { $0 })])
         if period == .oneMonth { data.browsable = IndexSet(totals.indices.filter { totals[$0] > 0 }) }
@@ -336,10 +356,7 @@ struct StatsPresenter {
             reviews.count.values[index].total > 0 && axis.index(ofDay: reviews.count.keys[index]) != nil
                 ? min(reviews.count.keys[index], 0) : nil
         }).count
-        let streak: Int? = {
-            guard case let .activityDays(activity)? = set.value(.activityDays) else { return nil }
-            return StatsStreaks(activity).current
-        }()
+        let streak = streaks?.current
         let sentence = (streak ?? 0) > 1
             ? text.daysInARow(streak ?? 0, count(streak ?? 0))
             : text.daysStudied(studiedDays, count(studiedDays))
@@ -363,8 +380,7 @@ struct StatsPresenter {
 
     // S7.5
     func activityBox() -> Outcome {
-        guard case let .activityDays(value)? = set.value(.activityDays) else { return .unavailable }
-        let streaks = StatsStreaks(value)
+        guard set.value(.activityDays) != nil, let streaks else { return .unavailable }
         guard !streaks.counts.isEmpty else { return empty(.activity, .noReviewsYet) }
         let currentYear = days.year(ofDay: 0)
         let firstYear = days.year(ofDay: streaks.counts.keys.min() ?? 0)
@@ -608,7 +624,7 @@ struct StatsPresenter {
         guard !value.byPercent.isEmpty else { return empty(.retrievability, .noMemoryState, footnote: footnote) }
         let (bins, values) = percentBins(value.byPercent, width: 5)
         let desired: Double? = {
-            guard case let .retentionByDay(retention)? = set.value(.retentionByDay) else { return nil }
+            guard case let .retentionByDay(retention)? = extraValue(.retentionByDay) else { return nil }
             return desiredRetention(retention, over: nil)
         }()
         let below = desired.map { desired in
@@ -669,15 +685,16 @@ struct StatsPresenter {
 
     // S7.15
     func byDeck() -> Outcome {
-        guard case let .byDeck(value)? = set.value(.byDeck) else { return .unavailable }
+        // Its rows are named from the deck tree: none before it is read.
+        guard case let .byDeck(value)? = set.value(.byDeck), decks.isKnown else { return .unavailable }
         if case let .deck(id) = set.scope, let deck = decks.deck(id), deck.children.isEmpty {
             return content(.empty(text.noSubdecks), data: skeleton(.byDeck))
         }
         var rows: [(StatsDeckRow, StatsDeckValues, String)] = []
         for row in value.rows {
             guard let values = window(row.windows) else { return .unavailable }
-            guard let deck = decks.deck(row.deckID) else { continue }
-            rows.append((row, values, deck.name))
+            // A deck the tree has not caught up with keeps its row, so the shares add up.
+            rows.append((row, values, decks.deck(row.deckID)?.name ?? text.noValue))
         }
         let reviews = rows.reduce(0) { $0 + $1.1.reviews }
         guard reviews > 0 else { return empty(.byDeck, noReviews) }
@@ -949,8 +966,7 @@ extension StatsPresenter {
             return StatsStripFigure(value: shown, unit: nil, detail: tomorrow, loading: false,
                                     spoken: tomorrow.map { text.spoken(shown, $0) } ?? shown)
         case .streak:
-            guard case let .activityDays(value)? = set.value(.activityDays) else { return nil }
-            let current = StatsStreaks(value).current
+            guard set.value(.activityDays) != nil, let current = streaks?.current else { return nil }
             return StatsStripFigure(value: count(current), unit: text.daysUnit(current), detail: nil, loading: false,
                                     spoken: text.days(current, count(current)))
         case .mature:
