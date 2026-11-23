@@ -197,7 +197,7 @@ public nonisolated final class CoreBrowseSearch: BrowseSearching {
     /// Read in the core from the selection's ranges (U276): no note id
     /// crosses the FFI, whatever the selection's size (V17).
     public func cardsOfNotes(of target: BrowseTarget) async throws -> UInt64 {
-        try await CoreBrowseQuery.startNoteCards(try await selection(target)).value()
+        try await Self.cancelling(try await CoreBrowseQuery.startNoteCards(try await selection(target)))
     }
 
     /// The handle's rows of the selected rows' notes, read from the handle
@@ -207,7 +207,17 @@ public nonisolated final class CoreBrowseSearch: BrowseSearching {
     }
 
     public func tags(of target: BrowseTarget) async throws -> [String] {
-        try await CoreBrowseQuery.startSelectionTags(try await selection(target)).value()
+        try await Self.cancelling(try await CoreBrowseQuery.startSelectionTags(try await selection(target)))
+    }
+
+    /// A read job's value; cancelling the task cancels the job, so a
+    /// sheet that closes frees the search reader its read holds.
+    private static func cancelling<T: Sendable>(_ job: CoreBrowseReadJob<T>) async throws -> T {
+        try await withTaskCancellationHandler {
+            try await job.value()
+        } onCancel: {
+            Task { try? await job.job.cancel() }
+        }
     }
 
     public func run(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BulkActionResult {

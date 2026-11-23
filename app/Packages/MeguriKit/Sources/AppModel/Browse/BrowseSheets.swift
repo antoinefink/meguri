@@ -84,6 +84,9 @@ public nonisolated enum BrowseDueCheck: Hashable, Sendable {
     case checking
     case valid(DueDays)
     case invalid(InvalidDaysKind)
+    /// The core could not read the text (it was not refused): Set stays
+    /// enabled, and the operation reads it again (S9), its refusal shown then.
+    case unchecked
 }
 
 /// Why a sheet's command wrote nothing (`browser/bulk-framework` K4).
@@ -119,7 +122,10 @@ public final class BrowseSheet: Identifiable {
     public let target: BrowseTarget
     /// The target's counts (V7), once read: the preview's numbers and the
     /// decks Change Deck marks.
-    public internal(set) var counts: BrowseSelectionCounts?
+    public internal(set) var counts: BrowseSelectionCounts? {
+        didSet { if kind == .changeDeck { highlightOwnDeck() } }
+    }
+    @ObservationIgnored private var ownDeckOffered = false
     public internal(set) var phase: Phase = .editing
     public internal(set) var failure: BrowseSheetFailure?
 
@@ -166,10 +172,16 @@ public final class BrowseSheet: Identifiable {
         didSet {
             guard dueText != oldValue else { return }
             failure = nil
+            dueEdited = true
             checkDue()
         }
     }
     public internal(set) var due: BrowseDueCheck = .checking
+    /// The person changed the text: a late prefill leaves it alone.
+    @ObservationIgnored private var dueEdited = false
+    /// Raised when the text is filled from the remembered key: the field
+    /// selects it, so typing replaces it.
+    public internal(set) var dueSelectRequests: UInt64 = 0
     @ObservationIgnored private var dueToken: UInt64 = 0
 
     // MARK: Forget (B10 Reset, `sched/manual-ops` M6)
@@ -181,6 +193,7 @@ public final class BrowseSheet: Identifiable {
     @ObservationIgnored private weak var commands: BrowseCommands?
     @ObservationIgnored private let reads: any BrowseSheetReads
     @ObservationIgnored private var running: BrowseRunningAction?
+    @ObservationIgnored private var loading: Task<Void, Never>?
 
     init(id: UInt64, kind: BrowseSheetKind, target: BrowseTarget, commands: BrowseCommands, reads: any BrowseSheetReads,
          defaults: BrowseSheetDefaults?) {
@@ -200,7 +213,11 @@ public final class BrowseSheet: Identifiable {
     /// the person has not changed yet.
     func prefill(_ defaults: BrowseSheetDefaults) {
         guard phase == .editing else { return }
-        if kind == .setDueDate, dueText.isEmpty { dueText = defaults.setDueDays }
+        if kind == .setDueDate, !dueEdited {
+            dueText = defaults.setDueDays
+            dueEdited = false
+            dueSelectRequests &+= 1
+        }
         if kind == .forget, !touched {
             restorePosition = defaults.restorePosition
             resetCounts = defaults.resetCounts
@@ -240,8 +257,17 @@ public final class BrowseSheet: Identifiable {
     public var highlightedDeck: BrowseDeckChoice? {
         let choices = deckChoices
         if let chosenDeck, choices.contains(chosenDeck) { return chosenDeck }
-        if Self.blank(deckQuery), let deck = counts?.deck, choices.contains(.deck(deck)) { return .deck(deck) }
         return choices.first
+    }
+
+    /// With no text and nothing chosen, the selection's own deck is
+    /// highlighted, once both the decks and the counts are in; it is set as a
+    /// choice, so a later read never moves the highlight under the person.
+    private func highlightOwnDeck() {
+        guard !ownDeckOffered, decks != nil, let counts else { return }
+        ownDeckOffered = true
+        guard chosenDeck == nil, Self.blank(deckQuery), let deck = counts.deck, deckChoices.contains(.deck(deck)) else { return }
+        chosenDeck = .deck(deck)
     }
 
     /// ↑ and ↓ over every row, the create row included, wrapping (H6.3).
@@ -296,11 +322,10 @@ public final class BrowseSheet: Identifiable {
             let check: BrowseDueCheck
             do {
                 check = .valid(try await reads.parseDueDays(text))
-            } catch let error as BridgeError {
-                guard case .schedOpRefused(.invalidDays(let kind)) = error else { return }
+            } catch BridgeError.schedOpRefused(.invalidDays(let kind)) {
                 check = .invalid(kind)
             } catch {
-                return
+                check = .unchecked
             }
             guard let self, self.dueToken == token else { return }
             self.due = check
@@ -326,7 +351,11 @@ public final class BrowseSheet: Identifiable {
         switch kind {
         case .changeDeck: return highlightedDeck != nil
         case .addTags, .removeTags: return !tagList.isEmpty || typingTag
-        case .setDueDate: if case .valid = due { return true } else { return false }
+        case .setDueDate:
+            switch due {
+            case .valid, .unchecked: return true
+            case .checking, .invalid: return false
+            }
         case .forget: return true
         }
     }
@@ -405,18 +434,22 @@ public final class BrowseSheet: Identifiable {
     }
 
     /// The reads the sheet opens with.
-    func load(session: (any BrowseSearching)?, facts: BrowseSelectionCounts?, waitFirst: Task<BrowseTargetFacts?, Never>?) {
+    func load(session: (any BrowseSearching)?, facts: BrowseSelectionCounts?, waitFirst: Task<BrowseTargetFacts?, Never>?,
+              defaultsKnown: Bool) {
         counts = facts
-        Task { [weak self, target, kind] in
+        loading = Task { [weak self, target, kind] in
             if facts == nil, let session {
-                // Two counts reads of a session at once cancel the older one in the core.
+                // Two counts reads of a session at once cancel the older one in the
+                // core: after the selection's read, and once more if a newer read
+                // cancelled this one.
                 _ = await waitFirst?.value
-                let read = try? await session.counts(of: target)
+                var read = try? await session.counts(of: target)
+                if read == nil, !Task.isCancelled { read = try? await session.counts(of: target) }
                 self?.counts = read
             }
-            if kind == .removeTags, let session {
-                let tags = (try? await session.tags(of: target)) ?? []
-                self?.selectionTags = tags
+            if kind == .removeTags, let session, !Task.isCancelled {
+                // A failed read leaves the suggestions unknown, never "no tags".
+                if let tags = try? await session.tags(of: target) { self?.selectionTags = tags }
             }
         }
         if kind == .changeDeck {
@@ -428,12 +461,22 @@ public final class BrowseSheet: Identifiable {
                     self.decksGeneration = snapshot.generation
                     self.listsDefault = listed
                     self.decks = snapshot.decks.filter { !$0.filtered }
+                    self.highlightOwnDeck()
                 } catch {
                     self?.deckReadFailed = true
                 }
             }
         }
-        if kind == .setDueDate { checkDue() }
+        // Without the remembered text yet, the field waits for it rather than
+        // showing the empty text's refusal.
+        if kind == .setDueDate, defaultsKnown { checkDue() }
+    }
+
+    /// The sheet closed: its reads stop (a large selection's tags read holds
+    /// a search reader until it ends).
+    func closed() {
+        loading?.cancel()
+        nameCheck?.cancel()
     }
 
     static func failure(_ error: any Error) -> BrowseSheetFailure? {

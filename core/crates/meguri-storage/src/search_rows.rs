@@ -102,7 +102,7 @@ pub(crate) fn visit_note_tags(
     })
 }
 
-/// The `tags` of each note of `notes` that exists, in no promised order,
+/// The `tags` of each note of `notes` that exists, by ascending id,
 /// read as [`visit_note_tags`] reads them (Remove Tags' suggestions,
 /// `browser/workspace` V8.1). Cancelled as [`visit`] is.
 pub(crate) fn visit_tags_of_notes(
@@ -117,7 +117,7 @@ pub(crate) fn visit_tags_of_notes(
     with_cancel(conn, cancel, || {
         let mut statement = conn.prepare(
             "SELECT id, CASE WHEN typeof(tags) IN ('integer', 'real') THEN CAST(tags AS TEXT) ELSE tags END FROM notes \
-             WHERE id IN (SELECT value FROM json_each(?1))",
+             WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id",
         )?;
         let mut rows = statement.query([json_list(notes)])?;
         while let Some(row) = rows.next()? {

@@ -39,7 +39,7 @@ final class MacBrowseSheetsTests: XCTestCase {
         sheetCapture(app, "change-deck-create-\(appearance)")
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitUntil { !changeDeck.exists }, "Return moves the cards")
-        capture(app, "change-deck-after-\(appearance)")
+        afterCapture(app, "change-deck-after-\(appearance)")
         XCTAssertTrue(undoTitle(app).hasSuffix("Change Deck"), undoTitle(app))
 
         // Set Due Date… ⇧⌘D: the remembered text, a range's preview, an error.
@@ -60,7 +60,7 @@ final class MacBrowseSheetsTests: XCTestCase {
         XCTAssertTrue(waitUntil { self.element(app, "browse.sheet.setDueDate.confirm").isEnabled })
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitUntil { !due.exists })
-        capture(app, "set-due-date-after-\(appearance)")
+        afterCapture(app, "set-due-date-after-\(appearance)")
         XCTAssertTrue(undoTitle(app).hasSuffix("Set Due Date"), undoTitle(app))
 
         // Forget… ⌥⌘N: the two options and "Review history is kept.".
@@ -73,7 +73,7 @@ final class MacBrowseSheetsTests: XCTestCase {
         sheetCapture(app, "forget-filled-\(appearance)")
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitUntil { !forget.exists })
-        capture(app, "forget-after-\(appearance)")
+        afterCapture(app, "forget-after-\(appearance)")
         XCTAssertTrue(undoTitle(app).hasSuffix("Forget"), undoTitle(app))
 
         // Add Tags… ⇧⌘A: the token field; Return makes the typed text a token and adds it.
@@ -87,7 +87,7 @@ final class MacBrowseSheetsTests: XCTestCase {
         sheetCapture(app, "add-tags-filled-\(appearance)")
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitUntil { !add.exists })
-        capture(app, "add-tags-after-\(appearance)")
+        afterCapture(app, "add-tags-after-\(appearance)")
         XCTAssertTrue(undoTitle(app).hasSuffix("Add Tags"), undoTitle(app))
 
         // Remove Tags… ⌥⇧⌘A: completion from the notes' own tags.
@@ -102,7 +102,7 @@ final class MacBrowseSheetsTests: XCTestCase {
             app.typeText("ter")
             app.typeKey(.return, modifierFlags: [])
             XCTAssertTrue(waitUntil { !remove.exists })
-            capture(app, "remove-tags-after-\(appearance)")
+            afterCapture(app, "remove-tags-after-\(appearance)")
         }
 
         // Esc cancels a sheet: nothing changes.
@@ -123,9 +123,13 @@ final class MacBrowseSheetsTests: XCTestCase {
         element(app, "browse.sidebar.state.suspended").click()
         XCTAssertTrue(waitUntil { self.resultsTable(app).outlineRows.count == 2 })
         try app.bringToFront(bundleIdentifier: bundle)
-        let button = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Save Search'")).firstMatch
-        XCTAssertTrue(button.waitForExistence(timeout: 10), "the sidebar's Save Search…")
-        button.click()
+        // T13: the Saved Searches section's context menu.
+        let header = app.staticTexts.matching(NSPredicate(format: "label == 'Saved Searches' OR value == 'Saved Searches'")).firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 10), "the sidebar's Saved Searches section")
+        header.rightClick()
+        let item = app.menuItems.matching(NSPredicate(format: "title BEGINSWITH 'Save Search'")).firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "Save Search… in the section's menu")
+        item.click()
         let sheet = element(app, "browse.saveSearch")
         XCTAssertTrue(sheet.waitForExistence(timeout: 10))
         continueAfterFailure = true
@@ -176,6 +180,12 @@ final class MacBrowseSheetsTests: XCTestCase {
     /// Edit › Undo's title, read from the menu bar.
     private func undoTitle(_ app: XCUIApplication) -> String {
         app.menuBars.menuItems.matching(NSPredicate(format: "title BEGINSWITH 'Undo'")).firstMatch.title
+    }
+
+    /// The table after a command: its rows are read again first.
+    private func afterCapture(_ app: XCUIApplication, _ name: String) {
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        capture(app, name)
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {

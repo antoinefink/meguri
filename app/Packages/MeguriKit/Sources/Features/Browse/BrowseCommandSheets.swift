@@ -97,7 +97,7 @@ struct BrowseCommandSheetView: View {
     @ViewBuilder private var tagsContent: some View {
         VStack(alignment: .leading, spacing: Spacing.xSmall) {
             #if os(macOS)
-            BrowseSheetTagField(sheet: sheet, names: tagNames, commit: tagField)
+            BrowseSheetTagField(sheet: sheet, names: tagNames, commit: tagField, onReturn: confirm)
                 .accessibilityIdentifier("browse.sheet.tags.field")
             #else
             TextField(text: Binding(get: { sheet.tags.joined(separator: " ") },
@@ -384,6 +384,10 @@ private struct BrowseDueDateContent: View {
             // The remembered text, selected, so typing replaces it.
             selection = TextSelection(range: sheet.dueText.startIndex..<sheet.dueText.endIndex)
         }
+        .onChange(of: sheet.dueSelectRequests) {
+            // It arrived after the sheet opened: selected too.
+            selection = TextSelection(range: sheet.dueText.startIndex..<sheet.dueText.endIndex)
+        }
     }
 
     @ViewBuilder private var check: some View {
@@ -395,7 +399,7 @@ private struct BrowseDueDateContent: View {
             Text(verbatim: BrowseSheetText.dueError(kind, locale: locale))
                 .foregroundStyle(.red)
                 .accessibilityIdentifier("browse.sheet.setDueDate.error")
-        case .checking:
+        case .checking, .unchecked:
             Text(verbatim: " ").accessibilityHidden(true)
         }
     }
@@ -496,6 +500,10 @@ private struct BrowseSheetTagField: NSViewRepresentable {
     let sheet: BrowseSheet
     let names: [String]
     let commit: BrowseSheetTagCommit
+    /// Return in the field: the text typed becomes a token, then the sheet's
+    /// default button runs (the field takes Return before the window's
+    /// default button sees it).
+    let onReturn: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -561,6 +569,14 @@ private struct BrowseSheetTagField: NSViewRepresentable {
             // field holds a tag when either is there. The tokens are read when
             // editing ends or the default button commits them.
             parent.sheet.typingTag = editor.string.contains { !$0.isWhitespace }
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.insertNewline(_:)) else { return false }
+            // The field makes its token first; then the default button runs.
+            let onReturn = parent.onReturn
+            DispatchQueue.main.async { onReturn() }
+            return false
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {

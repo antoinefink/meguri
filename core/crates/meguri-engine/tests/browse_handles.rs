@@ -1223,7 +1223,7 @@ fn selection_reads_give_sibling_rows_the_cards_of_the_target_notes_and_their_tag
         &[
             ("UPDATE notes SET tags = ' Verb::past idiom ' WHERE id = ?1", vec![note(0)]),
             ("UPDATE notes SET tags = ' VERB  zeta idiom ' WHERE id = ?1", vec![note(1)]),
-            ("UPDATE notes SET tags = '' WHERE id = ?1", vec![note(2)]),
+            ("UPDATE notes SET tags = ' Straße STRASSE ' WHERE id = ?1", vec![note(2)]),
         ],
     );
     let h = Harness::open_path(dir, path);
@@ -1271,13 +1271,13 @@ fn selection_reads_give_sibling_rows_the_cards_of_the_target_notes_and_their_tag
 
     // The tags of the target notes: n0000 and n0001 (rows 0 and 1 by
     // Sort Field), each once whatever its case; the third note has none.
+    // Each tag once, sorted by unicase: `idiom`, which both notes store, and
+    // `Verb::past` and `VERB`, two tags.
     let tags = selection_tags(&fx.session.selection(firsts, 0, vec![0..2]), &token).unwrap();
-    assert_eq!(tags.len(), 4, "{tags:?}");
-    assert_eq!(
-        tags.iter().map(|tag| tag.to_lowercase()).collect::<Vec<_>>(),
-        ["idiom", "verb", "verb::past", "zeta"]
-    );
-    assert_eq!(selection_tags(&fx.session.selection(firsts, 0, vec![2..3]), &token).unwrap(), Vec::<String>::new());
+    assert_eq!(tags, ["idiom", "VERB", "Verb::past", "zeta"]);
+    // Full folding would make these one; removing one leaves the other, so
+    // both are offered.
+    assert_eq!(selection_tags(&fx.session.selection(firsts, 0, vec![2..3]), &token).unwrap(), ["STRASSE", "Straße"]);
 
     // Notes mode: the notes' cards; siblings are the selection itself.
     let (by_note, count) = fx.search("", SearchMode::Notes, asc("noteFld"));

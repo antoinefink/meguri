@@ -600,10 +600,11 @@ public final class BrowseCommands {
             BrowseSelectionCounts(cards: cards, notes: notes, suspended: suspended, buried: buried, decks: facts.decks ?? 0,
                                   deck: facts.deck, deckIDs: facts.deckIDs ?? [], notetypes: notetypes)
         } else { nil }
-        sheet.load(session: results.commandSession, facts: known, waitFirst: factsTask?.task)
+        sheet.load(session: results.commandSession, facts: known, waitFirst: factsTask?.task, defaultsKnown: sheetDefaults != nil)
         if sheetDefaults == nil, kind == .setDueDate || kind == .forget {
+            let generation = generation
             Task { [weak sheet] in
-                guard let defaults = try? await sheetReads.sheetDefaults() else { return }
+                guard let defaults = try? await sheetReads.sheetDefaults(), self.generation == generation else { return }
                 sheetDefaults = defaults
                 sheet?.prefill(defaults)
             }
@@ -622,13 +623,17 @@ public final class BrowseCommands {
 
     /// The sheet's Cancel, Esc, or the end of its command.
     func closeSheet(_ sheet: BrowseSheet) {
-        if self.sheet === sheet { self.sheet = nil }
+        sheet.closed()
+        guard self.sheet === sheet else { return }
+        self.sheet = nil
+        // The sheet's counts read may have cancelled the selection's: read them again.
+        rowsChanged()
     }
 
     /// The sheet closed by the system (a window closing).
     public func dismissSheet() {
         guard let sheet else { return }
-        if sheet.isRunning { sheet.cancel() } else { self.sheet = nil }
+        if sheet.isRunning { sheet.cancel() } else { closeSheet(sheet) }
     }
 
     /// Runs the sheet's command on its rows. No second try on other rows:
@@ -679,6 +684,7 @@ public final class BrowseCommands {
         facts = nil
         deleteQuestion = nil
         failed = nil
+        sheet?.closed()
         sheet = nil
         sheetDefaults = nil
     }

@@ -195,6 +195,46 @@ import Testing
         #expect(steps == ["Set Due Date"] && model.commands.announcement?.kind == .rescheduled)
     }
 
+    @Test func aLatePrefillNeverReplacesWhatThePersonTyped() async throws {
+        let (model, _, reads) = try await browse()
+        reads.defaults = BrowseSheetDefaults(setDueDays: "9", restorePosition: true, resetCounts: false)
+        reads.holdDefaults = true
+        await select(model, [0])
+        let sheet = try await open(.setDueDate, model)
+        // Before the remembered text arrives the field shows no refusal.
+        #expect(sheet.due == .checking && !sheet.canConfirm)
+        sheet.dueText = "4"
+        reads.releaseDefaults()
+        await until { if case .valid = sheet.due { true } else { false } }
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(sheet.dueText == "4")
+    }
+
+    @Test func defaultsReadBeforeTheCollectionWentAreDropped() async throws {
+        let (model, _, reads) = try await browse()
+        reads.holdDefaults = true
+        await select(model, [0])
+        let sheet = try await open(.setDueDate, model)
+        model.commands.reset()
+        reads.releaseDefaults()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(sheet.dueText.isEmpty && model.commands.sheet == nil)
+    }
+
+    @Test func theOwnDeckHighlightComesOnceAndNeverMovesUnderThePerson() async throws {
+        let (model, session, _) = try await browse()
+        session.deckIDs = [5]
+        await select(model, [0])
+        let sheet = try await open(.changeDeck, model)
+        await until { sheet.decks != nil }
+        #expect(sheet.highlightedDeck == .deck(5))
+        sheet.moveHighlight(by: 1)
+        #expect(sheet.highlightedDeck == .deck(2))
+        // Counts read again (the selection's checkmarks) leave the choice alone.
+        sheet.counts = sheet.counts
+        #expect(sheet.highlightedDeck == .deck(2))
+    }
+
     // MARK: Forget
 
     @Test func forgetSendsItsTwoOptionsAndCancelSendsNothing() async throws {
@@ -265,6 +305,14 @@ import Testing
 /// 4 Cram (filtered) and 5 Zeta; the default deck holds no card.
 @MainActor final class FakeSheetReads: BrowseSheetReads {
     var defaults = BrowseSheetDefaults(setDueDays: "0", restorePosition: true, resetCounts: false)
+    /// `sheetDefaults()` waits for `releaseDefaults()`.
+    var holdDefaults = false
+    private var heldDefaults: [CheckedContinuation<Void, Never>] = []
+    func releaseDefaults() {
+        holdDefaults = false
+        heldDefaults.forEach { $0.resume() }
+        heldDefaults = []
+    }
     /// Names `matchDeckName` finds a deck for (compared ignoring case).
     var existing: [String] = []
     private(set) var matched: [String] = []
@@ -286,7 +334,10 @@ import Testing
     }
 
     func defaultDeckHasCards() async throws -> Bool { false }
-    func sheetDefaults() async throws -> BrowseSheetDefaults { defaults }
+    func sheetDefaults() async throws -> BrowseSheetDefaults {
+        if holdDefaults { await withCheckedContinuation { heldDefaults.append($0) } }
+        return defaults
+    }
 
     /// `sched/set-due-date` S2's grammar, enough for these tests.
     func parseDueDays(_ text: String) async throws -> DueDays {

@@ -396,7 +396,7 @@ pub trait ReadRows: sealed::Connected {
         crate::search_rows::visit_note_tags(self.connection(), cancel, visit)
     }
 
-    /// The `tags` of each listed note that exists, in no promised order
+    /// The `tags` of each listed note that exists, by ascending id
     /// (Remove Tags' suggestions, `browser/workspace` V8.1): text, or none
     /// for NULL and BLOB; cancelled as [`ReadRows::visit_id_rows`] is.
     fn visit_tags_of_notes(

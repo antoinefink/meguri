@@ -52,10 +52,13 @@ pub fn selection_note_cards(selection: &HandleSelection, cancel: &CancelToken) -
 }
 
 /// V8.1: the tags the target notes store (Remove Tags' field suggests only
-/// these), each once whatever its letter case (`tags/tags` T3 compares names
-/// by `unicase`; the first spelling read is kept), sorted by `unicase`
-/// (`text/unicode-primitives` U2). A note whose `tags` is not text holds
-/// none. Refused and cancelled as `selection_counts` is.
+/// these), each once whatever its letter case, sorted by `unicase`
+/// (`text/unicode-primitives` U2). Two spellings are one when their
+/// lowercase forms are equal, close to the simple folding Remove matches
+/// with (`tags/tags` T5): `Straße` and `STRASSE` stay two, as removing one
+/// leaves the other. The spelling of the note with the lowest id is kept. A
+/// note whose `tags` is not text holds none. Refused and cancelled as
+/// `selection_counts` is.
 pub fn selection_tags(selection: &HandleSelection, cancel: &CancelToken) -> Result<Vec<String>, BrowseError> {
     read_selection(selection, cancel, |snapshot, picked, token| {
         let notes = distinct(picked.notes());
@@ -69,7 +72,7 @@ pub fn selection_tags(selection: &HandleSelection, cancel: &CancelToken) -> Resu
             snapshot
                 .visit_tags_of_notes(chunk, &stop, &mut |_, text| {
                     for tag in text.into_iter().flat_map(split_text) {
-                        if seen.insert(meguri_text::fold::folded(tag)) {
+                        if seen.insert(tag.to_lowercase()) {
                             tags.push(tag.to_owned());
                         }
                     }
