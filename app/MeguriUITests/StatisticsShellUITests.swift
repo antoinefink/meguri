@@ -5,7 +5,8 @@ import XCTest
 /// N25.11), behind `StatsRollout`: with the flag off nothing reaches it; with it on the sidebar's
 /// Statistics row is second under Today and View › Statistics (⇧⌘S) opens the page; Tab walks the
 /// toolbar's two controls, then each box's header and switches; a loading phase never unpins a
-/// pinned selection (deferred from the chart system, U295).
+/// pinned selection (deferred from the chart system, U295); real clicks and keys pin, move and
+/// clear a plot's selection (U297).
 @MainActor
 final class StatisticsShellUITests: XCTestCase {
     // MARK: Flag
@@ -44,8 +45,42 @@ final class StatisticsShellUITests: XCTestCase {
     }
 
     /// U295's deferred case: a pinned selection stays pinned while its box shows a loading phase
-    /// (the plot loses focus to it), and still shows once the box is ready again.
+    /// (the plot loses focus to it), and still shows once the box is ready again. The `slow`
+    /// sample answers a tier every two seconds, so the loading phase is long enough to see.
     func testLoadingPhaseKeepsAPinnedSelection() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let bundle = try BuildUnderTest.current().bundleIdentifier
+        app.launchArguments = MeguriLaunch(locale: "en_US", animations: false, windowSize: "large",
+                                           route: "stats/page/slow").arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+        // The plot's label is the box's title while it loads, its sentence once ready (S15).
+        let plot = element(app, "stats.box.knowledgeOverTime.plot")
+        let ready = NSPredicate(format: "exists == true AND label BEGINSWITH 'Estimated knowledge'")
+        let loading = NSPredicate(format: "exists == true AND label == 'Knowledge Over Time'")
+        XCTAssertTrue(wait(plot, ready, 40), "Knowledge Over Time filled")
+        try app.bringToFront(bundleIdentifier: bundle)
+        // A click in the plot pins the bar under it (S8.3).
+        plot.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5)).click()
+        XCTAssertTrue(pinned(bundle), "The click pinned a selection")
+        // The kept results go (as on CollectionReplaced): the box reads again, loading.
+        post("\(bundle).testhooks.statsReload")
+        XCTAssertTrue(wait(plot, loading, 10), "The box reads again: a loading phase")
+        XCTAssertTrue(pinned(bundle), "Pinned while loading")
+        XCTAssertTrue(wait(plot, ready, 40), "The box filled again")
+        XCTAssertTrue(pinned(bundle), "The selection stayed pinned through the loading phase")
+    }
+
+    private func wait(_ target: XCUIElement, _ predicate: NSPredicate, _ timeout: TimeInterval) -> Bool {
+        XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: target)], timeout: timeout) == .completed
+    }
+
+    /// S8.3 and S14 with real clicks (U297): the plot's click pins the bar under it, Right moves
+    /// the pin, Esc clears it, a click on another chart moves the pin there and a click outside
+    /// every chart unpins. Before U297 the plot's click-to-focus interaction took the click, so a
+    /// click never pinned anything (`testLoadingPhaseKeepsAPinnedSelection` failed on it).
+    func testAClickPinsAndKeysAndClicksElsewhereMoveOrClearIt() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
         let bundle = try BuildUnderTest.current().bundleIdentifier
@@ -53,23 +88,58 @@ final class StatisticsShellUITests: XCTestCase {
                                            route: "stats/page/typical").arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
-        let box = element(app, "stats.box.knowledgeOverTime")
-        XCTAssertTrue(box.waitForExistence(timeout: 20))
-        // Every box filled: the strip's Mature figure has its value.
         XCTAssertTrue(waitForValue(element(app, "stats.strip.mature")))
-        try app.bringToFront(bundleIdentifier: bundle)
-        // A click in the plot pins the bar under it (S8.3).
-        let plot = element(app, "stats.box.knowledgeOverTime.plot")
-        XCTAssertTrue(plot.waitForExistence(timeout: 10))
-        plot.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5)).click()
-        XCTAssertTrue(pinned(bundle), "The click pinned a selection")
-        // The kept results go (as on CollectionReplaced): the box reads again, loading.
-        post("\(bundle).testhooks.statsReload")
-        let mature = element(app, "stats.strip.mature")
-        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == ''"), object: mature)],
-                                       timeout: 10) == .completed, "The boxes read again: a loading phase")
-        XCTAssertTrue(waitForValue(mature), "The box filled again")
-        XCTAssertTrue(pinned(bundle), "The selection stayed pinned through the loading phase")
+        let knowledge = element(app, "stats.box.knowledgeOverTime.plot")
+        let retention = element(app, "stats.box.retention.plot")
+        XCTAssertTrue(knowledge.waitForExistence(timeout: 10) && retention.exists)
+        func after(_ action: () -> Void) throws -> String {
+            try app.bringToFront(bundleIdentifier: bundle)
+            action()
+            Thread.sleep(forTimeInterval: 0.6)
+            return selections(bundle)
+        }
+        let hovered = try after { knowledge.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5)).hover() }
+        XCTAssertTrue(hovered.hasPrefix("knowledgeOverTime:") && hovered.hasSuffix(":false"), "Hover shows, unpinned: \(hovered)")
+        let clicked = try after { knowledge.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5)).click() }
+        let bin = try XCTUnwrap(Self.bin(clicked, "knowledgeOverTime", pinned: true), "A click pins: \(clicked)")
+        let moved = try after { app.typeKey(.rightArrow, modifierFlags: []) }
+        XCTAssertEqual(Self.bin(moved, "knowledgeOverTime", pinned: true), bin + 1, "Right moves the pin: \(moved)")
+        XCTAssertEqual(try after { app.typeKey(.escape, modifierFlags: []) }, "none", "Esc clears")
+        _ = try after { knowledge.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click() }
+        let other = try after { retention.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click() }
+        XCTAssertNotNil(Self.bin(other, "retention", pinned: true), "Another chart's click pins there: \(other)")
+        XCTAssertFalse(other.contains("knowledgeOverTime:"), "and unpins the first: \(other)")
+        // The Knowledge box's figure, outside every plot.
+        let outside = try after {
+            element(app, "stats.box.knowledgeOverTime").coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.15)).click()
+        }
+        XCTAssertEqual(outside, "none", "A click outside every chart unpins")
+    }
+
+    /// The bin of `box` in `statsSelected`'s answer, when its pin is `pinned`.
+    private static func bin(_ answer: String, _ box: String, pinned: Bool) -> Int? {
+        for item in answer.split(separator: ",") {
+            let parts = item.split(separator: ":")
+            if parts.count == 3, parts[0] == box, parts[2] == String(pinned) { return Int(parts[1]) }
+        }
+        return nil
+    }
+
+    /// Asks the app for every box's selection (`statsQuerySelection`, answered `statsSelected`
+    /// with `<box>:<bin>:<pinned>` items, or "none" when no box holds one); a missing answer fails.
+    private func selections(_ bundle: String) -> String {
+        final class Box: @unchecked Sendable { var text = "no answer" }
+        let box = Box()
+        let expectation = XCTNSNotificationExpectation(name: Notification.Name("\(bundle).testhooks.statsSelected"), object: nil,
+                                                       notificationCenter: DistributedNotificationCenter.default())
+        expectation.handler = { notification in
+            box.text = notification.object as? String ?? "?"
+            return true
+        }
+        post("\(bundle).testhooks.statsQuerySelection")
+        let answered = XCTWaiter().wait(for: [expectation], timeout: 3) == .completed
+        XCTAssertTrue(answered, "The app answers every selection query")
+        return box.text
     }
 
     /// Asks the app whether a box holds a pinned selection (`statsQueryPin`, answered `statsPinned`).

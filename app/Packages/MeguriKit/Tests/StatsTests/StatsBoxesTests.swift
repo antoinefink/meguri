@@ -36,6 +36,8 @@ import Testing
         // Known never exceeds Studied (S20's by-construction check).
         let studied = try #require(box.data.series.first { $0.id == "studied" })
         #expect(zip(known.values, studied.values).allSatisfy { ($0 ?? 0) <= ($1 ?? .infinity) })
+        // The callout names the gap with its share (S7.1): today 86 − 77 = 9, 10.5%.
+        #expect(p.format.calloutText(box.data, bin: 29).hasSuffix("Studied 86, Likely forgotten 9 (10.5%)"))
     }
 
     @Test func knowledgeEmptyLines() throws {

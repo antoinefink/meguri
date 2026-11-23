@@ -21,10 +21,18 @@ public struct StatsBoxSlot {
     public func title(locale: Locale) -> String { StatsPageText.title(id, locale: locale) }
 
     /// The model's selection for the box, cleared by a switch or the period (S8.3) and kept across
-    /// a refresh: a loading phase never unpins it.
+    /// a refresh: a loading phase never unpins it. Pinning a bar unpins every other box's: a click
+    /// on another chart is a click outside this one (S8.3).
     public var selection: Binding<StatsChartSelection> {
         let model = model, id = id
-        return Binding(get: { model.selection(for: id) }, set: { model.select($0, in: id) })
+        return Binding(get: { model.selection(for: id) }, set: { selection in
+            if selection.pinned {
+                for other in StatsBoxID.allCases where other != id && model.selection(for: other).pinned {
+                    model.select(.none, in: other)
+                }
+            }
+            model.select(selection, in: id)
+        })
     }
 }
 

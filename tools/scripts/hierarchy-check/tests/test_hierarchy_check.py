@@ -888,6 +888,24 @@ class IdentifierFormat(unittest.TestCase):
                        el("searchField", label="Filter", f=(1000, 40, 200, 40))]), window=(0, 0, 1366, 1024))
         self.assertEqual(hierarchy_check.check(tree), [])
 
+    def test_an_ipad_toolbar_items_inner_button(self):
+        # Seen on iPad (U297): a navigation bar Menu exports as the named button with an unnamed
+        # button of the same frame inside it.
+        tree = doc(el("navigationBar", f=(320, 32, 1056, 125), children=[
+            el("button", "stats.toolbar.deck", label="Deck", f=(980, 36, 101, 36), children=[
+                el("button", f=(980, 36, 101, 36), children=[el("staticText", label="All Decks", f=(986, 44, 72, 20))])])]),
+            window=(0, 0, 1376, 1032))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_inner_button_lookalikes_are_still_reported(self):
+        # Another frame, an unnamed outer button, or outside a navigation bar.
+        tree = doc(el("navigationBar", f=(0, 32, 400, 100), children=[
+                       el("button", "stats.toolbar.deck", label="Deck", f=(10, 36, 100, 36), children=[el("button", f=(10, 36, 50, 36))]),
+                       el("button", label="Other", f=(200, 36, 100, 36), children=[el("button", f=(200, 36, 100, 36))])]),
+                   el("button", "sample.screen.menu", label="Menu", f=(10, 300, 100, 36), children=[el("button", f=(10, 300, 100, 36))]))
+        self.assertEqual(kinds(hierarchy_check.check(tree)),
+                         ["missing-identifier", "missing-identifier", "missing-identifier", "missing-identifier"])
+
     def test_lookalikes_of_those_parts_are_still_reported(self):
         tree = doc(el("navigationBar", "Meguri", f=(0, 32, 320, 54), children=[el("button", label="Edit", f=(10, 40, 40, 40))]),
                    el("segmentedControl", f=(0, 100, 120, 40), children=[el("button", label="Fields", f=(0, 100, 60, 40))]),
