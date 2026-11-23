@@ -22,6 +22,8 @@ struct StatsActivityBox: View {
     @Environment(\.layoutDirection) private var layoutDirection
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var focused: Bool
+    /// Counts the keys' moves, so the page scrolls the newly selected day into view.
+    @State private var revealRequest = 0
 
     /// N24.6's fixed square, as on Today: it never grows with the width or the text size.
     #if os(macOS)
@@ -53,8 +55,15 @@ struct StatsActivityBox: View {
     @ViewBuilder
     private func grid(_ activity: StatsActivity?, span: StatsActivitySpan?, phase: StatsBoxPhase) -> some View {
         if let activity {
-            StatsActivityGrid(activity: activity, square: Self.square, selection: slot.selection, showInBrowse: showInBrowse,
-                              pinned: { focused = true })
+            ScrollViewReader { proxy in
+                StatsActivityGrid(activity: activity, square: Self.square, selection: slot.selection, showInBrowse: showInBrowse,
+                                  pinned: { focused = true })
+                    .onChange(of: revealRequest) {
+                        // A key moved the selection: the page scrolls just enough to show the day
+                        // (a tall grid on an iPad with a keyboard runs past the screen).
+                        withAnimation { proxy.scrollTo(StatsActivityGrid.selectedDayID) }
+                    }
+            }
             #if os(macOS)
             // As the charts' plots: Tab reaches it with keyboard navigation on and a click focuses
             // it from its tap handler; click-to-focus would take the click that pins (S8.3).
@@ -165,6 +174,7 @@ struct StatsActivityBox: View {
         let next = Self.moved(selection.wrappedValue.bin.map(activity.day(ofAbsoluteDay:)), key: key, first: activity.span.firstDay,
                               last: 0, rightToLeft: layoutDirection == .rightToLeft)
         selection.wrappedValue = StatsChartSelection(bin: activity.absoluteDay(ofDay: next), pinned: true)
+        revealRequest += 1
         return .handled
     }
 
@@ -309,6 +319,9 @@ private struct StatsActivityGrid: View {
         self.pinned = pinned
     }
 
+    /// The selected day's place, for the page's scroll view.
+    static let selectedDayID = "stats.activity.selectedDay"
+
     private var grid: ActivityContinuousGrid { activity.grid }
     private var rightToLeft: Bool { layoutDirection == .rightToLeft }
     private var geometry: ActivityContinuousGrid.Geometry {
@@ -399,6 +412,12 @@ private struct StatsActivityGrid: View {
         let height = size.height
         let width = size.width
         return ZStack(alignment: .topLeading) {
+            // Where the page scrolls to when a key moves the selection.
+            Color.clear
+                .frame(width: square.side, height: square.side)
+                .padding(.leading, rect.minX)
+                .padding(.top, rect.minY)
+                .id(Self.selectedDayID)
             RoundedRectangle(cornerRadius: square.cornerRadius + 1)
                 .strokeBorder(.primary, lineWidth: 2)
                 .frame(width: square.side + 4, height: square.side + 4)
