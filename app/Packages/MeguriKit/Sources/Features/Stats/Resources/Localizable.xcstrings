@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "stats.activity.today %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today, %@"
+          }
+        }
+      }
+    },
     "stats.activity.yearTotal %@ %lld %@": {
       "localizations": {
         "en": {

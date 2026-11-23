@@ -15,6 +15,9 @@ nonisolated public final class StatsSampleService: StatsService {
         case noReviews
         /// No card at all (S12.2).
         case noCards
+        /// Cards and reviews only since 1 January, at most the last 120 days: Activity's one
+        /// partial year.
+        case recent
     }
 
     /// How its requests end.
@@ -158,6 +161,8 @@ nonisolated struct StatsSampleCollection {
     let scope: StatsPageScope
     let history: StatsHistory
     private let weight: Double
+    /// The scope's first review: about three years back, or this year's for `recent`.
+    private let firstReviewDay: Int
 
     init(shape: StatsSampleService.Shape, scope: StatsPageScope, history: StatsHistory) {
         self.shape = shape
@@ -167,9 +172,15 @@ nonisolated struct StatsSampleCollection {
         case .allDecks, .search: 1
         case let .deck(id): Self.weight(id) ?? 0
         }
+        if shape == .recent {
+            let days = StatsDays(context: Self.context(), calendar: Calendar(identifier: .gregorian))
+            firstReviewDay = max(-120, days.firstDay(ofYear: days.year(ofDay: 0)) ?? -120)
+        } else {
+            firstReviewDay = Self.firstDay
+        }
     }
 
-    private var reviewed: Bool { shape == .typical }
+    private var reviewed: Bool { shape == .typical || shape == .recent }
     private var hasCards: Bool { shape != .noCards }
     private var windowStart: Int { history == .allHistory ? Self.firstDay : -366 }
 
@@ -178,7 +189,7 @@ nonisolated struct StatsSampleCollection {
                         preferences: StatsPreferences(firstDayOfWeek: 0, cardCountsSeparateInactive: true,
                                                       futureDueShowBacklog: true, fsrs: true),
                         browseScope: scope == .allDecks ? .none : .text("deck:Sample"),
-                        oldestDay: reviewed ? .day(Self.firstDay) : .noRows)
+                        oldestDay: reviewed ? .day(firstReviewDay) : .noRows)
     }
 
     /// Now, with Anki's day ending at the next 4 a.m. (rollover hour 4) in the device's zone.
@@ -224,7 +235,7 @@ nonisolated struct StatsSampleCollection {
     private func scaled(_ value: Int) -> Int { Int((Double(value) * weight).rounded()) }
 
     /// The scope's reviews on `day`; none for a shape with no review.
-    private func reviews(on day: Int) -> Int { reviewed ? scaled(Self.reviews(day)) : 0 }
+    private func reviews(on day: Int) -> Int { reviewed && day >= firstReviewDay ? scaled(Self.reviews(day)) : 0 }
 
     /// The scope's reviews on an average day, for the windows with no time axis.
     private var dailyReviews: Int { reviewed ? scaled(150) : 0 }
@@ -329,7 +340,7 @@ nonisolated struct StatsSampleCollection {
             return .byDeck(StatsByDeck(rows: byDeckRows))
         case .activityDays:
             return .activityDays(map(Array(Self.firstDay...0)) { day in
-                let n = reviewed ? scaled(Self.reviews(day)) : 0
+                let n = reviews(on: day)
                 return n > 0 ? n : nil
             })
         case .knowledgeOverTime:
@@ -338,7 +349,7 @@ nonisolated struct StatsSampleCollection {
     }
 
     private func reviewKinds(_ day: Int, time: Bool) -> StatsReviewKinds? {
-        let n = reviewed ? scaled(Self.reviews(day)) : 0
+        let n = reviews(on: day)
         guard n > 0 else { return nil }
         let unit = time ? 7_500 : 1
         return StatsReviewKinds(learn: n * 8 / 100 * unit, relearn: n * 5 / 100 * unit, young: n * 30 / 100 * unit,
@@ -346,7 +357,7 @@ nonisolated struct StatsSampleCollection {
     }
 
     private func answers(_ day: Int, time: Bool) -> StatsAnswers? {
-        let n = reviewed ? scaled(Self.reviews(day)) : 0
+        let n = reviews(on: day)
         guard n > 0 else { return nil }
         let unit = time ? 7_500 : 1
         return StatsAnswers(again: n * 9 / 100 * unit, hard: n * 6 / 100 * unit, good: n * 74 / 100 * unit,

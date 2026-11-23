@@ -106,6 +106,7 @@ extension TestHooks {
             registry.register("stats/charts/selection/1m") { _ in .screen { gallery(.selection, option: "1m") } }
             registry.register("stats/charts/selection/contrast") { _ in .screen { gallery(.selection, option: "contrast") } }
             registry.register("stats/charts/selection/ax5") { _ in .screen { gallery(.selection, option: "ax5") } }
+            registerReviews(in: &registry)
         }
 
         enum Sample {
