@@ -188,6 +188,30 @@ import Testing
         #expect(labels.values.allSatisfy { $0.split(separator: " ").count == 2 && Int($0.split(separator: " ")[0]) != nil }, "\(labels)")
     }
 
+    @Test func anOpenPointSaysItHasTooFewReviewsAndRulesComeLast() {
+        let data = StatsChartData(
+            bins: [.day(Self.date(2026, 11, 17)), .day(Self.date(2026, 11, 18))],
+            series: [StatsSeries(id: "r", name: "Retention", color: .remembered, mark: .line(points: true), values: [0.8, 0.9],
+                                 openPoints: [0])],
+            rules: [StatsRule(id: "d", name: "Desired retention", value: 0.9)],
+            unit: .fraction,
+            calloutLines: [StatsCalloutLine(id: "p", name: "Remembered", values: [8, 90], unit: .count)]
+        )
+        #expect(Self.format.calloutText(data, bin: 0)
+            == "17 Nov, Retention 80.0%, Too few reviews to trust, Remembered 8, Desired retention 90.0%")
+        #expect(Self.format.calloutText(data, bin: 1) == "18 Nov, Retention 90.0%, Remembered 90, Desired retention 90.0%")
+    }
+
+    @Test func aCalloutLineCanCarryItsOwnText() {
+        let data = StatsChartData(
+            bins: [.day(Self.date(2026, 11, 17))],
+            series: [StatsSeries(id: "k", name: "Known", color: .remembered, mark: .line(), values: [900])],
+            calloutLines: [StatsCalloutLine(id: "g", name: "Likely forgotten", values: [100], texts: ["100 (10.0%)"])]
+        )
+        #expect(Self.format.calloutText(data, bin: 0) == "17 Nov, Known 900, Likely forgotten 100 (10.0%)")
+        #expect(Self.format.tabSeparatedValues(data).hasSuffix("17 Nov\t900\t100 (10.0%)"))
+    }
+
     @Test func aCalloutLineWritesItsOwnUnit() {
         let data = StatsChartData(
             bins: [.day(Self.date(2026, 11, 17))],

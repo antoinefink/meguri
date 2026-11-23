@@ -230,7 +230,13 @@ struct StatsPresenter {
             sentence = delta < 0 ? text.down(sentence, count(-delta), date) : text.up(sentence, count(delta), date)
         }
         let forgotten = max(0, now.studied - knownNow)
-        let data = kit.knowledgeData(axis: axis, known: known, studied: studied)
+        // The callout's gap with its share of the studied cards (S7.1: "Likely forgotten <n> (<p>%)").
+        let gapTexts = zip(known, studied).map { pair -> String? in
+            guard let k = pair.0, let s = pair.1 else { return nil }
+            let gap = max(0, s - k.rounded())
+            return text.withShare(count(gap), percent(s > 0 ? gap / s : 0))
+        }
+        let data = kit.knowledgeData(axis: axis, known: known, studied: studied, gapTexts: gapTexts)
         return content(.ready, figure: StatsBoxFigure(value: cards(knownNow), sentence: sentence), data: data,
                        bins: axis.bins,
                        figures: [
@@ -780,7 +786,7 @@ enum StatsQuantile {
 struct StatsSeriesKit {
     let text: StatsText
 
-    func knowledgeData(axis: StatsTimeAxis?, known: [Double?], studied: [Double?]) -> StatsChartData {
+    func knowledgeData(axis: StatsTimeAxis?, known: [Double?], studied: [Double?], gapTexts: [String?]? = nil) -> StatsChartData {
         let gap = zip(known, studied).map { pair -> Double? in
             guard let k = pair.0, let s = pair.1 else { return nil }
             return max(0, s - k.rounded())
@@ -792,7 +798,7 @@ struct StatsSeriesKit {
                 StatsSeries(id: "studied", name: text.studied, color: .reference, mark: .line(dashed: true), values: studied),
             ],
             yScale: .fitted,
-            calloutLines: axis == nil ? [] : [StatsCalloutLine(id: "likelyForgotten", name: text.likelyForgotten, values: gap)]
+            calloutLines: axis == nil ? [] : [StatsCalloutLine(id: "likelyForgotten", name: text.likelyForgotten, values: gap, texts: gapTexts)]
         )
     }
 
