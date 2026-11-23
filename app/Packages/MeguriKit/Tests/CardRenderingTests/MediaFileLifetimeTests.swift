@@ -106,6 +106,7 @@ import Testing
         await resolver.close()
     }
 
+    #if DEBUG
     /// The last release runs the deinit there and then, on the releasing
     /// thread (here a dispatch queue): nothing is left to run on the file's
     /// actor afterwards, and every file opened is closed by the time its last
@@ -132,6 +133,7 @@ import Testing
         }
         await resolver.close()
     }
+    #endif
 
     private nonisolated final class Holder: @unchecked Sendable {
         private var file: MediaFile?
