@@ -108,6 +108,9 @@ struct StatsPlotOptions: Hashable {
     var focusable = true
     /// The chart element, its Audio Graph and its per-bar elements (S15).
     var accessible = true
+    /// Its own hover and click: an upper panel leaves them to the panel under it, which holds
+    /// the focus and the keys (S14), and draws the shared selection's rule all the same.
+    var interactive = true
     /// A width every y axis label keeps, so two panels' plots share their x positions.
     var yLabelWidth: CGFloat?
 
@@ -496,7 +499,9 @@ struct StatsChartPlot: View {
                 ZStack(alignment: .topLeading) {
                     if isReady {
                         markers(proxy, plot: plot)
-                        interactionLayer(proxy, plot: plot)
+                        if options.interactive {
+                            interactionLayer(proxy, plot: plot)
+                        }
                         if options.accessible {
                             StatsAccessibilityBins(data: data, format: format, browse: showInBrowse)
                                 .equatable()

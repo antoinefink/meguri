@@ -43,8 +43,9 @@ struct StatsBarRow: Identifiable, Hashable {
     }
 
     /// The bar's reading for VoiceOver: its name, then each segment's name and value.
-    var spoken: String {
-        ([name] + segments.map { "\($0.name) \($0.text)" }).filter { !$0.isEmpty }.joined(separator: ", ")
+    func spoken(locale: Locale) -> String {
+        let named = segments.map { String(localized: "stats.value.labelled \($0.name) \($0.text)", bundle: .module, locale: locale) }
+        return ([name] + named).filter { !$0.isEmpty }.joined(separator: ", ")
     }
 }
 
@@ -93,19 +94,22 @@ struct StatsSegmentedBars: View {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 GridRow {
                     if showsNames {
+                        // The bar's element reads its name first: the name is not one of its own.
                         Text(verbatim: row.name)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .gridColumnAlignment(.leading)
+                            .accessibilityHidden(true)
                     }
+                    // A row's modifiers would go to each of its cells: the bar's are its own.
                     bar(row, index: index)
                         .frame(maxWidth: .infinity)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Text(verbatim: row.spoken(locale: locale)))
+                        .accessibilityIdentifier("stats.box.\(box).bar.\(row.id)")
                         .zIndex(selection.bin == index ? 1 : 0)
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text(verbatim: row.spoken))
-                .accessibilityIdentifier("stats.box.\(box).bar.\(row.id)")
             }
         }
         #if os(macOS)

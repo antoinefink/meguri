@@ -90,7 +90,7 @@ struct StatsCardCountsBox: View {
                 StatsBoxFigureView(figure: content.figure, ready: ready)
                 Group {
                     if let table {
-                        StatsSegmentedBars(box: slot.id.rawValue, rows: [Self.bar(table, title: title)], showsNames: false,
+                        StatsSegmentedBars(box: slot.id.rawValue, rows: [Self.bar(table, title: title, text: StatsText(locale: locale))], showsNames: false,
                                            selection: slot.selection,
                                            summary: StatsSectionText.summary(title, content.figure) ?? title,
                                            audioGraph: Self.values(table, series: StatsText(locale: locale).cardsSeries))
@@ -113,10 +113,10 @@ struct StatsCardCountsBox: View {
     }
 
     /// The one bar: a segment per state, in the table's order.
-    static func bar(_ table: StatsCardCountsTable, title: String) -> StatsBarRow {
+    static func bar(_ table: StatsCardCountsTable, title: String, text: StatsText) -> StatsBarRow {
         StatsBarRow(id: "states", name: title, segments: table.rows.map { row in
             .init(id: "\(row.label)", name: row.name, color: row.color, value: Double(row.count),
-                  text: "\(row.countText) (\(row.shareText))")
+                  text: text.withShare(row.countText, row.shareText))
         })
     }
 
@@ -132,7 +132,7 @@ struct StatsCardCountsBox: View {
         let lines = table.rows.map { "\($0.name)\t\($0.countText)\t\($0.shareText)" }
             + ["\(text.figureTotal)\t\(table.total)", "\(text.figureNotes)\t\(table.notes)"]
         StatsExportMenu(values: lines.joined(separator: "\n")) {
-            StatsSegmentedBars(box: slot.id.rawValue, rows: [Self.bar(table, title: title)], showsNames: false,
+            StatsSegmentedBars(box: slot.id.rawValue, rows: [Self.bar(table, title: title, text: StatsText(locale: locale))], showsNames: false,
                                selection: .constant(.none), summary: title, audioGraph: Self.values(table, series: StatsText(locale: locale).cardsSeries))
         }
     }

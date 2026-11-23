@@ -35,7 +35,7 @@ struct StatsAnswersBox: View {
         let ready = content.phase == .ready
         let title = slot.title(locale: locale)
         let table: StatsAnswersTable? = if ready, case let .answers(value)? = content.detail { value } else { nil }
-        let bars = table.map { Self.bars($0, data: content.data) } ?? []
+        let bars = table.map { Self.bars($0, data: content.data, text: StatsText(locale: locale)) } ?? []
         StatsBoxContainer {
             VStack(alignment: .leading, spacing: Spacing.small) {
                 StatsBoxHeader(box: slot.id.rawValue, title: title, open: slot.open) { EmptyView() }
@@ -69,19 +69,23 @@ struct StatsAnswersBox: View {
         .accessibilityIdentifier("stats.box.\(slot.id.rawValue)")
     }
 
+    /// The groups' identifier parts, `stats.box.answers.bar.<group>` and `.row.<group>`: stable
+    /// in every language.
+    static let groupIDs = ["learning", "young", "mature"]
+
     /// Three bars and the space between them: the plot's place in every phase.
     static var barsHeight: CGFloat { 3 * StatsSegmentedBars.barHeight + 2 * Spacing.xSmall }
 
     /// A bar per group, its segments the four buttons with the series' names and colours.
-    static func bars(_ table: StatsAnswersTable, data: StatsChartData) -> [StatsBarRow] {
-        table.rows.map { row in
-            StatsBarRow(id: row.name, name: row.name, segments: data.series.indices.map { button in
+    static func bars(_ table: StatsAnswersTable, data: StatsChartData, text: StatsText) -> [StatsBarRow] {
+        table.rows.enumerated().map { group, row in
+            StatsBarRow(id: groupIDs[min(group, groupIDs.count - 1)], name: row.name, segments: data.series.indices.map { button in
                 let series = data.series[button]
                 let count = row.counts.indices.contains(button) ? row.counts[button] : 0
                 let countText = row.countTexts.indices.contains(button) ? row.countTexts[button] : ""
                 let share = row.shareTexts.indices.contains(button) ? row.shareTexts[button] : ""
                 return .init(id: series.id, name: series.name, color: series.color, value: Double(count),
-                             text: "\(countText) (\(share))")
+                             text: text.withShare(countText, share))
             })
         }
     }
@@ -120,8 +124,9 @@ struct StatsAnswersBox: View {
                     }
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text(verbatim: Self.spoken(name, buttons: buttons.map(\.0), counts: counts, text: text)))
-                .accessibilityIdentifier("stats.box.answers.row.\(["learning", "young", "mature"][min(group, 2)])")
+                .accessibilityLabel(Text(verbatim: Self.spoken(name, buttons: buttons.map(\.0), counts: counts, text: text,
+                                                               locale: locale)))
+                .accessibilityIdentifier("stats.box.answers.row.\(Self.groupIDs[min(group, Self.groupIDs.count - 1)])")
             }
         }
         .font(.subheadline)
@@ -130,8 +135,9 @@ struct StatsAnswersBox: View {
     }
 
     /// A group's row for VoiceOver: "Young, Again 12, Hard 3, Good 200, Easy 50".
-    static func spoken(_ group: String, buttons: [String], counts: [String], text: StatsText) -> String {
-        ([group] + buttons.indices.map { "\(buttons[$0]) \(counts.indices.contains($0) ? counts[$0] : text.noValue)" })
+    static func spoken(_ group: String, buttons: [String], counts: [String], text: StatsText, locale: Locale) -> String {
+        let labelled = StatsSectionText(locale: locale)
+        return ([group] + buttons.indices.map { labelled.labelled(buttons[$0], counts.indices.contains($0) ? counts[$0] : text.noValue) })
             .joined(separator: ", ")
     }
 }
@@ -167,7 +173,7 @@ struct StatsTimeOfDayBox: View {
                         box: "\(slot.id.rawValue).remembered", data: ready ? upper : upper.skeleton(), phase: .ready,
                         size: .panel, summary: summary, selection: slot.selection, showInBrowse: nil, separatesSeries: nil,
                         options: StatsPlotOptions(legend: false, xAxis: false, callout: false, focusable: false,
-                                                  accessible: false, yLabelWidth: axisLabelWidth)
+                                                  accessible: false, interactive: false, yLabelWidth: axisLabelWidth)
                     )
                     StatsChartPlot(
                         box: slot.id.rawValue, data: ready ? lower : lower.skeleton(), phase: plotPhase(content.phase),

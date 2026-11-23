@@ -50,14 +50,15 @@ import Testing
     }
 
     /// All ahead: Overdue, 25 months (this one to the 24th) and Later. Months over more than a
-    /// year take a wider label, so a lead box keeps four places, two once Overdue and Later have
-    /// theirs: every 13th month from this one (bins 1 and 14); bin 1 touches Overdue and goes,
-    /// bin 14 stands 12 bins from Later and stays.
+    /// year take a wider label, so a lead box keeps four places for its months (Overdue and
+    /// Later take two of the seven): every 7th month from this one (bins 1, 8, 15, 22); bin 1
+    /// touches Overdue and bin 22 stands 4 bins from Later, under the clearance of 5: both go.
     @Test func allAheadKeepsItsMonthsClearOfOverdueAndLater() {
         let bins: [StatsPeriod] = [.overdue] + (0...24).map { .month(Self.month($0)) } + [.later]
         let labels = Self.format.labelledBins(bins, maximum: 7)
-        #expect(labels.keys.sorted() == [0, 14, 26])
-        #expect(labels[14] == "Dec 2027")
+        #expect(labels.keys.sorted() == [0, 8, 15, 26])
+        #expect(labels[8] == "Jun 2027")
+        #expect(labels[15] == "Jan 2028")
         #expect(labels[26] == "Later")
     }
 
@@ -137,7 +138,7 @@ import Testing
         #expect(Self.bar.segment(at: 1.1) == nil)
         let empty = StatsBarRow(id: "e", name: "Mature", segments: [.init(id: "again", name: "Again", color: .again, value: 0, text: "")])
         #expect(empty.segment(at: 0.5) == nil)
-        #expect(Self.bar.spoken == "Young, Again 1 (10.0%), Hard 0 (0.0%), Good 6 (60.0%), Easy 3 (30.0%)")
+        #expect(Self.bar.spoken(locale: Self.locale) == "Young, Again 1 (10.0%), Hard 0 (0.0%), Good 6 (60.0%), Easy 3 (30.0%)")
     }
 
     /// Left and Right move along the segments with a value, bar after bar, and stop at the ends.
@@ -167,14 +168,15 @@ import Testing
     @Test func answersBarsComeFromTheTable() throws {
         let content = try #require(Fixture.content(.answers, Fixture.presenter(Fixture.set())))
         guard case let .answers(table)? = content.detail else { Issue.record("no table"); return }
-        let bars = StatsAnswersBox.bars(table, data: content.data)
+        let bars = StatsAnswersBox.bars(table, data: content.data, text: StatsText(locale: Self.locale))
         #expect(bars.map(\.name) == ["Learning", "Young", "Mature"])
+        #expect(bars.map(\.id) == ["learning", "young", "mature"])
         #expect(bars[1].segments.map(\.name) == ["Again", "Hard", "Good", "Easy"])
         #expect(bars[1].segments.map(\.color) == [.again, .hard, .good, .easy])
         #expect(bars[1].segments.map(\.value) == [1, 1, 6, 2])
         #expect(bars[1].segments.map(\.text) == ["1 (10.0%)", "1 (10.0%)", "6 (60.0%)", "2 (20.0%)"])
-        #expect(StatsAnswersBox.spoken("Young", buttons: ["Again", "Hard"], counts: ["1"], text: StatsText(locale: Self.locale))
-            == "Young, Again 1, Hard —")
+        #expect(StatsAnswersBox.spoken("Young", buttons: ["Again", "Hard"], counts: ["1"], text: StatsText(locale: Self.locale),
+                                       locale: Self.locale) == "Young, Again 1, Hard —")
     }
 
     /// Card Counts' bar has a segment per state in the table's order, its Audio Graph a
@@ -182,7 +184,7 @@ import Testing
     @Test func cardCountsBarHasASegmentPerState() throws {
         let content = try #require(Fixture.content(.cardCounts, Fixture.presenter(Fixture.set())))
         guard case let .cardCounts(table)? = content.detail else { Issue.record("no table"); return }
-        let bar = StatsCardCountsBox.bar(table, title: "Card Counts")
+        let bar = StatsCardCountsBox.bar(table, title: "Card Counts", text: StatsText(locale: Self.locale))
         #expect(bar.segments.map(\.id) == ["mature", "young", "relearning", "learning", "new", "suspended", "buried"])
         #expect(bar.segments.first?.text == "60 (60.0%)")
         let graph = StatsCardCountsBox.values(table, series: "Cards")

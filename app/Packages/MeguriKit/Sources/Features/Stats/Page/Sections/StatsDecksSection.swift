@@ -72,11 +72,14 @@ struct StatsByDeckBox: View {
     @State private var hovered: String?
     @Environment(\.locale) private var locale
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.statsScrolling) private var scrolling
     @ScaledMetric(relativeTo: .subheadline) private var numberWidth: CGFloat = 76
     @ScaledMetric(relativeTo: .subheadline) private var timeWidth: CGFloat = 116
     @ScaledMetric(relativeTo: .subheadline) private var shareBarWidth: CGFloat = 44
 
     private var compact: Bool { horizontalSizeClass == .compact }
+    /// The order shown: a column the compact table leaves out sorts as the deck order.
+    private var shownSort: StatsByDeckSort { columns.contains(sort.column) ? sort : StatsByDeckSort() }
     private var columns: [StatsByDeckColumn] {
         compact ? [.deck, .retention, .time] : StatsByDeckColumn.allCases
     }
@@ -94,7 +97,7 @@ struct StatsByDeckBox: View {
                     header
                     Divider()
                     if let table, !table.rows.isEmpty {
-                        ForEach(sort.sorted(table.rows)) { row in
+                        ForEach(shownSort.sorted(table.rows)) { row in
                             rowView(row)
                         }
                     } else {
@@ -120,15 +123,15 @@ struct StatsByDeckBox: View {
         return HStack(spacing: Spacing.small) {
             ForEach(columns, id: \.self) { column in
                 let title = text.column(column)
-                let sorted = sort.column == column
+                let sorted = shownSort.column == column
                 Button {
-                    sort = sort.clicked(column)
+                    sort = shownSort.clicked(column)
                 } label: {
                     HStack(spacing: Spacing.xxSmall) {
                         if column != .deck { Spacer(minLength: 0) }
                         Text(verbatim: title)
                             .lineLimit(1)
-                        Image(systemName: sort.ascending ? "chevron.up" : "chevron.down")
+                        Image(systemName: shownSort.ascending ? "chevron.up" : "chevron.down")
                             .font(.caption2.weight(.semibold))
                             .opacity(sorted ? 1 : 0)
                             .accessibilityHidden(true)
@@ -142,7 +145,7 @@ struct StatsByDeckBox: View {
                 .frame(width: width(column), alignment: column == .deck ? .leading : .trailing)
                 .frame(maxWidth: column == .deck ? .infinity : nil, alignment: .leading)
                 .accessibilityLabel(Text(verbatim: title))
-                .accessibilityValue(Text(verbatim: sorted ? (sort.ascending ? text.ascending : text.descending) : ""))
+                .accessibilityValue(Text(verbatim: sorted ? (shownSort.ascending ? text.ascending : text.descending) : ""))
                 .accessibilityAddTraits(sorted ? [.isHeader, .isSelected] : .isHeader)
                 .accessibilityIdentifier("stats.box.byDeck.sort.\(column.rawValue)")
             }
@@ -184,7 +187,9 @@ struct StatsByDeckBox: View {
                 .buttonStyle(.plain)
                 #if os(macOS)
                 .onHover { inside in
-                    if inside { hovered = row.id } else if hovered == row.id { hovered = nil }
+                    // Hover waits while the page scrolls (N25.14): rows passing under a resting
+                    // pointer redraw nothing.
+                    if inside, !scrolling.active { hovered = row.id } else if hovered == row.id { hovered = nil }
                 }
                 #endif
                 .accessibilityHint(Text(verbatim: StatsSectionText(locale: locale).rowHint))

@@ -207,7 +207,7 @@ public struct StatsChartFormat: Sendable {
         }()
         // A label with its year is about twice as wide: fewer of them, so they fit a lead box
         // at compact width.
-        let fitting = spansYears ? min(room, max(3, maximum * 3 / 5) - specials.count) : room
+        let fitting = spansYears ? min(room, max(3, maximum * 3 / 5)) : room
         let step = max(1, Int((Double(regular.count) / Double(max(1, fitting))).rounded(.up)))
         // Overdue and Later belong to Reviews Due, which looks ahead: its current period is the first.
         let order = specials.isEmpty ? regular.reversed() : regular
