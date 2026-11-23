@@ -2286,8 +2286,6 @@ public final class SyncCoordinator {
                     guard meguriWake?.id == id, meguriCurrent(owner, expected, revision), meguriRound === round else { return }
                     meguriAccounting = nil
                     reduceMeguriRound(report)
-                    // MP6.10: a change made during the round waits for the next window.
-                    meguriRoutine = Self.meguriRoutine(meguriRoutine, changesWaiting: meguriReviewRounds.waiting)
                     // Only this actual routine round can supply a new instant.
                     // Pending/skipped work retains the earlier complete exchange.
                     if meguriRoutine == .idle, !Task.isCancelled, !meguriCancelling,
@@ -2302,6 +2300,9 @@ public final class SyncCoordinator {
                         debugMeguriRoundSuccessSequence += 1
                     }
                     #endif
+                    // MP6.10: after the exchange is recorded, a change made during the
+                    // round keeps the status pending until its window's round.
+                    meguriRoutine = Self.meguriRoutine(meguriRoutine, changesWaiting: meguriReviewRounds.waiting)
                     if meguriRoutine == .fullSyncRequired, let facade = meguriBootstrap {
                         try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
                         // T19.5 "round failed, full sync required": the needs-you row with its Choose action.
@@ -4018,9 +4019,11 @@ public final class SyncCoordinator {
     func quitAfterLocalFlush(completion: @escaping @MainActor () -> Void) async {
         cancelOwnEditorDecision()
         cancelMeguriEditorDecision(meguriAction?.id)
-        // MP6.10: changes waiting for a review window go before Meguri quits.
-        if providerState?.selection == .meguri, meguriReviewRounds.flush(), let wake = meguriWake {
-            await waitForMeguriRound(wake.task, atMost: .seconds(10))
+        // MP6.10: changes waiting for a review window, or the round the session's
+        // end just started (Close ends the review before quitting), go before Meguri quits.
+        if providerState?.selection == .meguri {
+            _ = meguriReviewRounds.flush()
+            if let wake = meguriWake { await waitForMeguriRound(wake.task, atMost: .seconds(10)) }
         }
         // A provider-only owner has no policy to answer the quit request.
         guard backend != nil, cloudConfigured else { completion(); return }
