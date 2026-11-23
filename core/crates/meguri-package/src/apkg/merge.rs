@@ -350,11 +350,11 @@ pub(crate) fn plan(
     let mut seen: HashSet<&[u8]> = HashSet::new();
     let mut joins: BTreeMap<(i64, i64), Vec<NoteId>> = BTreeMap::new();
     for note in &raw.notes {
-        let mid = note.notetype_id.0;
-        if !stage.routes.contains_key(&mid) || !seen.insert(note.guid.as_bytes()) {
+        let mid = note.notetype;
+        if !stage.routes.contains_key(&mid) || !seen.insert(note.guid.as_slice()) {
             continue;
         }
-        if let Some(target) = matches.get(note.guid.as_bytes()) {
+        if let Some(target) = matches.get(note.guid.as_slice()) {
             let theirs = stage.mid_after(target.id, target.notetype.0);
             if theirs != mid {
                 joins.entry((mid, theirs)).or_default().push(target.id);
@@ -626,11 +626,11 @@ fn emptied(
     let mut seen: HashSet<&[u8]> = HashSet::new();
     let mut updated: BTreeMap<i64, Vec<NoteId>> = BTreeMap::new();
     for note in &raw.notes {
-        let mid = note.notetype_id.0;
-        if !stage.routes.contains_key(&mid) || !seen.insert(note.guid.as_bytes()) {
+        let mid = note.notetype;
+        if !stage.routes.contains_key(&mid) || !seen.insert(note.guid.as_slice()) {
             continue;
         }
-        let Some(target) = matches.get(note.guid.as_bytes()) else {
+        let Some(target) = matches.get(note.guid.as_slice()) else {
             continue;
         };
         if !open.contains_key(&mid) {
@@ -638,8 +638,8 @@ fn emptied(
         }
         let stored = if stage.stamped.contains(&target.notetype.0) { now_s } else { target.mtime };
         let holds = match options.update_notes {
-            UpdateCondition::IfNewer => stored < note.mtime.0,
-            UpdateCondition::Always => stored != note.mtime.0,
+            UpdateCondition::IfNewer => stored < note.mtime,
+            UpdateCondition::Always => stored != note.mtime,
             UpdateCondition::Never => false,
         };
         if holds {

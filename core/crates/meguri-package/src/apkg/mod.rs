@@ -30,6 +30,13 @@ pub use archive::PackageFormat;
 pub use classify::{PackageClass, classify, classify_name};
 pub use session::{ImportSession, inspect};
 
+/// The most notes and cards a package may hold. An apply keeps a few dozen
+/// bytes per note (its identity, its decision and its log entry) and reads
+/// every text in pages, so these bound its memory whatever the package
+/// stores (R1852); no real deck comes near them.
+pub const MAX_NOTES: u64 = 1_000_000;
+pub const MAX_CARDS: u64 = 4_000_000;
+
 /// What an import needs from its host besides the engine.
 #[derive(Clone)]
 pub struct ApkgContext {
@@ -313,6 +320,13 @@ pub enum ApkgImportError {
     },
     DeckTooDeep {
         name: String,
+    },
+    /// The package holds more notes or cards than an apply keeps track of
+    /// in bounded memory ([`MAX_NOTES`], [`MAX_CARDS`]): refused at the
+    /// inspect, before anything is planned.
+    TooLarge {
+        notes: u64,
+        cards: u64,
     },
     SessionClosed,
     Cancelled,

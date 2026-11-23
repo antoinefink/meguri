@@ -201,10 +201,11 @@ pub fn apply(
         {
             let fault = Arc::clone(&fault);
             let kept = Arc::clone(&kept);
-            let clock = context.clock.clone();
+            let context = context.clone();
+            let package_path = session.collection_path();
             move |ctx, built| {
                 let backup = ctx.safety_backup_name().map(str::to_owned);
-                let committed = commit(ctx, built, clock.as_ref(), &fault)?;
+                let committed = commit(ctx, built, &package_path, &context, &fault)?;
                 *kept.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((committed.clone(), backup));
                 Ok(committed)
             }
@@ -238,6 +239,7 @@ pub fn apply(
     // The slot is held until the session has its result and the static
     // media are written: no second apply and no collection swap in between.
     let _held = slot;
+    meguri_model::faultpoint!("package.apkg.after_commit").map_err(crate::Error::from)?;
     match outcome {
         Ok(op) => finish(op.seq.0, op.generation.0, op.undo.map(|undo| undo.name), false).ok_or_else(|| {
             ApkgImportError::Io {

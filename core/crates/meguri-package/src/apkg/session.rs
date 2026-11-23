@@ -220,6 +220,13 @@ pub fn inspect(
     )
     .map_err(candidate_error)?;
 
+    if prepared.notes > super::MAX_NOTES || prepared.cards > super::MAX_CARDS {
+        return Err(ApkgImportError::TooLarge {
+            notes: prepared.notes,
+            cards: prepared.cards,
+        });
+    }
+
     // Step 8: the media map.
     let media = archive.media_map(check)?;
     let decoded = archive.charged();
