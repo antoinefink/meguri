@@ -340,11 +340,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             attach(tries: 100)
         }
 
-        /// Browse is left: the rows shown last are kept, whatever moved them.
-        override func viewWillMove(toWindow newWindow: NSWindow?) {
-            if newWindow == nil { report(leaving: true) }
-            super.viewWillMove(toWindow: newWindow)
-        }
+
 
         /// The window's results table (the table view with a column header),
         /// looked for again until SwiftUI has made it.
@@ -361,7 +357,15 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             clip.postsBoundsChangedNotifications = true
             observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip,
                                                               queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.report() }
+                MainActor.assumeIsolated {
+                    // Only the user's scrolling moves the kept row: the clip view also
+                    // moves while SwiftUI takes the table down for another section
+                    // (a click in the sidebar), and that must not keep its top.
+                    switch NSApp.currentEvent?.type {
+                    case .scrollWheel, .keyDown, .leftMouseDragged, .swipe: self?.report()
+                    default: break
+                    }
+                }
             }
             results.trace("attached")
             restore(tries: 20)
@@ -392,7 +396,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             results.restored()
         }
 
-        private func report(leaving: Bool = false) {
+        private func report() {
             guard let table = table ?? window?.contentView.flatMap(BrowseResponder.resultsTable(in:)),
                   let clip = table.enclosingScrollView?.contentView else { return }
             // The rows under the clip view's insets (the toolbar, the header) are not shown.
@@ -402,7 +406,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             let rows = table.rows(in: table.convert(shown, from: clip.documentView ?? table))
             guard rows.length > 0 else { return }
             guard let token else { return }
-            results.tableScrolled(first: rows.location, last: rows.location + rows.length - 1, token: token, leaving: leaving)
+            results.tableScrolled(first: rows.location, last: rows.location + rows.length - 1, token: token)
         }
     }
 }

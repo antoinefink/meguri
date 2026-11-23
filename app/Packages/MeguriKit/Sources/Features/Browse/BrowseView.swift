@@ -204,19 +204,25 @@ extension BrowseModel {
 }
 
 #if os(macOS)
-/// N21.8: ⌥⌘A is Select All anywhere in Browse, and ⌘A in the table:
-/// keys of the window with no menu item of their own, as Find…'s ⇧⌘O.
+/// N21.8: ⌥⌘A is Select All anywhere in Browse: a key of the window with no
+/// menu item of its own, as Find…'s ⇧⌘O. (⌘A in the table is the menu bar's
+/// Select All, which reaches the table once it has the keys.)
 private struct BrowseKeys: View {
     let model: BrowseModel
-    @State private var monitor = BrowseKeyMonitor()
+    @State private var focus = BrowseClickFocus()
     #if DEBUG
-    /// The UI suites read which view had the keys at the last key press.
+    /// The UI suites read which view has the keys after the last click.
     @State private var responder = ""
     #endif
 
     var body: some View {
         ZStack {
-            Color.clear.accessibilityHidden(true)
+            Button { model.commands.selectAll() } label: { EmptyView() }
+                .keyboardShortcut("a", modifiers: [.command, .option])
+                .disabled(!model.commands.canSelectAll)
+                .opacity(0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             #if DEBUG
             Text(verbatim: responder)
                 .frame(width: 1, height: 1)
@@ -230,66 +236,57 @@ private struct BrowseKeys: View {
         }
         .onAppear {
             #if DEBUG
-            monitor.onKey = { responder = $0 }
+            focus.onFocus = { responder = $0 }
             #endif
-            monitor.start(model: model)
+            focus.start(results: model.results)
         }
-        .onDisappear { monitor.stop() }
+        .onDisappear { focus.stop() }
     }
 }
 
-/// Exception to the native contract, for a functional need (VM, 2026-11-23):
-/// AppKit's Select All reached the outline view but not the SwiftUI table's
-/// selection, hidden buttons' key equivalents never fired (the menu bar's
-/// Select All took ⌘A), and the sidebar list's key handler never saw Return.
-/// A local key monitor, live only while Browse shows, runs before them; any
-/// other focus keeps its keys, and sheets keep them all.
-@MainActor private final class BrowseKeyMonitor {
+/// A click in the results table or the sidebar's list gives that view the
+/// keys. SwiftUI left them with the window's hosting view (and so with the
+/// sidebar) after a click on a table row (VM, 2026-11-23): Return, the
+/// arrows, ⌘A and ⌘⌫ never reached the table. With the table the first
+/// responder, its own keys, the menu bar's Select All and Delete Note, and
+/// its primary action (Return opens the inspector, N21.3) all work natively.
+/// Exception to the native contract, for that functional need: a local
+/// monitor of mouse-downs, live only while Browse shows; it never consumes
+/// an event.
+@MainActor private final class BrowseClickFocus {
     private var token: Any?
-    var onKey: ((String) -> Void)?
-    /// Where the last click in Browse's window landed. SwiftUI keeps the
-    /// window's hosting view as the first responder after a click on the
-    /// table or the sidebar (VM, 2026-11-23), so the keys follow the click.
-    private var clicked: Area = .elsewhere
-    /// The window that click landed in: keys of any other window are left alone.
-    private weak var clickedWindow: NSWindow?
-    private enum Area { case table, sidebar, elsewhere }
+    var onFocus: ((String) -> Void)?
 
-    func start(model: BrowseModel) {
+    func start(results: BrowseResults) {
         stop()
-        token = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self, weak model] event in
-            // Local monitors run on the main thread.
+        token = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self, weak results] event in
+            // Local monitors run on the main thread; the view is focused once
+            // the click itself has been handled.
             MainActor.assumeIsolated {
-                guard let self, let model else { return false }
-                if event.type != .keyDown {
-                    self.clicked = Self.area(of: event)
-                    self.clickedWindow = event.window
-                    model.results.tableFocused = self.clicked == .table
-                    self.onKey?("click in \(self.clicked)")
-                    return false
+                guard let window = event.window, window.attachedSheet == nil, let root = window.contentView else { return }
+                let point = event.locationInWindow
+                let candidates: [NSTableView?] = [BrowseResponder.resultsTable(in: root), BrowseResponder.sidebarList(in: root)]
+                let hit = candidates.compactMap { $0 }.first { view in
+                    let area = view.enclosingScrollView ?? view
+                    return area.convert(area.bounds, to: nil).contains(point)
                 }
-                self.onKey?(Self.describe(event.window?.firstResponder) + " · clicked \(self.clicked)")
-                return self.handles(event, model)
-            } ? nil : event
+                guard let view = hit else { return }
+                let isTable = view.headerView != nil
+                DispatchQueue.main.async { [weak self, weak results] in
+                    MainActor.assumeIsolated {
+                        if window.firstResponder !== view { window.makeFirstResponder(view) }
+                        results?.tableFocused = isTable
+                        self?.onFocus?(Self.describe(window.firstResponder))
+                    }
+                }
+            }
+            return event
         }
     }
 
-    private static func area(of event: NSEvent) -> Area {
-        guard let root = event.window?.contentView else { return .elsewhere }
-        let point = event.locationInWindow
-        func hit(_ view: NSView?) -> Bool {
-            guard let frame = (view?.enclosingScrollView ?? view).map({ $0.convert($0.bounds, to: nil) }) else { return false }
-            return frame.contains(point)
-        }
-        if hit(BrowseResponder.resultsTable(in: root)) { return .table }
-        if hit(BrowseResponder.sidebarList(in: root)) { return .sidebar }
-        return .elsewhere
-    }
-
-    /// The keys belong to the window rather than a view inside it.
-    private static func windowHasKeys(_ window: NSWindow) -> Bool {
-        guard let responder = window.firstResponder else { return true }
-        return responder === window || responder === window.contentView
+    func stop() {
+        if let token { NSEvent.removeMonitor(token) }
+        token = nil
     }
 
     /// The first responder's class and its first enclosing views' classes.
@@ -301,38 +298,6 @@ private struct BrowseKeys: View {
             view = current.superview
         }
         return names.joined(separator: " < ")
-    }
-
-    func stop() {
-        if let token { NSEvent.removeMonitor(token) }
-        token = nil
-    }
-
-    private func handles(_ event: NSEvent, _ model: BrowseModel) -> Bool {
-        // Browse's own window only: the one holding its results table, where the
-        // last click landed; never a sheet.
-        guard let window = event.window, window.sheetParent == nil, window.attachedSheet == nil,
-              let root = window.contentView, BrowseResponder.resultsTable(in: root) != nil else { return false }
-        if window !== clickedWindow { clicked = .elsewhere }
-        let flags = event.modifierFlags.intersection([.command, .option, .shift, .control])
-        let key = event.charactersIgnoringModifiers?.lowercased()
-        if key == "a" {
-            let inTable = BrowseResponder.tableIsFirst(window.firstResponder)
-                || (clicked == .table && Self.windowHasKeys(window))
-            let take = flags == [.command, .option] || (flags == .command && inTable)
-            guard take, model.commands.canSelectAll else { return false }
-            model.commands.selectAll()
-            return true
-        }
-        // ⌘⌫ after a click in the table: Note › Delete Note (N21.8). The menu
-        // item's key did not reach it while the window's hosting view had the keys.
-        if flags == .command, event.keyCode == 51, clicked == .table, Self.windowHasKeys(window),
-           model.commands.state(.delete).enabled {
-            model.commands.perform(.delete)
-            return true
-        }
-        // The sidebar's Return and Space are the list's own (BrowseSidebar).
-        return false
     }
 }
 #endif

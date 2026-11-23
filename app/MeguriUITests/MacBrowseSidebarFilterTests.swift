@@ -45,6 +45,7 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
 
     /// T9: Return and Space on the one selected filter row are a second click,
     /// each from a fresh launch so one result does not decide the other.
+    /// The model's rule is `BrowseModelTests` (`activateByKey`).
     func testReturnOnTheSelectedRowRemovesItsFilter() throws { try keyRemovesTheFilter(XCUIKeyboardKey.return.rawValue, "Return") }
     func testSpaceOnTheSelectedRowRemovesItsFilter() throws { try keyRemovesTheFilter(" ", "Space") }
 
@@ -55,10 +56,10 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         element(app, "browse.sidebar.state.new").click()
         XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, statusText(app))
         app.typeKey(key, modifierFlags: [])
-        // Debug builds: whether the key reached the app at all (the monitor sees every key).
+        // Debug builds: the view that has the keys after the click.
         let readout = element(app, "browse.debug.responder")
         XCTAssertTrue(waitUntil { self.statusText(app) == whole },
-                      "\(name) removes it: \(statusText(app)); last event: \(readout.exists ? readout.label : "unknown")")
+                      "\(name) removes it: \(statusText(app)); keys at: \(readout.exists ? readout.label : "unknown")")
     }
 
     /// The first row sits below the column header after a sidebar click and

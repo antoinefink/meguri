@@ -781,14 +781,14 @@ public final class BrowseResults {
     /// The rows the table's scroll view shows, as it reports them (the Mac:
     /// its rows' appear and disappear events do not follow a scroll there).
     /// At its top, the table comes back unscrolled: the kept row is 0.
-    public func tableScrolled(first: Int, last: Int, token: UInt64? = nil, leaving: Bool = false) {
+    public func tableScrolled(first: Int, last: Int, token: UInt64? = nil) {
         scrollReported = true
         // A table of an earlier list reports nothing about this one.
-        guard tableShown || leaving, let list, last >= first, token.map({ $0 == list.token }) ?? true else {
-            trace("ignored \(first)-\(last)\(leaving ? " leaving" : "") shown=\(tableShown)")
+        guard tableShown, let list, last >= first, token.map({ $0 == list.token }) ?? true else {
+            trace("ignored \(first)-\(last) shown=\(tableShown)")
             return
         }
-        if leaving || first == 0 { trace("kept \(first)-\(last)\(leaving ? " leaving" : "")") }
+        trace("kept \(first)-\(last)")
         keptRow = (list.token, first <= 0 ? 0 : (first + last) / 2)
     }
     @ObservationIgnored private var scrollReported = false

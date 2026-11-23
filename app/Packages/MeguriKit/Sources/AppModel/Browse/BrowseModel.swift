@@ -425,6 +425,16 @@ public final class BrowseModel {
         }
     }
 
+    /// T9: Return or Space on the list's selection is a second click on its
+    /// one filter row, where that removes the filter. True when it acted.
+    @discardableResult
+    public func activateByKey(_ selection: Set<BrowseSidebarTag>) -> Bool {
+        let filters = selection.filter { if case .section = $0 { false } else { true } }
+        guard filters.count == 1, let row = filters.first, activationRemoves(row) else { return false }
+        activate(row)
+        return true
+    }
+
     /// The list's selection: the Browse row, then the selected filter rows.
     public var listSelection: Set<BrowseSidebarTag> {
         selectedRows.union([.section(.browse)])

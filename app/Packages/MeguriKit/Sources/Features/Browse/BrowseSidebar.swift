@@ -61,17 +61,10 @@ public struct BrowseSidebar<Header: View>: View {
             #if os(macOS)
             guard NSApp.currentEvent?.type == .keyDown else { return }
             #endif
-            let filters = rows.filter { if case .section = $0 { false } else { true } }
-            guard filters.count == 1, let row = filters.first, model.activationRemoves(row) else { return }
-            model.activate(row)
+            model.activateByKey(rows)
         }
         // T9: Space on the one selected filter row, as Return.
-        .onKeyPress(.space) {
-            let filters = selection.filter { if case .section = $0 { false } else { true } }
-            guard filters.count == 1, let row = filters.first, model.activationRemoves(row) else { return .ignored }
-            model.activate(row)
-            return .handled
-        }
+        .onKeyPress(.space) { model.activateByKey(selection) ? .handled : .ignored }
         // N20.6 (2026-11-22): the system's own prompt, "Search", as with Today selected.
         .searchable(text: $model.filter, placement: .sidebar)
         .accessibilityIdentifier("browse.sidebar.list")
