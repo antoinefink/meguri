@@ -356,10 +356,9 @@ struct StatsStrip: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
+        // The button is the figure's one element (S6), read as its label and value.
         .accessibilityLabel(Text(verbatim: label))
         .accessibilityValue(Text(verbatim: figure.loading ? "" : figure.spoken ?? figure.value ?? ""))
-        .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("stats.strip.\(id.rawValue)")
     }
 }

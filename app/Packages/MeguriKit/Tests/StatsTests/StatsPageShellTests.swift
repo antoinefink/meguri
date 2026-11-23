@@ -76,6 +76,7 @@ import Testing
         let page = samplePage(StatsSampleService(tierDelay: .milliseconds(120)), period: .all)
         page.appear()
         await waitFilled(page)
+        #expect(page.model.state == .content)
         #expect(StatsPage.filled(page.model))
         page.disappear()
     }
@@ -89,6 +90,7 @@ import Testing
         let fresh = samplePage(StatsSampleService(shape: .noReviews, tierDelay: .milliseconds(1)))
         fresh.appear()
         await waitFilled(fresh)
+        #expect(fresh.model.state == .content)
         #expect(StatsPage.filled(fresh.model))
         fresh.disappear()
     }
@@ -121,6 +123,7 @@ import Testing
         page.disappear()
         #expect(page.shown)
         await waitFilled(page)
+        #expect(page.model.state == .content)
         #expect(StatsPage.filled(page.model))
         page.disappear()
         #expect(!page.shown)
