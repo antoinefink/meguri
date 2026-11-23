@@ -200,7 +200,15 @@ final class MacBrowseCommandsTests: XCTestCase {
         XCTAssertTrue(waitUntil { table.outlineRows.count > 100 }, "\(table.outlineRows.count)")
         try app.bringToFront(bundleIdentifier: bundle)
         for _ in 0..<8 { table.scroll(byDeltaX: 0, deltaY: -600) }
-        let first = table.outlineRows.allElementsBoundByIndex.firstIndex { $0.isHittable } ?? 0
+        // Rows on screen by their frames: XCTest reads a SwiftUI table's rows
+        // as not hittable, so `isHittable` cannot tell where the table is.
+        let visible = table.frame
+        func onScreen(_ element: XCUIElement) -> Bool {
+            let frame = element.frame
+            return !frame.isEmpty && frame.minY >= visible.minY && frame.maxY <= visible.maxY
+        }
+        let rows = table.outlineRows.allElementsBoundByIndex
+        let first = rows.firstIndex(where: onScreen) ?? 0
         XCTAssertGreaterThan(first, 20, "the table scrolled down")
         let shown = table.outlineRows.element(boundBy: first + 3)
         let id = shown.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'browse.table.row.'")).firstMatch.identifier
@@ -209,8 +217,8 @@ final class MacBrowseCommandsTests: XCTestCase {
         XCTAssertTrue(waitUntil { !table.exists })
         element(app, "shell.root.sidebar.browse").click()
         let row = app.descendants(matching: .any)[id]
-        XCTAssertTrue(waitUntil { row.exists && row.isHittable }, "row \(id) is on screen again")
-        XCTAssertFalse(table.outlineRows.element(boundBy: 0).isHittable, "not back at the top")
+        XCTAssertTrue(waitUntil { row.exists && onScreen(row) }, "row \(id) is on screen again")
+        XCTAssertFalse(onScreen(table.outlineRows.element(boundBy: 0)), "not back at the top")
     }
 
     /// N21.2, T10: Esc first closes the suggestions, then empties the query.
