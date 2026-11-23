@@ -302,6 +302,12 @@ public final class StatsPageModel {
         selections[box] = selection == .none ? nil : selection
     }
 
+    /// A click outside every chart: no box keeps a pinned bar (S8.3).
+    public func unpinAll() {
+        let next = selections.filter { !$0.value.pinned }
+        if next != selections { selections = next }
+    }
+
     // MARK: Refresh
 
     /// Starts a refresh of the scope and period on screen, cancelling the one before (H16).

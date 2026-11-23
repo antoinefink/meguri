@@ -138,6 +138,12 @@ private struct StatsPageScroll: View {
                     }
                 }
                 .padding()
+                #if os(macOS)
+                // A click outside every chart unpins (S8.3): a plot's own click is its child's
+                // gesture and wins over this one, and buttons and controls keep theirs.
+                .contentShape(Rectangle())
+                .onTapGesture { model.unpinAll() }
+                #endif
                 .scrollTargetLayout()
             }
             .modifier(StatsScrollPosition(navigation: navigation))
