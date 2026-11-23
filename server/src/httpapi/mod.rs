@@ -238,6 +238,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
     let browser = browser_api || oauth_route;
     let exempt = request.method() == Method::GET && request.uri().path() == "/api/status";
     let (parts, body) = request.into_parts();
+    let download = parts.uri.path() == "/api/mcp/collection-download";
     // Keep the incoming receiver alive until the closing response is finished.
     // Dropping it on a refusal could enable HTTP/1 background unread-body drain.
     let response = if browser {
@@ -248,7 +249,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
             Ok(())
         };
         match early {
-            Err(e) => ingress::retain(e.into_response(), body, None, service),
+            Err(e) => ingress::retain(api_error(e, download), body, None, service),
             Ok(()) if exempt => {
                 let response = dispatch(&service, &parts, None)
                     .await
@@ -256,7 +257,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
                 ingress::retain(response, body, None, service)
             }
             Ok(()) => match service.browser_ingress.enter() {
-                Err(e) => ingress::retain(e.into_response(), body, None, service),
+                Err(e) => ingress::retain(api_error(e, download), body, None, service),
                 Ok(permit) => {
                     // At most CAPACITY workers, no waiting/spawn queue. A caller's
                     // cancellation must not free its slot while slow work runs.
@@ -266,12 +267,12 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
                         let mut body = body;
                         let response = dispatch_browser(&service, &parts, &mut body, deadline)
                             .await
-                            .unwrap_or_else(IntoResponse::into_response);
+                            .unwrap_or_else(|e| api_error(e, download));
                         ingress::retain(response, body, Some(permit), service)
                     });
                     worker
                         .await
-                        .unwrap_or_else(|_| Error::new("internal_error").into_response())
+                        .unwrap_or_else(|_| api_error(Error::new("internal_error"), download))
                 }
             },
         }
@@ -325,7 +326,7 @@ fn secure(mut response: Response) -> Response {
     response
 }
 async fn dispatch_browser(
-    service: &Service,
+    service: &Arc<Service>,
     parts: &axum::http::request::Parts,
     body: &mut Body,
     deadline: tokio::time::Instant,
@@ -335,6 +336,9 @@ async fn dispatch_browser(
     }
     if parts.uri.query().is_some() {
         return Err(Error::new("invalid_request"));
+    }
+    if parts.method == Method::GET && parts.uri.path() == "/api/mcp/collection-download" {
+        return collection_download(service, parts).await;
     }
     if parts.method != Method::POST {
         return dispatch(service, parts, None).await;
@@ -351,6 +355,30 @@ async fn dispatch_browser(
     }
     let bytes = service.browser_ingress.read(body, deadline).await?;
     dispatch(service, parts, Some(&bytes)).await
+}
+// Retain the common admission, unread body and private response headers. Ticket
+// failures disclose neither OAuth metadata nor whether a credential ever existed.
+fn api_error(error: Error, download: bool) -> Response {
+    if download && matches!(error.code, "authentication_failed" | "capability_invalid" | "invalid_token") {
+        let mut response = Error::new("authentication_failed").into_response();
+        response.headers_mut().insert("www-authenticate", "Bearer".parse().unwrap());
+        response
+    } else if download && error.code == "conflict" {
+        let mut response = error.into_response();
+        *response.status_mut() = StatusCode::CONFLICT;
+        response
+    } else {
+        error.into_response()
+    }
+}
+async fn collection_download(service: &Arc<Service>, parts: &axum::http::request::Parts) -> Result<Response> {
+    let token = crate::mcp_service::bearer(&parts.headers).map_err(|_| Error::new("authentication_failed"))?;
+    crate::crypto::bearer(token).map_err(|_| Error::new("authentication_failed"))?;
+    if !service.admission_open().await? { return Err(Error::new("admission_closed")); }
+    let socket = parts.extensions.get::<ConnectInfo<SocketAddr>>().ok_or(Error::new("internal_error"))?.0;
+    let (ip, _) = effective_peer(&parts.headers, socket, service);
+    service.attempts.capability(ip, token)?;
+    service.redeem_collection(token).await
 }
 /// Fixed route/header avoids capabilities or uploaded names in request paths.
 async fn media_upload(service: &Service, parts: &axum::http::request::Parts, body: &mut Body, deadline: tokio::time::Instant) -> Result<Response> {

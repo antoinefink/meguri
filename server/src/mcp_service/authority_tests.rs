@@ -454,3 +454,133 @@ async fn direct_expanded_types_ignore_metadata_and_keep_immutable_media_on_reuse
         assert_eq!(media_counts(&f),(4,4,4));
     }
 }
+
+#[cfg(feature="test-hooks")]
+async fn export_browser(f: &Fixture) -> crate::accounts::BrowserAuthority {
+    let (_, secret)=f.service.browser_login("127.0.0.1".parse().unwrap(),"generated.admin","generated MCP password".into()).await.unwrap();
+    f.service.browser_authority(&secret).await.unwrap()
+}
+async fn export_ticket(f: &Fixture) -> String {
+    let bridge=McpService::new(f.service.clone());
+    let a=f.service.mcp_authority(&f.token,false).await.unwrap();
+    let (url,token,_)=bridge.download_collection(a).await.unwrap();
+    assert!(url.ends_with("/api/mcp/collection-download"));
+    assert!(!url.contains(&token));
+    token
+}
+#[tokio::test]
+async fn export_expiry_and_ticket_limit_are_bounded_and_lazily_reclaimed() {
+    let f=Fixture::new(false).await;
+    let mut tickets=Vec::new();for _ in 0..8 {tickets.push(export_ticket(&f).await);}
+    let bridge=McpService::new(f.service.clone());
+    let a=f.service.mcp_authority(&f.token,false).await.unwrap();
+    assert_eq!(bridge.download_collection(a.clone()).await.unwrap_err().code,"busy");
+    f.service.mcp_exports.expire_fixture(&tickets[0]);
+    assert_eq!(f.service.redeem_collection(&tickets[0]).await.err().unwrap().code,"capability_invalid");
+    bridge.download_collection(a).await.unwrap();
+}
+#[tokio::test]
+async fn export_failed_preparation_retains_ticket_and_replay_is_atomic() {
+    use axum::body::to_bytes;
+    let f=Fixture::new(false).await;
+    let ticket=export_ticket(&f).await;
+    let full=f.service.temp.reserve(f.service.config.temp_bytes.get()).unwrap();
+    assert!(f.service.redeem_collection(&ticket).await.is_err());
+    drop(full);assert_eq!(f.service.temp.used(),0);
+    let (first,second)=tokio::join!(f.service.redeem_collection(&ticket),f.service.redeem_collection(&ticket));
+    let response=match (first,second) {
+        (Ok(r),Err(error)) | (Err(error),Ok(r))=>{assert_eq!(error.code,"capability_invalid");r},
+        _=>panic!("exactly one redemption must succeed"),
+    };
+    assert!(to_bytes(response.into_body(),1024*1024).await.unwrap().starts_with(b"SQLite format 3\0"));
+    assert_eq!(f.service.temp.used(),0);
+}
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn export_completion_rechecks_authority_and_publication_after_copy() {
+    for mutation in ["revoke","expiry","publication","reset"] {
+        let f=Fixture::new(false).await;
+        let a=f.service.mcp_authority(&f.token,false).await.unwrap();
+        let ticket=export_ticket(&f).await;
+        let ready=f.service.hooks.arm("collection_export_ready");
+        let owner=f.service.clone();let original_ticket=ticket.clone();
+        let work=tokio::spawn(async move {owner.redeem_collection(&original_ticket).await});
+        tokio::time::timeout(Duration::from_secs(10),ready.arrived()).await.unwrap();
+        // A ready export owns staging/capacity, but neither the barrier nor a
+        // metadata slot: lifecycle changes can complete before we let it finish.
+        match mutation {
+            "reset"=>{let browser=export_browser(&f).await;f.service.reset_data(browser,a.account_id().into()).await.unwrap();},
+            _=>{
+                let gate=f.service.mcp_publication_barrier(&a).await.unwrap();let guard=gate.enter().await;
+                let id=a.account_id().to_owned();
+                f.service.metadata.files(move |root| {
+                    let _held=(gate,guard);
+                    if mutation=="revoke" {
+                        let db=storage::open(root.database(),false)?;db.execute("UPDATE oauth_grants SET revoked=1",[])?;
+                    } else if mutation=="expiry" {
+                        let db=storage::open(root.database(),false)?;db.execute("UPDATE oauth_tokens SET expires_at=0",[])?;
+                    } else {
+                        let stage=root.stage_collection(&id)?;
+                        crate::collection::schema::create_blank(&stage.path,123,456)?;stage.activate()?;
+                    }
+                    Ok(())
+                }).await.unwrap();
+            }
+        }
+        ready.resume();assert!(work.await.unwrap().is_err(),"{mutation}");
+        assert_eq!(f.service.temp.used(),0);
+        if mutation=="publication" {
+            // Full replacement leaves the grant alive. Failure consumed no ticket.
+            let response=f.service.redeem_collection(&ticket).await.unwrap();
+            axum::body::to_bytes(response.into_body(),1024*1024).await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn export_capacity_and_private_stage_survive_buffering_until_response_drop() {
+    let f=Fixture::new(false).await;
+    let first=export_ticket(&f).await;let second=export_ticket(&f).await;let third=export_ticket(&f).await;
+    let first=f.service.redeem_collection(&first).await.unwrap();
+    let second=f.service.redeem_collection(&second).await.unwrap();
+    assert!(f.service.temp.used()>0);
+    assert_eq!(f.service.redeem_collection(&third).await.err().unwrap().code,"busy");
+    drop(first);drop(second);
+    tokio::time::timeout(Duration::from_secs(5),f.service.mcp_exports.idle_fixture()).await.unwrap();
+    assert_eq!(f.service.temp.used(),0);
+    let response=f.service.redeem_collection(&third).await.unwrap();
+    axum::body::to_bytes(response.into_body(),1024*1024).await.unwrap();
+    assert_eq!(f.service.temp.used(),0);
+    assert_eq!(std::fs::read_dir(f.path.parent().unwrap().parent().unwrap()).unwrap().count(),1,"all unpublished export stages removed");
+}
+
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn export_prepared_stage_is_fenced_by_reset_and_cancellation_releases_its_lease() {
+    for cancel in [false,true] {
+        let f=Fixture::new(false).await;
+        let a=f.service.mcp_authority(&f.token,false).await.unwrap();
+        let ticket=export_ticket(&f).await;
+        let pinned=f.service.hooks.arm("collection_export_pinned");
+        let owner=f.service.clone();
+        let work=tokio::spawn(async move {owner.redeem_collection(&ticket).await});
+        tokio::time::timeout(Duration::from_secs(10),pinned.arrived()).await.unwrap();
+        let generations=f.path.parent().unwrap().parent().unwrap();
+        assert_eq!(std::fs::read_dir(generations).unwrap().count(),2,"stage already created under original guard");
+        assert!(f.service.temp.used()>0);
+        if cancel {
+            work.abort();assert!(work.await.unwrap_err().is_cancelled());pinned.resume();
+        } else {
+            // Reset can finish while the expensive backup has not started.
+            let browser=export_browser(&f).await;
+            tokio::time::timeout(Duration::from_secs(10),f.service.reset_data(browser,a.account_id().into())).await.unwrap().unwrap();
+            let before=std::fs::read_dir(generations).unwrap().map(|e|e.unwrap().file_name()).collect::<std::collections::BTreeSet<_>>();
+            pinned.resume();assert!(work.await.unwrap().is_err());
+            let after=std::fs::read_dir(generations).unwrap().map(|e|e.unwrap().file_name()).collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(after,before,"old preparation cannot stage in the replacement account");
+        }
+        tokio::time::timeout(Duration::from_secs(5),f.service.mcp_exports.idle_fixture()).await.unwrap();
+        assert_eq!(f.service.temp.used(),0);
+        assert_eq!(std::fs::read_dir(generations).unwrap().count(),1,"no unpublished stage remains");
+    }
+}

@@ -187,7 +187,7 @@ fn backend_arguments(bytes: &[u8], name: &str) -> Result<(), ()> {
         "list_decks_and_note_types" => mcp::Backend::parse::<mcp::CatalogInput>(raw).map(|_| ()),
         "create_note" => mcp::Backend::parse::<inputs::CreateNote>(raw).map(|_| ()),
         "edit_note" => mcp::Backend::parse::<inputs::EditNote>(raw).map(|_| ()),
-        "prepare_media_upload" => {
+        "prepare_media_upload" | "download_collection" => {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct Prepare {}

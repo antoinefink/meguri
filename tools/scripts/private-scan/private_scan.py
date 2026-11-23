@@ -856,7 +856,10 @@ PUBLIC_ARTIFACTS = {
     'server/src/collection/mcp/search_index.rs':
         'eceacc44bfa21be963bb4744c75c52bd694da92ec3b77405339c754621807e58',
     'server/src/mcp_service/authority_tests.rs':
-        '7b4c9e754a30ca8dca5dbfd226f2856104ec8627de5c69cc4fcb6adb0152b2e2',
+        'ea295605b6ca19fdb94c5a836b46819ccf788554a446508cc0efbe201ded09f7',
+    # Complete-content PUBLIC review: mcp-sqlite-download, 2026-11-23.
+    'server/src/mcp_service/export.rs':
+        'de4bcaceea675b072c5b13569ec3b347c838cd359af8866326b5900b3696c551',
     'server/src/mcp_service/attachments/format/audio.rs':
         '1eca9c96b3c638ad66723119d54ed0537246a3fedcd3fe6fd9acb5e8fa8043a9',
     'server/src/mcp_service/attachments/format/images.rs':
@@ -902,7 +905,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '5333a1f1e2980c2c8559cc912026c2774aa68aef86df15df246a0ac84a1893ee',
+        '17779a1e91c303db26256265114fbd015627340676ad9e56c957330e629b9077',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1197,7 +1200,7 @@ PUBLIC_ARTIFACTS = {
     "specs/servers/meguri-sync-web.md":
         '5b80364781b6b1eaa16529b666cfd1ca3e6a76098dcb8c2282e7406810640bea',
     "specs/servers/meguri-collection-mcp.md":
-        "54f68d949b88f1d0b6bc09b5d25c98123ea20e05bcc9bc4a4cab22b7574ed03d",
+        "e66ee71591d949fe299d4c744046c5528b83148ea10a2db7381e09496d2799d7",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
         "81191321d7af0a18c682b5bff490ea26beea3ccfa4ce1ad28b53f38dcc5f1adb",
     "specs/conformance/meguri-sync-server.md":
