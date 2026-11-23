@@ -1289,6 +1289,7 @@ Decided by Antoine in chat on 2026-11-22 (`decisions.md`, rows `stats.overview` 
 - Mac: the window toolbar, leading to trailing: the title "Statistics" with the subtitle "1,370 cards in 4 decks" (and the status of N25.9), the deck pop-up button, the period segmented control (1M 3M 6M 1Y All), then the sync button and the Add menu as on every page. Both controls are standard toolbar items and stay put while the page scrolls.
 - iPad at regular width: the same in the navigation bar, as two trailing items kept apart (not one glass group), the pop-up's label carrying its up-and-down chevrons (U297, 2026-11-23).
 - iPhone, the Duo folded, a narrow iPad window: the inline title "Statistics" with the deck pop-up beside it (a menu button with the deck's name and a chevron) and the subtitle under it; the period segmented control pinned under the navigation bar while the page scrolls; the Jump menu (`list.bullet`) as a trailing toolbar button.
+- While the controls are disabled (no collection, no cards), the Mac's period control is dimmed with the deck pop-up: an exception, since the window toolbar draws a disabled segmented control in full colour (seen in the test VM, 2026-11-23).
 - The deck's name is visible at every scroll position on every device. A long name truncates in the middle, with the full name as help text (Mac).
 - Kept state: `stats/statistics-page` S3.3 (per window and device; first time All Decks and All).
 

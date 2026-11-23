@@ -241,9 +241,12 @@ final class StatsTouchPerfTests: PerfTestCase {
         wait(for: [finished], timeout: 60)
         var token: Int32 = 0
         var state: UInt64 = 0
-        if notify_register_check(name, &token) == NOTIFY_STATUS_OK {
-            notify_get_state(token, &state)
-            notify_cancel(token)
+        guard notify_register_check(name, &token) == NOTIFY_STATUS_OK else {
+            return StatsFramePacingReading(text: "unreadable: notify_register_check failed")
+        }
+        defer { notify_cancel(token) }
+        guard notify_get_state(token, &state) == NOTIFY_STATUS_OK else {
+            return StatsFramePacingReading(text: "unreadable: notify_get_state failed")
         }
         return StatsFramePacingReading(text: "ratio=\(Double(state & 0xFFFF_FFFF) / 1_000);frames=\(state >> 32)")
     }
@@ -270,7 +273,8 @@ struct StatsFramePacingReading {
     @MainActor static func check(_ readings: [StatsFramePacingReading]) {
         XCTContext.runActivity(named: "meguri.stats.framePacing: " + readings.map(\.text).joined(separator: " | ")) { _ in }
         for reading in readings {
-            guard let ratio = reading.ratio, let frames = reading.frames, frames > 0 else {
+            // At least two callbacks: one interval measured.
+            guard let ratio = reading.ratio, let frames = reading.frames, frames >= 2 else {
                 XCTFail("the app measured no frames for a scroll (\(reading.text))")
                 continue
             }

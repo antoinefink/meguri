@@ -282,6 +282,15 @@ extension TestHooks {
         @objc private func tick(_ link: CADisplayLink) {
             let now = link.timestamp
             let frame = link.targetTimestamp - link.timestamp
+            if previous == nil, frame > 0 {
+                // Main-thread work between start() and the first callback delays it: beyond one
+                // frame and the same half-frame tolerance, that wait is late time too.
+                let over = CACurrentMediaTime() - started - frame
+                if over > frame / 2 {
+                    lateTime += over
+                    late += 1
+                }
+            }
             if let previous, frame > 0 {
                 let interval = now - previous
                 let over = interval - frame
