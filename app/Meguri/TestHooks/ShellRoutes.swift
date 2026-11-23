@@ -388,7 +388,7 @@ extension TestHooks {
     final class ShellCommands: NSObject {
         enum Command: String, CaseIterable {
             case toggleSizeClass, presentAdd, closeWindow, closeNativeReview, flushNativeReview, showBrowse, showStats, showToday, statsReload,
-                 statsPeriodAll, statsPeriodYear, statsPeriodHalfYear, statsScroll, statsQueryPin, statsQuerySelection
+                 statsPeriodAll, statsPeriodYear, statsPeriodHalfYear, statsScroll, statsScrollSettled, statsQueryPin, statsQuerySelection
             #if os(macOS)
             case readNativeReviewPhase
             #endif
@@ -487,6 +487,7 @@ extension TestHooks {
             case .statsPeriodYear: StatsHooks.shared.select(.oneYear)
             case .statsPeriodHalfYear: StatsHooks.shared.select(.sixMonths)
             case .statsScroll: StatsHooks.shared.scroll()
+            case .statsScrollSettled: StatsHooks.shared.scroll(reading: false)
             case .statsQueryPin: StatsHooks.shared.queryPin()
             case .statsQuerySelection: StatsHooks.shared.querySelection()
             case .closeWindow:

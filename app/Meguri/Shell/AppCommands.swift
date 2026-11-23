@@ -478,5 +478,8 @@ struct FindSecondKey: View {
             .opacity(0)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+            // The Mac's accessibility tree still lists this invisible, empty 24 x 8 button behind
+            // every page (accessibilityHidden does not take a button out of it), so it is named.
+            .accessibilityIdentifier("shell.root.findSecondKey")
     }
 }

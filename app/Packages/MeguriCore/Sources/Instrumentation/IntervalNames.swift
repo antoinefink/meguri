@@ -86,6 +86,9 @@ public enum IntervalNames {
     public static let statsLogTier = IntervalName("stats.logTier", .stats)
     /// A scroll of the page while a refresh reads (R2078): the window its hitches are measured in.
     public static let statsScrollDuringRead = IntervalName("stats.scrollDuringRead", .stats)
+    /// A scroll of the filled page with nothing reading (R2078's settled case, the owner's report
+    /// of 2026-11-23): the window its hitches are measured in.
+    public static let statsScrollSettled = IntervalName("stats.scrollSettled", .stats)
     /// A switch or a period within the year → the boxes redrawn with no core call (R2079).
     public static let statsSelection = IntervalName("stats.selection", .stats)
     /// Heatmap data arrival → the heatmap drawn (R1839).
@@ -113,7 +116,7 @@ public enum IntervalNames {
         reviewPresentToNextSettled, reviewOnDemandRender, reviewAnswerMainThread,
         reviewUndoToCardVisible, reviewActionToNextVisible, reviewTouchDownToTint, searchFirstPage,
         statsAllGraphs, statsScopeChange, statsKeptOpen, statsColdOpen, statsPresentTier, statsLogTier,
-        statsScrollDuringRead, statsSelection, heatmapRender, cardInfoOpen,
+        statsScrollDuringRead, statsScrollSettled, statsSelection, heatmapRender, cardInfoOpen,
         probeSyntheticDelay, probeNativeSwap,
     ] + BridgeCall.all.map(\.interval)
 
