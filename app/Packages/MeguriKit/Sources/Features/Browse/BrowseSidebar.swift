@@ -331,6 +331,7 @@ public struct BrowseSidebar<Header: View>: View {
             .help(help.map { Text(verbatim: $0) } ?? Text(verbatim: label))
             .badge(model.counts[tag].map { Text($0, format: .number) })
             .accessibilityValue(model.counts[tag].map { Text(verbatim: BrowseStrings.count($0, mode: model.mode)) } ?? Text(verbatim: ""))
+            .accessibilityHint(model.activationRemoves(tag) ? Text("browse.sidebar.row.removeHint", bundle: .module) : Text(verbatim: ""))
             .accessibilityIdentifier("browse.sidebar.\(identifier)")
             .tag(tag)
     }

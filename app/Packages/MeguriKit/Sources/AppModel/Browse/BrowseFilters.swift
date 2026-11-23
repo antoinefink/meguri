@@ -71,7 +71,13 @@ extension FilterQuery {
 
     /// A click (or Return, or a tap): K's token becomes is {v}.
     public nonisolated func clicking(_ value: FilterValue) -> FilterQuery {
-        setting(value.kind, to: .value([value], negated: false))
+        // A second click on the row that is its kind's whole token removes it
+        // (decided 2026-11-23; T9).
+        if let index = tokenIndex(value.kind), case .value(let values, false) = tokens[index], values.count == 1,
+           values[0].isSameValue(value) {
+            return setting(value.kind, to: nil)
+        }
+        return setting(value.kind, to: .value([value], negated: false))
     }
 
     /// ⌘-click: v is added to K's token when absent and removed when present

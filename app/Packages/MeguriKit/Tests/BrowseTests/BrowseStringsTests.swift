@@ -18,6 +18,20 @@ import Testing
         #expect(BrowseStrings.showAll(1_204, locale: english) == "Show All 1,204…")
     }
 
+    /// V8.1's titles; with nothing suspended or buried, the menu bar's
+    /// disabled items read plain "Unsuspend" and "Unbury" (N21.8).
+    @Test func commandTitlesCountTheirTargets() {
+        func title(_ command: BrowseCommand, _ count: UInt64?, asks: Bool = false) -> String {
+            BrowseCommandText.title(command, BrowseCommandState(shown: true, enabled: true, count: count, asks: asks), locale: english)
+        }
+        #expect(title(.suspend, 1) == "Suspend Card" && title(.suspend, 3) == "Suspend Cards")
+        #expect(title(.unsuspend, 1) == "Unsuspend Card" && title(.unsuspend, 2) == "Unsuspend 2 Cards")
+        #expect(title(.unsuspend, 0) == "Unsuspend" && title(.unbury, 0) == "Unbury")
+        #expect(title(.unsuspend, nil) == "Unsuspend Cards")
+        #expect(title(.delete, 1) == "Delete Note" && title(.delete, 3, asks: true) == "Delete 3 Notes…")
+        #expect(title(.delete, 1, asks: true) == "Delete Note…")
+    }
+
     @Test func countsReadAloudWithPlurals() {
         #expect(BrowseStrings.count(2_203, mode: .cards, locale: english) == "2,203 cards")
         #expect(BrowseStrings.count(1, mode: .cards, locale: english) == "1 card")

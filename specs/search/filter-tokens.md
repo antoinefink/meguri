@@ -159,12 +159,15 @@ Browse's sidebar (`browser/sidebar`, changed by `browser/workspace` V6) lists va
 
 | Input on a row of kind K, value v (Mac, iPad with a pointer) | Touch (iPad, the Duo opened) | Result |
 |---|---|---|
-| click, Return | tap | K's token becomes is {v}; every other token and the text stay |
+| click, Return | tap | K's token becomes is {v}; every other token and the text stay. When K's token is already exactly is {v} (the row is the one selected row of its kind), the token is removed instead (decided 2026-11-23) |
 | ⌘-click | | in K's token, v is added when absent and removed when present (a token left with no value is removed); with no K token, is {v} is made; the token's is / is not stays |
 | ⌥-click | | K's token becomes is not {v}; on No Flag it becomes is {Any Flag} and on Any Flag is {No Flag} (T10's normal form, so the token reads back the same after a relaunch); on Untagged, which has no opposite value, it acts as a click |
-| click on a saved search | tap | the whole query is replaced by T7's reading of its text |
+| click on a saved search | tap | the whole query is replaced by T7's reading of its text; when the query already equals what it set, the query is emptied instead (decided 2026-11-23) |
 
 - A row shows selected exactly when its value is in K's token and the token is **is**. Rows of an **is not** token are not selected; the token in the field says "is not". Removing a token deselects its rows; the clear button empties the query.
+- A saved search row shows selected exactly while the query equals the query it sets: a built-in's token, or the reading of a user saved search's text made when it was last clicked (a user saved search not clicked since launch is not compared). Editing or removing a token in the field updates the rows at once (decided 2026-11-23).
+- Space or Return on the list with one filter row selected acts as a second click on it. VoiceOver reads a selected filter row as selected; where a click would remove its filter (a saved search the query holds, or its kind's only value), it adds the hint "Activate again to remove this filter."
+- A ⌘-click keeps its add-or-remove behaviour; a click on a row whose kind's token holds other values, or is **is not**, makes it is {v} as above.
 - A deck row stands for that deck with its subdecks; a tag row for that tag with its descendants (T3).
 - A click never adds a second token of a kind (T2).
 - Section headers fold their section only.
