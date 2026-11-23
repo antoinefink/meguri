@@ -28,19 +28,6 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         XCTAssertFalse(selected(app, "browse.sidebar.state.new"))
         capture(app, "sidebar-new-removed")
 
-        // Space, then Return, on the one selected row: the same as a second click.
-        let readout = element(app, "browse.debug.responder")
-        // Both keys are reported, then the case stops at a failure again.
-        continueAfterFailure = true
-        for (name, key) in [("Space", " "), ("Return", XCUIKeyboardKey.return.rawValue)] {
-            new.click()
-            XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, statusText(app))
-            app.typeKey(key, modifierFlags: [])
-            XCTAssertTrue(waitUntil { self.statusText(app) == whole },
-                          "\(name) removes it: \(statusText(app)); keys at \(readout.exists ? readout.label : "unknown")")
-        }
-        continueAfterFailure = false
-
         // A saved search whose token no section lists shows selected itself.
         element(app, "browse.sidebar.saved.dueToday").click()
         XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, statusText(app))
@@ -54,6 +41,25 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         XCTAssertTrue(waitUntil { self.statusText(app) == whole }, statusText(app))
         XCTAssertFalse(selected(app, "browse.sidebar.saved.dueToday"), "the field emptied deselects Due Today")
         capture(app, "sidebar-field-emptied")
+    }
+
+    /// T9: Return and Space on the one selected filter row are a second click,
+    /// each from a fresh launch so one result does not decide the other.
+    /// The model's rule is `BrowseModelTests` (`activateByKey`).
+    func testReturnOnTheSelectedRowRemovesItsFilter() throws { try keyRemovesTheFilter(XCUIKeyboardKey.return.rawValue, "Return") }
+    func testSpaceOnTheSelectedRowRemovesItsFilter() throws { try keyRemovesTheFilter(" ", "Space") }
+
+    private func keyRemovesTheFilter(_ key: String, _ name: String) throws {
+        let (app, bundle) = try launch()
+        try openBrowse(app, bundle)
+        let whole = statusText(app)
+        element(app, "browse.sidebar.state.new").click()
+        XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, statusText(app))
+        app.typeKey(key, modifierFlags: [])
+        // Debug builds: the view that has the keys after the click.
+        let readout = element(app, "browse.debug.responder")
+        XCTAssertTrue(waitUntil { self.statusText(app) == whole },
+                      "\(name) removes it: \(statusText(app)); keys at: \(readout.exists ? readout.label : "unknown")")
     }
 
     /// The first row sits below the column header after a sidebar click and

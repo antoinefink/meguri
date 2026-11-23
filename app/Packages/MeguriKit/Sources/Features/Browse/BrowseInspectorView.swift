@@ -156,8 +156,10 @@ struct BrowseSelectionSummaryView: View {
     private func row(_ command: BrowseCommand, state: BrowseCommandState) -> some View {
         Button(role: command == .delete ? .destructive : nil) { commands.perform(command) } label: {
             HStack {
+                // One rule with the menus: a disabled command reads disabled. An explicit
+                // primary style kept Find Duplicates… (no key beside it) looking enabled.
                 Text(verbatim: BrowseCommandText.title(command, state, locale: locale))
-                    .foregroundStyle(command == .delete ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
+                    .foregroundStyle(Self.titleStyle(command, enabled: state.enabled))
                 Spacer(minLength: Spacing.small)
                 if let key = BrowseInspectorText.key(command) { Text(verbatim: key).foregroundStyle(.secondary) }
             }
@@ -167,6 +169,15 @@ struct BrowseSelectionSummaryView: View {
         .buttonStyle(.plain)
         .disabled(!state.enabled)
         .accessibilityIdentifier("browse.inspector.command.\(BrowseCommandIdentifier.of(command))")
+    }
+
+    private static func titleStyle(_ command: BrowseCommand, enabled: Bool) -> AnyShapeStyle {
+        switch (command == .delete, enabled) {
+        case (true, true): AnyShapeStyle(.red)
+        case (true, false): AnyShapeStyle(Color.red.opacity(0.4))
+        case (false, true): AnyShapeStyle(.primary)
+        case (false, false): AnyShapeStyle(.tertiary)
+        }
     }
 
     /// Flag ▸ with No Flag and the seven flags, each in its colour.

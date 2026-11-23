@@ -52,6 +52,22 @@ public struct BrowseSidebar<Header: View>: View {
             notetypes
             tags
         }
+        // The list's own row actions: the row menus, and its primary action, which
+        // macOS runs on Return (and a double click). T9: Return on the one selected
+        // filter row is a second click on it. A double click is two clicks already.
+        #if os(macOS)
+        .contextMenu(forSelectionType: BrowseSidebarTag.self) { rows in
+            rowMenu(rows)
+        } primaryAction: { rows in
+            guard NSApp.currentEvent?.type == .keyDown else { return }
+            model.activateByKey(rows)
+        }
+        #else
+        // On touch a tap is the selection's (a primary action would take every tap).
+        .contextMenu(forSelectionType: BrowseSidebarTag.self) { rows in rowMenu(rows) }
+        #endif
+        // T9: Space on the one selected filter row, as Return.
+        .onKeyPress(.space) { model.activateByKey(selection) ? .handled : .ignored }
         // N20.6 (2026-11-22): the system's own prompt, "Search", as with Today selected.
         .searchable(text: $model.filter, placement: .sidebar)
         .accessibilityIdentifier("browse.sidebar.list")
@@ -67,6 +83,25 @@ public struct BrowseSidebar<Header: View>: View {
             if selection != rows { selection = rows }
         }
         .onChange(of: selection) { _, rows in selectionChanged(rows) }
+    }
+
+    /// V6: a user saved search's Rename… and Delete (T13; not the built-ins),
+    /// a note type's Edit Note Type… (W14). Other rows have no menu.
+    @ViewBuilder private func rowMenu(_ rows: Set<BrowseSidebarTag>) -> some View {
+        if rows.count == 1, let row = rows.first {
+            switch row {
+            case .saved(let name):
+                Button { model.startRenaming(name) } label: { Text("browse.savedSearch.rename", bundle: .module) }
+                    .accessibilityIdentifier("browse.sidebar.saved.rename")
+                Button { model.deleteSavedSearch(name) } label: { Text("browse.savedSearch.delete", bundle: .module) }
+                    .accessibilityIdentifier("browse.sidebar.saved.delete")
+            case .notetype(let id):
+                Button { model.editNoteType(id) } label: { Text("browse.columns.editNoteType", bundle: .module) }
+                    .accessibilityIdentifier("browse.sidebar.notetype.edit")
+            default:
+                EmptyView()
+            }
+        }
     }
 
     // MARK: Selection (T9)
@@ -199,17 +234,9 @@ public struct BrowseSidebar<Header: View>: View {
                 case .builtIn(let search):
                     row(.builtIn(search), label: BrowseStrings.builtIn(search), identifier: "saved.\(Self.identifier(search))")
                 case .user(let search):
+                    // V6, T13: its Rename… and Delete are in the list's row menu (`rowMenu`).
                     row(.saved(search.name), label: search.name,
                         identifier: "user.\(model.savedSearches.firstIndex(of: search) ?? 0)")
-                        // V6, T13: a user's saved search can be renamed and deleted (the built-ins cannot).
-                        .contextMenu {
-                            Button { model.startRenaming(search.name) } label: { Text("browse.savedSearch.rename", bundle: .module) }
-                                .accessibilityIdentifier("browse.sidebar.saved.rename")
-                            Button { model.deleteSavedSearch(search.name) } label: {
-                                Text("browse.savedSearch.delete", bundle: .module)
-                            }
-                            .accessibilityIdentifier("browse.sidebar.saved.delete")
-                        }
                 }
             }
         }
@@ -285,12 +312,8 @@ public struct BrowseSidebar<Header: View>: View {
     private var notetypes: some View {
         section(.notetypes, shown: shows(notetypeRows)) {
             ForEach(notetypeRows, id: \.id) { notetype in
+                // V6, W14: Edit Note Type… is in the list's row menu (`rowMenu`).
                 row(.notetype(notetype.id), label: notetype.name, identifier: "notetype.\(notetype.id)")
-                    // V6, W14: Edit Note Type… opens Note Types on it.
-                    .contextMenu {
-                        Button { model.editNoteType(notetype.id) } label: { Text("browse.columns.editNoteType", bundle: .module) }
-                            .accessibilityIdentifier("browse.sidebar.notetype.edit")
-                    }
             }
         }
     }
