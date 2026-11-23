@@ -28,12 +28,12 @@ final class MacBrowseCommandsTests: XCTestCase {
         let search = app.toolbars.searchFields.firstMatch.exists ? app.toolbars.searchFields.firstMatch : app.searchFields.element(boundBy: 1)
         XCTAssertTrue(mode.waitForExistence(timeout: 10) && sync.exists && add.exists && search.exists,
                       "mode \(mode.exists), sync \(sync.exists), add \(add.exists), search \(search.exists)")
+        capture(app, "toolbar-\(appearance)")
         let window = app.windows.firstMatch.frame
         XCTAssertLessThan(mode.frame.midX, window.midX, "The Cards / Notes control sits after the title, not centred: \(mode.frame)")
         XCTAssertLessThan(mode.frame.maxX, sync.frame.minX, "Then the sync button")
         XCTAssertLessThan(sync.frame.maxX, search.frame.minX + 1, "Then the search field: \(sync.frame) \(search.frame)")
         XCTAssertLessThan(search.frame.maxX, add.frame.minX + 1, "Then the Add menu: \(search.frame) \(add.frame)")
-        capture(app, "toolbar-\(appearance)")
 
         let sidebarField = app.searchFields.element(boundBy: 0)
         XCTAssertTrue(sidebarField.exists)
@@ -41,14 +41,14 @@ final class MacBrowseCommandsTests: XCTestCase {
 
         // Card State: Suspended finds the recipe's two suspended cards.
         element(app, "browse.sidebar.state.suspended").click()
-        let table = app.tables["browse.results.table"]
-        XCTAssertTrue(waitUntil { table.tableRows.count == 2 }, "two suspended cards: \(table.tableRows.count)")
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count == 2 }, "two suspended cards: \(table.outlineRows.count)")
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
+        table.outlineRows.element(boundBy: 0).click()
         capture(app, "suspended-selected-\(appearance)")
 
         // One row: Unsuspend shows, Suspend does not; the later sheets are there, disabled.
-        table.tableRows.element(boundBy: 0).rightClick()
+        table.outlineRows.element(boundBy: 0).rightClick()
         let unsuspend = app.menuItems["browse.menu.unsuspend"]
         XCTAssertTrue(unsuspend.waitForExistence(timeout: 5))
         XCTAssertFalse(app.menuItems["browse.menu.suspend"].exists, "V8.1: Suspend is not shown for a suspended card")
@@ -60,12 +60,12 @@ final class MacBrowseCommandsTests: XCTestCase {
 
         // Several rows: their counts.
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
+        table.outlineRows.element(boundBy: 0).click()
         // ⌥⌘A: Select All anywhere in Browse (N21.8).
         app.typeKey("a", modifierFlags: [.command, .option])
-        XCTAssertTrue(waitUntil { self.element(app, "browse.status.text").label.contains("2 selected") },
-                      element(app, "browse.status.text").label)
-        table.tableRows.element(boundBy: 1).rightClick()
+        XCTAssertTrue(waitUntil { self.statusText(app).contains("2 selected") },
+                      statusText(app))
+        table.outlineRows.element(boundBy: 1).rightClick()
         XCTAssertTrue(app.menuItems["browse.menu.unsuspend"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.menuItems["browse.menu.unsuspend"].title, "Unsuspend 2 Cards")
         screen(app, "context-menu-two-rows-cards-\(appearance)")
@@ -74,14 +74,14 @@ final class MacBrowseCommandsTests: XCTestCase {
         // Notes mode: the notes' cards.
         try app.bringToFront(bundleIdentifier: bundle)
         mode.buttons.element(boundBy: 1).click()
-        XCTAssertTrue(waitUntil { table.tableRows.count >= 1 })
-        table.tableRows.element(boundBy: 0).click()
-        table.tableRows.element(boundBy: 0).rightClick()
+        XCTAssertTrue(waitUntil { table.outlineRows.count >= 1 })
+        table.outlineRows.element(boundBy: 0).click()
+        table.outlineRows.element(boundBy: 0).rightClick()
         XCTAssertTrue(app.menuItems["browse.menu.delete"].waitForExistence(timeout: 5))
         screen(app, "context-menu-one-row-notes-\(appearance)")
         app.typeKey(.escape, modifierFlags: [])
         app.typeKey("a", modifierFlags: [.command, .option])
-        table.tableRows.element(boundBy: 0).rightClick()
+        table.outlineRows.element(boundBy: 0).rightClick()
         XCTAssertTrue(app.menuItems["browse.menu.delete"].waitForExistence(timeout: 5))
         screen(app, "context-menu-rows-notes-\(appearance)")
         app.typeKey(.escape, modifierFlags: [])
@@ -94,10 +94,10 @@ final class MacBrowseCommandsTests: XCTestCase {
         let (app, bundle) = try launch(appearance: "light")
         try openBrowse(app, bundle)
         element(app, "browse.sidebar.state.suspended").click()
-        let table = app.tables["browse.results.table"]
-        XCTAssertTrue(waitUntil { table.tableRows.count == 2 })
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count == 2 })
         try app.bringToFront(bundleIdentifier: bundle)
-        let row = table.tableRows.element(boundBy: 0)
+        let row = table.outlineRows.element(boundBy: 0)
         row.click()
         let state = row.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'browse.table.row.'")).firstMatch
         XCTAssertTrue(waitUntil { state.label == "Suspended" }, "before: \(state.label)")
@@ -108,7 +108,7 @@ final class MacBrowseCommandsTests: XCTestCase {
         unsuspend.click()
         // H10: the row stays in the results, now not suspended.
         XCTAssertTrue(waitUntil { state.label.isEmpty }, "after: \(state.label)")
-        XCTAssertEqual(table.tableRows.count, 2)
+        XCTAssertEqual(table.outlineRows.count, 2)
         capture(app, "after-unsuspend")
 
         let edit = app.menuBars.menuBarItems["Edit"]
@@ -136,10 +136,10 @@ final class MacBrowseCommandsTests: XCTestCase {
     func testNoteAndCardMenus() throws {
         let (app, bundle) = try launch(appearance: "light")
         try openBrowse(app, bundle)
-        let table = app.tables["browse.results.table"]
-        XCTAssertTrue(waitUntil { table.tableRows.count > 2 })
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count > 2 })
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
+        table.outlineRows.element(boundBy: 0).click()
         let bar = app.menuBars.menuBarItems
         let titles = bar.allElementsBoundByIndex.map(\.title)
         let deck = titles.firstIndex(of: "Deck"), note = titles.firstIndex(of: "Note"), card = titles.firstIndex(of: "Card")
@@ -175,12 +175,12 @@ final class MacBrowseCommandsTests: XCTestCase {
         let (app, bundle) = try launch(appearance: appearance)
         try openBrowse(app, bundle)
         element(app, "browse.sidebar.state.suspended").click()
-        let table = app.tables["browse.results.table"]
-        XCTAssertTrue(waitUntil { table.tableRows.count == 2 })
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count == 2 })
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
+        table.outlineRows.element(boundBy: 0).click()
         app.typeKey("a", modifierFlags: .command)
-        XCTAssertTrue(waitUntil { self.element(app, "browse.status.text").label.contains("2 selected") })
+        XCTAssertTrue(waitUntil { self.statusText(app).contains("2 selected") })
         app.typeKey(.delete, modifierFlags: .command)
         let sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 10), "⌘⌫ in the table asks for two notes")
@@ -189,20 +189,20 @@ final class MacBrowseCommandsTests: XCTestCase {
         capture(app, "delete-question-\(appearance)")
         sheet.buttons["Cancel"].click()
         XCTAssertTrue(waitUntil { !sheet.exists })
-        XCTAssertEqual(table.tableRows.count, 2, "Cancel deletes nothing")
+        XCTAssertEqual(table.outlineRows.count, 2, "Cancel deletes nothing")
     }
 
     /// V1: leaving Browse for Today and coming back keeps the table's scroll position.
     func testScrollPositionIsKept() throws {
         let (app, bundle) = try launch(appearance: "light")
         try openBrowse(app, bundle)
-        let table = app.tables["browse.results.table"]
-        XCTAssertTrue(waitUntil { table.tableRows.count > 100 }, "\(table.tableRows.count)")
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count > 100 }, "\(table.outlineRows.count)")
         try app.bringToFront(bundleIdentifier: bundle)
         for _ in 0..<8 { table.scroll(byDeltaX: 0, deltaY: -600) }
-        let first = table.tableRows.allElementsBoundByIndex.firstIndex { $0.isHittable } ?? 0
+        let first = table.outlineRows.allElementsBoundByIndex.firstIndex { $0.isHittable } ?? 0
         XCTAssertGreaterThan(first, 20, "the table scrolled down")
-        let shown = table.tableRows.element(boundBy: first + 3)
+        let shown = table.outlineRows.element(boundBy: first + 3)
         let id = shown.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'browse.table.row.'")).firstMatch.identifier
         XCTAssertFalse(id.isEmpty)
         element(app, "shell.root.sidebar.home").click()
@@ -210,7 +210,7 @@ final class MacBrowseCommandsTests: XCTestCase {
         element(app, "shell.root.sidebar.browse").click()
         let row = app.descendants(matching: .any)[id]
         XCTAssertTrue(waitUntil { row.exists && row.isHittable }, "row \(id) is on screen again")
-        XCTAssertFalse(table.tableRows.element(boundBy: 0).isHittable, "not back at the top")
+        XCTAssertFalse(table.outlineRows.element(boundBy: 0).isHittable, "not back at the top")
     }
 
     /// N21.2, T10: Esc first closes the suggestions, then empties the query.
@@ -280,7 +280,16 @@ final class MacBrowseCommandsTests: XCTestCase {
     private func openBrowse(_ app: XCUIApplication, _ bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         element(app, "shell.root.sidebar.browse").click()
-        XCTAssertTrue(app.tables["browse.results.table"].waitForExistence(timeout: 20), "Browse's table")
+        XCTAssertTrue(resultsTable(app).waitForExistence(timeout: 20), "Browse's table")
+    }
+
+    /// SwiftUI's Table is an outline in the Mac's accessibility tree.
+    private func resultsTable(_ app: XCUIApplication) -> XCUIElement {
+        app.outlines.matching(identifier: "browse.results.table").firstMatch
+    }
+
+    private func statusText(_ app: XCUIApplication) -> String {
+        element(app, "browse.status.text").value as? String ?? ""
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {

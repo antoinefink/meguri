@@ -43,14 +43,21 @@ public struct BrowseView: View {
                 // N21.3, N23.6: the trailing group, in this order: the sync button,
                 // the search field, the Add menu. U273's inspector toggle
                 // (`sidebar.trailing`) goes last, after the Add menu.
+                // The search field's item comes after the items of the toolbar
+                // it is declared after: the Add menu is declared in a toolbar
+                // after the field (VM capture, 2026-11-23: declared beside the
+                // sync button, it came before the field).
                 if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
-                DefaultToolbarItem(kind: .search, placement: .primaryAction)
-                if let addMenu { ToolbarItem(placement: .primaryAction) { addMenu } }
                 #else
                 ToolbarItem(placement: .principal) { modePicker }
                 #endif
             }
             .browseSearchField(model)
+            #if os(macOS)
+            .toolbar {
+                if let addMenu { ToolbarItem(placement: .primaryAction) { addMenu } }
+            }
+            #endif
             .modifier(BrowseCommandFeedback(model: model))
             #if os(macOS)
             .background { BrowseSelectAllKey(commands: model.commands) }
