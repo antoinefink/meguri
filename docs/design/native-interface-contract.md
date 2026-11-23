@@ -658,7 +658,7 @@ Decided by the coordinator on 2026-11-23, pending Antoine's look. He showed "Car
 
 - **Placement:**
   - No banner row: the card keeps that height on every platform.
-  - While the notice applies (`review/reviewer-strings#S3`), the review's top-trailing controls start with a button showing `exclamationmark.triangle.fill` in the symbol's own multicolour rendering, the system's yellow triangle (not yet met on iOS: the captures of 2026-11-23 show the glass toolbar group drawing it as a template, black in light and white in dark; open): `[leech][undo][more]` on touch, with the opened foldable's side column in the same order. On the Mac it is the first trailing toolbar item.
+  - While the notice applies (`review/reviewer-strings#S3`), the review's top-trailing controls start with a button showing `exclamationmark.triangle.fill` in the symbol's own multicolour rendering, the system's yellow triangle. In the iOS glass toolbar group the multicolour symbol alone is drawn as a template (black in light, white in dark), so the icon also takes the system yellow as its style and tint; Increase Contrast's darker yellow applies there by itself (2026-11-23): `[leech][undo][more]` on touch, with the opened foldable's side column in the same order. On the Mac it is the first trailing toolbar item.
   - When no notice applies the button is absent and the group is as before.
 - **Lifetime** (Antoine, 2026-11-23: it "should just stay visible for as long as you are on the card"; this replaces the 2-second expiry #166 gave the notice, and the earlier "as long as the notice" line):
   - It appears when the card after the leech answer is presented and stays through that whole card: question side, reveal, answer side, scrolling, the popover, audio and the More menu.
