@@ -171,6 +171,8 @@ public final class BrowseModel {
             inspector?.selectionChanged()
         }
         commands.editNote = { [weak inspector] in inspector?.editNote() }
+        commands.saveFirst = { [weak inspector] in await inspector?.flushForBackground() }
+        commands.unsavedEdit = { [weak inspector] in inspector?.unsavedEdit ?? false }
         self.device = device
         folded = device.folded
         showsAllTags = device.showsAllTags

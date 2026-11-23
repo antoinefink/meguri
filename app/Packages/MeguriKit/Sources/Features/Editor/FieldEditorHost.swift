@@ -239,6 +239,9 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     /// Resolve all earlier sequence numbers before returning the flushed draft
     /// targets. A caller must not submit a write before this returns.
     public func flush(hold: Bool) async throws {
+        // Browse's inspector flushes for a save, a cloze and a reload: a flush
+        // waits for the one under way rather than fail (no input is skipped).
+        while browsing, editable, commandLoad != nil { try await Task.sleep(for: .milliseconds(5)) }
         guard editable, let expected = activeLoad, commandLoad == nil else { throw EditorRuntimeError.unavailable }
         try requireCurrent(expected)
         commandLoad = expected
@@ -291,7 +294,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     // MARK: Formatting (editor/formatting F3, editor/cloze-wrap)
 
     /// F3's inline formats the inspector's bar and Format menu offer.
-    public enum InlineFormat: String, CaseIterable, Sendable { case bold, italic, underline, superscript, subscript }
+    public enum InlineFormat: String, CaseIterable, Sendable { case bold, italic, underline, superscript, `subscript` }
 
     /// F2: the commands act on the focused rich field only.
     public var canFormat: Bool { editable && !held && fieldFocused && focusedMode == .rich }

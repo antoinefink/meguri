@@ -7,7 +7,7 @@
     const blocks = new Set(("address article aside blockquote details dialog dd div dl dt " +
         "fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr li main " +
         "nav ol p pre section table ul").split(" "));
-    let loadId = 0, seq = 0, held = true, fields = [], current = null, pageMode = "add";
+    let loadId = 0, seq = 0, held = true, fields = [], current = null;
     const bridge = window.webkit.messageHandlers.meguriEditor;
     const envelope = (type, payload = {}) => ({type, loadId, seq: ++seq, ...payload});
     const emit = (type, payload) => bridge.postMessage(envelope(type, payload));
@@ -246,10 +246,6 @@
             if (event.key === "Tab") { event.preventDefault(); tab(field, event.shiftKey); }
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") event.preventDefault();
             if (event.metaKey && event.shiftKey && event.code === "KeyX") { event.preventDefault(); toggleMode(field); }
-            // editor/formatting F14: in Browse the Format menu owns ⌘B, ⌘I and ⌘U;
-            // WebKit's own handling of them never changes field HTML.
-            if (pageMode === "browse" && event.metaKey && !event.altKey && !event.ctrlKey &&
-                ["KeyB", "KeyI", "KeyU"].includes(event.code)) event.preventDefault();
             if (event.metaKey && event.code === "KeyZ" && history(field, event.shiftKey)) event.preventDefault();
         });
         // U197 has not supplied the paste/drop pipeline. Refuse these rather
@@ -272,7 +268,6 @@
         superscript: {tag: "sup", tags: ["sup"], prop: "vertical-align", styled: style => style.verticalAlign === "super", excludes: "subscript"},
         subscript: {tag: "sub", tags: ["sub"], prop: "vertical-align", styled: style => style.verticalAlign === "sub", excludes: "superscript"},
     };
-    const voids = new Set("area base br col embed hr img input link meta source track wbr".split(" "));
     const counts = (node, kind) => node?.nodeType === Node.ELEMENT_NODE &&
         (kind.tags.includes(node.localName) || (node.hasAttribute("style") && kind.styled(node.style)));
     function withinFormat(field, node, kind) {
@@ -299,100 +294,81 @@
         }
         stripStyle(element, kind);
     }
-    function stripInside(root, kind) {
-        for (const element of Array.from(root.querySelectorAll("*")).reverse()) if (counts(element, kind)) strip(element, kind);
-    }
     const textNodes = root => {
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         const nodes = []; while (walker.nextNode()) if (walker.currentNode.data.length) nodes.push(walker.currentNode);
         return nodes;
     };
-    const isVoid = node => node.nodeType === Node.ELEMENT_NODE && voids.has(node.localName);
-    // F4 step 3: one wrapper per run of adjacent inline content with text;
-    // void elements at a run's edges stay outside it.
-    function wrapRuns(parent, tag) {
-        let run = [];
-        const close = () => {
-            while (run.length && isVoid(run[0])) run.shift();
-            while (run.length && isVoid(run[run.length - 1])) run.pop();
-            if (run.some(node => node.textContent.length > 0)) {
-                const wrapper = document.createElement(tag);
-                run[0].before(wrapper); wrapper.append(...run);
-            }
-            run = [];
-        };
-        for (const node of Array.from(parent.childNodes)) {
-            if (node.nodeType === Node.ELEMENT_NODE && (blocks.has(node.localName) ||
-                (node.hasAttribute("block") && node.getAttribute("block") !== "false"))) { close(); wrapRuns(node, tag); }
-            else run.push(node);
-        }
-        close();
-    }
-    // F4 step 5: a wrapper merges with a neighbour of the same format,
-    // past empty text nodes.
-    function mergeNeighbours(root, tag) {
-        for (const wrapper of Array.from(root.querySelectorAll(tag))) {
-            if (!wrapper.isConnected || wrapper.attributes.length) continue;
-            let previous = wrapper.previousSibling;
-            while (previous?.nodeType === Node.TEXT_NODE && previous.data === "") previous = previous.previousSibling;
-            if (previous?.nodeType === Node.ELEMENT_NODE && previous.localName === tag && previous.attributes.length === 0) {
-                previous.append(...Array.from(wrapper.childNodes)); wrapper.remove(); continue;
-            }
-            let next = wrapper.nextSibling;
-            while (next?.nodeType === Node.TEXT_NODE && next.data === "") next = next.nextSibling;
-            if (next?.nodeType === Node.ELEMENT_NODE && next.localName === tag && next.attributes.length === 0) {
-                wrapper.append(...Array.from(next.childNodes)); next.remove();
-            }
-        }
-    }
     function selectTexts(field, texts) {
         if (!texts.length) return;
         const value = document.createRange();
         value.setStart(texts[0], 0); value.setEnd(texts[texts.length - 1], texts[texts.length - 1].length);
         selectRange(field, value);
     }
+    // The selected text nodes, split at the selection's edges, in order.
+    function selectedTexts(field, selected) {
+        let {startContainer, startOffset, endContainer, endOffset} = selected;
+        if (endContainer.nodeType === Node.TEXT_NODE && endOffset < endContainer.data.length) endContainer.splitText(endOffset);
+        if (startContainer.nodeType === Node.TEXT_NODE && startOffset > 0) {
+            const rest = startContainer.splitText(startOffset);
+            if (endContainer === startContainer) { endContainer = rest; endOffset -= startOffset; }
+            startContainer = rest; startOffset = 0;
+        }
+        const scope = document.createRange();
+        scope.setStart(startContainer, startOffset); scope.setEnd(endContainer, endOffset);
+        return textNodes(field.rich).filter(node => scope.intersectsNode(node) &&
+            !(node === endContainer && endOffset === 0) && !(node === startContainer && startOffset === node.data.length));
+    }
+    // F4 Removing, for one text node: its outermost format element is split
+    // into the content before it, the node itself, and the content after it;
+    // the middle loses the format (F3).
+    function removeAround(field, text, kind) {
+        let outer = null;
+        for (let element = text.parentElement; element && element !== field.rich; element = element.parentElement) {
+            if (counts(element, kind)) outer = element;
+        }
+        if (!outer) return;
+        const before = document.createRange(); before.setStartBefore(outer); before.setEndBefore(text);
+        const after = document.createRange(); after.setStartAfter(text); after.setEndAfter(outer);
+        const head = before.extractContents(), tail = after.extractContents();
+        const empty = node => node.nodeType === Node.ELEMENT_NODE && !node.textContent && !node.querySelector("img, br");
+        for (const fragment of [head, tail]) for (const node of Array.from(fragment.childNodes)) if (empty(node)) node.remove();
+        outer.before(head); outer.after(tail);
+        for (const element of Array.from(outer.querySelectorAll("*")).reverse()) if (counts(element, kind)) strip(element, kind);
+        strip(outer, kind);
+    }
     function format(field, command) {
         const kind = formats[command];
         const selected = range(field);
         if (held || selected.collapsed) return false;
+        const has = withinFormat(field, selected.startContainer, kind) || withinFormat(field, selected.endContainer, kind);
         beforeEdit(field, "format");
         const before = field.rich.innerHTML;
-        const has = withinFormat(field, selected.startContainer, kind) || withinFormat(field, selected.endContainer, kind);
-        const content = selected.extractContents();
-        if (kind.excludes) stripInside(content, formats[kind.excludes]);
-        stripInside(content, kind);
-        const texts = textNodes(content);
+        const texts = selectedTexts(field, selected);
         if (has) {
-            // The outermost format element around the point is split there,
-            // and the selection goes between its two halves (F4 Removing).
-            let outer = null;
-            for (let element = selected.startContainer.nodeType === Node.ELEMENT_NODE ? selected.startContainer : selected.startContainer.parentElement;
-                element && element !== field.rich; element = element.parentElement) if (counts(element, kind)) outer = element;
-            if (outer) {
-                let middle = content;
-                for (let element = selected.startContainer.nodeType === Node.ELEMENT_NODE ? selected.startContainer : selected.startContainer.parentElement;
-                    element && element !== outer; element = element.parentElement) {
-                    if (counts(element, kind)) continue;
-                    const copy = element.cloneNode(false); copy.append(middle); middle = copy;
-                }
-                const kept = outer.cloneNode(false); kept.append(middle);
-                const tail = document.createRange();
-                tail.setStart(selected.startContainer, selected.startOffset); tail.setEndAfter(outer);
-                const after = tail.extractContents();
-                const halves = [outer, ...Array.from(after.childNodes)];
-                outer.after(kept, after);
-                strip(kept, kind);
-                // A half left with nothing in it goes.
-                for (const half of halves) {
-                    if (half.nodeType === Node.ELEMENT_NODE && !half.textContent && !half.querySelector("img, br")) half.remove();
-                }
-            } else selected.insertNode(content);
+            for (const text of texts) removeAround(field, text, kind);
         } else {
-            wrapRuns(content, kind.tag);
-            selected.insertNode(content);
-            mergeNeighbours(field.rich, kind.tag);
+            if (kind.excludes) for (const text of texts) removeAround(field, text, formats[kind.excludes]);
+            // F4 step 3: each selected text gets the wrapper (blocks keep their
+            // structure); then adjacent wrappers and neighbours of the format merge.
+            const made = new Set();
+            for (const text of texts) {
+                if (withinFormat(field, text, kind)) continue;
+                const wrapper = document.createElement(kind.tag);
+                text.before(wrapper); wrapper.append(text); made.add(wrapper);
+            }
+            const mergeable = node => node?.nodeType === Node.ELEMENT_NODE && node.localName === kind.tag && node.attributes.length === 0;
+            for (const wrapper of made) {
+                if (!wrapper.isConnected) continue;
+                let previous = wrapper.previousSibling;
+                while (previous?.nodeType === Node.TEXT_NODE && previous.data === "") previous = previous.previousSibling;
+                let target = wrapper;
+                if (mergeable(previous)) { previous.append(...Array.from(wrapper.childNodes)); wrapper.remove(); target = previous; }
+                let next = target.nextSibling;
+                while (next?.nodeType === Node.TEXT_NODE && next.data === "") next = next.nextSibling;
+                if (mergeable(next) && true) { target.append(...Array.from(next.childNodes)); next.remove(); }
+            }
         }
-        field.rich.normalize();
         selectTexts(field, texts.filter(node => node.isConnected));
         if (field.rich.innerHTML === before) { field.undo.pop(); return false; }
         dirty(field); historyState(field);
@@ -501,7 +477,7 @@
             message.fields.forEach(validateField);
             if (message.fields.some((value, index) => index > 0 && value.ord <= message.fields[index - 1].ord)) throw new Error("Invalid field order");
             for (const field of fields) clearTimeout(field.timer);
-            loadId = message.loadId; seq = 0; current = null; pageMode = message.mode;
+            loadId = message.loadId; seq = 0; current = null;
             held = true; container.replaceChildren(); fields = message.fields.map(makeField);
             held = false; container.inert = false;
             focus(fields.find(field => field.ord === message.focus));

@@ -135,6 +135,47 @@ import Testing
         #expect(fixture.backend.saves.map(\.id) == [10])
     }
 
+    @Test func typingBackTheOpenedTextAfterASaveIsSavedToo() async throws {
+        let fixture = try await Fixture()
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true }
+        let runtime = try #require(fixture.runtime)
+        try await runtime.type(1, "edited")
+        runtime.blur()
+        try await pollUntil { fixture.backend.saves.count == 1 }
+        // Back to the text the page opened with: the page says "unchanged", which is no longer what is stored.
+        try await runtime.type(1, "back 10")
+        runtime.blur()
+        try await pollUntil { fixture.backend.saves.count == 2 }
+        #expect(fixture.backend.saves.last?.fields == [1: "back 10"])
+    }
+
+    @Test func tagsTypedForOneNoteNeverReachAnother() async throws {
+        let fixture = try await Fixture()
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.noteID == 10 }
+        let first = try #require(fixture.inspector.note)
+        fixture.select([1])
+        try await pollUntil { fixture.inspector.note?.noteID == 20 && fixture.inspector.note?.runtime?.editable == true }
+        fixture.inspector.setTags(["late"], for: first)
+        await fixture.inspector.settled()
+        #expect(fixture.backend.saves.isEmpty && fixture.inspector.note?.draft.tags == [])
+        fixture.inspector.setTags(["kept"], for: try #require(fixture.inspector.note))
+        try await pollUntil { fixture.backend.saves.count == 1 }
+        #expect(fixture.backend.saves.first?.id == 20 && fixture.backend.saves.first?.tags == ["kept"])
+    }
+
+    @Test func aCommandOnTheEditedRowSavesTheEditFirst() async throws {
+        let fixture = try await Fixture()
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true && fixture.model.commands.facts?.rows == 1 }
+        fixture.runtime?.typeWithoutCommit(0, "before the flag")
+        fixture.backend.onSave = { _ in #expect(fixture.session.actions.isEmpty, "the save comes before the command") }
+        fixture.model.commands.perform(.flag(2))
+        try await pollUntil { !fixture.session.actions.isEmpty }
+        #expect(fixture.backend.saves.first?.fields == [0: "before the flag"])
+    }
+
     @Test func aChangeFromElsewhereReloadsTheUneditedFieldsAndKeepsTheEditedOnes() async throws {
         let fixture = try await Fixture()
         fixture.select([0])
@@ -403,10 +444,13 @@ import Testing
     private(set) var focused: Int?
     private(set) var hiddenSet: Set<Int>?
     private var pending: [Int: String] = [:]
+    /// What the page was opened with: its "unchanged" means equal to this.
+    private var opened: [String]
 
     init(draft: NoteEditorDraft, page: FakePage, continuing: Bool = false) {
         self.draft = draft
         self.page = page
+        opened = draft.values
         if !continuing { page.newPages += 1 }
     }
 
@@ -417,7 +461,7 @@ import Testing
     }
     func flush(hold: Bool) async throws {
         if hold { held = true }
-        let commits = pending.map { NoteEditorDraft.Commit(ord: $0.key, html: $0.value, unchanged: $0.value == draft.fields[$0.key].baseline) }
+        let commits = pending.map { NoteEditorDraft.Commit(ord: $0.key, html: $0.value, unchanged: $0.value == opened[$0.key]) }
         pending = [:]
         try await draft.accept(commits, ifCurrent: { true })
     }
@@ -429,7 +473,10 @@ import Testing
         editable = false
         return FakeFieldRuntime(draft: draft, page: page, continuing: true)
     }
-    func reload(fields: [Int]) async throws { page.reloads.append(fields) }
+    func reload(fields: [Int]) async throws {
+        page.reloads.append(fields)
+        for ord in fields { opened[ord] = draft.values[ord] }
+    }
     func setHiddenFields(_ ords: Set<Int>) async throws {
         draft.hiddenFields = ords
         hiddenSet = ords
@@ -439,7 +486,7 @@ import Testing
     /// Typing and its commit (the page's idle or blur commit).
     func type(_ ord: Int, _ html: String) async throws {
         draft.markDirty(ord)
-        try await draft.accept([.init(ord: ord, html: html, unchanged: html == draft.fields[ord].baseline)], ifCurrent: { true })
+        try await draft.accept([.init(ord: ord, html: html, unchanged: html == opened[ord])], ifCurrent: { true })
     }
     /// Typing whose commit waits for the next flush.
     func typeWithoutCommit(_ ord: Int, _ html: String) {

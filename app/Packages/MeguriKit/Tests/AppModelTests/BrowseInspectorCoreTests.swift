@@ -30,11 +30,11 @@ extension ReviewCollectionStartupTests {
             #expect(note.card?.id == shown)
 
             // Nothing typed: leaving the row writes nothing (W4).
-            let before = try await CoreNoteService().readNote(id: note.noteID)
+            let before = try await CoreNoteService().readNote(id: note.noteID), stepBefore = undo.undoName
             results.select([0])
             await waitUntil { inspector.note?.noteID != note.noteID && inspector.note?.runtime?.editable == true }
             #expect(try await CoreNoteService().readNote(id: note.noteID) == before)
-            #expect(undo.undoName == nil, "no step was recorded")
+            #expect(undo.undoName == stepBefore, "no step was recorded")
 
             // A field edited, then the focus leaves: one "Edit Note" step; the row's cell follows, still selected.
             let first = try #require(inspector.note)

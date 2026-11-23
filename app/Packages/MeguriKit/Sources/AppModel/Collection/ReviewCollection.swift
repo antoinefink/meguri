@@ -2338,6 +2338,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         return result
     }
     private func performClose(quitting: Bool) async -> Bool {
+        // W3: Browse's inspector saves its note before the collection closes.
+        await browseOwner?.inspector.flushForBackground()
         closing = true
         defer { closing = false }
         if let cancelledEditor = cancelPendingEditorReplacement() {

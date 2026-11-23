@@ -136,7 +136,9 @@ struct BrowseNoteTab: View {
     private var tagsRow: some View {
         Form {
             LabeledContent {
-                BrowseTagField(tags: note.draft.tags, names: tagNames) { inspector.setTags($0) }
+                BrowseTagField(tags: note.draft.tags, names: tagNames) { [note] in inspector.setTags($0, for: note) }
+                    // A field per note: what was typed for one note never reaches the next.
+                    .id(note.noteID)
                     .accessibilityIdentifier("browse.inspector.tags")
             } label: { Text("browse.inspector.tags", bundle: .module) }
         }

@@ -477,7 +477,7 @@ struct AppCommands: Commands {
             Divider()
             // F14: ⌘= Superscript, ⇧⌘= Subscript (decided 2026-10-27).
             formatItem("Superscript", .superscript, key: "=")
-            formatItem("Subscript", .subscript, key: "=", [.command, .shift])
+            formatItem("Subscript", .`subscript`, key: "=", [.command, .shift])
             Divider()
             Button("Cloze Deletion") { context?.formattingHost?.cloze(sameNumber: false) }
                 .keyboardShortcut("c", modifiers: [.command, .shift])

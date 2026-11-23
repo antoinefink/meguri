@@ -11,6 +11,10 @@ public final class NoteEditorDraft {
     public struct Field: Sendable, Equatable {
         public let definition: NotetypeField
         public fileprivate(set) var baseline: String
+        /// The value the page was opened (or last reloaded) with: what its
+        /// "unchanged" commit stands for. Only a Browse save moves `baseline`
+        /// away from it (`acknowledgeSaved`).
+        fileprivate var opened: String
         public fileprivate(set) var target: String
         public fileprivate(set) var changed: Bool
         public fileprivate(set) var mode: Mode
@@ -74,7 +78,7 @@ public final class NoteEditorDraft {
         self.noteID = noteID; baselineTags = tags
         fields = notetype.fields.enumerated().map { index, definition in
             let value = values?[index] ?? ""
-            return Field(definition: definition, baseline: value, target: value, changed: false,
+            return Field(definition: definition, baseline: value, opened: value, target: value, changed: false,
                 mode: definition.plainText ? .html : .rich, collapsed: definition.collapsed)
         }
     }
@@ -174,7 +178,7 @@ public final class NoteEditorDraft {
         var reloaded: [Int] = []
         for index in fields.indices where !pendingFields.contains(index) && fields[index].target == fields[index].baseline {
             guard fields[index].baseline != values[index] else { continue }
-            fields[index].baseline = values[index]; fields[index].target = values[index]
+            fields[index].baseline = values[index]; fields[index].target = values[index]; fields[index].opened = values[index]
             fields[index].changed = false
             reloaded.append(index)
         }
@@ -232,7 +236,9 @@ public final class NoteEditorDraft {
         // before changing either committed bytes or pending dirty state.
         guard current() else { throw BridgeError.unavailable(reason: "The editor owner changed.") }
         for commit in commits {
-            fields[commit.ord].target = commit.unchanged ? fields[commit.ord].baseline : byOrdinal[commit.ord]!
+            // "Unchanged" is the page's word for "as I was opened with", which a
+            // Browse save may have left behind as the stored value.
+            fields[commit.ord].target = commit.unchanged ? fields[commit.ord].opened : byOrdinal[commit.ord]!
             fields[commit.ord].changed = !commit.unchanged
             pendingFields.remove(commit.ord)
         }
@@ -297,7 +303,7 @@ public final class NoteEditorDraft {
     /// supplied on recovery for changed fields (F7).
     public func displayValues() async throws -> (targets: [String], baselines: [String]) {
         let count = fields.count
-        let converted = try await html.convert(values + fields.map(\.baseline), forDisplay: true)
+        let converted = try await html.convert(values + fields.map(\.opened), forDisplay: true)
         guard converted.count == count * 2 else { throw BridgeError.internal("Invalid editor conversion result.") }
         return (Array(converted.prefix(count)), Array(converted.suffix(count)))
     }

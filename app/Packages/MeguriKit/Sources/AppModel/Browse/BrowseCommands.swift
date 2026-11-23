@@ -346,8 +346,27 @@ public final class BrowseCommands {
         run(command, menu: target)
     }
 
+    /// The inspector saves its note before a command runs (W2), so a
+    /// command on the edited row (Delete included) never drops the edit.
+    @ObservationIgnored var saveFirst: (@MainActor () async -> Void)?
+    /// The inspector holds an edit not saved yet.
+    @ObservationIgnored var unsavedEdit: @MainActor () -> Bool = { false }
+
     /// `menu` nil: the selection now (the menu bar's commands).
     private func run(_ command: BrowseCommand, menu: BrowseTarget?) {
+        let state = menu.map { state(command, on: $0) } ?? state(command)
+        guard state.enabled else { return }
+        if command != .editNote, command != .editNoteType, unsavedEdit(), let saveFirst {
+            Task {
+                await saveFirst()
+                runNow(command, menu: menu)
+            }
+            return
+        }
+        runNow(command, menu: menu)
+    }
+
+    private func runNow(_ command: BrowseCommand, menu: BrowseTarget?) {
         let state = menu.map { state(command, on: $0) } ?? state(command)
         guard state.enabled else { return }
         switch command {
