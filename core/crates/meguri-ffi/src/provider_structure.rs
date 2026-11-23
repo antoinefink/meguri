@@ -207,7 +207,7 @@ fn work(op: ProviderStructureOp, host: &meguri_host::CoreHost)
                 Ok(())
             })
         }
-        ProviderStructureOp::Import { .. } => unreachable!("handled above"),
+        ProviderStructureOp::Import { .. } => return Err(CoreError::Internal { message: "import op reached the note type ops".into() }),
     };
     Ok(Some((work, saved, None)))
 }

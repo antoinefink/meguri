@@ -109,9 +109,8 @@ fn a_structural_import_is_confirmed_then_imported_and_uploaded() {
     let session = i::inspect(&rig.host, &i::sorting_package(root.path()));
 
     // The first accepted sheet has no token: the plan's reason comes back.
-    let script = r::Script::new(s::quiet_round(&rig.host));
     let token = confirmation(&rig, &session);
-    assert_untouched(&rig, &before, &script);
+    assert_untouched(&rig, &before, &r::Script::new(vec![]));
 
     let mut steps = s::quiet_round(&rig.host);
     steps.extend(s::upload_steps(root.path(), &before));

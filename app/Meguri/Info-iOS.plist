@@ -17,6 +17,21 @@
 				<array><string>colpkg</string></array>
 			</dict>
 		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.antoinefink.meguri.deck-package</string>
+			<key>UTTypeDescription</key>
+			<string>Deck Package</string>
+			<key>UTTypeConformsTo</key>
+			<array><string>public.data</string></array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array><string>apkg</string></array>
+				<key>public.mime-type</key>
+				<array><string>application/x-apkg</string><string>application/vnd.anki</string></array>
+			</dict>
+		</dict>
 	</array>
 	<key>CFBundleURLTypes</key>
 	<array>

@@ -35,6 +35,9 @@ impl CoreHost {
                 Ok(_) => Ok(()),
                 Err(ApkgImportError::MediaCommitPending(result)) => Err(EngineError::MediaCommitPending {
                     seq: meguri_engine::Seq(result.seq), message: "deck package import".into() }),
+                // Committed, its result lost: never told as a refusal.
+                Err(ApkgImportError::Io { detail }) if detail == apkg::COMMITTED_WITHOUT_RESULT => Err(EngineError::CommitCompleted {
+                    seq: meguri_engine::Seq(0), message: "deck package import".into() }),
                 Err(ApkgImportError::Cancelled) => Err(EngineError::Cancelled),
                 Err(ApkgImportError::Engine(error)) => Err((**error).clone()),
                 Err(_) => Err(EngineError::InvalidArgument { message: "the import was refused".into() }),

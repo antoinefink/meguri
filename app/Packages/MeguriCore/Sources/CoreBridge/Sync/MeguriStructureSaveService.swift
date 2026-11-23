@@ -28,6 +28,8 @@ public enum MeguriStructureRefusal: Sendable {
         case .busy: .busy; case .notReady: .notReady; case .uploadPending: .uploadPending
         case .nothingPending: .nothingPending; case .round(let refusal): .round(MeguriRoundRefusal(refusal))
         case .unavailable: .unavailable
+        // Only a deck package import is refused this way (`importDeckPackage` reads it first).
+        case .importSessionClosed: .unavailable
         }
     }
 }
@@ -102,7 +104,7 @@ extension CoreMeguriRoundService {
         let drains = drains
         let (connection, credentials) = try await admittedInputs()
         let op = MeguriCoreBindings.ProviderStructureOp.save(draft: draft.raw)
-        return try await owned(since: drains) {
+        return try await owned(since: drains, busy: .refused(.busy)) {
             try await CoreEventStream.shared.start()
             let started = try await MaintenanceLane.shared.call(.providerStartStructureSave) {
                 try connection.startStructureSave(credentials: credentials, op: op, reachable: reachable)
@@ -111,13 +113,15 @@ extension CoreMeguriRoundService {
         }
     }
     /// One structure job at a time on this facade, registered so that
-    /// `cancelAndDrain` and retirement stop and join it.
-    private func owned(since drains: UInt64, _ work: @escaping @Sendable () async throws -> MeguriStructureOutcome) async throws -> MeguriStructureOutcome {
+    /// `cancelAndDrain` and retirement stop and join it. `busy` is the
+    /// answer while another one runs.
+    func owned<Output: Sendable>(since drains: UInt64, busy: Output,
+                                 _ work: @escaping @Sendable () async throws -> Output) async throws -> Output {
         // A drain that ran while the credentials were read: nothing starts after it.
         guard drains == self.drains else { throw CancellationError() }
-        guard structureWork == nil else { return .refused(.busy) }
+        guard structureWork == nil else { return busy }
         let task = Task { try await work() }
-        structureWork = task
+        structureWork = Task { _ = await withTaskCancellationHandler { await task.result } onCancel: { task.cancel() } }
         let result = await withTaskCancellationHandler { await task.result } onCancel: { task.cancel() }
         structureWork = nil
         return try result.get()
@@ -129,7 +133,7 @@ extension CoreMeguriRoundService {
     ) async throws -> MeguriStructureOutcome {
         let drains = drains
         let (connection, credentials) = try await admittedInputs()
-        return try await owned(since: drains) {
+        return try await owned(since: drains, busy: .refused(.busy)) {
             try await CoreEventStream.shared.start()
             let started = try await MaintenanceLane.shared.call(.providerStartStructureUpload) {
                 try connection.startStructureUpload(credentials: credentials)
@@ -162,6 +166,8 @@ extension CoreMeguriRoundService {
                 case .fullSyncRequired: return .fullSyncRequired
                 case .cancelled: return .cancelled
                 case .unavailable: return .unavailable
+                // Only a deck package import ends this way (`importDeckPackage`).
+                case .importNotCommitted: return .unavailable
                 case .saved(let upload): return .saved(MeguriStructureUpload(upload))
                 case .roundStopped(let round):
                     let phase = try await MaintenanceLane.shared.call(.providerRoundOutcome) { try round.outcome() }

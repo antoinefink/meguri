@@ -281,7 +281,9 @@ fn refusal(error: ApkgImportError) -> DeckImportRefusal {
         ApkgImportError::Stale => R::Stale,
         // Both are outcomes of their own; a caller that reaches this with
         // one lost its result.
-        ApkgImportError::ConfirmationRequired { .. } => R::Stale,
+        ApkgImportError::ConfirmationRequired { .. } => R::Engine {
+            error: CoreError::Internal { message: "an import confirmation was read as a refusal".into() },
+        },
         ApkgImportError::MediaCommitPending(_) => R::CommittedWithoutResult,
         ApkgImportError::NotetypeKindConflict { incoming, target } => R::NotetypeKindConflict { incoming, target },
         ApkgImportError::DeckTooDeep { name } => R::DeckTooDeep { name },
@@ -606,7 +608,9 @@ impl DeckImportSession {
     fn end(&self) {
         // A running apply keeps its own reference: the staging directory
         // goes when that apply ends.
-        if let Some(session) = self.inner.lock().unwrap_or_else(PoisonError::into_inner).take() { session.end(); }
+        // Taken out first: the staging is never removed under the lock.
+        let session = self.inner.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(session) = session { session.end(); }
     }
 }
 impl DeckImportConfirmation {
@@ -707,6 +711,11 @@ impl DeckImportSession {
         ask_structure: bool) -> Result<DeckImportApplyStart, CoreError> {
         callback::enter("DeckImportSession::start_apply");
         let engine = runtime::engine()?;
+        // The caller's reading of the service can be stale: a ready Meguri
+        // Sync binding always asks, so this call never commits a structural
+        // plan that the binding would then have to upload.
+        let ask_structure = ask_structure
+            || matches!(runtime::host()?.meguri_readiness(), Ok(meguri_sync::provider::MeguriReadiness::Ready));
         let session = self.shared();
         let token = confirmation.map(|confirmation| {
             if ask_structure { confirmation.token.without_structure() } else { confirmation.token() }
@@ -788,6 +797,8 @@ mod tests {
             (engine(EngineError::CommitCompleted { seq: meguri_engine::Seq(4), message: "m".into() }), R::CommittedWithoutResult),
             (engine(EngineError::MediaCommitPending { seq: meguri_engine::Seq(4), message: "m".into() }), R::CommittedWithoutResult),
             (engine(EngineError::Internal { message: "bug".into() }), R::Engine { error: CoreError::Internal { message: "bug".into() } }),
+            (engine(EngineError::Cancelled), R::Cancelled),
+            (ApkgImportError::MediaCommitPending(Box::new(result(true))), R::CommittedWithoutResult),
         ];
         for (error, expected) in cases { assert_eq!(refusal(error.clone()), expected, "{error:?}"); }
         // Each limit of I15.1 by its name.
