@@ -198,3 +198,26 @@ public struct StatsSparseMap<Value: Sendable & Hashable>: Sendable, Hashable {
         zip(keys, values).map { (key: $0, value: $1) }
     }
 }
+
+/// A kept map (the Statistics page keeps its last result on the device): read back only when
+/// its keys still ascend with one value each, so a damaged file never gives a wrong lookup.
+extension StatsSparseMap: Codable where Value: Codable {
+    private enum CodingKeys: String, CodingKey { case keys, values }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let keys = try container.decode([Int].self, forKey: .keys)
+        let values = try container.decode([Value].self, forKey: .values)
+        guard keys.count == values.count, zip(keys, keys.dropFirst()).allSatisfy({ $0 < $1 }) else {
+            throw DecodingError.dataCorruptedError(forKey: .keys, in: container,
+                                                   debugDescription: "keys must ascend, one value each")
+        }
+        self.init(keys: keys, values: values)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(keys, forKey: .keys)
+        try container.encode(values, forKey: .values)
+    }
+}

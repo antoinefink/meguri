@@ -10,7 +10,7 @@ import Synchronization
 // progress for the parts that wait, then its end. Reads only.
 
 /// The page's deck filter (`stats/history-reads` H1).
-public enum StatsPageScope: Sendable, Hashable {
+public enum StatsPageScope: Sendable, Hashable, Codable {
     case allDecks
     /// A deck and its subdecks, with the filtered-deck cards whose home deck is among them (G2.1).
     case deck(Int64)
@@ -27,7 +27,7 @@ public enum StatsPageScope: Sendable, Hashable {
 }
 
 /// G3's history values.
-public enum StatsHistory: Sendable, Hashable {
+public enum StatsHistory: Sendable, Hashable, Codable {
     /// Days −366 to 0 (and rows after `N`).
     case last12Months
     case allHistory
@@ -41,7 +41,7 @@ public enum StatsHistory: Sendable, Hashable {
 }
 
 /// The page's period (`stats/statistics-page` S3.2).
-public enum StatsPagePeriod: Sendable, Hashable, CaseIterable {
+public enum StatsPagePeriod: Sendable, Hashable, Codable, CaseIterable {
     case oneMonth, threeMonths, sixMonths, oneYear, all
 
     /// The history a request for this period reads (G3's round 11 line): 1M to 1Y read the
@@ -74,7 +74,7 @@ public enum StatsTier: Int, Sendable, Hashable, Comparable {
 }
 
 /// A part of the page request (H5); the raw value is its name.
-public enum StatsPart: String, Sendable, Hashable, CaseIterable {
+public enum StatsPart: String, Sendable, Hashable, Codable, CaseIterable {
     case cardCounts = "card_counts"
     case futureDue = "future_due"
     case intervals
@@ -174,7 +174,7 @@ public struct StatsPageRequest: Sendable, Hashable {
 
 /// G1's context: every value of a request is computed for it, so the page needs no clock of
 /// its own for its days. A later read for the result on screen passes it back.
-public struct StatsContext: Sendable, Hashable {
+public struct StatsContext: Sendable, Hashable, Codable {
     /// `N`, epoch seconds.
     public let nextDayAt: Int64
     /// The scheduler's day number.
@@ -188,6 +188,13 @@ public struct StatsContext: Sendable, Hashable {
     public let generation: UInt64
     public let seq: UInt64
 
+    public init(nextDayAt: Int64, today: UInt32, rolloverHour: UInt8, nowMilliseconds: Int64, utcOffsetSeconds: Int32,
+                zoneIdentifier: String, generation: UInt64, seq: UInt64) {
+        self.nextDayAt = nextDayAt; self.today = today; self.rolloverHour = rolloverHour
+        self.nowMilliseconds = nowMilliseconds; self.utcOffsetSeconds = utcOffsetSeconds
+        self.zoneIdentifier = zoneIdentifier; self.generation = generation; self.seq = seq
+    }
+
     init(_ raw: MeguriCoreBindings.StatsContext) {
         nextDayAt = raw.nextDayAt; today = raw.today; rolloverHour = raw.rolloverHour; nowMilliseconds = raw.nowMs
         utcOffsetSeconds = raw.utcOffsetSecs; zoneIdentifier = raw.zone; generation = raw.generation; seq = raw.seq
@@ -200,12 +207,17 @@ public struct StatsContext: Sendable, Hashable {
 }
 
 /// G7's keys and `fsrs`, as the request read them. The page writes none of them (S3.4).
-public struct StatsPreferences: Sendable, Hashable {
+public struct StatsPreferences: Sendable, Hashable, Codable {
     /// 0 Sunday, 1 Monday, 5 Friday, 6 Saturday.
     public let firstDayOfWeek: UInt8
     public let cardCountsSeparateInactive: Bool
     public let futureDueShowBacklog: Bool
     public let fsrs: Bool
+
+    public init(firstDayOfWeek: UInt8, cardCountsSeparateInactive: Bool, futureDueShowBacklog: Bool, fsrs: Bool) {
+        self.firstDayOfWeek = firstDayOfWeek; self.cardCountsSeparateInactive = cardCountsSeparateInactive
+        self.futureDueShowBacklog = futureDueShowBacklog; self.fsrs = fsrs
+    }
 
     init(_ raw: MeguriCoreBindings.StatsPreferences) {
         firstDayOfWeek = raw.firstDayOfWeek; cardCountsSeparateInactive = raw.cardCountsSeparateInactive
@@ -214,7 +226,7 @@ public struct StatsPreferences: Sendable, Hashable {
 }
 
 /// The scope's browse text (`stats/browse-queries` Q2).
-public enum StatsBrowseScope: Sendable, Hashable {
+public enum StatsBrowseScope: Sendable, Hashable, Codable {
     /// All Decks: an item's query is used alone.
     case none
     case text(String)
@@ -231,10 +243,14 @@ public enum StatsBrowseScope: Sendable, Hashable {
 }
 
 /// An unreadable row (G4): its table, column and row key.
-public struct StatsUnreadable: Sendable, Hashable {
+public struct StatsUnreadable: Sendable, Hashable, Codable {
     public let table: String
     public let column: String
     public let key: Int64
+
+    public init(table: String, column: String, key: Int64) {
+        self.table = table; self.column = column; self.key = key
+    }
 
     init(_ raw: MeguriCoreBindings.StatsUnreadable) {
         table = raw.table; column = raw.column; key = raw.key
@@ -242,7 +258,7 @@ public struct StatsUnreadable: Sendable, Hashable {
 }
 
 /// Why one part has no value; the request's other parts still return (H15).
-public enum StatsPartFailure: Sendable, Hashable {
+public enum StatsPartFailure: Sendable, Hashable, Codable {
     /// A Search scope for one of the page's own parts (H18).
     case unsupportedScope
     /// An unreadable row of the scope outside the window, for the parts that read all history.
@@ -265,7 +281,7 @@ public enum StatsPartFailure: Sendable, Hashable {
 }
 
 /// H9's `oldest_day`.
-public enum StatsOldestDay: Sendable, Hashable {
+public enum StatsOldestDay: Sendable, Hashable, Codable {
     /// The smallest day (H1) of a row of the scope.
     case day(Int)
     /// The scope has no row.
@@ -283,7 +299,7 @@ public enum StatsOldestDay: Sendable, Hashable {
 }
 
 /// What every part of a request is computed for (G8.2, H5's last line).
-public struct StatsPageHeader: Sendable, Hashable {
+public struct StatsPageHeader: Sendable, Hashable, Codable {
     public let refresh: UInt64
     /// The history the request read.
     public let history: StatsHistory
@@ -291,6 +307,12 @@ public struct StatsPageHeader: Sendable, Hashable {
     public let preferences: StatsPreferences
     public let browseScope: StatsBrowseScope
     public let oldestDay: StatsOldestDay
+
+    public init(refresh: UInt64, history: StatsHistory, context: StatsContext, preferences: StatsPreferences,
+                browseScope: StatsBrowseScope, oldestDay: StatsOldestDay) {
+        self.refresh = refresh; self.history = history; self.context = context; self.preferences = preferences
+        self.browseScope = browseScope; self.oldestDay = oldestDay
+    }
 
     init(_ raw: MeguriCoreBindings.StatsPageHeader) {
         refresh = raw.refresh; history = StatsHistory(raw.history); context = StatsContext(raw.context)
@@ -300,7 +322,7 @@ public struct StatsPageHeader: Sendable, Hashable {
 }
 
 /// A part's result.
-public enum StatsPartOutcome: Sendable, Hashable {
+public enum StatsPartOutcome: Sendable, Hashable, Codable {
     case data(StatsPartValue)
     case failed(StatsPartFailure)
 }
@@ -310,6 +332,10 @@ public struct StatsPartResult: Sendable, Hashable {
     public let part: StatsPart
     public let header: StatsPageHeader
     public let outcome: StatsPartOutcome
+
+    public init(part: StatsPart, header: StatsPageHeader, outcome: StatsPartOutcome) {
+        self.part = part; self.header = header; self.outcome = outcome
+    }
 }
 
 /// How far a waiting part has got (H15), at most every 100 ms.
@@ -390,12 +416,23 @@ enum StatsPageEvent: Sendable {
 public final class StatsPageStream: AsyncSequence, Sendable {
     public typealias Element = StatsPageMessage
 
-    let job: CoreJob
+    /// The core job; nil for a stream that replays given messages.
+    let job: CoreJob?
     private let messages: AsyncStream<StatsPageMessage>
     private let state: StatsPageCancel
+    private let stop: @Sendable () async -> Void
 
     init(job: CoreJob, messages: AsyncStream<StatsPageMessage>, state: StatsPageCancel) {
         self.job = job; self.messages = messages; self.state = state
+        stop = { try? await job.cancel() }
+    }
+
+    /// A stream of `messages`, for a fake `StatsService` in tests and previews: no core job runs.
+    /// It behaves as a core stream does: after `cancel()` (which then runs `onCancel`) only
+    /// `.end(.cancelled)` is delivered, and a stream that finishes without its end gives that end.
+    public init(replaying messages: AsyncStream<StatsPageMessage>,
+                onCancel: @escaping @Sendable () async -> Void = {}) {
+        job = nil; self.messages = messages; state = StatsPageCancel(); stop = onCancel
     }
 
     public func makeAsyncIterator() -> StatsPageIterator {
@@ -406,7 +443,7 @@ public final class StatsPageStream: AsyncSequence, Sendable {
     /// stops within 50 ms. A history build the request started goes on.
     public func cancel() async {
         state.cancelled.withLock { $0 = true }
-        try? await job.cancel()
+        await stop()
     }
 
     /// Starts `request` and returns its stream at once.
