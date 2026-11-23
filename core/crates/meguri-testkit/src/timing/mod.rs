@@ -7,6 +7,7 @@
 //! Timings are never goldens (T12). A report holds counts, times, operation
 //! names and build identifiers only (R1940).
 
+pub mod apkg_import;
 pub mod catalogue;
 pub mod image;
 pub mod package;
@@ -15,6 +16,7 @@ pub mod report;
 pub mod run;
 pub mod stub;
 
+pub use apkg_import::ApkgImport;
 pub use catalogue::Operation;
 pub use image::Summary;
 pub use protocol::{ErrorKind, Outcome, RunContext, RunFailure, Stage, TimedOperation, TimedRun};

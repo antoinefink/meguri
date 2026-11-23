@@ -50,3 +50,8 @@ path = "tests/main.rs"
 [[test]]
 name = "apkg_large"
 path = "tests/apkg_large.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "apkg_kill"
+path = "tests/apkg_kill.rs"

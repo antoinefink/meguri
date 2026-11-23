@@ -125,13 +125,25 @@ fn a_run_reports_every_operation_with_the_manifests_clock_and_the_collections_co
     assert_eq!(collection["graves"], json!(0));
     assert_eq!(collection.as_object().unwrap().len(), 8);
 
-    // Every operation, in catalogue order. Meguri's engine has no entry
-    // point the bridge opens collections through yet (CoreHost::open, U38),
-    // so each one is unsupported: nothing ran, no samples, no check.
+    // Every operation, in catalogue order. The deck package import runs
+    // (T6.11); each other one is unsupported: nothing ran, no samples, no
+    // check.
     let operations = report["operations"].as_array().unwrap();
     let names: Vec<&str> = operations.iter().map(|o| o["name"].as_str().unwrap()).collect();
     assert_eq!(names, CATALOGUE);
     for op in operations {
+        if op["name"] == json!("package.apkg_import") {
+            assert_eq!(op["status"], json!("ok"), "{op}");
+            assert_eq!(op["samples_ms"].as_array().unwrap().len(), 5, "{op}");
+            // The image's notes are all new to an empty collection, and its
+            // cards and review log arrive with them.
+            assert_eq!(
+                op["check"],
+                json!({"notes_added": counts["notes"], "cards": counts["cards"], "revlog": counts["revlog"]}),
+                "{op}"
+            );
+            continue;
+        }
         assert_eq!(op.as_object().unwrap().len(), 2, "{op}");
         assert_eq!(op["status"], json!("unsupported"), "{op}");
     }
