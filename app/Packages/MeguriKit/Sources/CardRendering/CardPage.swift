@@ -126,6 +126,11 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         webView.isOpaque = true
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.automaticallyAdjustsScrollIndicatorInsets = false
+        // N16.10: no scroll indicators on touch, including the one shown as a
+        // scrollable page appears. Scrolling itself is untouched; an element
+        // that scrolls inside the card keeps the card's own styling.
+        webView.scrollView.showsVerticalScrollIndicator = false
+        webView.scrollView.showsHorizontalScrollIndicator = false
         #endif
         let document = CardRuntime.pageDocument(platform: platform, appearance: appearance, mediaRoot: MediaOrigin.url, reviewExtra: reviewExtra)
         configuration.media.bind(webView, to: .init(resolver: resolver, document: document, diagnostics: diagnostics))
