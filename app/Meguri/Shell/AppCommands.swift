@@ -102,7 +102,7 @@ struct NativeCommandContext {
         return BrowseResponder.tableIsFirst(MacUndoResponder.shared.firstResponder)
             || (collection.browse.results.tableFocused && !(MacUndoResponder.shared.firstResponder is NSText))
         #else
-        return true
+        return collection.browse.results.tableFocused
         #endif
     }
     var canSelectSiblings: Bool { browseCommands?.canSelectSiblings == true }

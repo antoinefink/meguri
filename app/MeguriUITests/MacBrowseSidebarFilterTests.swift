@@ -32,7 +32,9 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
         new.click()
         XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, statusText(app))
         app.typeKey(.return, modifierFlags: [])
-        XCTAssertTrue(waitUntil { self.statusText(app) == whole }, "Return removes it: \(statusText(app))")
+        let readout = element(app, "browse.debug.responder")
+        XCTAssertTrue(waitUntil { self.statusText(app) == whole },
+                      "Return removes it: \(statusText(app)); keys at \(readout.exists ? readout.label : "unknown")")
 
         // A saved search whose token no section lists shows selected itself.
         element(app, "browse.sidebar.saved.dueToday").click()
@@ -55,7 +57,6 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
     func testTheFirstRowStartsBelowTheColumnHeader() throws {
         let (app, bundle) = try launch()
         try openBrowse(app, bundle)
-        continueAfterFailure = true
         let table = app.outlines.matching(identifier: "browse.results.table").firstMatch
         element(app, "browse.sidebar.state.review").click()
         XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, statusText(app))

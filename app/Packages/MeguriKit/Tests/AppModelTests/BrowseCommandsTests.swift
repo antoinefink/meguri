@@ -321,7 +321,17 @@ import Testing
         for index in 0...30 { results.rowAppeared(index) }
         for index in 0...30 { results.rowDisappeared(index) }
         results.tableDisappeared()
-        #expect(results.tableAppeared() == nil)
+        #expect(results.tableAppeared() == 0)
+        // The Mac reports the rows its scroll view shows; then those decide.
+        results.tableSettled()
+        results.tableScrolled(first: 200, last: 230)
+        for index in 0...30 { results.rowAppeared(index) }
+        results.tableDisappeared()
+        #expect(results.tableAppeared() == 215)
+        results.tableSettled()
+        results.tableScrolled(first: 0, last: 30)
+        results.tableDisappeared()
+        #expect(results.tableAppeared() == 0)
     }
 
     // MARK: Saved searches (T13)

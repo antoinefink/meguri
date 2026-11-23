@@ -149,6 +149,12 @@ import Testing
         model.activate(.flag(2)); model.activate(.flag(2))
         model.activate(.flag(0)); model.activate(.flag(0))
         #expect(model.query.tokens.isEmpty)
+        // VoiceOver's hint says a click removes the filter only where it does.
+        model.activate(.deck(10)); model.activate(.deck(20), click: .command)
+        #expect(!model.activationRemoves(.deck(10)) && !model.activationRemoves(.state(.new)))
+        model.activate(.deck(20), click: .command)
+        #expect(model.activationRemoves(.deck(10)))
+        model.activate(.deck(10))
         // A token holding two values, or an is-not token: a click makes it is {v}.
         model.activate(.deck(10)); model.activate(.deck(20), click: .command)
         model.activate(.deck(10))

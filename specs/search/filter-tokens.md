@@ -166,7 +166,7 @@ Browse's sidebar (`browser/sidebar`, changed by `browser/workspace` V6) lists va
 
 - A row shows selected exactly when its value is in K's token and the token is **is**. Rows of an **is not** token are not selected; the token in the field says "is not". Removing a token deselects its rows; the clear button empties the query.
 - A saved search row shows selected exactly while the query equals the query it sets: a built-in's token, or the reading of a user saved search's text made when it was last clicked (a user saved search not clicked since launch is not compared). Editing or removing a token in the field updates the rows at once (decided 2026-11-23).
-- Space or Return on the list with one filter row selected acts as a second click on it. VoiceOver reads a selected filter row as selected, with the hint "Activate again to remove this filter."
+- Space or Return on the list with one filter row selected acts as a second click on it. VoiceOver reads a selected filter row as selected; where a click would remove its filter (a saved search the query holds, or its kind's only value), it adds the hint "Activate again to remove this filter."
 - A ⌘-click keeps its add-or-remove behaviour; a click on a row whose kind's token holds other values, or is **is not**, makes it is {v} as above.
 - A deck row stands for that deck with its subdecks; a tag row for that tag with its descendants (T3).
 - A click never adds a second token of a kind (T2).

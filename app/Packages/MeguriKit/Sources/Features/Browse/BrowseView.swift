@@ -44,12 +44,12 @@ public struct BrowseView: View {
             .toolbar {
                 #if os(macOS)
                 // N21.3, N23.6 (VM probe of every placement, 2026-11-23): the title,
-                // then Cards / Notes and the sync button as secondary actions, which
-                // macOS draws after the title and before the principal search field;
-                // the Add menu and the inspector toggle trail it. A navigation item
-                // stands before the title; a primary one after the search field.
+                // then Cards / Notes as a secondary action, which macOS draws after
+                // the title (a navigation item stands before it); then the sync
+                // button, the Add menu and the inspector toggle. macOS draws the
+                // search field last (see BrowseSearchField's placement).
                 ToolbarItem(placement: .secondaryAction) { modePicker }
-                if let syncStatusItem { ToolbarItem(placement: .secondaryAction) { syncStatusItem } }
+                if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
                 if let addMenu { ToolbarItem(placement: .primaryAction) { addMenu } }
                 // N21.3: the inspector toggle, last.
                 ToolbarItem(placement: .primaryAction) { inspectorToggle }
@@ -210,12 +210,28 @@ extension BrowseModel {
 private struct BrowseKeys: View {
     let model: BrowseModel
     @State private var monitor = BrowseKeyMonitor()
+    #if DEBUG
+    /// The UI suites read which view had the keys at the last key press.
+    @State private var responder = ""
+    #endif
 
     var body: some View {
-        Color.clear
-            .accessibilityHidden(true)
-            .onAppear { monitor.start(model: model) }
-            .onDisappear { monitor.stop() }
+        ZStack {
+            Color.clear.accessibilityHidden(true)
+            #if DEBUG
+            Text(verbatim: responder)
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .accessibilityIdentifier("browse.debug.responder")
+            #endif
+        }
+        .onAppear {
+            #if DEBUG
+            monitor.onKey = { responder = $0 }
+            #endif
+            monitor.start(model: model)
+        }
+        .onDisappear { monitor.stop() }
     }
 }
 
@@ -227,13 +243,57 @@ private struct BrowseKeys: View {
 /// other focus keeps its keys, and sheets keep them all.
 @MainActor private final class BrowseKeyMonitor {
     private var token: Any?
+    var onKey: ((String) -> Void)?
+    /// Where the last click in Browse's window landed. SwiftUI keeps the
+    /// window's hosting view as the first responder after a click on the
+    /// table or the sidebar (VM, 2026-11-23), so the keys follow the click.
+    private var clicked: Area = .elsewhere
+    private enum Area { case table, sidebar, elsewhere }
 
     func start(model: BrowseModel) {
         stop()
-        token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak model] event in
+        token = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self, weak model] event in
             // Local monitors run on the main thread.
-            MainActor.assumeIsolated { Self.handles(event, model) } ? nil : event
+            MainActor.assumeIsolated {
+                guard let self, let model else { return false }
+                if event.type != .keyDown {
+                    self.clicked = Self.area(of: event)
+                    model.results.tableFocused = self.clicked == .table
+                    return false
+                }
+                self.onKey?(Self.describe(event.window?.firstResponder) + " · clicked \(self.clicked)")
+                return self.handles(event, model)
+            } ? nil : event
         }
+    }
+
+    private static func area(of event: NSEvent) -> Area {
+        guard let root = event.window?.contentView else { return .elsewhere }
+        let point = event.locationInWindow
+        func hit(_ view: NSView?) -> Bool {
+            guard let frame = (view?.enclosingScrollView ?? view).map({ $0.convert($0.bounds, to: nil) }) else { return false }
+            return frame.contains(point)
+        }
+        if hit(BrowseResponder.resultsTable(in: root)) { return .table }
+        if hit(BrowseResponder.sidebarList(in: root)) { return .sidebar }
+        return .elsewhere
+    }
+
+    /// The keys belong to the window rather than a view inside it.
+    private static func windowHasKeys(_ window: NSWindow) -> Bool {
+        guard let responder = window.firstResponder else { return true }
+        return responder === window || responder === window.contentView
+    }
+
+    /// The first responder's class and its first enclosing views' classes.
+    private static func describe(_ responder: NSResponder?) -> String {
+        var names = [responder.map { String(describing: type(of: $0)) } ?? "nil"]
+        var view = (responder as? NSView)?.superview
+        while let current = view, names.count < 6 {
+            names.append(String(describing: type(of: current)))
+            view = current.superview
+        }
+        return names.joined(separator: " < ")
     }
 
     func stop() {
@@ -241,19 +301,32 @@ private struct BrowseKeys: View {
         token = nil
     }
 
-    private static func handles(_ event: NSEvent, _ model: BrowseModel?) -> Bool {
-        guard let model, let window = event.window, window.sheetParent == nil, window.attachedSheet == nil else { return false }
+    private func handles(_ event: NSEvent, _ model: BrowseModel) -> Bool {
+        guard let window = event.window, window.sheetParent == nil, window.attachedSheet == nil else { return false }
         let flags = event.modifierFlags.intersection([.command, .option, .shift, .control])
         let key = event.charactersIgnoringModifiers?.lowercased()
         if key == "a" {
-            let take = flags == [.command, .option] || (flags == .command && BrowseResponder.tableIsFirst(window.firstResponder))
+            let inTable = BrowseResponder.tableIsFirst(window.firstResponder)
+                || (clicked == .table && Self.windowHasKeys(window))
+            let take = flags == [.command, .option] || (flags == .command && inTable)
             guard take, model.commands.canSelectAll else { return false }
             model.commands.selectAll()
             return true
         }
+        // ⌘⌫ after a click in the table: Note › Delete Note (N21.8). The menu
+        // item's key did not reach it while the window's hosting view had the keys.
+        if flags == .command, event.keyCode == 51, clicked == .table, Self.windowHasKeys(window),
+           model.commands.state(.delete).enabled {
+            model.commands.perform(.delete)
+            return true
+        }
         // Return or Space on the sidebar's one selected filter row: a second click (T9).
-        if flags.isEmpty, key == "\r" || key == " ", BrowseResponder.sidebarIsFirst(window.firstResponder),
-           model.selectedRows.count == 1, let row = model.selectedRows.first {
+        // The list draws that row selected beside Browse's: a row folded away or
+        // filtered out is not acted on.
+        let sidebar = BrowseResponder.sidebar(window.firstResponder)
+            ?? (clicked == .sidebar && Self.windowHasKeys(window) ? window.contentView.flatMap(BrowseResponder.sidebarList(in:)) : nil)
+        if flags.isEmpty, key == "\r" || key == " ", (sidebar?.numberOfSelectedRows ?? 0) >= 2,
+           model.selectedRows.count == 1, let row = model.selectedRows.first, model.activationRemoves(row) {
             model.activate(row)
             return true
         }
@@ -267,15 +340,43 @@ private struct BrowseKeys: View {
 /// first responder (SwiftUI gives it the table's accessibility identifier).
 public enum BrowseResponder {
     public static func tableIsFirst(_ responder: NSResponder?) -> Bool {
-        guard let table = responder as? NSTableView else { return false }
-        // The sidebar is an outline view too, without a column header.
-        return table.accessibilityIdentifier() == "browse.results.table" || table.headerView != nil
+        enclosing(responder, NSTableView.self).map { $0.accessibilityIdentifier() == "browse.results.table" || $0.headerView != nil } ?? false
     }
 
-    /// The sidebar's list (an outline view with no column header) has the keys.
-    public static func sidebarIsFirst(_ responder: NSResponder?) -> Bool {
-        guard let outline = responder as? NSOutlineView else { return false }
-        return outline.accessibilityIdentifier() == "browse.sidebar.list" || outline.headerView == nil
+    /// The sidebar's list (an outline view with no column header), when it has the keys.
+    public static func sidebar(_ responder: NSResponder?) -> NSOutlineView? {
+        enclosing(responder, NSOutlineView.self).flatMap { $0.accessibilityIdentifier() == "browse.sidebar.list" || $0.headerView == nil ? $0 : nil }
+    }
+
+    /// The results table in `root`: the table view with a column header.
+    public static func resultsTable(in root: NSView) -> NSTableView? {
+        first(in: root) { ($0 as? NSTableView)?.headerView != nil }.flatMap { $0 as? NSTableView }
+    }
+
+    /// The sidebar's list in `root`: the outline view with no column header.
+    public static func sidebarList(in root: NSView) -> NSOutlineView? {
+        first(in: root) { ($0 as? NSOutlineView).map { $0.headerView == nil } ?? false }.flatMap { $0 as? NSOutlineView }
+    }
+
+    private static func first(in view: NSView, where test: (NSView) -> Bool) -> NSView? {
+        if test(view) { return view }
+        for child in view.subviews {
+            if let found = first(in: child, where: test) { return found }
+        }
+        return nil
+    }
+
+    /// The table view holding the first responder: SwiftUI may make a view
+    /// inside the table, not the table itself, the first responder (VM,
+    /// 2026-11-23). A text input never counts: it keeps its own keys.
+    private static func enclosing<T: NSTableView>(_ responder: NSResponder?, _ type: T.Type) -> T? {
+        guard !(responder is NSText) else { return nil }
+        var view = responder as? NSView
+        while let current = view {
+            if let table = current as? T { return table }
+            view = current.superview
+        }
+        return nil
     }
 }
 #endif

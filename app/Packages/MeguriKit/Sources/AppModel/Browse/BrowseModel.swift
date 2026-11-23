@@ -414,6 +414,17 @@ public final class BrowseModel {
         return rows
     }
 
+    /// A click on `row` would remove its filter (T9): a saved search the
+    /// query holds, or the one value of its kind's **is** token.
+    public func activationRemoves(_ row: BrowseSidebarTag) -> Bool {
+        switch row {
+        case .builtIn, .saved: return selectedRows.contains(row)
+        default:
+            guard let value = value(of: row) else { return false }
+            return query.clicking(value).tokens.count < query.tokens.count
+        }
+    }
+
     /// The list's selection: the Browse row, then the selected filter rows.
     public var listSelection: Set<BrowseSidebarTag> {
         selectedRows.union([.section(.browse)])

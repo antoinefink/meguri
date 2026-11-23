@@ -2,6 +2,9 @@ import AppModel
 import CoreBridge
 import DesignSystem
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// One row of the table: its index in the shown list. Its cells read the
 /// row from `BrowseResults` when it has been read (`browser/result-sets`
@@ -69,6 +72,9 @@ struct BrowseTable: View {
                 model.inspector.show()
             }
             .focused($focused)
+            #if os(macOS)
+            .background { BrowseScrollReporter(results: results, token: list?.token) }
+            #endif
             // Another handle shown is another table: no diff of its rows with the last list's.
             .id(list?.token ?? 0)
             .accessibilityIdentifier("browse.results.table")
@@ -84,7 +90,9 @@ struct BrowseTable: View {
                 // row a new list brought into view.
                 let kept = results.tableAppeared()
                 let target = results.scrollTarget.flatMap { $0.token == list?.token ? $0.index : nil }
-                guard kept != nil || target != nil else { return results.tableSettled() }
+                // Kept at its top (row 0): no scroll, and no older target either.
+                guard kept.map({ $0 > 0 }) ?? (target != nil) else { return results.tableSettled() }
+                let request = results.scrollTarget
                 Task { @MainActor in
                     if let kept { proxy.scrollTo(kept, anchor: .center) } else if let target { proxy.scrollTo(target) }
                     // A table shown again may not have laid its rows out yet: the
@@ -92,7 +100,8 @@ struct BrowseTable: View {
                     // at its top).
                     await Task.yield()
                     try? await Task.sleep(for: .milliseconds(60))
-                    if let kept { proxy.scrollTo(kept, anchor: .center) }
+                    // Unless a newer scroll request came meanwhile.
+                    if let kept, results.scrollTarget == request { proxy.scrollTo(kept, anchor: .center) }
                     results.tableSettled()
                 }
             }
@@ -292,3 +301,81 @@ enum NSFontSize {
     static var systemName: String { UIFont.preferredFont(forTextStyle: .body).fontName }
     #endif
 }
+
+#if os(macOS)
+/// V1 on the Mac: the rows the results table's scroll view shows, read from
+/// the table itself whenever its clip view moves. SwiftUI's appear and
+/// disappear events of the table's cells did not follow a scroll in the VM
+/// (2026-11-23), so the kept row came back at the top.
+private struct BrowseScrollReporter: NSViewRepresentable {
+    let results: BrowseResults
+    /// The list this table shows.
+    let token: UInt64?
+
+    func makeNSView(context: Context) -> Reporter { Reporter(results: results) }
+    func updateNSView(_ view: Reporter, context: Context) {
+        view.results = results
+        view.token = token
+    }
+
+    final class Reporter: NSView {
+        var results: BrowseResults
+        var token: UInt64?
+        private weak var table: NSTableView?
+        private var observer: NSObjectProtocol?
+
+        init(results: BrowseResults) {
+            self.results = results
+            super.init(frame: .zero)
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+            table = nil
+            guard window != nil else { return }
+            attach(tries: 100)
+        }
+
+        /// Browse is left: the rows shown last are kept, whatever moved them.
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil { report(leaving: true) }
+            super.viewWillMove(toWindow: newWindow)
+        }
+
+        /// The window's results table (the table view with a column header),
+        /// looked for again until SwiftUI has made it.
+        private func attach(tries: Int) {
+            guard window != nil, table == nil else { return }
+            table = window?.contentView.flatMap(BrowseResponder.resultsTable(in:))
+            guard let clip = table?.enclosingScrollView?.contentView else {
+                if tries > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.attach(tries: tries - 1) }
+                }
+                return
+            }
+            clip.postsBoundsChangedNotifications = true
+            observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip,
+                                                              queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.report() }
+            }
+        }
+
+        private func report(leaving: Bool = false) {
+            guard let table = table ?? window?.contentView.flatMap(BrowseResponder.resultsTable(in:)),
+                  let clip = table.enclosingScrollView?.contentView else { return }
+            // The rows under the clip view's insets (the toolbar, the header) are not shown.
+            var shown = clip.documentVisibleRect
+            shown.origin.y += clip.contentInsets.top
+            shown.size.height -= clip.contentInsets.top + clip.contentInsets.bottom
+            let rows = table.rows(in: table.convert(shown, from: clip.documentView ?? table))
+            guard rows.length > 0 else { return }
+            guard let token else { return }
+            results.tableScrolled(first: rows.location, last: rows.location + rows.length - 1, token: token, leaving: leaving)
+        }
+    }
+}
+#endif
