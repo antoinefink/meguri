@@ -209,6 +209,8 @@ extension TestHooks {
             return rows
         }
         func saveSearch(name: String, text: String) async throws {}
+        func renameSavedSearch(_ old: String, to name: String) async throws {}
+        func deleteSavedSearch(_ name: String) async throws {}
         private static let flagLabels = ["Red", "Orange", "Green", "Blue", "Pink", "Turquoise", "Purple"]
         func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
             switch section {

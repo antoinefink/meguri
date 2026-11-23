@@ -60,3 +60,19 @@ six-second MCP queue.
   the late match and absent term each took one call. Their backend p95
   latencies were 67.82 ms and 71.82 ms. The server suite also checks
   cursor traversal when the production deadline ends the page.
+
+## Reconciliation with master
+
+- Merged master at `bc8878ca2da90b20270f2ad3100d873a7e5a2bcf` into the PR
+  branch. The descriptor list carries both the SQLite download entry and
+  the search continuation guidance.
+- Reviewer `s-20261123T104930Z-8cb19270` approved all eight combined MCP
+  files in `cleanroom/20261123T114919Z-54817` after complete-content review.
+  The orchestrator verified their PUBLIC digests and refreshed two pins.
+  - `server/src/mcp_service/authority_tests.rs`
+    `ce8b31f955e6aac28cf117bcb041cee67566273a6c6583bd560285c46b23a4bc`
+  - `specs/servers/meguri-collection-mcp.md`
+    `ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8`
+- Scoped privacy check `private/20261123T115201Z-12757` passed. All 416
+  server tests passed in `sync-server-test/20261123T114952Z-72240`.
+  Server lint passed in `sync-server-lint/20261123T115151Z-72235`.

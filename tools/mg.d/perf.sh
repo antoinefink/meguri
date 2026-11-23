@@ -322,7 +322,7 @@ MG_PERF_UI_CHECK_SUITES="PerfTestCaseTests CardSwapTimingGateTests"
 # The suites that open the generated 150k collection: perf-ui makes it in
 # this checkout (tools/mg fixtures 150k) and, for the test VM, puts it at its
 # own path there, where the test finds it (build/fixtures/<profile>-1-150k).
-MG_PERF_UI_150K_SUITES="BrowserSearchPerfTests"
+MG_PERF_UI_150K_SUITES="BrowserSearchPerfTests StatsPerfTests"
 
 # mg__perf_ui_fixtures <suite>...: makes the 150k collection for the suites
 # that need it, into MG_PERF_UI_FIXTURE (empty when none does), before the

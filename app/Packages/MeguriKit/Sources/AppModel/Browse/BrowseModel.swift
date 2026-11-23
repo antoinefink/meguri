@@ -92,6 +92,8 @@ public final class BrowseModel {
 
     /// The results table (U270a): the query's rows in the mode.
     public let results: BrowseResults
+    /// The commands on its rows (U275).
+    public let commands: BrowseCommands
 
     // MARK: The search field (U271)
 
@@ -114,6 +116,8 @@ public final class BrowseModel {
     public internal(set) var valueCounts: [FilterValue: UInt64] = [:]
     /// Save Search… is asking for a name (T13).
     public var savingSearch: SavingSearch?
+    /// Rename… is asking for a saved search's new name (T13).
+    public var renamingSearch: RenamingSearch?
     /// A Field token's (or Field suggestion's) Contains… is asking for its text (T10).
     public var editingContains: EditingContains?
     /// Saved searches' suggestions read again after a Save Search.
@@ -140,7 +144,7 @@ public final class BrowseModel {
     @ObservationIgnored private let store: BrowseDeviceStore
     /// Whether the collection is open and ready for reads.
     @ObservationIgnored public var ready: @MainActor () -> Bool = { true } {
-        didSet { let ready = ready; results.ready = { ready() } }
+        didSet { let ready = ready; results.ready = { ready() }; commands.ready = { ready() } }
     }
     /// A handed search whose reading failed, tried again on the next appear.
     var pendingSearch: String?
@@ -151,7 +155,11 @@ public final class BrowseModel {
     public init(backend: any BrowseBackend, store: BrowseDeviceStore = BrowseDeviceStore(defaults: nil)) {
         self.backend = backend
         self.store = store
-        results = BrowseResults(backend: backend)
+        let results = BrowseResults(backend: backend)
+        self.results = results
+        let commands = BrowseCommands(results: results)
+        self.commands = commands
+        results.selectionObserver = { [weak commands] in commands?.selectionChanged() }
         let device = store.load()
         self.device = device
         folded = device.folded
@@ -415,6 +423,8 @@ public final class BrowseModel {
     /// and counts are read again while Browse shows, else when it next does.
     public func changesCommitted(_ changes: ChangeSet, seq: UInt64) {
         results.changesCommitted(changes, seq: seq)
+        // The selection's counts (suspended, buried, note types) may have changed.
+        if changes.wholeCollection || !changes.cards.isEmpty || !changes.notes.isEmpty { commands.rowsChanged() }
         // Saved searches and flag names are config keys (K7, K8).
         let names = changes.configKeys.contains { $0.name == "savedFilters" || $0.name == "flagLabels" }
         guard changes.wholeCollection || !changes.cards.isEmpty || !changes.notes.isEmpty || !changes.decks.isEmpty
@@ -436,6 +446,7 @@ public final class BrowseModel {
         epoch &+= 1
         // A save on its way went with the old epoch: Save can be tried again.
         if savingSearch?.saving == true { savingSearch?.markFailed() }
+        commands.reset()
         results.collectionReady()
         readies &+= 1
         if let unwritten = unwrittenMode, unwritten == mode { writeMode(unwritten) }
@@ -458,6 +469,7 @@ public final class BrowseModel {
     /// The collection was replaced: the next open is a first open (T14).
     public func collectionReplaced() {
         epoch &+= 1
+        commands.reset()
         results.collectionReplaced()
         countsTask?.cancel()
         opened = false
@@ -471,7 +483,7 @@ public final class BrowseModel {
         counts = [:]; tagNotes = [:]; tagExpansion = [:]; tagWrites = [:]; filter = ""
         liveRun?.cancel()
         suggestions = []; suggestionScope = nil; suggestedField = nil; tokenOffers = [:]; valueCounts = [:]
-        savingSearch = nil; editingContains = nil; committedText = nil
+        savingSearch = nil; renamingSearch = nil; editingContains = nil; committedText = nil
         stale = true
         device.runText = nil
         device.notesMode = nil

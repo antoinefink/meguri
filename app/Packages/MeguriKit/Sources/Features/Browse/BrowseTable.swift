@@ -37,7 +37,10 @@ nonisolated struct BrowseColumn: Identifiable, Hashable {
 /// `Table` with the state column first, then the set's columns, system
 /// selection and headers whose sort indicator is the order shown.
 struct BrowseTable: View {
-    let results: BrowseResults
+    let model: BrowseModel
+    @FocusState private var focused: Bool
+
+    private var results: BrowseResults { model.results }
 
     var body: some View {
         let list = results.list
@@ -57,12 +60,34 @@ struct BrowseTable: View {
                     TableRow(line)
                 }
             }
+            // N21.5: the commands on the rows it was opened on (the selection,
+            // or a row outside it, which a secondary click outlines).
+            .contextMenu(forSelectionType: Int.self) { rows in
+                BrowseRowMenu(model: model, rows: rows)
+            }
+            .focused($focused)
             // Another handle shown is another table: no diff of its rows with the last list's.
             .id(list?.token ?? 0)
             .accessibilityIdentifier("browse.results.table")
-            .onChange(of: results.scrollTarget, initial: true) {
+            .onChange(of: results.scrollTarget) {
                 guard let target = results.scrollTarget, target.token == list?.token else { return }
                 proxy.scrollTo(target.index, anchor: .center)
+            }
+            .onChange(of: focused, initial: true) { _, focused in results.tableFocused = focused }
+            .onAppear {
+                // V1: back at the row it showed when Browse was left; else at the
+                // row a new list brought into view.
+                let kept = results.tableAppeared()
+                let target = results.scrollTarget.flatMap { $0.token == list?.token ? $0.index : nil }
+                guard let row = kept ?? target else { return results.tableSettled() }
+                Task { @MainActor in
+                    proxy.scrollTo(row, anchor: .center)
+                    results.tableSettled()
+                }
+            }
+            .onDisappear {
+                results.tableDisappeared()
+                results.tableFocused = false
             }
         }
     }
@@ -165,6 +190,7 @@ struct BrowseStateCell: View {
         .accessibilityLabel(symbol.map { Text(verbatim: $0.label) } ?? Text(verbatim: ""))
         .accessibilityIdentifier(row?.id.map { "browse.table.row.\($0)" } ?? "browse.table.placeholder.\(index)")
         .onAppear { results.rowAppeared(index) }
+        .onDisappear { results.rowDisappeared(index) }
     }
 
     struct Symbol {

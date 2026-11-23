@@ -154,8 +154,8 @@
         "sha256": "e9537f0f1998c487e7636b5951eaa355cf6655d568457f044c7af339d7604e76"
       },
       "src/consent.tsx": {
-        "bytes": 9033,
-        "sha256": "5b56531943a6b8069bbe5efdf6a8f4f971c9f30ce05d9d95d478976bc36b9b8f"
+        "bytes": 9095,
+        "sha256": "8d8afbb0c6dbc78639d6291b7c9c2177102848f72c451a88adc4fbe4c7db6e2a"
       },
       "src/favicon-512.png": {
         "bytes": 430567,
@@ -206,8 +206,8 @@
         "sha256": "e8f82051540e0cbf0fce3d430d5856e63e80a6b454247f81dabf89349b9b3c4f"
       },
       "tests/browser/mcp.spec.ts": {
-        "bytes": 37452,
-        "sha256": "e9199df938f27417f8353b1abfbb362927b19197edd305fb0b9bea48b960c8bf"
+        "bytes": 37514,
+        "sha256": "9377050f417a5b5a72d1f83b0f54944233e1d1891e36af1954ec902780dd748c"
       },
       "tests/browser/media-upload.spec.ts": {
         "bytes": 10091,
@@ -285,8 +285,8 @@
         "sha256": "303972069cba005453abe7939235e27b5622e986968adb0344836cb0475875d9"
       },
       "server/src/httpapi/mod.rs": {
-        "bytes": 22607,
-        "sha256": "d567f05ac0f4545908accd28a7e73f385840ceee3c154f68b5f5c7ed5171d391"
+        "bytes": 24247,
+        "sha256": "1812f9c8613cd1341e154ad685dfc953be280278ebc8908b316ece993b45d122"
       },
       "server/src/webassets/mod.rs": {
         "bytes": 4527,

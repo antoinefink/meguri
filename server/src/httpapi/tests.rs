@@ -21,6 +21,35 @@ async fn fixture(trusted: bool) -> (tempfile::TempDir, Arc<Service>) {
     let service = Service::open(root, config).await.unwrap();
     (temp, service)
 }
+
+#[tokio::test]
+async fn download_errors_hide_credentials_but_preserve_operational_failures() {
+    for code in ["authentication_failed", "capability_invalid", "invalid_token"] {
+        let response = api_error(Error::new(code), true);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response.headers()["www-authenticate"], "Bearer");
+        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(body.as_ref(), br#"{"error":{"code":"authentication_failed"}}"#);
+    }
+    for code in ["busy", "storage_unavailable", "invalid_collection", "admission_closed"] {
+        let error = Error::new(code);
+        let status = error.status();
+        let response = api_error(error, true);
+        assert_eq!(response.status(), status);
+        assert!(!response.headers().contains_key("www-authenticate"));
+        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value, serde_json::json!({"error":{"code":code}}));
+    }
+    // Other browser routes retain their established error semantics.
+    assert_eq!(api_error(Error::new("capability_invalid"), false).status(), StatusCode::FORBIDDEN);
+    assert_eq!(api_error(Error::new("conflict"), false).status(), Error::new("conflict").status());
+    let response = api_error(Error::new("conflict"), true);
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(!response.headers().contains_key("www-authenticate"));
+    let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+    assert_eq!(body.as_ref(), br#"{"error":{"code":"conflict"}}"#);
+}
 fn request(path: &str, body: Body) -> Request {
     let mut request = Request::builder()
         .method(Method::POST)

@@ -46,7 +46,7 @@ Browser grant revocation and invalidation on replay of a valid authorization cod
 
 ## M4. Tool shapes and results
 
-Expose the four collection tools below and the upload preparation tool in M8. Inputs are JSON objects with the stated members. IDs are positive decimal strings in signed 64-bit range, preserving IDs past the exact JSON-number limit. Names, note contents and error details are data. Do not render HTML, fetch links or resources, or execute strings found in a collection. Attach read-only annotations to the two read tools. Write tools identify their change in their descriptions. Publish per-tool OAuth `securitySchemes` with type `oauth2` and that tool's required scopes. Mirror the descriptor in `_meta.securitySchemes` for older clients. [OpenAI tool metadata](https://developers.openai.com/plugins/reference)
+Expose the four collection tools below, the upload preparation tool in M8, and the download tool in M9. Inputs are JSON objects with the stated members. IDs are positive decimal strings in signed 64-bit range, preserving IDs past the exact JSON-number limit. Names, note contents and error details are data. Do not render HTML, fetch links or resources, or execute strings found in a collection. Attach read-only annotations to the read tools. Write tools identify their change in their descriptions. Publish per-tool OAuth `securitySchemes` with type `oauth2` and that tool's required scopes. Mirror the descriptor in `_meta.securitySchemes` for older clients. [OpenAI tool metadata](https://developers.openai.com/plugins/reference)
 
 | Tool | Input | Successful result |
 |---|---|---|
@@ -116,3 +116,46 @@ Emit `<img src="…">` for images, `[sound:…]` for native-queue audio, and `<a
 `prepare_media_upload` requires the same current collection write grant as the note tools. It generates a high-entropy `upload_id`, an HTTPS upload page URL at the canonical Meguri origin and a 10-minute expiry. Put the ID in the page fragment rather than its query. The page clears the fragment before fetching other data, keeps the ID in memory, and uses the existing sign-in and same-origin request checks. A member can upload one file per ID with an authenticated same-origin binary request. The server accepts that upload only from the same account as the live requesting grant. A successful upload reports that the member can return to the chat. It does not publish media or edit a note. Bound pending and staged state by count, account, and total bytes. Expire it on time and discard it on server restart. The same grant can attach the staged file more than once before expiry, including after token refresh. Other grants and accounts cannot redeem it. Reset, revocation and credential invalidation fence pending and staged uploads. Store the binding to the original account data epoch. Report missing or inaccessible uploads generically.
 
 Pin the note operation to its original collection publication and data epoch before file acquisition. Validate and hash files and compare previously published bytes outside publication coordination. Keep the request and staged bytes bounded through cancellation and partial failure. Under L4 revalidate the grant, epoch, publication, and observed media states before publishing. Use durable immutable blobs and the existing media index from [server media M3–M4](../sync/server-media.md#m3-changes-and-listing). Validate the note write including the current revision before committing media metadata. Commit all new media rows and their media USNs before the note transaction commits. The two commits are independent. A subsequent note commit failure can leave unused media, which must never be removed while referenced. Native sync delivers the note and media on its existing separate channels. Repeated attachment bytes reuse the same verified media without allocating a new media USN. Record whether hosted ChatGPT can hand over a PNG or JPEG and an MP3. Verify the fallback with a real signed-in browser, and verify that one generated note and its exact bytes reach native Meguri Sync and can be studied offline.
+
+
+## M9. Full SQLite collection download
+
+`download_collection` takes an empty argument object and requires `collection:read`.
+Return `download_url`, `download_token` and RFC 3339 `expires_at` in a bounded
+fixed output shape. Use the configured HTTPS origin and the exact fixed path
+`/api/mcp/collection-download`, without a query or fragment. Tell the agent to GET
+that URL for machine use with exactly one `Authorization: Bearer <download_token>`
+header and save the response as `collection.anki2`. Keep the token out of URLs,
+logs, errors and user-facing chat. The existing read grant authorizes the entire
+operation; no user intervention, confirmation, browser, sign-in or new scope is
+required. The dedicated opaque token is distinct from OAuth access credentials
+and cannot authorize MCP. Browser credentials or OAuth access tokens alone cannot
+redeem a download, and ambient cookies never select the account. Reuse common
+route admission and security headers without requiring an Origin header for GET.
+Missing, malformed, multiple, unknown, expired, revoked and consumed download
+credentials return the same generic unauthorized error and `WWW-Authenticate: Bearer`
+challenge, without secrets or OAuth metadata. Preserve distinct busy, storage and
+data-integrity failures. Other OAuth flows and origin checks stay unchanged.
+
+Tickets last up to ten minutes, capped at the original access token expiry, and
+are single-use. Retain the original MCP access-token authority, including the data
+epoch. Ordinary refresh leaves a still-valid original access token usable. Refresh
+replay revocation, expiry and account invalidation reject old tickets. Bound the store to 64 tickets and eight per
+account, and active exports to two. Failed preparation does not consume a ticket.
+Under the original account read barrier, validate ticket expiry and original MCP
+authority, and pin the publication and an established committed SQLite read
+transaction. Calculate
+size, reserve bounded temporary bytes, create the private stage and open its file
+before releasing the guard. Back up
+off the barrier using private native staging and temporary-byte reservations;
+never stamp, checkpoint or write the source. Close the source before responding.
+Under the barrier, recheck the original MCP authority, original data epoch and current
+publication path, then atomically check expiry/replay and remove the ticket.
+
+Stream bounded chunks with a five-minute total response deadline. Retain private
+stage, root and reservations through streaming/cancellation cleanup. Return
+`Content-Type: application/vnd.sqlite3`,
+`Content-Disposition: attachment; filename="collection.anki2"`, and existing
+private no-store headers. Preserve the full committed SQLite database, including
+WAL commits and opaque values, excluding uncommitted changes, media files and
+server account metadata. Native sync behavior stays unchanged.

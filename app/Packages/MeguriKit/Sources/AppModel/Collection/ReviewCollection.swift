@@ -373,6 +373,18 @@ public final class ReviewCollection: ChangeFanoutSink {
             defer { self.navigation.browseSearch = "" }
             return self.navigation.browseSearch
         }
+        // U275: the commands write as the deck commands do (no review, sheet or other
+        // collection work), and title their undo steps after themselves (V8.3).
+        value.commands.ready = { [weak self] in
+            guard let self else { return false }
+            return self.browseReadable && self.deckNamesAllowed(host: .main, route: nil)
+        }
+        value.commands.stepRecorded = { [weak self] seq, title in self?.collectionUndo.name(step: seq, title) }
+        value.commands.openNoteType = { [weak self] id in
+            guard let self else { return }
+            self.noteTypes.selection = id
+            self.navigation.select(.section(.noteTypes))
+        }
         browseOwner = value
         return value
     }

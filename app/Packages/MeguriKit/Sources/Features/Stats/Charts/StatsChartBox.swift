@@ -286,25 +286,45 @@ public struct StatsChartBox<Accessory: View>: View {
 
     // MARK: Container
 
-    /// N25.3: the system group box on the Mac and the iPad at regular width; it
-    /// takes the height its row gives it, so the boxes of a row share it. At
-    /// compact width (iPhone, the folded Duo, a narrow iPad) the box is a
-    /// section-like group on the grouped background, as inset grouped lists
-    /// draw their sections (N25.6).
     @ViewBuilder private func container(@ViewBuilder _ content: () -> some View) -> some View {
+        StatsBoxContainer(content: content)
+    }
+}
+
+/// A box's frame (N25.3, N25.6), shared by the chart boxes and the boxes that are not charts
+/// (Activity, the tables): the system group box on the Mac and the iPad at regular width, which
+/// takes the height its row gives it, so the boxes of a row share it; at compact width (iPhone,
+/// the folded Duo, a narrow iPad) a section-like group on the grouped background, as inset
+/// grouped lists draw their sections.
+///
+/// Every box keeps one even inset of about 16 points on all four sides, as the touch group box
+/// and the grouped sections draw theirs (Antoine, 2026-11-23: "not enough internal margin around
+/// this grey section"). The Mac's group box insets its content by only about 4 points, so the
+/// content adds `Spacing.small` inside it there; the touch group box already insets by
+/// `Spacing.medium`.
+struct StatsBoxContainer<Content: View>: View {
+    private let content: Content
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
         #if os(macOS)
         GroupBox {
-            content()
+            content
+                .padding(Spacing.small)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         #else
         if horizontalSizeClass == .regular {
             GroupBox {
-                content()
+                content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         } else {
-            content()
+            content
                 .padding(Spacing.medium)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(Color(uiColor: .secondarySystemGroupedBackground), in: Radius.rounded(Radius.large))

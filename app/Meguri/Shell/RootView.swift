@@ -233,7 +233,8 @@ struct RootView: View {
     /// Opens a `meguri://` link; a refused one is explained in a short alert
     /// (U153 turns it into a status message).
     private func open(_ url: URL) async {
-        guard case let .refused(refusal) = await DeepLinkRouter.open(url, in: navigation, deckExists: features.deckExists) else { return }
+        guard case let .refused(refusal) = await DeepLinkRouter.open(url, in: navigation,
+            browseAvailable: features.availableSections.contains(.browse), deckExists: features.deckExists) else { return }
         #if os(macOS)
         // An alert while the app is hidden closes its window (app/AGENTS.md).
         await NSApplication.shared.untilUnhidden()
@@ -245,6 +246,7 @@ struct RootView: View {
         switch refusal {
         case .unknownLink: Text("Meguri doesn’t know this link.")
         case let .missingDeck(deck): Text("No deck has the ID \(String(deck.rawValue)).")
+        case .browseUnavailable: Text("Browse isn’t available on this device yet.")
         }
     }
 }

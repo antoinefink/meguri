@@ -11,6 +11,9 @@ public final class ReviewCoordinator {
     public enum Phase: Equatable { case loading, question, answer, transition, waiting, finished, ended, error }
     public private(set) var phase: Phase = .loading
     public private(set) var item: ReviewHeadItem?
+    /// The head item whose side is on screen, for the answer area's labels. `item`
+    /// moves to a new head as soon as it is read, before its card is presented.
+    public private(set) var shownItem: ReviewHeadItem?
     public private(set) var counts = ReviewCounts(new: 0, learning: 0, review: 0)
     public private(set) var sessionID: UInt64?
     public private(set) var notice: String?
@@ -67,7 +70,23 @@ public final class ReviewCoordinator {
     private var terminalPresentation: Phase?
     private enum PresentationIntent: Equatable { case automatic, explicit, restoration(UUID) }
     private var restorationID: UUID?
-    private var busy = false
+    private var busy = false { didSet { if !busy { underCard = false } } }
+    /// The running operation is a read nobody asked for (an event's or a
+    /// deadline's refresh, a media retry) under the card on screen: that side
+    /// and its controls stay as they are until a replacement is ready, never
+    /// an empty answer area (Antoine, 2026-11-22: Show Answer flashed after a
+    /// sync round). Input meanwhile is held, then given once the read is done.
+    private var underCard = false
+    private enum HeldInput {
+        case reveal(inputTime: TimeInterval)
+        case rate(ReviewRating, inputTime: TimeInterval, instant: Date, item: ReviewHeadItem)
+        case restore(redo: Bool, step: ReviewUndoStatus)
+    }
+    private var heldInput: (input: HeldInput, presentation: UInt64, at: TimeInterval)?
+    /// A held input older than this is dropped: a press acts at once or not at all.
+    static let heldInputLimit: TimeInterval = 1
+    /// Counts the sides shown: a held input applies only to the side it was given on.
+    private var presentationRevision: UInt64 = 0
     private var refreshPending = false
     private var forceQuestion = false
     private var pendingAnswer: ReviewRecord.Answer?
@@ -137,10 +156,12 @@ public final class ReviewCoordinator {
             (phase == .waiting || phase == .finished)
     }
     public var canRefresh: Bool { !busy && !paused && !closingAdmission && sessionID != nil && phase != .ended }
-    public var canReveal: Bool { phase == .question && !busy && !paused && !editingNote }
-    public var canRate: Bool { phase == .answer && !busy && !paused && !editingNote }
-    public var canUndo: Bool { if case .available = undoStatus { return !busy && !paused && !editingNote && phase != .ended && !undoHeld() }; return false }
-    public var canRedo: Bool { if case .available = redoStatus { return !busy && !paused && !editingNote && phase != .ended && !undoHeld() }; return false }
+    public var canReveal: Bool { phase == .question && admitsInput && !paused && !editingNote }
+    public var canRate: Bool { phase == .answer && admitsInput && !paused && !editingNote }
+    public var canUndo: Bool { if case .available = undoStatus { return admitsInput && !paused && !editingNote && phase != .ended && !undoHeld() }; return false }
+    public var canRedo: Bool { if case .available = redoStatus { return admitsInput && !paused && !editingNote && phase != .ended && !undoHeld() }; return false }
+    /// Idle, or reading under the card on screen, which holds the input until it is done.
+    private var admitsInput: Bool { !busy || (underCard && showsCard) }
     /// N20.8: Edit Note acts on a presented card, on either side, and never
     /// while a transition, a pause or another open form owns the screen.
     public var canEditNote: Bool {
@@ -294,9 +315,13 @@ public final class ReviewCoordinator {
     }
 
     public func reveal() {
+        let inputTime = uptime()
+        if phase == .question, hold(.reveal(inputTime: inputTime)) { return }
+        reveal(inputTime: inputTime)
+    }
+    private func reveal(inputTime: TimeInterval) {
         guard phase == .question, !busy, !paused, !editingNote else { return }
         busy = true; phase = .transition
-        let inputTime = uptime()
         operation = Task {
             #if DEBUG
             let logger = Logger(subsystem: "Meguri", category: "ReviewAnswerStage")
@@ -324,6 +349,7 @@ public final class ReviewCoordinator {
                     try Task.checkCancellation()
                     sideIsAnswer = true
                     answerShownUptime = uptime()
+                    presentationRevision &+= 1
                     phase = .answer
                 }
             } catch { nativeInput?.failed(error); fail(error) }
@@ -335,11 +361,15 @@ public final class ReviewCoordinator {
     }
 
     public func rate(_ rating: ReviewRating) {
+        let inputTime = uptime()
+        let instant = clock.now()
+        if phase == .answer, let shownItem, hold(.rate(rating, inputTime: inputTime, instant: instant, item: shownItem)) { return }
+        rate(rating, inputTime: inputTime, instant: instant)
+    }
+    private func rate(_ rating: ReviewRating, inputTime: TimeInterval, instant: Date) {
         guard phase == .answer, !busy, !paused, !editingNote, let item, let sessionID else { return }
         // All input paths enter this synchronous gate, before any suspension.
         busy = true; phase = .transition
-        let inputTime = uptime()
-        let instant = clock.now()
         let use: NativeReviewInput.AnswerUse?
         do {
             if let nativeInput {
@@ -459,6 +489,7 @@ public final class ReviewCoordinator {
 
     public func restore(redo: Bool = false) {
         guard (redo ? canRedo : canUndo), let sessionID else { return }
+        if hold(.restore(redo: redo, step: redo ? redoStatus : undoStatus)) { return }
         // Only an answer step moves the record's answers; a bury, a suspend or an edit does not.
         let answerStep: Bool = {
             if case .available(let step) = redo ? redoStatus : undoStatus { return step.kind == .answer }
@@ -556,8 +587,43 @@ public final class ReviewCoordinator {
         // E2: the side on screen is not rendered again while the form is
         // open; the read runs once when it closes.
         if editingNote { return }
-        if !paused && terminalPresentation == nil { phase = .transition }
+        leaveForRefresh()
         if !busy && !paused { refresh() }
+    }
+    /// A refresh never empties the answer area of a card on screen: that side
+    /// stays until the read presents its replacement (or keeps it).
+    private func leaveForRefresh() {
+        if !paused && terminalPresentation == nil && !showsCard { phase = .transition }
+    }
+    private var showsCard: Bool { phase == .question || phase == .answer }
+    /// Holds input given while a read runs under the card on screen; the first one wins.
+    private func hold(_ input: HeldInput) -> Bool {
+        guard busy, underCard, showsCard, !paused, !editingNote else { return false }
+        if heldInput == nil { heldInput = (input, presentationRevision, uptime()) }
+        return true
+    }
+    /// Gives the held input once nothing runs, to the side it was given on.
+    private func giveHeldInput() {
+        guard !busy, let held = heldInput else { return }
+        heldInput = nil
+        guard held.presentation == presentationRevision, showsCard, !paused, !editingNote, !closingAdmission,
+              uptime() - held.at <= Self.heldInputLimit else { return }
+        switch held.input {
+        case .reveal(let inputTime): reveal(inputTime: inputTime)
+        case .rate(let rating, let inputTime, let instant, let shown):
+            // The same choice: the card, its state and the labels that were on the buttons.
+            guard let item, item.cardId == shown.cardId, item.stateToken == shown.stateToken,
+                  item.renderKey == shown.renderKey, Self.labels(item) == Self.labels(shown) else { return }
+            rate(rating, inputTime: inputTime, instant: instant)
+        case .restore(let redo, let step):
+            // The step named on the button or menu when it was pressed.
+            guard (redo ? redoStatus : undoStatus) == step else { return }
+            restore(redo: redo)
+        }
+    }
+    private static func labels(_ item: ReviewHeadItem) -> [ReviewAnswerLabel] {
+        let states = item.nextStates
+        return [states.again.label, states.hard.label, states.good.label, states.easy.label]
     }
     public func retry() {
         // Check Now refreshes facts. Error Retry explicitly recovers presentation.
@@ -587,7 +653,8 @@ public final class ReviewCoordinator {
         let restoration = restorationIntent
         let presentationIntent = restoration == .automatic ? intent : restoration
         busy = true
-        if terminalPresentation == nil { phase = .transition }
+        leaveForRefresh()
+        underCard = showsCard
         let question = forceQuestion; forceQuestion = false; refreshPending = false
         operation = Task {
             do { try await apply(client.head(sessionID: sessionID), question: question, intent: presentationIntent); try await persist() }
@@ -598,7 +665,12 @@ public final class ReviewCoordinator {
     private func completeOperation() {
         busy = false
         if refreshPending && !paused && !editingNote { refresh() }
-        else { retryArrivedMedia() }
+        else {
+            // A media retry keeps the presentation: the held input goes first.
+            giveHeldInput()
+            retryArrivedMedia()
+        }
+        giveHeldInput()
     }
 
     func mediaArrived(_ names: [String]) {
@@ -615,7 +687,7 @@ public final class ReviewCoordinator {
               !mediaArrivals.isEmpty else { return }
         let names = mediaArrivals.take(), revision = pauseRevision, expected = sessionID
         let presentation = mediaPresentationRevision
-        busy = true
+        busy = true; underCard = true
         operation = Task {
             var deferred = false
             do {
@@ -632,7 +704,11 @@ public final class ReviewCoordinator {
                 // Presentation/resume owns the next attempt; never spin on readiness.
                 busy = false
                 if refreshPending && !paused { refresh() }
-                else if presentation != mediaPresentationRevision { retryArrivedMedia() }
+                else {
+                    giveHeldInput()
+                    if presentation != mediaPresentationRevision { retryArrivedMedia() }
+                }
+                giveHeldInput()
             } else { completeOperation() }
         }
     }
@@ -668,13 +744,13 @@ public final class ReviewCoordinator {
             clearVisibleMedia()
             preload?.cancel(); await preload?.value; preload = nil
             timer.pause(at: uptime()); activeTime.pause(at: uptime()); surface.pair?.pauseAudio()
-            studyState = nil
+            studyState = nil; presentationRevision &+= 1
             // From cards, a start, or an error's retry: any way into the end state counts.
             let entering = phase != .waiting && phase != .finished
             if case .waitingUntil(let instant) = head.terminalState {
                 waitingUntil = Date(timeIntervalSince1970: Double(instant)); phase = .waiting
             } else { waitingUntil = nil; phase = .finished }
-            terminalPresentation = phase
+            terminalPresentation = phase; shownItem = nil
             firstPresentation()
             if entering { onTerminal?() }
             // An empty head settles the restoration it belongs to.
@@ -762,6 +838,8 @@ public final class ReviewCoordinator {
             preload?.cancel(); await preload?.value; preload = nil
             try Task.checkCancellation()
             let keepAnswer = !question && sideIsAnswer && previous?.cardId == item.cardId
+            // Input given from here on meets another page: never given (F3).
+            presentationRevision &+= 1
             #if DEBUG
             logger.notice("present.begin")
             #endif
@@ -781,9 +859,11 @@ public final class ReviewCoordinator {
                 try await surface.reveal(inputTime: uptime()); sideIsAnswer = true
                 answerShownUptime = uptime()
             }
+            presentationRevision &+= 1
         }
         try Task.checkCancellation()
         terminalPresentation = nil
+        shownItem = item
         phase = sideIsAnswer ? .answer : .question
         firstPresentation()
         finishRestoration(intent)
@@ -809,6 +889,8 @@ public final class ReviewCoordinator {
         summaryTask?.cancel()
         pauseRevision &+= 1
         paused = true
+        // Input held under a read belongs to the card as it was; after a pause it is gone.
+        heldInput = nil
         // Only the shared visual child is cancelled; original Core calls and
         // accepted/Undo record persistence drain in their parent operations.
         if pagePreparation != nil {
@@ -899,7 +981,7 @@ public final class ReviewCoordinator {
     /// Nothing is written and nothing is rendered again.
     @discardableResult public func beginEditingNote() -> Bool {
         guard canEditNote else { return false }
-        editingNote = true
+        editingNote = true; heldInput = nil
         timer.pause(at: uptime())
         surface.pair?.pauseAudio()
         (surface as? ReviewPages)?.inputActive = false
@@ -927,11 +1009,13 @@ public final class ReviewCoordinator {
             #endif
         }
         if saved {
-            // The same card and side, presented again from the saved note.
+            // The same card and side, presented again from the saved note. The
+            // person's own step: the answers wait for the new labels (F3).
             presentedKey = nil
+            if !paused && terminalPresentation == nil && showsCard { phase = .transition }
             requestRefresh()
         } else if refreshPending {
-            if !paused && terminalPresentation == nil { phase = .transition }
+            leaveForRefresh()
             if !busy && !paused { refresh() }
         } else { retryArrivedMedia() }
     }
@@ -1034,6 +1118,7 @@ public final class ReviewCoordinator {
     private func fail(_ error: any Error) {
         guard phase != .ended else { return }
         startTrace?.cancel()
+        presentationRevision &+= 1
         notice = String(describing: error); phase = .error
         // A start that failed before its session opened never shows (N16.8).
         if sessionID != nil { firstPresentation() }

@@ -86,6 +86,9 @@ public enum IntervalNames {
     public static let statsLogTier = IntervalName("stats.logTier", .stats)
     /// A scroll of the page while a refresh reads (R2078): the window its hitches are measured in.
     public static let statsScrollDuringRead = IntervalName("stats.scrollDuringRead", .stats)
+    /// A scroll of the filled page with nothing reading (R2078's settled case, the owner's report
+    /// of 2026-11-23): the window its hitches are measured in.
+    public static let statsScrollSettled = IntervalName("stats.scrollSettled", .stats)
     /// A switch or a period within the year → the boxes redrawn with no core call (R2079).
     public static let statsSelection = IntervalName("stats.selection", .stats)
     /// Heatmap data arrival → the heatmap drawn (R1839).
@@ -113,7 +116,7 @@ public enum IntervalNames {
         reviewPresentToNextSettled, reviewOnDemandRender, reviewAnswerMainThread,
         reviewUndoToCardVisible, reviewActionToNextVisible, reviewTouchDownToTint, searchFirstPage,
         statsAllGraphs, statsScopeChange, statsKeptOpen, statsColdOpen, statsPresentTier, statsLogTier,
-        statsScrollDuringRead, statsSelection, heatmapRender, cardInfoOpen,
+        statsScrollDuringRead, statsScrollSettled, statsSelection, heatmapRender, cardInfoOpen,
         probeSyntheticDelay, probeNativeSwap,
     ] + BridgeCall.all.map(\.interval)
 
@@ -454,6 +457,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let useStandardBrowserColumns = BridgeCall("use_standard_browser_columns")
     public static let setBrowserNotesMode = BridgeCall("set_browser_notes_mode")
     public static let saveBrowserSearch = BridgeCall("save_browser_search")
+    public static let renameBrowserSavedSearch = BridgeCall("rename_browser_saved_search")
+    public static let deleteBrowserSavedSearches = BridgeCall("delete_browser_saved_searches")
     public static let startBrowseSelectionCounts = BridgeCall("start_browse_selection_counts")
     public static let browseSelectionCountsJobResult = BridgeCall("BrowseSelectionCountsJob.result")
     public static let browseOpening = BridgeCall("browse_opening")
@@ -464,6 +469,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let findReplacePreviewJobResult = BridgeCall("FindReplacePreviewJob.result")
     public static let startFindReplace = BridgeCall("start_find_replace")
     public static let bulkActionJobResult = BridgeCall("BulkActionJob.result")
+    public static let startBulkCardActionOnSelection = BridgeCall("start_bulk_card_action_on_selection")
+    public static let startBulkNoteActionOnSelection = BridgeCall("start_bulk_note_action_on_selection")
 
     public static let startCreateBackup = BridgeCall("start_create_backup")
     public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
@@ -775,8 +782,9 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         startNotetypeTemplateCardCounts, notetypeTemplateCardCountsJobResult, notetypeTemplateIssues, notetypeReplaceFieldReferences,
         notetypeTemplateSyntax, notetypeStylingSyntax,
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
-        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, setBrowserNotesMode, saveBrowserSearch, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
+        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, setBrowserNotesMode, saveBrowserSearch, renameBrowserSavedSearch, deleteBrowserSavedSearches, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
         startFindDuplicates, findDuplicatesJobResult,
         findReplacePreviewsNew, findReplacePreviewsStart, findReplacePreviewJobResult, startFindReplace, bulkActionJobResult,
+        startBulkCardActionOnSelection, startBulkNoteActionOnSelection,
     ]
 }

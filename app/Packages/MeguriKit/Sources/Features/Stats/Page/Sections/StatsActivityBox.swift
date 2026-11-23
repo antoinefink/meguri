@@ -232,6 +232,7 @@ private struct StatsActivityYears: View {
     @Environment(\.locale) private var locale
     @Environment(\.calendar) private var calendar
     @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.statsScrolling) private var scrolling
     @State private var positions: [Int: ScrollPosition] = [:]
     @State private var viewport: CGFloat = 0
 
@@ -345,7 +346,7 @@ private struct StatsActivityYears: View {
             .frame(width: grid.width(square), height: ActivityYearGrid.height(square))
             #if os(macOS)
             .onContinuousHover(coordinateSpace: .local) { phase in
-                guard !selection.pinned else { return }
+                guard !selection.pinned, !scrolling.active else { return }
                 switch phase {
                 case let .active(location):
                     let hovered = day(location)

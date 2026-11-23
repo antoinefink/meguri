@@ -23,6 +23,9 @@ nonisolated public enum DeepLinkRefusal: Equatable, Sendable {
     case unknownLink
     /// No deck has this id.
     case missingDeck(DeckID)
+    /// Browse is not on this device's layout yet (the iPad's and iPhone's,
+    /// U278, U279): the link changes nothing, rather than showing Today.
+    case browseUnavailable
 }
 
 /// Opens `meguri://` links (R319–R321). A link only navigates: it never
@@ -56,11 +59,13 @@ public enum DeepLinkRouter {
     }
 
     /// Opens `url` in `navigation`. A deck link asks `deckExists` first and
-    /// changes nothing when the deck is missing. Opening a link ends an open
-    /// review, as any navigation away from it does (R22); a refused link
-    /// leaves the review running.
+    /// changes nothing when the deck is missing; a Browse link changes
+    /// nothing where Browse is not shown (`browseAvailable` false, R320's
+    /// missing target). Opening a link ends an open review, as any
+    /// navigation away from it does (R22); a refused link leaves the review
+    /// running.
     public static func open(
-        _ url: URL, in navigation: AppNavigation, deckExists: (DeckID) async -> Bool
+        _ url: URL, in navigation: AppNavigation, browseAvailable: Bool = true, deckExists: (DeckID) async -> Bool
     ) async -> DeepLinkOutcome {
         guard let link = parse(url) else { return .refused(.unknownLink) }
         switch link {
@@ -70,6 +75,7 @@ public enum DeepLinkRouter {
             guard await deckExists(deck) else { return .refused(.missingDeck(deck)) }
             navigation.openDeckPage(deck)
         case let .browse(search):
+            guard browseAvailable else { return .refused(.browseUnavailable) }
             navigation.endReview()
             navigation.browseSearch = search
             // A new search: its results from the top, at Browse's root.

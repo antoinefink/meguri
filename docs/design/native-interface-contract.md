@@ -965,6 +965,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `ho
 - Table: a native `Table` with sortable, resizable, reorderable columns; the state column first (V2.5); text leading, numbers and dates trailing, tabular figures; system selection; no row tints, no alternating colours beyond the system's.
 - Status line under the table in the footnote style: V11's text at the leading edge, the column set menu at the trailing edge.
 - Under about 900 points the inspector hides itself first; Return or a double click on a row shows it over the table.
+- Built 2026-11-23 (U275; the implementer's reading, pending the coordinator): the Cards / Notes control is a `.navigation` toolbar item, which the system draws right after the title; the trailing group is declared in order as the sync button, the system search field (`DefaultToolbarItem(kind: .search)`) and the Add menu (round 6's, the Today page's own); U273's inspector toggle goes after the Add menu. Until U273 the toolbar has no inspector toggle.
 
 ### N21.4 The inspector (6A)
 
@@ -976,6 +977,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `ho
 
 - The inspector shows a title ("12 Cards Selected"), one secondary line (V7), then the commands as plain buttons in one column, each with its key at the trailing edge, Delete last in red. No toolbar change.
 - The row context menu holds the same commands with their keys, grouped: [Change Deck…, Add Tags…, Remove Tags…] | [Flag ▸, Suspend, Unsuspend, Bury, Unbury] | [Set Due Date…, Forget…] | [Change Note Type…, Edit Note Type…] | [Find and Replace…, Find Duplicates…] | [Delete].
+- Built 2026-11-23 (U275; the implementer's reading, pending the coordinator): V8.1's "Shown when" leaves a command out of the context menu (Apple's rule for context menus) and disables it in the menu bar, whose items stay put. The context menu acts on the rows it was opened on (the selection, or the one row a secondary click outlines outside it), taken as index ranges of the list at its revision when the menu is drawn: a list that moves on while the menu is open makes the core refuse them (`browser/bulk-framework` K1), so no command acts on rows the person did not choose. A Delete after its question runs on the rows it asked about at that revision; when they moved meanwhile it deletes nothing and says so. Until the counts of the rows arrive from the core (a few milliseconds), both commands of a pair show and Unsuspend and Unbury read "Unsuspend Cards" and "Unbury Cards"; in Cards mode the rows on screen give the counts at once. Commands whose sheet or pane a later unit builds are in their places, disabled: Change Deck…, Add Tags…, Remove Tags…, Set Due Date…, Forget… (U276), Find and Replace…, Find Duplicates… (U277), Change Note Type… (U284), Edit Note in Browse (U273). The flags' items carry `flag.fill` in their colours, drawn as a non-template image so the menu keeps the colour (lint allowlist entry). A command the core refuses or that fails shows one alert, "Nothing Was Changed" ("Meguri couldn’t finish the command on these rows. Try again.", OK): V8 is silent on failures. In the standard column set the status line's set name stays plain text: V2.2 gives its menu no item there until U272's column chooser.
 
 ### N21.6 Sheets
 
@@ -1017,6 +1019,7 @@ Round 6's menu bar (N20.4) gains a **Note** menu between Deck and Card, and thes
 - The Deck menu's items are disabled while Browse or Note Types is shown: Browse's deck rows are filters, not the shown deck. So ⌘⌫ is Delete Note in Browse and the focused list's Delete in Note Types, never Delete Deck.
 - Card Info stays ⌥⌘I (R1226), not ⌘I, which is Italic while a field has focus.
 - Separators: Note after Edit Note, Remove Tags… and Edit Note Type…; Card after Show in Browse, Flag, Unsuspend and Forget….
+- Built 2026-11-23 (U275; the implementer's reading, pending the coordinator): Edit Note ⌘E moves from the Card menu (N20.8) to the Note menu, as this table places it; in review it is N20.8's, in Browse it waits for U273's inspector (disabled). Bury Card ⌘J and Suspend Card ⇧⌘J stay one item each: the review's card in review, Browse's selection in Browse (titled "Bury Cards" for several), so no key is on two enabled items. The Card menu reads: Show Answer | Again, Hard, Good, Easy | Change Deck…, Flag ▸ | Bury, Unbury, Suspend, Unsuspend | Set Due Date…, Forget… | Back to Decks; Show in Browse comes with U280. ⌥⌘A is a key equivalent of the window with no menu item (as Find…'s ⇧⌘O), and Select All is the system's (⌘A selects every row while the table has the focus). View › Card Info ⌥⌘I is in its place, disabled until U273 and U274. Delete Note ⌘⌫ is enabled only while the table has the focus and no text input does.
 
 ### N21.9 Other ways in (11A)
 
@@ -1289,6 +1292,7 @@ Decided by Antoine in chat on 2026-11-22 (`decisions.md`, rows `stats.overview` 
 - Mac: the window toolbar, leading to trailing: the title "Statistics" with the subtitle "1,370 cards in 4 decks" (and the status of N25.9), the deck pop-up button, the period segmented control (1M 3M 6M 1Y All), then the sync button and the Add menu as on every page. Both controls are standard toolbar items and stay put while the page scrolls.
 - iPad at regular width: the same in the navigation bar, as two trailing items kept apart (not one glass group), the pop-up's label carrying its up-and-down chevrons (U297, 2026-11-23).
 - iPhone, the Duo folded, a narrow iPad window: the inline title "Statistics" with the deck pop-up beside it (a menu button with the deck's name and a chevron) and the subtitle under it; the period segmented control pinned under the navigation bar while the page scrolls; the Jump menu (`list.bullet`) as a trailing toolbar button.
+- While the controls are disabled (no collection, no cards), the Mac's period control is dimmed with the deck pop-up: an exception, since the window toolbar draws a disabled segmented control in full colour (seen in the test VM, 2026-11-23).
 - The deck's name is visible at every scroll position on every device. A long name truncates in the middle, with the full name as help text (Mac).
 - Kept state: `stats/statistics-page` S3.3 (per window and device; first time All Decks and All).
 
@@ -1297,6 +1301,7 @@ Decided by Antoine in chat on 2026-11-22 (`decisions.md`, rows `stats.overview` 
 - One scroll view. The strip (five figures, no box: value, unit in small text, label under), then the seven sections of S5, each a plain heading in the flow: the title in bold and its question in secondary text on the same line, wrapping under it when narrow.
 - Grid of boxes: two columns up to about 1,250 points of content width, three beyond, one under about 560. A lead box spans the row; the other boxes follow side by side and wrap. Boxes in a row share the row's height.
 - A box is the system group box (`GroupBox`, the system's grouped background): no shadow, no custom border, radius or background.
+- A box's content sits about 16 points inside the box on all four sides, as the touch group box and inset grouped lists place theirs (Antoine, 2026-11-23, on the Mac: "Not enough internal margin around this grey section"). The iPad's group box and N25.6's group already do; the Mac's group box keeps only about 4 points, so its content adds `Spacing.small`. Every part of N25.4 lines up on that inset, the header's switches and marker included; the strip and the section headings stay level with the box's outside.
 - The iPad at regular width is this page in touch sizes, with the sidebar and two columns; in a narrow window or Slide Over it becomes N25.6's column.
 
 ### N25.4 The parts of a box
@@ -1305,7 +1310,7 @@ Top to bottom, at the box's inset:
 
 1. The header: a button with the title in the headline style and a trailing chevron (`chevron.right`), opening the chart's page (N25.5); trailing on the same line, the box's switches as small segmented controls (Reviews Over Time: By Type | By Answer and Count | Time; Retention: All | Young | Mature), or "Now" in secondary text for the charts of the present, or "Estimated" for Knowledge Over Time.
 2. One large figure (the title-2 style, tabular digits) and its sentence in secondary text.
-3. The plot (Swift Charts), at a fixed height per box size, y-axis labels on the trailing side as the system draws them, no second axis (S8.2).
+3. The plot (Swift Charts), at a fixed height per box size, y-axis labels on the trailing side as the system draws them, no second axis (S8.2). Bars have square corners and the parts of a stacked bar meet with no space between them, so they read as one bar; single bars match (Antoine, 2026-11-23, paraphrased: a zoomed stack did not read as one ordinary bar; decided by the coordinator). Bands of a stacked area meet too. With Differentiate Without Colour a line of about 1.5 points parts them (N25.12).
 4. The legend, in stack order, each swatch with its name (the system chart legend).
 5. Two to four small figures in a row (label in secondary text over its value), stacking at accessibility sizes.
 6. A footnote in footnote secondary text when the box has one (left-out cards).
@@ -1370,6 +1375,15 @@ Antoine, 2026-11-22: the Statistics page "is a bit of an exception", "it's under
 - `screen-inventory.yaml` `stats.overview`: its earlier text (the scope and history header, thirteen equal boxes in Anki's order, "the heatmap and streak stats are not here", the Stats sidebar section and tab names); and in `home.deckPage` "streak stats and the Stats action (U228) are not built" (the Activity header leads to Statistics; streaks stay off the deck page).
 - N20.2's table gains Deck Statistics; N21.1's sidebar order gains Statistics second; N21.1's iPhone tabs become four.
 - Unchanged: N11.7's toolbar header principle, Today's heatmap (N14.11, N24.6), round 10's "no streak on Today", Browse (Show in Browse uses its tokens; `search/filter-tokens` T3's Studied On token is also made by the page).
+
+### N25.14 Scrolling (2026-11-23)
+
+Antoine, 2026-11-23, paraphrased: after the first fill, scrolling should feel smoother; the first fill's time is fine. Checked by `StatsPerfTests` and `StatsTouchPerfTests` (R2078):
+
+- Each box's view observes its own box: the model keeps one observable cell per box for its content and its selection, so a hover, a part arriving or a progress tick redraws only the box it changes. A plot's accessibility elements are made again only when its data changes, not on a hover.
+- While the page scrolls (any scroll phase but idle), the pointer's hover selects nothing; a bar it was over when the page started to move is let go, a pinned bar stays.
+- Nothing about the page's look changes.
+- Measured (the hooks scrolling the platform scroll view in animated steps, the pointer over the page, the main thread's late time per second): the Mac on the 150k collection, settled 447 to 549 ms/s before, 0 to 37 after; while a refresh reads, 439 to 517 before, 43 to 288 after. The causes were the one dictionary of box contents and the one of selections every box read: a hover change, a part or a progress tick redrew all fifteen charts. Marks were not a cause: at All on three years no chart draws more than 185. XCTest's own hitch metric reports nothing in the test VM, so the tests assert R2078 on this measurement.
 
 ## N26. The home screen on the Duo, opened and folded (2026-11-22)
 

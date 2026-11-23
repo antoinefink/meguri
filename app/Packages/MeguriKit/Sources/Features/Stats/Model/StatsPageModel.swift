@@ -28,15 +28,39 @@ public final class StatsPageModel {
 
     /// What the page shows in place of its sections, or `.content`.
     public private(set) var state: StatsPageState = .noCollection
-    /// Every box's content, always present (a box keeps its place, S8.5).
-    public private(set) var boxes: [StatsBoxID: StatsBoxContent] = [:]
+    /// Every box's content, always present (a box keeps its place, S8.5). Not observed as a
+    /// whole: each box's view observes its own cell (`box(_:)`), so a part, a progress tick or a
+    /// switch redraws only the boxes it changes (R2078). `boxesVersion` counts every change.
+    @ObservationIgnored public private(set) var boxes: [StatsBoxID: StatsBoxContent] = [:] {
+        didSet {
+            guard boxes != oldValue else { return }
+            for id in StatsBoxID.allCases {
+                if let cell = cells[id], cell.content != boxes[id] { cell.content = boxes[id] }
+            }
+            boxesVersion &+= 1
+        }
+    }
     public private(set) var strip: [StatsStripID: StatsStripFigure] = [:]
     /// "<n> cards in <m> decks" with S10.4's status; nil while the count is unknown.
     public private(set) var subtitle: String?
     /// S12.6's line under the strip for a filtered deck.
     public private(set) var filteredDeckNote: String?
     /// Each box's selection, carried across a refresh and cleared by a switch or the period (S8.3).
-    public private(set) var selections: [StatsBoxID: StatsChartSelection] = [:]
+    /// Not observed as a whole either: a hover over one chart redraws that chart alone.
+    @ObservationIgnored public private(set) var selections: [StatsBoxID: StatsChartSelection] = [:] {
+        didSet {
+            for id in StatsBoxID.allCases {
+                let selection = selections[id] ?? StatsChartSelection.none
+                if let cell = cells[id], cell.selection != selection { cell.selection = selection }
+            }
+        }
+    }
+    /// Each box's content and selection, observed on their own.
+    @ObservationIgnored private let cells = Dictionary(uniqueKeysWithValues: StatsBoxID.allCases.map { ($0, StatsBoxCell()) })
+    /// Counts the changes of any box's content: the page's view hears it after the model's
+    /// whole update (its intervals and `filled`), as it heard the dictionary itself, without
+    /// reading every box.
+    public private(set) var boxesVersion = 0
 
     /// The toolbar's controls respond (S12.1, S12.2 disable them).
     public var controlsEnabled: Bool { state != .noCollection && state != .noCards }
@@ -44,9 +68,11 @@ public final class StatsPageModel {
     /// The deck pop-up's rows after All Decks (S3.1).
     public var deckMenu: [StatsDeckDirectory.MenuItem] { decks.menu }
 
-    public func box(_ id: StatsBoxID) -> StatsBoxContent { boxes[id] ?? skeletonContent(id, phase: .loading(fraction: nil)) }
+    public func box(_ id: StatsBoxID) -> StatsBoxContent {
+        cells[id]?.content ?? skeletonContent(id, phase: .loading(fraction: nil))
+    }
     public func strip(_ id: StatsStripID) -> StatsStripFigure { strip[id] ?? .loading }
-    public func selection(for box: StatsBoxID) -> StatsChartSelection { selections[box] ?? .none }
+    public func selection(for box: StatsBoxID) -> StatsChartSelection { cells[box]?.selection ?? .none }
 
     // MARK: Refresh state
 
@@ -295,6 +321,12 @@ public final class StatsPageModel {
         inputs &+= 1
         selections[box] = nil
         rebuild()
+    }
+
+    /// The page started to scroll: a hovered bar is let go (R2078), a pinned one stays.
+    public func endHover() {
+        let next = selections.filter(\.value.pinned)
+        if next != selections { selections = next }
     }
 
     /// The box's selection, from the chart (pointer, touch, keys).
@@ -664,6 +696,14 @@ public final class StatsPageModel {
         }
         return nil
     }
+}
+
+/// One box's content and selection (`StatsPageModel.box(_:)`, `selection(for:)`): its own
+/// observable, so the view that reads one box is redrawn only when that box changes.
+@Observable @MainActor
+final class StatsBoxCell {
+    var content: StatsBoxContent?
+    var selection: StatsChartSelection = .none
 }
 
 extension StatsBoxContent {

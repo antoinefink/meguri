@@ -52,8 +52,10 @@ public struct BrowseSidebar<Header: View>: View {
             notetypes
             tags
         }
-        .searchable(text: $model.filter, placement: .sidebar, prompt: Text("browse.sidebar.filter", bundle: .module))
+        // N20.6 (2026-11-22): the system's own prompt, "Search", as with Today selected.
+        .searchable(text: $model.filter, placement: .sidebar)
         .accessibilityIdentifier("browse.sidebar.list")
+        .modifier(RenameSavedSearch(model: model))
         .onAppear {
             selection = model.listSelection
             model.useFormatter(locale: locale, timeZone: timeZone, clock: clock)
@@ -155,7 +157,18 @@ public struct BrowseSidebar<Header: View>: View {
             } header: {
                 Text(verbatim: BrowseStrings.section(kind))
                     .accessibilityIdentifier("browse.sidebar.\(kind.rawValue)")
+                    .contextMenu { sectionMenu(kind) }
             }
+        }
+    }
+
+    /// T13: the Saved Searches section's Save Search… (the query's, while
+    /// it is not empty). The other sections have no menu in this version.
+    @ViewBuilder private func sectionMenu(_ kind: BrowseSidebarSection) -> some View {
+        if kind == .savedSearches {
+            Button { model.startSavingSearch() } label: { Text("browse.search.saveSearch", bundle: .module) }
+                .disabled(!model.canSaveSearch)
+                .accessibilityIdentifier("browse.sidebar.savedSearches.save")
         }
     }
 
@@ -188,6 +201,15 @@ public struct BrowseSidebar<Header: View>: View {
                 case .user(let search):
                     row(.saved(search.name), label: search.name,
                         identifier: "user.\(model.savedSearches.firstIndex(of: search) ?? 0)")
+                        // V6, T13: a user's saved search can be renamed and deleted (the built-ins cannot).
+                        .contextMenu {
+                            Button { model.startRenaming(search.name) } label: { Text("browse.savedSearch.rename", bundle: .module) }
+                                .accessibilityIdentifier("browse.sidebar.saved.rename")
+                            Button { model.deleteSavedSearch(search.name) } label: {
+                                Text("browse.savedSearch.delete", bundle: .module)
+                            }
+                            .accessibilityIdentifier("browse.sidebar.saved.delete")
+                        }
                 }
             }
         }
@@ -264,6 +286,11 @@ public struct BrowseSidebar<Header: View>: View {
         section(.notetypes, shown: shows(notetypeRows)) {
             ForEach(notetypeRows, id: \.id) { notetype in
                 row(.notetype(notetype.id), label: notetype.name, identifier: "notetype.\(notetype.id)")
+                    // V6, W14: Edit Note Type… opens Note Types on it.
+                    .contextMenu {
+                        Button { model.editNoteType(notetype.id) } label: { Text("browse.columns.editNoteType", bundle: .module) }
+                            .accessibilityIdentifier("browse.sidebar.notetype.edit")
+                    }
             }
         }
     }
@@ -446,5 +473,33 @@ private struct FilteredTagBranch<Header: View>: View {
             }
             .tag(BrowseSidebarTag.tag(node.item.fullName))
         }
+    }
+}
+
+/// T13's Rename…: the saved search's new name, Cancel and Rename; a name
+/// another saved search has asks whether to replace it (Replace, Cancel).
+private struct RenameSavedSearch: ViewModifier {
+    let model: BrowseModel
+    @State private var name = ""
+
+    func body(content: Content) -> some View {
+        let renaming = model.renamingSearch
+        content
+            .alert(Text("browse.renameSearch.title", bundle: .module), isPresented: Binding(
+                get: { model.renamingSearch != nil && model.renamingSearch?.replacing == nil },
+                set: { if !$0, model.renamingSearch?.replacing == nil { model.cancelRenaming() } }), presenting: renaming) { renaming in
+                TextField(text: $name) { Text("browse.saveSearch.name", bundle: .module) }
+                    .onAppear { name = renaming.old }
+                    .accessibilityIdentifier("browse.renameSearch.name")
+                Button(role: .cancel) { model.cancelRenaming() } label: { Text("browse.saveSearch.cancel", bundle: .module) }
+                Button { model.rename(to: name) } label: { Text("browse.renameSearch.rename", bundle: .module) }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .alert(Text(verbatim: BrowseStrings.replaceSavedSearch(renaming?.replacing ?? "")), isPresented: Binding(
+                get: { model.renamingSearch?.replacing != nil }, set: { if !$0 { model.keepRenaming() } }),
+                   presenting: renaming?.replacing) { replacing in
+                Button(role: .cancel) { model.keepRenaming() } label: { Text("browse.saveSearch.cancel", bundle: .module) }
+                Button { model.rename(to: replacing) } label: { Text("browse.saveSearch.replace", bundle: .module) }
+            }
     }
 }
