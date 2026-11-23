@@ -587,3 +587,34 @@ fn today_limits_move_to_the_target_day_and_presets_come_only_when_asked_and_abse
     let again = import(&other, &package, options).unwrap();
     assert_eq!(again.counts.presets_added, 0);
 }
+
+#[test]
+fn a_failed_safety_backup_refuses_a_structural_import_with_nothing_written() {
+    let source = Fixture::new(0);
+    let mut incoming = notetype(5000, "Pair", 200, &two_fields(), &one_template());
+    incoming.config.sort_field_idx = 1;
+    put_notetype(&source, incoming);
+    add(&source, 5000, "g-one", &["sun", "soleil"], 1);
+    let package = export(&source, "deck.apkg");
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    add(&target, 5000, "g-two", &["moon", "lune"], 1);
+    target.clock.step_ms(30_000);
+    let before = dump(&target);
+    // The backups folder cannot take a file: a plain file stands in its place.
+    let backups = target.dir.path().join("backups");
+    let _ = std::fs::remove_dir_all(&backups);
+    std::fs::write(&backups, b"in the way").unwrap();
+    let session = inspect(&target, &package).unwrap();
+    let refusal = apply(&target, &session, ALL_OFF).unwrap_err();
+    assert!(
+        matches!(&refusal, ApkgImportError::Engine(error) if matches!(**error, EngineError::SafetyBackupFailed(_))),
+        "{refusal:?}"
+    );
+    assert_eq!(dump(&target), before);
+    // The session stays open: once the folder is back the same apply imports.
+    std::fs::remove_file(&backups).unwrap();
+    std::fs::create_dir(&backups).unwrap();
+    let result = apply(&target, &session, ALL_OFF).unwrap();
+    assert!(result.safety_backup.is_some());
+}
