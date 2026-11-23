@@ -21,6 +21,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         // A write changes the tree's counts or names: Edit › Undo's step may have changed.
         didSet { if decks != oldValue { undoOwner?.scheduleRefresh() } }
     }
+    /// The generation `decks` was read for, once a read applied; nil while the tree of the open
+    /// collection has not been read (a launch, a replacement). The Statistics page reads it so a
+    /// deck it shows is never taken for deleted before the tree arrives (U296).
+    public private(set) var deckTreeGeneration: UInt64?
     /// Page content may belong to a deck intentionally absent from the tree.
     public struct DeckPageDetail: Sendable, Hashable {
         public let id: Int64
@@ -515,6 +519,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard expected == generation, tree.generation == expected, revision == deckTreeRevision,
               foreground, !closed, !closing, !resuming else { return false }
         decks = tree.nodes
+        deckTreeGeneration = tree.generation
         return true
     }
     private let exportService: any CollectionExportService
@@ -1220,8 +1225,17 @@ public final class ReviewCollection: ChangeFanoutSink {
             && changes.skippedIncomingCards.isEmpty && changes.skippedIncomingNotes.isEmpty
             && changes.skippedIncomingDecks.isEmpty
     }
+    /// The Statistics page's change signals (U296; `stats/graphs-common` G10): the open
+    /// collection's change sets and day changes, and every replacement. Set by the page's host
+    /// only while Statistics can be reached; nothing else listens.
+    @ObservationIgnored public var statsStaleness: (@MainActor (StatsStaleness) -> Void)?
+
     func receive(_ event: CoreEvent) {
         guard !closed else { return }
+        if let statsStaleness, let staleness = StatsStaleness(event.kind),
+           staleness == .collectionReplaced || event.generation == generation {
+            statsStaleness(staleness)
+        }
         // Never drop review commit failures behind a coalesced deck refresh.
         review?.receive(event)
         sync.coreEvent(event)
@@ -1283,7 +1297,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             review?.generationEnded(); review = nil; navigation.endReview()
             previousRecord = nil; studyRefusal = nil; dropWalk()
             studyPreparation.collectionEnded()
-            decks = []; countTimer?.invalidate(); countsTask?.cancel()
+            decks = []; deckTreeGeneration = nil; countTimer?.invalidate(); countsTask?.cancel()
             navigation.collectionReplaced(keepingEntrySheet: opening)
             browseCollectionReplaced()
             if !opening {
@@ -1527,6 +1541,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             // New counts can mean another first card (a learning card came due).
             if tree.nodes != decks { studyWarmup.invalidate() }
             decks = tree.nodes
+            deckTreeGeneration = tree.generation
             countsSnapshot &+= 1
             refreshTodayNumbers()
             countTimer?.invalidate(); countTimer = nil

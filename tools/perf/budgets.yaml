@@ -64,7 +64,7 @@
 version: 1
 plan: docs/plans/2026-10-12-1926-feat-meguri-anki-compatible-apple-app-plan.md
 budget_range: [R1807, R1855]
-extra_budgets: [R1583]
+extra_budgets: [R1583, R2076, R2077, R2078, R2079]
 registry: app/Packages/MeguriCore/Sources/Instrumentation/IntervalNames.swift
 perf_tests: app/MeguriUITests/Performance
 
@@ -1297,6 +1297,61 @@ budgets:
         fixture: worst-media-30k
         where: [simulator, device]
         pending: U245
+  # --- The Statistics page (plan U296: StatsPerfTests; the parent plan's
+  # R2067-R2079, past budget_range, so each is an extra budget) ----------------
+  - id: R2076
+    title: With a kept result, the page shows every box filled in the first frame after navigation and is usable at once
+    group: stats
+    cases:
+      - id: kept-open
+        suite: StatsPerfTests
+        test: "StatsPerfTests/testKeptOpen*"
+        name: stats.keptOpen
+        metric: duration
+        unit: ms
+        limit: 17
+        where: [simulator, device]
+        note: One frame at 60 Hz, from the page's appearance to the main-queue turn after the update that shows every box.
+  - id: R2077
+    title: With nothing kept and the caches not built, the page fills every box within a few seconds on an iPhone, each box showing its progress until its data arrives
+    group: stats
+    cases:
+      - id: cold-open
+        suite: StatsPerfTests
+        test: "StatsPerfTests/testColdOpen*"
+        name: stats.coldOpen
+        metric: duration
+        unit: ms
+        limit: 4000
+        where: [simulator, device]
+        note: '"A few seconds on an iPhone" read as 4 s, the knowledge replay''s own target (R2071); each run is a fresh launch on a fresh copy of the fixture, so nothing is kept and no cache is built.'
+  - id: R2078
+    title: While any read runs, scrolling the page has a hitch time ratio below 5 ms/s and each control responds within one frame
+    group: stats
+    cases:
+      - id: scroll
+        suite: StatsPerfTests
+        test: "StatsPerfTests/testScrollDuringRead*"
+        name: xctest.hitch
+        metric: hitch-time-ratio
+        unit: ms/s
+        limit: 5
+        strict: true
+        where: [simulator, device]
+        note: The hooks scroll the page section by section for about three seconds (stats.scrollDuringRead) while a refresh reads.
+  - id: R2079
+    title: Selecting a value, changing a box's switch and changing the period within the last year take one frame and make no core call
+    group: stats
+    cases:
+      - id: period
+        suite: StatsPerfTests
+        test: "StatsPerfTests/testSelection*"
+        name: stats.selection
+        metric: duration
+        unit: ms
+        limit: 17
+        where: [simulator, device]
+        note: A period change between 1Y and 6M, from the change to the main-queue turn after its re-bin.
 
 probes:
   # The harness's own interval (U12): `perf/probe` emits it around a 30 ms

@@ -74,6 +74,20 @@ public enum IntervalNames {
     public static let statsAllGraphs = IntervalName("stats.allGraphs", .stats)
     /// A scope change → the graphs redrawn (R1838).
     public static let statsScopeChange = IntervalName("stats.scopeChange", .stats)
+    /// The Statistics page (U296, `stats/statistics-page` S19). Each starts when the page
+    /// asks (it appears, or its deck or period changes) and ends in the frame that shows it.
+    /// The page shown with a kept result → every box filled (R2076).
+    public static let statsKeptOpen = IntervalName("stats.keptOpen", .stats)
+    /// The page shown with nothing kept → every box filled (R2077).
+    public static let statsColdOpen = IntervalName("stats.coldOpen", .stats)
+    /// A refresh starts → the present tier's boxes and figures filled (S10.1 1, R2067).
+    public static let statsPresentTier = IntervalName("stats.presentTier", .stats)
+    /// A refresh starts → the review-log tier's boxes filled (S10.1 2, R1837).
+    public static let statsLogTier = IntervalName("stats.logTier", .stats)
+    /// A scroll of the page while a refresh reads (R2078): the window its hitches are measured in.
+    public static let statsScrollDuringRead = IntervalName("stats.scrollDuringRead", .stats)
+    /// A switch or a period within the year → the boxes redrawn with no core call (R2079).
+    public static let statsSelection = IntervalName("stats.selection", .stats)
     /// Heatmap data arrival → the heatmap drawn (R1839).
     public static let heatmapRender = IntervalName("heatmap.render", .stats)
     /// Opening Card Info → its content visible (R1841).
@@ -98,7 +112,8 @@ public enum IntervalNames {
         reviewStartToFirstCard, reviewStartPagesReady, reviewStartCardReady,
         reviewPresentToNextSettled, reviewOnDemandRender, reviewAnswerMainThread,
         reviewUndoToCardVisible, reviewActionToNextVisible, reviewTouchDownToTint, searchFirstPage,
-        statsAllGraphs, statsScopeChange, heatmapRender, cardInfoOpen,
+        statsAllGraphs, statsScopeChange, statsKeptOpen, statsColdOpen, statsPresentTier, statsLogTier,
+        statsScrollDuringRead, statsSelection, heatmapRender, cardInfoOpen,
         probeSyntheticDelay, probeNativeSwap,
     ] + BridgeCall.all.map(\.interval)
 

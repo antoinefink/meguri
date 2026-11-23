@@ -63,6 +63,156 @@
         }
       }
     },
+    "stats.box.activity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activity"
+          }
+        }
+      }
+    },
+    "stats.box.addedAndStarted": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Added and Started"
+          }
+        }
+      }
+    },
+    "stats.box.answers": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answers"
+          }
+        }
+      }
+    },
+    "stats.box.byDeck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "By Deck"
+          }
+        }
+      }
+    },
+    "stats.box.cardCounts": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card Counts"
+          }
+        }
+      }
+    },
+    "stats.box.cardsOverTime": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cards Over Time"
+          }
+        }
+      }
+    },
+    "stats.box.difficulty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Difficulty"
+          }
+        }
+      }
+    },
+    "stats.box.forgotten": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forgotten"
+          }
+        }
+      }
+    },
+    "stats.box.knowledgeOverTime": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Knowledge Over Time"
+          }
+        }
+      }
+    },
+    "stats.box.retention": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retention"
+          }
+        }
+      }
+    },
+    "stats.box.retrievability": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retrievability"
+          }
+        }
+      }
+    },
+    "stats.box.reviewsDue": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviews Due"
+          }
+        }
+      }
+    },
+    "stats.box.reviewsOverTime": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviews Over Time"
+          }
+        }
+      }
+    },
+    "stats.box.stability": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stability"
+          }
+        }
+      }
+    },
+    "stats.box.timeOfDay": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time of Day"
+          }
+        }
+      }
+    },
     "stats.byDeck.sentence %@": {
       "localizations": {
         "en": {
@@ -311,6 +461,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Week of %@"
+          }
+        }
+      }
+    },
+    "stats.deck.allDecks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All Decks"
+          }
+        }
+      }
+    },
+    "stats.deck.label": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck"
           }
         }
       }
@@ -895,12 +1065,202 @@
         }
       }
     },
+    "stats.page.deckMissing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This deck no longer exists."
+          }
+        }
+      }
+    },
     "stats.page.filteredDeck": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "A filtered deck shows the cards it holds now. Their reviews also count in their home decks."
+          }
+        }
+      }
+    },
+    "stats.page.noCards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Cards"
+          }
+        }
+      }
+    },
+    "stats.page.noCards.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add notes or import a collection to see statistics."
+          }
+        }
+      }
+    },
+    "stats.page.noCollection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Collection"
+          }
+        }
+      }
+    },
+    "stats.page.noCollection.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Statistics appear once a collection is open."
+          }
+        }
+      }
+    },
+    "stats.page.showAllDecks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show All Decks"
+          }
+        }
+      }
+    },
+    "stats.page.unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Statistics Unavailable"
+          }
+        }
+      }
+    },
+    "stats.page.unavailable.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A review or card record can’t be read. Check Database can repair it."
+          }
+        }
+      }
+    },
+    "stats.period.1m": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1M"
+          }
+        }
+      }
+    },
+    "stats.period.1m.spoken": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 Month"
+          }
+        }
+      }
+    },
+    "stats.period.1y": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Y"
+          }
+        }
+      }
+    },
+    "stats.period.1y.spoken": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 Year"
+          }
+        }
+      }
+    },
+    "stats.period.3m": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3M"
+          }
+        }
+      }
+    },
+    "stats.period.3m.spoken": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3 Months"
+          }
+        }
+      }
+    },
+    "stats.period.6m": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "6M"
+          }
+        }
+      }
+    },
+    "stats.period.6m.spoken": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "6 Months"
+          }
+        }
+      }
+    },
+    "stats.period.all": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        }
+      }
+    },
+    "stats.period.all.spoken": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        }
+      }
+    },
+    "stats.period.label": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Period"
           }
         }
       }
@@ -1015,6 +1375,146 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ tomorrow"
+          }
+        }
+      }
+    },
+    "stats.section.answering": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answering"
+          }
+        }
+      }
+    },
+    "stats.section.answering.question": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your answers, by kind and by hour"
+          }
+        }
+      }
+    },
+    "stats.section.cards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cards"
+          }
+        }
+      }
+    },
+    "stats.section.cards.question": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What your collection is made of, and how it grew"
+          }
+        }
+      }
+    },
+    "stats.section.comingUp": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coming Up"
+          }
+        }
+      }
+    },
+    "stats.section.comingUp.question": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What is waiting for you"
+          }
+        }
+      }
+    },
+    "stats.section.decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Decks"
+          }
+        }
+      }
+    },
+    "stats.section.decks.question": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Where your work and time go"
+          }
+        }
+      }
+    },
+    "stats.section.knowledge": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Knowledge"
+          }
+        }
+      }
+    },
+    "stats.section.knowledge.question": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How much you know, and how much you forget"
+          }
+        }
+      }
+    },
+    "stats.section.memory": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memory"
+          }
+        }
+      }
+    },
+    "stats.section.memory.question": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How stable recall is now"
+          }
+        }
+      }
+    },
+    "stats.section.reviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviews"
+          }
+        }
+      }
+    },
+    "stats.section.reviews.question": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How you review over time"
           }
         }
       }
@@ -1439,6 +1939,56 @@
         }
       }
     },
+    "stats.strip.mature": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mature"
+          }
+        }
+      }
+    },
+    "stats.strip.remainingToday": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remaining Today"
+          }
+        }
+      }
+    },
+    "stats.strip.retentionToday": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retention Today"
+          }
+        }
+      }
+    },
+    "stats.strip.streak": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Streak"
+          }
+        }
+      }
+    },
+    "stats.strip.studiedToday": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Studied Today"
+          }
+        }
+      }
+    },
     "stats.subtitle.cardsInDecks %lld %@ %lld %@": {
       "localizations": {
         "en": {
@@ -1531,12 +2081,122 @@
         }
       }
     },
+    "stats.switch.all": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        }
+      }
+    },
+    "stats.switch.byAnswer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "By Answer"
+          }
+        }
+      }
+    },
+    "stats.switch.byType": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "By Type"
+          }
+        }
+      }
+    },
+    "stats.switch.count": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Count"
+          }
+        }
+      }
+    },
+    "stats.switch.kind": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviews"
+          }
+        }
+      }
+    },
+    "stats.switch.mature": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mature"
+          }
+        }
+      }
+    },
+    "stats.switch.measure": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Measure"
+          }
+        }
+      }
+    },
+    "stats.switch.mode": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Breakdown"
+          }
+        }
+      }
+    },
+    "stats.switch.time": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time"
+          }
+        }
+      }
+    },
+    "stats.switch.young": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Young"
+          }
+        }
+      }
+    },
     "stats.timeOfDay.busiest": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "is your busiest hour"
+          }
+        }
+      }
+    },
+    "stats.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Statistics"
           }
         }
       }

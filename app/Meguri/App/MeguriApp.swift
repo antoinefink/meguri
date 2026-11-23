@@ -103,6 +103,10 @@ struct MeguriApp: App {
         #endif
         if let collection {
             features = .standard(collection: collection)
+            #if MEGURI_TEST_HOOKS
+            // The performance tests drive the page through the hooks' commands (U296).
+            TestHooks.StatsHooks.shared.attach(features.statsPage, sample: false)
+            #endif
             // Preserve navigation/window restoration while unavailable areas stay absent.
             navigation.show(.home)
             #if os(macOS)

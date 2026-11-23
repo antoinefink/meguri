@@ -31,6 +31,7 @@ extension TestHooks {
     /// | `-MeguriRoute` | a route registered in `RouteRegistry`, e.g. `sample/sheet` |
     /// | `-MeguriBackgroundLaunch` | Mac only: `YES` or `NO`; in Debug, `YES` keeps the app out of the Dock and never active (`BackgroundLaunch`, which reads it itself; Profile ignores it). Not a UI-state option: it changes neither the restored state nor the window size |
     /// | `-MeguriStudyTimings` | `on` or `off` (default): a strip below the shell gives the last Study's way to its first card (`StudyStartTrace`, R1813) as `testhooks.studyStart.timings` |
+    /// | `-MeguriStatsRollout` | `off` (default), `on` or `open`: turns `StatsRollout` on (U296), so the sidebar's Statistics row and View › Statistics (⇧⌘S) show; `open` also opens the window on Statistics once the shell starts (captures and performance tests over `-MeguriFixture`). A `stats/…` route turns it on by itself |
     /// | `-MeguriSyncRender` | a `SyncCoordinator.RenderState` name (`meguriConnected`, `meguriSyncing`, …), optionally followed by `+justFinished`: with `-MeguriFixture`, once the collection opens the shell shows that synthetic sync status in place of the real one; with a shell route, the shell gets the sync button over that status (captures of the sync button; nothing syncs) |
     struct LaunchOptions: Equatable {
         enum WindowSize: Equatable {
@@ -67,6 +68,12 @@ extension TestHooks {
         var integrations: Bool?
         var route: Route?
         var studyTimings = false
+        var statsRollout: StatsRolloutOption?
+
+        /// `-MeguriStatsRollout`'s values beyond `off`.
+        enum StatsRolloutOption: String, Equatable {
+            case on, open
+        }
         var syncRender: SyncRender?
 
         /// `-MeguriSyncRender`: the synthetic status the shell shows, and
@@ -80,7 +87,7 @@ extension TestHooks {
         static let names = [
             "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
             "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "SizeClass",
-            "Integrations", "Route", "BackgroundLaunch", "ImportSource", "OwnedProviderFixture", "StudyTimings", "SyncRender",
+            "Integrations", "Route", "BackgroundLaunch", "ImportSource", "OwnedProviderFixture", "StudyTimings", "SyncRender", "StatsRollout",
             "NativeReviewRoot", "NativeReviewCase", "NativeReviewPlatform", "NativeReviewFreezeSHA256", "NativeReviewFreezeBytes",
         ]
 
@@ -213,6 +220,12 @@ extension TestHooks {
             studyTimings = try values["StudyTimings"].map { value throws(TestHookError) in try Self.onOff(value, "StudyTimings") } ?? false
             if let value = values["Route"] {
                 route = try Route(value)
+            }
+            if let value = values["StatsRollout"], value != "off" {
+                guard let option = StatsRolloutOption(rawValue: value) else {
+                    throw TestHookError("-MeguriStatsRollout takes off, on or open, got '\(value)'")
+                }
+                statsRollout = option
             }
             if let value = values["SyncRender"] {
                 let parts = value.split(separator: "+", maxSplits: 1).map(String.init)

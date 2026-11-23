@@ -1,6 +1,8 @@
 #if MEGURI_TEST_HOOKS
 @_spi(MeguriTestHooks) import AppModel
+import CoreBridge
 import DesignSystem
+import Stats
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -385,7 +387,8 @@ extension TestHooks {
     ///   or failed (object / state 2). Other launches do not listen for it.
     final class ShellCommands: NSObject {
         enum Command: String, CaseIterable {
-            case toggleSizeClass, presentAdd, closeWindow, closeNativeReview, flushNativeReview, showBrowse
+            case toggleSizeClass, presentAdd, closeWindow, closeNativeReview, flushNativeReview, showBrowse, showStats, showToday, statsReload,
+                 statsPeriodAll, statsPeriodYear, statsPeriodHalfYear, statsScroll
             #if os(macOS)
             case readNativeReviewPhase
             #endif
@@ -473,6 +476,17 @@ extension TestHooks {
             case .showBrowse:
                 // As the Browse sidebar row (U270a's performance test).
                 navigation?.select(.section(.browse))
+            case .showStats:
+                // As the Statistics sidebar row, behind its flag (U296's performance test).
+                guard StatsRollout.enabled else { return }
+                navigation?.select(.section(.stats))
+            case .showToday:
+                navigation?.select(.section(.home))
+            case .statsReload: StatsHooks.shared.reload()
+            case .statsPeriodAll: StatsHooks.shared.select(.all)
+            case .statsPeriodYear: StatsHooks.shared.select(.oneYear)
+            case .statsPeriodHalfYear: StatsHooks.shared.select(.sixMonths)
+            case .statsScroll: StatsHooks.shared.scroll()
             case .closeWindow:
                 #if os(macOS)
                 NSApplication.shared.windows.first { $0.isVisible && $0.canBecomeMain }?.performClose(nil)
