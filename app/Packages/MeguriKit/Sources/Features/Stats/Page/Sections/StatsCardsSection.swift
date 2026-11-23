@@ -150,6 +150,11 @@ struct StatsCardCountsBox: View {
         }
     }
 
+    /// The columns' widths while nothing is shown: a five-digit count and 100%, in the locale, so
+    /// the layout chosen while loading is the one the values usually keep.
+    private var loadingCounts: [String] { [StatsChartFormat(locale: locale, now: .distantPast).count(88_888)] }
+    private var loadingShares: [String] { [StatsChartFormat(locale: locale, now: .distantPast).percent(1)] }
+
     /// The state rows (Antoine, 2026-11-23: "Remove the total and notes counters"): names in
     /// every phase, values once ready. The count and share columns are each as wide as their
     /// widest value, so the numbers line up on the right in any locale ("52,6 %").
@@ -166,7 +171,7 @@ struct StatsCardCountsBox: View {
                 let row = table?.rows.firstIndex { $0.label == label }.map { (index: $0, row: table!.rows[$0]) }
                 stateRow(label: label, name: row?.row.name ?? name, color: row?.row.color ?? color, row: row?.row,
                          index: row?.index ?? index, highlighted: highlighted == (row?.index ?? index) && table != nil,
-                         counts: table?.rows.map(\.countText) ?? ["—"], shares: table?.rows.map(\.shareText) ?? ["—"])
+                         counts: table?.rows.map(\.countText) ?? loadingCounts, shares: table?.rows.map(\.shareText) ?? loadingShares)
             }
         }
         .font(.subheadline)

@@ -68,6 +68,8 @@ struct StatsActivityBox: View {
                     .onChange(of: recentWeeks) { dropHiddenPin(activity) }
                     // A refresh that adds a week (a rollover, new history) can move the lines shown.
                     .onChange(of: activity?.grid.columns) { dropHiddenPin(activity) }
+                    // A shorter period can keep the column count and move the first day drawn.
+                    .onChange(of: activity?.span.firstDay) { dropHiddenPin(activity) }
                     .zIndex(1)
                 if narrow, activity?.windowed != true, let columns = (activity?.grid.columns ?? span?.grid().columns), perLine > 0,
                    ActivityContinuousGrid.Geometry.firstColumn(columns: columns, perLine: perLine,

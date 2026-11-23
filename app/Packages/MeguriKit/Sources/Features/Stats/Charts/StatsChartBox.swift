@@ -41,11 +41,14 @@ public struct StatsSmallFigure: Identifiable, Hashable, Sendable {
     }
 }
 
-/// A box (contract N25.4): the header button with its chevron and trailing
-/// switches or marker, the figure and its sentence, the plot with the system
-/// legend, the small figures and the footnote. It keeps its size in every
-/// phase (S8.5): the sentence keeps two lines, a box that can have a footnote
-/// keeps its line, and the plot keeps its height at every text size (S15).
+/// A box (contract N25.4): the header (a plain title until the chart's page
+/// exists) with its trailing switches or marker, the figure and its sentence,
+/// the plot with the system legend, the small figures and the footnote. It
+/// keeps its size in every phase (S8.5): the sentence keeps two lines and the
+/// plot keeps its height at every text size (S15). A footnote's line is kept
+/// only while the box has one (Antoine, 2026-11-23: no empty space at the
+/// bottom); a footnote that comes with the data adds its line then, the one
+/// change of height accepted for it.
 public struct StatsChartBox<Accessory: View>: View {
     private let box: String
     private let title: String
