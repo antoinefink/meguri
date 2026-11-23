@@ -115,6 +115,42 @@ public struct StatsRule: Identifiable, Hashable, Sendable {
     }
 }
 
+/// A dashed vertical rule at a place on the x axis that is not a bin, named in the legend:
+/// Retrievability's desired retention among its 5% bins (S7.12). Minimal: one value on the bins'
+/// own scale, drawn in the label colour like a horizontal rule.
+public struct StatsMarker: Identifiable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    /// Where it stands, in bins from the first bin's leading edge (0) to the last bin's trailing
+    /// edge (`bins.count`); nil draws nothing and keeps only its legend entry (a value not read yet).
+    public var position: Double?
+    /// The marked value as the callout writes it ("90.0%"), or nil to leave it out of the callout.
+    public var valueText: String?
+    public var color: StatsSeriesColor
+
+    public init(id: String, name: String, position: Double?, valueText: String? = nil, color: StatsSeriesColor = .rule) {
+        self.id = id
+        self.name = name
+        self.position = position
+        self.valueText = valueText
+        self.color = color
+    }
+
+    /// The position of `value` on an axis of `bins` equal bins from `lower` to `upper`, kept on
+    /// the plot: 90% among twenty 5% bins from 0 to 100% stands at 18, the leading edge of
+    /// the 90%–95% bin.
+    public static func position(of value: Double, lower: Double, upper: Double, bins: Int) -> Double? {
+        guard bins > 0, upper > lower, value.isFinite else { return nil }
+        return min(max((value - lower) / (upper - lower) * Double(bins), 0), Double(bins))
+    }
+
+    /// The plot's x for a position, from the first bin's centre and the distance between two
+    /// bins' centres: a band's leading edge is half a step before its centre.
+    static func x(_ position: Double, firstCenter: Double, step: Double) -> Double {
+        firstCenter + (position - 0.5) * step
+    }
+}
+
 /// A line of the callout that is not a drawn series, such as Reviews Due's
 /// "Total by then" (S7.9) or a stack's total (S7.4): the running total lives
 /// here, never on a second axis (S8.2).
@@ -159,12 +195,17 @@ public struct StatsChartData: Hashable, Sendable {
     /// The Audio Graph's name for the y axis (P18.3: cards, reviews, minutes,
     /// percent); nil names it by the unit.
     public var unitName: String?
+    /// Vertical rules at places on the x axis (Retrievability's desired retention), after the
+    /// rules in the legend.
+    public var markers: [StatsMarker]
 
     public init(
         bins: [StatsPeriod], series: [StatsSeries], rules: [StatsRule] = [],
         unit: StatsValueUnit = .count, yScale: StatsYScale = .zero,
-        calloutLines: [StatsCalloutLine] = [], browsable: IndexSet = [], unitName: String? = nil
+        calloutLines: [StatsCalloutLine] = [], browsable: IndexSet = [], unitName: String? = nil,
+        markers: [StatsMarker] = []
     ) {
+        self.markers = markers
         self.bins = bins
         self.series = series
         self.rules = rules
@@ -202,11 +243,11 @@ public struct StatsChartData: Hashable, Sendable {
 
     /// Whether every series keeps to one colour family (S8.1).
     public var keepsOneFamily: Bool {
-        StatsSeriesColor.keepsOneFamily(series.map(\.color) + rules.map(\.color))
+        StatsSeriesColor.keepsOneFamily(series.map(\.color) + rules.map(\.color) + markers.map(\.color))
     }
 
-    /// The names in legend order: the series in stack order, then the rules.
-    public var legendNames: [String] { series.map(\.name) + rules.map(\.name) }
+    /// The names in legend order: the series in stack order, then the rules and the markers.
+    public var legendNames: [String] { series.map(\.name) + rules.map(\.name) + markers.map(\.name) }
 }
 
 // MARK: - Stacking and the y domain
