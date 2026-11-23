@@ -105,6 +105,14 @@ pub fn apply(
     progress.set_phase(ProgressPhase::Planning);
     let check = || -> ImportOutcome<()> { cancel.check().map_err(Into::into) };
     let raw = Arc::new(gather::read(&session.collection_path(), &context, options.with_scheduling, &check)?);
+    // With the review log counted (it is brought only with scheduling).
+    let rows = (raw.notes.len() as u64).saturating_add(raw.cards).saturating_add(raw.revlog);
+    if rows > super::MAX_ROWS {
+        return Err(ApkgImportError::TooLarge {
+            rows,
+            limit: super::MAX_ROWS,
+        });
+    }
     let taken = Arc::new(gather::take(&raw, &options));
     let service = MediaService::open(&collection, context.clock.clone())?;
 

@@ -299,6 +299,11 @@ fn changes_of(commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Result<Op
     if payload.row_keys(Table::Cards).next().is_none() && payload.row_keys(Table::Revlog).next().is_none() {
         return Ok(None);
     }
+    if crate::bulk_commit(commit) {
+        // A delta holds every touched row's images: a rebuild in the
+        // background instead, so its memory never grows with the commit.
+        return Err(Unusable);
+    }
     let mut cards: HashMap<i64, (Option<RowImage>, Option<RowImage>)> = HashMap::new();
     for delta in payload.cards() {
         let delta = delta?;

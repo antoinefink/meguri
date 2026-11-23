@@ -220,10 +220,10 @@ pub fn inspect(
     )
     .map_err(candidate_error)?;
 
-    if prepared.notes > super::MAX_NOTES || prepared.cards > super::MAX_CARDS {
+    if prepared.notes.saturating_add(prepared.cards) > super::MAX_ROWS {
         return Err(ApkgImportError::TooLarge {
-            notes: prepared.notes,
-            cards: prepared.cards,
+            rows: prepared.notes.saturating_add(prepared.cards),
+            limit: super::MAX_ROWS,
         });
     }
 

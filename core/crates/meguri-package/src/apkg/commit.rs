@@ -68,11 +68,33 @@ fn reduced(field: &str) -> String {
     text[..end].to_owned()
 }
 
-fn entry(note: i64, fields: &[String], existing: Option<i64>) -> LogEntry {
-    LogEntry {
-        note,
-        fields: fields.iter().map(|field| reduced(field)).collect(),
-        existing_id: existing,
+/// What the log's field texts may hold in all (R1852): past it, an entry
+/// keeps its ids and no fields, and `ImportLog::fields_omitted` counts it.
+/// A note type of many fields would otherwise make the log grow with the
+/// package's text.
+pub(crate) const LOG_TEXT_BUDGET: usize = 16 * 1024 * 1024;
+
+struct LogBudget {
+    left: usize,
+    omitted: u64,
+}
+
+impl LogBudget {
+    fn entry(&mut self, note: i64, fields: &[String], existing: Option<i64>) -> LogEntry {
+        let mut kept = Vec::new();
+        if self.left > 0 {
+            kept = fields.iter().map(|field| reduced(field)).collect();
+            let cost: usize =
+                kept.iter().map(|field: &String| field.len() + std::mem::size_of::<String>()).sum();
+            self.left = self.left.saturating_sub(cost.max(1));
+        } else {
+            self.omitted += 1;
+        }
+        LogEntry {
+            note,
+            fields: kept,
+            existing_id: existing,
+        }
     }
 }
 
@@ -500,6 +522,10 @@ pub(crate) fn commit(
         media_skipped: plan.media.skipped,
         ..ImportCounts::default()
     };
+    let mut budget = LogBudget {
+        left: LOG_TEXT_BUDGET,
+        omitted: 0,
+    };
     let mut log = ImportLog {
         found_notes: plan.raw.notes.len() as u64,
         ..ImportLog::default()
@@ -625,17 +651,17 @@ pub(crate) fn commit(
                 None => source.fields.split('\u{1f}').map(str::to_owned).collect(),
             };
             match planned.decision {
-                Decision::MissingNotetype => log.missing_notetype.push(entry(source.id.0, &fields, None)),
+                Decision::MissingNotetype => log.missing_notetype.push(budget.entry(source.id.0, &fields, None)),
                 Decision::Conflicting { existing } => {
-                    log.conflicting.push(entry(source.id.0, &fields, Some(existing.0)));
+                    log.conflicting.push(budget.entry(source.id.0, &fields, Some(existing.0)));
                 }
                 Decision::Duplicate { target } => {
-                    log.duplicate.push(entry(target.0, &fields, None));
+                    log.duplicate.push(budget.entry(target.0, &fields, None));
                     targets[index] = Some(target);
                 }
                 Decision::DuplicateOf { earlier, same_type } => {
                     let target = targets[earlier].ok_or_else(|| stale(Table::Notes, source.id.0))?;
-                    log.duplicate.push(entry(target.0, &fields, None));
+                    log.duplicate.push(budget.entry(target.0, &fields, None));
                     if same_type {
                         targets[index] = Some(target);
                     }
@@ -669,10 +695,10 @@ pub(crate) fn commit(
                     scope.put(&note)?;
                     let stored: Vec<String> = note.fields.split('\u{1f}').map(str::to_owned).collect();
                     if matches!(planned.decision, Decision::New) {
-                        log.new.push(entry(note.id.0, &stored, None));
+                        log.new.push(budget.entry(note.id.0, &stored, None));
                         counts.notes_added += 1;
                     } else {
-                        log.updated.push(entry(note.id.0, &stored, None));
+                        log.updated.push(budget.entry(note.id.0, &stored, None));
                         counts.notes_updated += 1;
                     }
                     if witness {
@@ -812,7 +838,7 @@ pub(crate) fn commit(
                     }
                 }
             };
-            log.missing_deck.push(entry(target.0, &stored, None));
+            log.missing_deck.push(budget.entry(target.0, &stored, None));
         }
     }
     if plan.options.with_scheduling {
@@ -840,6 +866,7 @@ pub(crate) fn commit(
     if let Some(stage) = plan.media.stage.take() {
         ctx.commit_media(stage, &witnesses)?;
     }
+    log.fields_omitted = budget.omitted;
     Ok(Committed {
         log,
         counts,

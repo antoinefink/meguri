@@ -30,12 +30,13 @@ pub use archive::PackageFormat;
 pub use classify::{PackageClass, classify, classify_name};
 pub use session::{ImportSession, inspect};
 
-/// The most notes and cards a package may hold. An apply keeps a few dozen
-/// bytes per note (its identity, its decision and its log entry) and reads
-/// every text in pages, so these bound its memory whatever the package
-/// stores (R1852); no real deck comes near them.
-pub const MAX_NOTES: u64 = 1_000_000;
-pub const MAX_CARDS: u64 = 4_000_000;
+/// The most rows an import may bring: the package's notes and cards, and
+/// its review log when learning progress is included. An apply reads every
+/// text in pages, so its memory does not grow with what the rows store; it
+/// grows with their number (its own identity and decision per note, and the
+/// op's undo journal, which indexes every written row), and this bounds it
+/// (R1852).
+pub const MAX_ROWS: u64 = 2_000_000;
 
 /// What an import needs from its host besides the engine.
 #[derive(Clone)]
@@ -119,7 +120,8 @@ pub struct LogEntry {
     /// The target note's id, or the package note's for `conflicting` and
     /// `missing_notetype`.
     pub note: i64,
-    /// Every field, reduced as I13 says.
+    /// Every field, reduced as I13 says; empty once the log's text budget
+    /// is spent (`ImportLog::fields_omitted`).
     pub fields: Vec<String>,
     /// For `conflicting`: the target note that holds the GUID.
     pub existing_id: Option<i64>,
@@ -142,6 +144,9 @@ pub enum LogCategory {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ImportLog {
     pub found_notes: u64,
+    /// Entries that carry no field text: the log holds 16 MiB of it in all
+    /// (R1852), and later entries keep their ids only.
+    pub fields_omitted: u64,
     pub new: Vec<LogEntry>,
     pub updated: Vec<LogEntry>,
     pub duplicate: Vec<LogEntry>,
@@ -348,12 +353,12 @@ pub enum ApkgImportError {
     DeckTooDeep {
         name: String,
     },
-    /// The package holds more notes or cards than an apply keeps track of
-    /// in bounded memory ([`MAX_NOTES`], [`MAX_CARDS`]): refused at the
-    /// inspect, before anything is planned.
+    /// The import would bring more rows than [`MAX_ROWS`]: refused at the
+    /// inspect for notes and cards alone, and at the start of an apply
+    /// with the review log counted, before anything is planned or staged.
     TooLarge {
-        notes: u64,
-        cards: u64,
+        rows: u64,
+        limit: u64,
     },
     SessionClosed,
     Cancelled,

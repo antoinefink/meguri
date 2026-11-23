@@ -66,3 +66,14 @@ pub fn card_info_debug_json(collection: &Collection, card_id: CardId) -> Result<
         CardInfoOutcome::Unavailable(kind) => Err(kind),
     })
 }
+
+/// The touched cards and review-log rows above which a commit is taken as a
+/// bulk one (an import): the derived stats components then rebuild in the
+/// background instead of holding a delta of every row's images, so what
+/// they keep for a commit stays bounded (R1852).
+pub(crate) const BULK_COMMIT_ROWS: usize = 20_000;
+
+pub(crate) fn bulk_commit(commit: &meguri_engine::ObservedCommit<'_>) -> bool {
+    let changes = commit.changes;
+    changes.cards.len() + changes.revlog_added.len() + changes.revlog_removed.len() > BULK_COMMIT_ROWS
+}
