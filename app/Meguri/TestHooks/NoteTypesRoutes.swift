@@ -368,7 +368,7 @@ extension TestHooks {
     }
 }
 
-extension TestHooks.NoteTypesRoutes {
+extension TestHooks {
     /// The preview's sample page: the draft's own styling around fixed
     /// sample text for each sample card type and side (no collection is
     /// open here, so the core cannot render). A draft text the sample's
