@@ -478,6 +478,16 @@ pub trait ReadRows: sealed::Connected {
             })? as u64)
     }
 
+    /// The ids of one type's notes, ascending (the template preview's note
+    /// menu); no other column is read.
+    fn notetype_note_ids(&self, notetype: NotetypeId) -> Result<Vec<NoteId>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT id FROM notes WHERE mid = ?1 ORDER BY id")?;
+        let ids = statement.query_map([notetype.0], |row| row.get::<_, i64>(0).map(NoteId))?;
+        Ok(ids.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// The notes among `ids` that exist, in id order, from one statement
     /// (bulk actions read their listed notes a page at a time).
     fn notes_with_ids(&self, ids: &[NoteId]) -> Result<Vec<Note>, StorageError> {

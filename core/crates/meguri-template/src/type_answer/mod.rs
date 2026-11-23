@@ -143,6 +143,41 @@ pub fn question(
     Ok((out, descriptor))
 }
 
+/// `render/type-answer` A11.1: the text shown in place of every type-in
+/// marker after a side's first.
+pub const PREVIEW_EXTRA_MARKER: &str = "Only the first type-in box of a card template works.";
+
+/// A11.1 (`render/preview` V9): the template preview's simulated type-in
+/// on one side's display text. A side without `[[type:` is unchanged.
+/// Otherwise every exact `<hr id=answer>` goes first; the first marker
+/// becomes the read-only box holding `example` on the question, and the
+/// comparison of expected `example` with typed `sample` on the answer
+/// (after `<hr id=answer>` when the side had one); every later marker
+/// becomes the warning. Nothing reads the note's fields.
+pub fn simulate_preview(text: &str, answer_side: bool) -> String {
+    if !text.contains("[[type:") {
+        return text.to_owned();
+    }
+    let had_rule = text.contains("<hr id=answer>");
+    let source = text.replace("<hr id=answer>", "");
+    let first = if answer_side {
+        let comparison = compare("example", "sample", Mode::Plain, false);
+        format!("{}{comparison}", if had_rule { "<hr id=answer>" } else { "" })
+    } else {
+        "<center><input id='typeans' type=text value='example' readonly='readonly'></center>".to_owned()
+    };
+    let later = format!("<center><b>{PREVIEW_EXTRA_MARKER}</b></center>");
+    let mut out = String::with_capacity(source.len() + first.len());
+    let mut at = 0;
+    for (index, found) in MARKERS.find_iter(&source).enumerate() {
+        out.push_str(&source[at..found.start()]);
+        out.push_str(if index == 0 { &first } else { &later });
+        at = found.end();
+    }
+    out.push_str(&source[at..]);
+    out
+}
+
 /// A5: insert literal blocks and move exact answer rules when R has a marker.
 pub fn answer(text: &str, descriptor: Option<&Descriptor>, typed: &str) -> String {
     let Some(d) = descriptor else {

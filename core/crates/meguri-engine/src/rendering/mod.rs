@@ -148,19 +148,9 @@ pub(crate) fn render_captured(
                 sides.answer_replay_ids,
             )
         };
-    let mut media_refs = std::collections::BTreeSet::new();
-    for html in [&question, &answer].into_iter().flatten() {
-        media_refs.extend(meguri_text::media_refs::local_references(html));
-    }
-    for av in comparable.question_av.iter().chain(&comparable.answer_av) {
-        if let AvTag::Sound { name } = av
-            && !meguri_text::media_refs::is_remote(name)
-        {
-            media_refs.insert(name.clone());
-        }
-    }
+    let media_refs = media_refs([&question, &answer].into_iter().flatten(), &comparable);
     Ok(RenderedCard {
-        media_refs: media_refs.into_iter().collect(),
+        media_refs,
         card_id: card.id,
         ordinal: u32::from(card.ord),
         mode,
@@ -176,6 +166,23 @@ pub(crate) fn render_captured(
         marked: crate::tags::canonical::split_text(&note.tags).any(|t| t.to_lowercase() == "marked"),
         type_in,
     })
+}
+
+/// The local media names a render shows: references in its display HTML
+/// and its sound tags, sorted and each once (for preloading).
+pub(crate) fn media_refs<'a>(html: impl IntoIterator<Item = &'a String>, comparable: &CardRender) -> Vec<String> {
+    let mut refs = std::collections::BTreeSet::new();
+    for html in html {
+        refs.extend(meguri_text::media_refs::local_references(html));
+    }
+    for av in comparable.question_av.iter().chain(&comparable.answer_av) {
+        if let AvTag::Sound { name } = av
+            && !meguri_text::media_refs::is_remote(name)
+        {
+            refs.insert(name.clone());
+        }
+    }
+    refs.into_iter().collect()
 }
 
 /// Collection-backed template preview (conformance/render-ops Q1.3/1.4).
