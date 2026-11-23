@@ -130,7 +130,7 @@ Units: U225, U226, U230 and U231 of the parent plan are superseded by U293 to U3
 8. **Windows without a time axis** (Answers, Time of Day, By Deck) are 30, 90, 182 or 365 days or all, not week-aligned; 6M's 182 days is Meguri's.
 9. **Streak**: a day not yet studied today does not break the current streak.
 10. **Kept results** persist on the device per (collection, deck, period) and are dropped when the collection is replaced.
-11. **Activity** ignores the period and shows every year.
+11. **Activity** ignores the period and shows every year. Changed 2026-11-23 (Antoine): it shows the period's window ending today; All shows every year.
 12. **Show in Browse for a day** uses Browse's Studied On token, labelled "Forgotten on <date>" for Forgotten.
 13. **All's axis** starts at the scope's oldest review month for every chart; Reviews Due's All looks at most 24 months ahead, then one Later bar.
 

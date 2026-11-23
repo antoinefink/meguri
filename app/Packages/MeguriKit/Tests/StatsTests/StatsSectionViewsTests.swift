@@ -7,7 +7,7 @@ import Testing
 /// The logic the section views of U299 to U301 add on top of the model's values, against
 /// hand-computed fixtures: Reviews Due's axis labels beside Overdue and Later (S7.9; the labels
 /// ran into them in a small box), Retrievability's desired-retention marker (S7.12), the
-/// Card Counts' donut and Answers' shares (S7.7, S7.10), Time of Day's shared callout
+/// Card Counts' pie and Answers' shares (S7.7, S7.10), Time of Day's shared callout
 /// (S7.11) and By Deck's sorting (S7.15).
 @MainActor
 @Suite struct StatsSectionViewsTests {
@@ -116,26 +116,27 @@ import Testing
         #expect(!Self.format.calloutText(unknown, bin: 19).contains("Desired"))
     }
 
-    // MARK: Card Counts' donut (S7.7) and Answers' shares (S7.10)
+    // MARK: Card Counts' pie (S7.7) and Answers' shares (S7.10)
 
     /// A turn from 12 o'clock clockwise among 50, 0, 25 and 25 cards: the first half is the
     /// first state, the empty one takes nothing, then a quarter each.
-    @Test func theDonutsSectorsFollowTheTurnFromTwelveOClock() {
+    @Test func thePiesSectorsFollowTheTurnFromTwelveOClock() {
         let counts = [50, 0, 25, 25]
-        #expect(StatsCardCountsDonut.state(atFraction: 0, counts: counts) == 0)
-        #expect(StatsCardCountsDonut.state(atFraction: 0.49, counts: counts) == 0)
-        #expect(StatsCardCountsDonut.state(atFraction: 0.5, counts: counts) == 2)
-        #expect(StatsCardCountsDonut.state(atFraction: 0.75, counts: counts) == 3)
-        #expect(StatsCardCountsDonut.state(atFraction: 1, counts: counts) == 3)
-        #expect(StatsCardCountsDonut.state(atFraction: 0.5, counts: [0, 0]) == nil)
-        // A donut 100 points across: four points on its ring, one in its centre and one beyond it.
+        #expect(StatsCardCountsPie.state(atFraction: 0, counts: counts) == 0)
+        #expect(StatsCardCountsPie.state(atFraction: 0.49, counts: counts) == 0)
+        #expect(StatsCardCountsPie.state(atFraction: 0.5, counts: counts) == 2)
+        #expect(StatsCardCountsPie.state(atFraction: 0.75, counts: counts) == 3)
+        #expect(StatsCardCountsPie.state(atFraction: 1, counts: counts) == 3)
+        #expect(StatsCardCountsPie.state(atFraction: 0.5, counts: [0, 0]) == nil)
+        // A pie 100 points across: four points near its edge, one near its centre and one beyond it.
         let size = CGSize(width: 100, height: 100)
-        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 50, y: 5), in: size, counts: counts) == 0)
-        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 95, y: 50), in: size, counts: counts) == 0)
-        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 50, y: 95), in: size, counts: counts) == 2)
-        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 5, y: 50), in: size, counts: counts) == 3)
-        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 50, y: 50), in: size, counts: counts) == nil)
-        #expect(StatsCardCountsDonut.state(at: CGPoint(x: 2, y: 2), in: size, counts: counts) == nil)
+        #expect(StatsCardCountsPie.state(at: CGPoint(x: 50, y: 5), in: size, counts: counts) == 0)
+        #expect(StatsCardCountsPie.state(at: CGPoint(x: 95, y: 50), in: size, counts: counts) == 0)
+        #expect(StatsCardCountsPie.state(at: CGPoint(x: 50, y: 95), in: size, counts: counts) == 2)
+        #expect(StatsCardCountsPie.state(at: CGPoint(x: 5, y: 50), in: size, counts: counts) == 3)
+        // A pie has no empty centre: a point near the centre is in a sector (just right of 12 o'clock).
+        #expect(StatsCardCountsPie.state(at: CGPoint(x: 51, y: 49), in: size, counts: counts) == 0)
+        #expect(StatsCardCountsPie.state(at: CGPoint(x: 2, y: 2), in: size, counts: counts) == nil)
     }
 
     /// Answers stack each kind to 100%: Young's 1, 1, 6 and 2 presses are 10%, 10%, 60% and 20%,

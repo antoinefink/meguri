@@ -703,7 +703,7 @@ screens:
       log, knowledge; kept results first, refreshed in place with "Updating…" in the subtitle;
       with nothing kept, each box at its final size with a small progress indicator in its plot,
       determinate where the core reports progress; no full-page spinner or shimmer). No session
-      timer, FSRS always shown, no Card Ease, no second axes (Card Counts a donut with its table since
+      timer, FSRS always shown, no Card Ease, no second axes (Card Counts a pie with its table since
       2026-11-23). Live: refreshes itself
       half a second after a change, a sync or a rollover; no Refresh command. Every screen unit
       checks first run and no collection. Identifiers stats.<element> (stats/statistics-page
@@ -742,7 +742,7 @@ screens:
       stats/chart/<box>/<state> for cards-over-time, reviews-due, answers, retrievability and
       by-deck (1m 3m 6m 1y, deck, loading, empty, failed, pinned, contrast; cold, leaf and the
       card-counts, time-of-day and stability failures). Identifiers: stats.box.cardCounts.plot (the
-      donut), .table and .row.<state>; stats.box.byDeck.table, .sort.<column> (deck, cards,
+      pie), .table and .row.<state>; stats.box.byDeck.table, .sort.<column> (deck, cards,
       reviews, retention, time) and .row.<deck id>-<own cards>. Box titles are plain headings
       (stats.box.<box>.header, no chevron) until U302 gives a box its page.
   - id: stats.heatmapSettings

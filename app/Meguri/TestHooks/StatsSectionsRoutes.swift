@@ -8,7 +8,8 @@ extension TestHooks.StatsRoutes {
     /// The states of the Cards, Coming Up, Answering, Memory and Decks sections (plan U299 to
     /// U301), on the sample collection with the page scrolled to the section, All Decks and All
     /// unless named. For each section's first box, `stats/chart/<box>/<state>`:
-    /// - `1m`, `3m`, `6m`, `1y`: that period; `deck`: Languages; `contrast`: Increase Contrast.
+    /// - `1m`, `3m`, `6m`, `1y`: that period (Activity too: it follows the period); `deck`:
+    ///   Languages; `contrast`: Increase Contrast.
     /// - `loading`: the present tier back, the review log still reading (Card Counts, Reviews
     ///   Due and the Memory boxes filled, the others with their progress); `cold`: nothing back.
     /// - `empty`: no review yet (S12.3); `failed`: the section's parts fail alone (S12.8).
@@ -34,6 +35,10 @@ extension TestHooks.StatsRoutes {
                 (.addedAndStarted, { StatsChartSelection(bin: max(0, $0.data.bins.count - 3), pinned: true) }),
             ])
         }
+        registry.registerShell("stats/chart/activity/1m") { _ in section(.activity, period: .oneMonth) }
+        registry.registerShell("stats/chart/activity/3m") { _ in section(.activity, period: .threeMonths) }
+        registry.registerShell("stats/chart/activity/6m") { _ in section(.activity, period: .sixMonths) }
+        registry.registerShell("stats/chart/activity/1y") { _ in section(.activity, period: .oneYear) }
         registry.registerShell("stats/chart/reviews-due/1m") { _ in section(.reviewsDue, period: .oneMonth) }
         registry.registerShell("stats/chart/reviews-due/3m") { _ in section(.reviewsDue, period: .threeMonths) }
         registry.registerShell("stats/chart/reviews-due/6m") { _ in section(.reviewsDue, period: .sixMonths) }

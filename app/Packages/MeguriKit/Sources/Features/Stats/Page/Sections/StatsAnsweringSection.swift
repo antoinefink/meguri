@@ -95,7 +95,9 @@ struct StatsTimeOfDayBox: View {
             VStack(alignment: .leading, spacing: Spacing.small) {
                 StatsBoxHeader(box: slot.id.rawValue, title: title, open: slot.open) { EmptyView() }
                 StatsBoxFigureView(figure: content.figure, ready: ready)
-                VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                // Room between the panels for the upper axis's lowest label and the lower one's
+                // highest, which otherwise ran into each other ("70%20K" in the captures).
+                VStack(alignment: .leading, spacing: Spacing.medium) {
                     StatsChartPlot(
                         box: "\(slot.id.rawValue).remembered", data: ready ? upper : upper.skeleton(), phase: .ready,
                         size: .panel, summary: summary, selection: slot.selection, showInBrowse: nil, separatesSeries: nil,

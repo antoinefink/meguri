@@ -148,21 +148,52 @@ import Testing
     }
 
     @Test func activity() throws {
-        let box = try Self.box(.activity)
-        guard case let .activity(activity)? = box.detail else { Issue.record("no activity"); return }
+        // All: every day back to the first review, each year with its total.
+        let all = try Self.box(.activity, Fixture.presenter(Fixture.set(history: .allHistory), period: .all))
+        guard case let .activity(activity)? = all.detail else { Issue.record("no activity"); return }
         #expect(activity.years.map(\.year) == [2026, 2025])
         #expect(activity.years.map(\.total) == [15, 2])
         #expect(activity.years.last?.totalText == "2025: 2 reviews")
         #expect(activity.currentStreak == 3 && activity.longestStreak == 3 && activity.daysStudiedThisYear == 3)
-        #expect(activity.span.firstDay == -400 && activity.total == 17)
+        #expect(activity.span.firstDay == -400 && activity.total == 17 && !activity.windowed)
         // Option B (2026-11-23): the streak is the headline, nothing under the grid; each year's
         // total goes beside its label on the grid.
-        #expect(box.figure == StatsBoxFigure(value: "3 days in a row", sentence: "Your longest streak · studied 3 of 285 days this year"))
-        #expect(box.figures.isEmpty)
+        #expect(all.figure == StatsBoxFigure(value: "3 days in a row", sentence: "Your longest streak · studied 3 of 285 days this year"))
+        #expect(all.figures.isEmpty)
         #expect(activity.daysThisYear == 285, "1 January to 12 October 2026")
         #expect(activity.years.last?.totalFull == "· 2 reviews" && activity.years.last?.totalNumber == "· 2")
-        // The period never changes it.
-        #expect(try Self.box(.activity, Fixture.presenter(Fixture.set(), period: .oneYear)).detail == box.detail)
+        #expect(activity.years.first?.totalFull == "· 15 reviews")
+    }
+
+    /// Activity follows the period (Antoine, 2026-11-23: "with 3M selected it showed two years"):
+    /// 1M to 1Y draw their window's days ending today (30, 90, 182, 365), All every day. A year
+    /// keeps its total beside its label only where the window holds it from 1 January; the
+    /// headline is the streak's and this year's whatever the period. Today is 12 October 2026.
+    @Test func activityFollowsThePeriod() throws {
+        func activity(_ period: StatsPagePeriod) throws -> (StatsActivity, StatsBoxFigure?) {
+            let box = try Self.box(.activity, Fixture.presenter(Fixture.set(), period: period))
+            guard case let .activity(activity)? = box.detail else { throw Fixture.Missing() }
+            return (activity, box.figure)
+        }
+        let (month, monthFigure) = try activity(.oneMonth)
+        #expect(month.span.firstDay == -29 && month.windowed)
+        #expect(month.years.map(\.year) == [2026])
+        // The window starts inside 2026: its label alone.
+        #expect(month.years.first?.totalText == "2026" && month.years.first?.totalFull == "")
+        #expect(monthFigure?.value == "3 days in a row" && month.currentStreak == 3)
+        let (quarter, _) = try activity(.threeMonths)
+        #expect(quarter.span.firstDay == -89 && quarter.years.map(\.year) == [2026])
+        #expect(try activity(.sixMonths).0.span.firstDay == -181)
+        // 1Y from 13 October 2025: 2026 is whole so far (from 1 January, day −284), 2025 is not.
+        let (year, _) = try activity(.oneYear)
+        #expect(year.span.firstDay == -364 && year.years.map(\.year) == [2026, 2025])
+        #expect(year.years.map(\.totalFull) == ["· 15 reviews", ""])
+        #expect(year.years.last?.totalText == "2025")
+        // A history shorter than the window starts at its first review.
+        #expect(StatsPagePeriod.oneYear.activityFirstDay(oldest: -40) == -40)
+        #expect(StatsPagePeriod.oneMonth.activityFirstDay(oldest: -40) == -29)
+        #expect(StatsPagePeriod.all.activityFirstDay(oldest: -40) == -40)
+        #expect(StatsPagePeriod.all.activityFirstDay(oldest: 3) == 0)
     }
 
     /// Option B's four headlines: the current streak that is the longest, one shorter than the
@@ -196,7 +227,8 @@ import Testing
         #expect(box.figure?.sentence == "32 mature, up 2 in the period")
         #expect(Self.figures(box) == ["New": "45 (\(p.signed(-5)))", "Learning": "2 (+2)", "Young": "11 (+1)",
                                       "Mature": "32 (+2)"])
-        #expect(box.footnote == "5 suspended cards are not shown.")
+        // The 5 suspended cards left out are not said on the box face (Antoine, 2026-11-23).
+        #expect(box.footnote == nil)
         // No review: S12.3's line.
         let none = try Self.box(.cardsOverTime, Fixture.presenter(Fixture.set(oldest: .noRows)))
         #expect(none.phase == .empty("No reviews yet", detail: nil))

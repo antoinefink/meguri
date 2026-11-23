@@ -389,11 +389,18 @@ struct StatsPresenter {
         guard let firstCounted = streaks.counts.keys.min() else { return empty(.activity, .noReviewsYet) }
         // From H9's oldest review when the header has it, as the loading grid was sized (S10.3).
         let oldest: Int = if case let .day(day) = header.oldestDay { min(day, firstCounted) } else { firstCounted }
-        let span = StatsActivitySpan(firstDay: oldest, days: days)
+        // The period's window (Antoine, 2026-11-23): 1M to 1Y show their days ending today, All
+        // every day. The headline stays the streak's and this year's.
+        let span = StatsActivitySpan(firstDay: period.activityFirstDay(oldest: oldest), days: days)
         let years = span.years.map { year in
             let first = days.firstDay(ofYear: year) ?? Int.min
             let last = (days.firstDay(ofYear: year + 1) ?? 1) - 1
             let total = streaks.counts.reduce(0) { $0 + ($1.key >= first && $1.key <= last ? $1.value : 0) }
+            // A year's total beside its label only where the window holds the whole year so far
+            // (from 1 January); a year the window starts inside keeps its label alone.
+            guard period.activityWindowDays.map({ 1 - $0 <= first }) ?? true else {
+                return StatsActivity.Year(year: year, total: total, totalText: String(year))
+            }
             return StatsActivity.Year(year: year, total: total, totalText: text.yearTotal(String(year), total, count(total)),
                                       totalFull: text.totalFull(total, count(total)), totalNumber: text.totalNumber(count(total)))
         }
@@ -402,6 +409,7 @@ struct StatsPresenter {
         var activity = StatsActivity(span: span, counts: streaks.counts, years: years, currentStreak: streaks.current,
                                      longestStreak: streaks.longest, daysStudiedThisYear: thisYear, days: days)
         activity.daysThisYear = max(1, 1 - thisYearStart)
+        activity.windowed = period.activityWindowDays != nil
         return content(.ready, figure: Self.activityFigure(activity, text: text, count: count), data: StatsChartData(bins: [], series: []),
                        detail: .activity(activity))
     }
@@ -422,7 +430,9 @@ struct StatsPresenter {
     // S7.6
     func cardsOverTime() -> Outcome {
         guard case let .cardStatesOverTime(value)? = set.value(.cardStatesOverTime) else { return .unavailable }
-        let footnote = value.leftOut > 0 ? text.suspendedNotShown(value.leftOut, count(value.leftOut)) : nil
+        // The suspended cards left out are not said on the box (Antoine, 2026-11-23); the chart's
+        // page says it in its About text (S9, U302).
+        let footnote: String? = nil
         if noRows { return empty(.cardsOverTime, .noReviewsYet, footnote: footnote) }
         let axis = pastAxis
         let levels = Self.levels(value, at: axis.bins.map(\.last))
