@@ -41,9 +41,12 @@ extension TestHooks {
     /// sample page made of the draft's styling and fixed sample text (no
     /// collection is open, so the core cannot render):
     /// - `notetypes/cards/preview-back`: Recognition's Back, the answer shown.
-    /// - `notetypes/cards/preview-error`: an unknown field on Production's
-    ///   front before the preview's first render: the issue's words where the
-    ///   card would be (after an edit, the last card stays faded under them).
+    /// - `notetypes/cards/preview-error`: Production's card, then its front
+    ///   edited to name a field that does not exist: the card stays, faded,
+    ///   under the issue's words.
+    /// - `notetypes/cards/preview-edited`: Recognition's card, then the
+    ///   styling edited (the word larger and purple): the preview shows the
+    ///   unsaved styling, the Styling part open.
     /// - `notetypes/cards/preview-empty`: Phrases, a type with no notes: the
     ///   sample note with Fill Empty Fields on.
     /// - `notetypes/cards/preview-cloze`: the Cloze type's card 2.
@@ -65,6 +68,7 @@ extension TestHooks {
             registry.registerShell("notetypes/cards/styling") { _ in launch(.cards(.styling)) }
             registry.registerShell("notetypes/cards/preview-back") { _ in launch(.cards(.previewBack)) }
             registry.registerShell("notetypes/cards/preview-error") { _ in launch(.cards(.previewError)) }
+            registry.registerShell("notetypes/cards/preview-edited") { _ in launch(.cards(.previewEdited)) }
             registry.registerShell("notetypes/cards/preview-empty") { _ in launch(.cards(.previewEmpty)) }
             registry.registerShell("notetypes/cards/preview-cloze") { _ in launch(.cards(.previewCloze)) }
             registry.registerShell("notetypes/cards/preview-hidden") { _ in launch(.cards(.previewHidden)) }
@@ -108,7 +112,14 @@ extension TestHooks {
             case cards(Cards)
         }
 
-        enum Cards { case typical, issues, styling, previewBack, previewError, previewEmpty, previewCloze, previewHidden }
+        enum Cards { case typical, issues, styling, previewBack, previewError, previewEdited, previewEmpty, previewCloze, previewHidden }
+
+        /// Waits until the preview has put a card on the page (at most 20 s).
+        @MainActor static func previewDrawn(_ model: NoteTypesModel) async {
+            for _ in 0..<200 where model.preview.shown == nil {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
 
         @MainActor static func launch(_ state: State, sync: SampleMeguriSync = .init()) -> ShellLaunch {
             let backend = SampleNoteTypesBackend()
@@ -177,10 +188,18 @@ extension TestHooks {
                             model.cardPart = .back
                         case .previewError:
                             model.selectedCard[id] = 1
+                            model.cardPart = .front
+                            await previewDrawn(model)
                             model.stage(id) { draft in
                                 draft.setText(1, .front, "<div class=\"meaning\">{{Meaning}}</div>\n<div class=\"pos\">{{Part of Speech}}</div>\n{{Wrod}}")
                             }
-                            model.cardPart = .front
+                        case .previewEdited:
+                            model.cardPart = .styling
+                            await previewDrawn(model)
+                            model.stage(id) { draft in
+                                draft.css = draft.css.replacingOccurrences(of: ".word { font-size: 32px; color: teal; }",
+                                                                           with: ".word { font-size: 44px; color: purple; }")
+                            }
                         case .previewEmpty, .previewHidden:
                             model.cardPart = .front
                         case .previewCloze:

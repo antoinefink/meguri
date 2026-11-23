@@ -158,6 +158,9 @@ struct NoteTypePreviewPane: View {
                     // Under an error the last card stays, faded, so the place keeps its shape.
                     .opacity(covered ? 0.25 : 1)
                     .allowsHitTesting(!covered)
+                    .accessibilityElement(children: .contain)
+                    // Present once a card is on the page: tests and captures wait for it.
+                    .accessibilityIdentifier("noteTypes.cards.preview.page")
                     .accessibilityHidden(covered)
             }
             if deleted {

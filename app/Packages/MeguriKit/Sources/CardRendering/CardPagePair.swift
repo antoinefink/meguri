@@ -61,6 +61,26 @@ public final class CardPagePair {
     /// After presentation and its host-context acknowledgement attempt. A
     /// missing/failing host remains unavailable; acknowledgement is not paint.
     public var onCommitted: ((CardUpdate, SwapToken) -> Void)?
+    /// A preview's rule (`render/preview` V12): a replay command plays only
+    /// right after a click or tap on the card, so a card script that calls
+    /// the bridge by itself plays nothing. Review leaves it off.
+    public var playNeedsTap = false {
+        didSet { if playNeedsTap { installTapWatch() } }
+    }
+    /// When the last click or tap on the card happened (system uptime).
+    var lastTap: TimeInterval?
+    private var tapWatch: AnyObject?
+
+    /// How long after a click or tap a replay command counts as the person's.
+    static let tapWindow: TimeInterval = 1.5
+
+    /// Whether a replay command may play: always without the rule, else only
+    /// within `tapWindow` after a click or tap on the card.
+    static func allowsPlay(needsTap: Bool, lastTap: TimeInterval?, now: TimeInterval) -> Bool {
+        guard needsTap else { return true }
+        guard let lastTap else { return false }
+        return now >= lastTap && now - lastTap <= tapWindow
+    }
     /// Frame probes end intervals independently of the double-rAF receipt.
     public let swaps: SwapRecorder
     public let reveals: SwapRecorder
@@ -127,6 +147,11 @@ public final class CardPagePair {
             page.onAction = { [weak self] page, action in
                 guard let self, page === self.current, !self.suspended, !self.lifecycleSuspended else { return }
                 if case .play(let side, let index) = action, let payload = page.payload, let update = page.update {
+                    guard Self.allowsPlay(needsTap: self.playNeedsTap, lastTap: self.lastTap,
+                                          now: ProcessInfo.processInfo.systemUptime) else {
+                        self.diagnostics.record("playWithoutTap", update: update)
+                        return
+                    }
                     self.audio.playEntry(payload: payload, update: update, side: side, index: index)
                 }
                 self.onAction?(action)
@@ -609,6 +634,27 @@ public final class CardPagePair {
         return pendingResume
     }
 
+    /// Records clicks and taps on the card without taking them from the page
+    /// (links and replay buttons still get them).
+    private func installTapWatch() {
+        guard tapWatch == nil else { return }
+        let watch = TapWatch { [weak self] in self?.lastTap = ProcessInfo.processInfo.systemUptime }
+        #if os(macOS)
+        let recognizer = NSPressGestureRecognizer(target: watch, action: #selector(TapWatch.pressed(_:)))
+        recognizer.minimumPressDuration = 0
+        recognizer.delaysPrimaryMouseButtonEvents = false
+        #else
+        let recognizer = UILongPressGestureRecognizer(target: watch, action: #selector(TapWatch.pressed(_:)))
+        recognizer.minimumPressDuration = 0
+        recognizer.cancelsTouchesInView = false
+        recognizer.delaysTouchesBegan = false
+        recognizer.delaysTouchesEnded = false
+        recognizer.delegate = watch
+        #endif
+        container.addGestureRecognizer(recognizer)
+        tapWatch = watch
+    }
+
     public func close() {
         guard !closed else { return }
         closed = true; commitSerial += 1; hostInstallation = UUID()
@@ -749,3 +795,26 @@ public final class CardPagePair {
         #endif
     }
 }
+
+/// The target of the preview's click and tap watch.
+private final class TapWatch: NSObject {
+    let record: () -> Void
+    init(record: @escaping () -> Void) { self.record = record }
+    #if os(macOS)
+    @objc func pressed(_ recognizer: NSPressGestureRecognizer) {
+        if recognizer.state == .began || recognizer.state == .ended { record() }
+    }
+    #else
+    @objc func pressed(_ recognizer: UILongPressGestureRecognizer) {
+        if recognizer.state == .began || recognizer.state == .ended { record() }
+    }
+    #endif
+}
+
+#if os(iOS)
+extension TapWatch: UIGestureRecognizerDelegate {
+    /// The page's own recognizers keep working beside the watch.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+}
+#endif

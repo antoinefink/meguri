@@ -435,6 +435,8 @@ public final class NoteTypePreview {
                 // Card media never starts without a tap here (V12); links leave as in review.
                 let made = CardPagePair(configuration: .preview, resolver: resolver, appearance: appearance)
                 made.configureLinks(preferExternalBrowser: true, approvals: CardSchemeApprovals())
+                // Audio plays only from a click or tap on the card (V12, W9).
+                made.playNeedsTap = true
                 pair = made
             }
             guard let pair else { return nil }
