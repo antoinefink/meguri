@@ -1287,7 +1287,7 @@ Decided by Antoine in chat on 2026-11-22 (`decisions.md`, rows `stats.overview` 
 ### N25.2 The toolbar and its two controls (3A)
 
 - Mac: the window toolbar, leading to trailing: the title "Statistics" with the subtitle "1,370 cards in 4 decks" (and the status of N25.9), the deck pop-up button, the period segmented control (1M 3M 6M 1Y All), then the sync button and the Add menu as on every page. Both controls are standard toolbar items and stay put while the page scrolls.
-- iPad at regular width: the same in the navigation bar.
+- iPad at regular width: the same in the navigation bar, as two trailing items kept apart (not one glass group), the pop-up's label carrying its up-and-down chevrons (U297, 2026-11-23).
 - iPhone, the Duo folded, a narrow iPad window: the inline title "Statistics" with the deck pop-up beside it (a menu button with the deck's name and a chevron) and the subtitle under it; the period segmented control pinned under the navigation bar while the page scrolls; the Jump menu (`list.bullet`) as a trailing toolbar button.
 - The deck's name is visible at every scroll position on every device. A long name truncates in the middle, with the full name as help text (Mac).
 - Kept state: `stats/statistics-page` S3.3 (per window and device; first time All Decks and All).
@@ -1309,6 +1309,8 @@ Top to bottom, at the box's inset:
 4. The legend, in stack order, each swatch with its name (the system chart legend).
 5. Two to four small figures in a row (label in secondary text over its value), stacking at accessibility sizes.
 6. A footnote in footnote secondary text when the box has one (left-out cards).
+
+Every header is as tall as one with a small switch, so the boxes of a row line up. A month axis over more than one year writes each label with its whole year ("Oct 2028"), never a two-digit year (U297, 2026-11-23).
 
 Colours: `stats/statistics-page` S8.1 (system colours only; the state family and the answer family, indigo for single measures, Forgotten orange). Selection, callout and Show in Browse: S8.3, S8.4; the callout is the system chart selection's annotation, a small material panel that never covers the rule. Empty and sparse: S8.5, the line centred in the plot area in secondary text.
 

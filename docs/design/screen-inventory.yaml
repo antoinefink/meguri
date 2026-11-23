@@ -702,6 +702,10 @@ screens:
       Reached before U307 shows it through StatsRollout (routes stats/page/<state>,
       stats/period/<period>, stats/deck/<deck>, stats/chart/<box>). Toolbar identifiers are
       stats.toolbar.deck and stats.toolbar.period (R1964's area.screen.element).
+      Knowledge section (U297): Knowledge Over Time's Estimated marker explains, as help, that
+      each day is worked out again with today's memory parameters; an open Retention point's
+      callout says it has too few reviews to trust; route stats/page/pinned shows a pinned bar
+      in each Knowledge box.
   - id: stats.heatmapSettings
     title: Heatmap settings
     units: [U229]
