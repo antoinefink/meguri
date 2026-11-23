@@ -312,7 +312,7 @@ Every row: `usn` -1, `mtime_secs` = `crt`, `val` the compact JSON text (`storage
 
 ### F6.3 `deck_config`
 
-The new-collection default preset of `model/protobuf-records` P6.6 (the example message) with `bury_new`, `bury_reviews` and `bury_interday_learning` true (R1804) and `desired_retention` 0.9; `name` `Default` (id 1) or `Preset <n>`; `mtime_secs` = `crt`; `usn` -1. The due worst case sets `reviews_per_day` of `Preset 2` to its review limit; recipes set `new_per_day` and `reviews_per_day` of their own presets.
+The new-collection default preset of `model/protobuf-records` P6.6 (the example message) with `bury_new`, `bury_reviews` and `bury_interday_learning` true (R1804) and `desired_retention` 0.9; `name` `Default` (id 1) or `Preset <n>`; `mtime_secs` = `crt`; `usn` -1. The due worst case sets `reviews_per_day` of `Preset 2` to its review limit; recipes set `new_per_day`, `reviews_per_day`, `leech_threshold` and `leech_action` of their own presets.
 
 ### F6.4 `decks`
 
@@ -393,7 +393,7 @@ Committed (R1805): `decks-2000` (20,000 cards, 2,000 decks), `due-500k` (500,000
 | `now` | the pinned instant, RFC 3339 with `Z` or `±HH:MM`; the offset is the collection's |
 | `rollover_hour` | optional, default 4 |
 | `learn_ahead_secs` | optional `collapseTime` seconds, with `sched/day-clock#D2`'s u32 range; default 1,200 |
-| `presets` | optional list of `{name, new_per_day?, reviews_per_day?}` added after `Default` |
+| `presets` | optional list of `{name, new_per_day?, reviews_per_day?, leech_threshold?, leech_action?}` added after `Default`; `leech_threshold` is 1 to 9,999 (`sched/leeches#L1`), `leech_action` is `tag` or `suspend` (L3) (added 2026-11-23, for the review's leech captures) |
 | `decks` | list of decks; each `name` (`::` nests; missing parents are created with `Default`; a deck listed twice or after its child is an error), `preset` (default `Default`), `notetype` (`basic`, `reversed`, `cloze`, `broken`; default `basic`), card counts by state `new`, `learning`, `due` (review due on or before today), `later` (review due after today), `suspended`, `buried` (each default 0), `tags`, `fields` (texts with `{n}`, the note's number in its deck from 1; drawn words when missing), `media` `{images, sounds, missing}` references per note (`missing` names files that are not written) |
 
 ### F9.2 Rules

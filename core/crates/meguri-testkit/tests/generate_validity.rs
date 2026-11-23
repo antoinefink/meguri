@@ -1439,6 +1439,29 @@ fn recipe_learn_ahead_defaults_to_1200_and_requires_u32() {
 }
 
 #[test]
+fn recipe_presets_set_the_leech_threshold_and_action() {
+    let recipe = Recipe::named("leech-review").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    generate_recipe(&recipe, 1, dir.path()).unwrap();
+    let collection = open(&collection(dir.path()));
+    let rows = collection.writer();
+    let mut seen = BTreeMap::new();
+    for id in rows.ids_after(Table::DeckConfig, None, 100).unwrap() {
+        let preset = rows.deck_config(DeckConfigId(id)).unwrap().unwrap();
+        seen.insert(preset.name.clone(), (preset.config.leech_threshold, preset.config.leech_action));
+    }
+    assert_eq!(seen.get("Default"), Some(&(8, 1)), "the default keeps 8 and Tag Only");
+    assert_eq!(seen.get("Leech Tag"), Some(&(1, 1)));
+    assert_eq!(seen.get("Leech Suspend"), Some(&(1, 0)));
+    let base = "recipe: leech\ndescription: leech\nnow: '2030-01-15T10:00:00Z'\npresets:\n";
+    for bad in ["  - {name: P, leech_threshold: 0}\n", "  - {name: P, leech_threshold: 10000}\n"] {
+        let recipe = Recipe::parse(&format!("{base}{bad}")).unwrap();
+        assert!(generate_recipe(&recipe, 1, tempfile::tempdir().unwrap().path()).is_err(), "{bad}");
+    }
+    assert!(Recipe::parse(&format!("{base}  - {{name: P, leech_action: delete}}\n")).is_err());
+}
+
+#[test]
 fn the_recipes_give_their_decks_and_counts() {
     let names = Recipe::names().unwrap();
     for wanted in ["empty", "typical", "overflow", "error-prone", "review-ready"] {
