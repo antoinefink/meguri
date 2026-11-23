@@ -215,6 +215,8 @@ public final class StatsPageModel {
     /// model keeps only the shown scope's kept sets in memory.
     public func memoryWarning() {
         kept.trim()
+        // The presenters hold their sets; the next rebuild makes the shown ones again.
+        presenters = [:]
     }
 
     // MARK: Controls

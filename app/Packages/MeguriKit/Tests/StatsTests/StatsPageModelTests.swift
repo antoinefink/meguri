@@ -544,4 +544,17 @@ import Testing
         #expect(model.box(.answers).phase == .failed)
         #expect(model.box(.cardCounts).phase == .ready)
     }
+
+    @Test func everyWindowWaitingForTheSameDeviceReadRefreshes() async throws {
+        let directory = URL.temporaryDirectory.appending(path: "stats-wait-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let onDisk = StatsKeptResults(directory: directory)
+        let first = model(kept: onDisk)
+        let second = model(kept: onDisk)
+        first.appear()
+        second.appear()
+        await onDisk.waitForLoads()
+        // Both windows asked while one read ran: both refresh when it ends.
+        await settle({ service.requests.count == 2 }, "both windows refreshed")
+    }
 }

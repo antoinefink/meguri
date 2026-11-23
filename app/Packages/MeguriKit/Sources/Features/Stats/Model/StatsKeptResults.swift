@@ -22,6 +22,8 @@ public final class StatsKeptResults {
     @ObservationIgnored private var recent: [Key] = []
     @ObservationIgnored private var loading: [Key: Task<Void, Never>] = [:]
     @ObservationIgnored private var writes: [Task<Void, Never>] = []
+    /// Every caller waiting for a running read (each window that asked), run when it ends.
+    @ObservationIgnored private var waiters: [Key: [@MainActor () -> Void]] = [:]
     /// The collection the sets are of; nil keeps nothing.
     public private(set) var collection: String?
     @ObservationIgnored private let disk: StatsKeptDisk?
@@ -76,6 +78,7 @@ public final class StatsKeptResults {
         for key in Array(loading.keys) where !keep.contains(key.scope) {
             loading[key]?.cancel()
             loading[key] = nil
+            waiters[key] = nil
         }
         recent.removeAll { !keep.contains($0.scope) }
     }
@@ -83,6 +86,7 @@ public final class StatsKeptResults {
     private func drop(disk: Bool) {
         for task in loading.values { task.cancel() }
         loading = [:]
+        waiters = [:]
         entries = [:]
         recent = []
         epoch &+= 1
@@ -140,7 +144,9 @@ public final class StatsKeptResults {
         guard let disk, let collection else { return }
         for history in [StatsHistory.last12Months, .allHistory] {
             let key = Key(scope: scope, history: history)
-            guard entries[key] == nil, loading[key] == nil else { continue }
+            guard entries[key] == nil else { continue }
+            waiters[key, default: []].append(loaded)
+            guard loading[key] == nil else { continue }
             let epoch = epoch
             loading[key] = Task { [weak self] in
                 let sets = await disk.load(key: key, collection: collection, epoch: epoch)
@@ -148,7 +154,7 @@ public final class StatsKeptResults {
                 self.loading[key] = nil
                 // A set kept meanwhile (this launch's refresh) is newer; the read ones join it.
                 for set in (sets ?? []).reversed() where set.scope == scope && set.history == history { self.keep(set) }
-                loaded()
+                for waiter in self.waiters.removeValue(forKey: key) ?? [] { waiter() }
             }
         }
     }
