@@ -651,6 +651,7 @@ Decided by the coordinator on 2026-11-23, pending Antoine's look. He showed the 
 - An element of the card that scrolls on its own keeps whatever the card's styling gives it: that is the person's card, not Meguri's chrome.
 - The Mac keeps the system's behaviour, which follows its "Show scroll bars" setting.
 - Only the review's card pages and their warm-up use this page. Note Types and Browse have no card web view today. A later card preview decides its indicators for itself.
+
 ### N16.11 The leech notice is an icon (2026-11-23)
 
 Decided by the coordinator on 2026-11-23, pending Antoine's look. He showed "Card was a leech." drawn as a banner row above the card and asked for one yellow icon in the top controls instead. It takes no extra height, is less prominent, and can be pressed when needed.
