@@ -43,6 +43,9 @@ public struct BrowseView: View {
                 // N21.3, N23.6: the trailing group, in this order: the sync button,
                 // the search field, the Add menu. U273's inspector toggle
                 // (`sidebar.trailing`) goes last, after the Add menu.
+                // The search field is placed by its own default item between the
+                // two (the field is searchable with the automatic placement:
+                // with the toolbar placement the system put it last, after Add).
                 if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
                 DefaultToolbarItem(kind: .search, placement: .primaryAction)
                 if let addMenu { ToolbarItem(placement: .primaryAction) { addMenu } }

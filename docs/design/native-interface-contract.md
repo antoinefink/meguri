@@ -642,6 +642,15 @@ Decided by the coordinator under Antoine's delegation on 2026-11-22, from his ca
 - A tap or click in the answer area that misses its buttons does nothing on either side: the area takes it, so it reaches neither the card's page nor the tap zones, and no grade comes from a near miss of a button (U180). A drag that starts there does not scroll the card.
 - Replaces: the answer row's band of the page colour between the card and the bottom edge (N3's reserved region now lies over the card, still the same height on both sides, so reveal moves nothing).
 
+### N16.10 No scroll indicator on the card (touch)
+
+Decided by the coordinator on 2026-11-23, pending Antoine's look. He showed the review on his opened Duo: the card's vertical scroll indicator ran as a long grey bar between the card and the column of answer buttons, which he found "a bit strange" and "web-like".
+
+- On iPhone, iPad and a foldable, folded or opened, the review card's page shows no scroll indicator, vertical or horizontal, on either side. That includes the brief one the system shows when a long card appears. Built: the page's scroll view (`CardPage`, `showsVerticalScrollIndicator` and `showsHorizontalScrollIndicator` off).
+- Nothing else changes: how the card scrolls (by touch, keyboard or VoiceOver), N16.9's answer area over the card, and N16.1's progress bar.
+- An element of the card that scrolls on its own keeps whatever the card's styling gives it: that is the person's card, not Meguri's chrome.
+- The Mac keeps the system's behaviour, which follows its "Show scroll bars" setting.
+- Only the review's card pages and their warm-up use this page. Note Types and Browse have no card web view today. A later card preview decides its indicators for itself.
 ### N16.11 The leech notice is an icon (2026-11-23)
 
 Decided by the coordinator on 2026-11-23, pending Antoine's look. He showed "Card was a leech." drawn as a banner row above the card and asked for one yellow icon in the top controls instead. It takes no extra height, is less prominent, and can be pressed when needed.
