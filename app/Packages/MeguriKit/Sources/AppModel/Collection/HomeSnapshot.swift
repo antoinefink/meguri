@@ -1,5 +1,4 @@
 import CoreBridge
-import Darwin
 import Foundation
 
 /// Home's last finished read, kept on the device so a launch draws the deck list and
@@ -117,11 +116,14 @@ public nonisolated struct CollectionFileIdentity: Codable, Equatable, Sendable {
 
     /// One `stat` of the file; nil when it does not exist or cannot be read.
     public static func of(_ file: URL) -> CollectionFileIdentity? {
-        var info = Darwin.stat()
         let path = file.path(percentEncoded: false)
-        guard Darwin.stat(path, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return nil }
-        return CollectionFileIdentity(path: path, fileNumber: UInt64(info.st_ino),
-            createdSeconds: Int64(info.st_birthtimespec.tv_sec), createdNanoseconds: Int64(info.st_birthtimespec.tv_nsec))
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let number = attributes[.systemFileNumber] as? NSNumber,
+              let created = attributes[.creationDate] as? Date else { return nil }
+        let seconds = created.timeIntervalSince1970.rounded(.down)
+        return CollectionFileIdentity(path: path, fileNumber: number.uint64Value, createdSeconds: Int64(seconds),
+            createdNanoseconds: Int64(((created.timeIntervalSince1970 - seconds) * 1e9).rounded()))
     }
 }
 

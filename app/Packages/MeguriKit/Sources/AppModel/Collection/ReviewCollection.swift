@@ -641,13 +641,15 @@ public final class ReviewCollection: ChangeFanoutSink {
         self.configuration = configuration; self.navigation = navigation
         // One stat and a few kilobytes, before the first frame: the launch draws the last read (N27.2).
         let collectionFile = configuration.collectionLocation.collectionFile
-        collectionFileAtLaunch = FileManager.default.fileExists(atPath: collectionFile.path(percentEncoded: false))
-        homeSnapshots = configuration.homeSnapshotFile.map(HomeSnapshotStore.init(file:))
+        let fileAtLaunch = FileManager.default.fileExists(atPath: collectionFile.path(percentEncoded: false))
+        let snapshots = configuration.homeSnapshotFile.map(HomeSnapshotStore.init(file:))
+        collectionFileAtLaunch = fileAtLaunch
+        homeSnapshots = snapshots
         // A snapshot for another file, or with no file at all, is deleted here.
-        if let snapshot = homeSnapshots?.load(for: collectionFile) {
+        if let snapshot = snapshots?.load(for: collectionFile) {
             keptHome = KeptHome(snapshot: snapshot, now: configuration.clock.now())
         }
-        if collectionFileAtLaunch { deckListInteractive = Signposts.begin(IntervalNames.launchToDeckListInteractive) }
+        if fileAtLaunch { deckListInteractive = Signposts.begin(IntervalNames.launchToDeckListInteractive) }
         self.providerDirectory = providerDirectory ?? CoreBridge.CollectionLocation(
             collectionDirectory: configuration.collectionLocation.directory,
             backupsDirectory: configuration.collectionLocation.backupsDirectory,
@@ -1002,15 +1004,18 @@ public final class ReviewCollection: ChangeFanoutSink {
         // The open-time exchange may end before the steps below do (F5.1).
         studyPreparation.hostOpened()
         startupStep?("ready")
-        await sync.completeOpenedHost(generation: value, startupForeground: startupForeground)
-        startupStep?("syncAttached")
+        // N27.5: Home's first deck tree comes first. The session record is one small file and
+        // the day check settles the day the counts are for (a rollover unburies); the sync
+        // attachment, the media index and study preparation follow the tree, never before it.
+        // A failed save still ends the completion, as before, once the sync attachment has run.
+        var recordFailure: (any Error)?
         if loadRecord {
             do { previousRecord = try await records.load() }
             catch { self.error = "Couldn’t read the previous session record. \(error)" }
             if var previousRecord, !recoveryDrops.isEmpty {
                 for card in recoveryDrops { previousRecord.reject(cardID: card) }
                 self.previousRecord = previousRecord
-                try await records.save(previousRecord, version: 1)
+                do { try await records.save(previousRecord, version: 1) } catch { recordFailure = error }
             }
         }
         recoveryDrops.removeAll()
@@ -1020,13 +1025,16 @@ public final class ReviewCollection: ChangeFanoutSink {
             didCheck: { [weak self] in self?.refreshCounts(); self?.review?.requestRefresh() })
         if foreground { await day?.checkNow() }
         startupStep?("dayChecked")
+        await loadCounts()
+        startupStep?("treeRead")
+        await sync.completeOpenedHost(generation: value, startupForeground: startupForeground)
+        startupStep?("syncAttached")
+        if let recordFailure { throw recordFailure }
         await refreshMedia()
         startupStep?("mediaRead")
         // Presented whatever the status: the read never waits for the job (F5.1).
         await studyPreparation.collectionOpened()
         startupStep?("studyPrepared")
-        await loadCounts()
-        startupStep?("treeRead")
         preparedGeneration = generation
         studyWarmup.warm()
     }
