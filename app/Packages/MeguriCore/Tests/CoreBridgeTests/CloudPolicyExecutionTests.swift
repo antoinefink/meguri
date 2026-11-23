@@ -1857,6 +1857,81 @@ extension EventTests {
         }
     }
 
+    // Publication's `sent` step emits ConfigureAutomatic{off} while the opening
+    // row's fetch can still be inside the SDK. That cancellation is no failure
+    // (P4, P15), and the retired callbacks record no drain.
+    @Test(arguments: [false, true])
+    func policyFetchRetiredInsideSDKBySchedulingChangeDoesNotFailOrForgeDrain(changeAccount: Bool) async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, executor) = try await nativePolicy(fixture)
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor)
+            let wrapped = Mutex<PolicyPendingEngine?>(nil)
+            await fixture.factory.wrapNextEngine { sdk in
+                let engine = PolicyPendingEngine(sdk); wrapped.withLock { $0 = engine }; return engine
+            }
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await fixture.engine()
+            let wrapper = try #require(wrapped.withLock { $0 })
+            try #require(wrapper.instanceID == engine.instanceID)
+            let inside = CloudCallbackGate(), cancellation = CloudCallbackGate(), returned = CloudCallbackGate()
+            await engine.appendFetchScripts([.manualPaused(fetchedZones: ["meguri-root", fixture.zone], records: [],
+                pauseZone: fixture.zone, afterDid: true, gate: inside)])
+            let fetch = try #require(try policyCommands(try await policy.input(.foreground))
+                .first { if case .requestFetch = $0.action { true } else { false } })
+            let calls = engine.acceptedNetworkCalls.value
+            let drains = try await fixture.core.fetchDrains()
+            await wrapper.pauseNextCancellation(cancellation)
+            try await withCloudTask(gates: [inside, cancellation, returned], operation: {
+                let result = await executor.execute(fetch)
+                #expect((result.error != nil) == changeAccount && !result.deferred)
+                #expect(result.fetchProofOutcome == nil && result.nativeCancellation == nil)
+                #expect(result.originalGuardRefusal == nil && result.dependentFetchRefusal == nil)
+                // The original fetch entered the SDK once and was not repeated.
+                #expect(engine.acceptedNetworkCalls.value == calls + 1)
+                let drainsAfterFetch = try await fixture.core.fetchDrains()
+                #expect(drainsAfterFetch == drains)
+                await returned.enter()
+            }, whileRunning: {
+                try await inside.waitForArrival()
+                let changed = try policyCommands(try await policy.input(.settings(.init(enabled: true, paused: false, automatic: false, media: false))))
+                let configure = try #require(changed.first { if case .configureAutomatic = $0.action { true } else { false } })
+                let replacing = Task {
+                    let result = await executor.execute(configure)
+                    _ = await cancellation.operationSucceeded()
+                    return result
+                }
+                do {
+                    // Configure has retired Core authority; its cancelOperations
+                    // is held, so the fetch is still inside the original SDK call.
+                    try await cancellation.waitForArrival()
+                    try await fixture.adapter.waitForStopping(instanceID: engine.instanceID)
+                    if changeAccount {
+                        try await fixture.core.accountChanged(sdk: nil, status: .available, identity: Data("synthetic-account-B".utf8))
+                    }
+                    await inside.open()
+                    try await returned.waitForArrival()
+                    await returned.open(); await cancellation.open()
+                    let result = await replacing.value
+                    #expect((result.error != nil) == changeAccount && !result.deferred)
+                } catch {
+                    await inside.open(); await returned.open(); await cancellation.open()
+                    _ = await replacing.value
+                    throw error
+                }
+            })
+            let drainsAfterRetirement = try await fixture.core.fetchDrains()
+            #expect(drainsAfterRetirement == drains)
+            #expect(await engine.recordedTrace().contains(.released))
+            if !changeAccount {
+                let next = try await fixture.engine()
+                #expect(next.instanceID != engine.instanceID && !next.automaticallySync)
+                try await fixture.core.validateSDK(next.instanceID)
+                #expect(await fixture.adapter.retainedInstanceIDs() == [next.instanceID])
+                #expect(next.acceptedNetworkCalls.value == 0)
+            }
+        }
+    }
+
     // Only metadata admission uses the Debug policy-origin observation hook.
     #if DEBUG
     @Test(arguments: ["scheduling", "account", "sdk", "metadata"])

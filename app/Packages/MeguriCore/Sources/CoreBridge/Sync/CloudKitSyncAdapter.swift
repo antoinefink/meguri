@@ -2664,13 +2664,21 @@ public actor CloudKitSyncAdapter {
             // engine. That refusal supplies no transport result. The original
             // command's control guard must still pass; a changed account,
             // binding, generation or actual SDK failure is not this case.
-            guard case .requestSend = command.action,
-                  await schedulingRetired(instance, execution: execution, error: error) else { throw error }
+            // A fetch retired after it entered the SDK is the same case: P4's
+            // ConfigureAutomatic stops the old instance without waiting for its
+            // fetch, and that cancellation is no failing cycle (P15). Its
+            // retired callbacks drain nothing, so no fetch result is claimed.
+            switch command.action {
+            case .requestSend, .requestFetch: break
+            default: throw error
+            }
+            guard await schedulingRetired(instance, execution: execution, error: error) else { throw error }
         }
     }
     private func schedulingRetired(_ instance: Instance, execution: CoreCloudPolicyExecution, error: any Error) async -> Bool {
         guard !Task.isCancelled else { return false }
-        guard error is CancellationError || (error as? BridgeError) == .cloudPolicy(.staleCommand)
+        // CloudKit reports its own cancellation as operationCancelled (code 20).
+        guard cloudOperationWasCancelled(error) || (error as? BridgeError) == .cloudPolicy(.staleCommand)
                 || (error as? BridgeError) == .cloudConnection(.authorityChanged) else { return false }
         func ownedStop() -> Bool {
             (instance.firstStopReason == .policyConfigureAutomatic || instance.firstStopReason == .configureAutomatic)
