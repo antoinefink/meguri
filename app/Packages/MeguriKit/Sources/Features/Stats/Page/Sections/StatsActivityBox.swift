@@ -20,6 +20,7 @@ struct StatsActivityBox: View {
     @Environment(\.locale) private var locale
     @Environment(\.calendar) private var calendar
     @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var focused: Bool
 
     /// N24.6's fixed square, as on Today: it never grows with the width or the text size.
@@ -92,6 +93,7 @@ struct StatsActivityBox: View {
         let figures = [
             "\(text.figureCurrentStreak), \(text.days(activity.currentStreak, format.count(Double(activity.currentStreak))))",
             "\(text.figureLongestStreak), \(text.days(activity.longestStreak, format.count(Double(activity.longestStreak))))",
+            "\(text.figureDaysStudiedThisYear), \(format.count(Double(activity.daysStudiedThisYear)))",
             "\(text.figureAllReviews), \(format.count(Double(activity.total)))",
         ]
         return (figures + activity.years.reversed().map(\.totalText)).joined(separator: "; ")
@@ -103,11 +105,18 @@ struct StatsActivityBox: View {
     /// oldest first as the grid reads; each a row that wraps.
     private func figures(_ content: StatsBoxContent, activity: StatsActivity?, span: StatsActivitySpan?) -> some View {
         let ready = content.phase == .ready
-        // While loading, each year the header knows with a dash, so the box keeps its size.
-        let years: [(year: Int, text: String)] = activity.map { $0.years.map { ($0.year, $0.totalText) } }
-            ?? (span?.years ?? []).map { ($0, text.yearTotal(String($0), 0, text.noValue)) }
+        // While loading, each year the header knows with a dash, as wide as a six-figure total, so
+        // the row keeps its lines when the counts arrive (S10.3).
+        let reserve = 888_888
+        let reserveText = reserve.formatted(.number.locale(locale))
+        let years: [(year: Int, text: String, reserve: String?)] = activity.map { $0.years.map { ($0.year, $0.totalText, nil) } }
+            ?? (span?.years ?? []).map { ($0, text.yearTotal(String($0), 0, text.noValue), text.yearTotal(String($0), reserve, reserveText)) }
+        // At the accessibility sizes, one under another (S15), as the other boxes' figures.
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let row = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xSmall))
+            : AnyLayout(StatsWrappingRow(spacing: Spacing.large, lineSpacing: Spacing.small))
         return VStack(alignment: .leading, spacing: Spacing.small) {
-            StatsWrappingRow(spacing: Spacing.large, lineSpacing: Spacing.small) {
+            row {
                 ForEach(content.figures) { item in
                     VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                         Text(verbatim: item.label)
@@ -125,11 +134,15 @@ struct StatsActivityBox: View {
             if !years.isEmpty {
                 StatsWrappingRow(spacing: Spacing.medium, lineSpacing: Spacing.xxSmall) {
                     ForEach(years.reversed(), id: \.year) { year in
-                        Text(verbatim: year.text)
-                            .font(.subheadline)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("stats.activity.yearTotal.\(year.year)")
+                        ZStack(alignment: .leading) {
+                            if let reserve = year.reserve { Text(verbatim: reserve).hidden().accessibilityHidden(true) }
+                            Text(verbatim: year.text)
+                        }
+                        .font(.subheadline)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("stats.activity.yearTotal.\(year.year)")
                     }
                 }
             }
@@ -214,7 +227,8 @@ private struct StatsActivityLayout: Layout {
         // With no width offered, a year's weeks (Today's 53).
         let pitch = square.side + square.gap
         let ideal = CGFloat(min(columns, ActivityGrid.maximumWeeks)) * pitch - square.gap
-        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? ideal
+        // No width, an infinite one or a zero probe: a year's weeks, never a column a line.
+        let width = proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? ideal
         return CGSize(width: width, height: geometry(width: width, subviews: subviews).height)
     }
 
@@ -227,10 +241,19 @@ private struct StatsActivityLayout: Layout {
     }
 }
 
-/// A caption line, never drawn: the label band's height at the current text size.
+/// A caption line, never drawn: the label band's height at the current text size, measured
+/// with the locale's own month names and a year, so a script with taller glyphs gets its room.
 private struct StatsActivityBandProbe: View {
+    @Environment(\.locale) private var locale
+
     var body: some View {
-        Text(verbatim: "Nov").font(.caption).hidden().accessibilityHidden(true)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        return Text(verbatim: (calendar.shortStandaloneMonthSymbols + ["2026"]).joined(separator: " "))
+            .font(.caption.weight(.semibold))
+            .lineLimit(1)
+            .hidden()
+            .accessibilityHidden(true)
     }
 }
 
@@ -365,12 +388,15 @@ private struct StatsActivityGrid: View {
                 rows: [(name: text.reviewsSeries, value: format.count(Double(count)), color: nil)],
                 showInBrowse: browseAction(count: count, day: day)
             )
+            // Its own text in the app's direction; the grid around it is laid out left to right.
+            .environment(\.layoutDirection, layoutDirection)
             .fixedSize()
             .alignmentGuide(.leading) { dimensions in
-                // Beside the day: to its right in the grid's first half, to its left in the second.
+                // Beside the day: to its right in the grid's first half, to its left in the second;
+                // kept inside the grid's width.
                 let leading = rect.midX > width / 2
                 let origin = leading ? rect.minX - Spacing.xSmall - dimensions.width : rect.maxX + Spacing.xSmall
-                return -origin
+                return -max(0, min(origin, width - dimensions.width))
             }
             .alignmentGuide(.top) { dimensions in
                 // Level with the day, kept inside the grid, so it never runs onto the figures.
@@ -399,9 +425,17 @@ private struct StatsActivityCanvas: View, Equatable {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
 
+    /// The canvas draws itself again at a new size on its own; the body (the days' elements)
+    /// is built again only when their places change: a line break, the height, or under
+    /// right-to-left layout the width. A live resize between two line breaks rebuilds nothing.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.grid == rhs.grid && lhs.square == rhs.square && lhs.rightToLeft == rhs.rightToLeft && lhs.size == rhs.size
-            && lhs.labels == rhs.labels
+        lhs.grid == rhs.grid && lhs.square == rhs.square && lhs.rightToLeft == rhs.rightToLeft && lhs.labels == rhs.labels
+            && lhs.placesKey == rhs.placesKey
+    }
+
+    private nonisolated var placesKey: [CGFloat] {
+        [CGFloat(ActivityContinuousGrid.Geometry.perLine(width: size.width, square: square)), size.height,
+         rightToLeft ? size.width : 0]
     }
 
     var body: some View {

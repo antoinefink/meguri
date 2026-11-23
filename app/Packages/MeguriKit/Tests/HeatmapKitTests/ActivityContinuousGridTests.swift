@@ -225,8 +225,9 @@ import Testing
         #expect(labels.contains("1:y2026@3|0"))
         // April's 1st is in its line's second column; no line label, as its line holds two March columns.
         #expect(labels.filter { $0.hasPrefix("4:") } == ["4:m4@12"])
-        // A line that starts with three June columns names June, then July's 1st.
-        #expect(labels.filter { $0.hasPrefix("7:") } == ["7:m6@0", "7:m7@24"])
+        // A line with two June columns before July's 1st names only July; one with three August
+        // columns before September's names August.
+        #expect(labels.filter { $0.hasPrefix("7:") } == ["7:m7@24"])
         // A 1st in a line's last column would run past the edge: left out, and the next line names it.
         #expect(labels.filter { $0.hasPrefix("9:") } == ["9:m8@0"])
         #expect(labels.filter { $0.hasPrefix("10:") } == ["10:m9@0"])
@@ -234,9 +235,13 @@ import Testing
     }
 
     @Test func aYearAtTheTrailingEdgeEndsThere() {
-        // Five weeks a line (58 pt): 1 January's column is the line's last; its year ends at the edge.
+        // Five weeks a line (58 pt): 1 January's column is the line's last. Its rule stays at the
+        // column and the year's text ends just before it; the grid's first year gives way to it,
+        // and December's 1st, in the first column, is named.
         let labels = Self.summary(Self.labels(Self.fromDecember, width: 58))
-        #expect(labels.prefix(2) == ["0:y2025@0", "0:y2026@36|33"])
+        #expect(labels.filter { $0.hasPrefix("0:") } == ["0:m12@0", "0:y2026@24|48"])
+        let mirrored = Self.summary(Self.labels(Self.fromDecember, width: 58, rightToLeft: true))
+        #expect(mirrored.filter { $0.hasPrefix("0:") } == ["0:m12@43", "0:y2026@12|9"])
     }
 
     @Test func aYearAtTheGridsFirstColumn() {
@@ -259,6 +264,10 @@ import Testing
         #expect(Self.summary(third) == ["0:y2025@0", "0:y2026@51|48", "0:m4@204", "0:m7@360", "0:m10@516"])
         // Names wider than half a year: the years alone.
         #expect(Self.labels(Self.grid(days: Self.sixYears), width: 1_600, month: 700).step == 12)
+        // Years alone means no month at all, a line's first month included.
+        let years = Self.labels(Self.grid(days: Self.sixYears), width: 718, month: 400)
+        #expect(years.step == 12)
+        #expect(!years.items.contains { if case .month = $0.kind { true } else { false } })
     }
 
     @Test func labelsMirrorRightToLeft() {

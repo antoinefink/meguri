@@ -294,12 +294,15 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
     /// with it; at the column holding 1 January a thin rule and the year in bold instead of the
     /// month; the grid's first column also carries its year (no rule), so the oldest line says
     /// when it starts. A later line whose first column holds no 1st is labelled with its month
-    /// when at least three of its columns are that month, as Today's first column is. When the
+    /// when at least three of its columns before the next 1st are that month, as Today's first
+    /// column is. When the
     /// months do not fit, every second, third, fourth, sixth month is named, or the years alone:
     /// the smallest step at which no two names at a 1st overlap. Years are placed first, then
     /// the grid's first year, then a line's first month, then the months; a label that would
     /// overlap one already placed, or run past the trailing edge, is left out, except a year,
-    /// which then ends at the edge. Under right-to-left layout everything mirrors.
+    /// which is never left out: past the edge its rule stays at its column and its text ends
+    /// just before the rule. A line's first month follows the step too. Under right-to-left
+    /// layout everything mirrors.
     /// - Parameters:
     ///   - ruleWidth: the rule's width; the year's text starts `ruleSpacing` after it.
     ///   - spacing: the least space between two labels.
@@ -354,35 +357,41 @@ public nonisolated struct ActivityContinuousGrid: Sendable, Equatable, Hashable 
             let column = line * geometry.perLine
             guard column < columns, !firstColumns.contains(column), let month = columnMonth(column) else { continue }
             let end = min(columns, column + geometry.perLine)
-            let same = (column..<end).prefix { columnMonth($0) == month }.count
-            if same >= 3 { candidates.append(candidate(.month(month.month), column: column, rank: .lineStart, rule: false)) }
+            // Only the columns before the next 1st count, so two names never sit side by side.
+            let same = (column..<end).prefix { !firstColumns.contains($0) && columnMonth($0) == month }.count
+            // Named only as the month step names it, and never when only the years fit.
+            let yearsOnly = step == Self.monthSteps.last
+            if same >= 3, !yearsOnly, (month.month - 1) % step == 0 { candidates.append(candidate(.month(month.month), column: column, rank: .lineStart, rule: false)) }
         }
 
-        var placed: [(candidate: Candidate, start: CGFloat, line: Int)] = []
+        // Each placed label's span on its line (rule and text), its text's left edge and its rule.
+        var placed: [(candidate: Candidate, line: Int, start: CGFloat, end: CGFloat, text: CGFloat, rule: CGFloat?)] = []
         for item in candidates.sorted(by: { ($0.rank.rawValue, $0.column) < ($1.rank.rawValue, $1.column) }) {
             let line = geometry.place(ofColumn: item.column).line
-            var start = left(item.column)
-            if start + item.extent > geometry.width {
+            let left = left(item.column)
+            var start = left, end = left + item.extent
+            var text = item.rule ? left + ruleWidth + ruleSpacing : left
+            if end > geometry.width {
+                // Only a year stays: its rule keeps 1 January's column and its text ends before it.
                 guard item.rank == .year else { continue }
-                start = max(0, geometry.width - item.extent)
+                text = max(0, left - ruleSpacing - item.width)
+                start = text
+                end = left + ruleWidth
             }
             let overlaps = placed.contains { other in
-                other.line == line && start < other.start + other.candidate.extent + spacing
-                    && other.start < start + item.extent + spacing
+                other.line == line && start < other.end + spacing && other.start < end + spacing
             }
             if overlaps && item.rank != .year { continue }
-            placed.append((item, start, line))
+            placed.append((item, line, start, end, text, item.rule ? left : nil))
         }
         let items = placed.sorted { ($0.line, $0.start) < ($1.line, $1.start) }.map { item -> Label in
-            let text = item.candidate.rule ? item.start + ruleWidth + ruleSpacing : item.start
-            let rule: CGFloat? = item.candidate.rule ? item.start : nil
             guard rightToLeft else {
-                return Label(kind: item.candidate.kind, line: item.line, column: item.candidate.column, x: text,
-                             width: item.candidate.width, rule: rule)
+                return Label(kind: item.candidate.kind, line: item.line, column: item.candidate.column, x: item.text,
+                             width: item.candidate.width, rule: item.rule)
             }
             return Label(kind: item.candidate.kind, line: item.line, column: item.candidate.column,
-                         x: geometry.width - text - item.candidate.width, width: item.candidate.width,
-                         rule: rule.map { geometry.width - $0 - ruleWidth })
+                         x: geometry.width - item.text - item.candidate.width, width: item.candidate.width,
+                         rule: item.rule.map { geometry.width - $0 - ruleWidth })
         }
         return Labels(items: items, step: step)
     }

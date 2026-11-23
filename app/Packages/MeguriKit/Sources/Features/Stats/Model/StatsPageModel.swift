@@ -582,9 +582,10 @@ public final class StatsPageModel {
         }()
         if note != filteredDeckNote { filteredDeckNote = note }
         var next = boxes
-        // Activity while it has no detail yet: the first part's header sizes its grid (S10.3).
+        // Activity while it is not ready: each part's header sizes its grid (S10.3), so a span
+        // kept from an earlier header follows the running request's.
         for id in StatsBoxID.allCases where part.map({ id.reads($0, reviewsMode: selection.reviewsMode) }) ?? true
-            || (id == .activity && boxes[id]?.detail == nil) {
+            || (id == .activity && boxes[id]?.phase != .ready) {
             let content = content(id)
             next[id] = content
             carrySelection(id, to: content)
