@@ -153,11 +153,13 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 ### S7.5 Activity
 
 - Data: `activity_days` (H11).
-- Grid: Today's heatmap extended (N24.6's squares, green and AH7's level rule, AH9's month labels): one block per calendar year, the current year first and every earlier year back to the scope's first review. AH7's levels are computed per block, from the days that block shows. The week starts on the system's first weekday. The period does not change it.
-- Beside the grid: Current Streak, Longest Streak, Days Studied This Year, and each year's total ("2025: 41,233 reviews").
+- Grid (changed 2026-11-23: the owner's Option E, "Continuous, wrapped like text"; it replaces the year blocks): Today's heatmap extended to all of history as one grid (N24.6's squares, green and AH7's level rule, AH9's month labels). A column per week with the seven weekdays down it, unbroken from the week of the scope's first review (H9's oldest day, or the oldest counted day when it is older) to the current week. The week starts on the system's first weekday. Days before the first review and after today are not drawn; today's square is outlined. AH7's levels are computed over every day the grid shows. The period does not change it.
+- It never scrolls sideways. At Today's fixed square size the grid fills the box's width with as many week columns as fit, and wraps onto a new line when it reaches the edge, like text: the oldest week at the top left, today at the bottom right; the last line is usually partial and leading-aligned. A width change moves the line breaks and nothing else. Lines are a little further apart than the rows.
+- Labels, in a band above each line's squares: at the column holding 1 January, a thin rule and the year in bold, in place of January's name; at the column holding any other 1st, the month's short name, as AH9. The grid's first column also carries its year, unless a 1 January's year is in its way. A later line whose first column holds no 1st names that column's month when at least three of the line's columns before the next 1st are that month, as AH9's first column, when the month step below names that month. When the names do not fit, every second, third, fourth or sixth month is named, or the years alone: the smallest step at which no two names overlap. Labels are placed in this order: the years at 1 January, the grid's first year, a line's first month, then the months; one that would overlap a label already placed, or run past the trailing edge, is left out. A year at 1 January is never left out: past the edge its rule stays at its column and its text ends just before the rule.
+- Under the grid, in a row that wraps: Current Streak, Longest Streak, Days Studied This Year, All Reviews (every review in the grid); then each year's total ("2025: 41,233 reviews"), oldest first as the grid reads. While the counts have not returned, the grid already has its final size, from the header's oldest day, and each year it covers reads "<year>: — reviews".
 - **Streaks** (Meguri's own; `stats/heatmap-addon`'s streak rules are not used): a day is studied when its H11 count is above 0. The current streak is the number of consecutive studied days ending today, or ending yesterday while today has none yet (a day not yet studied does not break it). The longest is the longest such run in all history. Days follow Anki's day (`stats/history-reads` H1, the collection's rollover hour), so a review just after midnight before the rollover counts for the day before, and travel across time zones can move a day.
-- Selection: a day shows its date and count; Show in Browse for a day with reviews, "Cards Reviewed on <date>" (H13 `answered`).
-- On the iPhone and the folded Duo the year blocks are one horizontal strip of weeks that swipes back through time (N25.6), not stacked blocks.
+- Selection: a day shows its date and count; Show in Browse for a day with reviews, "Cards Reviewed on <date>" (H13 `answered`). A pinned day is kept as its calendar date, so a rollover or a width change never moves it to another day.
+- On the iPhone and the folded Duo the grid is the same, at the touch squares: the column's width gives more, shorter lines (N25.6). There is no separate strip.
 - No streak appears on the Today page, which keeps its one small grid (N14.11, N24.6; round 10 kept the streak off Today, and round 11's 7A puts it here only).
 
 ### S7.6 Cards Over Time (lead)
@@ -390,7 +392,7 @@ A deck deleted while it is the filter (`unknown_deck`, G8.2), or kept from an ea
 ## S14. Keyboard
 
 - Tab moves through the toolbar's deck pop-up and period control, then box by box (each box's header button, then its switches, then its plot).
-- In a focused plot, Left and Right move the selection one bar at a time; Return runs Show in Browse when the bar offers it; Esc clears the selection.
+- In a focused plot, Left and Right move the selection one bar at a time; Return runs Show in Browse when the bar offers it; Esc clears the selection. In Activity's grid (S7.5) the keys follow the squares as drawn: Left and Right move to the square beside it (a week), Up and Down to the square above or below it (a day); a line's end continues on the next line, the selection stays between the first day and today, and under right-to-left layout Left and Right swap.
 - ⌘[ returns from a chart's page. View › Go to Section's items have no keys.
 
 ## S15. Accessibility
@@ -400,7 +402,7 @@ A deck deleted while it is the filter (`unknown_deck`, G8.2), or kept from an ea
 - Each chart is one element whose label is its figure's sentence (for example "Estimated knowledge, 3,512 of 3,950 studied cards, up 412 in a year."), with an Audio Graph (`AXChartDescriptor`: one category per bar, named by its period; one series per stacked kind or line) and one element per bar inside it, in runs of ten (P18.2), each reading the callout's text. Show in Browse is a named action on the elements that offer it.
 - Series are told apart by legend, order and name as well as colour, and follow Increase Contrast.
 - Text follows Dynamic Type to the largest accessibility size; at the accessibility sizes legends and figures stack under the plot and the plot keeps its height.
-- The strip's figures, the tables' rows and the Activity grid's days are elements (S6, S7.5: a month container per year block, as `stats/heatmap-presentation` M15 does).
+- The strip's figures, the tables' rows and the Activity grid's days are elements (S6, S7.5: a container per month of the grid, as `stats/heatmap-presentation` M15 does).
 - Identifiers: `stats.<element>` (R1445): `stats.deck`, `stats.period`, `stats.strip.<figure>`, `stats.section.<section>`, `stats.box.<box>`, `stats.box.<box>.header`, `stats.chartPage.<box>`, `stats.goToSection`.
 
 ## S16. Strings
