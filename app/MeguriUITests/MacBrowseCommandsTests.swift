@@ -204,27 +204,25 @@ final class MacBrowseCommandsTests: XCTestCase {
         XCTAssertTrue(waitUntil { table.outlineRows.count > 100 }, "\(table.outlineRows.count)")
         try app.bringToFront(bundleIdentifier: bundle)
         for _ in 0..<8 { table.scroll(byDeltaX: 0, deltaY: -600) }
-        // The rows on screen are the drawn rows' state cells (`browse.table.row.<id>`),
-        // located by their frames: XCTest reads a SwiftUI table's rows as not
-        // hittable, and walking all of the outline's rows takes minutes.
+        // The rows on screen are found by their frames (XCTest reads a SwiftUI
+        // table's rows as not hittable), probing only around where 4,800 points
+        // of scrolling lands: walking every row of the outline takes minutes.
         let visible = table.frame
         func onScreen(_ element: XCUIElement) -> Bool {
             let frame = element.frame
             return element.exists && frame.minY >= visible.minY && frame.maxY <= visible.maxY
         }
-        let cells = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'browse.table.row.'"))
-        let drawn = cells.allElementsBoundByIndex.filter(onScreen).sorted { $0.frame.minY < $1.frame.minY }
-        XCTAssertGreaterThan(drawn.count, 5, "rows on screen")
-        let id = drawn[drawn.count / 2].identifier
-        let topID = drawn.first?.identifier ?? ""
+        let shown = (120..<320).lazy.filter { onScreen(table.outlineRows.element(boundBy: $0)) }.first
+        let index = try XCTUnwrap(shown, "a row between 120 and 320 is on screen after scrolling")
+        let middle = table.outlineRows.element(boundBy: index + 10)
+        XCTAssertTrue(onScreen(middle))
         element(app, "shell.root.sidebar.home").click()
         XCTAssertTrue(waitUntil { !table.exists })
         element(app, "shell.root.sidebar.browse").click()
-        let row = app.descendants(matching: .any)[id]
-        XCTAssertTrue(waitUntil { onScreen(row) }, "row \(id) is on screen again")
+        XCTAssertTrue(waitUntil { onScreen(table.outlineRows.element(boundBy: index + 10)) },
+                      "row \(index + 10) is on screen again")
+        XCTAssertFalse(onScreen(table.outlineRows.element(boundBy: 0)), "not back at the top")
         capture(app, "kept-scroll")
-        XCTAssertNotEqual(topID, "", "a row was on top")
-        XCTAssertGreaterThan(table.outlineRows.count, 100)
     }
 
     /// N21.2, T10: Esc first closes the suggestions, then empties the query.
