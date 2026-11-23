@@ -4,8 +4,8 @@ import Foundation
 /// The core reads Browse's shell uses (U270). Production is
 /// `CoreBrowseBackend`; tests and the test hooks' routes pass their own.
 /// Every call reads and writes nothing, except `setTagsCollapsed`, a
-/// person's own toggle of a tag's disclosure, `saveSearch` (Save Search…)
-/// and the column set and mode writes.
+/// person's own toggle of a tag's disclosure, the saved searches' Save
+/// Search…, Rename… and Delete, and the column set and mode writes.
 @MainActor public protocol BrowseBackend: AnyObject, Sendable {
     /// T14: the default search and the mode a first open reads.
     func opening() async throws -> BrowseOpening
@@ -23,6 +23,10 @@ import Foundation
         -> [FilterSuggestion]
     /// T13: Save Search… with the query's run text; one undoable step.
     func saveSearch(name: String, text: String) async throws
+    /// T13: Rename… of a user saved search; one undoable step (K7.2).
+    func renameSavedSearch(_ old: String, to name: String) async throws
+    /// T13: Delete of a user saved search; one undoable step (K7.2).
+    func deleteSavedSearch(_ name: String) async throws
     /// The rows of one kind as the core offers them (T12.1's value list):
     /// the saved searches, every deck's value, the note types' values.
     func values(_ section: FilterSection) async throws -> [FilterSuggestionRow]
@@ -71,6 +75,12 @@ import Foundation
     }
     public func saveSearch(name: String, text: String) async throws {
         _ = try await CoreBrowseQuery.saveSearch(name: name, search: text)
+    }
+    public func renameSavedSearch(_ old: String, to name: String) async throws {
+        _ = try await CoreBrowseQuery.renameSavedSearch(old, to: name)
+    }
+    public func deleteSavedSearch(_ name: String) async throws {
+        _ = try await CoreBrowseQuery.deleteSavedSearches([name])
     }
     public func values(_ section: FilterSection) async throws -> [FilterSuggestionRow] {
         try await CoreBrowseQuery.suggestions(for: FilterQuery(), caret: 0, scope: section, labels: labels).map(\.row)

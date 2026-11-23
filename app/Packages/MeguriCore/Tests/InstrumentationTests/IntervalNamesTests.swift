@@ -131,9 +131,10 @@ import Testing
             "start_notetype_template_card_counts", "NotetypeTemplateCardCountsJob.result", "notetype_template_issues",
             "notetype_replace_field_references", "notetype_template_syntax", "notetype_styling_syntax",
             "open_search_session", "BrowseSearchSession.start_search", "BrowseSearchSession.resort", "BrowseSearchSession.toggle", "BrowseSearchSession.reverse", "BrowseSearchSession.invalidated_rows", "BrowseSearchSession.rows", "BrowseSearchSession.qa_cells", "BrowseSearchSession.index_of", "BrowseSearchSession.map_selection", "BrowseSearchSession.resolve_selection", "BrowseSearchSession.selection", "BrowseSearchSession.handle_state", "BrowseSearchSession.close", "BrowseSelection.resolve",
-            "filter_run_text", "filter_read_text", "filter_commit", "filter_text_incomplete", "filter_deck_value", "filter_suggestions", "start_filter_counts", "FilterCountsJob.result", "browser_column_set", "change_browser_column_set", "use_standard_browser_columns", "set_browser_notes_mode", "save_browser_search", "start_browse_selection_counts", "BrowseSelectionCountsJob.result", "browse_opening",
+            "filter_run_text", "filter_read_text", "filter_commit", "filter_text_incomplete", "filter_deck_value", "filter_suggestions", "start_filter_counts", "FilterCountsJob.result", "browser_column_set", "change_browser_column_set", "use_standard_browser_columns", "set_browser_notes_mode", "save_browser_search", "rename_browser_saved_search", "delete_browser_saved_searches", "start_browse_selection_counts", "BrowseSelectionCountsJob.result", "browse_opening",
             "start_find_duplicates", "FindDuplicatesJob.result",
             "FindReplacePreviews.new", "FindReplacePreviews.start", "FindReplacePreviewJob.result", "start_find_replace", "BulkActionJob.result",
+            "start_bulk_card_action_on_selection", "start_bulk_note_action_on_selection",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)

@@ -457,6 +457,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let useStandardBrowserColumns = BridgeCall("use_standard_browser_columns")
     public static let setBrowserNotesMode = BridgeCall("set_browser_notes_mode")
     public static let saveBrowserSearch = BridgeCall("save_browser_search")
+    public static let renameBrowserSavedSearch = BridgeCall("rename_browser_saved_search")
+    public static let deleteBrowserSavedSearches = BridgeCall("delete_browser_saved_searches")
     public static let startBrowseSelectionCounts = BridgeCall("start_browse_selection_counts")
     public static let browseSelectionCountsJobResult = BridgeCall("BrowseSelectionCountsJob.result")
     public static let browseOpening = BridgeCall("browse_opening")
@@ -467,6 +469,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let findReplacePreviewJobResult = BridgeCall("FindReplacePreviewJob.result")
     public static let startFindReplace = BridgeCall("start_find_replace")
     public static let bulkActionJobResult = BridgeCall("BulkActionJob.result")
+    public static let startBulkCardActionOnSelection = BridgeCall("start_bulk_card_action_on_selection")
+    public static let startBulkNoteActionOnSelection = BridgeCall("start_bulk_note_action_on_selection")
 
     public static let startCreateBackup = BridgeCall("start_create_backup")
     public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
@@ -778,8 +782,9 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         startNotetypeTemplateCardCounts, notetypeTemplateCardCountsJobResult, notetypeTemplateIssues, notetypeReplaceFieldReferences,
         notetypeTemplateSyntax, notetypeStylingSyntax,
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
-        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, setBrowserNotesMode, saveBrowserSearch, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
+        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, setBrowserNotesMode, saveBrowserSearch, renameBrowserSavedSearch, deleteBrowserSavedSearches, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
         startFindDuplicates, findDuplicatesJobResult,
         findReplacePreviewsNew, findReplacePreviewsStart, findReplacePreviewJobResult, startFindReplace, bulkActionJobResult,
+        startBulkCardActionOnSelection, startBulkNoteActionOnSelection,
     ]
 }

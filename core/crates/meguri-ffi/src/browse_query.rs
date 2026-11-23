@@ -1030,6 +1030,30 @@ pub fn save_browser_search(name: String, search: String) -> Result<BoolMutation,
     Ok(meguri_engine::browser_config::save_search(&collection, &name, &search)?.into())
 }
 
+/// Rename… of a user saved search (T13, `browser/config-keys` K7.2 Rename
+/// Saved Search): the member `old` moves to `new_name` with every `"`
+/// removed, replacing a saved search of that name (asking first is the
+/// caller's), as one undoable "Rename Saved Search" step. `written` is
+/// false when the cleaned name is empty, equals `old`, or no saved search
+/// is named `old`.
+#[uniffi::export]
+pub fn rename_browser_saved_search(old: String, new_name: String) -> Result<BoolMutation, CoreError> {
+    callback::enter("rename_browser_saved_search");
+    let collection = runtime::host()?.collection()?;
+    Ok(meguri_engine::browser_config::rename_saved_search(&collection, &old, &new_name)?.into())
+}
+
+/// Delete of user saved searches (T13, `browser/config-keys` K7.2 Delete
+/// Saved Searches), as one undoable "Delete Saved Search" step. Names that
+/// are not saved searches are skipped; `written` is false when none was.
+#[uniffi::export]
+pub fn delete_browser_saved_searches(names: Vec<String>) -> Result<BoolMutation, CoreError> {
+    callback::enter("delete_browser_saved_searches");
+    let collection = runtime::host()?.collection()?;
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    Ok(meguri_engine::browser_config::delete_saved_searches(&collection, &names)?.into())
+}
+
 // --------------------------------------------------------------- opening
 
 /// What Browse opens with (`search/filter-tokens` T14): the default search
