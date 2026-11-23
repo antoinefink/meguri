@@ -208,12 +208,39 @@ pub struct ImportResult {
     pub undo_step: Option<&'static str>,
     pub log: ImportLog,
     pub counts: ImportCounts,
+    /// What the op reported about note type structure (I14.4).
+    pub structure: StructureSummary,
     /// The safety backup's name, when one was taken or reused (I14.4).
     pub safety_backup: Option<String>,
     /// The rows are committed and some media files are still being put in
     /// place by the journal's recovery (`MediaCommitPending`): never
     /// import again.
     pub media_pending: bool,
+}
+
+/// The structure report an import committed with (`engine/change-stream`
+/// S2.5, `sync/cloudkit-records` K19.1): its reason codes, the note types
+/// with a layout entry, the removed ones and the (old, new) type changes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StructureSummary {
+    /// 8 `apkg_apply` always; 3 `sort_field_changed`; 9 `notetypes_merged`.
+    pub reasons: Vec<u32>,
+    /// Per note type with a layout entry: its id and whether the entry is
+    /// the identity (names changed, positions kept).
+    pub layouts: Vec<(i64, bool)>,
+    pub removed: Vec<i64>,
+    pub type_changes: Vec<(i64, i64)>,
+}
+
+impl StructureSummary {
+    pub(crate) fn of(report: &meguri_storage::journal::StructureReport) -> StructureSummary {
+        StructureSummary {
+            reasons: report.reasons.iter().map(|reason| *reason as u32).collect(),
+            layouts: report.layouts.iter().map(|(id, layout)| (*id, layout.is_identity())).collect(),
+            removed: report.removed.iter().copied().collect(),
+            type_changes: report.type_changes.keys().copied().collect(),
+        }
+    }
 }
 
 /// J10: one field position whose content an update would drop.

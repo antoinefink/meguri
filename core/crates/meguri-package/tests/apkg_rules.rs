@@ -660,3 +660,204 @@ fn a_filtered_ancestor_matched_only_by_case_folding_gets_its_stand_in() {
     assert!(name.ends_with("::x") && name.contains(&suffix.to_string()), "{name}");
     assert!(matches!(reader.deck(deck).unwrap().unwrap().kind.kind, DeckKind::Normal(_)));
 }
+
+fn backup_count(f: &Fixture) -> usize {
+    std::fs::read_dir(f.dir.path().join("backups")).map_or(0, |entries| entries.count())
+}
+
+/// A package and a target whose import changes note type 5000's sort field:
+/// a structural import that takes the safety backup.
+fn sort_field_case() -> (Fixture, std::path::PathBuf, Fixture) {
+    let source = Fixture::new(0);
+    let mut incoming = notetype(5000, "Pair", 200, &two_fields(), &one_template());
+    incoming.config.sort_field_idx = 1;
+    put_notetype(&source, incoming);
+    add(&source, 5000, "g-one", &["<img src=\"a.png\">", "soleil"], 1);
+    let package = crate::apkg_import::with_media(&export(&source, "deck.apkg"), "media.apkg", &[("a.png", b"pixels")]);
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    add(&target, 5000, "g-two", &["moon", "lune"], 1);
+    target.clock.step_ms(30_000);
+    (source, package, target)
+}
+
+#[test]
+fn the_structure_report_carries_reason_8_and_what_the_note_types_went_through() {
+    // An import that adds notes only: reason 8 alone.
+    let source = Fixture::new(1);
+    source.clock.step_ms(1000);
+    crate::apkg_import::add_note(&source, source.notetype, &["fresh", "back"]);
+    let target = Fixture::new(1);
+    let plain = import(&target, &export(&source, "deck.apkg"), ALL_OFF).unwrap().structure;
+    assert_eq!(plain.reasons, [8]);
+    assert!(plain.layouts.is_empty() && plain.removed.is_empty() && plain.type_changes.is_empty());
+
+    // A sort field change without a merge: 8 and 3, with that note type's layout.
+    let (_source, package, target) = sort_field_case();
+    let sorted = import(&target, &package, ALL_OFF).unwrap().structure;
+    assert_eq!(sorted.reasons, [3, 8]);
+    assert_eq!(sorted.layouts.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [5000]);
+
+    // An update that only renames a field: 8 and an identity layout.
+    let source = Fixture::new(0);
+    let renamed = [("Front", Some(11)), ("Answer", Some(12))];
+    put_notetype(&source, notetype(5000, "Pair", 200, &renamed, &one_template()));
+    add(&source, 5000, "g-one", &["sun", "soleil"], 1);
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    let rename = import(&target, &export(&source, "deck.apkg"), ALL_OFF).unwrap().structure;
+    assert_eq!(rename.reasons, [8]);
+    assert_eq!(rename.layouts, [(5000, true)]);
+
+    let merge = ImportOptions {
+        merge_notetypes: true,
+        ..ALL_OFF
+    };
+    // A merge without an effect (equal layouts, same names): 8 alone.
+    let source = Fixture::new(0);
+    put_notetype(&source, notetype(5000, "Pair", 200, &two_fields(), &one_template()));
+    add(&source, 5000, "g-one", &["sun", "soleil"], 1);
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    let quiet = import(&target, &export(&source, "deck.apkg"), merge).unwrap().structure;
+    assert_eq!(quiet.reasons, [8]);
+    assert!(quiet.layouts.is_empty());
+
+    // A merge that adds a field: 8 and 9, with T's layout.
+    let source = Fixture::new(0);
+    let wider = [("Front", Some(11)), ("Back", Some(12)), ("Extra", Some(13))];
+    put_notetype(&source, notetype(5000, "Pair", 200, &wider, &one_template()));
+    add(&source, 5000, "g-one", &["sun", "soleil", "more"], 1);
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    let grown = import(&target, &export(&source, "deck.apkg"), merge).unwrap().structure;
+    assert_eq!(grown.reasons, [8, 9]);
+    assert_eq!(grown.layouts, [(5000, false)]);
+}
+
+#[test]
+fn the_safety_backup_is_written_before_the_import_commits() {
+    let (_source, package, target) = sort_field_case();
+    let notes_before = note_ids(&target).len() as u64;
+    let stores = backup_count(&target);
+    let result = import(&target, &package, ALL_OFF).unwrap();
+    assert_eq!(backup_count(&target), stores + 1);
+    let name = result.safety_backup.unwrap();
+    // The backup holds the collection as it was before the op: none of the
+    // import's notes, and the note type's old sort field.
+    let inspected = meguri_package::inspect_collection_package(
+        &target.dir.path().join("backups").join(&name),
+        &meguri_package::CollectionPackageInspectContext {
+            collection_directory: target.collection.path().parent().unwrap(),
+            live_collection_size: 0,
+            reserved_space_bytes: 0,
+            clock: target.clock.as_ref(),
+            random: target.random.as_ref(),
+            space: &meguri_storage::space::StatvfsSpace,
+            is_cancelled: &|| false,
+        },
+    )
+    .unwrap();
+    assert_eq!(inspected.facts().notes, notes_before);
+    assert_eq!(note_ids(&target).len() as u64, notes_before + 1);
+    assert!(inspected.facts().modified < target.collection.reader(ReaderRole::Query).unwrap().col().unwrap().modified.0);
+}
+
+#[test]
+fn a_cancel_at_the_backup_stage_writes_nothing() {
+    let (_source, package, target) = sort_field_case();
+    let before = dump(&target);
+    let stores = backup_count(&target);
+    let session = inspect(&target, &package).unwrap();
+    let cancel = meguri_engine::CancelToken::new();
+    let stop = cancel.clone();
+    let (sink, _) = crate::apkg_import::at_stage("backup", move || stop.cancel());
+    let refusal = meguri_package::apkg::apply(target.host.engine(), &session, ALL_OFF, None, &cancel, &sink);
+    assert!(matches!(refusal, Err(ApkgImportError::Cancelled)), "{refusal:?}");
+    assert_eq!(dump(&target), before);
+    assert_eq!(backup_count(&target), stores);
+    assert!(crate::apkg_import::media_files(&target).is_empty());
+    // The session is still open.
+    assert!(apply(&target, &session, ALL_OFF).unwrap().safety_backup.is_some());
+}
+
+#[test]
+fn a_deck_name_past_the_nesting_limit_is_refused_in_the_plan_at_no_cost() {
+    let (source, _, target) = sort_field_case();
+    // A deck thirteen levels deep whose ancestors the package lacks.
+    let deep = meguri_engine::decks::ops::add(&source.collection, "deep".into()).unwrap().value;
+    let name: Vec<String> = (1..=13).map(|level| format!("level{level}")).collect();
+    let (id, native) = (deep.id, name.join("\u{1f}"));
+    raw(&source, move |scope| {
+        let mut deck = scope.deck(id)?.unwrap();
+        deck.name.clone_from(&native);
+        scope.put(&deck)?;
+        Ok(())
+    });
+    add(&source, 5000, "g-deep", &["<img src=\"a.png\">", "profond"], deep.id.0);
+    let package = crate::apkg_import::with_media(&export(&source, "deck.apkg"), "deep.apkg", &[("a.png", b"pixels")]);
+    let before = dump(&target);
+    let stores = backup_count(&target);
+    let session = inspect(&target, &package).unwrap();
+    let staged = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = staged.clone();
+    let (sink, _) = crate::apkg_import::at_stage("media", move || seen.store(true, std::sync::atomic::Ordering::SeqCst));
+    let refusal =
+        meguri_package::apkg::apply(target.host.engine(), &session, ALL_OFF, None, &meguri_engine::CancelToken::new(), &sink);
+    let Err(ApkgImportError::DeckTooDeep { name }) = refusal else {
+        panic!("a nesting refusal, not {refusal:?}");
+    };
+    assert!(name.starts_with("level1::level2"), "{name}");
+    assert!(!staged.load(std::sync::atomic::Ordering::SeqCst), "refused before media staging");
+    assert_eq!(backup_count(&target), stores, "and before any safety backup");
+    assert_eq!(dump(&target), before);
+}
+
+/// Enough space until `low` is set, then almost none.
+struct Switch(std::sync::atomic::AtomicBool, std::sync::atomic::AtomicUsize, usize);
+impl meguri_storage::space::SpaceProvider for Switch {
+    fn available_bytes(&self, _: &std::path::Path) -> Result<u64, meguri_storage::StorageError> {
+        let call = self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let low = self.0.load(std::sync::atomic::Ordering::SeqCst) || call >= self.2;
+        Ok(if low { 1024 } else { u64::MAX / 4 })
+    }
+}
+
+#[test]
+fn low_space_at_the_extraction_and_at_the_media_preflight_refuses_before_writing() {
+    let (_source, package, target) = sort_field_case();
+    let before = dump(&target);
+    let files = crate::apkg_import::listing(&target);
+    // The second check of an inspect is the extraction's.
+    let mut context = crate::apkg_import::context(&target);
+    context.space = std::sync::Arc::new(Switch(false.into(), 0.into(), 1));
+    let refusal = meguri_package::apkg::inspect(
+        &package,
+        "media.apkg",
+        &context,
+        &meguri_engine::CancelToken::new(),
+        &meguri_engine::ProgressSink::new(),
+    );
+    assert!(matches!(refusal, Err(ApkgImportError::InsufficientSpace { available: 1024, .. })));
+    assert_eq!(crate::apkg_import::listing(&target), files, "the source copy is removed");
+    // The third: the media preflight of the apply.
+    let space = std::sync::Arc::new(Switch(false.into(), 0.into(), usize::MAX));
+    context.space = space.clone();
+    let session = meguri_package::apkg::inspect(
+        &package,
+        "media.apkg",
+        &context,
+        &meguri_engine::CancelToken::new(),
+        &meguri_engine::ProgressSink::new(),
+    )
+    .unwrap();
+    space.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    let stores = backup_count(&target);
+    let refusal = apply(&target, &session, ALL_OFF);
+    assert!(matches!(refusal, Err(ApkgImportError::InsufficientSpace { available: 1024, .. })), "{refusal:?}");
+    assert_eq!(dump(&target), before);
+    assert_eq!(backup_count(&target), stores);
+    assert!(crate::apkg_import::media_files(&target).is_empty());
+    space.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(apply(&target, &session, ALL_OFF).unwrap().counts.notes_added, 1);
+}

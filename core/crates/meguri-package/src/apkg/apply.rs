@@ -19,7 +19,7 @@ use super::gather;
 use super::plan::{self, ImportPlan};
 use super::session::ImportSession;
 use super::{
-    ApkgImportError, ConfirmationToken, ImportOptions, ImportOutcome, ImportResult, UpdateCondition,
+    ApkgImportError, ConfirmationToken, ImportOptions, ImportOutcome, ImportResult, StructureSummary, UpdateCondition,
 };
 
 /// The committed write phase's value and its safety backup's name, kept
@@ -205,9 +205,10 @@ pub fn apply(
             let package_path = session.collection_path();
             move |ctx, built| {
                 let backup = ctx.safety_backup_name().map(str::to_owned);
+                // Kept outside the op, once: the log holds an entry per note.
                 let committed = commit(ctx, built, &package_path, &context, &fault)?;
-                *kept.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((committed.clone(), backup));
-                Ok(committed)
+                *kept.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((committed, backup));
+                Ok(())
             }
         },
     );
@@ -230,6 +231,7 @@ pub fn apply(
             undo_step: undo,
             log: committed.log,
             counts,
+            structure: StructureSummary::of(&committed.structure),
             safety_backup: backup,
             media_pending: pending,
         };

@@ -32,6 +32,9 @@ pub(crate) struct Committed {
     pub log: ImportLog,
     pub counts: ImportCounts,
     /// Static media entries to write once the op committed (I12.4).
+    /// The structure report the op committed with (`engine/change-stream`
+    /// S2.5), which the storage guard checked against the rows.
+    pub structure: meguri_storage::journal::StructureReport,
     pub statics: Vec<usize>,
     /// Decoded bytes charged to the package so far (P8).
     pub decoded: u64,
@@ -516,6 +519,7 @@ pub(crate) fn commit(
     meguri_engine::mark_schema_change(scope, &reasons)?;
     let mut report = plan.stage.report.clone();
     report.reasons.insert(StructureReason::ApkgApply);
+    let authored = report.clone();
     let token = scope.start_structure_report(report)?;
     let mut copies: Vec<i64> = Vec::new();
     let mut retired: HashSet<i64> = HashSet::new();
@@ -707,7 +711,10 @@ pub(crate) fn commit(
     // Cards (I11.1) and review log (I11.3), a page at a time.
     let index_of: HashMap<i64, usize> = plan.raw.notes.iter().enumerate().map(|(i, note)| (note.id, i)).collect();
     let shift = i64::from(plan.package_today) - i64::from(plan.target_today);
-    let mut pairs: HashMap<NoteId, HashSet<u16>> = HashMap::new();
+    // The (note, ordinal) pairs seen: one flat set, and the target notes
+    // whose existing cards were read into it.
+    let mut pairs: HashSet<(i64, u16)> = HashSet::new();
+    let mut loaded: HashSet<i64> = HashSet::new();
     let mut added_cards: HashMap<i64, i64> = HashMap::new();
     let mut missing_deck: Vec<usize> = Vec::new();
     let mut shaper = plan.taken.shaper();
@@ -738,18 +745,14 @@ pub(crate) fn commit(
                     None => continue,
                 },
             };
-            let seen = match pairs.entry(note) {
-                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    let existing = if written.contains(&index) && matches!(plan.notes[index].decision, Decision::New) {
-                        HashSet::new()
-                    } else {
-                        scope.cards_of_note(note)?.iter().map(|card| card.ord).collect()
-                    };
-                    entry.insert(existing)
+            // A note this import added has no card but those added here.
+            let fresh = written.contains(&index) && matches!(plan.notes[index].decision, Decision::New);
+            if !fresh && loaded.insert(note.0) {
+                for existing in scope.cards_of_note(note)? {
+                    pairs.insert((note.0, existing.ord));
                 }
-            };
-            if !seen.insert(ord) {
+            }
+            if !pairs.insert((note.0, ord)) {
                 continue;
             }
             let mut place = |id: DeckId, home: bool| -> DeckId {
@@ -840,6 +843,7 @@ pub(crate) fn commit(
     Ok(Committed {
         log,
         counts,
+        structure: authored,
         statics: std::mem::take(&mut plan.media.statics),
         decoded: plan.media.decoded,
     })
