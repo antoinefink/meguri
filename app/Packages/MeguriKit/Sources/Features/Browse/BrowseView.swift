@@ -347,6 +347,17 @@ public enum BrowseResponder {
         first(in: root) { ($0 as? NSTableView)?.headerView != nil }.flatMap { $0 as? NSTableView }
     }
 
+    /// Every table view with a column header in `root`.
+    public static func resultsTables(in root: NSView) -> [NSTableView] {
+        var tables: [NSTableView] = []
+        func collect(_ view: NSView) {
+            if let table = view as? NSTableView, table.headerView != nil { tables.append(table) }
+            view.subviews.forEach(collect)
+        }
+        collect(root)
+        return tables
+    }
+
     /// The sidebar's list in `root`: the outline view with no column header.
     public static func sidebarList(in root: NSView) -> NSOutlineView? {
         first(in: root) { ($0 as? NSOutlineView).map { $0.headerView == nil } ?? false }.flatMap { $0 as? NSOutlineView }

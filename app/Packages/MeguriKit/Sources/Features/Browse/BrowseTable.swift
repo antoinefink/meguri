@@ -317,7 +317,10 @@ private struct BrowseScrollReporter: NSViewRepresentable {
     func makeNSView(context: Context) -> Reporter { Reporter(results: results) }
     func updateNSView(_ view: Reporter, context: Context) {
         view.results = results
-        view.token = token
+        if view.token != token {
+            view.token = token
+            view.reattach()
+        }
     }
 
     final class Reporter: NSView {
@@ -336,6 +339,11 @@ private struct BrowseScrollReporter: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            reattach()
+        }
+
+        /// The list changed or the view moved: the table to watch is looked for again.
+        func reattach() {
             if let observer { NotificationCenter.default.removeObserver(observer) }
             if let liveObserver { NotificationCenter.default.removeObserver(liveObserver) }
             observer = nil
@@ -345,13 +353,14 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             attach(tries: 100)
         }
 
-
-
-        /// The window's results table (the table view with a column header),
-        /// looked for again until SwiftUI has made it.
+        /// The table view whose row count is the list's: SwiftUI swaps the
+        /// table when a list arrives, and the old one never scrolls (VM trace,
+        /// 2026-11-23). Retried until SwiftUI has made it.
         private func attach(tries: Int) {
-            guard window != nil, table == nil else { return }
-            table = window?.contentView.flatMap(BrowseResponder.resultsTable(in:))
+            guard let window, table == nil, token != nil else { return }
+            let rows = results.list?.count ?? 0
+            table = window.contentView.flatMap { BrowseResponder.resultsTables(in: $0) }?
+                .first { $0.window != nil && rows > 0 && $0.numberOfRows == rows }
             guard let clip = table?.enclosingScrollView?.contentView else {
                 if tries == 0 { results.trace("no table found") }
                 if tries > 0 {
