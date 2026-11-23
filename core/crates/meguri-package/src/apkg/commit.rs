@@ -218,7 +218,10 @@ fn write_decks(
 ) -> Result<HashMap<i64, i64>, EngineError> {
     for preset in &plan.taken.presets {
         if scope.deck_config(preset.id)?.is_none() {
-            scope.put(preset)?;
+            // The golden `package/apkg-import/v1-scheduler` shows the added
+            // row holding the bounded values of a preset save
+            // (`sched/presets` V3), not the bytes the package stores.
+            scope.put(&preset.for_use())?;
             counts.presets_added += 1;
         }
     }

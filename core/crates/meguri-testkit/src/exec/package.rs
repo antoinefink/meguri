@@ -162,7 +162,13 @@ fn import(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError>
 /// once), close. The log names target notes by their logical ids.
 fn import_apkg(session: &mut Session<'_>, args: &Map<String, Value>) -> Result<OpResult, ExecError> {
     use meguri_package::apkg::{self, ApkgContext, ApkgImportError, ImportOptions, UpdateCondition};
-    let request = PackageListingRequest::from_mapping(args).map_err(invalid)?;
+    let mut named = Map::new();
+    for key in ["name", "fixture"] {
+        if let Some(value) = args.get(key) {
+            named.insert(key.to_owned(), value.clone());
+        }
+    }
+    let request = PackageListingRequest::from_mapping(&named).map_err(invalid)?;
     let path = source(session, &request)?;
     let flag = |key: &str| args.get(key).and_then(Value::as_bool).ok_or_else(|| invalid(key));
     let rule = |key: &str| match args.get(key).and_then(Value::as_str) {
