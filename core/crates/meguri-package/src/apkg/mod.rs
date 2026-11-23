@@ -375,6 +375,20 @@ pub struct ConfirmationToken {
     pub(crate) snapshot_seq: u64,
 }
 
+impl ConfirmationToken {
+    /// This confirmation as it covers the preview alone. An apply that asks
+    /// to confirm structure then answers `ConfirmationRequired` for every
+    /// plan with a structural reason: the caller that runs such a plan
+    /// elsewhere (`sync/meguri-provider` MP7.1's job) uses it for an apply
+    /// that must not commit one.
+    pub fn without_structure(&self) -> ConfirmationToken {
+        ConfirmationToken {
+            structure: None,
+            ..self.clone()
+        }
+    }
+}
+
 /// I16.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ApkgImportError {

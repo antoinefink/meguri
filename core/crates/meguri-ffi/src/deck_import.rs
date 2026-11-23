@@ -528,6 +528,7 @@ pub struct DeckImportConfirmationRequest {
     pub confirmation: Arc<DeckImportConfirmation>,
 }
 
+#[allow(clippy::large_enum_variant)] // An owned boundary value; the common case is the result.
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum DeckImportApplyOutcome {
     /// Committed. With `media_pending` the engine reported
@@ -690,22 +691,32 @@ pub struct DeckImportApplyStart {
 
 #[uniffi::export]
 impl DeckImportSession {
-    /// I14 as a job, for an import that runs alone (no ready Meguri Sync
-    /// binding): phase `Planning`, the stages `media` and `backup`, then
-    /// `Committing`, which cannot be cancelled. `confirmation` is the one a
-    /// previous apply's `ConfirmationRequired` returned. A refusal or a
-    /// cancel before the commit leaves the session open for another apply.
-    pub fn start_apply(&self, options: DeckImportOptions, confirmation: Option<Arc<DeckImportConfirmation>>)
-        -> Result<DeckImportApplyStart, CoreError> {
+    /// I14 as a job, for an import that runs alone: phase `Planning`, the
+    /// stages `media` and `backup`, then `Committing`, which cannot be
+    /// cancelled. `confirmation` is the one a previous apply's
+    /// `ConfirmationRequired` returned. A refusal or a cancel before the
+    /// commit leaves the session open for another apply.
+    ///
+    /// `ask_structure` is true while a ready Meguri Sync binding would have
+    /// to upload the collection after a structural import (MP7.1). This
+    /// call then never commits a plan with a structural reason, whatever
+    /// `confirmation` covers: it answers `ConfirmationRequired` with the
+    /// reasons, and the accepted confirmation goes to the structure job
+    /// (`ProviderStructureOp::Import`). A plan without one commits here.
+    pub fn start_apply(&self, options: DeckImportOptions, confirmation: Option<Arc<DeckImportConfirmation>>,
+        ask_structure: bool) -> Result<DeckImportApplyStart, CoreError> {
         callback::enter("DeckImportSession::start_apply");
         let engine = runtime::engine()?;
         let session = self.shared();
-        let token = confirmation.map(|confirmation| confirmation.token());
+        let token = confirmation.map(|confirmation| {
+            if ask_structure { confirmation.token.without_structure() } else { confirmation.token() }
+        });
         let outcome = Arc::new(Mutex::new(None));
         let out = outcome.clone();
         let handle = engine.start_job(JobKind::BulkOp, move |job| {
             let answer = match &session {
-                Some(session) => apkg::apply(engine, session, options.into(), token.as_ref(), &job.cancel, &job.progress),
+                Some(session) => apkg::apply_confirming(engine, session, options.into(), token.as_ref(), ask_structure,
+                    &job.cancel, &job.progress),
                 None => Err(ApkgImportError::SessionClosed),
             };
             let cancelled = matches!(answer, Err(ApkgImportError::Cancelled));

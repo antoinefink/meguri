@@ -11,7 +11,11 @@ use meguri_ffi::{
     deck_import::*,
     lifecycle::close_collection,
     notes::{AddNoteRequest, UpdateNoteRequest, add_note, update_note},
-    notetypes::notetype_names,
+    notetype_structure::{
+        NotetypeConfirmedLosses, NotetypeStructureDraft, StructureDraftField, StructureDraftTemplate,
+        start_notetype_structure_save,
+    },
+    notetypes::{notetype_names, read_notetype},
     review_session::{ReviewUndoScope, ReviewUndoStatus},
     test_hooks::test_write_deck_package,
     undo::{peek_undo, start_undo},
@@ -199,7 +203,7 @@ fn session(device: &Device, package: &Path) -> (Arc<DeckImportSession>, DeckImpo
     }
 }
 fn apply(device: &Device, session: &DeckImportSession, options: DeckImportOptions) -> (JobOutcome, DeckImportApplyOutcome) {
-    let started = session.start_apply(options, None).unwrap();
+    let started = session.start_apply(options, None, false).unwrap();
     let outcome = device.finish(started.handle.id);
     (outcome, started.result.outcome().unwrap().expect("a finished apply has its outcome"))
 }
@@ -303,7 +307,7 @@ fn a_deck_package_is_classified_inspected_applied_paged_undone_and_closed() {
     assert_eq!(target.staging(), 1);
     close_collection().unwrap();
     assert_eq!(target.staging(), 0);
-    assert!(matches!(edited.result().unwrap(), None));
+    assert!(edited.result().unwrap().is_none());
 }
 
 /// What a file or the device refuses, each as its own case and with
@@ -394,7 +398,7 @@ fn a_cancel_in_each_phase_writes_nothing() {
     for at_space in [false, true] {
         let result = Mutex::new(None);
         let start = || {
-            let started = open_session.start_apply(options, None).unwrap();
+            let started = open_session.start_apply(options, None, false).unwrap();
             *result.lock().unwrap() = Some(started.result);
             started.handle
         };
@@ -409,4 +413,96 @@ fn a_cancel_in_each_phase_writes_nothing() {
     assert_eq!(imported(&target, &open_session, options).counts.notes_added, 2);
     close_collection().unwrap();
     assert_eq!(target.staging(), 0);
+}
+
+/// The stock Basic note type sorted by its second field: a schema change.
+fn sort_basic_by_back(device: &Device) {
+    let record = read_notetype(basic()).unwrap();
+    let draft = NotetypeStructureDraft {
+        notetype_id: record.id,
+        base: record.base.clone(),
+        name: record.name.clone(),
+        css: record.css.clone(),
+        fields: record
+            .fields
+            .iter()
+            .map(|f| StructureDraftField {
+                origin: Some(f.ord),
+                name: f.name.clone(),
+                sticky: f.sticky,
+                rtl: f.rtl,
+                font_name: f.font_name.clone(),
+                font_size: f.font_size,
+                description: f.description.clone(),
+                plain_text: f.plain_text,
+                collapsed: f.collapsed,
+                exclude_from_search: f.exclude_from_search,
+            })
+            .collect(),
+        templates: record
+            .templates
+            .iter()
+            .map(|t| StructureDraftTemplate {
+                origin: Some(t.ord),
+                name: t.name.clone(),
+                front: t.front.clone(),
+                back: t.back.clone(),
+                browser_front: t.q_format_browser.clone(),
+                browser_back: t.a_format_browser.clone(),
+                target_deck_id: t.target_deck_id,
+                browser_font_name: t.browser_font_name.clone(),
+                browser_font_size: t.browser_font_size,
+            })
+            .collect(),
+        sort_field: Some(1),
+        skip_checks: true,
+        confirmed: NotetypeConfirmedLosses::default(),
+    };
+    let saved = start_notetype_structure_save(draft).unwrap();
+    assert_eq!(device.finish(saved.handle.id), JobOutcome::Succeeded);
+}
+
+/// `sync/meguri-provider` MP7.1's first requirement through the exports: a
+/// caller that asks gets a plan's structural reason before anything is
+/// written, even with no merge preview, and this call never commits such a
+/// plan while it asks (the accepted confirmation is the structure job's).
+/// A caller that does not ask (no ready Meguri Sync binding) is asked nothing.
+#[test]
+fn a_structural_plan_is_confirmed_first_and_never_committed_by_the_asking_apply() {
+    let root = tempfile::tempdir().unwrap();
+    let source = open(&root.path().join("source"));
+    note("g-first", "sun");
+    source.clock.now.store(NOW + 90_000, Ordering::SeqCst);
+    sort_basic_by_back(&source);
+    let package = root.path().join("sorted.apkg");
+    test_write_deck_package(package.to_str().unwrap().into()).unwrap();
+    close_collection().unwrap();
+    drop(source);
+    let target = open(&root.path().join("target"));
+    target.clock.now.store(NOW + 200_000, Ordering::SeqCst);
+    let options = deck_import_stored_options().unwrap();
+    let (open_session, _) = session(&target, &package);
+    let ask = |confirmation: Option<Arc<DeckImportConfirmation>>, asking: bool| {
+        let started = open_session.start_apply(options, confirmation, asking).unwrap();
+        assert_eq!(target.finish(started.handle.id), JobOutcome::Succeeded);
+        started.result.outcome().unwrap().unwrap()
+    };
+    let DeckImportApplyOutcome::ConfirmationRequired { request } = ask(None, true) else { panic!("asks first") };
+    assert_eq!(request.reasons, [DeckImportStructuralReason::SortFieldChanged]);
+    assert!(request.preview.emptied_fields.is_empty() && request.preview.removed_notetypes.is_empty()
+        && request.preview.dropped_values.is_empty());
+    assert_eq!((undo_name(), target.backups()), (None, 0), "nothing was written or backed up");
+    // The asking apply does not commit the confirmed plan either: the job does.
+    let DeckImportApplyOutcome::ConfirmationRequired { request: again } = ask(Some(request.confirmation.clone()), true) else {
+        panic!("the asking apply never commits a structural plan")
+    };
+    assert_eq!(again.reasons, [DeckImportStructuralReason::SortFieldChanged]);
+    assert_eq!((undo_name(), target.backups()), (None, 0));
+    // Without the question (iCloud, Off, no ready binding): it commits, with
+    // the safety backup a structural edit takes.
+    let DeckImportApplyOutcome::Imported { result } = ask(None, false) else { panic!("commits alone") };
+    assert_eq!(result.structure.reasons, [DeckImportStructuralReason::SortFieldChanged]);
+    assert!(result.safety_backup.is_some() && target.backups() == 1);
+    assert_eq!(result.counts.notes_added, 1);
+    close_collection().unwrap();
 }

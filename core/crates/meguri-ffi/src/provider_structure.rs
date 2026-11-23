@@ -54,6 +54,9 @@ pub enum ProviderStructureRefusal {
     NothingPending,
     Round { refusal: ProviderRoundRefusal },
     Unavailable,
+    /// The import's session is closed (`package/apkg-import` I2): the file
+    /// is chosen again.
+    ImportSessionClosed,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum ProviderUploadPending { Unreachable, Busy, Failed, Cancelled, LocalChanged, Storage, SignIn }
@@ -142,15 +145,16 @@ fn upload(value: MeguriStructureUploadOutcome) -> ProviderStructureUpload {
 }
 /// The op as the job's save phase. Its inputs are checked before the job
 /// starts; its typed result is kept for `saved`.
+/// None for an import whose session is closed.
 fn work(op: ProviderStructureOp, host: &meguri_host::CoreHost)
-    -> Result<(MeguriStructureWork, Saved, Option<DeckImportAnswer>), CoreError> {
+    -> Result<Option<(MeguriStructureWork, Saved, Option<DeckImportAnswer>)>, CoreError> {
     let saved = Saved::default();
     let op = match op {
         ProviderStructureOp::Import { session, options, confirmation } => {
-            // A closed session imports nothing: the caller's own error, before a round runs.
-            let session = session.shared().ok_or_else(|| CoreError::InvalidArgument { message: "the import session is closed".into() })?;
+            // A closed session imports nothing, and no round runs for it.
+            let Some(session) = session.shared() else { return Ok(None) };
             let (work, answer) = host.deck_import_work(session, options.into(), confirmation.map(|confirmation| confirmation.token()));
-            return Ok((work, saved, Some(answer)));
+            return Ok(Some((work, saved, Some(answer))));
         }
         other => other,
     };
@@ -205,7 +209,7 @@ fn work(op: ProviderStructureOp, host: &meguri_host::CoreHost)
         }
         ProviderStructureOp::Import { .. } => unreachable!("handled above"),
     };
-    Ok((work, saved, None))
+    Ok(Some((work, saved, None)))
 }
 impl ProviderConnection {
     fn structure_access(&self, credentials: ProviderCredentials) -> MeguriAccessSource {
@@ -229,7 +233,9 @@ impl ProviderConnection {
         -> Result<ProviderStructureStart, CoreError> {
         callback::enter("ProviderConnection.start_structure_save");
         self.owner.validate()?;
-        let (work, saved, import) = work(op, &self.owner.host)?;
+        let Some((work, saved, import)) = work(op, &self.owner.host)? else {
+            return Ok(ProviderStructureStart::Refused { refusal: ProviderStructureRefusal::ImportSessionClosed });
+        };
         let start = self.owner.host.start_meguri_structure_save(self.structure_access(credentials), work, reachable);
         Ok(self.structure_start(start, saved, import))
     }
@@ -348,7 +354,7 @@ mod tests {
     }
     /// MP7.1: without a ready binding an import is not this job's (it runs
     /// alone, `package/apkg-import` I14). The refusal leaves the session
-    /// open; a closed session is the caller's error, before anything starts.
+    /// open; a closed session is refused as such, before anything starts.
     #[test]
     fn an_import_without_a_ready_binding_is_refused_and_keeps_its_session() {
         use crate::deck_import::{DeckImportOptions, DeckImportSession, DeckImportUpdate};
@@ -378,8 +384,8 @@ mod tests {
         assert!(session.shared().is_some(), "the refused job left the session open");
         assert!(!connection.owner.structure_upload_pending().unwrap());
         session.close().unwrap();
-        assert!(matches!(connection.start_structure_save(credentials(&connection), op, true),
-            Err(CoreError::InvalidArgument { .. })));
+        assert!(matches!(connection.start_structure_save(credentials(&connection), op, true).unwrap(),
+            ProviderStructureStart::Refused { refusal: ProviderStructureRefusal::ImportSessionClosed }));
         drop(session);
         connection.owner.host.close().unwrap();
     }
