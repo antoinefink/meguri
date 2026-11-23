@@ -38,6 +38,22 @@ pub use session::{ImportSession, inspect};
 /// (R1852).
 pub const MAX_ROWS: u64 = 2_000_000;
 
+/// What else a package may hold; with [`MAX_ROWS`] these keep an import's
+/// memory and time bounded whatever the file stores. Each is far above
+/// what a deck holds. A package past one is refused at the inspect, by
+/// aggregates, before any row is read.
+pub const LIMITS: meguri_storage::deck_package::DeckCandidateLimits = meguri_storage::deck_package::DeckCandidateLimits {
+    rows: MAX_ROWS,
+    guid_bytes: 255,
+    // A page of notes is `gather::NOTE_PAGE` of these at most.
+    note_bytes: 2 * 1024 * 1024,
+    card_data_bytes: 64 * 1024,
+    tag_uses: 2 * MAX_ROWS,
+    structure_rows: 10_000,
+    notetype_parts: 5000,
+    structure_bytes: 64 * 1024 * 1024,
+};
+
 /// What an import needs from its host besides the engine.
 #[derive(Clone)]
 pub struct ApkgContext {
@@ -353,11 +369,13 @@ pub enum ApkgImportError {
     DeckTooDeep {
         name: String,
     },
-    /// The import would bring more rows than [`MAX_ROWS`]: refused at the
-    /// inspect for notes and cards alone, and at the start of an apply
-    /// with the review log counted, before anything is planned or staged.
+    /// The package is past one of [`LIMITS`], which `what` names: refused
+    /// at the inspect before any row is read, or, for the rows with the
+    /// review log counted, at the start of an apply, before anything is
+    /// planned or staged.
     TooLarge {
-        rows: u64,
+        what: &'static str,
+        found: u64,
         limit: u64,
     },
     SessionClosed,

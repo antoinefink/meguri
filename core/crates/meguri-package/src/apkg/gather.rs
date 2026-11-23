@@ -21,6 +21,8 @@ use super::session::unreadable;
 use super::{ApkgContext, ImportOptions, ImportOutcome, corrupt};
 
 pub(crate) const PAGE: usize = 1000;
+/// Notes per page: with `LIMITS.note_bytes` a page holds 128 MiB at most.
+pub(crate) const NOTE_PAGE: usize = 64;
 
 /// What the plan keeps of one package note: never its text.
 #[derive(Clone, Debug)]
@@ -75,7 +77,7 @@ impl PackageRows {
 
     /// Up to a page of notes above `after`, by id.
     pub fn notes_after(&self, after: Option<i64>) -> ImportOutcome<Vec<Note>> {
-        self.rows().notes_after(after.map(meguri_model::ids::NoteId), PAGE).map_err(unreadable)
+        self.rows().notes_after(after.map(meguri_model::ids::NoteId), NOTE_PAGE).map_err(unreadable)
     }
 
     pub fn cards_after(&self, after: Option<i64>) -> ImportOutcome<Vec<Card>> {

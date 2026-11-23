@@ -26,6 +26,85 @@ pub struct DeckCandidateRepair<'a> {
     pub minutes_west_at: &'a dyn Fn(i64) -> i32,
     /// `notes/note-records` F1 on a note's values for a field count.
     pub repair_fields: &'a dyn Fn(Vec<String>, usize) -> Vec<String>,
+    /// Checked before any repair reads the rows.
+    pub limits: DeckCandidateLimits,
+}
+
+/// What a deck package may hold, so that an import's memory and time stay
+/// bounded whatever the file stores (R1852). A package past one is refused
+/// with `CandidateError::TooLarge`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeckCandidateLimits {
+    /// Notes and cards together.
+    pub rows: u64,
+    /// One note's GUID, in bytes.
+    pub guid_bytes: u64,
+    /// One note's fields, tags and data together, in bytes.
+    pub note_bytes: u64,
+    /// One card's data, in bytes.
+    pub card_data_bytes: u64,
+    /// Tags over all notes, each use counted.
+    pub tag_uses: u64,
+    /// Rows of each of decks, presets and note types.
+    pub structure_rows: u64,
+    /// Fields or templates of one note type.
+    pub notetype_parts: u64,
+    /// Bytes of the decks, presets, note types, fields and templates.
+    pub structure_bytes: u64,
+}
+
+fn within(what: &'static str, found: i64, limit: u64) -> Result<(), CandidateError> {
+    let found = u64::try_from(found).map_err(|_| corrupt("candidate size"))?;
+    if found > limit {
+        return Err(CandidateError::TooLarge { what, found, limit });
+    }
+    Ok(())
+}
+
+/// The limits, by aggregates alone: no row's content is read into memory.
+fn check_limits(conn: &rusqlite::Connection, limits: &DeckCandidateLimits) -> Result<(), CandidateError> {
+    let one = |sql: &str| -> Result<i64, CandidateError> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
+    let cards = one("SELECT count(*) FROM cards")?;
+    let (notes, guid, note, tags): (i64, i64, i64, i64) = conn.query_row(
+        "SELECT count(*),                 coalesce(max(length(CAST(guid AS BLOB))), 0),                 coalesce(max(length(CAST(flds AS BLOB)) + length(CAST(tags AS BLOB)) + length(CAST(data AS BLOB))), 0),                 coalesce(sum(length(CAST(tags AS BLOB)) - length(replace(CAST(tags AS BLOB), X'20', X'')) + 1), 0)          FROM notes",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
+    within("rows", notes.saturating_add(cards), limits.rows)?;
+    within("guid bytes", guid, limits.guid_bytes)?;
+    within("note bytes", note, limits.note_bytes)?;
+    within("tag uses", tags, limits.tag_uses)?;
+    within(
+        "card data bytes",
+        one("SELECT coalesce(max(length(CAST(data AS BLOB))), 0) FROM cards")?,
+        limits.card_data_bytes,
+    )?;
+    let mut bytes = 0_i64;
+    for (table, columns) in [
+        ("decks", "length(CAST(name AS BLOB)) + length(common) + length(kind)"),
+        ("deck_config", "length(CAST(name AS BLOB)) + length(config)"),
+        ("notetypes", "length(CAST(name AS BLOB)) + length(config)"),
+    ] {
+        let (count, size): (i64, i64) = conn.query_row(
+            &format!("SELECT count(*), coalesce(sum({columns}), 0) FROM {table}"),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        within("structure rows", count, limits.structure_rows)?;
+        bytes = bytes.saturating_add(size);
+    }
+    for table in ["fields", "templates"] {
+        let (most, size): (i64, i64) = conn.query_row(
+            &format!(
+                "SELECT coalesce(max(parts), 0), coalesce(sum(size), 0) FROM                  (SELECT count(*) AS parts, sum(length(CAST(name AS BLOB)) + length(config)) AS size                   FROM {table} GROUP BY ntid)"
+            ),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        within("note type parts", most, limits.notetype_parts)?;
+        bytes = bytes.saturating_add(size);
+    }
+    within("structure bytes", bytes, limits.structure_bytes)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -118,6 +197,8 @@ fn repair_opened(
             return Err(corrupt("candidate integrity_check"));
         }
     }
+    cancelled(context)?;
+    check_limits(conn, &repair.limits)?;
     cancelled(context)?;
     // The file is a private copy that is read, never activated: triggers
     // and views a package brought could rewrite the rows the repairs below

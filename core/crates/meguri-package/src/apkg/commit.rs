@@ -742,7 +742,7 @@ pub(crate) fn commit(
     let mut pairs: HashSet<(i64, u16)> = HashSet::new();
     let mut loaded: HashSet<i64> = HashSet::new();
     let mut added_cards: HashMap<i64, i64> = HashMap::new();
-    let mut missing_deck: Vec<usize> = Vec::new();
+    let mut missing_deck: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     let mut shaper = plan.taken.shaper();
     let mut after = None;
     loop {
@@ -789,9 +789,7 @@ pub(crate) fn commit(
                     Some(mapped) => DeckId(*mapped),
                     None if id.0 == 1 => id,
                     None => {
-                        if missing_deck.last() != Some(&index) && !missing_deck.contains(&index) {
-                            missing_deck.push(index);
-                        }
+                        missing_deck.insert(index);
                         DeckId(1)
                     }
                 }
@@ -819,7 +817,7 @@ pub(crate) fn commit(
     }
     // `missing_deck` entries, in I9's order: the note as written, or as the
     // package holds it when this import wrote nothing for it.
-    missing_deck.sort_unstable();
+    let missing_deck: Vec<usize> = missing_deck.into_iter().collect();
     for chunk in missing_deck.chunks(200) {
         let ids: Vec<NoteId> = chunk.iter().map(|index| NoteId(plan.raw.notes[*index].id)).collect();
         let held = package.rows().notes_with_ids(&ids)?;

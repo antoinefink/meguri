@@ -209,7 +209,7 @@ fn a_package_past_the_row_limit_is_refused_before_the_plan() {
     PeakAlloc::reset_peak();
     let baseline = PeakAlloc::current();
     let refusal = apkg::apply(target.host.engine(), &session, scheduling, None, &CancelToken::new(), &ProgressSink::new());
-    let Err(apkg::ApkgImportError::TooLarge { rows, limit }) = refusal else {
+    let Err(apkg::ApkgImportError::TooLarge { what: "rows", found: rows, limit }) = refusal else {
         panic!("a size refusal, not {refusal:?}");
     };
     assert_eq!((rows, limit), (apkg::MAX_ROWS + 3, apkg::MAX_ROWS));

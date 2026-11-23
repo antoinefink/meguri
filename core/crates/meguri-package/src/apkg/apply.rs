@@ -109,7 +109,8 @@ pub fn apply(
     let rows = (raw.notes.len() as u64).saturating_add(raw.cards).saturating_add(raw.revlog);
     if rows > super::MAX_ROWS {
         return Err(ApkgImportError::TooLarge {
-            rows,
+            what: "rows",
+            found: rows,
             limit: super::MAX_ROWS,
         });
     }

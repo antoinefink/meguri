@@ -913,3 +913,53 @@ fn the_media_preflight_counts_the_safety_backup_a_structural_import_takes() {
     space.0.store(with, SeqCst);
     assert!(apply(&structural, &session, ALL_OFF).unwrap().safety_backup.is_some());
 }
+
+#[test]
+fn a_package_past_a_size_limit_is_refused_at_the_inspect_and_leaves_no_staging() {
+    use meguri_package::apkg::LIMITS;
+    // Each case edits one stored value of an otherwise small package.
+    type Edit = fn(&mut WriteScope<'_>, NoteId) -> Result<(), EngineError>;
+    let cases: [(&str, u64, Edit); 4] = [
+        ("guid bytes", LIMITS.guid_bytes, |scope, id| {
+            let mut note = scope.note(id)?.unwrap();
+            note.guid = "g".repeat(256);
+            scope.put_note_forced(&note)?;
+            Ok(())
+        }),
+        ("note bytes", LIMITS.note_bytes, |scope, id| {
+            let mut note = scope.note(id)?.unwrap();
+            note.fields = format!("{}\u{1f}back", "w".repeat(2 * 1024 * 1024));
+            scope.put_note_forced(&note)?;
+            Ok(())
+        }),
+        ("note bytes", LIMITS.note_bytes, |scope, id| {
+            let mut note = scope.note(id)?.unwrap();
+            note.tags = format!(" {} ", "t".repeat(2 * 1024 * 1024));
+            scope.put_note_forced(&note)?;
+            Ok(())
+        }),
+        ("card data bytes", LIMITS.card_data_bytes, |scope, id| {
+            let mut card = scope.cards_of_note(id)?.remove(0);
+            card.data = meguri_model::card_data::CardData::parse(&format!("{{\"pad\":\"{}\"}}", "d".repeat(70_000)));
+            scope.put(&card)?;
+            Ok(())
+        }),
+    ];
+    for (name, limit, edit) in cases {
+        let source = Fixture::new(0);
+        let id = crate::apkg_import::add_note(&source, source.notetype, &["front", "back"]);
+        raw(&source, move |scope| edit(scope, id));
+        let package = export(&source, "deck.apkg");
+        let target = Fixture::new(0);
+        let files = crate::apkg_import::listing(&target);
+        let before = dump(&target);
+        let refusal = inspect(&target, &package);
+        let Err(ApkgImportError::TooLarge { what, found, limit: stated }) = refusal else {
+            panic!("{name}: a size refusal, not {:?}", refusal.map(|_| ()));
+        };
+        assert_eq!((what, stated), (name, limit));
+        assert!(found > limit, "{name}: {found}");
+        assert_eq!(crate::apkg_import::listing(&target), files, "{name}: the staging is removed");
+        assert_eq!(dump(&target), before);
+    }
+}
