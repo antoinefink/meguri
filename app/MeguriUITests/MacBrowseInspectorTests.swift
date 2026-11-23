@@ -127,17 +127,22 @@ final class MacBrowseInspectorTests: XCTestCase {
         let bar = element(app, "browse.inspector.formatting")
         XCTAssertTrue(bar.frame.maxY <= app.windows.firstMatch.frame.maxY + 1, "the bar stays at the pane's bottom edge")
 
-        // N21.3: under about 900 points the pane hides; Return shows it over the table.
+        // N21.3: under about 900 points the pane hides; a double click shows it over the
+        // table, the toolbar's toggle hides it, and Return on the selected row shows it again.
         try app.bringToFront(bundleIdentifier: bundle)
         press(table.outlineRows.element(boundBy: 0))
         try resize(app, bundle: bundle, to: "820x700")
         XCTAssertTrue(waitUntil { !note.exists }, "the pane hid itself")
         try app.bringToFront(bundleIdentifier: bundle)
+        table.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).doubleClick()
+        XCTAssertTrue(note.waitForExistence(timeout: 10), "a double click shows it over the table")
+        sleep(1)
+        capture(app, "narrow-over-table-\(appearance)")
+        element(app, "browse.toolbar.inspector").click()
+        XCTAssertTrue(waitUntil { !note.exists }, "the toolbar's toggle hides it")
         press(table.outlineRows.element(boundBy: 0))
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(note.waitForExistence(timeout: 10), "Return shows it over the table")
-        sleep(1)
-        capture(app, "narrow-over-table-\(appearance)")
     }
 
     /// Browse's sidebar: the deck row whose name holds `name` sets the Deck token. The
