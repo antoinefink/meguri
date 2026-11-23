@@ -129,7 +129,6 @@ import Testing
                 }
             }
             #expect(ranBeforeReturn, "round \(round): the deinit waited for a job on the file's actor")
-            while !MediaFile.deinitRan(id) && !ranBeforeReturn { await Task.yield() }
         }
         await resolver.close()
     }
