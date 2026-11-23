@@ -86,6 +86,10 @@ import Testing
         let lowest = CGRect(x: 160, y: 380, width: 16, height: 16)
         let over = StatsActivityBox.calloutOrigin(day: lowest, callout: 200, 60, in: grid)
         #expect(over == CGPoint(x: 68, y: 312))
+        // A grid too short for it above or below: under the day all the same, past the grid.
+        let short = CGSize(width: 330, height: 100)
+        let past = StatsActivityBox.calloutOrigin(day: CGRect(x: 160, y: 40, width: 16, height: 16), callout: 200, 80, in: short)
+        #expect(past == CGPoint(x: 68, y: 64))
     }
 
     /// S14 on the grid: Left and Right a week (the square beside), Up and Down a day (the

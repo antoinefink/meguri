@@ -40,7 +40,9 @@ struct StatsActivityBox: View {
         StatsBoxChrome(box: slot.id.rawValue, title: slot.title(locale: locale), open: slot.open) {
             // The figures under the grid, so the lines keep the box's whole width (N25.8).
             VStack(alignment: .leading, spacing: Spacing.medium) {
+                // Over the figures, so a callout that runs past the grid stays on top.
                 grid(activity, span: span, phase: content.phase)
+                    .zIndex(1)
                 figures(content, activity: activity, span: span)
             }
         }
@@ -182,8 +184,9 @@ struct StatsActivityBox: View {
 
     /// Where the callout goes, never over the day (N25.4): beside it, on the side with room
     /// (its right in the grid's first half, its left in the second, when both have room), level
-    /// with it; when neither side has room, under the day, or over it at the grid's bottom edge. Always
-    /// inside the grid, so it never runs onto the figures.
+    /// with it, kept inside the grid's height; when neither side has room, under the day, or
+    /// over it when the room under it is too short. When neither fits inside the grid, it goes
+    /// under the day all the same, over the figures, rather than on the day.
     nonisolated static func calloutOrigin(day: CGRect, callout width: CGFloat, _ height: CGFloat, in grid: CGSize) -> CGPoint {
         let gap = Spacing.xSmall
         let left = day.minX - gap - width, right = day.maxX + gap
@@ -194,7 +197,8 @@ struct StatsActivityBox: View {
         if fitsRight { return CGPoint(x: right, y: clampedY(day.minY - gap)) }
         let x = min(max(0, day.midX - width / 2), max(0, grid.width - width))
         let below = day.maxY + gap
-        let y = below + height <= grid.height ? below : max(0, day.minY - gap - height)
+        let above = day.minY - gap - height
+        let y = below + height <= grid.height || above < 0 ? below : above
         return CGPoint(x: x, y: y)
     }
 
