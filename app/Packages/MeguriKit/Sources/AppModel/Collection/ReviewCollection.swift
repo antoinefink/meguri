@@ -380,6 +380,10 @@ public final class ReviewCollection: ChangeFanoutSink {
             return self.browseReadable && self.deckNamesAllowed(host: .main, route: nil)
         }
         value.commands.stepRecorded = { [weak self] seq, title in self?.collectionUndo.name(step: seq, title) }
+        // U273: the inspector's saves are "Edit Note" steps of this collection (V8.3).
+        value.inspector.stepRecorded = { [weak self] seq, title in self?.collectionUndo.name(step: seq, title) }
+        value.inspector.generation = { [weak self] in self?.generation ?? 0 }
+        value.inspector.preview.resolver = { [weak self] in await self?.mediaResolverForReview() }
         value.commands.openNoteType = { [weak self] id in
             guard let self else { return }
             self.noteTypes.selection = id
@@ -2271,6 +2275,10 @@ public final class ReviewCollection: ChangeFanoutSink {
                 } else {
                     do { try await review?.pause() }
                     catch { self.error = String(describing: error) }
+                    // W3: Browse's inspector saves its note before the background.
+                    guard await browseOwner?.inspector.flushForBackground() != false else {
+                        throw BridgeError.unavailable(reason: "The note in Browse could not be saved. Its text has been kept.")
+                    }
                     guard await addFlowOwner?.flushForBackground() != false else {
                         throw BridgeError.unavailable(reason: "The note editor could not flush. Your draft has been kept.")
                     }
@@ -2332,6 +2340,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         return result
     }
     private func performClose(quitting: Bool) async -> Bool {
+        // W3: Browse's inspector saves its note before the collection closes;
+        // a save that failed keeps the collection open, with the text.
+        if await browseOwner?.inspector.flushForBackground() == false { return false }
         closing = true
         defer { closing = false }
         if let cancelledEditor = cancelPendingEditorReplacement() {
