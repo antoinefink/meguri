@@ -332,6 +332,29 @@ extension ReviewCoordinatorTests {
         #expect(await fixture.model.end())
     }
 
+    /// MP6.10: between window rounds an answer costs the review its own work
+    /// only: one answer call and two undo reads, one render and one presentation
+    /// of the next card, no head read.
+    @Test func answersBetweenSyncWindowsReadNoHead() async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        let renders = fixture.surface.calls.filter { $0 == "render" }.count
+        let presents = fixture.surface.calls.filter { $0 == "present" }.count
+        let undo = fixture.client.undoReads
+        for card in Int64(1)...5 {
+            fixture.model.reveal(); await fixture.model.settled()
+            fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(card + 1), marks: [], removed: [card]),
+                leech: false, suspended: false, rolledOver: false)
+            fixture.model.rate(.good); await fixture.model.settled()
+        }
+        for _ in 0..<20 { await Task.yield() }
+        #expect(fixture.client.answers == 5 && fixture.client.headReads == 0)
+        #expect(fixture.client.undoReads - undo == 10)
+        #expect(fixture.surface.calls.filter { $0 == "render" }.count - renders == 5)
+        #expect(fixture.surface.calls.filter { $0 == "present" }.count - presents == 5)
+        #expect(await fixture.model.end())
+    }
+
     /// `head(_:)` with another state token (and render key): the same card, changed elsewhere.
     static func head(_ id: Int64, token: UInt8, key: UInt8? = nil) -> ReviewHead {
         let base = head(id), item = base.items[0]

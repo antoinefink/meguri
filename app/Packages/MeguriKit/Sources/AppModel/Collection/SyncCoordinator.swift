@@ -1134,6 +1134,10 @@ public final class SyncCoordinator {
     @ObservationIgnored var meguriMediaRetryDelay: ((Duration?) -> Duration?)?
     @ObservationIgnored var meguriMediaResumeObserver: ((MeguriMediaResume.Trigger) -> Void)?
     private var meguriWake: (id: UUID, task: Task<Void, Never>, availability: MeguriWakeAvailability)?
+    /// MP6.10: a review session's changes wait for one window before their round.
+    @ObservationIgnored lazy var meguriReviewRounds = MeguriReviewRounds { [weak self] in
+        self?.requestMeguriWake(automatic: true)
+    }
     private var meguriAddressDrain: Task<Void, Never>?
     private var meguriPauseDrain: Task<Void, Never>?
     private var meguriCancellation: Task<Void, Never>?
@@ -2270,6 +2274,8 @@ public final class SyncCoordinator {
                 let recoveryRevision = meguriReachabilityRecoveryRevision
                 meguriWakePending = false; meguriWakeManual = false
                 guard meguriSchedulingAllowed(automatic: !manual) else { return }
+                // MP6.10: this round carries every change committed so far.
+                meguriReviewRounds.roundStarting()
                 meguriRoutine = .exchanging
                 let availabilityRevision = availability.revision
                 do {
@@ -2294,6 +2300,9 @@ public final class SyncCoordinator {
                         debugMeguriRoundSuccessSequence += 1
                     }
                     #endif
+                    // MP6.10: after the exchange is recorded, a change made during the
+                    // round keeps the status pending until its window's round.
+                    meguriRoutine = Self.meguriRoutine(meguriRoutine, changesWaiting: meguriReviewRounds.waiting)
                     if meguriRoutine == .fullSyncRequired, let facade = meguriBootstrap {
                         try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
                         // T19.5 "round failed, full sync required": the needs-you row with its Choose action.
@@ -2731,14 +2740,25 @@ public final class SyncCoordinator {
     func receive(_ event: CloudPolicyEvent) { if !closing { enqueue(.policy(event)) } }
     func coreEvent(_ event: CoreEvent) {
         guard !closing else { return }
+        // MP6.10: sessions are followed whatever the service, so a later switch to
+        // Meguri Sync sees the right state.
+        if event.generation == generation {
+            switch event.kind {
+            case .sessionStarted(let id, _): meguriReviewRounds.sessionStarted(id)
+            case .sessionEnded(let id): meguriReviewRounds.sessionEnded(id, request: false)
+            default: break
+            }
+        }
         if event.generation == generation, providerState?.selection == .meguri {
             meguriWake?.availability.observe(kind: event.kind, sequence: event.seq, generation: event.generation)
             switch event.kind {
             case .changes(let changes):
-                if changes.source != .syncIncoming && changes.source != .cloudIncoming && changes.source != .cloudRekey {
-                    requestMeguriWake(automatic: true)
+                if changes.source != .syncIncoming && changes.source != .cloudIncoming && changes.source != .cloudRekey,
+                   meguriReviewRounds.localChange() {
+                    // MP6.10: waiting for the window is pending, never up to date.
+                    meguriRoutine = Self.meguriRoutine(meguriRoutine, changesWaiting: true)
                 }
-            case .sessionEnded: requestMeguriWake(automatic: true)
+            case .sessionEnded: meguriReviewRounds.requestAfterSessionEnd()
             case .available:
                 if meguriWake == nil { requestMeguriWake(automatic: true) }
             default: break
@@ -3873,6 +3893,12 @@ public final class SyncCoordinator {
         guard !replacing else { return false }
         if initialAdoptionEnabledBefore != nil { initialOwnAdmission.setOpen(false) }
         if providerState?.selection == .meguri {
+            // MP6.10: changes waiting for a review window go before the app is suspended,
+            // within the background time the system gave.
+            if meguriReviewRounds.flush(), let wake = meguriWake {
+                await waitForMeguriRound(wake.task, atMost: Self.meguriBackgroundBudget(deadlineMilliseconds: deadlineMilliseconds,
+                    now: Int64(clock.now().timeIntervalSince1970 * 1_000)))
+            }
             suspended = true
             await drainMeguriProduct()
         }
@@ -3899,7 +3925,85 @@ public final class SyncCoordinator {
             operationFailed = true; return false
         }
     }
+    /// MP6.10: the status while changes wait is pending; a round that ends idle
+    /// with changes made during it stays pending until their window's round.
+    static func meguriRoutine(_ routine: MeguriRoutineState?, changesWaiting: Bool) -> MeguriRoutineState? {
+        changesWaiting && routine == .idle ? .pending : routine
+    }
+    /// MP6.10: the share of the system's background time a waiting round may take,
+    /// leaving the rest for the local flush and the suspension that follow.
+    static func meguriBackgroundBudget(deadlineMilliseconds: Int64?, now: Int64) -> Duration {
+        guard let deadlineMilliseconds else {
+            // The Mac keeps running when it is hidden: no system deadline, the same bound.
+            #if os(macOS)
+            return .seconds(20)
+            #else
+            return .zero
+            #endif
+        }
+        let left = max(0, deadlineMilliseconds - now - 5_000)
+        return .milliseconds(min(left, 20_000))
+    }
+    /// The background or quit wait for a round, which a foreground return or
+    /// the system's expiry ends early; the round itself is drained after it.
+    private var meguriRoundWait: Task<Void, Never>?
+    private func waitForMeguriRound(_ round: Task<Void, Never>, atMost budget: Duration) async {
+        let wait = Task { await Self.wait(for: round, atMost: budget) }
+        meguriRoundWait = wait
+        await wait.value
+        if meguriRoundWait == wait { meguriRoundWait = nil }
+    }
+    /// MP6.10: the app is back, or its background time is up: stop waiting.
+    func endMeguriRoundWait() { meguriRoundWait?.cancel() }
+    /// Returns when `task` ends, `budget` passes or the caller is cancelled,
+    /// whichever comes first. It never cancels `task`.
+    static func wait(for task: Task<Void, Never>, atMost budget: Duration) async {
+        guard budget > .zero, !Task.isCancelled else { return }
+        let gate = WaitGate()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                gate.install(continuation)
+                let finished = Task { await task.value; gate.open() }
+                let timeout = Task { try? await Task.sleep(for: budget); gate.open() }
+                gate.onOpen = { finished.cancel(); timeout.cancel() }
+            }
+        } onCancel: { gate.open() }
+    }
+    private nonisolated final class WaitGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var opened = false
+        private var cleanup: (@Sendable () -> Void)?
+        var onOpen: (@Sendable () -> Void)? {
+            get { lock.withLock { cleanup } }
+            set {
+                let runNow = lock.withLock { () -> Bool in
+                    if opened { return true }
+                    cleanup = newValue; return false
+                }
+                if runNow { newValue?() }
+            }
+        }
+        func install(_ continuation: CheckedContinuation<Void, Never>) {
+            let resumeNow = lock.withLock { () -> Bool in
+                if opened { return true }
+                self.continuation = continuation; return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+        func open() {
+            let (continuation, cleanup) = lock.withLock { () -> (CheckedContinuation<Void, Never>?, (@Sendable () -> Void)?) in
+                guard !opened else { return (nil, nil) }
+                opened = true
+                defer { self.continuation = nil; self.cleanup = nil }
+                return (self.continuation, self.cleanup)
+            }
+            cleanup?()
+            continuation?.resume()
+        }
+    }
     public func backgroundExpired() {
+        endMeguriRoundWait()
         if suspended { pendingExpiry = true }
         else {
             cancelCommands(.expiry)
@@ -3915,6 +4019,12 @@ public final class SyncCoordinator {
     func quitAfterLocalFlush(completion: @escaping @MainActor () -> Void) async {
         cancelOwnEditorDecision()
         cancelMeguriEditorDecision(meguriAction?.id)
+        // MP6.10: changes waiting for a review window, or the round the session's
+        // end just started (Close ends the review before quitting), go before Meguri quits.
+        if providerState?.selection == .meguri {
+            _ = meguriReviewRounds.flush()
+            if let wake = meguriWake { await waitForMeguriRound(wake.task, atMost: .seconds(10)) }
+        }
         // A provider-only owner has no policy to answer the quit request.
         guard backend != nil, cloudConfigured else { completion(); return }
         quitCompletion = completion
@@ -4378,6 +4488,7 @@ public final class SyncCoordinator {
             if desiredVisibleMedia?.generation != next { desiredVisibleMedia = nil }
             deliveredVisibleMedia = nil
             generation = next; status = nil; preview = nil; recovery = nil
+            meguriReviewRounds.reset()
             retainedRecoveryStart = nil
             hasDeferredNativeWork = false
             hostRevision &+= 1
