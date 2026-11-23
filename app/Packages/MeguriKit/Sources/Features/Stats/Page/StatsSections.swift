@@ -57,7 +57,7 @@ extension StatsBoxID {
     /// The footnote lines the box keeps in every phase, so it never grows when one arrives (S8.5).
     var footnoteLines: Int {
         switch self {
-        case .knowledgeOverTime: 2
+        case .knowledgeOverTime: 1
         case .cardsOverTime, .retrievability, .stability, .difficulty: 1
         default: 0
         }

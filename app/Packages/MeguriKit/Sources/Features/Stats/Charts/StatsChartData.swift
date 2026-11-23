@@ -73,11 +73,15 @@ public struct StatsSeries: Identifiable, Hashable, Sendable {
     /// Bins whose point is drawn open and left out of the line: a rate from too
     /// few reviews to trust (S7.2's fewer than 20).
     public var openPoints: IndexSet
+    /// The values already written, per bin, where the callout says more than the value in the
+    /// chart's unit (Answers' share with its count, "61.2% (9,718)"); nil writes `values`.
+    public var valueTexts: [String?]?
 
     public init(
         id: String, name: String, color: StatsSeriesColor, mark: StatsMark,
-        values: [Double?], openPoints: IndexSet = []
+        values: [Double?], openPoints: IndexSet = [], valueTexts: [String?]? = nil
     ) {
+        self.valueTexts = valueTexts
         self.id = id
         self.name = name
         self.color = color
@@ -115,6 +119,66 @@ public struct StatsRule: Identifiable, Hashable, Sendable {
     }
 }
 
+/// A dashed vertical rule at a place on the x axis that is not a bin, named in the legend:
+/// Retrievability's desired retention among its 5% bins (S7.12). Minimal: one value on the bins'
+/// own scale, drawn in the label colour like a horizontal rule.
+public struct StatsMarker: Identifiable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    /// Where it stands, in bins from the first bin's leading edge (0) to the last bin's trailing
+    /// edge (`bins.count`); nil draws nothing and keeps only its legend entry (a value not read yet).
+    public var position: Double?
+    /// The marked value as the callout writes it ("90.0%"), or nil to leave it out of the callout.
+    public var valueText: String?
+    public var color: StatsSeriesColor
+
+    public init(id: String, name: String, position: Double?, valueText: String? = nil, color: StatsSeriesColor = .rule) {
+        self.id = id
+        self.name = name
+        self.position = position
+        self.valueText = valueText
+        self.color = color
+    }
+
+    /// The position of `value` on an axis of `bins` equal bins from `lower` to `upper`, kept on
+    /// the plot: 90% among twenty 5% bins from 0 to 100% stands at 18, the leading edge of
+    /// the 90%–95% bin.
+    public static func position(of value: Double, lower: Double, upper: Double, bins: Int) -> Double? {
+        guard bins > 0, upper > lower, value.isFinite else { return nil }
+        return min(max((value - lower) / (upper - lower) * Double(bins), 0), Double(bins))
+    }
+
+    /// The plot's x for a position, from the first bin's centre and the distance between two
+    /// bins' centres: a band's leading edge is half a step before its centre.
+    static func x(_ position: Double, firstCenter: Double, step: Double) -> Double {
+        firstCenter + (position - 0.5) * step
+    }
+}
+
+/// A band filled between two line series, named in the legend: Knowledge Over Time's likely
+/// forgotten cards between Studied and Known (S7.1). Drawn under the lines in a soft tint of
+/// its colour, only over bins where both lines have a value (a gap in either breaks it), with
+/// straight joins between bins like the lines'.
+public struct StatsBand: Identifiable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var color: StatsSeriesColor
+    /// The series ids of its two edges.
+    public var lower: String
+    public var upper: String
+    /// What the band stands for, for the Audio Graph's description (S15).
+    public var spoken: String?
+
+    public init(id: String, name: String, color: StatsSeriesColor, lower: String, upper: String, spoken: String? = nil) {
+        self.id = id
+        self.name = name
+        self.color = color
+        self.lower = lower
+        self.upper = upper
+        self.spoken = spoken
+    }
+}
+
 /// A line of the callout that is not a drawn series, such as Reviews Due's
 /// "Total by then" (S7.9) or a stack's total (S7.4): the running total lives
 /// here, never on a second axis (S8.2).
@@ -128,8 +192,12 @@ public struct StatsCalloutLine: Identifiable, Hashable, Sendable {
     /// The line's values already written, per bin, where a value is more than one number
     /// (Knowledge's "Likely forgotten 547 (6.5%)", S7.1); nil writes `values` in the unit.
     public var texts: [String?]?
+    /// The swatch of the line, where it is drawn (Knowledge's likely forgotten band); nil for none.
+    public var color: StatsSeriesColor?
 
-    public init(id: String, name: String, values: [Double?], unit: StatsValueUnit? = nil, texts: [String?]? = nil) {
+    public init(id: String, name: String, values: [Double?], unit: StatsValueUnit? = nil, texts: [String?]? = nil,
+                color: StatsSeriesColor? = nil) {
+        self.color = color
         self.id = id
         self.name = name
         self.values = values
@@ -159,12 +227,20 @@ public struct StatsChartData: Hashable, Sendable {
     /// The Audio Graph's name for the y axis (P18.3: cards, reviews, minutes,
     /// percent); nil names it by the unit.
     public var unitName: String?
+    /// Vertical rules at places on the x axis (Retrievability's desired retention), after the
+    /// rules in the legend.
+    public var markers: [StatsMarker]
+    /// Bands between two of the line series, under the lines; in the legend after the series.
+    public var bands: [StatsBand]
 
     public init(
         bins: [StatsPeriod], series: [StatsSeries], rules: [StatsRule] = [],
         unit: StatsValueUnit = .count, yScale: StatsYScale = .zero,
-        calloutLines: [StatsCalloutLine] = [], browsable: IndexSet = [], unitName: String? = nil
+        calloutLines: [StatsCalloutLine] = [], browsable: IndexSet = [], unitName: String? = nil,
+        markers: [StatsMarker] = [], bands: [StatsBand] = []
     ) {
+        self.markers = markers
+        self.bands = bands
         self.bins = bins
         self.series = series
         self.rules = rules
@@ -180,7 +256,7 @@ public struct StatsChartData: Hashable, Sendable {
     public func skeleton() -> StatsChartData {
         var copy = self
         copy.bins = []
-        copy.series = series.map { var s = $0; s.values = []; s.openPoints = []; return s }
+        copy.series = series.map { var s = $0; s.values = []; s.openPoints = []; s.valueTexts = nil; return s }
         copy.calloutLines = []
         copy.browsable = []
         return copy
@@ -202,11 +278,31 @@ public struct StatsChartData: Hashable, Sendable {
 
     /// Whether every series keeps to one colour family (S8.1).
     public var keepsOneFamily: Bool {
-        StatsSeriesColor.keepsOneFamily(series.map(\.color) + rules.map(\.color))
+        StatsSeriesColor.keepsOneFamily(series.map(\.color) + bands.map(\.color) + rules.map(\.color) + markers.map(\.color))
     }
 
-    /// The names in legend order: the series in stack order, then the rules.
-    public var legendNames: [String] { series.map(\.name) + rules.map(\.name) }
+    /// The names in legend order: the series in stack order, the bands, then the rules and the
+    /// markers.
+    public var legendNames: [String] { series.map(\.name) + bands.map(\.name) + rules.map(\.name) + markers.map(\.name) }
+
+    /// A band's runs of bins where both its edges have a value, each with the pair of values:
+    /// a gap in either edge breaks the band, as it breaks the line.
+    func bandPieces(_ band: StatsBand) -> [[(bin: Int, lower: Double, upper: Double)]] {
+        guard let lower = series.first(where: { $0.id == band.lower }),
+              let upper = series.first(where: { $0.id == band.upper }) else { return [] }
+        var pieces: [[(bin: Int, lower: Double, upper: Double)]] = []
+        var current: [(bin: Int, lower: Double, upper: Double)] = []
+        for bin in bins.indices {
+            if let low = value(lower, at: bin), let high = value(upper, at: bin) {
+                current.append((bin, min(low, high), max(low, high)))
+            } else if !current.isEmpty {
+                pieces.append(current)
+                current = []
+            }
+        }
+        if !current.isEmpty { pieces.append(current) }
+        return pieces
+    }
 }
 
 // MARK: - Stacking and the y domain

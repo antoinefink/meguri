@@ -31,7 +31,7 @@ extension TestHooks {
     /// | `-MeguriRoute` | a route registered in `RouteRegistry`, e.g. `sample/sheet` |
     /// | `-MeguriBackgroundLaunch` | Mac only: `YES` or `NO`; in Debug, `YES` keeps the app out of the Dock and never active (`BackgroundLaunch`, which reads it itself; Profile ignores it). Not a UI-state option: it changes neither the restored state nor the window size |
     /// | `-MeguriStudyTimings` | `on` or `off` (default): a strip below the shell gives the last Study's way to its first card (`StudyStartTrace`, R1813) as `testhooks.studyStart.timings` |
-    /// | `-MeguriStatsRollout` | `off` (default), `on` or `open`: turns `StatsRollout` on (U296), so the sidebar's Statistics row and View › Statistics (⇧⌘S) show; `open` also opens the window on Statistics once the shell starts (captures and performance tests over `-MeguriFixture`); `open:<section>` then scrolls the page to that section (`knowledge`, `reviews`, `cards`, `comingUp`, `answering`, `memory`, `decks`), for Mac captures, which cannot scroll. A `stats/…` route turns it on by itself |
+    /// | `-MeguriStatsRollout` | `off`, `on` or `open`: `off` hides Statistics where it shows by default (the Mac, the iPad; U307's part), `on` turns `StatsRollout` on (U296) wherever the app runs, so the sidebar's Statistics row and View › Statistics (⇧⌘S) show; `open` also opens the window on Statistics once the shell starts (captures and performance tests over `-MeguriFixture`); `open:<section>` then scrolls the page to that section (`knowledge`, `reviews`, `cards`, `comingUp`, `answering`, `memory`, `decks`), for Mac captures, which cannot scroll. A `stats/…` route turns it on by itself |
     /// | `-MeguriSyncRender` | a `SyncCoordinator.RenderState` name (`meguriConnected`, `meguriSyncing`, …), optionally followed by `+justFinished`: with `-MeguriFixture`, once the collection opens the shell shows that synthetic sync status in place of the real one; with a shell route, the shell gets the sync button over that status (captures of the sync button; nothing syncs) |
     struct LaunchOptions: Equatable {
         enum WindowSize: Equatable {
@@ -69,6 +69,8 @@ extension TestHooks {
         var route: Route?
         var studyTimings = false
         var statsRollout: StatsRolloutOption?
+        /// `-MeguriStatsRollout off`: Statistics hidden where it would show (the Mac, the iPad).
+        var statsRolloutOff = false
         /// The section `open:<section>` scrolls to (a `StatsSectionID` raw value).
         var statsSection: String?
 
@@ -226,6 +228,7 @@ extension TestHooks {
             if let value = values["Route"] {
                 route = try Route(value)
             }
+            statsRolloutOff = values["StatsRollout"] == "off"
             if let value = values["StatsRollout"], value != "off" {
                 let parts = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
                 guard let option = StatsRolloutOption(rawValue: parts[0]),

@@ -16,7 +16,21 @@ public final class ReviewCoordinator {
     public private(set) var shownItem: ReviewHeadItem?
     public private(set) var counts = ReviewCounts(new: 0, learning: 0, review: 0)
     public private(set) var sessionID: UInt64?
-    public private(set) var notice: String?
+    public private(set) var notice: String? {
+        didSet {
+            noticeRevision &+= 1
+            leechNoticeID = nil
+            leechNoticeTask?.cancel(); leechNoticeTask = nil
+        }
+    }
+    // Ordering only: even publishing the same persistent text supersedes an answer's notice.
+    @ObservationIgnored private var noticeRevision: UInt64 = 0
+    /// S2/S3: each leech outcome has its own announcement, even with identical text.
+    public private(set) var leechNoticeID: UUID?
+    @ObservationIgnored private(set) var leechNoticeTask: Task<Void, Never>?
+    @ObservationIgnored var waitForLeechNoticeExpiry: () async throws -> Void = {
+        try await ContinuousClock().sleep(for: .seconds(2))
+    }
     public private(set) var undoStatus: ReviewUndoStatus = .unavailable(reason: .none)
     public private(set) var redoStatus: ReviewUndoStatus = .unavailable(reason: .none)
     public private(set) var record: ReviewRecord
@@ -368,6 +382,8 @@ public final class ReviewCoordinator {
     }
     private func rate(_ rating: ReviewRating, inputTime: TimeInterval, instant: Date) {
         guard phase == .answer, !busy, !paused, !editingNote, let item, let sessionID else { return }
+        dismissLeechNotice()
+        let answerNoticeRevision = noticeRevision
         // All input paths enter this synchronous gate, before any suspension.
         busy = true; phase = .transition
         let use: NativeReviewInput.AnswerUse?
@@ -400,8 +416,8 @@ public final class ReviewCoordinator {
                     if let pendingAnswer, pendingAnswer.id == answer.id {
                         record.answers.append(pendingAnswer); record.undone.removeAll()
                         self.pendingAnswer = nil
+                        if leech, noticeRevision == answerNoticeRevision { showLeechNotice(suspended: suspended) }
                     }
-                    if leech { notice = suspended ? "Card was a leech. It has been suspended." : "Card was a leech." }
                     if suspended { record.suspended.insert(item.cardId) }
                     enqueuePersistence(diagnosticAnswer: true)
                     let needsRefresh = refreshPending
@@ -453,6 +469,7 @@ public final class ReviewCoordinator {
     /// end of the session. One undo step brings it back.
     public func act(_ action: ReviewCardAction) {
         guard canActOnCard, let item, let sessionID else { return }
+        dismissLeechNotice()
         busy = true; phase = .transition
         let inputTime = uptime()
         timer.pause(at: inputTime)
@@ -489,6 +506,7 @@ public final class ReviewCoordinator {
 
     public func restore(redo: Bool = false) {
         guard (redo ? canRedo : canUndo), let sessionID else { return }
+        dismissLeechNotice()
         if hold(.restore(redo: redo, step: redo ? redoStatus : undoStatus)) { return }
         // Only an answer step moves the record's answers; a bury, a suspend or an edit does not.
         let answerStep: Bool = {
@@ -1023,6 +1041,24 @@ public final class ReviewCoordinator {
     /// A notice above the card, for a change the screen reports itself.
     func showNotice(_ text: String) { notice = text }
 
+    private func showLeechNotice(suspended: Bool) {
+        guard !closingAdmission, phase != .ended else { return }
+        notice = suspended ? "Card was a leech. It has been suspended." : "Card was a leech."
+        let id = UUID()
+        leechNoticeID = id
+        let wait = waitForLeechNoticeExpiry
+        leechNoticeTask = Task { [weak self] in
+            do { try await wait() }
+            catch { return }
+            guard let self, self.leechNoticeID == id else { return }
+            self.notice = nil
+        }
+    }
+
+    private func dismissLeechNotice() {
+        if leechNoticeID != nil { notice = nil }
+    }
+
     public func mediaUnavailable() {
         mediaArrivals = ReviewMediaArrivals()
         beginPause()
@@ -1051,6 +1087,7 @@ public final class ReviewCoordinator {
     @discardableResult public func end() async -> Bool {
         if let endTask { return await endTask.value }
         closingAdmission = true
+        dismissLeechNotice()
         restorationID = nil
         startTrace?.cancel()
         beginPause()
@@ -1077,6 +1114,7 @@ public final class ReviewCoordinator {
     }
     public func generationEnded() {
         closingAdmission = true
+        dismissLeechNotice()
         restorationID = nil
         startTrace?.cancel()
         summaryTask?.cancel()

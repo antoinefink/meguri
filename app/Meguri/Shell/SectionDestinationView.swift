@@ -57,8 +57,8 @@ struct ShellFeatures {
     /// The compact layout's Statistics tab (iPhone, the folded Duo: U304); the sidebar's row
     /// follows `availableSections`.
     var statsTab = false
-    /// The Statistics page behind `StatsRollout` (U296): View › Statistics and Go to Section act
-    /// on it; nil while it cannot be reached.
+    /// The Statistics page where `StatsRollout` shows it (the Mac and the iPad): View ›
+    /// Statistics and Go to Section act on it; nil while it cannot be reached.
     var statsPage: StatsPage?
     /// What keeps the page's wiring to the collection alive for the app's run.
     var statsHost: AnyObject?
@@ -113,24 +113,21 @@ struct ShellFeatures {
         features.today = { _ in AnyView(TodayView(collection: collection, besideDeckList: true)) }
         #if os(macOS)
         features.nativeMacWorkspace = true
-        // N21.1: Today, then Browse; Note Types under them (N22.1). The iPad's rows wait for its own layout.
-        features.availableSections = [.home, .browse, .noteTypes]
-        #else
-        // W14: Note Types has a sidebar row at regular width; the tab layout reaches it from Settings (U286).
-        features.availableSections = [.home, .noteTypes, .settings]
         #endif
+        // N21.1: Today, then Statistics (N25.1) and Browse on the Mac; Note Types under them
+        // (N22.1). The iPad's Browse row waits for its own layout; W14: Note Types has a sidebar
+        // row at regular width, and the tab layout reaches it from Settings (U286).
+        features.availableSections = AppSection.productSidebar(on: .current, statistics: StatsRollout.enabled)
         let statsPage: StatsPage?
         if StatsRollout.enabled {
-            // N25.1: Statistics second, under Today.
             let host = StatsCollectionHost(collection: collection)
             statsPage = host.page
             features.statsHost = host
-            features.availableSections.insert(.stats, at: 1)
         } else {
             statsPage = nil
         }
         features.statsPage = statsPage
-        // Statistics, behind its flag, reads a collection as Browse does.
+        // Statistics, where it is shown, reads a collection as Browse does.
         features.sectionShown = { section in
             (section != .stats || statsPage != nil) && Self.sectionShown(section, hasCollection: collection.hasCollection)
         }

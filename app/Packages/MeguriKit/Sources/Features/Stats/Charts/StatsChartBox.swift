@@ -59,18 +59,16 @@ public struct StatsChartBox<Accessory: View>: View {
     private let footnoteLines: Int
     private let separatesSeries: Bool?
     private let externalSelection: Binding<StatsChartSelection>?
-    private let open: () -> Void
+    private let open: (() -> Void)?
     private let showInBrowse: ((Int) -> Void)?
     private let spokenSummary: String?
 
     @State private var ownSelection = StatsChartSelection.none
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.displayScale) private var displayScale
     @Environment(\.locale) private var locale
     @Environment(\.calendar) private var calendar
     @Environment(\.appClock) private var clock
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     /// - Parameters:
     ///   - box: the box's id in `stats.box.<box>` (S15), e.g. `reviewsOverTime`.
@@ -87,7 +85,7 @@ public struct StatsChartBox<Accessory: View>: View {
         phase: StatsBoxPhase = .ready, size: StatsPlotSize = .regular,
         figures: [StatsSmallFigure] = [], footnote: String? = nil, footnoteLines: Int = 0,
         separatesSeries: Bool? = nil, selection: Binding<StatsChartSelection>? = nil,
-        open: @escaping () -> Void, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil,
+        open: (() -> Void)? = nil, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil,
         @ViewBuilder accessory: () -> Accessory
     ) {
         spokenSummary = summary
@@ -108,7 +106,6 @@ public struct StatsChartBox<Accessory: View>: View {
     }
 
     private var isReady: Bool { phase == .ready }
-    private var stacks: Bool { dynamicTypeSize.isAccessibilitySize }
     private var selection: Binding<StatsChartSelection> { externalSelection ?? $ownSelection }
 
     private var plotPhase: StatsPlotPhase {
@@ -146,62 +143,11 @@ public struct StatsChartBox<Accessory: View>: View {
     // MARK: Parts
 
     private var header: some View {
-        let layout = stacks
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xSmall))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Spacing.xSmall))
-        return layout {
-            Button(action: open) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.xxSmall) {
-                    Text(verbatim: title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .multilineTextAlignment(.leading)
-                    Image(systemName: "chevron.right")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(title)
-            .accessibilityHint(Text("stats.chart.openHint", bundle: .module))
-            .accessibilityIdentifier("stats.box.\(box).header")
-            if !stacks {
-                Spacer(minLength: Spacing.xSmall)
-                // Every header as tall as one with a small switch, aligned on its baseline, so
-                // the figures, plots and axes of the boxes in a row line up (Retention's switch
-                // beside Forgotten's bare title).
-                Picker(selection: .constant(0)) { Text(verbatim: " ").tag(0) } label: { EmptyView() }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .fixedSize()
-                    .frame(width: 0)
-                    .hidden()
-                    .accessibilityHidden(true)
-            }
-            accessory
-                .controlSize(.small)
-        }
+        StatsBoxHeader(box: box, title: title, open: open) { accessory }
     }
 
     private var figureView: some View {
-        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-            Text(verbatim: isReady ? figure?.value ?? "—" : "—")
-                .font(.title2.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(isReady && figure != nil ? .primary : .secondary)
-                .lineLimit(1)
-            // Two lines kept in every phase, so the plot never moves down when
-            // the numbers arrive (S8.5: the box keeps its size).
-            Text(verbatim: isReady ? figure?.sentence ?? " " : " ")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(stacks ? 3 : 2, reservesSpace: true)
-        }
-        // The chart element reads the figure and its sentence (S15).
-        .accessibilityHidden(true)
+        StatsBoxFigureView(figure: figure, ready: isReady)
     }
 
     private var plot: some View {
@@ -217,50 +163,12 @@ public struct StatsChartBox<Accessory: View>: View {
         )
     }
 
-    /// The small figures in one row; two to a row at compact width when there
-    /// are four (decided by width class and count, never by the values, so the
-    /// box keeps its size when they arrive); one column at the accessibility sizes.
-    @ViewBuilder private var figuresView: some View {
-        if stacks {
-            VStack(alignment: .leading, spacing: Spacing.xSmall) { figureCells }
-        } else if horizontalSizeClass == .compact, figures.count > 3 {
-            Grid(alignment: .topLeading, horizontalSpacing: Spacing.medium, verticalSpacing: Spacing.xSmall) {
-                ForEach(Array(stride(from: 0, to: figures.count, by: 2)), id: \.self) { start in
-                    GridRow {
-                        ForEach(figures[start..<min(start + 2, figures.count)]) { figureCell($0) }
-                    }
-                }
-            }
-        } else {
-            HStack(alignment: .top, spacing: Spacing.medium) { figureCells }
-        }
-    }
-
-    private var figureCells: some View {
-        ForEach(figures) { figureCell($0) }
-    }
-
-    private func figureCell(_ item: StatsSmallFigure) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-            Text(verbatim: item.label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(verbatim: isReady ? item.value ?? "—" : "—")
-                .font(.subheadline.weight(.medium))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .foregroundStyle(isReady && item.value != nil ? .primary : .secondary)
-        }
-        .frame(maxWidth: stacks ? nil : .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+    private var figuresView: some View {
+        StatsBoxSmallFigures(figures: figures, ready: isReady)
     }
 
     private var footnoteView: some View {
-        Text(verbatim: isReady ? footnote ?? " " : " ")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .lineLimit(stacks ? footnoteLines * 3 : footnoteLines, reservesSpace: true)
+        StatsBoxFootnote(footnote: footnote, lines: footnoteLines, ready: isReady)
     }
 
     @ViewBuilder private var exportMenu: some View {
@@ -340,7 +248,7 @@ extension StatsChartBox where Accessory == EmptyView {
         phase: StatsBoxPhase = .ready, size: StatsPlotSize = .regular,
         figures: [StatsSmallFigure] = [], footnote: String? = nil, footnoteLines: Int = 0,
         separatesSeries: Bool? = nil, selection: Binding<StatsChartSelection>? = nil,
-        open: @escaping () -> Void, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil
+        open: (() -> Void)? = nil, showInBrowse: ((Int) -> Void)? = nil, summary: String? = nil
     ) {
         self.init(
             box: box, title: title, figure: figure, data: data, phase: phase, size: size,
