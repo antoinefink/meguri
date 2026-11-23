@@ -113,30 +113,35 @@ Pin the note operation to its original collection publication and data epoch bef
 ## M9. Full SQLite collection download
 
 `download_collection` takes an empty argument object and requires `collection:read`.
-Return `download_url` and RFC 3339 `expires_at`; tell the client to share the link
-with the user. The link opens `/mcp/download#download=<opaque ticket>`. Clear the
-fragment before bootstrap and keep the ticket only in the page. Require sign-in
-to the same account and a deliberate native form POST to
-`/api/mcp/collection-download`, with the single `ticket` field in an
-`application/x-www-form-urlencoded` body. Use the browser cookie, existing
-same-origin and ingress checks, and no query or header secrets. After fragment
-clearing, this page alone uses the document referrer policy `same-origin` so
-native form navigation sends the required non-null Origin. Restore the default
-on leaving the page. HTTP private headers stay unchanged; external destinations
-receive no referrer.
+Return `download_url`, `download_token` and RFC 3339 `expires_at` in a bounded
+fixed output shape. Use the configured HTTPS origin and the exact fixed path
+`/api/mcp/collection-download`, without a query or fragment. Tell the agent to GET
+that URL for machine use with exactly one `Authorization: Bearer <download_token>`
+header and save the response as `collection.anki2`. Keep the token out of URLs,
+logs, errors and user-facing chat. The existing read grant authorizes the entire
+operation; no user intervention, confirmation, browser, sign-in or new scope is
+required. The dedicated opaque token is distinct from OAuth access credentials
+and cannot authorize MCP. Browser credentials or OAuth access tokens alone cannot
+redeem a download, and ambient cookies never select the account. Reuse common
+route admission and security headers without requiring an Origin header for GET.
+Missing, malformed, multiple, unknown, expired, revoked and consumed download
+credentials return the same generic unauthorized error and `WWW-Authenticate: Bearer`
+challenge, without secrets or OAuth metadata. Preserve distinct busy, storage and
+data-integrity failures. Other OAuth flows and origin checks stay unchanged.
 
 Tickets last up to ten minutes, capped at the original access token expiry, and
 are single-use. Retain the original MCP access-token authority, including the data
 epoch. Ordinary refresh leaves a still-valid original access token usable. Refresh
 replay revocation, expiry and account invalidation reject old tickets. Bound the store to 64 tickets and eight per
-account, and active exports to two. Wrong accounts and failed preparation do not
-consume a ticket. Under the account read barrier, validate both authorities and
-pin the publication and an established committed SQLite read transaction. Calculate
+account, and active exports to two. Failed preparation does not consume a ticket.
+Under the original account read barrier, validate ticket expiry and original MCP
+authority, and pin the publication and an established committed SQLite read
+transaction. Calculate
 size, reserve bounded temporary bytes, create the private stage and open its file
 before releasing the guard. Back up
 off the barrier using private native staging and temporary-byte reservations;
 never stamp, checkpoint or write the source. Close the source before responding.
-Under the barrier, recheck both authorities, the original data epoch and current
+Under the barrier, recheck the original MCP authority, original data epoch and current
 publication path, then atomically check expiry/replay and remove the ticket.
 
 Stream bounded chunks with a five-minute total response deadline. Retain private

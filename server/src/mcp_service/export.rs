@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-//! M9: bounded, single-use browser downloads of the committed collection only.
+//! M9: bounded, single-use Bearer downloads of the committed collection only.
 use super::*;
-use crate::{accounts::{self, BrowserAuthority}, collection::schema,
+use crate::{accounts, collection::schema,
     limits::TempReservation, storage::collection::Generation};
 use axum::{body::{Body, Bytes}, response::Response};
 use http_body::{Body as HttpBody, Frame};
@@ -27,7 +27,7 @@ impl Default for Exports {
 }
 impl Exports {
     fn read(&self, key: &[u8; 32]) -> Result<Arc<Ticket>> {
-        let mut tickets = self.tickets.lock().map_err(|_| invalid())?;
+        let mut tickets = self.tickets.lock().map_err(|_| Error::new("storage_unavailable"))?;
         tickets.retain(|_, t| t.expires > accounts::now());
         tickets.get(key).cloned().ok_or_else(invalid)
     }
@@ -41,14 +41,14 @@ impl Exports {
     }
 }
 impl McpService {
-    pub(crate) async fn download_collection(&self, original: oauth::Authority) -> Result<(String, i64)> {
+    pub(crate) async fn download_collection(&self, original: oauth::Authority) -> Result<(String, String, i64)> {
         let token = crypto::random_token()?;
         let key = key(&token)?;
         let expires = (accounts::now() + 600).min(original.access_expires_at());
         let store = self.service.mcp_exports.clone();
         self.execute(original, false, move |_, _, a| {
             a.check()?;
-            let mut tickets = store.tickets.lock().map_err(|_| invalid())?;
+            let mut tickets = store.tickets.lock().map_err(|_| Error::new("storage_unavailable"))?;
             tickets.retain(|_, t| t.expires > accounts::now());
             if tickets.len() >= 64 || tickets.values().filter(|t| t.authority.account_id() == a.original.account_id()).count() >= 8 {
                 return Err(mcp::busy());
@@ -57,7 +57,7 @@ impl McpService {
             tickets.insert(key, Arc::new(Ticket { authority: a.original.clone(), expires }));
             Ok(())
         }).await?;
-        Ok((format!("{}/mcp/download#download={token}", self.service.config.origin()), expires))
+        Ok((format!("{}/api/mcp/collection-download", self.service.config.origin()), token, expires))
     }
 }
 // These fields drop in order: close SQLite before releasing its independent pin.
@@ -72,30 +72,19 @@ struct Snapshot {
     _capacity: OwnedSemaphorePermit,
     _root: Arc<DataRoot>,
 }
-fn check_browser(root: &DataRoot, browser: &BrowserAuthority, ticket: &Ticket) -> Result<()> {
-    let mut c = storage::inspect(root.database())?;
-    c.busy_timeout(Duration::ZERO)?;
-    let tx = c.transaction()?;
-    let account = accounts::check_browser(&tx, browser, "authentication_failed")?;
-    oauth::check_authority(&tx, &ticket.authority, false).map_err(|_| invalid())?;
-    if account.identity.id != ticket.authority.account_id() || ticket.expires <= accounts::now() {
-        return Err(invalid());
-    }
-    Ok(())
-}
 impl Service {
-    pub(crate) async fn redeem_collection(self: &Arc<Self>, browser: BrowserAuthority, token: &str) -> Result<Response> {
+    pub(crate) async fn redeem_collection(self: &Arc<Self>, token: &str) -> Result<Response> {
         let key = key(token)?;
         let ticket = self.mcp_exports.read(&key)?;
-        let capacity = self.mcp_exports.capacity.clone().try_acquire_owned().map_err(|_| mcp::busy())?;
+        let capacity = self.mcp_exports.capacity.clone();
         let bridge = McpService::new(self.clone());
         let first_ticket = ticket.clone();
-        let first_browser = browser.clone();
         // execute holds the one publication guard. Establish a real SQLite read
         // transaction here, then return a separate pin without retaining it.
         let budget = self.temp.clone();
         let (source, snapshot) = bridge.execute(ticket.authority.clone(), false, move |_, path, a| {
-            check_browser(&a.held.root, &first_browser, &first_ticket)?;
+            if first_ticket.expires <= accounts::now() { return Err(invalid()); }
+            let capacity = capacity.try_acquire_owned().map_err(|_| mcp::busy())?;
             let pin = a.held.root.pin_collection(path)?;
             let c = schema::open_mcp(path, false)?;
             c.execute_batch("BEGIN DEFERRED")?;
@@ -128,11 +117,11 @@ impl Service {
         }).await.map_err(|_| Error::new("storage_unavailable"))??;
         self.pause("collection_export_ready").await;
         let store = self.mcp_exports.clone();
-        // No await between the final checks and ticket removal. A wrong account,
-        // copy failure or lost publication leaves the ticket unconsumed.
+        // No await between the final authority check and ticket removal. A copy
+        // failure or lost publication leaves the ticket unconsumed.
         let snapshot = bridge.execute(ticket.authority.clone(), false, move |_, current, a| {
-            let mut tickets = store.tickets.lock().map_err(|_| invalid())?;
-            check_browser(&a.held.root, &browser, &ticket)?;
+            let mut tickets = store.tickets.lock().map_err(|_| Error::new("storage_unavailable"))?;
+            a.check()?;
             if path != current { return Err(Error::new("conflict")); }
             if tickets.get(&key).is_none_or(|t| t.expires <= accounts::now() || !Arc::ptr_eq(t, &ticket)) { return Err(invalid()); }
             tickets.remove(&key).ok_or_else(invalid)?;
@@ -144,9 +133,17 @@ impl Service {
 enum Chunk { Data(Bytes), End }
 struct Stream {
     rx: mpsc::Receiver<io::Result<Chunk>>,
+    deadline: Pin<Box<tokio::time::Sleep>>,
     completed: Option<oneshot::Sender<()>>,
-    cleaned: oneshot::Receiver<()>,
+    cleaned: Option<oneshot::Receiver<()>>,
     ended: bool,
+}
+impl Stream {
+    fn finish(&mut self) {
+        self.ended = true;
+        self.rx.close();
+        if let Some(done) = self.completed.take() { let _ = done.send(()); }
+    }
 }
 impl Drop for Stream {
     fn drop(&mut self) {
@@ -158,22 +155,31 @@ impl HttpBody for Stream {
     type Error = io::Error;
     fn poll_frame(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<io::Result<Frame<Bytes>>>> {
         if !self.ended {
+            // Check before the channel: queued bytes cannot extend the worker's
+            // absolute deadline, even if the client resumes polling much later.
+            if self.deadline.as_mut().poll(cx).is_ready() {
+                self.finish();
+                return Poll::Ready(Some(Err(io::ErrorKind::TimedOut.into())));
+            }
             match self.rx.poll_recv(cx) {
                 Poll::Ready(Some(Ok(Chunk::Data(bytes)))) => return Poll::Ready(Some(Ok(Frame::data(bytes)))),
                 Poll::Ready(Some(Ok(Chunk::End))) => {
-                    self.ended = true;
-                    if let Some(done) = self.completed.take() { let _ = done.send(()); }
+                    self.finish();
                 }
                 Poll::Ready(Some(Err(error))) => {
-                    if let Some(done) = self.completed.take() { let _ = done.send(()); }
+                    self.finish();
                     return Poll::Ready(Some(Err(error)));
                 }
-                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Ready(None) => self.finish(),
                 Poll::Pending => return Poll::Pending,
             }
         }
         // EOF follows cleanup, so byte reservations never outlive completion.
-        Pin::new(&mut self.cleaned).poll(cx).map(|_| None)
+        if let Some(cleaned) = self.cleaned.as_mut() {
+            if Pin::new(cleaned).poll(cx).is_pending() { return Poll::Pending; }
+            self.cleaned = None;
+        }
+        Poll::Ready(None)
     }
 }
 fn stream(mut snapshot: Snapshot) -> Response {
@@ -209,9 +215,37 @@ fn stream(mut snapshot: Snapshot) -> Response {
         drop(snapshot);
         let _ = cleanup.send(());
     });
-    let mut response = Response::new(Body::new(Stream { rx, completed: Some(completed), cleaned, ended: false }));
+    let mut response = Response::new(Body::new(Stream { rx, deadline: Box::pin(tokio::time::sleep_until(deadline)),
+        completed: Some(completed), cleaned: Some(cleaned), ended: false }));
     response.headers_mut().insert("content-type", "application/vnd.sqlite3".parse().unwrap());
     response.headers_mut().insert("content-disposition", "attachment; filename=\"collection.anki2\"".parse().unwrap());
     response.headers_mut().insert("content-length", size.into());
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn elapsed_response_deadline_refuses_queued_bytes_and_waits_for_cleanup() {
+        let (tx, rx) = mpsc::channel(2);
+        tx.try_send(Ok(Chunk::Data(Bytes::from_static(b"queued")))).unwrap();
+        let (completed, mut completion) = oneshot::channel();
+        let (cleanup, cleaned) = oneshot::channel();
+        let deadline = tokio::time::Instant::now() - Duration::from_secs(1);
+        let mut stream = Stream { rx, deadline: Box::pin(tokio::time::sleep_until(deadline)),
+            completed: Some(completed), cleaned: Some(cleaned), ended: false };
+        let frame = std::future::poll_fn(|cx| Pin::new(&mut stream).poll_frame(cx)).await;
+        assert_eq!(frame.unwrap().unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert!(tx.is_closed());
+        assert_eq!(completion.try_recv(), Ok(()));
+        std::future::poll_fn(|cx| {
+            assert!(Pin::new(&mut stream).poll_frame(cx).is_pending());
+            Poll::Ready(())
+        }).await;
+        cleanup.send(()).unwrap();
+        assert!(std::future::poll_fn(|cx| Pin::new(&mut stream).poll_frame(cx)).await.is_none());
+        assert!(std::future::poll_fn(|cx| Pin::new(&mut stream).poll_frame(cx)).await.is_none());
+    }
 }

@@ -238,7 +238,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
     let browser = browser_api || oauth_route;
     let exempt = request.method() == Method::GET && request.uri().path() == "/api/status";
     let (parts, body) = request.into_parts();
-    let download_navigation = parts.method == Method::POST && parts.uri.path() == "/api/mcp/collection-download";
+    let download = parts.uri.path() == "/api/mcp/collection-download";
     // Keep the incoming receiver alive until the closing response is finished.
     // Dropping it on a refusal could enable HTTP/1 background unread-body drain.
     let response = if browser {
@@ -249,7 +249,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
             Ok(())
         };
         match early {
-            Err(e) => ingress::retain(browser_error(e, download_navigation), body, None, service),
+            Err(e) => ingress::retain(api_error(e, download), body, None, service),
             Ok(()) if exempt => {
                 let response = dispatch(&service, &parts, None)
                     .await
@@ -257,7 +257,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
                 ingress::retain(response, body, None, service)
             }
             Ok(()) => match service.browser_ingress.enter() {
-                Err(e) => ingress::retain(browser_error(e, download_navigation), body, None, service),
+                Err(e) => ingress::retain(api_error(e, download), body, None, service),
                 Ok(permit) => {
                     // At most CAPACITY workers, no waiting/spawn queue. A caller's
                     // cancellation must not free its slot while slow work runs.
@@ -267,12 +267,12 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
                         let mut body = body;
                         let response = dispatch_browser(&service, &parts, &mut body, deadline)
                             .await
-                            .unwrap_or_else(|e| browser_error(e, download_navigation));
+                            .unwrap_or_else(|e| api_error(e, download));
                         ingress::retain(response, body, Some(permit), service)
                     });
                     worker
                         .await
-                        .unwrap_or_else(|_| browser_error(Error::new("internal_error"), download_navigation))
+                        .unwrap_or_else(|_| api_error(Error::new("internal_error"), download))
                 }
             },
         }
@@ -337,14 +337,14 @@ async fn dispatch_browser(
     if parts.uri.query().is_some() {
         return Err(Error::new("invalid_request"));
     }
+    if parts.method == Method::GET && parts.uri.path() == "/api/mcp/collection-download" {
+        return collection_download(service, parts).await;
+    }
     if parts.method != Method::POST {
         return dispatch(service, parts, None).await;
     }
     if !mutation(parts.uri.path()) {
         return Err(Error::new("route_not_found"));
-    }
-    if parts.uri.path() == "/api/mcp/collection-download" {
-        return collection_download(service, parts, body, deadline).await;
     }
     if parts.uri.path() == "/api/mcp/media-upload" {
         return media_upload(service, parts, body, deadline).await;
@@ -356,45 +356,29 @@ async fn dispatch_browser(
     let bytes = service.browser_ingress.read(body, deadline).await?;
     dispatch(service, parts, Some(&bytes)).await
 }
-// Render before ingress::retain so the response still owns the unread request
-// body, ingress permit and root through navigation completion or cancellation.
-fn browser_error(error: Error, download_navigation: bool) -> Response {
-    let response = error.into_response();
-    if download_navigation { download_failure(response) } else { response }
-}
-fn download_failure(mut response: Response) -> Response {
-    let message = match response.status() {
-        StatusCode::UNAUTHORIZED => "You are signed out. Sign in on the original download page and try again.",
-        StatusCode::FORBIDDEN => "This link is unavailable for this account. Sign in to the account connected to your chat, or request a new link if it expired or was used.",
-        _ => "The download could not be prepared. Try again on the original download page. If it still fails, request a new link in your chat.",
-    };
-    *response.body_mut() = Body::from(format!("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Download unavailable</title><main><h1>Download unavailable</h1><p>{message}</p><p>Close this tab and return to the download page.</p></main></html>"));
-    response.headers_mut().insert("content-type", "text/html; charset=utf-8".parse().unwrap());
-    response.headers_mut().remove("content-length");
-    response
-}
-// Browser-generated URL encoding is identical to the opaque token alphabet.
-// Accept one exact field only: no decoding aliases, duplicates or extra fields.
-fn download_form(bytes: &[u8]) -> Result<&str> {
-    let token = std::str::from_utf8(bytes).ok().and_then(|s| s.strip_prefix("ticket="))
-        .filter(|s| s.len() == 43 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b)))
-        .ok_or(Error::new("invalid_request"))?;
-    crate::crypto::bearer(token).map_err(|_| Error::new("invalid_request"))?;
-    Ok(token)
-}
-async fn collection_download(service: &Arc<Service>, parts: &axum::http::request::Parts, body: &mut Body, deadline: tokio::time::Instant) -> Result<Response> {
-    if parts.headers.get_all("content-type").iter().count() != 1
-        || parts.headers.get("content-type").and_then(|v| v.to_str().ok()) != Some("application/x-www-form-urlencoded") {
-        return Err(Error::new("unsupported_content_type"));
+// Retain the common admission, unread body and private response headers. Ticket
+// failures disclose neither OAuth metadata nor whether a credential ever existed.
+fn api_error(error: Error, download: bool) -> Response {
+    if download && matches!(error.code, "authentication_failed" | "capability_invalid" | "invalid_token") {
+        let mut response = Error::new("authentication_failed").into_response();
+        response.headers_mut().insert("www-authenticate", "Bearer".parse().unwrap());
+        response
+    } else if download && error.code == "conflict" {
+        let mut response = error.into_response();
+        *response.status_mut() = StatusCode::CONFLICT;
+        response
+    } else {
+        error.into_response()
     }
+}
+async fn collection_download(service: &Arc<Service>, parts: &axum::http::request::Parts) -> Result<Response> {
+    let token = crate::mcp_service::bearer(&parts.headers).map_err(|_| Error::new("authentication_failed"))?;
+    crate::crypto::bearer(token).map_err(|_| Error::new("authentication_failed"))?;
     if !service.admission_open().await? { return Err(Error::new("admission_closed")); }
-    let browser = authority(service, &parts.headers).await?;
-    let bytes = service.browser_ingress.read_limit(body, deadline, 64).await?;
-    let token = download_form(&bytes)?;
     let socket = parts.extensions.get::<ConnectInfo<SocketAddr>>().ok_or(Error::new("internal_error"))?.0;
     let (ip, _) = effective_peer(&parts.headers, socket, service);
     service.attempts.capability(ip, token)?;
-    service.redeem_collection(browser, token).await.map_err(|e| if e.code == "invalid_token" { Error::new("capability_invalid") } else { e })
+    service.redeem_collection(token).await
 }
 /// Fixed route/header avoids capabilities or uploaded names in request paths.
 async fn media_upload(service: &Service, parts: &axum::http::request::Parts, body: &mut Body, deadline: tokio::time::Instant) -> Result<Response> {
@@ -417,8 +401,7 @@ async fn media_upload(service: &Service, parts: &axum::http::request::Parts, bod
 fn mutation(path: &str) -> bool {
     matches!(
         path,
-        "/api/mcp/collection-download"
-            | "/api/mcp/media-upload"
+        "/api/mcp/media-upload"
             | "/api/setup"
             | "/api/invitations/claim"
             | "/api/login"

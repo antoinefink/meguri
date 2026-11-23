@@ -54,7 +54,7 @@ impl Backend<FixtureAuthority> for Fixture {
                 })),
                 ToolCall::EditNote(_) => ("edit_note", Err(ToolFailure::Conflict.into())),
                 ToolCall::DownloadCollection => ("download_collection", Ok(ToolOutput::Download {
-                    download_url:"https://generated.example.test/mcp/download#download=fixture".into(), expires_at:"2026-11-23T14:00:00Z".into(),
+                    download_url:"https://generated.example.test/api/mcp/collection-download".into(), download_token:"A".repeat(43), expires_at:"2026-11-23T14:00:00Z".into(),
                 })),
                 ToolCall::PrepareMediaUpload => ("prepare_media_upload", Ok(ToolOutput::Upload {
                     upload_id:"u".repeat(43),upload_url:"https://generated.example.test/mcp/upload#upload=fixture".into(),expires_at:"2026-11-22T14:00:00Z".into(),
@@ -698,16 +698,25 @@ async fn download_discovery_read_scope_and_empty_input_for_both_revisions() {
         let listed = rpc(&r, revision, "generated-fixture-read", "tools/list", json!({})).await;
         let tool = listed["result"]["tools"].as_array().unwrap().iter().find(|t|t["name"] == "download_collection").unwrap();
         assert_eq!(tool["securitySchemes"][0]["scopes"], json!(["collection:read"]));
+        assert_eq!(tool["annotations"]["readOnlyHint"], true);
+        assert_eq!(tool["annotations"]["idempotentHint"], false);
         assert_eq!(tool["inputSchema"]["additionalProperties"], false);
-        assert!(tool["description"].as_str().unwrap().contains("Share download_url"));
+        assert!(tool["description"].as_str().unwrap().contains("Authorization: Bearer download_token"));
         for arguments in [json!({"account_id":"other"}), json!({"ticket":null}), json!([])] {
             let result = rpc(&r, revision, "generated-fixture-read", "tools/call", json!({"name":"download_collection","arguments":arguments})).await;
             assert!(result.get("error").is_some());
         }
         let result = rpc(&r, revision, "generated-fixture-read", "tools/call", json!({"name":"download_collection","arguments":{}})).await;
         assert_eq!(result["result"]["isError"], false);
-        let link = result["result"]["structuredContent"]["download_url"].as_str().unwrap();
-        assert!(result["result"]["content"][0]["text"].as_str().unwrap().contains(link));
+        let output = &result["result"]["structuredContent"];
+        assert_eq!(output, &json!({"download_url":"https://generated.example.test/api/mcp/collection-download",
+            "download_token":"A".repeat(43),"expires_at":"2026-11-23T14:00:00Z"}));
+        let text = result["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(output["download_url"].as_str().unwrap()));
+        assert!(text.contains("Authorization: Bearer download_token"));
+        assert!(text.contains("No user confirmation"));
+        assert!(text.contains("Keep download_token out of URLs and user-facing chat"));
+        assert!(!text.contains(output["download_token"].as_str().unwrap()));
     }
     assert_eq!(*r.fixture.calls.lock().unwrap(), vec![("a","download_collection"),("a","download_collection")]);
     r.stop().await;

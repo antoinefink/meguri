@@ -1,31 +1,30 @@
 ---
-title: Download the full SQLite collection from MCP
+title: Download the full SQLite collection from MCP without user confirmation
 status: active
 type: feat
 ---
 
 # Download the full SQLite collection from MCP
 
-Add the argument-free `download_collection` read tool. It gives the user a link that downloads the current synced collection as `collection.anki2`. The file contains the full committed SQLite database. The export scope is the collection database. Media files and server account metadata live outside it.
+Add the argument-free `download_collection` read tool. The connected agent can save the full committed collection as `collection.anki2`. The established read grant authorizes the tool. The agent fetches the file without asking the user to sign in or confirm. The export covers the collection database. Media and account data live outside it.
 
 ## Implementation
 
-Use the existing browser handoff pattern. The tool returns `download_url` and `expires_at`. Keep the opaque token in the URL fragment. The page clears the fragment before bootstrap. Require the same Meguri account and a deliberate download action. Send the token in a same-origin form POST body, so browser download machinery can stream the file to disk. Never put the token in a request URL. A ten-minute, single-use, bounded server-side ticket stores the original MCP authority. Reject expiration, revoke, invalidated authorization, and incorrect browser accounts. Keep the ticket usable after an incorrect account or failed preparation. Consume it atomically before the successful response. Use the existing private headers and a fixed attachment filename.
+The tool returns `download_url`, a dedicated `download_token`, and `expires_at`. The agent makes a GET request to the fixed HTTPS URL and sends the token in the `Authorization: Bearer` header. Cap the single-use credential at ten minutes or the original access credential’s expiry, whichever comes first. Use the configured origin. Keep secrets out of URLs, logs, and errors. The token grants one download for the same original account and cannot call MCP. Authentication uses only the dedicated credential at the download endpoint. Preserve the account scope of the MCP read grant and refuse expired or revoked authority, account resets, and replay. Do not require a browser session, a browser action, or any new OAuth consent.
 
 ```mermaid
 sequenceDiagram
-    participant Client as MCP client
+    participant Agent
     participant Server as Meguri Sync
-    participant Browser
-    Client->>Server: download_collection with read grant
-    Server-->>Client: Expiring browser link
-    Browser->>Server: Sign in and POST ticket
-    Server->>Server: Pin, copy, recheck, and consume ticket
-    Server-->>Browser: Stream collection.anki2
+    Agent->>Server: download_collection with MCP read grant
+    Server-->>Agent: HTTPS endpoint and download token
+    Agent->>Server: GET with dedicated bearer token
+    Server->>Server: Pin, copy, recheck, and consume token
+    Server-->>Agent: Stream collection.anki2
 ```
 
-Pin the published generation and commit view under the existing read barrier. Reuse the private staging, temporary byte reservations and SQLite backup routine from native sync. Open the source read-only without write stamps or checkpoints. Copy off the barrier and release the source before the response. Recheck original authority, browser session and publication under the barrier before consuming the ticket. Hold the stage, root, and capacity until streaming finishes or the response is dropped. Use bounded chunks and a bounded number of concurrent exports. Preserve native sync and MCP point operations.
+Pin the published generation and committed view under the account read barrier. Create the private stage under that guard. Run the SQLite copy after releasing it, with bounded temporary storage. Recheck original authority and publication before consuming the token. Use bounded streaming and retain stage ownership until the response completes or drops. Preserve page size and committed WAL changes without changing sync stamps. Keep existing browser, MCP and native operations compatible.
 
 ## Verification
 
-Use generated accounts and actual MCP transport. Check discovery, empty input validation, and read-grant access. Redeem with a signed-in owner and open the downloaded file in SQLite. Check a committed WAL change, absence of uncommitted changes, a preserved opaque value, unchanged live sync stamps, rejection for a different account, revocation, and replay. Exercise the browser fragment and real attachment save flow in Docker. Run focused `tools/mg` server and web jobs, then open the pull request against `master` for the hosted checks. Keep independent approval and privacy evidence per repository rules.
+Use generated accounts and real HTTP. From an authorized MCP read grant, automatically download the SQLite file using only the returned URL and token. Verify both protocol revisions, empty arguments, exact file headers, committed WAL contents, the 64 KiB source page size, SQLite integrity, unchanged live bytes, account binding, credential isolation, expiry, revoke, reset, atomic redemption and cleanup. Run focused `tools/mg` Docker server checks and obtain independent clean-room review. Update the existing pull request against `master` and follow hosted CI.

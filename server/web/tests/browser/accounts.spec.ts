@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Real service only. Parent provides a fresh synthetic Rust root behind HTTPS.
 import { readFileSync, writeFileSync } from "node:fs";
-import { createHash, randomBytes } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import type { Locator, Page, Response } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
@@ -12,68 +11,6 @@ const replacedPassword = "é".repeat(6);
 const resetPassword = "Synthetic reset password 2026";
 const memberUsername = "member." + "long".repeat(14) + "x"; // Maximum 64-character username.
 const fontResponses = new WeakMap<Page, Response[]>();
-// Real OAuth authority and Chromium navigation against the compiled private server.
-// Never follow the callback, print capabilities or capture this transient page.
-async function collectionDownload(page: Page, origin: string) {
-  const request = page.context().request;
-  const client = "https://chatgpt.com/oauth/client.json";
-  const callback = "https://chatgpt.com/connector_platform_oauth_redirect";
-  const verifier = randomBytes(32).toString("base64url");
-  const query = new URLSearchParams({ response_type: "code", client_id: client, redirect_uri: callback,
-    resource: `${origin}/mcp`, scope: "collection:read", code_challenge_method: "S256",
-    code_challenge: createHash("sha256").update(verifier).digest("base64url") });
-  const authorize = await request.get(`${origin}/oauth/authorize?${query}`, { maxRedirects: 0 });
-  expect(authorize.status()).toBe(302);
-  const consent = new URL(authorize.headers()["location"]!);
-  expect(consent.origin === origin && consent.pathname === "/oauth/consent").toBe(true);
-  const handle = new URLSearchParams(consent.hash.slice(1)).get("request");
-  expect(typeof handle === "string" && /^[A-Za-z0-9_-]{43}$/.test(handle)).toBe(true);
-  const read = await request.post(`${origin}/api/mcp/authorization/read`, { headers: { Origin: origin }, data: { request: handle } });
-  expect(read.status()).toBe(200);
-  const decision = await request.post(`${origin}/api/mcp/authorization/decide`, {
-    headers: { Origin: origin }, data: { request: handle, decision: "read" } });
-  expect(decision.status()).toBe(200);
-  const redirect = new URL((await decision.json()).data.redirect_to);
-  expect(redirect.origin + redirect.pathname === callback).toBe(true);
-  const code = redirect.searchParams.get("code");
-  expect(Boolean(code)).toBe(true);
-  const token = await request.post(`${origin}/oauth/token`, { form: {
-    grant_type: "authorization_code", client_id: client, code: code!, code_verifier: verifier, resource: `${origin}/mcp`,
-  } });
-  expect(token.status()).toBe(200);
-  const access = (await token.json()).access_token;
-  const tool = await request.post(`${origin}/mcp`, { headers: { Accept: "application/json", Authorization: `Bearer ${access}`,
-    "mcp-protocol-version": "2025-11-25" },
-    data: { jsonrpc: "2.0", id: "generated-download", method: "tools/call", params: { name: "download_collection", arguments: {} } } });
-  expect(tool.status()).toBe(200);
-  const result = (await tool.json()).result;
-  expect(result.isError).toBe(false);
-  const url = new URL(result.structuredContent.download_url);
-  expect(url.origin === origin && url.pathname === "/mcp/download" && !url.search).toBe(true);
-  const downloadPage = await page.context().newPage();
-  try {
-    await downloadPage.goto(url.href).catch(() => { throw new Error("Could not open the private download page."); });
-    await expect(downloadPage.getByRole("button", { name: "Download collection", exact: true })).toBeVisible();
-    expect(await downloadPage.evaluate(() => location.hash)).toBe("");
-    const outgoing = page.context().waitForEvent("request", { predicate: request => new URL(request.url()).pathname === "/api/mcp/collection-download" });
-    const saved = new Promise<import("@playwright/test").Download>(resolve => {
-      downloadPage.once("download", resolve);
-      page.context().once("page", popup => popup.once("download", resolve));
-    });
-    await downloadPage.getByRole("button", { name: "Download collection", exact: true }).click();
-    const navigation = await outgoing;
-    expect(navigation.method()).toBe("POST");
-    expect(await navigation.headerValue("origin")).toBe(origin);
-    expect(await navigation.headerValue("referer")).toBe(`${origin}/mcp/download`);
-    const download = await saved;
-    expect(download.suggestedFilename()).toBe("collection.anki2");
-    const path = await download.path();
-    expect(path !== null).toBe(true);
-    expect(readFileSync(path!).subarray(0, 16).toString()).toBe("SQLite format 3\0");
-    await download.delete();
-    expect(new URL(downloadPage.url()).pathname).toBe("/mcp/download");
-  } finally { await downloadPage.close(); }
-}
 async function accountAction(row: Locator, name: string) {
   await row.getByRole("button", { name: /^Actions for / }).click();
   await row.getByRole("button", { name, exact: true }).click();
@@ -588,7 +525,6 @@ test("setup, invitation, member settings, reset and admin actions over private H
   expect(logout.ok()).toBe(true);
   await signIn(page, "root.admin", initialPassword);
   await accountShell(page, "root.admin", true);
-  await collectionDownload(page, baseURL!);
   await connectionLayout(page, "root.admin", true);
   await audit(page, "connection-wide");
   await page.getByRole("link", { name: "Accounts", exact: true }).click();

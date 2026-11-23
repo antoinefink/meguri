@@ -6,9 +6,9 @@ use crate::mcp_transport::{self as transport, Access, AuthorizationRequest, BoxF
 use axum::{http::HeaderMap, response::{IntoResponse, Response}};
 use serde_json::json;
 
-/// Accept exactly one credential and pass its unchanged token to OAuth. Neither
+/// Accept exactly one credential, leaving its authority to the caller. Neither
 /// cookies nor native credentials nor request-supplied account selectors apply.
-fn bearer(headers: &HeaderMap) -> std::result::Result<&str, oauth::BearerFailure> {
+pub(crate) fn bearer(headers: &HeaderMap) -> std::result::Result<&str, oauth::BearerFailure> {
     let mut values = headers.get_all("authorization").iter();
     let Some(value) = values.next() else { return Err(oauth::BearerFailure::Missing); };
     if values.next().is_some() { return Err(oauth::BearerFailure::Invalid); }
@@ -95,10 +95,10 @@ impl transport::Backend<oauth::Authority> for McpService {
             let write = call.access() == Access::Write;
             Ok(match call {
                 ToolCall::DownloadCollection => {
-                    let (download_url, expires) = self.download_collection(authority).await.map_err(|e|self.dispatch_failure(e,write))?;
+                    let (download_url, download_token, expires) = self.download_collection(authority).await.map_err(|e|self.dispatch_failure(e,write))?;
                     let expires_at = time::OffsetDateTime::from_unix_timestamp(expires).map_err(|_|DispatchFailure::Tool(ToolFailure::Internal))?
                         .format(&time::format_description::well_known::Rfc3339).map_err(|_|DispatchFailure::Tool(ToolFailure::Internal))?;
-                    ToolOutput::Download { download_url, expires_at }
+                    ToolOutput::Download { download_url, download_token, expires_at }
                 }
                 ToolCall::PrepareMediaUpload => {
                     let (upload_id, upload_url, expires) = self.prepare_media_upload(authority).await.map_err(|e|self.dispatch_failure(e,write))?;

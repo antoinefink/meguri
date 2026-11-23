@@ -286,7 +286,7 @@ async fn dispatch<A: Clone + Send + Sync + 'static>(
 
 fn tool_result(value: Value, is_error: bool) -> Value {
     let text = match (value.get("download_url").and_then(Value::as_str), value.get("expires_at").and_then(Value::as_str)) {
-        (Some(url), Some(expires)) if !is_error => format!("[Download collection]({url})\n\nShare this link with the user. Sign in to the same Meguri account and choose Download collection before {expires}. This link can be used once."),
+        (Some(url), Some(expires)) if !is_error => format!("For machine use, GET {url} with exactly one Authorization: Bearer download_token header, using download_token from structuredContent, before {expires}. Save the response as collection.anki2. Keep download_token out of URLs and user-facing chat. No user confirmation, browser or sign-in is needed. The token can be used once."),
         _ => serde_json::to_string(&value).expect("JSON tool payload"),
     };
     json!({"content":[{"type":"text", "text":text}],
