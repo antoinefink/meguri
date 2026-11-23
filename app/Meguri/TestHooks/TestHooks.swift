@@ -267,6 +267,7 @@ enum TestHooks {
             case .unavailable: return "unavailable"
             case .failed: return "failed"
             case .creationRecovery: return "creationRecovery"
+            case .readFailed: return "readFailed"
             }
         }
     }

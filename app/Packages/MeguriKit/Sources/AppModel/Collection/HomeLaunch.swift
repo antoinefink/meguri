@@ -32,19 +32,25 @@ public nonisolated enum HomePhase: Equatable, Sendable {
     case decks
     /// A finished read found no deck.
     case noDecks
+    /// The open collection's first deck-tree read failed: its error, with Try Again.
+    case readFailed
     case unavailable
     case failed(String)
     case creationRecovery
 
     /// `treeRead`: a read of the open generation's deck tree has been applied.
+    /// `readFailed`: the open generation's first read failed and none has applied since.
     /// `kept`: a kept read with at least one deck is there to show.
-    public static func resolve(state: ReviewCollection.State, treeRead: Bool, decksEmpty: Bool, kept: Bool) -> HomePhase {
+    public static func resolve(state: ReviewCollection.State, treeRead: Bool, readFailed: Bool = false,
+                               decksEmpty: Bool, kept: Bool) -> HomePhase {
         switch state {
         case .noFile: return .welcome
         case .creationRecovery: return .creationRecovery
         case .failed(let message): return .failed(message)
         case .ready where treeRead: return decksEmpty ? .noDecks : .decks
-        // A tree already read that an exclusive phase holds back keeps the busy state.
+        case .ready where readFailed: return .readFailed
+        // A tree already read that an exclusive phase holds back keeps the busy state; before
+        // any read, the kept read shows, else the busy state the core reported.
         case .unavailable where treeRead: return .unavailable
         case .unavailable: return kept ? .kept : .unavailable
         case .unopened, .loading, .ready: return kept ? .kept : .pending
@@ -62,8 +68,9 @@ extension ReviewCollection {
     public var deckTreeRead: Bool { state == .ready && deckTreeGeneration != nil && deckTreeGeneration == generation }
 
     public var homePhase: HomePhase {
-        HomePhase.resolve(state: state, treeRead: deckTreeRead, decksEmpty: decks.isEmpty,
-                          kept: keptHome.map { !$0.nodes.isEmpty } ?? false)
+        let read = deckTreeGeneration != nil && deckTreeGeneration == generation
+        return HomePhase.resolve(state: state, treeRead: read, readFailed: deckTreeFailedGeneration == generation,
+                                 decksEmpty: decks.isEmpty, kept: keptHome.map { !$0.nodes.isEmpty } ?? false)
     }
 
     /// The tree Home draws: the read one, or the kept one while nothing is known yet.

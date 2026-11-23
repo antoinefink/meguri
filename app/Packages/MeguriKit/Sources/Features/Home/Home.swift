@@ -287,7 +287,7 @@ public struct HomeView: View {
     }
     private var hasFailed: Bool {
         if case .failed = collection.state { return true }
-        return false
+        return phase == .readFailed
     }
     @ViewBuilder private var content: some View {
         switch phase {
@@ -311,6 +311,10 @@ public struct HomeView: View {
                 EmptyStateView(Text("No Decks", bundle: .module), systemImage: "rectangle.stack",
                     description: Text("This collection has no decks to study.", bundle: .module))
             }
+        case .readFailed:
+            // N27.1: the first read failed; Try Again reads the tree again.
+            ErrorStateView(Text("Couldn’t Open Collection", bundle: .module), message: Text(verbatim: collection.error ?? ""),
+                retryIdentifier: "home.collection.retry", retry: { collection.refreshCounts() })
         case .decks: EmptyView()
         }
     }
@@ -1036,8 +1040,8 @@ public struct HomeSidebarDecks: View {
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
         let nodes = collection.homeDecks
-        if nodes.isEmpty, collection.homePhase.unknown {
-            // Not known yet: no row and no guidance (N27.1).
+        if nodes.isEmpty, collection.homePhase != .noDecks {
+            // Only a finished read says there is no deck (N27.1).
             EmptyView()
         } else if nodes.isEmpty {
             emptyGuidance

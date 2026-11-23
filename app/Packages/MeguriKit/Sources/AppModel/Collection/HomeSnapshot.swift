@@ -105,11 +105,11 @@ nonisolated extension HomeSnapshot.Studied {
     }
 }
 
-/// Which collection file a snapshot belongs to: its path, file number and creation time.
+/// Which collection file a snapshot belongs to: its file number and creation time (not its
+/// path, which moves with the app's container on an update).
 /// A replaced collection (an import, a download, a restored backup, a fixture) is a new
 /// file with another number and creation time, so it never matches an older snapshot.
 public nonisolated struct CollectionFileIdentity: Codable, Equatable, Sendable {
-    public var path: String
     public var fileNumber: UInt64
     public var createdSeconds: Int64
     public var createdNanoseconds: Int64
@@ -122,7 +122,7 @@ public nonisolated struct CollectionFileIdentity: Codable, Equatable, Sendable {
               let number = attributes[.systemFileNumber] as? NSNumber,
               let created = attributes[.creationDate] as? Date else { return nil }
         let seconds = created.timeIntervalSince1970.rounded(.down)
-        return CollectionFileIdentity(path: path, fileNumber: number.uint64Value, createdSeconds: Int64(seconds),
+        return CollectionFileIdentity(fileNumber: number.uint64Value, createdSeconds: Int64(seconds),
             createdNanoseconds: Int64(((created.timeIntervalSince1970 - seconds) * 1e9).rounded()))
     }
 }

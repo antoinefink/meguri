@@ -623,6 +623,12 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// The open generation's file, which a snapshot written for it names.
     @ObservationIgnored private var snapshotIdentity: (generation: UInt64, identity: CollectionFileIdentity)?
     @ObservationIgnored private var lastSnapshot: HomeSnapshot?
+    /// The day end the applied counts were read for.
+    @ObservationIgnored private var countsDayEndsAt: Int64?
+    /// The generation whose first deck-tree read failed, until a read succeeds.
+    private(set) var deckTreeFailedGeneration: UInt64?
+    /// The open applied the record's recovery drops: later ones apply as they come.
+    @ObservationIgnored private var recordDropsApplied = false
     /// The generation Today's numbers (T12, the next learning card) were last read for.
     private(set) var todayNumbersGeneration: UInt64?
     /// R1818's interval: the launch until its first deck tree is shown.
@@ -913,6 +919,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     private func openCollection() async {
         opening = true; state = .loading; error = nil; closed = false; releasedManualHostState = nil
+        recordDropsApplied = false
         defer { opening = false }
         configuration.recordDiagnostic(.init(component: .startup, operation: .open, stage: .requested, outcome: .observed))
         #if DEBUG
@@ -988,6 +995,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
         // The file this generation opened, which Home's snapshot names (N27.2).
         snapshotIdentity = CollectionFileIdentity.of(configuration.collectionLocation.collectionFile).map { (value, $0) }
+        // The file opened is not the one the kept read names (replaced while opening): drop it.
+        if let keptHome, keptHome.snapshot.collection != snapshotIdentity?.identity { self.keptHome = nil }
         // The retained host's history, also after a replacement that kept the generation.
         undoOwner?.scheduleRefresh()
         try sync.releaseEntryActivation()
@@ -1019,6 +1028,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             }
         }
         recoveryDrops.removeAll()
+        if loadRecord { recordDropsApplied = true }
         startupStep?("recordLoaded")
         day?.close()
         day = ReviewDayMonitor(clock: configuration.clock, zone: { [configuration] in configuration.timeZone ?? .autoupdatingCurrent },
@@ -1027,6 +1037,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         startupStep?("dayChecked")
         await loadCounts()
         startupStep?("treeRead")
+        // Changes committed during the rest of the open (an open-time exchange, a rollover)
+        // cannot refresh the counts while it runs: read once more at its end if any came.
+        let countsAtRead = countsRevision
         await sync.completeOpenedHost(generation: value, startupForeground: startupForeground)
         startupStep?("syncAttached")
         if let recordFailure { throw recordFailure }
@@ -1035,6 +1048,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         // Presented whatever the status: the read never waits for the job (F5.1).
         await studyPreparation.collectionOpened()
         startupStep?("studyPrepared")
+        if countsRevision != countsAtRead || deckTreeGeneration != generation { await loadCounts() }
         preparedGeneration = generation
         studyWarmup.warm()
     }
@@ -1383,7 +1397,16 @@ public final class ReviewCollection: ChangeFanoutSink {
                     catch { if self.generation == next { self.error = Self.openExplanation(error) } }
                 }
             }
-        case .recoveryDropped(_, let cardID, _): recoveryDrops.append(cardID)
+        case .recoveryDropped(_, let cardID, _):
+            // A drop that arrives after the open applied the record's drops is applied now.
+            if recordDropsApplied, var record = previousRecord {
+                record.reject(cardID: cardID)
+                previousRecord = record
+                let records = records
+                Task { try? await records.save(record, version: 1) }
+            } else {
+                recoveryDrops.append(cardID)
+            }
         case .sessionEnded:
             if !opening { Task { await studyPreparation.sessionEnded() } }
         default: break
@@ -1617,6 +1640,9 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     func loadCounts() async {
         let expected = generation, revision = deckTreeRevision
+        // The day these counts are for: read before the tree, so a rollover meanwhile never
+        // gives old counts the new day's end (N27.3).
+        let dayEnd = day?.nextDayAt
         do {
             let tree = try await loadDeckTree()
             guard expected == generation, tree.generation == generation, revision == deckTreeRevision, !closed else { return }
@@ -1624,6 +1650,8 @@ public final class ReviewCollection: ChangeFanoutSink {
             if tree.nodes != decks { studyWarmup.invalidate() }
             decks = tree.nodes
             deckTreeGeneration = tree.generation
+            deckTreeFailedGeneration = nil
+            countsDayEndsAt = dayEnd
             countsSnapshot &+= 1
             if let token = deckListInteractive { deckListInteractive = nil; Signposts.end(token) }
             saveHomeSnapshot()
@@ -1637,7 +1665,13 @@ public final class ReviewCollection: ChangeFanoutSink {
                 }
                 if let countTimer { RunLoop.main.add(countTimer, forMode: .common) }
             }
-        } catch { if expected == generation, revision == deckTreeRevision, !closed { self.error = "Couldn’t refresh decks. Try again." } }
+        } catch {
+            if expected == generation, revision == deckTreeRevision, !closed {
+                self.error = "Couldn’t refresh decks. Try again."
+                // A first read that failed is known: Home says so instead of waiting (N27.1).
+                if deckTreeGeneration != generation { deckTreeFailedGeneration = generation }
+            }
+        }
     }
     public func deck(_ id: Int64) -> CountedDeckNode? {
         func find(_ nodes: [CountedDeckNode]) -> CountedDeckNode? {
@@ -2268,8 +2302,10 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// Keeps what Home shows for the next launch (N27.2): after each read that applied, for
     /// the file this generation opened. Writes only when something changed, off the main thread.
     private func saveHomeSnapshot() {
-        guard let homeSnapshots, deckTreeRead, let identity = snapshotIdentity, identity.generation == generation else { return }
-        let snapshot = HomeSnapshot(collection: identity.identity, dayEndsAt: day?.nextDayAt, decks: decks,
+        // Not during a review: its answers refresh the counts after each card; its end saves.
+        guard let homeSnapshots, deckTreeRead, review == nil, let identity = snapshotIdentity,
+              identity.generation == generation else { return }
+        let snapshot = HomeSnapshot(collection: identity.identity, dayEndsAt: countsDayEndsAt, decks: decks,
             studied: studiedToday, nextLearningReadyAt: todayNumbersGeneration == generation ? nextLearningReadyAt : nil,
             previous: previousSession, previousAnswers: previousRecord?.answers.count)
         guard snapshot != lastSnapshot else { return }

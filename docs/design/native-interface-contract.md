@@ -1452,13 +1452,13 @@ Cause: the open set the collection ready before Home's first deck tree was read,
 ### N27.1 What each state shows
 
 - The welcome shows only when there is no collection to open (`state` no file). "No Decks" (and the sidebar's "No decks") shows only after a finished read of the open collection found no deck.
-- Not known yet (unopened, opening, open with its tree not read, and an exclusive phase before any read) is its own state (`HomePhase.pending` or `.kept`): it never draws the welcome, "No Decks" or a loading screen with text.
-- Failed, busy (an exclusive phase after a read) and Start Empty's recovery keep their own views.
+- Not known yet (unopened, opening, open with its tree not read) is its own state (`HomePhase.pending` or `.kept`): it never draws the welcome, "No Decks" or a loading screen with text. An exclusive phase before any read shows the kept read when there is one.
+- A first read that failed is known: the error with Try Again, never a wait that does not end. Failed, busy (an exclusive phase, which never brings the kept read back after a read) and Start Empty's recovery keep their own views.
 
 ### N27.2 The kept read
 
 - At the end of each successful read Home keeps what it showed: deck names, the tree's shape and its saved disclosures, the counts, Today's figures (Studied Today, the next learning card, the previous session) and the tab layout's previous-session count, with the study day's end (`next_day_at`). One small file in the app's caches (`<Caches>/Meguri/home-snapshot.json`), excluded from backups, never synced, written off the main thread when it changed.
-- It names its collection file (path, file number, creation time). A launch reads it before the first frame and shows it only for that same file: a replaced collection (an import, a download, a restored backup, a fixture) is another file, so its snapshot is deleted unread. It is also deleted when a replacement starts or happens in the app (an import, a Meguri Sync or iCloud download, a manual transfer), and when no collection file exists. The app has no sign-out or reset that keeps the file; those that replace or remove it are covered by the rules above.
+- It names its collection file (file number and creation time; not the path, which moves with the app's container on an update), and its counts' day end is the one known when they were read. A launch reads it before the first frame and shows it only for that same file: a replaced collection (an import, a download, a restored backup, a fixture) is another file, so its snapshot is deleted unread. It is also deleted when a replacement starts or happens in the app (an import, a Meguri Sync or iCloud download, a manual transfer), and when no collection file exists. The app has no sign-out or reset that keeps the file; those that replace or remove it are covered by the rules above.
 - Until this launch's first read the deck list, the sidebar, Today and a restored deck page show the kept read; the read replaces it in place: same rows, same identities, same order, no layout jump and no scroll reset (the list keeps one view and its saved position). The heatmap and other reads wait for the first tree (N27.5).
 
 ### N27.3 Held counts and nothing kept
@@ -1473,7 +1473,7 @@ Cause: the open set the collection ready before Home's first deck tree was read,
 
 ### N27.5 Nothing else before the first tree
 
-- The first deck tree is read as soon as the open's day check has run, before the sync attachment, the media index and study preparation. The heatmap's reads wait for it (the core's query lane is serial; a history scan queued first delayed the tree). R1818's interval `launch.toDeckListInteractive` runs from the collection owner's creation to the first tree.
+- The first deck tree is read as soon as the open's day check has run, before the sync attachment, the media index and study preparation; if changes were committed meanwhile, the open reads the tree once more at its end. Recovery drops that arrive after the session record was read apply as they come. The snapshot is not written during a review (its end writes it). The heatmap's reads wait for it (the core's query lane is serial; a history scan queued first delayed the tree). R1818's interval `launch.toDeckListInteractive` runs from the collection owner's creation to the first tree.
 - Measured with `ReviewCollectionLaunchTimingTests` on the generated 10k collection (this Mac, Debug build, other jobs running, median of five opens): the core open takes about 200 ms. From the ready state to the first tree took 4.7 ms before and 3.7 ms after. The moved steps are short in that test, which has no sync service; on a device the sync attachment runs in that window. With a kept read the decks are in the first frame and nothing waits on screen.
 
 ### N27.6 The opened Duo's layout

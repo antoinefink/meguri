@@ -37,6 +37,11 @@ import Testing
         #expect(HomePhase.resolve(state: .failed("x"), treeRead: false, decksEmpty: true, kept: true) == .failed("x"))
         #expect(HomePhase.resolve(state: .creationRecovery, treeRead: false, decksEmpty: true, kept: true) == .creationRecovery)
         #expect(HomePhase.resolve(state: .unavailable, treeRead: true, decksEmpty: false, kept: false) == .unavailable)
+        // After a read, an exclusive phase never brings the kept (older) read back.
+        #expect(HomePhase.resolve(state: .unavailable, treeRead: true, decksEmpty: false, kept: true) == .unavailable)
+        // A first read that failed is known: its error, never a wait or "No Decks", kept or not.
+        #expect(HomePhase.resolve(state: .ready, treeRead: false, readFailed: true, decksEmpty: true, kept: true) == .readFailed)
+        #expect(HomePhase.resolve(state: .ready, treeRead: false, readFailed: true, decksEmpty: true, kept: false) == .readFailed)
     }
 
     // MARK: N27.2, the snapshot file
@@ -91,7 +96,7 @@ import Testing
     // MARK: N27.3, counts of an earlier study day
 
     @Test func countsOfAnEarlierStudyDayAreHeldBack() throws {
-        let identity = CollectionFileIdentity(path: "/x", fileNumber: 1, createdSeconds: 1, createdNanoseconds: 0)
+        let identity = CollectionFileIdentity(fileNumber: 1, createdSeconds: 1, createdNanoseconds: 0)
         let dayEnd: Int64 = 1_894_744_800
         let before = Date(timeIntervalSince1970: Double(dayEnd - 60))
         let after = Date(timeIntervalSince1970: Double(dayEnd + 60))
