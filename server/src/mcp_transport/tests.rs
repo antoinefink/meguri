@@ -62,7 +62,7 @@ impl Backend<FixtureAuthority> for Fixture {
                     download_url:"https://generated.example.test/api/mcp/collection-download".into(), download_token:"A".repeat(43), expires_at:"2026-11-23T14:00:00Z".into(),
                 })),
                 ToolCall::PrepareMediaUpload => ("prepare_media_upload", Ok(ToolOutput::Upload {
-                    upload_id:"u".repeat(43),upload_url:"https://generated.example.test/mcp/upload#upload=fixture".into(),expires_at:"2026-11-22T14:00:00Z".into(),
+                    upload_id:"A".repeat(43),upload_url:"https://generated.example.test/api/mcp/media-upload".into(),expires_at:"2026-11-22T14:00:00Z".into(),
                 })),
             };
             self.calls.lock().unwrap().push((authority.0, name));
@@ -659,6 +659,7 @@ async fn diagnosed_failures_keep_access_specific_envelopes_and_fixed_terminal_de
         ("list_decks_and_note_types",json!({}),Access::Read),
         ("edit_note",json!({"note_id":"1","revision":"generated-private","fields":{}}),Access::Write),
         ("create_note",json!({"deck_id":"1","note_type_id":"1","fields":{}}),Access::Write),
+        ("prepare_media_upload",json!({}),Access::Write),
     ] {
         for (failure,detail,label) in [
             (ToolFailure::Busy,Detail::McpQueue,"mcp_queue"),
@@ -675,6 +676,15 @@ async fn diagnosed_failures_keep_access_specific_envelopes_and_fixed_terminal_de
             (ToolFailure::Internal,Detail::CollectionAccess,"collection_access"),
             (ToolFailure::UnsupportedCollection,Detail::SqliteOpen,"sqlite_open"),
             (ToolFailure::UnsupportedCollection,Detail::SqliteAccess,"sqlite_access"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentClient,"attachment_client"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentUrl,"attachment_url"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentDns,"attachment_dns"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentAddress,"attachment_address"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentHttpClient,"attachment_http_client"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentHttpRequest,"attachment_http_request"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentHttpResponse,"attachment_http_response"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentTimeout,"attachment_timeout"),
+            (ToolFailure::AttachmentUnavailable,Detail::AttachmentBody,"attachment_body"),
         ] {
             let state=Arc::new(State {
                 origin:"https://mcp-fixture.invalid".into(),log_level:crate::config::LogLevel::Off,
@@ -697,6 +707,9 @@ async fn diagnosed_failures_keep_access_specific_envelopes_and_fixed_terminal_de
             assert_eq!(diagnostic.outcome,Outcome::ToolError(failure));
             assert!(diagnostic.record(crate::config::LogLevel::Off,StatusCode::OK,0).is_none());
             let record=diagnostic.record(crate::config::LogLevel::Info,StatusCode::OK,0).unwrap();
+            assert_eq!(record,format!("mcp_response_ready stage=dispatch operation={name} status=200 outcome=tool_error reason={} detail={label}",failure.code()));
+            assert_eq!(diagnostic.record(crate::config::LogLevel::Debug,StatusCode::OK,12).unwrap(),
+                format!("{record} elapsed_ms=12"));
             assert!(record.ends_with(&format!(" detail={label}")));
             assert!(record.contains(&format!("status=200 outcome=tool_error reason={}",failure.code())));
             assert!(!record.contains("generated-private"));
@@ -750,5 +763,37 @@ async fn download_discovery_read_scope_and_empty_input_for_both_revisions() {
         assert!(!text.contains(output["download_token"].as_str().unwrap()));
     }
     assert_eq!(*r.fixture.calls.lock().unwrap(), vec![("a","download_collection"),("a","download_collection")]);
+    r.stop().await;
+}
+
+#[tokio::test]
+async fn upload_discovery_and_results_describe_automatic_transfer_without_visible_credentials() {
+    let r=Running::start().await;
+    for revision in SUPPORTED_REVISIONS {
+        let listed=rpc(&r,revision,"generated-fixture-a","tools/list",json!({})).await;
+        let tools=listed["result"]["tools"].as_array().unwrap();
+        for name in ["create_note","edit_note","prepare_media_upload"] {
+            let tool=tools.iter().find(|tool|tool["name"]==name).unwrap();
+            let text=tool["description"].as_str().unwrap();
+            assert!(text.contains("Use files + file_fields first where supported"));
+            assert!(text.contains("prepare_media_upload") || name=="prepare_media_upload");
+            assert!(!text.contains("return to chat"));
+        }
+        let tool=tools.iter().find(|tool|tool["name"]=="prepare_media_upload").unwrap();
+        assert_eq!(tool["securitySchemes"][0]["scopes"],json!(["collection:read","collection:write"]));
+        let result=rpc(&r,revision,"generated-fixture-a","tools/call",
+            json!({"name":"prepare_media_upload","arguments":{}})).await;
+        let output=&result["result"]["structuredContent"];
+        assert_eq!(output,&json!({"upload_id":"A".repeat(43),
+            "upload_url":"https://generated.example.test/api/mcp/media-upload","expires_at":"2026-11-22T14:00:00Z"}));
+        let text=result["result"]["content"][0]["text"].as_str().unwrap();
+        for instruction in ["POST local file bytes",output["upload_url"].as_str().unwrap(),
+            "Authorization: Bearer upload_id","Content-Type: application/octet-stream",
+            "create_note or edit_note with uploads","Keep upload_id out of URLs and user-facing chat",
+            "No browser, sign-in or user action is needed"] {
+            assert!(text.contains(instruction));
+        }
+        assert!(!text.contains(output["upload_id"].as_str().unwrap()));
+    }
     r.stop().await;
 }

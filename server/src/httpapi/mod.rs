@@ -238,18 +238,21 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
     let browser = browser_api || oauth_route;
     let exempt = request.method() == Method::GET && request.uri().path() == "/api/status";
     let (parts, body) = request.into_parts();
-    let download = parts.uri.path() == "/api/mcp/collection-download";
+    let ticket_route = matches!(parts.uri.path(), "/api/mcp/collection-download" | "/api/mcp/media-upload");
+    let machine_upload = parts.method == Method::POST && parts.uri.path() == "/api/mcp/media-upload"
+        && parts.uri.query().is_none();
     // Keep the incoming receiver alive until the closing response is finished.
     // Dropping it on a refusal could enable HTTP/1 background unread-body drain.
     let response = if browser {
-        let early = if (browser_api && !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS))
+        let early = if (browser_api && !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS)
+                && (!machine_upload || parts.headers.contains_key("origin")))
             || (oauth_route && parts.headers.contains_key("origin")) {
             origin(&parts.headers, &service)
         } else {
             Ok(())
         };
         match early {
-            Err(e) => ingress::retain(api_error(e, download), body, None, service),
+            Err(e) => ingress::retain(api_error(e, ticket_route), body, None, service),
             Ok(()) if exempt => {
                 let response = dispatch(&service, &parts, None)
                     .await
@@ -257,7 +260,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
                 ingress::retain(response, body, None, service)
             }
             Ok(()) => match service.browser_ingress.enter() {
-                Err(e) => ingress::retain(api_error(e, download), body, None, service),
+                Err(e) => ingress::retain(api_error(e, ticket_route), body, None, service),
                 Ok(permit) => {
                     // At most CAPACITY workers, no waiting/spawn queue. A caller's
                     // cancellation must not free its slot while slow work runs.
@@ -267,12 +270,12 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
                         let mut body = body;
                         let response = dispatch_browser(&service, &parts, &mut body, deadline)
                             .await
-                            .unwrap_or_else(|e| api_error(e, download));
+                            .unwrap_or_else(|e| api_error(e, ticket_route));
                         ingress::retain(response, body, Some(permit), service)
                     });
                     worker
                         .await
-                        .unwrap_or_else(|_| api_error(Error::new("internal_error"), download))
+                        .unwrap_or_else(|_| api_error(Error::new("internal_error"), ticket_route))
                 }
             },
         }
@@ -358,12 +361,12 @@ async fn dispatch_browser(
 }
 // Retain the common admission, unread body and private response headers. Ticket
 // failures disclose neither OAuth metadata nor whether a credential ever existed.
-fn api_error(error: Error, download: bool) -> Response {
-    if download && matches!(error.code, "authentication_failed" | "capability_invalid" | "invalid_token") {
+fn api_error(error: Error, ticket_route: bool) -> Response {
+    if ticket_route && matches!(error.code, "authentication_failed" | "capability_invalid" | "invalid_token") {
         let mut response = Error::new("authentication_failed").into_response();
         response.headers_mut().insert("www-authenticate", "Bearer".parse().unwrap());
         response
-    } else if download && error.code == "conflict" {
+    } else if ticket_route && error.code == "conflict" {
         let mut response = error.into_response();
         *response.status_mut() = StatusCode::CONFLICT;
         response
@@ -386,16 +389,16 @@ async fn media_upload(service: &Service, parts: &axum::http::request::Parts, bod
         || parts.headers.get("content-type").and_then(|v|v.to_str().ok()) != Some("application/octet-stream") {
         return Err(Error::new("unsupported_content_type"));
     }
-    if parts.headers.get_all("x-meguri-upload").iter().count() != 1 { return Err(Error::new("capability_invalid")); }
-    let id = parts.headers.get("x-meguri-upload").and_then(|v|v.to_str().ok()).ok_or(Error::new("capability_invalid"))?.to_owned();
-    let a = authority(service,&parts.headers).await?;
+    let id = crate::mcp_service::bearer(&parts.headers).map_err(|_| Error::new("authentication_failed"))?;
+    crate::crypto::bearer(id).map_err(|_| Error::new("authentication_failed"))?;
+    if !service.admission_open().await? { return Err(Error::new("admission_closed")); }
     let socket = parts.extensions.get::<ConnectInfo<SocketAddr>>().ok_or(Error::new("internal_error"))?.0;
     let (ip,_) = effective_peer(&parts.headers,socket,service);
-    service.attempts.capability(ip,&id)?;
-    service.check_media_upload(a.clone(),&id).await?;
+    service.attempts.capability(ip,id)?;
+    service.check_media_upload(id).await?;
     let permit = service.media_upload_slot()?;
     let bytes = service.browser_ingress.read_limit(body,deadline,crate::mcp_service::attachments::FILE_BYTES).await?;
-    service.accept_media_upload(a,id,bytes,permit).await?;
+    service.accept_media_upload(id.to_owned(),bytes,permit).await?;
     Ok(data(serde_json::json!({"uploaded":true}),false))
 }
 fn mutation(path: &str) -> bool {

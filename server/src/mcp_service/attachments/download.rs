@@ -3,12 +3,16 @@
 use super::*;
 use std::net::{IpAddr, SocketAddr};
 const HOST: &str = "files.oaiusercontent.com";
+fn failed(detail: Detail) -> Error { unavailable().with_mcp_detail(detail) }
+fn request_failed(error: reqwest::Error, stage: Detail) -> Error {
+    failed(if error.is_timeout() { Detail::AttachmentTimeout } else { stage })
+}
 pub(super) fn target(value: &str) -> Result<url::Url> {
-    if value.len() > 4096 || value.bytes().any(|b|b.is_ascii_control() || b == b'\\') { return Err(unavailable()); }
-    let url = url::Url::parse(value).map_err(|_| unavailable())?;
+    if value.len() > 4096 || value.bytes().any(|b|b.is_ascii_control() || b == b'\\') { return Err(failed(Detail::AttachmentUrl)); }
+    let url = url::Url::parse(value).map_err(|_| failed(Detail::AttachmentUrl))?;
     if url.scheme() != "https" || url.host_str() != Some(HOST) || url.port_or_known_default() != Some(443)
         || !url.username().is_empty() || url.password().is_some() || url.fragment().is_some()
-        || value.split('/').nth(2).is_some_and(|a|a.contains('@')) { return Err(unavailable()); }
+        || value.split('/').nth(2).is_some_and(|a|a.contains('@')) { return Err(failed(Detail::AttachmentUrl)); }
     Ok(url)
 }
 fn public(ip: IpAddr) -> bool {
@@ -34,40 +38,87 @@ pub(super) async fn fetch(value: &str, maximum: usize) -> Result<Vec<u8>> {
     let url = target(value)?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     tokio::time::timeout_at(deadline, async move {
-        let resolved = tokio::net::lookup_host((HOST,443)).await.map_err(|_| unavailable())?;
-        let mut addresses = Vec::<SocketAddr>::new();
-        for address in resolved {
-            if addresses.len() >= 16 || !public(address.ip()) { return Err(unavailable()); }
-            if !addresses.contains(&address) { addresses.push(address); }
-        }
-        if addresses.is_empty() { return Err(unavailable()); }
+        let resolved = tokio::net::lookup_host((HOST,443)).await.map_err(|_| failed(Detail::AttachmentDns))?;
+        let addresses = checked_addresses(resolved)?;
         // Per-request DNS overrides pin every connection to checked answers.
         // The URL host remains intact for SNI and certificate hostname checks.
         let client = reqwest::Client::builder().https_only(true).no_proxy()
             .redirect(reqwest::redirect::Policy::none()).no_gzip().no_brotli().no_deflate().no_zstd()
             .timeout(Duration::from_secs(15)).resolve_to_addrs(HOST,&addresses)
-            .build().map_err(|_| unavailable())?;
-        let mut response = client.get(url).header("accept-encoding","identity").send().await.map_err(|_| unavailable())?;
-        if response.status() != reqwest::StatusCode::OK || response.headers().contains_key("content-encoding")
-            || response.content_length().is_some_and(|n| n == 0 || n > maximum as u64) { return Err(unavailable()); }
-        let expected = response.content_length();
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|_| unavailable())? {
-            if chunk.len() > maximum - bytes.len() { return Err(invalid()); }
-            bytes.extend_from_slice(&chunk);
-        }
-        if bytes.is_empty() || expected.is_some_and(|n|n != bytes.len() as u64) { return Err(unavailable()); }
-        Ok(bytes)
-    }).await.map_err(|_| unavailable())?
+            .build().map_err(|_| failed(Detail::AttachmentHttpClient))?;
+        let response = client.get(url).header("accept-encoding","identity").send().await
+            .map_err(|e| request_failed(e,Detail::AttachmentHttpRequest))?;
+        collect(response,maximum).await
+    }).await.map_err(|_| failed(Detail::AttachmentTimeout))?
+}
+fn checked_addresses(resolved: impl Iterator<Item = SocketAddr>) -> Result<Vec<SocketAddr>> {
+    let mut addresses = Vec::new();
+    for address in resolved {
+        if addresses.len() >= 16 || !public(address.ip()) { return Err(failed(Detail::AttachmentAddress)); }
+        if !addresses.contains(&address) { addresses.push(address); }
+    }
+    if addresses.is_empty() { return Err(failed(Detail::AttachmentAddress)); }
+    Ok(addresses)
+}
+async fn collect(mut response: reqwest::Response, maximum: usize) -> Result<Vec<u8>> {
+    if response.status() != reqwest::StatusCode::OK || response.headers().contains_key("content-encoding")
+        || response.content_length().is_some_and(|n| n == 0 || n > maximum as u64) {
+        return Err(failed(Detail::AttachmentHttpResponse));
+    }
+    let expected = response.content_length();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| request_failed(e,Detail::AttachmentBody))? {
+        if chunk.len() > maximum - bytes.len() { return Err(invalid().with_mcp_detail(Detail::AttachmentBody)); }
+        bytes.extend_from_slice(&chunk);
+    }
+    if bytes.is_empty() || expected.is_some_and(|n|n != bytes.len() as u64) { return Err(failed(Detail::AttachmentBody)); }
+    Ok(bytes)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn refuses_untrusted_urls_and_special_addresses_without_io() {
-        for value in ["http://files.oaiusercontent.com/x","https://files.oaiusercontent.com.evil.test/x", "https://files.oaiusercontent.com:444/x", "https://user@files.oaiusercontent.com/x", "https://@files.oaiusercontent.com/x", "https://files.oaiusercontent.com/x#secret", "https://127.0.0.1/x"] { assert!(target(value).is_err()); }
+        for value in ["http://files.oaiusercontent.com/x","https://files.oaiusercontent.com.evil.test/x", "https://files.oaiusercontent.com:444/x", "https://user@files.oaiusercontent.com/x", "https://@files.oaiusercontent.com/x", "https://files.oaiusercontent.com/x#secret", "https://127.0.0.1/x"] {
+            let error=target(value).unwrap_err();
+            assert_eq!(error,failed(Detail::AttachmentUrl));
+            assert_eq!(error.to_string(),"attachment_unavailable");
+        }
         assert!(target("https://files.oaiusercontent.com/generated?secret=fixture").is_ok());
         for ip in ["0.0.0.0","10.0.0.1","100.64.0.1","127.0.0.1","169.254.169.254","172.16.0.1","192.168.1.1","192.0.2.1","198.18.0.1","198.51.100.1","203.0.113.1","224.0.0.1","255.255.255.255","::1","::ffff:8.8.8.8","64:ff9b::808:808","2001:db8::1","2002:808:808::1","fc00::1","fe80::1","3fff::1"] { assert!(!public(ip.parse().unwrap()),"{ip}"); }
         for ip in ["8.8.8.8","1.1.1.1","2606:4700:4700::1111"] { assert!(public(ip.parse().unwrap())); }
+    }
+    #[test]
+    fn address_failures_have_only_the_fixed_address_detail() {
+        for addresses in [vec![],vec!["127.0.0.1:443".parse().unwrap()],
+            vec!["8.8.8.8:443".parse().unwrap(),"192.168.1.1:443".parse().unwrap()]] {
+            assert_eq!(checked_addresses(addresses.into_iter()).unwrap_err(),failed(Detail::AttachmentAddress));
+        }
+        let address="8.8.8.8:443".parse().unwrap();
+        assert_eq!(checked_addresses([address,address].into_iter()).unwrap(),vec![address]);
+    }
+    #[tokio::test]
+    async fn response_failures_are_distinct_from_requests_and_never_include_input_data() {
+        for status in [206,302,403,500] {
+            let response=axum::http::Response::builder().status(status)
+                .header("location","https://generated-secret.example.test/private")
+                .body(b"private response bytes".to_vec()).unwrap().into();
+            assert_eq!(collect(response,1024).await.unwrap_err(),failed(Detail::AttachmentHttpResponse));
+        }
+        let encoded=axum::http::Response::builder().header("content-encoding","identity")
+            .body(vec![1u8]).unwrap().into();
+        assert_eq!(collect(encoded,1024).await.unwrap_err(),failed(Detail::AttachmentHttpResponse));
+        for bytes in [vec![],vec![1u8;1025]] {
+            let response=axum::http::Response::new(bytes).into();
+            assert_eq!(collect(response,1024).await.unwrap_err(),failed(Detail::AttachmentHttpResponse));
+        }
+        let bytes=b"generated bytes".to_vec();
+        assert_eq!(collect(axum::http::Response::new(bytes.clone()).into(),1024).await.unwrap(),bytes);
+        for detail in [Detail::AttachmentHttpRequest,Detail::AttachmentBody] {
+            let error=reqwest::Client::new().get("https://[generated-private-error").build().unwrap_err();
+            let error=request_failed(error,detail);
+            assert_eq!(error,failed(detail));
+            assert_eq!(error.to_string(),"attachment_unavailable");
+        }
     }
 }
