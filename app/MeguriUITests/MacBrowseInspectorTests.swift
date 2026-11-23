@@ -44,11 +44,13 @@ final class MacBrowseInspectorTests: XCTestCase {
         // A card with a sound and an image (the Español deck's notes).
         try showDeck(app, bundle, containing: "Español")
         press(table.outlineRows.element(boundBy: 0))
-        let note = element(app, "browse.inspector.note")
+        // The Note tab: its Deck pop-up, and the fields' page (the tab's own container is
+        // folded into the pane's scroll view in the accessibility tree).
+        let note = element(app, "browse.inspector.deck")
         XCTAssertTrue(note.waitForExistence(timeout: 10), "the Note tab")
         XCTAssertTrue(element(app, "browse.inspector.deck").exists && element(app, "browse.inspector.type").exists)
         XCTAssertTrue(element(app, "browse.inspector.tags").exists && element(app, "browse.inspector.formatting").exists)
-        let fields = note.textViews
+        let fields = element(app, "editor.fields").textViews
         XCTAssertTrue(shows(fields, "palabra"), "the selected row's note")
         XCTAssertFalse(element(app, "browse.inspector.format.bold").isEnabled, "Option A: the bar is dimmed until a field has the focus")
         sleep(2)
@@ -122,7 +124,8 @@ final class MacBrowseInspectorTests: XCTestCase {
         app.typeKey(.downArrow, modifierFlags: [.command])
         for line in 1...30 { app.typeText("\rline \(line) of a long field that wraps across the pane") }
         capture(app, "long-note-\(appearance)")
-        XCTAssertTrue(note.frame.maxY <= app.windows.firstMatch.frame.maxY + 1, "the pane stays in the window")
+        let bar = element(app, "browse.inspector.formatting")
+        XCTAssertTrue(bar.frame.maxY <= app.windows.firstMatch.frame.maxY + 1, "the bar stays at the pane's bottom edge")
 
         // N21.3: under about 900 points the pane hides; Return shows it over the table.
         try app.bringToFront(bundleIdentifier: bundle)
