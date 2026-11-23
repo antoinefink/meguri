@@ -23,6 +23,21 @@ fn note_facts(fixture: &PublishedFixture, id: NoteId) -> w::EntityFacts {
         .expect("actual note capture")
 }
 
+/// The builder hands only images that the WAL flush covers, and waits at most
+/// 1 s for that flush (`sync/policy` P7.1). The writer's own flush is due 750 ms
+/// after a commit (`storage/open-and-connections` C9.2), so under load the next
+/// build can return no record. A test that needs that build to hand its record
+/// first makes the commits durable through a real flush receipt.
+fn flush_collection_wal(fixture: &PublishedFixture) {
+    fixture
+        .workflow
+        .host
+        .collection()
+        .unwrap()
+        .flush_wal(Duration::from_secs(30))
+        .unwrap();
+}
+
 fn add_note(fixture: &PublishedFixture, back: String) -> (NoteId, w::EntityFacts) {
     let collection = fixture.workflow.host.collection().unwrap();
     let notetype = {
