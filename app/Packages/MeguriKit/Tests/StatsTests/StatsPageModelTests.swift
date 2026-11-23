@@ -87,16 +87,17 @@ import Testing
         model.appear()
         let request = try await request(1)
         #expect(model.box(.activity).detail == nil, "no header yet")
-        // Today is 2026-10-12; 400 days back is 2025-09-07: two years, 401 days.
+        // Today is 2026-10-12; the oldest review is 400 days back, and 1M's window is the last
+        // 30 days (Activity follows the period, 2026-11-23): one year, 30 days.
         service.answer(request, tier1)
         await settle { model.box(.activity).detail != nil }
         #expect(model.box(.activity).phase == .loading(fraction: nil))
         guard case let .activitySpan(span)? = model.box(.activity).detail else { Issue.record("no span"); return }
-        #expect(span.firstDay == -400 && span.years == [2026, 2025] && span.dayCount == 401)
+        #expect(span.firstDay == -29 && span.years == [2026] && span.dayCount == 30)
         service.answer(request, tier2)
         await settle { model.box(.activity).phase == .ready }
         guard case let .activity(activity)? = model.box(.activity).detail else { Issue.record("no activity"); return }
-        #expect(activity.years.count == 2)
+        #expect(activity.years.count == 1)
         #expect(activity.span == span, "the grid keeps the loading grid's size")
     }
 
@@ -458,6 +459,17 @@ import Testing
         model.unpinAll()
         #expect(model.selection(for: .retention) == .none && model.selection(for: .forgotten) == .none)
         #expect(model.selection(for: .knowledgeOverTime) == StatsChartSelection(bin: 7))
+    }
+
+    /// A period change clears every box's selection but Activity's pinned day, which its view lets
+    /// go only when the new window no longer draws it (Activity follows the period, 2026-11-23).
+    @Test func aPeriodChangeKeepsActivitysPinnedDay() {
+        let model = model()
+        model.select(StatsChartSelection(bin: 40, pinned: true), in: .activity)
+        model.select(StatsChartSelection(bin: 3, pinned: true), in: .retention)
+        model.selectPeriod(.threeMonths)
+        #expect(model.selection(for: .activity) == StatsChartSelection(bin: 40, pinned: true))
+        #expect(model.selection(for: .retention) == .none)
     }
 
     @Test func theSelectionIsCarriedAcrossARefreshAndClearedByAPeriodChange() async throws {

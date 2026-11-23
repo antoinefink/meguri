@@ -8,6 +8,8 @@ import Testing
 /// Fixture records for the page model (made-up values, no collection), and a fake
 /// `StatsService` whose requests the tests answer by hand.
 nonisolated enum Fixture {
+    /// A value a test needed was not there.
+    struct Missing: Error {}
     /// 2026-10-13 04:00 in Europe/Paris (UTC+2), rollover hour 4: `T0` is 2026-10-12, a Monday
     /// (`stats/activity-heatmap` AH3's example).
     static let nextDayAt: Int64 = 1_791_856_800
