@@ -22,9 +22,8 @@ public nonisolated enum BrowseCommand: Hashable, Sendable {
     /// their places, disabled.
     public var built: Bool {
         switch self {
-        case .flag, .suspend, .unsuspend, .bury, .unbury, .delete, .editNoteType: true
-        case .changeDeck, .addTags, .removeTags, .setDueDate, .forget, .changeNoteType, .findReplace, .findDuplicates,
-             .editNote:
+        case .flag, .suspend, .unsuspend, .bury, .unbury, .delete, .editNoteType, .editNote: true
+        case .changeDeck, .addTags, .removeTags, .setDueDate, .forget, .changeNoteType, .findReplace, .findDuplicates:
             false
         }
     }
@@ -50,6 +49,9 @@ public nonisolated struct BrowseTargetFacts: Equatable, Sendable {
     /// The cards a Delete removes: every card of the target notes; read
     /// for one target note only (V8.2 asks for more than one note anyway).
     public var noteCards: UInt64?
+    /// V7: the target cards' distinct home decks, and that deck when one.
+    public var decks: UInt64?
+    public var deck: Int64?
 
     public init(mode: BrowseMode, rows: Int, cards: UInt64? = nil, notes: UInt64? = nil, suspended: UInt64? = nil,
                 buried: UInt64? = nil, notetypes: [Int64]? = nil, noteCards: UInt64? = nil) {
@@ -102,6 +104,8 @@ public nonisolated struct BrowseCommandState: Equatable, Sendable {
         default: true
         }
         var enabled = command.built && available && shown && (rows > 0 || !command.needsSelection)
+        // Edit Note shows one row's note in the inspector (U273).
+        if command == .editNote, rows != 1 { enabled = false }
         // Edit Note Type… opens one note type: it waits until that one is known.
         if command == .editNoteType, notetypes?.count != 1 { enabled = false }
         let count: UInt64? = switch command {
@@ -185,6 +189,8 @@ public final class BrowseCommands {
 
     @ObservationIgnored private let results: BrowseResults
     @ObservationIgnored private var factsTarget: BrowseTarget?
+    /// The rows the core's counts in `facts` were last read for.
+    @ObservationIgnored private(set) var factsRead: BrowseTarget?
     /// The read under way, and the rows it reads.
     @ObservationIgnored private var factsTask: (target: BrowseTarget, task: Task<BrowseTargetFacts?, Never>)?
     @ObservationIgnored private var serial: UInt64 = 0
@@ -197,6 +203,8 @@ public final class BrowseCommands {
     @ObservationIgnored public var stepRecorded: @MainActor (UInt64, String) -> Void = { _, _ in }
     /// Edit Note Type… opens Note Types on that type (W14).
     @ObservationIgnored public var openNoteType: @MainActor (Int64) -> Void = { _ in }
+    /// Edit Note: the inspector shows and its first field takes the focus (U273).
+    @ObservationIgnored var editNote: @MainActor () -> Void = {}
     /// The collection is ready for writes.
     @ObservationIgnored public var ready: @MainActor () -> Bool = { true }
 
@@ -271,7 +279,10 @@ public final class BrowseCommands {
         Task {
             let read = await task.value
             reading = false
-            if let read, factsTarget == target, facts != read { facts = read }
+            if let read, factsTarget == target {
+                if facts != read { facts = read }
+                factsRead = target
+            }
             if readAgain || factsTarget != target { startRead() }
         }
     }
@@ -316,6 +327,8 @@ public final class BrowseCommands {
         facts.suspended = counts.suspended
         facts.buried = counts.buried
         facts.notetypes = counts.notetypes
+        facts.decks = counts.decks
+        facts.deck = counts.deck
         if counts.notes == 1 {
             facts.noteCards = target.mode == .notes ? counts.cards : try? await session.cardsOfNotes(of: target)
         }
@@ -338,8 +351,30 @@ public final class BrowseCommands {
         run(command, menu: target)
     }
 
+    /// The inspector saves its note before a command runs (W2), so a
+    /// command on the edited row (Delete included) never drops the edit.
+    @ObservationIgnored var saveFirst: (@MainActor () async -> Bool)?
+    /// The inspector holds an edit not saved yet.
+    @ObservationIgnored var unsavedEdit: @MainActor () -> Bool = { false }
+
     /// `menu` nil: the selection now (the menu bar's commands).
     private func run(_ command: BrowseCommand, menu: BrowseTarget?) {
+        let state = menu.map { state(command, on: $0) } ?? state(command)
+        guard state.enabled else { return }
+        if command != .editNote, command != .editNoteType, unsavedEdit(), let saveFirst {
+            // The rows as they are now: a list that moves on during the save
+            // makes the core refuse them (K1); a failed save runs nothing.
+            let target = menu ?? results.target()
+            Task {
+                guard await saveFirst(), let target else { return }
+                runNow(command, menu: target)
+            }
+            return
+        }
+        runNow(command, menu: menu)
+    }
+
+    private func runNow(_ command: BrowseCommand, menu: BrowseTarget?) {
         let state = menu.map { state(command, on: $0) } ?? state(command)
         guard state.enabled else { return }
         switch command {
@@ -352,6 +387,8 @@ public final class BrowseCommands {
         case .delete: delete(menu: menu)
         case .editNoteType:
             if let id = facts?.notetypes?.first { openNoteType(id) }
+        case .editNote:
+            editNote()
         default:
             return
         }
@@ -383,6 +420,14 @@ public final class BrowseCommands {
                 fail(command, generation)
             }
         }
+    }
+
+    /// The inspector's Deck row (V12): Change Deck on `target`, the rows it
+    /// was chosen for (the shown card, or every card of the note in Notes
+    /// mode, B1), one "Change Deck" step.
+    func changeDeck(to deck: Int64, on target: BrowseTarget) {
+        guard available(nil) else { return }
+        runCards(.changeDeck(deck: deck), command: .changeDeck, count: nil, menu: target)
     }
 
     private func fail(_ command: BrowseCommand, _ generation: UInt64) {
@@ -524,6 +569,7 @@ public final class BrowseCommands {
         generation &+= 1
         busy = false
         factsTarget = nil
+        factsRead = nil
         facts = nil
         deleteQuestion = nil
         failed = nil

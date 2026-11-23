@@ -201,9 +201,9 @@ public struct StatsChartBox<Accessory: View>: View {
 
 /// A box's frame (N25.3, N25.6), shared by the chart boxes and the boxes that are not charts
 /// (Activity, the tables): the system group box on the Mac and the iPad at regular width, which
-/// takes the height its row gives it, so the boxes of a row share it; at compact width (iPhone,
-/// the folded Duo, a narrow iPad) a section-like group on the grouped background, as inset
-/// grouped lists draw their sections.
+/// takes the height its row gives it, so the boxes of a row share it; on the narrow page (iPhone,
+/// the folded Duo, the Duo held tall, a narrow iPad) a section-like group on the grouped
+/// background, as inset grouped lists draw their sections.
 ///
 /// Every box keeps one even inset of about 16 points on all four sides, as the touch group box
 /// and the grouped sections draw theirs (Antoine, 2026-11-23: "not enough internal margin around
@@ -213,6 +213,7 @@ public struct StatsChartBox<Accessory: View>: View {
 struct StatsBoxContainer<Content: View>: View {
     private let content: Content
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.statsNarrow) private var statsNarrow
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -226,7 +227,9 @@ struct StatsBoxContainer<Content: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         #else
-        if horizontalSizeClass == .regular {
+        // The narrow page (N25.6) is the shell's tab layout, the Duo held tall included, whose
+        // size class can be regular; outside the page the size class decides.
+        if !(statsNarrow ?? (horizontalSizeClass == .compact)) {
             GroupBox {
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

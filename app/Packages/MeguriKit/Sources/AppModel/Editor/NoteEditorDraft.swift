@@ -11,6 +11,10 @@ public final class NoteEditorDraft {
     public struct Field: Sendable, Equatable {
         public let definition: NotetypeField
         public fileprivate(set) var baseline: String
+        /// The value the page was opened (or last reloaded) with: what its
+        /// "unchanged" commit stands for. Only a Browse save moves `baseline`
+        /// away from it (`acknowledgeSaved`).
+        fileprivate var opened: String
         public fileprivate(set) var target: String
         public fileprivate(set) var changed: Bool
         public fileprivate(set) var mode: Mode
@@ -74,7 +78,7 @@ public final class NoteEditorDraft {
         self.noteID = noteID; baselineTags = tags
         fields = notetype.fields.enumerated().map { index, definition in
             let value = values?[index] ?? ""
-            return Field(definition: definition, baseline: value, target: value, changed: false,
+            return Field(definition: definition, baseline: value, opened: value, target: value, changed: false,
                 mode: definition.plainText ? .html : .rich, collapsed: definition.collapsed)
         }
     }
@@ -132,6 +136,38 @@ public final class NoteEditorDraft {
         return NoteFieldPatch(id: noteID, notetype: notetype, fields: changed, tags: tags, generation: generation)
     }
 
+    /// Browse's inspector (`browser/workspace` V12): the changed fields as
+    /// last committed and the tags when they changed, whatever input is
+    /// still on its way in another field (that input is saved by a later
+    /// save). Nil when nothing committed differs from what is stored, so a
+    /// save then writes nothing.
+    public func committedPatch() -> NoteFieldPatch? {
+        guard let noteID else { return nil }
+        var changed: [Int: String] = [:]
+        for (ord, field) in fields.enumerated() where field.target != field.baseline { changed[ord] = field.target }
+        let tags = self.tags == baselineTags ? nil : self.tags
+        guard !changed.isEmpty || tags != nil else { return nil }
+        return NoteFieldPatch(id: noteID, notetype: notetype, fields: changed, tags: tags, generation: generation)
+    }
+
+    /// Browse's inspector: `patch` committed, so what it sent is what is
+    /// stored now. Each sent field and the sent tags become the baseline; a
+    /// field edited again since keeps its newer target and stays changed.
+    public func acknowledgeSaved(_ patch: NoteFieldPatch) {
+        guard patch.id == noteID else { return }
+        for (ord, html) in patch.fields where fields.indices.contains(ord) {
+            fields[ord].baseline = html
+            fields[ord].changed = fields[ord].target != html
+        }
+        if let tags = patch.tags { baselineTags = tags }
+        revision &+= 1
+    }
+
+    /// Browse's inspector (V12): the fields the page leaves out, behind the
+    /// "<e> Empty Fields" row. Set before the page opens the draft, or
+    /// changed through the runtime; UI state only.
+    public var hiddenFields: Set<Int> = []
+
     /// Edit mode, for a change made elsewhere (`editor/edit-flows` W5.2 with
     /// E2's rule): every field without an unsaved edit takes the stored value
     /// as its baseline and target; a changed or pending field keeps the
@@ -142,7 +178,7 @@ public final class NoteEditorDraft {
         var reloaded: [Int] = []
         for index in fields.indices where !pendingFields.contains(index) && fields[index].target == fields[index].baseline {
             guard fields[index].baseline != values[index] else { continue }
-            fields[index].baseline = values[index]; fields[index].target = values[index]
+            fields[index].baseline = values[index]; fields[index].target = values[index]; fields[index].opened = values[index]
             fields[index].changed = false
             reloaded.append(index)
         }
@@ -200,7 +236,9 @@ public final class NoteEditorDraft {
         // before changing either committed bytes or pending dirty state.
         guard current() else { throw BridgeError.unavailable(reason: "The editor owner changed.") }
         for commit in commits {
-            fields[commit.ord].target = commit.unchanged ? fields[commit.ord].baseline : byOrdinal[commit.ord]!
+            // "Unchanged" is the page's word for "as I was opened with", which a
+            // Browse save may have left behind as the stored value.
+            fields[commit.ord].target = commit.unchanged ? fields[commit.ord].opened : byOrdinal[commit.ord]!
             fields[commit.ord].changed = !commit.unchanged
             pendingFields.remove(commit.ord)
         }
@@ -265,7 +303,7 @@ public final class NoteEditorDraft {
     /// supplied on recovery for changed fields (F7).
     public func displayValues() async throws -> (targets: [String], baselines: [String]) {
         let count = fields.count
-        let converted = try await html.convert(values + fields.map(\.baseline), forDisplay: true)
+        let converted = try await html.convert(values + fields.map(\.opened), forDisplay: true)
         guard converted.count == count * 2 else { throw BridgeError.internal("Invalid editor conversion result.") }
         return (Array(converted.prefix(count)), Array(converted.suffix(count)))
     }

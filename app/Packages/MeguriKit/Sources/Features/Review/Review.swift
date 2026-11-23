@@ -36,7 +36,7 @@ public struct ReviewView: View {
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
             reveal: model.reveal, rate: model.rate,
             redoDescription: redoDescription, status: status,
-            actions: moreActions) {
+            actions: moreActions, leech: model.leechNotice) {
             ZStack {
                 if let pair = model.pair {
                     // A walk's next deck brings its own pages: a new host for them, while
@@ -70,6 +70,10 @@ public struct ReviewView: View {
             if let editNote, editNote.flow.isPresented { editNote.form }
         }
         #endif
+        .onChange(of: model.leechAnnouncement?.id) { _, id in
+            guard id != nil, let text = model.leechAnnouncement?.text else { return }
+            AccessibilityNotification.Announcement(text).post()
+        }
         // N20.8: no banner or toast; VoiceOver says what happened.
         .onChange(of: model.cardActionAnnouncement?.id) { _, id in
             guard id != nil, let action = model.cardActionAnnouncement?.action else { return }
@@ -269,6 +273,8 @@ struct ReviewLayout<Card: View>: View {
     var redoDescription = "Redo"
     var status: AnyView? = nil
     var actions = ReviewMoreActions()
+    /// N16.11: the leech notice, as one icon first in the top controls.
+    var leech: ReviewLeechNotice? = nil
     @State private var noticeContentHeight: CGFloat?
     @State private var answerAreaTop: CGFloat?
     @State private var bottomInset: CGFloat = 0
@@ -298,6 +304,10 @@ struct ReviewLayout<Card: View>: View {
                 .accessibilityIdentifier("review.session.close")
             }
             ToolbarSpacer()
+            // N16.11: first among the trailing items, before the sync status.
+            if let leech {
+                ToolbarItem(placement: .primaryAction) { ReviewLeechButton(notice: leech) }
+            }
             if let status {
                 ToolbarItem(placement: .primaryAction) { status }
             }
@@ -344,6 +354,8 @@ struct ReviewLayout<Card: View>: View {
                     .accessibilityIdentifier("review.session.close")
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
+                    // N16.11: the leech icon comes first: [leech][undo][more].
+                    if let leech { ReviewLeechButton(notice: leech) }
                     Button { if canUndo { undo() } } label: {
                         Label { Text(verbatim: undoDescription) } icon: { Image(systemName: "arrow.uturn.backward") }
                     }
@@ -376,7 +388,8 @@ struct ReviewLayout<Card: View>: View {
     private var cardRegion: some View {
         GeometryReader { middle in
             VStack(spacing: 0) {
-                if let notice {
+                // N16.11: a leech answer's notice is the icon in the top controls instead.
+                if let notice, leech == nil {
                     let noticeLimit = max(0, middle.size.height) * 0.4
                     ScrollView(.vertical) {
                         Label {
@@ -816,6 +829,49 @@ struct ReviewMoreActions {
 /// N20.8: the touch review's More button (`ellipsis`, "More"), a pull-down
 /// menu in groups, each item with its system symbol. Later card actions slot
 /// into these groups or new ones after them.
+/// N16.11: the leech notice (`review/reviewer-strings#S3`) as one yellow
+/// warning icon in the top controls, in place of a banner above the card; a
+/// press shows what it means.
+struct ReviewLeechButton: View {
+    let notice: ReviewLeechNotice
+    @State private var shown = false
+    var body: some View {
+        Button { shown = true } label: {
+            Label { Text("review.leech.title", bundle: .module) } icon: {
+                // The symbol's own colours: the system's yellow triangle in light,
+                // dark and Increase Contrast.
+                Image(systemName: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
+            }
+        }
+        .help(Text("review.leech.title", bundle: .module))
+        .accessibilityHint(Text("review.leech.hint", bundle: .module))
+        .accessibilityIdentifier("review.session.leech")
+        .popover(isPresented: $shown) { ReviewLeechDetails(notice: notice) }
+    }
+}
+
+/// What a leech notice means, with what the answer did to the card.
+struct ReviewLeechDetails: View {
+    let notice: ReviewLeechNotice
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.small) {
+            Text("review.leech.title", bundle: .module)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            Text(notice.suspended ? "review.leech.suspended" : "review.leech.tagged", bundle: .module)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding()
+        // About a primary action's width in a popover; the text wraps.
+        .frame(idealWidth: ContentWidth.primaryAction, maxWidth: ContentWidth.readable, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review.session.leech.details")
+        #if !os(macOS)
+        .presentationDetents([.medium])
+        #endif
+    }
+}
+
 struct ReviewMoreMenu: View {
     let actions: ReviewMoreActions
     var body: some View {

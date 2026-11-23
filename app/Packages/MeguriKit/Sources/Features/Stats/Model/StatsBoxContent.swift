@@ -215,13 +215,17 @@ public struct StatsActivitySpan: Hashable, Sendable {
 
 /// Activity's grid, streaks and totals (S7.5).
 public struct StatsActivity: Hashable, Sendable {
-    /// A year's total, for the figures under the grid.
-    public struct Year: Hashable, Sendable, Identifiable {
+    /// A year's total, beside its label on the grid (the owner's Option B, 2026-11-23) and in
+    /// its container's label for VoiceOver.
+    nonisolated public struct Year: Hashable, Sendable, Identifiable {
         public var id: Int { year }
         public let year: Int
         public let total: Int
-        /// "2025: 41,233 reviews".
+        /// "2025: 41,233 reviews": the year's container label.
         public let totalText: String
+        /// After the year on the grid: "· 41,233 reviews", or the number alone, "· 41,233".
+        public var totalFull: String = ""
+        public var totalNumber: String = ""
     }
 
     public let span: StatsActivitySpan
@@ -234,6 +238,8 @@ public struct StatsActivity: Hashable, Sendable {
     public let currentStreak: Int
     public let longestStreak: Int
     public let daysStudiedThisYear: Int
+    /// The days of this year so far, today included (the "<D>" of "studied <d> of <D> days").
+    public var daysThisYear: Int = 1
     /// Reviews in all history.
     public let total: Int
     let days: StatsDays

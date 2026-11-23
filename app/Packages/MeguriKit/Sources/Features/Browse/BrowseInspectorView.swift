@@ -1,0 +1,227 @@
+import AppModel
+import CoreBridge
+import DesignSystem
+import SwiftUI
+
+/// The inspector's text (`browser/workspace` V7, V12, V16).
+enum BrowseInspectorText {
+    static func counted(_ key: StaticString, _ count: UInt64, locale: Locale = .current) -> String {
+        let n = Int(clamping: count), shown = n.formatted(.number.locale(locale))
+        return String(localized: key, defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
+    }
+
+    /// V7: "12 Cards Selected", "3 Notes Selected".
+    static func title(_ summary: BrowseSelectionSummary, locale: Locale = .current) -> String {
+        summary.mode == .cards ? counted("browse.inspector.cardsSelected", UInt64(summary.rows), locale: locale)
+            : counted("browse.inspector.notesSelected", UInt64(summary.rows), locale: locale)
+    }
+
+    /// V7's one line: "<k> notes" (Cards only), the deck or "<d> decks",
+    /// "<s> suspended" when s > 0, joined with " · ".
+    static func line(_ summary: BrowseSelectionSummary, locale: Locale = .current) -> String {
+        var parts: [String] = []
+        if let notes = summary.notes { parts.append(counted("browse.inspector.notes", notes, locale: locale)) }
+        if let deck = summary.deck { parts.append(deck.components(separatedBy: "::").joined(separator: " › ")) }
+        else if let decks = summary.decks { parts.append(counted("browse.inspector.decks", decks, locale: locale)) }
+        if let suspended = summary.suspended, suspended > 0 { parts.append(counted("browse.inspector.suspended", suspended, locale: locale)) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// V12: "Card 1 of 3".
+    static func card(_ index: Int, of count: Int, locale: Locale = .current) -> String {
+        let shown = { (n: Int) in n.formatted(.number.locale(locale)) }
+        return String(localized: "browse.inspector.cardOf", defaultValue: "\(shown(index + 1)) \(shown(count))", bundle: .module,
+                      locale: locale)
+    }
+
+    /// N21.5: each command's key at the trailing edge of its button.
+    static func key(_ command: BrowseCommand) -> String? {
+        switch command {
+        case .changeDeck: "⌘D"
+        case .addTags: "⇧⌘A"
+        case .removeTags: "⌥⇧⌘A"
+        case .suspend: "⇧⌘J"
+        case .bury: "⌘J"
+        case .setDueDate: "⇧⌘D"
+        case .forget: "⌥⌘N"
+        case .changeNoteType: "⇧⌘M"
+        case .findReplace: "⌥⌘F"
+        case .delete: "⌘⌫"
+        case .flag, .unsuspend, .unbury, .editNoteType, .findDuplicates, .editNote: nil
+        }
+    }
+}
+
+#if os(macOS)
+/// The trailing pane (N21.4, N21.5; `browser/workspace` V7): "No Selection",
+/// the summary of several rows with their commands, or the one row's note.
+/// The plan gives U273 the Note tab only: the Info tab and its Note | Info
+/// control come with U274.
+struct BrowseInspectorPane: View {
+    let model: BrowseModel
+
+    private var inspector: BrowseInspector { model.inspector }
+
+    var body: some View {
+        Group {
+            switch inspector.content {
+            case .noSelection:
+                if inspector.loading { loadingView } else { unavailable(Text("browse.inspector.noSelection", bundle: .module)) }
+            case .unavailable:
+                unavailable(Text(inspector.notice == nil ? "browse.inspector.unavailable" : "browse.inspector.noSelection", bundle: .module))
+            case .several:
+                if let summary = inspector.summary {
+                    BrowseSelectionSummaryView(model: model, summary: summary)
+                } else {
+                    Color.clear
+                }
+            case .note:
+                if let note = inspector.note { BrowseNoteTab(model: model, note: note) }
+                else if inspector.loading { loadingView }
+                else { unavailable(Text("browse.inspector.noSelection", bundle: .module)) }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("browse.inspector")
+    }
+
+    private var loadingView: some View {
+        ProgressView().controlSize(.small).accessibilityIdentifier("browse.inspector.loading")
+    }
+
+    /// V7's "No Selection" in its content-unavailable style; W5.4's notice under it.
+    private func unavailable(_ title: Text) -> some View {
+        ContentUnavailableView {
+            title
+        } description: {
+            if inspector.notice != nil { Text("browse.inspector.noteDeleted", bundle: .module) }
+        }
+        .accessibilityIdentifier("browse.inspector.empty")
+    }
+}
+
+/// N21.5: several rows: the title, one secondary line, then V8's commands as
+/// plain buttons in one column, each with its key at the trailing edge,
+/// grouped as the row's context menu groups them, Delete last in red.
+struct BrowseSelectionSummaryView: View {
+    let model: BrowseModel
+    let summary: BrowseSelectionSummary
+    @Environment(\.locale) private var locale
+
+    private var commands: BrowseCommands { model.commands }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(verbatim: BrowseInspectorText.title(summary, locale: locale))
+                    .font(.title3.weight(.semibold))
+                    .accessibilityIdentifier("browse.inspector.summary.title")
+                let line = BrowseInspectorText.line(summary, locale: locale)
+                if !line.isEmpty {
+                    Text(verbatim: line)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, Spacing.xxSmall)
+                        .accessibilityIdentifier("browse.inspector.summary.line")
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    group([.changeDeck, .addTags, .removeTags])
+                    Divider()
+                    flag
+                    group([.suspend, .unsuspend, .bury, .unbury])
+                    Divider()
+                    group([.setDueDate, .forget])
+                    Divider()
+                    group([.changeNoteType, .editNoteType])
+                    Divider()
+                    group([.findReplace, .findDuplicates])
+                    Divider()
+                    group([.delete])
+                }
+                .padding(.top, Spacing.small)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityIdentifier("browse.inspector.summary")
+    }
+
+    @ViewBuilder private func group(_ list: [BrowseCommand]) -> some View {
+        ForEach(list, id: \.self) { command in
+            let state = commands.state(command)
+            if state.shown { row(command, state: state) }
+        }
+    }
+
+    private func row(_ command: BrowseCommand, state: BrowseCommandState) -> some View {
+        Button(role: command == .delete ? .destructive : nil) { commands.perform(command) } label: {
+            HStack {
+                Text(verbatim: BrowseCommandText.title(command, state, locale: locale))
+                    .foregroundStyle(command == .delete ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
+                Spacer(minLength: Spacing.small)
+                if let key = BrowseInspectorText.key(command) { Text(verbatim: key).foregroundStyle(.secondary) }
+            }
+            .padding(.vertical, Spacing.xxSmall)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!state.enabled)
+        .accessibilityIdentifier("browse.inspector.command.\(BrowseCommandIdentifier.of(command))")
+    }
+
+    /// Flag ▸ with No Flag and the seven flags, each in its colour.
+    private var flag: some View {
+        Menu {
+            ForEach(Array(UInt8(0)...7), id: \.self) { flag in
+                Button { commands.perform(.flag(flag)) } label: {
+                    if flag == 0 {
+                        Text(verbatim: BrowseCommandText.flag(0, names: model.flagNames, locale: locale))
+                    } else {
+                        Label { Text(verbatim: BrowseCommandText.flag(flag, names: model.flagNames, locale: locale)) }
+                            icon: { BrowseFlagSymbol(flag: flag) }
+                    }
+                }
+                .disabled(!commands.state(.flag(flag)).enabled)
+                if flag == 0 { Divider() }
+            }
+        } label: {
+            HStack {
+                Text(verbatim: BrowseCommandText.title(.flag(1), commands.state(.flag(1)), locale: locale))
+                Spacer(minLength: Spacing.small)
+                Image(systemName: "chevron.right").foregroundStyle(.secondary).imageScale(.small)
+            }
+            .padding(.vertical, Spacing.xxSmall)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .accessibilityIdentifier("browse.inspector.command.flag")
+    }
+}
+
+#endif
+
+/// The identifiers of the commands' controls (`browse.<place>.<command>`).
+enum BrowseCommandIdentifier {
+    static func of(_ command: BrowseCommand) -> String {
+        switch command {
+        case .changeDeck: "changeDeck"
+        case .addTags: "addTags"
+        case .removeTags: "removeTags"
+        case .flag(let flag): "flag.\(flag)"
+        case .suspend: "suspend"
+        case .unsuspend: "unsuspend"
+        case .bury: "bury"
+        case .unbury: "unbury"
+        case .setDueDate: "setDueDate"
+        case .forget: "forget"
+        case .changeNoteType: "changeNoteType"
+        case .editNoteType: "editNoteType"
+        case .findReplace: "findReplace"
+        case .findDuplicates: "findDuplicates"
+        case .delete: "delete"
+        case .editNote: "editNote"
+        }
+    }
+}

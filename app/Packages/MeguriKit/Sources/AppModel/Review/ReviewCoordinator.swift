@@ -16,7 +16,26 @@ public final class ReviewCoordinator {
     public private(set) var shownItem: ReviewHeadItem?
     public private(set) var counts = ReviewCounts(new: 0, learning: 0, review: 0)
     public private(set) var sessionID: UInt64?
-    public private(set) var notice: String?
+    public private(set) var notice: String? {
+        didSet {
+            noticeRevision &+= 1
+            leechNoticeID = nil; leechNoticeCard = nil
+        }
+    }
+    // Ordering only: even publishing the same persistent text supersedes an answer's notice.
+    @ObservationIgnored private var noticeRevision: UInt64 = 0
+    /// S2/S3: each leech outcome has its own announcement, even with identical text.
+    public private(set) var leechNoticeID: UUID?
+    /// N16.11 (Antoine, 2026-11-23: it "should just stay visible for as long as you
+    /// are on the card"): the card presented after the leech answer. The notice stays
+    /// through that whole card and goes when another card is presented.
+    @ObservationIgnored private var leechNoticeCard: Int64?
+    /// S2, S3: each leech outcome is announced once, kept apart from the icon so
+    /// the last card's leech (whose end screen shows no icon) is still announced.
+    public private(set) var leechAnnouncement: ReviewLeechAnnouncement?
+    /// N16.11: while the notice is a leech answer's (`review/reviewer-strings#S3`),
+    /// the screen shows it as one icon in the top controls, not as a banner.
+    public var leechNotice: ReviewLeechNotice? { leechNoticeID == nil ? nil : ReviewLeechNotice(notice: notice) }
     public private(set) var undoStatus: ReviewUndoStatus = .unavailable(reason: .none)
     public private(set) var redoStatus: ReviewUndoStatus = .unavailable(reason: .none)
     public private(set) var record: ReviewRecord
@@ -368,6 +387,8 @@ public final class ReviewCoordinator {
     }
     private func rate(_ rating: ReviewRating, inputTime: TimeInterval, instant: Date) {
         guard phase == .answer, !busy, !paused, !editingNote, let item, let sessionID else { return }
+        dismissLeechNotice()
+        let answerNoticeRevision = noticeRevision
         // All input paths enter this synchronous gate, before any suspension.
         busy = true; phase = .transition
         let use: NativeReviewInput.AnswerUse?
@@ -400,8 +421,8 @@ public final class ReviewCoordinator {
                     if let pendingAnswer, pendingAnswer.id == answer.id {
                         record.answers.append(pendingAnswer); record.undone.removeAll()
                         self.pendingAnswer = nil
+                        if leech, noticeRevision == answerNoticeRevision { showLeechNotice(suspended: suspended) }
                     }
-                    if leech { notice = suspended ? "Card was a leech. It has been suspended." : "Card was a leech." }
                     if suspended { record.suspended.insert(item.cardId) }
                     enqueuePersistence(diagnosticAnswer: true)
                     let needsRefresh = refreshPending
@@ -453,6 +474,7 @@ public final class ReviewCoordinator {
     /// end of the session. One undo step brings it back.
     public func act(_ action: ReviewCardAction) {
         guard canActOnCard, let item, let sessionID else { return }
+        dismissLeechNotice()
         busy = true; phase = .transition
         let inputTime = uptime()
         timer.pause(at: inputTime)
@@ -489,6 +511,7 @@ public final class ReviewCoordinator {
 
     public func restore(redo: Bool = false) {
         guard (redo ? canRedo : canUndo), let sessionID else { return }
+        dismissLeechNotice()
         if hold(.restore(redo: redo, step: redo ? redoStatus : undoStatus)) { return }
         // Only an answer step moves the record's answers; a bury, a suspend or an edit does not.
         let answerStep: Bool = {
@@ -741,6 +764,8 @@ public final class ReviewCoordinator {
         case .waitingUntil, .finished:
             // No first card to show: the start's intervals end without one.
             startTrace?.cancel()
+            // N16.11: the leech icon belongs to a card; the end screen has none.
+            dismissLeechNotice()
             clearVisibleMedia()
             preload?.cancel(); await preload?.value; preload = nil
             timer.pause(at: uptime()); activeTime.pause(at: uptime()); surface.pair?.pauseAudio()
@@ -864,6 +889,7 @@ public final class ReviewCoordinator {
         try Task.checkCancellation()
         terminalPresentation = nil
         shownItem = item
+        presentedForLeechNotice(item.cardId)
         phase = sideIsAnswer ? .answer : .question
         firstPresentation()
         finishRestoration(intent)
@@ -1023,6 +1049,27 @@ public final class ReviewCoordinator {
     /// A notice above the card, for a change the screen reports itself.
     func showNotice(_ text: String) { notice = text }
 
+    private func showLeechNotice(suspended: Bool) {
+        guard !closingAdmission, phase != .ended else { return }
+        notice = suspended ? "Card was a leech. It has been suspended." : "Card was a leech."
+        // No expiry (N16.11, replacing #166's 2 s): it lasts for the card that
+        // follows, until that card is answered, acted on or undone, another
+        // card is presented, or the session ends.
+        leechNoticeID = UUID()
+        if let notice { leechAnnouncement = ReviewLeechAnnouncement(text: notice) }
+    }
+    /// N16.11: the first card presented after the leech answer keeps the notice;
+    /// any other card presented after it ends it.
+    private func presentedForLeechNotice(_ card: Int64) {
+        guard leechNoticeID != nil else { return }
+        if let leechNoticeCard { if leechNoticeCard != card { dismissLeechNotice() } }
+        else { leechNoticeCard = card }
+    }
+
+    private func dismissLeechNotice() {
+        if leechNoticeID != nil { notice = nil }
+    }
+
     public func mediaUnavailable() {
         mediaArrivals = ReviewMediaArrivals()
         beginPause()
@@ -1051,6 +1098,7 @@ public final class ReviewCoordinator {
     @discardableResult public func end() async -> Bool {
         if let endTask { return await endTask.value }
         closingAdmission = true
+        dismissLeechNotice()
         restorationID = nil
         startTrace?.cancel()
         beginPause()
@@ -1077,6 +1125,7 @@ public final class ReviewCoordinator {
     }
     public func generationEnded() {
         closingAdmission = true
+        dismissLeechNotice()
         restorationID = nil
         startTrace?.cancel()
         summaryTask?.cancel()
@@ -1130,6 +1179,29 @@ public final class ReviewCoordinator {
     }
     public static func name(_ rating: ReviewRating) -> String {
         switch rating { case .again: "again"; case .hard: "hard"; case .good: "good"; case .easy: "easy" }
+    }
+}
+
+/// One VoiceOver announcement of a leech outcome (`review/reviewer-strings#S2`, S3).
+public nonisolated struct ReviewLeechAnnouncement: Equatable, Sendable {
+    public let id = UUID()
+    public let text: String
+}
+
+/// A leech answer's notice (`review/reviewer-strings#S3`): the answered card's
+/// note was tagged, and the card suspended when its deck's leech action says so.
+/// Read from the notice's text, S3's two sentences, which the answer path sets.
+public nonisolated struct ReviewLeechNotice: Equatable, Sendable {
+    static let tagged = "Card was a leech."
+    static let suspendedText = "Card was a leech. It has been suspended."
+    public let suspended: Bool
+    public init(suspended: Bool) { self.suspended = suspended }
+    init?(notice: String?) {
+        switch notice {
+        case Self.tagged: suspended = false
+        case Self.suspendedText: suspended = true
+        default: return nil
+        }
     }
 }
 
