@@ -53,8 +53,12 @@ import WebKit
         for refused in ["", ".", "..", "../secret", "a/b.png", "a\\b.png", ".hidden", "line\nbreak.mp3", "%2E%2E%2Fsecret"] {
             #expect(MediaName.plain(refused) == nil, "\(refused.debugDescription)")
         }
+        // A reference the host cannot serve is ignored, never a protocol failure that stops the page.
+        #expect(try EditorBridgeMessage(["type": "playMedia", "loadId": 1, "seq": 1, "name": "../x.mp3"], ordinals: [0]).type == "playMedia")
+        #expect(try EditorBridgeMessage(["type": "openMedia", "loadId": 1, "seq": 1, "name": "https://example.org/a.png"],
+                                        ordinals: [0]).type == "openMedia")
         #expect(throws: (any Error).self) {
-            try EditorBridgeMessage(["type": "playMedia", "loadId": 1, "seq": 1, "name": "../x.mp3"], ordinals: [0])
+            try EditorBridgeMessage(["type": "playMedia", "loadId": 1, "seq": 1, "name": 3], ordinals: [0])
         }
         #expect(throws: (any Error).self) {
             try EditorBridgeMessage(["type": "caret", "loadId": 1, "seq": 1, "top": 20, "bottom": 10], ordinals: [0])

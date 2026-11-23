@@ -61,8 +61,10 @@ struct EditorBridgeMessage {
                 throw EditorRuntimeError.invalidMessage
             }
         }
+        // A reference the inspector cannot serve (a web address, a folder) is not a protocol
+        // error: the host ignores it (`MediaName.plain`) and the page keeps editing.
         if type == "playMedia" || type == "openMedia" {
-            guard let name = body["name"] as? String, MediaName.plain(name) != nil else { throw EditorRuntimeError.invalidMessage }
+            guard body["name"] is String else { throw EditorRuntimeError.invalidMessage }
         }
         if type == "contentHeight" {
             guard let height = Self.number(body["height"]), height >= 0 else { throw EditorRuntimeError.invalidMessage }

@@ -42,7 +42,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         capture(app, "several-rows-\(appearance)")
 
         // A card with a sound and an image (the Español deck's notes).
-        try showDeck(app, bundle, containing: "Español")
+        try showDeck(app, bundle, containing: "Español", firstField: "palabra")
         table.tableRows.element(boundBy: 0).click()
         let note = element(app, "browse.inspector.note")
         XCTAssertTrue(note.waitForExistence(timeout: 10), "the Note tab")
@@ -55,7 +55,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         capture(app, "sound-and-image-\(appearance)")
 
         // Right to left, then CJK with a sound.
-        try showDeck(app, bundle, containing: "العربية")
+        try showDeck(app, bundle, containing: "العربية", firstField: "كلمة")
         table.tableRows.element(boundBy: 0).click()
         XCTAssertTrue(waitUntil { fields.count > 0 })
         sleep(1)
@@ -77,7 +77,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         sleep(1)
         capture(app, "empty-fields-open-\(appearance)")
         empty.click()
-        try showDeck(app, bundle, containing: "語彙")
+        try showDeck(app, bundle, containing: "語彙", firstField: "単語")
         table.tableRows.element(boundBy: 0).click()
         XCTAssertTrue(waitUntil { fields.count > 0 })
         sleep(2)
@@ -136,16 +136,18 @@ final class MacBrowseInspectorTests: XCTestCase {
         capture(app, "narrow-over-table-\(appearance)")
     }
 
-    /// Browse's sidebar: the deck row whose name holds `name` sets the Deck token.
-    private func showDeck(_ app: XCUIApplication, _ bundle: String, containing name: String) throws {
+    /// Browse's sidebar: the deck row whose name holds `name` sets the Deck token; the
+    /// table has that deck's results once its first row's sort field holds `firstField`
+    /// (the previous results stay shown while a search runs).
+    private func showDeck(_ app: XCUIApplication, _ bundle: String, containing name: String, firstField: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         let row = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "browse.sidebar.deck.", name)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the deck row \(name)")
         row.click()
         let table = app.tables["browse.results.table"]
-        XCTAssertTrue(waitUntil { table.tableRows.count > 0 })
-        sleep(1)
+        let first = table.tableRows.element(boundBy: 0).staticTexts.matching(NSPredicate(format: "label CONTAINS %@", firstField))
+        XCTAssertTrue(waitUntil(timeout: 30) { first.count > 0 }, "the deck's own results: \(name)")
         try app.bringToFront(bundleIdentifier: bundle)
     }
 

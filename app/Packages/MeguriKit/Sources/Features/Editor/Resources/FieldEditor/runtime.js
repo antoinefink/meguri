@@ -454,12 +454,29 @@
         if (caretFrame) return;
         caretFrame = requestAnimationFrame(() => {
             caretFrame = 0;
-            const box = field.mode === "html" ? field.source.getBoundingClientRect() : (() => {
+            const box = field.mode === "html" ? sourceCaret(field.source) : (() => {
                 const value = range(field); const rects = value.getClientRects();
                 return rects.length ? rects[rects.length - 1] : field.host.getBoundingClientRect();
             })();
             void emit("caret", {top: Math.max(0, box.top), bottom: Math.max(0, box.bottom)});
         });
+    }
+    // The caret's line in a source box: a hidden copy of the text before the
+    // caret, laid out like the box, ends where the caret is.
+    function sourceCaret(source) {
+        const style = getComputedStyle(source), box = source.getBoundingClientRect();
+        const mirror = document.createElement("div");
+        for (const name of ["boxSizing", "width", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderTopWidth",
+            "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "borderStyle", "fontFamily", "fontSize", "fontWeight",
+            "lineHeight", "letterSpacing", "tabSize"]) mirror.style[name] = style[name];
+        Object.assign(mirror.style, {position: "absolute", visibility: "hidden", top: "0", left: "0", whiteSpace: "pre-wrap",
+            overflowWrap: "break-word"});
+        mirror.textContent = source.value.slice(0, source.selectionEnd);
+        const marker = document.createElement("span"); marker.textContent = "\u200b"; mirror.append(marker);
+        document.body.append(mirror);
+        const top = box.top + marker.offsetTop - source.scrollTop, bottom = top + marker.offsetHeight;
+        mirror.remove();
+        return {top, bottom};
     }
     function grow(source) { source.style.height = "auto"; source.style.height = `${source.scrollHeight}px`; }
     function makeField(value) {
@@ -525,6 +542,7 @@
             const follow = () => reportCaret(field);
             for (const type of ["input", "keyup", "mouseup", "focus"]) rich.addEventListener(type, follow);
             source.addEventListener("input", () => { grow(source); follow(); });
+            for (const type of ["keyup", "mouseup", "focus"]) source.addEventListener(type, follow);
         }
         return field;
     }

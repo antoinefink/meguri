@@ -70,15 +70,18 @@ public struct BrowseView: View {
                 setFormatter()
                 #if os(macOS)
                 if model.inspector.makeRuntime == nil {
-                    model.inspector.makeRuntime = { draft, current in
+                    // Weak references: the inspector owns this factory and the hosts it makes.
+                    // When it has gone the page edits on, with no media.
+                    model.inspector.makeRuntime = { [weak inspector = model.inspector] draft, current in
                         let host = try FieldEditorHost(draft: draft, isCurrent: current)
                         // `browser/inspector` I3: a row change opens the note with no field focused.
                         host.browsing = true
                         // Option A: the fields' thumbnails and sound chips.
-                        let inspector = model.inspector
-                        host.mediaDirectory = inspector.mediaDirectory
-                        host.onPlayMedia = { inspector.playSound($0) }
-                        host.onOpenMedia = { name in if let url = inspector.mediaFile(name) { NSWorkspace.shared.open(url) } }
+                        host.mediaDirectory = inspector?.mediaDirectory
+                        host.onPlayMedia = { [weak inspector] in inspector?.playSound($0) }
+                        host.onOpenMedia = { [weak inspector] name in
+                            if let url = inspector?.mediaFile(name) { NSWorkspace.shared.open(url) }
+                        }
                         return host
                     }
                 }
