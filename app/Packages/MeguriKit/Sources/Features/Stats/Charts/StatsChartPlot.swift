@@ -13,10 +13,14 @@ import UIKit
 public struct StatsChartSelection: Hashable, Sendable {
     public var bin: Int?
     public var pinned: Bool
+    /// The segment of the bin's stacked bar, where a box selects one (Answers' buttons, S7.10);
+    /// nil selects the whole bin.
+    public var segment: Int?
 
-    public init(bin: Int? = nil, pinned: Bool = false) {
+    public init(bin: Int? = nil, pinned: Bool = false, segment: Int? = nil) {
         self.bin = bin
         self.pinned = pinned
+        self.segment = segment
     }
 
     public static let none = StatsChartSelection()
@@ -37,7 +41,9 @@ public struct StatsChartSelection: Hashable, Sendable {
             return new.indices.contains(bin) ? self : .none
         }
         guard old.indices.contains(bin), let moved = new.firstIndex(of: old[bin]) else { return .none }
-        return StatsChartSelection(bin: moved, pinned: pinned)
+        var carried = self
+        carried.bin = moved
+        return carried
     }
 }
 
@@ -67,12 +73,15 @@ public enum StatsPlotSize: Hashable, Sendable {
     case regular
     /// A chart's own page (N25.5's taller plot).
     case page
+    /// One of two aligned panels in a regular box (Time of Day, S7.11).
+    case panel
 
     var height: CGFloat {
         switch self {
         case .lead: 200
         case .regular: 150
         case .page: 320
+        case .panel: 84
         }
     }
 
@@ -80,9 +89,29 @@ public enum StatsPlotSize: Hashable, Sendable {
     var axisLabels: Int {
         switch self {
         case .lead, .page: 7
-        case .regular: 4
+        case .regular, .panel: 4
         }
     }
+}
+
+/// What a plot draws beyond its marks, for a box that puts two plots together (Time of Day's
+/// panels, S7.11): the upper panel has no legend, x axis labels, callout or focus of its own, and
+/// the lower one speaks for both.
+struct StatsPlotOptions: Hashable {
+    /// The system legend under the plot.
+    var legend = true
+    /// The x axis labels.
+    var xAxis = true
+    /// The selection's callout beside its rule.
+    var callout = true
+    /// A stop for Tab and the plot keys (S14).
+    var focusable = true
+    /// The chart element, its Audio Graph and its per-bar elements (S15).
+    var accessible = true
+    /// A width every y axis label keeps, so two panels' plots share their x positions.
+    var yLabelWidth: CGFloat?
+
+    static let standard = StatsPlotOptions()
 }
 
 /// What a plot shows besides its marks.
@@ -111,6 +140,7 @@ struct StatsChartPlot: View {
     /// Draws a hairline between stacked series; nil follows Differentiate Without Colour,
     /// the only time a stack is drawn apart (a stack otherwise reads as one flat bar or band).
     let separatesSeries: Bool?
+    let options: StatsPlotOptions
     /// Worked out once per data, not on every pointer move.
     private let isReady: Bool
     private let domain: ClosedRange<Double>
@@ -122,8 +152,10 @@ struct StatsChartPlot: View {
 
     init(
         box: String, data: StatsChartData, phase: StatsPlotPhase, size: StatsPlotSize, summary: String,
-        selection: Binding<StatsChartSelection>, showInBrowse: ((Int) -> Void)?, separatesSeries: Bool?
+        selection: Binding<StatsChartSelection>, showInBrowse: ((Int) -> Void)?, separatesSeries: Bool?,
+        options: StatsPlotOptions = .standard
     ) {
+        self.options = options
         self.box = box
         self.data = data
         self.phase = phase
@@ -166,7 +198,9 @@ struct StatsChartPlot: View {
             .chartXScale(domain: binIDs)
             .chartForegroundStyleScale(domain: data.legendNames, range: legendColors)
             .chartLegend(position: .bottom, alignment: .leading)
+            .chartLegend(options.legend ? .automatic : .hidden)
             .chartXAxis { xAxis }
+            .chartXAxis(options.xAxis ? .automatic : .hidden)
             .chartYAxis { yAxis }
             .chartOverlay { proxy in overlay(proxy) }
             #if os(macOS)
@@ -175,9 +209,9 @@ struct StatsChartPlot: View {
             // focused the plot and cleared the hover, and no tap gesture fired). The plot is
             // reached by Tab with keyboard navigation on, as buttons are, and a click focuses
             // it from its tap handler.
-            .focusable(isReady, interactions: .activate)
+            .focusable(isReady && options.focusable, interactions: .activate)
             #else
-            .focusable(isReady)
+            .focusable(isReady && options.focusable)
             #endif
             .focused($focused)
             .onKeyPress(.leftArrow) { move(-1) }
@@ -209,6 +243,7 @@ struct StatsChartPlot: View {
             .accessibilityValue(Text(verbatim: pinnedName))
             .accessibilityIdentifier("stats.box.\(box).plot")
             .accessibilityChartDescriptor(StatsAudioGraph(data: isReady ? data : data.skeleton(), format: format, summary: summary))
+            .accessibilityHidden(!options.accessible)
     }
 
     /// The pinned bin's name, empty with none (or while the box is not ready).
@@ -229,7 +264,7 @@ struct StatsChartPlot: View {
     static func bin(_ id: String) -> Int? { id.hasPrefix("b") ? Int(id.dropFirst()) : nil }
 
     private var legendColors: [Color] {
-        data.series.map(\.color.color) + data.rules.map(\.color.color)
+        data.series.map(\.color.color) + data.rules.map(\.color.color) + data.markers.map(\.color.color)
     }
 
     private var fadedOpacity: Double { contrast == .increased ? 0.5 : 0.3 }
@@ -431,12 +466,13 @@ struct StatsChartPlot: View {
                 AxisValueLabel {
                     if let number = value.as(Double.self) {
                         Text(verbatim: format.axisValue(number, unit: data.unit))
+                            .frame(minWidth: options.yLabelWidth, alignment: .leading)
                     }
                 }
             }
         } else {
             AxisMarks(position: .trailing, values: [0.0]) { _ in
-                AxisValueLabel { Text(verbatim: " ") }
+                AxisValueLabel { Text(verbatim: " ").frame(minWidth: options.yLabelWidth, alignment: .leading) }
             }
         }
     }
@@ -459,17 +495,42 @@ struct StatsChartPlot: View {
                 let plot = geometry[anchor]
                 ZStack(alignment: .topLeading) {
                     if isReady {
+                        markers(proxy, plot: plot)
                         interactionLayer(proxy, plot: plot)
-                        StatsAccessibilityBins(data: data, format: format, browse: showInBrowse)
-                            .equatable()
-                            .frame(width: plot.width, height: plot.height)
-                            .offset(x: plot.minX, y: plot.minY)
-                        callout(proxy, plot: plot, in: geometry.size)
+                        if options.accessible {
+                            StatsAccessibilityBins(data: data, format: format, browse: showInBrowse)
+                                .equatable()
+                                .frame(width: plot.width, height: plot.height)
+                                .offset(x: plot.minX, y: plot.minY)
+                        }
+                        if options.callout {
+                            callout(proxy, plot: plot, in: geometry.size)
+                        }
                     } else {
                         phaseView
                             .frame(width: plot.width, height: plot.height)
                             .offset(x: plot.minX, y: plot.minY)
                     }
+                }
+            }
+        }
+    }
+
+    /// The markers (Retrievability's desired retention): a dashed vertical rule in the label
+    /// colour across the plot, between bins where the value falls inside one.
+    @ViewBuilder private func markers(_ proxy: ChartProxy, plot: CGRect) -> some View {
+        if !data.markers.isEmpty, let first = proxy.position(forX: Self.id(0)) {
+            let step = data.bins.count > 1 ? (proxy.position(forX: Self.id(1)) ?? first) - first : plot.width
+            ForEach(data.markers) { marker in
+                if let position = marker.position {
+                    let x = plot.minX + CGFloat(StatsMarker.x(position, firstCenter: Double(first), step: Double(step)))
+                    Path { path in
+                        path.move(to: CGPoint(x: x, y: plot.minY))
+                        path.addLine(to: CGPoint(x: x, y: plot.maxY))
+                    }
+                    .stroke(marker.color.color, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
             }
         }
