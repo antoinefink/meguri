@@ -41,7 +41,8 @@ extension TestHooks {
     /// collection is open, so the core cannot render):
     /// - `notetypes/cards/preview-back`: Recognition's Back, the answer shown.
     /// - `notetypes/cards/preview-error`: an unknown field on Production's
-    ///   front: the preview keeps the card under the issue's words.
+    ///   front before the preview's first render: the issue's words where the
+    ///   card would be (after an edit, the last card stays faded under them).
     /// - `notetypes/cards/preview-empty`: Phrases, a type with no notes: the
     ///   sample note with Fill Empty Fields on.
     /// - `notetypes/cards/preview-cloze`: the Cloze type's card 2.

@@ -1090,6 +1090,12 @@ extension NoteTypesModelTests {
         model.preview.notesChanged()
         await model.preview.settled()
         #expect(core.renders.last?.note == 5 && model.preview.notePosition! == (2, 3))
+        // Two changes before the list is read again: note 5 is still the one found.
+        core.notes = [5, 9]
+        model.preview.notesChanged()
+        model.preview.notesChanged()
+        await model.preview.settled()
+        #expect(core.renders.last?.note == 5 && model.preview.notePosition! == (1, 2))
     }
 
     @Test func aTypeWithoutNotesPreviewsANewNoteWithFillEmptyFieldsOn() async {

@@ -1263,6 +1263,8 @@ public final class NoteTypesModel {
             records[id] = record
             readCounts(id)
             if drafts[id] == nil { refreshIssues(id, immediately: true) }
+            // The newer version is what the preview shows now.
+            if selection == id { preview.subjectChanged() }
             await readReferences(id)
         }
     }

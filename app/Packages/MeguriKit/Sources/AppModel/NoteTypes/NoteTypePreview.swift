@@ -200,6 +200,8 @@ public final class NoteTypePreview {
     @ObservationIgnored private var fillEmptyChoice: [Int64: Bool] = [:]
     /// The note shown before the list was read again (`notesChanged`).
     @ObservationIgnored private var keptNote: Int64?
+    /// Raised whenever the list goes: a read started before is not taken.
+    @ObservationIgnored private var notesGeneration: UInt64 = 0
     @ObservationIgnored private var token: UInt64 = 0
     @ObservationIgnored private var pending: Task<Void, Never>?
     /// What `shown` was made from: a side switch of the same input reuses it.
@@ -242,8 +244,10 @@ public final class NoteTypePreview {
     /// Notes of the shown type were added, removed or edited elsewhere.
     public func notesChanged() {
         // The type stays: the note shown is found again in the new list.
-        keptNote = noteIndex.flatMap { notes?[safe: $0] }
+        // A second change before the list is read again keeps the note from the first.
+        if let shown = noteIndex.flatMap({ notes?[safe: $0] }) { keptNote = shown }
         notes = nil
+        notesGeneration &+= 1
         notesTask?.cancel()
         notesTask = nil
         shownKey = nil
@@ -359,11 +363,13 @@ public final class NoteTypePreview {
             keptNote = nil
             clozeNumber = 1
             shownKey = nil
+            notesGeneration &+= 1
         }
+        let generation = notesGeneration
         let task = notesTask ?? Task { [backend] in try? await backend.noteIds(notetype) }
         notesTask = task
         let read = await task.value
-        guard notesOf == notetype else { return nil }
+        guard notesOf == notetype, generation == notesGeneration else { return nil }
         notesTask = nil
         // A failed read is not "no notes": nothing is cached, and the next render reads again.
         guard let read else {
@@ -411,6 +417,8 @@ public final class NoteTypePreview {
         notesOf = nil
         notes = nil
         noteIndex = nil
+        keptNote = nil
+        notesGeneration &+= 1
         clozeNumber = 1
         fillEmptyChoice = [:]
         preferredNote = [:]
