@@ -189,9 +189,6 @@ pub(crate) fn stage(
         .filter(|index| used.contains(index) || is_static(&entries[*index].name))
         .collect();
     plan.media = MediaOutcome::default();
-    if needed.is_empty() {
-        return Ok(());
-    }
 
     // I15's third row, on the media folder's file system.
     let bytes = needed
@@ -211,6 +208,9 @@ pub(crate) fn stage(
             other => other.into(),
         })?;
 
+    if needed.is_empty() {
+        return Ok(());
+    }
     progress.set_phase(ProgressPhase::Named("media"));
     let mut archive = DeckArchive::open(&session.source_path(), check, session.decoded)?;
     let mut staged = service.begin_staging()?;

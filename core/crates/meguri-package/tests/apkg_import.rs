@@ -770,3 +770,40 @@ fn imported_rows_are_pending_for_the_next_sync() {
     assert!(reader.cards_of_note(added).unwrap().iter().all(|card| card.usn.0 == -1));
     assert!(reader.grave(added.0, meguri_model::grave::GraveKind::Note).unwrap().is_none());
 }
+
+#[test]
+fn legacy_map_keys_may_carry_leading_zeros_and_name_members_the_archive_lacks() {
+    let source = Fixture::new(1);
+    source.clock.step_ms(1000);
+    add_note(&source, source.notetype, &["<img src=\"a.png\">", "back"]);
+    let exported = export(&source, "deck.apkg");
+    let mut archive = ZipArchive::new(std::fs::File::open(&exported).unwrap()).unwrap();
+    let collection = zstd::decode_all(&entry(&mut archive, "collection.anki21b")[..]).unwrap();
+    let package = exported.with_file_name("keys.apkg");
+    write_zip(
+        &package,
+        &[
+            ("collection.anki21".into(), collection.clone()),
+            (
+                "media".into(),
+                br#"{"000":"a.png","99999999999999999999":"never.png","7":"unused.gif"}"#.to_vec(),
+            ),
+            ("0".into(), b"pixels".to_vec()),
+        ],
+    );
+    let target = Fixture::new(1);
+    let session = inspect(&target, &package).unwrap();
+    assert_eq!(session.facts().media_files, 3);
+    apply(&target, &session, ALL_OFF).unwrap();
+    assert_eq!(media_files(&target)["a.png"], b"pixels");
+    // Two equal keys are refused.
+    let twice = exported.with_file_name("twice.apkg");
+    write_zip(
+        &twice,
+        &[
+            ("collection.anki21".into(), collection),
+            ("media".into(), br#"{"0":"a.png","0":"b.png"}"#.to_vec()),
+        ],
+    );
+    assert!(matches!(inspect(&target, &twice), Err(ApkgImportError::Corrupt { .. })));
+}

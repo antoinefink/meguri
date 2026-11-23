@@ -111,7 +111,11 @@ pub(crate) fn same_schema(a: &Notetype, b: &Notetype) -> bool {
             _ => a_name == b_name,
         }
     }
-    a.fields.len() == b.fields.len()
+    // A standard and a cloze note type never share a schema: an update
+    // across kinds would leave cards without a template (as J2 refuses
+    // for a merge), so the incoming one becomes a copy.
+    (a.config.kind == 1) == (b.config.kind == 1)
+        && a.fields.len() == b.fields.len()
         && a.templates.len() == b.templates.len()
         && a.fields
             .iter()

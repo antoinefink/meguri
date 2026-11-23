@@ -960,10 +960,13 @@ impl MediaStore {
         if ignored(name) {
             return Err(MediaError::IgnoredName);
         }
-        if self.case_variant_present(name)? {
+        self.check_changes()?;
+        // The check and the write share one hold of the journal, so no add
+        // of this store can take the name in between.
+        let mut db = self.db()?;
+        if !self.candidates(&mut db, name)?.is_empty() || self.media_dir().join(name).symlink_metadata().is_ok() {
             return Ok(None);
         }
-        let mut db = self.db()?;
         self.install_locked(&mut db, name, bytes, &[])?;
         Ok(Some(name.into()))
     }

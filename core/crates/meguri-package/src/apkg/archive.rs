@@ -42,7 +42,7 @@ pub(crate) struct MediaEntry {
     /// (legacy, P17).
     pub name: String,
     /// The zip member that holds the payload.
-    pub member: u32,
+    pub member: u64,
     /// The declared size: the map's (latest) or the member's uncompressed
     /// size in the zip directory (legacy); 0 for a member the archive lacks.
     pub size: u64,
@@ -190,7 +190,7 @@ impl DeckArchive {
                 sha1.copy_from_slice(record.sha1);
                 entries.push(MediaEntry {
                     name: record.name.to_owned(),
-                    member: entries.len() as u32,
+                    member: entries.len() as u64,
                     size: u64::from(record.length),
                     sha1: Some(sha1),
                 });
@@ -204,7 +204,7 @@ impl DeckArchive {
             })?;
             let mut entries = legacy_map(&bytes, check)?;
             for entry in &mut entries {
-                if let Some(index) = self.zip.payloads.get(&entry.member) {
+                if let Some(index) = u32::try_from(entry.member).ok().and_then(|n| self.zip.payloads.get(&n)) {
                     entry.size = self.zip.sizes[*index].1;
                 }
             }
@@ -221,13 +221,15 @@ impl DeckArchive {
         check: &(dyn Fn() -> bool + Sync),
         mut output: impl FnMut(&[u8]) -> Result<()>,
     ) -> Result<(u64, [u8; 20])> {
-        if let Some(fault) = self.zip.bad_payloads.get(&entry.member) {
+        // A number past any member count names no member (P17).
+        let number = u32::try_from(entry.member).map_err(|_| corrupt("missing media payload"))?;
+        if let Some(fault) = self.zip.bad_payloads.get(&number) {
             return Err(fault.clone());
         }
         let index = *self
             .zip
             .payloads
-            .get(&entry.member)
+            .get(&number)
             .ok_or_else(|| corrupt("missing media payload"))?;
         let member = self.zip.archive.by_index(index)?;
         let mut digest = Sha1::new();
@@ -277,7 +279,7 @@ fn legacy_map(bytes: &[u8], check: &(dyn Fn() -> bool + Sync)) -> Result<Vec<Med
     }
     let text = std::str::from_utf8(bytes).map_err(|_| corrupt("legacy media map is not UTF-8"))?;
     let Pairs(pairs) = serde_json::from_str(text).map_err(|_| corrupt("legacy media map is not a JSON object"))?;
-    let mut members = BTreeSet::new();
+    let mut keys = BTreeSet::new();
     let mut names = BTreeSet::new();
     let mut entries = Vec::with_capacity(pairs.len());
     for (key, name) in pairs {
@@ -285,16 +287,13 @@ fn legacy_map(bytes: &[u8], check: &(dyn Fn() -> bool + Sync)) -> Result<Vec<Med
         if key.is_empty() || !key.bytes().all(|b| b.is_ascii_digit()) {
             return Err(corrupt("legacy media map key"));
         }
-        // Leading zeros are allowed; a number past any member count names
-        // no member and can never be read.
+        // Leading zeros are allowed (`007` names member `7`); a number past
+        // any member count names no member and can never be read. Only two
+        // equal keys are refused.
         let digits = key.trim_start_matches('0');
-        let member: u32 = if digits.is_empty() {
-            0
-        } else {
-            digits.parse().map_err(|_| corrupt("legacy media map key"))?
-        };
-        if !members.insert(member) {
-            return Err(corrupt("legacy media map repeats a member"));
+        let member: u64 = if digits.is_empty() { 0 } else { digits.parse().unwrap_or(u64::MAX) };
+        if !keys.insert(key.clone()) {
+            return Err(corrupt("legacy media map repeats a key"));
         }
         if name.is_empty() || name == "." || name == ".." || name.contains('/') {
             return Err(corrupt("unsafe legacy media name"));

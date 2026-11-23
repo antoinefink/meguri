@@ -13,6 +13,9 @@ use crate::package_inspection::{CandidateContext, CandidateError};
 use crate::schema::{SCHEMA_VERSION, refuse, version};
 use crate::{OpenError, OpenOptions, ReadRows, StorageError, open_collection};
 
+/// The most fields a package note type may have for I3.3's repair.
+const MAX_FIELDS: usize = 5000;
+
 /// One day, in milliseconds: how far past now an id may lie (I3.1).
 const DAY_MS: i64 = 86_400_000;
 
@@ -116,6 +119,17 @@ fn repair_opened(
         }
     }
     cancelled(context)?;
+    // The file is a private copy that is read, never activated: triggers
+    // and views a package brought could rewrite the rows the repairs below
+    // and the import read, so they go first.
+    let extras: Vec<(String, String)> = conn
+        .prepare("SELECT type, name FROM sqlite_master WHERE type IN ('trigger', 'view')")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (kind, name) in extras {
+        let kind = if kind == "view" { "VIEW" } else { "TRIGGER" };
+        conn.execute_batch(&format!("DROP {kind} IF EXISTS \"{}\"", name.replace('"', "\"\"")))?;
+    }
     conn.execute_batch("BEGIN IMMEDIATE")?;
     let run = || -> Result<DeckCandidateFacts, CandidateError> {
         let now_ms = context.clock.now_ms();
@@ -373,6 +387,11 @@ fn repair_field_counts(
         after = last.0;
         for (id, fields, wanted) in &page {
             let wanted = usize::try_from(*wanted).map_err(|_| corrupt("field count"))?;
+            // No real note type comes near this: a crafted count would make
+            // every repaired note that many values long.
+            if wanted > MAX_FIELDS {
+                return Err(corrupt("note type field count"));
+            }
             let values: Vec<String> = fields.split('\u{1f}').map(str::to_owned).collect();
             if wanted == 0 || values.len() == wanted {
                 continue;

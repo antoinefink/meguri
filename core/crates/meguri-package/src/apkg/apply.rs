@@ -99,7 +99,7 @@ pub fn apply(
     let context = session.context.clone();
     progress.set_phase(ProgressPhase::Planning);
     let check = || -> ImportOutcome<()> { cancel.check().map_err(Into::into) };
-    let raw = Arc::new(gather::read(&session.collection_path(), &context, &check)?);
+    let raw = Arc::new(gather::read(&session.collection_path(), &context, options.with_scheduling, &check)?);
     let taken = Arc::new(gather::take(&raw, &options));
     let service = MediaService::open(&collection, context.clock.clone())?;
 
@@ -117,7 +117,10 @@ pub fn apply(
         spec,
         meguri_engine::executor::plan_commit::REPLANS,
         |planning| {
-            let today = collection.today()?;
+            // T by the pure day calculation on the snapshot: the write phase
+            // makes the same computation on the live rows (I14.2).
+            let today = super::commit::today(&**planning.snapshot(), context.clock.as_ref(), context.clock.now_ms())
+                .map_err(|error| stash(&fault, error.into()))?;
             let now_s = context.clock.now_ms().div_euclid(1000);
             let built = plan::build(
                 &**planning.snapshot(),
@@ -224,7 +227,9 @@ pub fn apply(
         session.lock().result = Some(result.clone());
         Some(result)
     };
-    drop(slot);
+    // The slot is held until the session has its result and the static
+    // media are written: no second apply and no collection swap in between.
+    let _held = slot;
     match outcome {
         Ok(op) => finish(op.seq.0, op.generation.0, op.undo.map(|undo| undo.name), false).ok_or_else(|| {
             ApkgImportError::Io {

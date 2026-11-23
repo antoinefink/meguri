@@ -147,10 +147,11 @@ pub fn inspect(
         return Err(ApkgImportError::UnsupportedFile);
     }
     progress.set_phase(ProgressPhase::Named("extracting"));
-    let mut input = File::open(source)?;
-    if !input.metadata()?.is_file() {
+    // Checked before the open: opening a FIFO would block.
+    if !std::fs::metadata(source)?.is_file() {
         return Err(ApkgImportError::UnsupportedFile);
     }
+    let mut input = File::open(source)?;
     let size = input.metadata()?.len();
     preflight(context, size.checked_add(MARGIN).ok_or_else(|| corrupt("source size"))?)?;
     let staging = meguri_storage::leftovers::staging_directory(&context.collection_directory)?;
@@ -182,7 +183,8 @@ pub fn inspect(
     // Step 1: archive and format. Step 2: preflight and extraction.
     let mut archive = DeckArchive::open(&copy, check, 0)?;
     let format = archive.format;
-    let estimate = archive.collection_estimate(0)?;
+    let live = std::fs::metadata(context.collection_directory.join(COLLECTION)).map_or(0, |m| m.len());
+    let estimate = archive.collection_estimate(live)?;
     preflight(context, estimate.checked_add(MARGIN).ok_or_else(|| corrupt("inspect preflight"))?)?;
     let collection = staging.path().join(COLLECTION);
     {
@@ -238,7 +240,8 @@ pub fn inspect(
             };
             let mut next = Some(deck);
             while let Some(found) = next {
-                if named.iter().any(|known| known.id == found.id) {
+                // The deck with id 1 is listed only when a card names it.
+                if named.iter().any(|known| known.id == found.id) || (found.id.0 == 1 && !refs.decks.contains(&1)) {
                     break;
                 }
                 named.push(found);
@@ -266,7 +269,7 @@ pub fn inspect(
             has_scheduling: refs.studied_card || refs.revlog_row,
             has_presets,
             media_files: media.len() as u64,
-            media_bytes: media.iter().map(|entry| entry.size).sum(),
+            media_bytes: media.iter().fold(0_u64, |sum, entry| sum.saturating_add(entry.size)),
             repaired: Repaired {
                 note_ids: prepared.new_note_ids,
                 card_ids: prepared.new_card_ids,

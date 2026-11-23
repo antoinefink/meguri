@@ -80,12 +80,17 @@ fn write_options(scope: &mut WriteScope<'_>, options: &ImportOptions) -> Result<
     Ok(())
 }
 
-/// The target's today from the live rows, by the pure day calculation.
-fn live_today(scope: &WriteScope<'_>, clock: &dyn meguri_model::clock::Clock) -> Result<u32, EngineError> {
-    let config = meguri_sched::model::sched_config::SchedConfig::new(scope);
-    let at = scope.now().0;
+/// The target's today at `at` (epoch milliseconds) from `rows`, by the pure
+/// day calculation: the plan uses it on its snapshot and the write phase on
+/// the live rows.
+pub(crate) fn today(
+    rows: &impl ReadRows,
+    clock: &dyn meguri_model::clock::Clock,
+    at: i64,
+) -> Result<u32, EngineError> {
+    let config = meguri_sched::model::sched_config::SchedConfig::new(rows);
     Ok(meguri_sched::timing::sched_day(&meguri_sched::timing::DayInputs {
-        crt: scope.col()?.created.0,
+        crt: rows.col()?.created.0,
         creation_offset: config.creation_offset()?,
         rollover_hour: config.rollover_hour()?,
         offset: clock.utc_offset_at(at),
@@ -320,9 +325,14 @@ fn write_decks(
             let before = deck.name.clone();
             apply_renames(&mut deck.name, &renames[renames.len() - 1..]);
             if deck.name == before {
-                // The ancestor matched under unicase but not byte for byte.
-                let rest = &before[ancestor.name.len()..];
-                deck.name = format!("{}{rest}", stand_in.name);
+                // The ancestor matched under unicase but not byte for byte:
+                // replace as many leading components as its name has.
+                let depth = ancestor.name.split('\u{1f}').count();
+                let rest: Vec<&str> = before.split('\u{1f}').skip(depth).collect();
+                deck.name = std::iter::once(stand_in.name.as_str())
+                    .chain(rest)
+                    .collect::<Vec<_>>()
+                    .join("\u{1f}");
             }
         }
         let name = match names::prepare(&rows, deck.name.clone()) {
@@ -393,7 +403,8 @@ pub(crate) fn commit(
         ..ImportLog::default()
     };
     let scope = ctx.scope();
-    if live_today(scope, clock)? != plan.target_today {
+    let at = scope.now().0;
+    if today(&*scope, clock, at)? != plan.target_today {
         return Err(stale(Table::Col, "day"));
     }
     write_options(scope, &plan.options)?;

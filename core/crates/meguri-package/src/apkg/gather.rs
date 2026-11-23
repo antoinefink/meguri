@@ -36,18 +36,27 @@ pub(crate) struct RawPackage {
     pub rollover_hour: u8,
 }
 
-pub(crate) fn read(path: &Path, context: &ApkgContext, check: &dyn Fn() -> ImportOutcome<()>) -> ImportOutcome<RawPackage> {
+pub(crate) fn read(
+    path: &Path,
+    context: &ApkgContext,
+    scheduling: bool,
+    check: &dyn Fn() -> ImportOutcome<()>,
+) -> ImportOutcome<RawPackage> {
     let opened =
         meguri_storage::deck_package::open_deck_candidate(path, context.clock.as_ref(), context.random.as_ref())
             .map_err(|gate| corrupt(format!("candidate gate: {gate}")))?;
-    let outcome = read_rows(opened.writer(), check);
+    let outcome = read_rows(opened.writer(), scheduling, check);
     let closed = opened.close();
     let raw = outcome?;
     closed?;
     Ok(raw)
 }
 
-fn read_rows(rows: &impl ReadRows, check: &dyn Fn() -> ImportOutcome<()>) -> ImportOutcome<RawPackage> {
+fn read_rows(
+    rows: &impl ReadRows,
+    scheduling: bool,
+    check: &dyn Fn() -> ImportOutcome<()>,
+) -> ImportOutcome<RawPackage> {
     let mut notes = Vec::new();
     loop {
         check()?;
@@ -66,17 +75,26 @@ fn read_rows(rows: &impl ReadRows, check: &dyn Fn() -> ImportOutcome<()>) -> Imp
         }
         cards.extend(page);
     }
+    // I6 takes the cards of the package's notes and the review log of
+    // those cards: rows that name no parent play no part.
+    let note_ids: HashSet<i64> = notes.iter().map(|note| note.id.0).collect();
+    cards.retain(|card| note_ids.contains(&card.note_id.0));
     let mut revlog = Vec::new();
-    loop {
-        check()?;
-        let page = rows
-            .revlog_after(revlog.last().map(|r: &RevlogEntry| r.id), PAGE)
-            .map_err(unreadable)?;
-        if page.is_empty() {
-            break;
+    // Without scheduling no review-log row is taken (I6): none is read.
+    if scheduling {
+        loop {
+            check()?;
+            let page = rows
+                .revlog_after(revlog.last().map(|r: &RevlogEntry| r.id), PAGE)
+                .map_err(unreadable)?;
+            if page.is_empty() {
+                break;
+            }
+            revlog.extend(page);
         }
-        revlog.extend(page);
     }
+    let card_ids: HashSet<i64> = cards.iter().map(|card| card.id.0).collect();
+    revlog.retain(|row| card_ids.contains(&row.card_id.0));
     let mut notetypes = BTreeMap::new();
     for id in notes.iter().map(|note| note.notetype_id.0).collect::<BTreeSet<_>>() {
         if let Some(notetype) = rows.notetype(NotetypeId(id)).map_err(unreadable)? {

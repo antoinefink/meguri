@@ -618,3 +618,45 @@ fn a_failed_safety_backup_refuses_a_structural_import_with_nothing_written() {
     let result = apply(&target, &session, ALL_OFF).unwrap();
     assert!(result.safety_backup.is_some());
 }
+
+#[test]
+fn a_note_type_of_the_other_kind_is_never_updated_in_place() {
+    let source = Fixture::new(0);
+    let mut cloze = notetype(5000, "Pair", 200, &two_fields(), &one_template());
+    cloze.config.kind = NotetypeKind::Cloze.stored();
+    put_notetype(&source, cloze);
+    add(&source, 5000, "g-new", &["{{c1::star}}", "etoile"], 1);
+    let package = export(&source, "deck.apkg");
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    add(&target, 5000, "g-other", &["moon", "lune"], 1);
+    let result = import(&target, &package, ALL_OFF).unwrap();
+    assert_eq!((result.counts.notetypes_copied, result.counts.notetypes_updated), (1, 0));
+    assert_eq!(stored_notetype(&target, 5000).unwrap().config.kind, NotetypeKind::Standard.stored());
+    let fresh = note_by_guid(&target, "g-new").unwrap();
+    assert_eq!(stored_notetype(&target, fresh.notetype_id.0).unwrap().config.kind, NotetypeKind::Cloze.stored());
+}
+
+#[test]
+fn a_filtered_ancestor_matched_only_by_case_folding_gets_its_stand_in() {
+    let source = Fixture::new(0);
+    // U+1E9E folds to `ss`, the name of the target's filtered deck.
+    let child = meguri_engine::decks::ops::add(&source.collection, "\u{1e9e}::x".into()).unwrap().value;
+    put_notetype(&source, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    add(&source, 5000, "g-one", &["sun", "soleil"], child.id.0);
+    let package = export(&source, "deck.apkg");
+    let target = Fixture::new(0);
+    target.clock.step_ms(60_000);
+    raw(&target, |scope| {
+        scope.add_deck(&filtered("ss"))?;
+        Ok(())
+    });
+    import(&target, &package, ALL_OFF).unwrap();
+    let suffix = target.clock.now_ms() / 1000;
+    let id = note_by_guid(&target, "g-one").unwrap().id;
+    let reader = target.collection.reader(ReaderRole::Query).unwrap();
+    let deck = reader.cards_of_note(id).unwrap()[0].deck_id;
+    let name = reader.deck(deck).unwrap().unwrap().human_name();
+    assert!(name.ends_with("::x") && name.contains(&suffix.to_string()), "{name}");
+    assert!(matches!(reader.deck(deck).unwrap().unwrap().kind.kind, DeckKind::Normal(_)));
+}
