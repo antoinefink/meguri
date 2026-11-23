@@ -1432,3 +1432,47 @@ From Antoine's annotations on a capture of his opened iPhone Duo (`decisions.md`
 - Antoine, on the opened Duo: "Should we remove the big Meguri text on the top left?"; the coordinator decided yes. The column beside Today draws no title: its navigation bar holds only the trailing buttons (sync, Add) and the always-visible search field follows directly, with the inline title mode so no large-title band is left (`toolbar(removing: .title)`, as the iPad sidebar, N14.9). "Decks" stays the column's navigation title for VoiceOver and the scene; "Decks" is drawn once, as the section header (N26.3).
 - Single-column layouts (an iPhone, the Duo folded or held tall) keep the large title "Decks" (N14.8) and have no "Decks" header, so the word shows once there too. The iPad sidebar draws no title (N14.9); the Mac sidebar never drew one. Both unchanged.
 - Replaces N26.3's column title "Meguri".
+
+## N27. Home at launch: no flash of a false state (2026-11-23)
+
+Antoine's report from his iPhone Duo (2026-11-23), paraphrased: started cold, the app shows the screen that says there are no decks for a split second, then the decks; should it show a blank screen until everything is loaded, or a loader, and what is best. His standing rule: every interaction instant, no loading screen that flashes, old content stays until new content is ready, preload with pure reads. Decided by Claude (coordinator) under his delegation, pending his look (`decisions.md`, 2026-11-23). Where earlier text differs (N2's distinct collection-loading state, N14.1's "Loading … keep their content"), this section wins.
+
+Cause: the open set the collection ready before Home's first deck tree was read, and Home took "ready with an empty tree" for a collection with no decks. Between the two, the host completion awaited the sync attachment, the previous-session record, the day check, the media index and study preparation, in that order, before the tree read; the page drew "No Decks" (the sidebar "No decks", the opened Duo one column) for that time. Before the open, Home drew "Opening collection…" with a spinner.
+
+### N27.1 What each state shows
+
+- The welcome shows only when there is no collection to open (`state` no file). "No Decks" (and the sidebar's "No decks") shows only after a finished read of the open collection found no deck.
+- Not known yet (unopened, opening, open with its tree not read, and an exclusive phase before any read) is its own state (`HomePhase.pending` or `.kept`): it never draws the welcome, "No Decks" or a loading screen with text.
+- Failed, busy (an exclusive phase after a read) and Start Empty's recovery keep their own views.
+
+### N27.2 The kept read
+
+- At the end of each successful read Home keeps what it showed: deck names, the tree's shape and its saved disclosures, the counts, Today's figures (Studied Today, the next learning card, the previous session) and the tab layout's previous-session count, with the study day's end (`next_day_at`). One small file in the app's caches (`<Caches>/Meguri/home-snapshot.json`), excluded from backups, never synced, written off the main thread when it changed.
+- It names its collection file (path, file number, creation time). A launch reads it before the first frame and shows it only for that same file: a replaced collection (an import, a download, a restored backup, a fixture) is another file, so its snapshot is deleted unread. It is also deleted when a replacement starts or happens in the app (an import, a Meguri Sync or iCloud download, a manual transfer), and when no collection file exists. The app has no sign-out or reset that keeps the file; those that replace or remove it are covered by the rules above.
+- Until this launch's first read the deck list, the sidebar, Today and a restored deck page show the kept read; the read replaces it in place: same rows, same identities, same order, no layout jump and no scroll reset (the list keeps one view and its saved position). The heatmap and other reads wait for the first tree (N27.5).
+
+### N27.3 Held counts and nothing kept
+
+- Kept counts from an earlier study day (the day they were read in has ended, or its end is unknown) are held back: rows show names and the tree with no number (blank, never zero), nothing speaks a count, the Mac shows no subtitle, and Today and a deck page wait for the read in their own background. Learning cards that came due during the same day are not a new day: those counts show as kept and update with the read.
+- With nothing kept (the first run after install, after a replacement) and a collection still opening, the shell shows its chrome and an empty content area in the page's own background, with no spinner and no text. Only when the read takes longer than half a second does the system's small progress indicator (`ProgressView`, small) show, centred; it goes the moment content arrives. Never a full-screen loading screen.
+- On the first launch after install there is no collection file: the welcome shows as soon as the open finds none, in that background before it.
+
+### N27.4 A press on kept content
+
+- Kept controls look as they will (Study is not dimmed) and never act on kept ids. A deck row, a sidebar row or Study pressed before the collection is ready waits for the first read and the open's end (a few hundred milliseconds, at most three seconds), then acts on the read tree: a deck opens only if the read tree has its id, Today's Study walks the read decks. A later press or any navigation meanwhile supersedes the waiting one, and a deck the read tree lacks does nothing. Chosen over inert controls: the press is never dropped while the open is that short, and the list beside Today shows its selection at once.
+
+### N27.5 Nothing else before the first tree
+
+- The first deck tree is read as soon as the open's day check has run, before the sync attachment, the media index and study preparation. The heatmap's reads wait for it (the core's query lane is serial; a history scan queued first delayed the tree). R1818's interval `launch.toDeckListInteractive` runs from the collection owner's creation to the first tree.
+
+### N27.6 The opened Duo's layout
+
+- A launch that found the collection's file (or a kept read) lays the opened Duo out as the list beside Today from its first frame, instead of one column that switches to two. With no file it keeps N18.3's single column for the welcome.
+
+### N27.7 Launch screen
+
+- The touch launch screen is the system grouped background, light and dark (`UILaunchScreen` with the `LaunchBackground` colour, #F2F2F7 and black), the first frame's: the deck list, Today (inset grouped, N24.5) and the welcome are grouped lists. It was the generated empty launch screen, white in light mode, which showed as a white frame before the grey list. No bars are drawn: the system's launch-screen bars do not match iOS 27's glass bars, which appear with the first frame.
+
+### N27.8 What this replaces
+
+- N2's "distinct collection-loading state" and the "Opening collection…" loading view on Home; N14.1's loading state for Today. The failed, unavailable, no-file and empty-deck states stay distinct.

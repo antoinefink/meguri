@@ -144,7 +144,11 @@ screens:
       2026-11-21 (round 10; N24): a sidebar row's number counts every card waiting (the Mac's badge),
       its help tag gives the path and the three counts, a double-click (Mac) or Return (and S on the
       iPad) starts the deck (decks/deck-list H12), the heatmap takes N24.6's levels, colours and
-      month labels, and Today beside the list is home.today.
+      month labels, and Today beside the list is home.today. Changed 2026-11-23 (N27): loading is
+      the last read kept for the same collection file, replaced in place by the read, its counts held
+      back when they are from an earlier study day; with nothing kept, the page's own background and
+      the small progress indicator only after half a second; the welcome and the empty state ("No
+      Decks", the sidebar's "No decks") only once they are known.
   - id: home.today
     title: Today
     units: [U152, U157, U228]

@@ -31,6 +31,8 @@ extension TestHooks {
     /// | `-MeguriRoute` | a route registered in `RouteRegistry`, e.g. `sample/sheet` |
     /// | `-MeguriBackgroundLaunch` | Mac only: `YES` or `NO`; in Debug, `YES` keeps the app out of the Dock and never active (`BackgroundLaunch`, which reads it itself; Profile ignores it). Not a UI-state option: it changes neither the restored state nor the window size |
     /// | `-MeguriStudyTimings` | `on` or `off` (default): a strip below the shell gives the last Study's way to its first card (`StudyStartTrace`, R1813) as `testhooks.studyStart.timings` |
+    /// | `-MeguriHomeSnapshot` | `on` or `off` (default): `on` keeps Home's last read between launches (`HomeSnapshotStore`, N27.2) as a launch with no hook option does; a hook launch otherwise keeps none |
+    /// | `-MeguriHomeTrace` | `on` or `off` (default): a strip below the shell gives every Home phase shown since launch, in order (`HomePhase`, N27.1), as `testhooks.home.phases` |
     /// | `-MeguriStatsRollout` | `off`, `on` or `open`: `off` hides Statistics where it shows by default (the Mac, the iPad; U307's part), `on` turns `StatsRollout` on (U296) wherever the app runs, so the sidebar's Statistics row and View › Statistics (⇧⌘S) show; `open` also opens the window on Statistics once the shell starts (captures and performance tests over `-MeguriFixture`); `open:<section>` then scrolls the page to that section (`knowledge`, `reviews`, `cards`, `comingUp`, `answering`, `memory`, `decks`), for Mac captures, which cannot scroll. A `stats/…` route turns it on by itself |
     /// | `-MeguriSyncRender` | a `SyncCoordinator.RenderState` name (`meguriConnected`, `meguriSyncing`, …), optionally followed by `+justFinished`: with `-MeguriFixture`, once the collection opens the shell shows that synthetic sync status in place of the real one; with a shell route, the shell gets the sync button over that status (captures of the sync button; nothing syncs) |
     struct LaunchOptions: Equatable {
@@ -68,6 +70,8 @@ extension TestHooks {
         var integrations: Bool?
         var route: Route?
         var studyTimings = false
+        var homeSnapshot = false
+        var homeTrace = false
         var statsRollout: StatsRolloutOption?
         /// `-MeguriStatsRollout off`: Statistics hidden where it would show (the Mac, the iPad).
         var statsRolloutOff = false
@@ -95,6 +99,7 @@ extension TestHooks {
             "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
             "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "SizeClass",
             "Integrations", "Route", "BackgroundLaunch", "ImportSource", "OwnedProviderFixture", "StudyTimings", "SyncRender", "StatsRollout",
+            "HomeSnapshot", "HomeTrace",
             "NativeReviewRoot", "NativeReviewCase", "NativeReviewPlatform", "NativeReviewFreezeSHA256", "NativeReviewFreezeBytes",
         ]
 
@@ -225,6 +230,8 @@ extension TestHooks {
             }
             integrations = try values["Integrations"].map { value throws(TestHookError) in try Self.onOff(value, "Integrations") }
             studyTimings = try values["StudyTimings"].map { value throws(TestHookError) in try Self.onOff(value, "StudyTimings") } ?? false
+            homeSnapshot = try values["HomeSnapshot"].map { value throws(TestHookError) in try Self.onOff(value, "HomeSnapshot") } ?? false
+            homeTrace = try values["HomeTrace"].map { value throws(TestHookError) in try Self.onOff(value, "HomeTrace") } ?? false
             if let value = values["Route"] {
                 route = try Route(value)
             }
@@ -300,6 +307,9 @@ extension TestHooks {
             } else if ownedProvider != nil {
                 throw TestHookError("OwnedProviderFixture context requires explicit opt-in")
             }
+            // A hook launch starts from what it installs: no last read of an earlier run
+            // shows unless it asks (N27.2).
+            if self != LaunchOptions(), !homeSnapshot { configuration.homeSnapshotFile = nil }
             if let nativeReview {
                 guard installer.bundleIdentifier.hasSuffix(".dev") else { throw TestHookError("NativeReview requires a .dev bundle") }
                 #if os(macOS)
