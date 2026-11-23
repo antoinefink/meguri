@@ -165,20 +165,7 @@ struct StatsActivityBox: View {
     /// two lines in every phase so the grid never moves down when the numbers arrive (S10.3).
     /// The grid's element reads them (S15), so they are not elements of their own.
     private func headline(_ content: StatsBoxContent) -> some View {
-        let ready = content.phase == .ready
-        return VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-            Text(verbatim: ready ? content.figure?.value ?? text.noValue : text.noValue)
-                .font(.title2.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(ready && content.figure != nil ? .primary : .secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Text(verbatim: ready ? content.figure?.sentence ?? " " : " ")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2, reservesSpace: true)
-        }
-        .accessibilityHidden(true)
+        StatsBoxFigureView(figure: content.figure, ready: content.phase == .ready)
     }
 
     // MARK: Keys (S14)

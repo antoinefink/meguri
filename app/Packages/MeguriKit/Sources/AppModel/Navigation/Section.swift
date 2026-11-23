@@ -22,8 +22,22 @@ nonisolated public struct DeckID: RawRepresentable, Hashable, Codable, Sendable,
 nonisolated public enum AppSection: String, CaseIterable, Codable, Sendable {
     case home, browse, stats, noteTypes, settings
 
-    /// The sidebar's section group, top to bottom (R17).
-    public static let sidebar: [AppSection] = [.home, .browse, .stats, .noteTypes, .settings]
+    /// The sidebar's section group, top to bottom (R17; N25.1: Statistics second, under Today).
+    public static let sidebar: [AppSection] = [.home, .stats, .browse, .noteTypes, .settings]
+
+    /// Whether the Statistics section is in the product on a device family (N25.1, plan U307):
+    /// its page is built for the Mac and the iPad at regular width (U296 to U301) and for the
+    /// iPhone, the Duo and the compact layouts (U304), so on every family.
+    public static func statisticsShown(on family: DeviceFamily) -> Bool { true }
+
+    /// The product sidebar's section rows on a device family, top to bottom (N21.1, N22.1,
+    /// N25.1): Today, Statistics when it is shown, then Browse and Note Types on the Mac, Note
+    /// Types and Settings elsewhere (the iPad's Browse row waits for its own layout; the Mac's
+    /// Settings is its own window).
+    public static func productSidebar(on family: DeviceFamily, statistics: Bool) -> [AppSection] {
+        let rest: [AppSection] = family == .mac ? [.browse, .noteTypes] : [.noteTypes, .settings]
+        return [.home] + (statistics ? [.stats] : []) + rest
+    }
 
     /// The tab that shows this section in the tab layout.
     public var tab: CompactTab {
@@ -34,6 +48,12 @@ nonisolated public enum AppSection: String, CaseIterable, Codable, Sendable {
         case .noteTypes, .settings: .settings
         }
     }
+}
+
+/// The kind of device the app runs on, for the sections whose pages are not built for every
+/// layout yet.
+nonisolated public enum DeviceFamily: Sendable {
+    case mac, pad, phone
 }
 
 /// The tab layout's tabs, in tab bar order (R18; N25.1: Decks, Statistics, Browse, Settings).

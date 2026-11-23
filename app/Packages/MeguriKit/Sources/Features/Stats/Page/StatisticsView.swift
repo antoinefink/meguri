@@ -334,7 +334,7 @@ struct StatsSectionView: View {
     }
 
     @ViewBuilder private func boxView(_ box: StatsBoxID) -> some View {
-        let slot = StatsBoxSlot(id: box, model: model, size: box == section.lead ? .lead : .regular, open: {})
+        let slot = StatsBoxSlot(id: box, model: model, size: box == section.lead ? .lead : .regular, open: nil)
         switch section {
         case .knowledge: StatsKnowledgeSection.box(slot)
         case .reviews: StatsReviewsSection.box(slot)

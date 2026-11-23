@@ -128,7 +128,7 @@ import Testing
         await settle { model.subtitle?.contains("Updated just now") == true }
         #expect(model.box(.cardsOverTime).phase == .ready)
         #expect(model.box(.knowledgeOverTime).phase == .failed)
-        #expect(model.box(.knowledgeOverTime).data.legendNames == ["Known", "Studied"])
+        #expect(model.box(.knowledgeOverTime).data.legendNames == ["Known", "Studied", "Likely forgotten"])
         #expect(model.subtitle == "100 cards in 4 decks · Updated just now")
         timers.advance(61)
         #expect(model.subtitle == "100 cards in 4 decks")

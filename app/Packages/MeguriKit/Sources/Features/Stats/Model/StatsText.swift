@@ -27,6 +27,8 @@ struct StatsText {
     func days(_ n: Int, _ nText: String) -> String { text("stats.value.days \(n) \(nText)") }
     func daysUnit(_ n: Int) -> String { text("stats.unit.days \(n)") }
     func reviews(_ n: Int, _ nText: String) -> String { text("stats.value.reviews \(n) \(nText)") }
+    var likelyForgottenBand: String { text("stats.knowledge.bandSummary") }
+    func answers(_ n: Int, _ nText: String) -> String { text("stats.value.answers \(n) \(nText)") }
     func ofTotal(_ total: String) -> String { text("stats.value.ofTotal \(total)") }
     func withChange(_ value: String, _ change: String) -> String { text("stats.value.withChange \(value) \(change)") }
     func withShare(_ value: String, _ share: String) -> String { text("stats.value.withShare \(value) \(share)") }

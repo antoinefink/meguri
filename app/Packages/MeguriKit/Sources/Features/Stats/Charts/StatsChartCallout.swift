@@ -50,11 +50,12 @@ struct StatsChartCallout: View {
 /// A legend swatch: the series' colour, as the system legend draws it.
 struct StatsLegendSwatch: View {
     let color: StatsSeriesColor
+    static let side: CGFloat = 8
 
     var body: some View {
         Circle()
             .fill(color.color)
-            .frame(width: 8, height: 8)
+            .frame(width: Self.side, height: Self.side)
             .accessibilityHidden(true)
     }
 }

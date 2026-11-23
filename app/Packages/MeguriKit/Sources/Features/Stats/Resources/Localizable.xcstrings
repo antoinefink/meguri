@@ -379,6 +379,86 @@
         }
       }
     },
+    "stats.byDeck.ascending": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ascending"
+          }
+        }
+      }
+    },
+    "stats.byDeck.column.cards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cards"
+          }
+        }
+      }
+    },
+    "stats.byDeck.column.deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck"
+          }
+        }
+      }
+    },
+    "stats.byDeck.column.retention": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retention"
+          }
+        }
+      }
+    },
+    "stats.byDeck.column.reviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviews"
+          }
+        }
+      }
+    },
+    "stats.byDeck.column.time": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time"
+          }
+        }
+      }
+    },
+    "stats.byDeck.descending": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descending"
+          }
+        }
+      }
+    },
+    "stats.byDeck.rowHint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows statistics for this deck."
+          }
+        }
+      }
+    },
     "stats.byDeck.sentence %@": {
       "localizations": {
         "en": {
@@ -1229,12 +1309,22 @@
         }
       }
     },
+    "stats.knowledge.bandSummary": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shaded band between Studied and Known is the cards likely forgotten."
+          }
+        }
+      }
+    },
     "stats.knowledge.estimatedHelp": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "An estimate: each day is worked out again from your reviews up to that day, with today’s memory parameters."
+            "value": "An estimate: each day is worked out again from your reviews up to that day, with today’s memory parameters. Suspended cards are not included."
           }
         }
       }
@@ -2491,6 +2581,38 @@
         }
       }
     },
+    "stats.value.answers %lld %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@answers@"
+          },
+          "substitutions": {
+            "answers": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ answer"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ answers"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "stats.value.cards %lld %@": {
       "localizations": {
         "en": {
@@ -2551,6 +2673,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "stats.value.labelled %@ %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ %2$@"
           }
         }
       }

@@ -28,7 +28,8 @@ import Testing
         let since = p.format.shortDate(p.days.date(ofDay: -30))
         #expect(box.figure?.sentence == "89.1% of the 86 cards with an estimate, up 7 since \(since)")
         #expect(Self.figures(box) == ["Studied": "86", "Likely Forgotten": "9 (10.5%)", "Change in Period": "+7"])
-        #expect(box.footnote == "5 suspended cards are not included.")
+        // The 5 suspended cards left out are not on the box face (the marker's help says it).
+        #expect(box.footnote == nil)
         let known = try #require(box.data.series.first { $0.id == "known" })
         #expect(known.values.suffix(2) == [75.2, 76.6])
         #expect(known.values.prefix(28).allSatisfy { $0 == nil })
@@ -47,7 +48,7 @@ import Testing
         let noEstimate = try Self.box(.knowledgeOverTime, Fixture.presenter(Fixture.set(values: [.knowledgeOverTime: none])))
         #expect(noEstimate.phase == .empty("No cards with a memory estimate", detail: nil))
         // The legend stays.
-        #expect(noEstimate.data.legendNames == ["Known", "Studied"])
+        #expect(noEstimate.data.legendNames == ["Known", "Studied", "Likely forgotten"])
     }
 
     @Test func retention() throws {
