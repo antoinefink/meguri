@@ -387,26 +387,26 @@ struct StatsPresenter {
     // S7.5
     func activityBox() -> Outcome {
         guard set.value(.activityDays) != nil, let streaks else { return .unavailable }
-        guard !streaks.counts.isEmpty else { return empty(.activity, .noReviewsYet) }
-        let currentYear = days.year(ofDay: 0)
-        let firstYear = days.year(ofDay: streaks.counts.keys.min() ?? 0)
-        var years: [StatsActivity.Year] = []
-        for year in stride(from: currentYear, through: firstYear, by: -1) {
-            guard let first = days.firstDay(ofYear: year) else { continue }
-            let last = min((days.firstDay(ofYear: year + 1) ?? 1) - 1, 0)
-            let counts = streaks.counts.filter { $0.key >= first && $0.key <= last }
-            let total = counts.values.reduce(0, +)
-            years.append(StatsActivity.Year(year: year, firstDay: first, lastDay: last, counts: counts, total: total,
-                                            totalText: text.yearTotal(String(year), total, count(total))))
+        guard let firstCounted = streaks.counts.keys.min() else { return empty(.activity, .noReviewsYet) }
+        // From H9's oldest review when the header has it, as the loading grid was sized (S10.3).
+        let oldest: Int = if case let .day(day) = header.oldestDay { min(day, firstCounted) } else { firstCounted }
+        let span = StatsActivitySpan(firstDay: oldest, days: days)
+        let years = span.years.map { year in
+            let first = days.firstDay(ofYear: year) ?? Int.min
+            let last = (days.firstDay(ofYear: year + 1) ?? 1) - 1
+            let total = streaks.counts.reduce(0) { $0 + ($1.key >= first && $1.key <= last ? $1.value : 0) }
+            return StatsActivity.Year(year: year, total: total, totalText: text.yearTotal(String(year), total, count(total)))
         }
-        let thisYear = years.first?.counts.count ?? 0
-        let activity = StatsActivity(years: years, currentStreak: streaks.current, longestStreak: streaks.longest,
-                                     daysStudiedThisYear: thisYear, days: days)
+        let thisYearStart = days.firstDay(ofYear: days.year(ofDay: 0)) ?? 0
+        let thisYear = streaks.counts.keys.filter { $0 >= thisYearStart }.count
+        let activity = StatsActivity(span: span, counts: streaks.counts, years: years, currentStreak: streaks.current,
+                                     longestStreak: streaks.longest, daysStudiedThisYear: thisYear, days: days)
         return content(.ready, data: StatsChartData(bins: [], series: []),
                        figures: [
                            StatsSmallFigure(label: text.figureCurrentStreak, value: text.days(streaks.current, count(streaks.current))),
                            StatsSmallFigure(label: text.figureLongestStreak, value: text.days(streaks.longest, count(streaks.longest))),
                            StatsSmallFigure(label: text.figureDaysStudiedThisYear, value: count(thisYear)),
+                           StatsSmallFigure(label: text.figureAllReviews, value: count(activity.total)),
                        ],
                        detail: .activity(activity))
     }
@@ -930,7 +930,7 @@ struct StatsSeriesKit {
         case .reviewsOverTime:
             [text.figureDaysStudied, text.figureAverageADay, text.figureAverageOnDaysStudied]
                 + (selection.reviewsMeasure == .time ? [text.figureTimePerCard] : [])
-        case .activity: [text.figureCurrentStreak, text.figureLongestStreak, text.figureDaysStudiedThisYear]
+        case .activity: [text.figureCurrentStreak, text.figureLongestStreak, text.figureDaysStudiedThisYear, text.figureAllReviews]
         case .cardsOverTime: [text.figureNew, text.figureLearning, text.figureYoung, text.figureMature]
         case .cardCounts: [text.figureMature]
         case .addedAndStarted: [text.figureAddedADay, text.figureStartedADay]

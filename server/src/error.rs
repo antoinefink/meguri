@@ -124,13 +124,14 @@ impl IntoResponse for Error {
 /// MCP terminal diagnostics only. Never serialize into a client error body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum McpDiagnosticDetail {
-    PublicationGate, NativeWriter, CollectionPath, CollectionPin,
+    McpQueue, PublicationGate, NativeWriter, CollectionPath, CollectionPin,
     CollectionStorage, CollectionWorker, AuthorityStorage, CollectionOpen,
     CollectionAccess, SqliteOpen, SqliteOpenBusy, SqliteAccess, SqliteAccessBusy,
 }
 impl McpDiagnosticDetail {
     pub(crate) fn label(self) -> &'static str {
         match self {
+            Self::McpQueue => "mcp_queue",
             Self::PublicationGate => "publication_gate", Self::NativeWriter => "native_writer",
             Self::CollectionPath => "collection_path", Self::CollectionPin => "collection_pin",
             Self::CollectionStorage => "collection_storage", Self::CollectionWorker => "collection_worker",

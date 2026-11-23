@@ -1967,3 +1967,30 @@ extension EventTests {
     }
 }
 #endif
+
+#if DEBUG
+extension EventTests {
+    // A shutdown that cancels a start while its runtime preparation runs also
+    // ends its account read; the runtime's unverified-account refusal that
+    // follows reports that cancellation, and no SDK is created.
+    @Test(.timeLimit(.minutes(1)))
+    func cloudKitStartCancelledDuringRuntimePreparationReportsItsCancellation() async throws {
+        try await withCloudKitFixture(startAdapter: false) { f in
+            let arrived = AsyncStream<Void>.makeStream(), release = DispatchSemaphore(value: 0)
+            let adapter = f.adapter
+            let start = Task {
+                try await CloudRuntimePreparationBoundary.$interceptor.withValue({ _, _ in
+                    // Runs on the maintenance lane's thread, outside this task.
+                    arrived.continuation.yield(); release.wait()
+                    throw BridgeError.unavailable(reason: "cloud runtime account is unverified")
+                }) { try await adapter.start(automaticallySync: false) }
+            }
+            for await _ in arrived.stream { break }
+            start.cancel(); release.signal()
+            let result = await start.result
+            #expect(throws: CancellationError.self) { try result.get() }
+            #expect(await f.factory.engines().isEmpty)
+        }
+    }
+}
+#endif

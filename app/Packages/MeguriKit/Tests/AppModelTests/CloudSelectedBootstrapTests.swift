@@ -596,6 +596,11 @@ extension ReviewCollectionStartupTests {
             try FileManager.default.createDirectory(at: a.root, withIntermediateDirectories: false)
             try input.bytes.write(to: a.root.appending(path: "collection.anki2"))
             try await selectedBootstrapPublish(a)
+            // Publication's tail (ConfigureAutomatic at `sent`, the new instance's
+            // UpdatePending) still runs after the terminal commit. The edit's
+            // witness reads one quiescent selected snapshot, as in the other tests.
+            await a.sync.waitForInputs(); await a.sync.drainOperations(); await a.sync.waitForInputs()
+            try #require(!a.sync.operationFailed)
             let before = try await original.validateOwned() // Binds the actual current Host.
             try #require(before.generation == a.owner.generation && !before.qChanged)
             let probe = InitialCloudEvents()

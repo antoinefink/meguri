@@ -254,7 +254,7 @@ fn worker(path: &Path) -> Value {
     // After release the same revision permits a real changed, durable edit.
     let recovery = patch(revision, 1 + WARMUP + SAMPLES);
     backend.edit_note(path, &access, recovery, &SeededRuntime(1_900_000_000_000)).unwrap();
-    // Text search is one bounded page, explicitly not a complete collection scan.
+    // Text search is one bounded page; report whether that page exhausts.
     let query = SearchInput { query: Some("absent-generated-needle".into()), ..Default::default() };
     let (search, text) = sample(path, page, "bounded_text_search_page", || backend.search_notes(path, &access, query).unwrap());
     assert!(search.notes.is_empty());
@@ -282,7 +282,7 @@ fn worker(path: &Path) -> Value {
         "baseline_rss_kib": baseline.rss_kib, "baseline_hwm_kib": baseline.hwm_kib,
         "worker_hwm_kib": end.hwm_kib, "incremental_worker_hwm_kib": end.hwm_kib.saturating_sub(baseline.hwm_kib),
         "warmup_iterations": WARMUP, "summaries": summaries, "raw_samples": samples,
-        "bounded_text_search": {"measurement": text, "has_next_cursor": search.next_cursor.is_some(), "complete_search": false},
+        "bounded_text_search": {"measurement": text, "has_next_cursor": search.next_cursor.is_some(), "complete_search": !search.scan_incomplete, "scan_incomplete": search.scan_incomplete},
         "checkpoint": {"latency_ms": checkpoint_ms, "preceding_wal_frames": frames_before_checkpoint},
         "reopen_after_checkpoint": reopen, "main_bytes_after": file_bytes(path),
         "observed_idle_p95_within_150ms": idle_ok, "observed_busy_max_within_250ms": busy_ok,

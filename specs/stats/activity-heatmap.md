@@ -8,7 +8,7 @@ Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22
 
 ## AH1. What this heatmap is
 
-Changed 2026-11-22 (round 11): the Statistics page's Activity (`stats/statistics-page` S7.5) is this grid extended to every year, with streaks beside it, from the part `activity_days` (`stats/history-reads` H11): AH2's rows and AH3's days, the page's deck rule (G2.1) instead of AH4's home deck, and AH7's levels per year block. This heatmap on Today, the deck list and deck pages is unchanged and still has no streaks (round 10).
+Changed 2026-11-22 (round 11): the Statistics page's Activity (`stats/statistics-page` S7.5) is this grid extended to every year, with streaks beside it (under it since 2026-11-23), from the part `activity_days` (`stats/history-reads` H11): AH2's rows and AH3's days, the page's deck rule (G2.1) instead of AH4's home deck, and AH7's levels per year block (changed 2026-11-23, the owner's Option E: one continuous grid for all of history, wrapped onto lines, with AH7's levels over every day it shows). This heatmap on Today, the deck list and deck pages is unchanged and still has no streaks (round 10).
 
 The minimal heatmap on Home's Today page, the touch deck list and deck pages (`docs/design/native-interface-contract.md` N14.11). It is a Meguri design:
 

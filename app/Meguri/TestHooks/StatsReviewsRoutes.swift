@@ -12,7 +12,8 @@ extension TestHooks.StatsRoutes {
     ///   `empty` (no review yet, S12.3), `failed` (its part fails alone, S12.8), `pinned` (1M with
     ///   a day pinned), `contrast` (Increase Contrast).
     /// - `stats/chart/activity/<state>`: `pinned` (a day pinned), `failed` (its part fails alone),
-    ///   `recent` (reviews only this year: one partial year).
+    ///   `recent` (reviews only this year: one partial year), `long` (about seven years),
+    ///   `long-pinned` (seven years with a day pinned), `ax5` (the largest text size).
     static func registerReviews(in registry: inout TestHooks.RouteRegistry) {
         registry.registerShell("stats/chart/reviews-over-time/by-answer") { _ in reviews(.typical) { $0.setReviewsMode(.byAnswer) } }
         registry.registerShell("stats/chart/reviews-over-time/time") { _ in reviews(.typical) { $0.setReviewsMeasure(.time) } }
@@ -36,6 +37,12 @@ extension TestHooks.StatsRoutes {
             })) }
         registry.registerShell("stats/chart/activity/failed") { _ in reviews(.ending(.partFails(.activityDays))) }
         registry.registerShell("stats/chart/activity/recent") { _ in reviews(.shape(.recent)) }
+        registry.registerShell("stats/chart/activity/long") { _ in reviews(.shape(.long)) }
+        registry.registerShell("stats/chart/activity/long-pinned") { _ in reviews(.shape(.long), pin: (.activity, { content in
+                // A day of the first line, a few years back.
+                if case let .activity(activity)? = content.detail { activity.absoluteDay(ofDay: activity.span.firstDay + 200) } else { -2 }
+            })) }
+        registry.registerShell("stats/chart/activity/ax5") { _ in reviews(.typical, option: .ax5) }
     }
 
     /// The page scrolled to the Reviews section; `configure` sets the boxes' switches before the

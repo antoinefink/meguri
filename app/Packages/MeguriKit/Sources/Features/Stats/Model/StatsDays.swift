@@ -68,6 +68,12 @@ nonisolated struct StatsDays: Sendable, Hashable {
         Self.gregorian.component(.year, from: civilDate(day))
     }
 
+    /// The Gregorian date of `day` (Activity's grid counts plain days back from today's).
+    func gregorianDate(ofDay day: Int) -> (year: Int, month: Int, day: Int) {
+        let parts = Self.gregorian.dateComponents([.year, .month, .day], from: civilDate(day))
+        return (parts.year ?? 1970, parts.month ?? 1, parts.day ?? 1)
+    }
+
     /// The first day of the Gregorian year `year`, or nil when there is no such date.
     func firstDay(ofYear year: Int) -> Int? {
         guard let date = Self.gregorian.date(from: DateComponents(year: year, month: 1, day: 1)) else { return nil }

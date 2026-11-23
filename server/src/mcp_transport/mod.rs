@@ -10,7 +10,7 @@
 //! The backend rechecks the grant/publication at admission, read release and write
 //! commit, and bounds allocations while reading. Only fixed diagnostic metadata is logged.
 //!
-//! Eight nonqueued slots cover body reads, dispatch and response ownership. Reads
+//! Twelve nonqueued slots cover body reads, dispatch and response ownership. Reads
 //! have a ten-second body-read deadline and 1 MiB cap, with depth 16 / 4096 JSON values.
 //! Tool payloads are limited to 512 KiB; complete HTTP responses have a fixed cap.
 //! Close `Control` at shutdown admission, join the listener, then await `idle`.
@@ -61,7 +61,7 @@ pub const SUPPORTED_REVISIONS: [&str; 2] = ["2026-07-28", "2025-11-25"];
 pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 pub const MAX_RESULT_BYTES: usize = 512 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 3 * MAX_RESULT_BYTES + 64 * 1024;
-const CAPACITY: usize = 8;
+const CAPACITY: usize = 12;
 const BODY_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct Admission {

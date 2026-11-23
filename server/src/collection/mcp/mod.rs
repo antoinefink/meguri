@@ -2,10 +2,11 @@
 //! Collection-only MCP backend (M4–M6, C7). No transport or credential parsing.
 //!
 //! The adapter supplies a server-resolved path and an Authority for the exact
-//! original grant/account/publication. Writes refuse contention and an active
-//! native writer immediately; reads may wait up to 500 ms asynchronously for
-//! the account publication barrier before the worker and before any
-//! collection state lock. Its guard must retain the barrier through commit (and
+//! original grant/account/publication. The adapter queues MCP collection jobs
+//! for at most six seconds, then writes refuse publication contention and an
+//! active native writer immediately; reads may wait up to 500 ms asynchronously
+//! for publication before the worker and any collection state lock. Its guard
+//! must retain both admission locks through commit (and
 //! through the final read check), including cancellation of the blocking worker.
 //! Never implement admission using native round retirement. Schedule WAL
 //! checkpoint maintenance separately; MCP disables automatic/close checkpoints.
@@ -76,7 +77,11 @@ pub struct NoteResult {
     pub revision: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SearchResult { pub notes: Vec<NoteResult>, pub next_cursor: Option<String> }
+pub struct SearchResult {
+    pub notes: Vec<NoteResult>, pub next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scan_incomplete: bool,
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeckResult { pub deck_id: String, pub name: String, pub filtered: bool }
 #[derive(Debug, Serialize, Deserialize)]

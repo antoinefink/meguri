@@ -111,7 +111,7 @@ impl transport::Backend<oauth::Authority> for McpService {
                         query: input.query, deck_id: input.deck_id, tag: input.tag,
                         note_id: input.note_id, limit: input.limit.map(|v| v as usize), cursor: input.cursor,
                     }).await.map_err(|e| self.dispatch_failure(e, write))?;
-                    ToolOutput::Notes { next_cursor: out.next_cursor, notes: out.notes.into_iter().map(|n| transport::Note {
+                    ToolOutput::Notes { next_cursor: out.next_cursor, scan_incomplete: out.scan_incomplete, notes: out.notes.into_iter().map(|n| transport::Note {
                         note_id:n.note_id, note_type_id:n.note_type_id, fields:n.fields, tags:n.tags, revision:n.revision,
                     }).collect() }
                 }
