@@ -307,6 +307,7 @@ private struct StatsActivityGrid: View {
     @Environment(\.locale) private var locale
     @Environment(\.calendar) private var calendar
     @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.statsScrolling) private var scrolling
     /// The drawn size, for hit-testing and the overlays; the layout never reads it.
     @State private var size: CGSize = .zero
 
@@ -366,7 +367,7 @@ private struct StatsActivityGrid: View {
             .contentShape(Rectangle())
             #if os(macOS)
             .onContinuousHover(coordinateSpace: .local) { phase in
-                guard !selection.pinned else { return }
+                guard !selection.pinned, !scrolling.active else { return }
                 switch phase {
                 case let .active(location):
                     let hovered = day(at: location)
