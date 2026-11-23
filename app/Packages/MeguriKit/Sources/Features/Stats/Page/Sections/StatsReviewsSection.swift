@@ -48,7 +48,6 @@ struct StatsBoxChrome<Content: View>: View {
     let title: String
     let open: () -> Void
     @ViewBuilder let content: () -> Content
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         container {
@@ -77,24 +76,7 @@ struct StatsBoxChrome<Content: View>: View {
         .accessibilityIdentifier("stats.box.\(box)")
     }
 
-    @ViewBuilder private func container(@ViewBuilder _ content: () -> some View) -> some View {
-        #if os(macOS)
-        GroupBox {
-            content()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        #else
-        if horizontalSizeClass == .regular {
-            GroupBox {
-                content()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-        } else {
-            content()
-                .padding(Spacing.medium)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: Radius.rounded(Radius.large))
-        }
-        #endif
+    private func container(@ViewBuilder _ content: () -> some View) -> some View {
+        StatsBoxContainer(content: content)
     }
 }

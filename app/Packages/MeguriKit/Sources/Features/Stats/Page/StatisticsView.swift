@@ -53,7 +53,6 @@ public struct StatisticsView: View {
             .onAppear { page.appear() }
             .onDisappear { page.disappear() }
             .onChange(of: model.selection) { old, new in page.selectionChanged(from: old, to: new) }
-            .onChange(of: model.boxes) { page.boxesChanged() }
             .onChange(of: model.state) { page.boxesChanged() }
     }
 
@@ -116,6 +115,8 @@ public struct StatisticsView: View {
 private struct StatsPageScroll: View {
     let page: StatsPage
     let navigation: AppNavigation?
+    /// Set while the page moves, read by the plots' hover (not observed: it redraws nothing).
+    @State private var scrolling = StatsScrolling()
     private var model: StatsPageModel { page.model }
 
     var body: some View {
@@ -147,6 +148,13 @@ private struct StatsPageScroll: View {
                 .scrollTargetLayout()
             }
             .modifier(StatsScrollPosition(navigation: navigation))
+            .environment(\.statsScrolling, scrolling)
+            .onScrollPhaseChange { _, phase in
+                // A bar the pointer was over when the page started to move is left as it scrolls
+                // away; a pinned bar stays.
+                if phase.isScrolling, !scrolling.active { model.endHover() }
+                scrolling.active = phase.isScrolling
+            }
             .onChange(of: page.requestedSection) { _, section in
                 guard let section else { return }
                 withAnimation { proxy.scrollTo(section.rawValue, anchor: .top) }
@@ -476,6 +484,13 @@ struct StatsPeriodControl: View {
         .labelsHidden()
         .fixedSize()
         .disabled(!model.controlsEnabled)
+        #if os(macOS)
+        // Exception (verified in the test VM's captures, 2026-11-23): in the window toolbar a
+        // disabled segmented control is still drawn in full colour beside the dimmed deck
+        // pop-up, though it takes no click; it is dimmed to match while the page has no cards
+        // or no collection (S12.1, S12.2).
+        .opacity(model.controlsEnabled ? 1 : 0.4)
+        #endif
         .accessibilityIdentifier("stats.toolbar.period")
     }
 }
