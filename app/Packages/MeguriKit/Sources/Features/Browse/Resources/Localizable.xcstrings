@@ -589,6 +589,16 @@
         }
       }
     },
+    "browse.command.unbury.none": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unbury"
+          }
+        }
+      }
+    },
     "browse.command.unbury.unknown": {
       "localizations": {
         "en": {
@@ -627,6 +637,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "browse.command.unsuspend.none": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unsuspend"
           }
         }
       }

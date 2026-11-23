@@ -8,13 +8,7 @@ import SwiftUI
 /// with its menu, and the system's suggestions list in sections.
 struct BrowseSearchField: ViewModifier {
     let model: BrowseModel
-    /// The Mac's field is placed in the toolbar by Browse's own default
-    /// search item (N21.3's order); touch keeps it at the top of the list.
-    #if os(macOS)
-    static let placement: SearchFieldPlacement = .automatic
-    #else
     static let placement: SearchFieldPlacement = .toolbar
-    #endif
     @FocusState private var focused: Bool
     @Environment(\.locale) private var locale
 

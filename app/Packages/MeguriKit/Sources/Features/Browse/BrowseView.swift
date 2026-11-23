@@ -3,6 +3,9 @@ import CoreBridge
 import DesignSystem
 import Editor
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// Browse's detail beside its sidebar (N21.1, N21.3): the window title
 /// "Browse", the Cards / Notes control right after it, then the trailing
@@ -40,16 +43,11 @@ public struct BrowseView: View {
             .navigationTitle(Text("browse.title", bundle: .module))
             .toolbar {
                 #if os(macOS)
-                // N21.3: the Cards / Notes control right after the title.
-                ToolbarItem(placement: .navigation) { modePicker }
-                // N21.3, N23.6: the trailing group, in this order: the sync button,
-                // the search field, the Add menu. U273's inspector toggle
-                // (`sidebar.trailing`) goes last, after the Add menu.
-                // The search field is placed by its own default item between the
-                // two (the field is searchable with the automatic placement:
-                // with the toolbar placement the system put it last, after Add).
+                // N21.3: Cards / Notes first, held to the leading side by a spacer.
+                ToolbarItem(placement: .primaryAction) { modePicker }
+                ToolbarSpacer(placement: .primaryAction)
+                // N23.6: sync, Add, then the inspector toggle (macOS puts search last).
                 if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
-                DefaultToolbarItem(kind: .search, placement: .primaryAction)
                 if let addMenu { ToolbarItem(placement: .primaryAction) { addMenu } }
                 // N21.3: the inspector toggle, last.
                 ToolbarItem(placement: .primaryAction) { inspectorToggle }
@@ -211,12 +209,35 @@ private struct BrowseSelectAllKey: View {
     let commands: BrowseCommands
 
     var body: some View {
-        Button { commands.selectAll() } label: { EmptyView() }
-            .keyboardShortcut("a", modifiers: [.command, .option])
-            .disabled(!commands.canSelectAll)
-            .opacity(0)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        Group {
+            Button { commands.selectAll() } label: { EmptyView() }
+                .keyboardShortcut("a", modifiers: [.command, .option])
+            // ⌘A: the table's Select All (V7), while the table has the focus: a
+            // SwiftUI table did not answer the system's Select All in the VM.
+            Button {
+                if BrowseResponder.tableIsFirst(NSApp.keyWindow?.firstResponder) {
+                    commands.selectAll()
+                } else {
+                    // Any other focus (a field, the inspector's editor) keeps its own Select All.
+                    NSApp.sendAction(#selector(NSResponder.selectAll(_:)), to: nil, from: nil)
+                }
+            } label: { EmptyView() }
+                .keyboardShortcut("a", modifiers: .command)
+        }
+        .disabled(!commands.canSelectAll)
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+#endif
+
+#if os(macOS)
+/// Whether the results table has the keys: its outline view is the window's
+/// first responder (SwiftUI gives it the table's accessibility identifier).
+public enum BrowseResponder {
+    public static func tableIsFirst(_ responder: NSResponder?) -> Bool {
+        (responder as? NSTableView)?.accessibilityIdentifier() == "browse.results.table"
     }
 }
 #endif
