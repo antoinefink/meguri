@@ -167,7 +167,20 @@ public struct StatsChartBox<Accessory: View>: View {
             .accessibilityLabel(title)
             .accessibilityHint(Text("stats.chart.openHint", bundle: .module))
             .accessibilityIdentifier("stats.box.\(box).header")
-            if !stacks { Spacer(minLength: Spacing.xSmall) }
+            if !stacks {
+                Spacer(minLength: Spacing.xSmall)
+                // Every header as tall as one with a small switch, aligned on its baseline, so
+                // the figures, plots and axes of the boxes in a row line up (Retention's switch
+                // beside Forgotten's bare title).
+                Picker(selection: .constant(0)) { Text(verbatim: " ").tag(0) } label: { EmptyView() }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+                    .frame(width: 0)
+                    .hidden()
+                    .accessibilityHidden(true)
+            }
             accessory
                 .controlSize(.small)
         }
