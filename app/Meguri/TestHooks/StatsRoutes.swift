@@ -244,7 +244,7 @@ extension TestHooks {
         }
 
         func select(_ period: StatsPagePeriod) {
-            page?.model.selectPeriod(period)
+            page?.selectPeriod(period)
         }
 
         /// Scrolls the page section by section for about three seconds, animated, while it reads

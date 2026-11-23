@@ -28,13 +28,13 @@ final class StatisticsShellUITests: XCTestCase {
         XCTAssertTrue(stats.waitForExistence(timeout: 20), "The Statistics row behind the flag")
         XCTAssertLessThan(today.frame.minY, stats.frame.minY, "Statistics under Today (N25.1)")
         XCTAssertLessThan(stats.frame.minY, browse.frame.minY, "Statistics above Browse (N25.1)")
-        XCTAssertFalse(element(app, "stats.page").exists)
+        XCTAssertFalse(element(app, "stats.page.content").exists)
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("s", modifierFlags: [.command, .shift])
-        XCTAssertTrue(element(app, "stats.page").waitForExistence(timeout: 30), "⇧⌘S shows the page")
+        XCTAssertTrue(element(app, "stats.page.content").waitForExistence(timeout: 30), "⇧⌘S shows the page")
         // The first time on a device: All Decks and All (S3.3).
-        XCTAssertEqual(element(app, "stats.deck").value as? String, "All Decks")
-        let all = element(app, "stats.period.all")
+        XCTAssertEqual(element(app, "stats.toolbar.deck").value as? String, "All Decks")
+        let all = element(app, "stats.toolbar.period.all")
         XCTAssertTrue(all.waitForExistence(timeout: 10))
         XCTAssertTrue(all.isSelected, "All is the first period")
         for section in ["knowledge", "reviews", "cards", "comingUp", "answering", "memory", "decks"] {
@@ -64,7 +64,10 @@ final class StatisticsShellUITests: XCTestCase {
         XCTAssertTrue(callout.waitForExistence(timeout: 5), "The click pinned a selection")
         // The kept results go (as on CollectionReplaced): the box reads again, loading.
         post("\(bundle).testhooks.statsReload")
-        XCTAssertTrue(waitForValue(element(app, "stats.strip.mature")), "The box filled again")
+        let mature = element(app, "stats.strip.mature")
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == ''"), object: mature)],
+                                       timeout: 10) == .completed, "The boxes read again: a loading phase")
+        XCTAssertTrue(waitForValue(mature), "The box filled again")
         XCTAssertTrue(callout.waitForExistence(timeout: 5), "The selection stayed pinned through the loading phase")
     }
     #endif
@@ -91,10 +94,11 @@ final class StatisticsShellUITests: XCTestCase {
             let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
             order.append(focused.exists ? focused.identifier : "")
         }
-        let expected = ["stats.deck", "stats.period", "stats.box.knowledgeOverTime.header",
-                        "stats.box.retention.header", "stats.box.retention.kind", "stats.box.forgotten.header"]
-        let tail = Array(order.drop { $0 != "stats.deck" })
-        XCTAssertEqual(Array(tail.prefix(expected.count)), Array(expected.prefix(tail.count)), "Tab order \(order)")
+        let expected = ["stats.toolbar.deck", "stats.toolbar.period", "stats.box.knowledgeOverTime.header",
+                        "stats.box.retention.header", "stats.boxSwitch.retentionKind", "stats.box.forgotten.header"]
+        let tail = Array(order.drop { $0 != "stats.toolbar.deck" })
+        XCTAssertGreaterThanOrEqual(tail.count, 4, "Tab reached the deck pop-up and went on: \(order)")
+        XCTAssertEqual(Array(tail.prefix(min(tail.count, expected.count))), Array(expected.prefix(tail.count)), "Tab order \(order)")
         #endif
     }
 

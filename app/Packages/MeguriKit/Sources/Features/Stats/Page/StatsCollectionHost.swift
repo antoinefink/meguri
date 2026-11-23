@@ -14,7 +14,6 @@ public final class StatsCollectionHost {
     private let signals: StatsCacheSignals
     private let identity: StatsCollectionIdentity
     private weak var collection: ReviewCollection?
-    private var ready = false
     private var appliedTree: (generation: UInt64, nodes: [CountedDeckNode])?
 
     /// - Parameters:
@@ -34,18 +33,29 @@ public final class StatsCollectionHost {
         track()
     }
 
-    /// G10's staleness from the collection's events; a replacement is another collection.
+    /// G10's staleness from the collection's events. A replacement is another collection: its
+    /// results are kept under a new identity from now on (S10.2).
     private func received(_ staleness: StatsStaleness) {
-        if staleness == .collectionReplaced { identity.renew() }
         page.model.receive(staleness)
+        if staleness == .collectionReplaced {
+            identity.renew()
+            appliedTree = nil
+            if open { page.model.collectionOpened(identity: identity.current) }
+        }
     }
 
     // MARK: Observing the collection
 
     /// What the page reads from the collection, re-read after each change.
     private struct Observed: Equatable {
-        var ready: Bool
+        /// The collection can be read now.
+        var readable: Bool
+        /// No collection is open at all: none on the device, a failed open, or none opened yet.
+        var closed: Bool
+        /// A collection is about to open, or is opening or busy for a moment (an import, Check
+        /// Database).
         var opening: Bool
+        var noFile: Bool
         var tree: UInt64?
         var homeIdle: Bool
     }
@@ -53,13 +63,17 @@ public final class StatsCollectionHost {
     private func observe() -> Observed? {
         guard let collection else { return nil }
         let navigation = collection.navigation
-        let opening = collection.state == .loading || collection.state == .unopened
+        let closed: Bool = switch collection.state {
+        case .noFile, .unopened, .failed, .creationRecovery: true
+        case .loading, .ready, .unavailable: false
+        }
         let homeIdle = navigation.section == .home && navigation.review == nil && navigation.sheet == nil
             && collection.review == nil && collection.foreground && collection.state == .ready
         let tree = collection.deckTreeGeneration == collection.generation ? collection.deckTreeGeneration : nil
         // Read so a change of the tree's counts is seen.
         _ = collection.decks
-        return Observed(ready: collection.browseReadable, opening: opening, tree: tree, homeIdle: homeIdle)
+        return Observed(readable: collection.browseReadable, closed: closed, opening: collection.state == .unopened || (!closed && !collection.browseReadable),
+                        noFile: collection.state == .noFile, tree: tree, homeIdle: homeIdle)
     }
 
     private func track() {
@@ -70,22 +84,34 @@ public final class StatsCollectionHost {
         apply(observed)
     }
 
+    /// Whether the model has been told a collection is open.
+    private var open = false
+    /// No collection was on the device: the next one opened is a new collection.
+    private var hadNoFile = false
+
     private func apply(_ observed: Observed) {
         guard let collection else { return }
-        page.opening = observed.opening
-        if observed.ready != ready {
-            ready = observed.ready
-            if ready {
-                page.model.collectionOpened(identity: identity.current)
-                signals.collectionOpened()
-            } else {
-                appliedTree = nil
-                page.model.collectionClosed()
-                signals.collectionClosed()
+        // While a collection is opening or busy for a moment the page keeps what it shows and
+        // shows no "No Collection" (S12.1, S10.2).
+        if page.opening != observed.opening { page.opening = observed.opening }
+        if observed.noFile { hadNoFile = true }
+        if observed.readable, !open {
+            if hadNoFile {
+                // Created, imported or synced onto a device that had none.
+                identity.renew()
+                hadNoFile = false
             }
+            open = true
+            page.model.collectionOpened(identity: identity.current)
+            signals.collectionOpened()
+        } else if observed.closed, open {
+            open = false
+            appliedTree = nil
+            page.model.collectionClosed()
+            signals.collectionClosed()
         }
         // The tree once read for this collection: before that a deck shown is not known gone.
-        if ready, let generation = observed.tree,
+        if open, observed.readable, let generation = observed.tree,
            appliedTree?.generation != generation || appliedTree?.nodes != collection.decks {
             appliedTree = (generation, collection.decks)
             page.model.decksChanged(collection.decks)

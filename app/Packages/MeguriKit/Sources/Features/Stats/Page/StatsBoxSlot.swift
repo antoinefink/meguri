@@ -71,16 +71,16 @@ public struct StatsBoxAccessory: View {
         switch id {
         case .reviewsOverTime:
             HStack(spacing: Spacing.xSmall) {
-                StatsBoxSwitch(id: "stats.box.reviewsOverTime.mode", label: text("stats.switch.mode"),
+                StatsBoxSwitch(id: "stats.boxSwitch.reviewsMode", label: text("stats.switch.mode"),
                                selection: Binding(get: { model.selection.reviewsMode }, set: { model.setReviewsMode($0) }),
                                options: [(.byType, text("stats.switch.byType"), "byType"),
                                          (.byAnswer, text("stats.switch.byAnswer"), "byAnswer")])
-                StatsBoxSwitch(id: "stats.box.reviewsOverTime.measure", label: text("stats.switch.measure"),
+                StatsBoxSwitch(id: "stats.boxSwitch.reviewsMeasure", label: text("stats.switch.measure"),
                                selection: Binding(get: { model.selection.reviewsMeasure }, set: { model.setReviewsMeasure($0) }),
                                options: [(.count, text("stats.switch.count"), "count"), (.time, text("stats.switch.time"), "time")])
             }
         case .retention:
-            StatsBoxSwitch(id: "stats.box.retention.kind", label: text("stats.switch.kind"),
+            StatsBoxSwitch(id: "stats.boxSwitch.retentionKind", label: text("stats.switch.kind"),
                            selection: Binding(get: { model.selection.retentionKind }, set: { model.setRetentionKind($0) }),
                            options: [(.all, text("stats.switch.all"), "all"), (.young, text("stats.switch.young"), "young"),
                                      (.mature, text("stats.switch.mature"), "mature")])

@@ -27,12 +27,21 @@ public struct StatisticsView: View {
             .navigationTitle(Text("stats.title", bundle: .module))
             .navigationSubtitle(Text(verbatim: model.subtitle ?? ""))
             .toolbar {
+                #if os(macOS)
+                // N25.2: after the title, before the trailing sync button.
                 ToolbarItem(placement: .principal) {
-                    StatsDeckPopUp(model: model)
+                    StatsDeckPopUp(page: page)
                 }
                 ToolbarItem(placement: .principal) {
-                    StatsPeriodControl(model: model)
+                    StatsPeriodControl(page: page)
                 }
+                #else
+                // The iPad's navigation bar keeps the title and subtitle leading; the controls trail.
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    StatsDeckPopUp(page: page)
+                    StatsPeriodControl(page: page)
+                }
+                #endif
                 // N23.6: the shell's sync button, in its trailing place.
                 if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
             }
@@ -71,7 +80,7 @@ public struct StatisticsView: View {
             ContentUnavailableView {
                 Label { Text("stats.page.deckMissing", bundle: .module) } icon: { Image(systemName: "questionmark.folder") }
             } actions: {
-                Button { model.selectDeck(nil) } label: { Text("stats.page.showAllDecks", bundle: .module) }
+                Button { page.selectDeck(nil) } label: { Text("stats.page.showAllDecks", bundle: .module) }
                     .accessibilityIdentifier("stats.page.showAllDecks")
             }
             .accessibilityElement(children: .contain)
@@ -79,16 +88,19 @@ public struct StatisticsView: View {
         case .unavailable:
             // S12.8: the strip and the controls stay; the sections give way.
             VStack(alignment: .leading, spacing: 0) {
-                StatsStrip(model: model) { _ in }
+                // No read can finish: a figure with nothing shows a dash, not progress.
+                StatsStrip(model: model, readsEnded: true) { _ in }
                     .padding()
                 ContentUnavailableView {
                     Label { Text("stats.page.unavailable", bundle: .module) } icon: { Image(systemName: "exclamationmark.triangle") }
                 } description: {
                     Text("stats.page.unavailable.message", bundle: .module)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("stats.page.unavailable")
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         case .content:
             StatsPageScroll(page: page, navigation: navigation)
         }
@@ -130,7 +142,7 @@ private struct StatsPageScroll: View {
                 page.requestedSection = nil
             }
         }
-        .accessibilityIdentifier("stats.page")
+        .accessibilityIdentifier("stats.page.content")
     }
 }
 
@@ -204,7 +216,8 @@ struct StatsSectionView: View {
 
 /// N25.3's grid: one column under about 560 points of content width, two up to about 1,250,
 /// three beyond. A lead box spans its row; the others follow side by side and wrap; boxes in a
-/// row share the row's height.
+/// row share the row's height. A section's single row of fewer boxes than columns (Knowledge's
+/// two beside three columns) shares the width out rather than leave an empty cell.
 struct StatsBoxGrid: Layout {
     /// Per subview: whether it is a lead box.
     let leads: [Bool]
@@ -235,12 +248,18 @@ struct StatsBoxGrid: Layout {
         let column = max(0, (width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
         var frames = Array(repeating: CGRect.zero, count: subviews.count)
         var y: CGFloat = 0
-        for (offset, row) in rows(count: subviews.count, columns: columns).enumerated() {
+        let grid = rows(count: subviews.count, columns: columns)
+        // A section's only row beside its lead shares the width out (no empty cell at its end);
+        // a short last row under a full one keeps the columns, aligned with it.
+        let sideRows = grid.filter { !$0.lead }.count
+        for (offset, row) in grid.enumerated() {
             if offset > 0 { y += spacing }
-            let cell = row.lead ? width : column
+            let shared = !row.lead && sideRows == 1 && row.indices.count < columns
+            let cell = row.lead ? width
+                : shared ? max(0, (width - spacing * CGFloat(row.indices.count - 1)) / CGFloat(row.indices.count)) : column
             let height = row.indices.map { subviews[$0].sizeThatFits(ProposedViewSize(width: cell, height: nil)).height }.max() ?? 0
             for (position, index) in row.indices.enumerated() {
-                frames[index] = CGRect(x: CGFloat(position) * (column + spacing), y: y, width: cell, height: height)
+                frames[index] = CGRect(x: CGFloat(position) * (cell + spacing), y: y, width: cell, height: height)
             }
             y += height
         }
@@ -268,12 +287,22 @@ struct StatsBoxGrid: Layout {
 /// small progress indicator in its value's place (S10.1).
 struct StatsStrip: View {
     let model: StatsPageModel
+    /// No request can fill a figure that has nothing (S12.8): it shows a dash.
+    var readsEnded = false
     let go: (StatsSectionID) -> Void
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var width: CGFloat = 0
+
+    /// Five figures in a row where they fit whole, else three and two, else two by two: a value
+    /// is never cut.
+    static func columns(for width: CGFloat, accessibilitySize: Bool) -> Int {
+        if accessibilitySize { return width >= 720 ? 3 : 2 }
+        return width >= 760 ? 5 : width >= 440 ? 3 : 2
+    }
 
     var body: some View {
-        let columns = dynamicTypeSize.isAccessibilitySize ? 2 : 5
+        let columns = Self.columns(for: width, accessibilitySize: dynamicTypeSize.isAccessibilitySize)
         Grid(alignment: .topLeading, horizontalSpacing: Spacing.large, verticalSpacing: Spacing.small) {
             ForEach(Array(stride(from: 0, to: StatsStripID.allCases.count, by: columns)), id: \.self) { start in
                 GridRow(alignment: .top) {
@@ -283,12 +312,17 @@ struct StatsStrip: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("stats.strip")
+        .accessibilityIdentifier("stats.page.strip")
     }
 
     private func figure(_ id: StatsStripID) -> some View {
-        let figure = model.strip(id)
+        var figure = model.strip(id)
+        if readsEnded, figure.loading {
+            figure = StatsStripFigure(value: "—", unit: nil, detail: nil, loading: false, spoken: nil)
+        }
         let label = StatsPageText.label(id, locale: locale)
         return Button { go(id.section) } label: {
             VStack(alignment: .leading, spacing: Spacing.xxSmall) {
@@ -336,7 +370,8 @@ struct StatsStrip: View {
 /// decks last. Choosing writes nothing (S17). The deck's name truncates in the middle, with the
 /// full name as help (N25.2).
 struct StatsDeckPopUp: View {
-    let model: StatsPageModel
+    let page: StatsPage
+    private var model: StatsPageModel { page.model }
     @Environment(\.locale) private var locale
 
     private var shown: (name: String, full: String) {
@@ -344,7 +379,11 @@ struct StatsDeckPopUp: View {
             let all = String(localized: "stats.deck.allDecks", bundle: .module, locale: locale)
             return (all, all)
         }
-        guard let deck = model.decks.deck(id) else { return ("", "") }
+        guard let deck = model.decks.deck(id) else {
+            // A deck gone (S12.7): the control's own name until All Decks is chosen.
+            let label = String(localized: "stats.deck.label", bundle: .module, locale: locale)
+            return (label, label)
+        }
         return (deck.name, deck.fullName)
     }
 
@@ -353,17 +392,17 @@ struct StatsDeckPopUp: View {
         let normal = items.filter { !$0.filtered }
         let filtered = items.filter(\.filtered)
         Menu {
-            Picker(selection: Binding(get: { model.selection.deck }, set: { model.selectDeck($0) })) {
+            Picker(selection: Binding(get: { model.selection.deck }, set: { page.selectDeck($0) })) {
                 Text("stats.deck.allDecks", bundle: .module)
                     .tag(Int64?.none)
-                    .accessibilityIdentifier("stats.deck.all")
+                    .accessibilityIdentifier("stats.toolbar.deck.all")
                 Section {
                     ForEach(normal) { item in
                         // The tree's depth as an indent (S3.1).
                         Text(verbatim: String(repeating: "\u{2003}", count: item.depth) + item.name)
                             .tag(Optional(item.id))
                             .accessibilityLabel(Text(verbatim: item.name))
-                            .accessibilityIdentifier("stats.deck.\(item.id)")
+                            .accessibilityIdentifier("stats.toolbar.deck.\(item.id)")
                     }
                 }
                 if !filtered.isEmpty {
@@ -371,7 +410,7 @@ struct StatsDeckPopUp: View {
                         ForEach(filtered) { item in
                             Text(verbatim: item.name)
                                 .tag(Optional(item.id))
-                                .accessibilityIdentifier("stats.deck.\(item.id)")
+                                .accessibilityIdentifier("stats.toolbar.deck.\(item.id)")
                         }
                     }
                 }
@@ -388,22 +427,23 @@ struct StatsDeckPopUp: View {
         .disabled(!model.controlsEnabled)
         .accessibilityLabel(Text("stats.deck.label", bundle: .module))
         .accessibilityValue(Text(verbatim: shown.full))
-        .accessibilityIdentifier("stats.deck")
+        .accessibilityIdentifier("stats.toolbar.deck")
     }
 }
 
 /// S3.2's period control: 1M, 3M, 6M, 1Y, All, read as "1 Month" to "All".
 struct StatsPeriodControl: View {
-    let model: StatsPageModel
+    let page: StatsPage
+    private var model: StatsPageModel { page.model }
     @Environment(\.locale) private var locale
 
     var body: some View {
-        Picker(selection: Binding(get: { model.selection.period }, set: { model.selectPeriod($0) })) {
+        Picker(selection: Binding(get: { model.selection.period }, set: { page.selectPeriod($0) })) {
             ForEach(StatsPagePeriod.allCases, id: \.self) { period in
                 Text(verbatim: StatsPageText.name(period, locale: locale))
                     .accessibilityLabel(Text(verbatim: StatsPageText.spoken(period, locale: locale)))
                     .tag(period)
-                    .accessibilityIdentifier("stats.period.\(StatsPageText.identifier(period))")
+                    .accessibilityIdentifier("stats.toolbar.period.\(StatsPageText.identifier(period))")
             }
         } label: {
             Text("stats.period.label", bundle: .module)
@@ -412,6 +452,6 @@ struct StatsPeriodControl: View {
         .labelsHidden()
         .fixedSize()
         .disabled(!model.controlsEnabled)
-        .accessibilityIdentifier("stats.period")
+        .accessibilityIdentifier("stats.toolbar.period")
     }
 }

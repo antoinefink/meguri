@@ -27,8 +27,14 @@ public final class StatsPage {
         self.model = model
     }
 
+    /// The page's views on screen: SwiftUI can show a new one before the old one goes (a
+    /// rebuilt stack), so the page is shown from the first appearance to the last disappearance.
+    @ObservationIgnored private var appearances = 0
+
     /// The page appeared: it refreshes (R1294), and its first frame is timed (S19).
     public func appear() {
+        appearances += 1
+        guard appearances == 1 else { return }
         shown = true
         model.appear()
         timings.shown(kept: Self.filled(model, settled: false))
@@ -37,6 +43,8 @@ public final class StatsPage {
     }
 
     public func disappear() {
+        appearances = max(0, appearances - 1)
+        guard appearances == 0 else { return }
         shown = false
         model.disappear()
         timings.cancel()
@@ -47,6 +55,21 @@ public final class StatsPage {
     public func go(to section: StatsSectionID) {
         guard shown else { return }
         requestedSection = section
+    }
+
+    /// The deck pop-up: the interval starts before the model acts on the input.
+    public func selectDeck(_ id: Int64?) {
+        if shown, id != model.selection.deck { timings.scopeChanged() }
+        model.selectDeck(id)
+    }
+
+    /// The period control: a change to or from All is a new refresh, one within the year a re-bin.
+    public func selectPeriod(_ period: StatsPagePeriod) {
+        let old = model.selection.period
+        if shown, period != old {
+            if period.needsNewRequest(after: old) { timings.scopeChanged() } else { timings.rebinned() }
+        }
+        model.selectPeriod(period)
     }
 
     /// The window's selection changed: a deck or a change to or from All starts a refresh, timed

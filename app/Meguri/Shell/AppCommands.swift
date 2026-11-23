@@ -314,7 +314,7 @@ struct AppCommands: Commands {
         // W14: View › Note Types; ⇧⌘N stays New Deck… (N22.1).
         CommandGroup(before: .sidebar) {
             // N25.1, N25.11: Statistics before Browse, behind its flag (U296).
-            if context?.statsPage != nil {
+            if StatsRollout.enabled {
                 Button("Statistics") { context?.showStatistics() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(context?.canShowStatistics != true)
@@ -324,6 +324,7 @@ struct AppCommands: Commands {
                     }
                 }
                 .disabled(context?.canGoToSection != true)
+                .accessibilityIdentifier("stats.goToSection")
             }
             #if os(macOS)
             Button("Browse") { context?.showBrowse() }

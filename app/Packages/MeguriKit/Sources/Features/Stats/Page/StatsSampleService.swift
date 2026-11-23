@@ -405,7 +405,7 @@ nonisolated struct StatsSampleCollection {
 
     private var knowledge: StatsKnowledgeOverTime {
         guard reviewed else { return StatsKnowledgeOverTime(samples: [], failed: 0, leftOut: 0) }
-        let days = history == .allHistory ? Array(stride(from: Self.firstDay, through: -367, by: 7)) + Array(-366...0) : Array(-366...0)
+        let days = history == .allHistory ? Array(Self.firstDay...0) : Array(-366...0)
         let samples = days.map { day in
             let age = Double(day - Self.firstDay) / Double(-Self.firstDay)
             let studied = Double(scaled(3_950)) * (0.2 + 0.8 * age)

@@ -40,6 +40,10 @@ struct CompactRootView: View {
             }
         }
         .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width } action: { isUpright = $0 }
+        // Statistics has no tab yet (U304): a window that narrows on it shows Decks.
+        .onChange(of: navigation.section == .stats && !features.statsTab, initial: true) { _, orphaned in
+            if orphaned { navigation.select(.section(.home)) }
+        }
         // N23.1: the status panel's sheet opens at its measured height; the panel is
         // measured here, out of sight, not in the toolbar item (N23.6).
         .background { features.syncPanelMeasure?() }

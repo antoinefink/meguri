@@ -38,9 +38,9 @@ import Testing
         #expect(StatsCollectionIdentity(defaults: nil).current != StatsCollectionIdentity(defaults: nil).current)
     }
 
-    private func samplePage(_ service: StatsSampleService, deck: Int64? = nil) -> StatsPage {
+    private func samplePage(_ service: StatsSampleService, deck: Int64? = nil, period: StatsPagePeriod = .oneYear) -> StatsPage {
         let model = StatsPageModel(service: service, kept: StatsKeptResults(directory: nil), store: StatsSelectionStore(defaults: nil),
-                                   selection: StatsPageSelection(deck: deck, period: .oneYear))
+                                   selection: StatsPageSelection(deck: deck, period: period))
         model.collectionOpened(identity: "sample")
         model.decksChanged(StatsSampleService.decks)
         return StatsPage(model: model)
@@ -72,6 +72,27 @@ import Testing
         #expect(!page.filled, "A page off screen is not filled")
     }
 
+    @Test func allWithNothingKeptReadsTheYearThenAllHistory() async {
+        let page = samplePage(StatsSampleService(tierDelay: .milliseconds(120)), period: .all)
+        page.appear()
+        await waitFilled(page)
+        #expect(StatsPage.filled(page.model))
+        page.disappear()
+    }
+
+    @Test func anEmptySampleShowsNoCardsAndOneWithoutReviewsFills() async {
+        let empty = samplePage(StatsSampleService(shape: .noCards, tierDelay: .milliseconds(1)))
+        empty.appear()
+        for _ in 0..<400 where empty.model.state != .noCards { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(empty.model.state == .noCards)
+        empty.disappear()
+        let fresh = samplePage(StatsSampleService(shape: .noReviews, tierDelay: .milliseconds(1)))
+        fresh.appear()
+        await waitFilled(fresh)
+        #expect(StatsPage.filled(fresh.model))
+        fresh.disappear()
+    }
+
     @Test func aStalledTierKeepsItsBoxesLoadingAndTheEarlierOnesFilled() async {
         let page = samplePage(StatsSampleService(ending: .stall(.reviewLog), tierDelay: .milliseconds(1)))
         page.appear()
@@ -90,6 +111,19 @@ import Testing
         page.appear()
         #expect(page.model.state == .deckMissing)
         page.disappear()
+    }
+
+    @Test func aNewViewShownBeforeTheOldOneGoesKeepsThePageReading() async {
+        let page = samplePage(StatsSampleService(tierDelay: .milliseconds(1)))
+        page.appear()
+        // A rebuilt stack: the new view appears, then the old one disappears.
+        page.appear()
+        page.disappear()
+        #expect(page.shown)
+        await waitFilled(page)
+        #expect(StatsPage.filled(page.model))
+        page.disappear()
+        #expect(!page.shown)
     }
 
     @Test func goToSectionWaitsForThePageToShow() {
