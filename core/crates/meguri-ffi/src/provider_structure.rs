@@ -5,6 +5,7 @@
 //! the phase's job to end, then advance again.
 use super::normal::{ProviderRoundRefusal, ProviderRoundResult, access_for, round_result};
 use super::{ProviderConnection, ProviderCredentials, ProviderOwner};
+use crate::deck_import::{DeckImportApplyOutcome, DeckImportConfirmation, DeckImportOptions, DeckImportSession};
 use crate::mutations::MutationSummary;
 use crate::notetype_change::{NotetypeChangeRequest, NotetypeChanged};
 use crate::notetype_structure::{NotetypeRemoval, NotetypeRemoved, NotetypeRestore, NotetypeStructureDraft,
@@ -12,7 +13,7 @@ use crate::notetype_structure::{NotetypeRemoval, NotetypeRemoved, NotetypeRestor
 use crate::{CoreError, callback, jobs};
 use meguri_engine::notetypes::{change::{self, ChangeNotetype}, remove::{self, RemoveNotetype},
     restore::{self, RestoreNotetype}, structure::{self, StructureDraft}};
-use meguri_host::{MeguriAccessSource, MeguriBootstrapError, MeguriStructureOutcome, MeguriStructureRefusal,
+use meguri_host::{DeckImportAnswer, MeguriAccessSource, MeguriBootstrapError, MeguriStructureOutcome, MeguriStructureRefusal,
     MeguriStructureStage, MeguriStructureStep, MeguriStructureStop, MeguriStructureTask,
     MeguriStructureUploadOutcome, MeguriStructureWork, MeguriUploadPending};
 use meguri_model::ids::NotetypeId;
@@ -26,6 +27,10 @@ pub enum ProviderStructureOp {
     Change { request: NotetypeChangeRequest },
     Remove { request: NotetypeRemoval },
     Restore { request: NotetypeRestore },
+    /// MP7.1: a deck package import whose confirmation showed the sync
+    /// paragraph. `confirmation` is the one a previous apply returned; none
+    /// asks the plan's structural reasons first.
+    Import { session: Arc<DeckImportSession>, options: DeckImportOptions, confirmation: Option<Arc<DeckImportConfirmation>> },
 }
 /// What the op did, once it committed.
 #[derive(Clone, uniffi::Enum)]
@@ -81,6 +86,10 @@ pub enum ProviderStructureOutcome {
     Cancelled,
     /// Nothing was saved: the job's record could not be written.
     Unavailable,
+    /// MP7.1 step 3: the import's apply refused or asked to confirm, and
+    /// wrote nothing. Nothing is pending; `import_outcome` has the typed
+    /// refusal or the confirmation.
+    ImportNotCommitted,
     Saved { upload: ProviderStructureUpload },
 }
 #[derive(Clone, uniffi::Enum)]
@@ -96,7 +105,9 @@ pub enum ProviderStructureStart {
 }
 type Saved = Arc<Mutex<Option<ProviderStructureSaved>>>;
 #[derive(uniffi::Object)]
-pub struct ProviderStructureJob { owner: Arc<ProviderOwner>, task: Arc<MeguriStructureTask>, saved: Saved }
+pub struct ProviderStructureJob { owner: Arc<ProviderOwner>, task: Arc<MeguriStructureTask>, saved: Saved,
+    /// The import's own answer, for a job whose op is an import.
+    import: Option<DeckImportAnswer> }
 
 fn refusal(value: MeguriStructureRefusal) -> ProviderStructureRefusal {
     use MeguriStructureRefusal as R;
@@ -131,8 +142,18 @@ fn upload(value: MeguriStructureUploadOutcome) -> ProviderStructureUpload {
 }
 /// The op as the job's save phase. Its inputs are checked before the job
 /// starts; its typed result is kept for `saved`.
-fn work(op: ProviderStructureOp, host: &meguri_host::CoreHost) -> Result<(MeguriStructureWork, Saved), CoreError> {
+fn work(op: ProviderStructureOp, host: &meguri_host::CoreHost)
+    -> Result<(MeguriStructureWork, Saved, Option<DeckImportAnswer>), CoreError> {
     let saved = Saved::default();
+    let op = match op {
+        ProviderStructureOp::Import { session, options, confirmation } => {
+            // A closed session imports nothing: the caller's own error, before a round runs.
+            let session = session.shared().ok_or_else(|| CoreError::InvalidArgument { message: "the import session is closed".into() })?;
+            let (work, answer) = host.deck_import_work(session, options.into(), confirmation.map(|confirmation| confirmation.token()));
+            return Ok((work, saved, Some(answer)));
+        }
+        other => other,
+    };
     let output = saved.clone();
     let keep = move |value| *output.lock().unwrap_or_else(PoisonError::into_inner) = Some(value);
     let work: MeguriStructureWork = match op {
@@ -182,17 +203,19 @@ fn work(op: ProviderStructureOp, host: &meguri_host::CoreHost) -> Result<(Meguri
                 Ok(())
             })
         }
+        ProviderStructureOp::Import { .. } => unreachable!("handled above"),
     };
-    Ok((work, saved))
+    Ok((work, saved, None))
 }
 impl ProviderConnection {
     fn structure_access(&self, credentials: ProviderCredentials) -> MeguriAccessSource {
         let (owner, inner) = (self.owner.clone(), self.inner.clone());
         Arc::new(move || access_for(&owner, &inner, credentials.clone()).map_err(|_| MeguriBootstrapError::ConnectionChanged))
     }
-    fn structure_start(&self, start: Result<Arc<MeguriStructureTask>, MeguriStructureRefusal>, saved: Saved) -> ProviderStructureStart {
+    fn structure_start(&self, start: Result<Arc<MeguriStructureTask>, MeguriStructureRefusal>, saved: Saved,
+        import: Option<DeckImportAnswer>) -> ProviderStructureStart {
         match start {
-            Ok(task) => ProviderStructureStart::Started { job: Arc::new(ProviderStructureJob { owner: self.owner.clone(), task, saved }) },
+            Ok(task) => ProviderStructureStart::Started { job: Arc::new(ProviderStructureJob { owner: self.owner.clone(), task, saved, import }) },
             Err(error) => ProviderStructureStart::Refused { refusal: refusal(error) },
         }
     }
@@ -206,16 +229,16 @@ impl ProviderConnection {
         -> Result<ProviderStructureStart, CoreError> {
         callback::enter("ProviderConnection.start_structure_save");
         self.owner.validate()?;
-        let (work, saved) = work(op, &self.owner.host)?;
+        let (work, saved, import) = work(op, &self.owner.host)?;
         let start = self.owner.host.start_meguri_structure_save(self.structure_access(credentials), work, reachable);
-        Ok(self.structure_start(start, saved))
+        Ok(self.structure_start(start, saved, import))
     }
     /// MP7 step 5's Upload…: no round and no further question.
     pub fn start_structure_upload(&self, credentials: ProviderCredentials) -> Result<ProviderStructureStart, CoreError> {
         callback::enter("ProviderConnection.start_structure_upload");
         self.owner.validate()?;
         let start = self.owner.host.start_meguri_structure_upload(self.structure_access(credentials));
-        Ok(self.structure_start(start, Saved::default()))
+        Ok(self.structure_start(start, Saved::default(), None))
     }
 }
 #[uniffi::export]
@@ -239,6 +262,9 @@ impl ProviderStructureJob {
                 MeguriStructureStage::Media => ProviderStructureStage::Media,
             } },
             MeguriStructureStep::Finished(outcome) => ProviderStructureStep::Finished { outcome: match &*outcome {
+                // The import's own refusal or confirmation is typed: `import_outcome` has it.
+                MeguriStructureOutcome::NotSaved(MeguriStructureStop::Refused(_)) if self.import_answered() =>
+                    ProviderStructureOutcome::ImportNotCommitted,
                 MeguriStructureOutcome::NotSaved(MeguriStructureStop::Refused(error)) => return Err(error.clone().into()),
                 MeguriStructureOutcome::NotSaved(MeguriStructureStop::FullSyncRequired) => ProviderStructureOutcome::FullSyncRequired,
                 MeguriStructureOutcome::NotSaved(MeguriStructureStop::Round { task, .. }) =>
@@ -261,6 +287,20 @@ impl ProviderStructureJob {
     pub fn saved(&self) -> Result<Option<ProviderStructureSaved>, CoreError> {
         callback::enter("ProviderStructureJob.saved");
         Ok(self.saved.lock().unwrap_or_else(PoisonError::into_inner).clone())
+    }
+    /// For an import (MP7.1): what its apply answered, once it ran. The
+    /// result of a committed import (with `media_pending` after
+    /// `MediaCommitPending`), the confirmation to show, or the refusal.
+    /// None while the job has not reached its import, and for any other op.
+    pub fn import_outcome(&self) -> Result<Option<DeckImportApplyOutcome>, CoreError> {
+        callback::enter("ProviderStructureJob.import_outcome");
+        let answer = self.import.as_ref().and_then(|answer| answer.lock().unwrap_or_else(PoisonError::into_inner).clone());
+        Ok(answer.map(crate::deck_import::apply_outcome))
+    }
+}
+impl ProviderStructureJob {
+    fn import_answered(&self) -> bool {
+        self.import.as_ref().is_some_and(|answer| answer.lock().unwrap_or_else(PoisonError::into_inner).is_some())
     }
 }
 
@@ -304,6 +344,43 @@ mod tests {
             confirmed: Default::default(), digest: Some(vec![1, 2, 3]) } };
         assert!(matches!(connection.start_structure_save(credentials(&connection), restore, true),
             Err(CoreError::InvalidArgument { .. })));
+        connection.owner.host.close().unwrap();
+    }
+    /// MP7.1: without a ready binding an import is not this job's (it runs
+    /// alone, `package/apkg-import` I14). The refusal leaves the session
+    /// open; a closed session is the caller's error, before anything starts.
+    #[test]
+    fn an_import_without_a_ready_binding_is_refused_and_keeps_its_session() {
+        use crate::deck_import::{DeckImportOptions, DeckImportSession, DeckImportUpdate};
+        use meguri_package::{CollectionPackageWriteContext, Finalisation, apkg, write_collection_package_from_live};
+        let root = tempfile::tempdir().unwrap(); let connection = connection(root.path());
+        let host = &connection.owner.host;
+        let context = host.deck_package_context();
+        let package = root.path().join("deck.apkg");
+        {
+            let collection = host.collection().unwrap();
+            let lease = collection.reader(meguri_storage::ReaderRole::Maintenance).unwrap();
+            write_collection_package_from_live(&lease, &package, &CollectionPackageWriteContext {
+                collection_directory: &context.collection_directory, purpose: meguri_storage::atomic_file::Purpose::Export,
+                finalisation: Finalisation::Replace, clock: context.clock.as_ref(), random: context.random.as_ref(),
+                space: context.space.as_ref(), is_cancelled: &|| false }).unwrap();
+        }
+        let inspected = apkg::inspect(&package, "deck.apkg", &context, &meguri_engine::CancelToken::new(),
+            &meguri_engine::ProgressSink::new()).unwrap();
+        let session = DeckImportSession::register(inspected);
+        let options = DeckImportOptions { merge_notetypes: false, update_notes: DeckImportUpdate::IfNewer,
+            update_notetypes: DeckImportUpdate::IfNewer, with_scheduling: false, with_deck_configs: false };
+        let op = ProviderStructureOp::Import { session: session.clone(), options, confirmation: None };
+        for reachable in [true, false] {
+            assert!(matches!(connection.start_structure_save(credentials(&connection), op.clone(), reachable).unwrap(),
+                ProviderStructureStart::Refused { refusal: ProviderStructureRefusal::NotReady }));
+        }
+        assert!(session.shared().is_some(), "the refused job left the session open");
+        assert!(!connection.owner.structure_upload_pending().unwrap());
+        session.close().unwrap();
+        assert!(matches!(connection.start_structure_save(credentials(&connection), op, true),
+            Err(CoreError::InvalidArgument { .. })));
+        drop(session);
         connection.owner.host.close().unwrap();
     }
 }

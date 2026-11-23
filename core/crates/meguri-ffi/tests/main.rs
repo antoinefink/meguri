@@ -48,6 +48,9 @@ pub mod notetype_reads_ffi;
 #[path = "stats_page_ffi.rs"]
 pub mod stats_page_ffi;
 #[cfg(feature = "test-hooks")]
+#[path = "deck_import_ffi.rs"]
+pub mod deck_import_ffi;
+#[cfg(feature = "test-hooks")]
 #[path = "maintenance_ffi.rs"]
 pub mod maintenance_ffi;
 #[cfg(feature = "test-hooks")]

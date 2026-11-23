@@ -45,6 +45,9 @@ pub mod provider_bootstrap;
 #[path = "provider_fixture_transport.rs"]
 pub mod provider_fixture_transport;
 #[cfg(feature = "test-hooks")]
+#[path = "provider_import.rs"]
+pub mod provider_import;
+#[cfg(feature = "test-hooks")]
 #[path = "provider_normal.rs"]
 pub mod provider_normal;
 #[cfg(feature = "test-hooks")]

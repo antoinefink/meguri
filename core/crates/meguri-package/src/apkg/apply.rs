@@ -19,7 +19,8 @@ use super::gather;
 use super::plan::{self, ImportPlan};
 use super::session::ImportSession;
 use super::{
-    ApkgImportError, ConfirmationToken, ImportOptions, ImportOutcome, ImportResult, StructureSummary, UpdateCondition,
+    ApkgImportError, ConfirmationToken, ImportOptions, ImportOutcome, ImportResult, StructuralReason, StructureSummary,
+    UpdateCondition,
 };
 
 /// The committed write phase's value and its safety backup's name, kept
@@ -77,6 +78,24 @@ pub fn apply(
     session: &ImportSession,
     options: ImportOptions,
     token: Option<&ConfirmationToken>,
+    cancel: &Arc<CancelToken>,
+    progress: &ProgressSink,
+) -> ImportOutcome<ImportResult> {
+    apply_confirming(engine, session, options, token, false, cancel, progress)
+}
+
+/// [`apply`], and with `confirm_structure` I8's test also covers the plan's
+/// structural reasons (I14.4): a plan that carries one the token does not
+/// cover returns `ConfirmationRequired` with them, its preview possibly
+/// empty, and writes nothing. A caller asks when a ready Meguri Sync
+/// binding would upload the collection after the import
+/// (`sync/meguri-provider` MP7.1); the engine cannot know the binding.
+pub fn apply_confirming(
+    engine: &Engine,
+    session: &ImportSession,
+    options: ImportOptions,
+    token: Option<&ConfirmationToken>,
+    confirm_structure: bool,
     cancel: &Arc<CancelToken>,
     progress: &ProgressSink,
 ) -> ImportOutcome<ImportResult> {
@@ -150,21 +169,34 @@ pub fn apply(
                 progress,
             )
             .map_err(|error| stash(&fault, error))?;
-            // I8: a preview needs a confirmation that names this session,
-            // these options and this preview.
-            if !built.stage.preview.is_empty() {
+            // I8: a preview, and for a caller that asked the plan's
+            // structural reasons, need a confirmation that names this
+            // session, these options, this preview and those reasons.
+            let reasons = StructuralReason::of(&built.stage.reasons);
+            let structural = confirm_structure && !reasons.is_empty();
+            if !built.stage.preview.is_empty() || structural {
                 let digest = built.stage.preview.digest();
-                let confirmed = token
-                    .is_some_and(|token| token.session == session.id && token.options == options && token.digest == digest);
+                let confirmed = token.is_some_and(|token| {
+                    token.session == session.id
+                        && token.options == options
+                        && token.digest == digest
+                        && (!structural
+                            || token
+                                .structure
+                                .as_ref()
+                                .is_some_and(|shown| reasons.iter().all(|reason| shown.contains(reason))))
+                });
                 if !confirmed {
                     return Err(stash(
                         &fault,
                         ApkgImportError::ConfirmationRequired {
                             preview: Box::new(built.stage.preview.clone()),
+                            reasons: if confirm_structure { reasons.clone() } else { Vec::new() },
                             token: Box::new(ConfirmationToken {
                                 session: session.id,
                                 options,
                                 digest,
+                                structure: confirm_structure.then_some(reasons),
                                 snapshot_seq: planning.seq().0,
                             }),
                         },
@@ -256,7 +288,7 @@ pub fn apply(
     match outcome {
         Ok(op) => finish(op.seq.0, op.generation.0, op.undo.map(|undo| undo.name), false).ok_or_else(|| {
             ApkgImportError::Io {
-                detail: "the import committed without a result".into(),
+                detail: super::COMMITTED_WITHOUT_RESULT.into(),
             }
         }),
         Err(EngineError::CommitCompleted { seq, message }) => {

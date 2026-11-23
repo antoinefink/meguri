@@ -41,7 +41,9 @@ pub fn add_note(host: &CoreHost, notetype: NotetypeId, front: &str, back: &str) 
 /// A device whose Meguri Sync binding is ready, with `notes` notes of the
 /// Basic note type made before setup, so that nothing is pending. The clock
 /// then moves on: a later save stamps `scm` after `ls`.
-pub fn rig(root: &Path, notes: usize) -> Rig {
+pub fn rig(root: &Path, notes: usize) -> Rig { rig_with(root, notes, |_| {}) }
+/// [`rig`], with `setup` run on the collection before the binding is made.
+pub fn rig_with(root: &Path, notes: usize, setup: impl FnOnce(&CoreHost)) -> Rig {
     let clock = Arc::new(StepClock::new(b::NOW, UtcOffset::UTC, "UTC"));
     let config = b::config(&root.join("local"), clock.clone());
     meguri_engine::bootstrap::create(&config.collection_directory.join("collection.anki2"),
@@ -50,6 +52,7 @@ pub fn rig(root: &Path, notes: usize) -> Rig {
     b::settle(&host);
     let notetype = basic(&host);
     for index in 0..notes { add_note(&host, notetype, &format!("question {index}"), &format!("answer {index}")); }
+    setup(&host);
     let connection = b::select(&host);
     let (_, bytes) = b::server(&root.join("server"));
     let script = b::collection_script(bytes, true);
