@@ -81,6 +81,8 @@ public final class StatsPageModel {
     @ObservationIgnored private var inputs: UInt64 = 0
     /// A refresh waits for the device's kept sets of its scope (S10.3 decides on them).
     @ObservationIgnored private var refreshAfterLoad = false
+    /// The collection this model was told is open (the kept results are shared by every window).
+    @ObservationIgnored private var openedIdentity: String?
 
     private struct PresenterKey: Hashable {
         let set: UUID
@@ -134,6 +136,9 @@ public final class StatsPageModel {
     /// collections (S10.2).
     public func collectionOpened(identity: String) {
         let changed = !collectionOpen || kept.collection != identity
+        // Another collection in place of the open one: its deck tree is not this one's.
+        if collectionOpen, openedIdentity != identity { forgetDecks() }
+        openedIdentity = identity
         collectionOpen = true
         kept.open(collection: identity)
         kept.show(selection.scope, by: ObjectIdentifier(self))
@@ -153,9 +158,19 @@ public final class StatsPageModel {
         live?.cancel()
         live = nil
         collectionOpen = false
+        openedIdentity = nil
         kept.show(nil, by: ObjectIdentifier(self))
         kept.close()
+        // The next collection's tree is read when it opens; until then no deck is known, so the
+        // pop-up never offers the closed collection's decks (the page shows S12.1 meanwhile).
+        forgetDecks()
         rebuild()
+    }
+
+    private func forgetDecks() {
+        guard decks != .unknown else { return }
+        decks = .unknown
+        inputs &+= 1
     }
 
     /// The deck list's tree with its counts (C5), each time it is read.

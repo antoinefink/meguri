@@ -290,6 +290,27 @@ import Testing
         #expect(second.scope == .allDecks)
     }
 
+    /// A closed or replaced collection's deck tree is never offered for the next one: the pop-up
+    /// and every deck name wait for the tree read for the collection that opens.
+    @Test func anotherCollectionNeverShowsTheOldDeckTree() {
+        let model = model()
+        #expect(!model.deckMenu.isEmpty)
+        model.collectionClosed()
+        #expect(model.deckMenu.isEmpty && !model.decks.isKnown)
+        model.collectionOpened(identity: "collection-a")
+        #expect(model.deckMenu.isEmpty, "The tree is read again for the collection that opens")
+        model.decksChanged(Fixture.nodes())
+        #expect(!model.deckMenu.isEmpty)
+        // Replaced while open (CollectionReplaced, then the new identity).
+        model.receive(.collectionReplaced)
+        model.collectionOpened(identity: "collection-b")
+        #expect(model.deckMenu.isEmpty && model.subtitle == nil)
+        // The same collection told again keeps its tree.
+        model.decksChanged(Fixture.nodes())
+        model.collectionOpened(identity: "collection-b")
+        #expect(!model.deckMenu.isEmpty)
+    }
+
     // MARK: Periods (S3.2, S10.3, S10.5)
 
     @Test func aPeriodChangeWithinTheYearMakesNoRequest() async throws {
