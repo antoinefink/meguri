@@ -238,12 +238,12 @@ struct StatsByDeckBox: View {
     @ViewBuilder private func exportMenu(_ table: StatsByDeckTable, title: String) -> some View {
         let text = StatsSectionText(locale: locale)
         let header = StatsByDeckColumn.allCases.map(text.column).joined(separator: "\t")
-        let lines = sort.sorted(table.rows).map {
+        let lines = shownSort.sorted(table.rows).map {
             [$0.name, $0.cardsText, $0.reviewsText, $0.retentionText, $0.timeShareText].joined(separator: "\t")
         }
         StatsExportMenu(values: ([header] + lines).joined(separator: "\n")) {
             VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-                ForEach(sort.sorted(table.rows)) { row in
+                ForEach(shownSort.sorted(table.rows)) { row in
                     HStack {
                         Text(verbatim: row.name)
                         Spacer()
