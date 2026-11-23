@@ -21,6 +21,8 @@ struct StatsActivityBox: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.layoutDirection) private var layoutDirection
     @FocusState private var focused: Bool
+    /// Counts the keyboard's moves, so a narrow grid scrolls the newly selected day into view.
+    @State private var revealRequest = 0
 
     /// N24.6's fixed square, as on Today: it never grows with the width or the text size.
     #if os(macOS)
@@ -36,17 +38,23 @@ struct StatsActivityBox: View {
         let activity: StatsActivity? = if content.phase == .ready, case let .activity(value)? = content.detail { value } else { nil }
         let blocks = activity.map { Self.blocks($0, firstWeekday: calendar.firstWeekday) } ?? []
         StatsBoxChrome(box: slot.id.rawValue, title: slot.title(locale: locale), open: slot.open) {
-            ViewThatFits(in: .horizontal) {
-                // Wide: the figures trailing the grid (N25.8).
-                HStack(alignment: .top, spacing: Spacing.large) {
-                    grid(activity, blocks: blocks, phase: content.phase, scrolls: false)
-                    figures(content, activity: activity, column: true)
-                        .frame(minWidth: 180, alignment: .leading)
-                }
-                // Narrow: the figures under it, and the years scroll sideways to today.
-                VStack(alignment: .leading, spacing: Spacing.medium) {
-                    grid(activity, blocks: blocks, phase: content.phase, scrolls: true)
-                    figures(content, activity: activity, column: dynamicTypeSize.isAccessibilitySize)
+            // Narrow: the figures under the grid, and each year scrolls sideways to its newest
+            // week; always at the accessibility text sizes, where figures stack under the plot (S15).
+            let narrow = VStack(alignment: .leading, spacing: Spacing.medium) {
+                grid(activity, blocks: blocks, phase: content.phase, scrolls: true)
+                figures(content, activity: activity, column: dynamicTypeSize.isAccessibilitySize)
+            }
+            if dynamicTypeSize.isAccessibilitySize {
+                narrow
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    // Wide: the figures trailing the grid (N25.8).
+                    HStack(alignment: .top, spacing: Spacing.large) {
+                        grid(activity, blocks: blocks, phase: content.phase, scrolls: false)
+                        figures(content, activity: activity, column: true)
+                            .frame(minWidth: 180, alignment: .leading)
+                    }
+                    narrow
                 }
             }
         }
@@ -80,13 +88,13 @@ struct StatsActivityBox: View {
             // A width narrower than a year (a narrow window, the iPad's compact width) scrolls each
             // block sideways under its year label, starting at its newest drawn week.
             StatsActivityYears(blocks: blocks, activity: activity, square: Self.square, scrolls: scrolls,
-                               selection: slot.selection, showInBrowse: showInBrowse)
+                               revealRequest: revealRequest, selection: slot.selection, showInBrowse: showInBrowse)
             .focusable()
             .focused($focused)
-            .onKeyPress(.leftArrow) { move(layoutDirection == .rightToLeft ? 1 : -1, blocks: blocks) }
-            .onKeyPress(.rightArrow) { move(layoutDirection == .rightToLeft ? -1 : 1, blocks: blocks) }
+            .onKeyPress(.leftArrow) { move(layoutDirection == .rightToLeft ? 1 : -1, blocks: blocks, activity: activity) }
+            .onKeyPress(.rightArrow) { move(layoutDirection == .rightToLeft ? -1 : 1, blocks: blocks, activity: activity) }
             .onKeyPress(.escape) { clear() }
-            .onKeyPress(.return) { browseSelected(blocks) }
+            .onKeyPress(.return) { browseSelected(blocks, activity: activity) }
             #if os(macOS)
             .onChange(of: focused) {
                 // A click elsewhere that takes the focus unpins (S8.3).
@@ -101,8 +109,15 @@ struct StatsActivityBox: View {
             .accessibilityValue(summary(activity))
             .accessibilityIdentifier("stats.box.activity.plot")
         } else {
-            StatsActivityPlaceholder(square: Self.square, phase: phase, fitsWidth: scrolls)
+            StatsActivityPlaceholder(square: Self.square, phase: phase, fitsWidth: scrolls, years: placeholderYears)
         }
+    }
+
+    /// The year blocks a box not ready yet keeps room for: the header's count when the model
+    /// knows it (S10.3), else one.
+    private var placeholderYears: Int {
+        if case let .activityYears(years)? = slot.content.detail { return years }
+        return 1
     }
 
     /// The grid's value: the streaks and the year totals, as the figures beside it say.
@@ -160,12 +175,28 @@ struct StatsActivityBox: View {
 
     // MARK: Keys (S14)
 
-    private func move(_ step: Int, blocks: [Block]) -> KeyPress.Result {
+    private func move(_ step: Int, blocks: [Block], activity: StatsActivity) -> KeyPress.Result {
         guard let first = blocks.last?.year.firstDay, let last = blocks.first?.year.lastDay else { return .ignored }
         let selection = slot.selection
-        let next = selection.wrappedValue.bin.map { $0 + step } ?? last
-        selection.wrappedValue = StatsChartSelection(bin: min(max(next, first), last), pinned: true)
+        let next = Self.moved(selection.wrappedValue.bin.map(activity.day(ofAbsoluteDay:)), by: step, first: first, last: last)
+        selection.wrappedValue = StatsChartSelection(bin: activity.absoluteDay(ofDay: next), pinned: true)
+        revealRequest += 1
         return .handled
+    }
+
+    /// The scroll offset that centres a column in a viewport, kept inside the block.
+    static func revealOffset(column: Int, grid: ActivityYearGrid, square: ActivityGrid.Square, viewport: CGFloat,
+                             rightToLeft: Bool) -> CGFloat {
+        let pitch = square.side + square.gap
+        let width = grid.width(square)
+        let x = rightToLeft ? width - CGFloat(column) * pitch - square.side : CGFloat(column) * pitch
+        return min(max(0, x + square.side / 2 - viewport / 2), max(0, width - viewport))
+    }
+
+    /// The day a key moves the selection to: one day on, kept between the first block's
+    /// 1 January and today; with none selected, today.
+    static func moved(_ day: Int?, by step: Int, first: Int, last: Int) -> Int {
+        min(max(day.map { $0 + step } ?? last, first), last)
     }
 
     private func clear() -> KeyPress.Result {
@@ -175,8 +206,8 @@ struct StatsActivityBox: View {
         return .handled
     }
 
-    private func browseSelected(_ blocks: [Block]) -> KeyPress.Result {
-        guard let day = slot.selection.wrappedValue.bin, let showInBrowse,
+    private func browseSelected(_ blocks: [Block], activity: StatsActivity) -> KeyPress.Result {
+        guard let day = slot.selection.wrappedValue.bin.map(activity.day(ofAbsoluteDay:)), let showInBrowse,
               blocks.contains(where: { ($0.year.counts[day] ?? 0) > 0 }) else { return .ignored }
         showInBrowse(day)
         return .handled
@@ -191,19 +222,26 @@ private struct StatsActivityYears: View {
     let square: ActivityGrid.Square
     /// Each block scrolls sideways (narrower than a year).
     let scrolls: Bool
+    /// Changes when the keyboard moves the selection: a scrolled block shows the day.
+    let revealRequest: Int
+    /// The pinned or hovered day as an absolute day (`StatsActivity.absoluteDay`), so a
+    /// rollover never moves it to another date.
     @Binding var selection: StatsChartSelection
     let showInBrowse: ((Int) -> Void)?
 
     @Environment(\.locale) private var locale
     @Environment(\.calendar) private var calendar
     @Environment(\.layoutDirection) private var layoutDirection
+    @State private var positions: [Int: ScrollPosition] = [:]
+    @State private var viewport: CGFloat = 0
 
     init(blocks: [StatsActivityBox.Block], activity: StatsActivity, square: ActivityGrid.Square, scrolls: Bool,
-         selection: Binding<StatsChartSelection>, showInBrowse: ((Int) -> Void)?) {
+         revealRequest: Int, selection: Binding<StatsChartSelection>, showInBrowse: ((Int) -> Void)?) {
         self.blocks = blocks
         self.activity = activity
         self.square = square
         self.scrolls = scrolls
+        self.revealRequest = revealRequest
         _selection = selection
         self.showInBrowse = showInBrowse
     }
@@ -211,19 +249,27 @@ private struct StatsActivityYears: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.medium) {
             ForEach(blocks) { block in
-                let selected = selection.bin.flatMap { day in
+                let selected = selectedDay.flatMap { day in
                     (block.year.firstDay...max(block.year.firstDay, block.year.lastDay)).contains(day) ? day - block.year.firstDay : nil
                 }
                 VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                     Text(verbatim: String(block.year.year))
                         .font(.subheadline.weight(.semibold))
                         .accessibilityHidden(true)
-                    if scrolls {
-                        ScrollView(.horizontal) { grid(block, selected: selected) }
-                            .defaultScrollAnchor(UnitPoint(x: newestFraction(block.grid), y: 0))
-                    } else {
-                        grid(block, selected: selected)
+                    // The squares are drawn mirrored by hand under right-to-left layout (a canvas is
+                    // not mirrored), so the grid, its overlays and its scroll view lay out left to
+                    // right and every position is mirrored the same way.
+                    Group {
+                        if scrolls {
+                            ScrollView(.horizontal) { grid(block, selected: selected) }
+                                .scrollPosition(position(block.year.year))
+                                .defaultScrollAnchor(UnitPoint(x: newestFraction(block.grid), y: 0))
+                                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewport = $0 }
+                        } else {
+                            grid(block, selected: selected)
+                        }
                     }
+                    .environment(\.layoutDirection, .leftToRight)
                 }
                 // The block holding the callout is drawn over the blocks after it.
                 .zIndex(selected == nil ? 0 : 1)
@@ -233,13 +279,38 @@ private struct StatsActivityYears: View {
             }
         }
         .fixedSize(horizontal: !scrolls, vertical: true)
+        .onChange(of: revealRequest) { reveal() }
     }
+
+    /// The selected day (H1), from the stored absolute day.
+    private var selectedDay: Int? { selection.bin.map(activity.day(ofAbsoluteDay:)) }
+
+    /// Selects a day (H1), or none.
+    private func select(_ day: Int?, pinned: Bool) {
+        selection = day.map { StatsChartSelection(bin: activity.absoluteDay(ofDay: $0), pinned: pinned) } ?? .none
+    }
+
+    private func position(_ year: Int) -> Binding<ScrollPosition> {
+        Binding(get: { positions[year] ?? ScrollPosition() }, set: { positions[year] = $0 })
+    }
+
+    /// Scrolls the block holding the selected day so the day is in view (S14's keys in a narrow grid).
+    private func reveal() {
+        guard scrolls, viewport > 0, let day = selectedDay,
+              let block = blocks.first(where: { ($0.year.firstDay...max($0.year.firstDay, $0.year.lastDay)).contains(day) })
+        else { return }
+        var moved = ScrollPosition()
+        moved.scrollTo(x: StatsActivityBox.revealOffset(column: block.grid.cell(ofDay: day - block.year.firstDay).column, grid: block.grid,
+                                            square: square, viewport: viewport, rightToLeft: rightToLeft))
+        positions[block.year.year] = moved
+    }
+
 
     /// The month labels and the squares of a block, with the selection over them.
     private func grid(_ block: StatsActivityBox.Block, selected: Int?) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-            StatsActivityMonthLabels(grid: block.grid, square: square)
-            StatsActivitySquares(grid: block.grid, firstDay: block.year.firstDay, square: square,
+            StatsActivityMonthLabels(grid: block.grid, square: square, rightToLeft: rightToLeft)
+            StatsActivitySquares(grid: block.grid, firstDay: block.year.firstDay, square: square, rightToLeft: rightToLeft,
                                  labels: StatsActivityDayLabels(days: activity.days, locale: locale, calendar: calendar))
                 .equatable()
                 .overlay(alignment: .topLeading) {
@@ -278,23 +349,23 @@ private struct StatsActivityYears: View {
                 switch phase {
                 case let .active(location):
                     let hovered = day(location)
-                    if hovered != selection.bin { selection.bin = hovered }
+                    if hovered != selectedDay { select(hovered, pinned: false) }
                 case .ended:
-                    if selection.bin != nil { selection.bin = nil }
+                    if selection.bin != nil { selection = .none }
                 }
             }
             .gesture(SpatialTapGesture(count: 2, coordinateSpace: .local).onEnded { value in
                 guard let found = day(value.location) else { return }
-                selection = StatsChartSelection(bin: found, pinned: true)
+                select(found, pinned: true)
                 if (block.year.counts[found] ?? 0) > 0 { showInBrowse?(found) }
             })
             .simultaneousGesture(SpatialTapGesture(coordinateSpace: .local).onEnded { value in
-                selection = day(value.location).map { StatsChartSelection(bin: $0, pinned: true) } ?? .none
+                select(day(value.location), pinned: true)
             })
             #else
             .onTapGesture(coordinateSpace: .local) { location in
                 let found = day(location)
-                selection = found == nil || (found == selection.bin && selection.pinned) ? .none : StatsChartSelection(bin: found, pinned: true)
+                select(found == selectedDay && selection.pinned ? nil : found, pinned: true)
             }
             #endif
             .accessibilityHidden(true)
@@ -340,7 +411,11 @@ private struct StatsActivityYears: View {
                     let origin = leading ? x - Spacing.xSmall - dimensions.width : x + square.side + Spacing.xSmall
                     return -origin
                 }
-                .alignmentGuide(.top) { _ in -max(0, y - Spacing.xSmall) }
+                .alignmentGuide(.top) { dimensions in
+                    // Level with the day, kept inside the block's height, so a scrolled block
+                    // never clips it and it never runs onto the next box.
+                    -min(max(0, y - Spacing.xSmall), max(0, ActivityYearGrid.height(square) - dimensions.height))
+                }
                 .allowsHitTesting(selection.pinned)
             }
             .accessibilityHidden(true)
@@ -356,20 +431,21 @@ private struct StatsActivitySquares: View, Equatable {
     /// The block's first day (H1), for the days' dates.
     let firstDay: Int
     let square: ActivityGrid.Square
+    /// The app's layout direction: the canvas is laid out left to right and mirrors by hand.
+    let rightToLeft: Bool
     let labels: StatsActivityDayLabels
 
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.layoutDirection) private var layoutDirection
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.grid == rhs.grid && lhs.firstDay == rhs.firstDay && lhs.square == rhs.square && lhs.labels == rhs.labels
+        lhs.grid == rhs.grid && lhs.firstDay == rhs.firstDay && lhs.square == rhs.square
+            && lhs.rightToLeft == rhs.rightToLeft && lhs.labels == rhs.labels
     }
 
     var body: some View {
         let increased = contrast == .increased
         let dark = colorScheme == .dark
-        let rightToLeft = layoutDirection == .rightToLeft
         let width = grid.width(square)
         Canvas { context, _ in
             let pitch = square.side + square.gap
@@ -430,13 +506,18 @@ private nonisolated struct StatsActivityDayLabels: Equatable {
     let locale: Locale
     let calendar: Calendar
 
-    func date(_ day: Int) -> String {
-        days.date(ofDay: day).formatted(Date.FormatStyle(date: .complete, time: .omitted, locale: locale, calendar: calendar,
-                                                             timeZone: calendar.timeZone))
+    /// The day's long date, formatted only when VoiceOver reads it.
+    func date(_ day: Int) -> Text {
+        Text(days.date(ofDay: day), format: Date.FormatStyle(date: .complete, time: .omitted, locale: locale, calendar: calendar,
+                                                            timeZone: calendar.timeZone))
     }
 
+    /// A Gregorian month, as the blocks group the days, whatever the display calendar.
     func month(_ day: Int) -> String {
-        days.date(ofDay: day).formatted(Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.locale = locale
+        gregorian.timeZone = calendar.timeZone
+        return days.date(ofDay: day).formatted(Date.FormatStyle(locale: locale, calendar: gregorian, timeZone: calendar.timeZone)
             .month(.wide).year())
     }
 
@@ -452,8 +533,8 @@ private nonisolated struct StatsActivityDayLabels: Equatable {
 private struct StatsActivityMonthLabels: View {
     let grid: ActivityYearGrid
     let square: ActivityGrid.Square
+    let rightToLeft: Bool
     @Environment(\.locale) private var locale
-    @Environment(\.layoutDirection) private var layoutDirection
 
     var body: some View {
         Text(verbatim: "Nov")
@@ -466,9 +547,14 @@ private struct StatsActivityMonthLabels: View {
                     calendar.locale = locale
                     let names = calendar.shortStandaloneMonthSymbols
                     guard names.count == 12 else { return }
+                    #if os(macOS)
                     let resolved = names.map { context.resolve(Text(verbatim: $0).font(.caption).foregroundStyle(.secondary)) }
+                    #else
+                    // As Today's: the system grey nearly misses 4.5:1 on the grouped background.
+                    let resolved = names.map { context.resolve(Text(verbatim: $0).font(.caption).foregroundStyle(.token(.textSecondary))) }
+                    #endif
                     let labels = grid.monthLabels(pitch: square.side + square.gap, width: size.width,
-                                                  rightToLeft: layoutDirection == .rightToLeft) {
+                                                  rightToLeft: rightToLeft) {
                         resolved[$0 - 1].measure(in: CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)).width
                     }
                     for label in labels {
@@ -488,12 +574,19 @@ private struct StatsActivityPlaceholder: View {
     /// Narrower than a year: the box's width; else a year's, so the figures beside it keep
     /// their place when the grid arrives.
     let fitsWidth: Bool
+    /// Year blocks to keep room for (S10.3: the box at its final height).
+    let years: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-            Text(verbatim: "2026").font(.subheadline.weight(.semibold)).hidden()
-            Text(verbatim: "Nov").font(.caption).hidden()
-            Color.clear.frame(height: ActivityYearGrid.height(square))
+        // One block's room per year, as the blocks stack (StatsActivityYears).
+        VStack(alignment: .leading, spacing: Spacing.medium) {
+            ForEach(0..<max(1, years), id: \.self) { _ in
+                VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                    Text(verbatim: "2026").font(.subheadline.weight(.semibold)).hidden()
+                    Text(verbatim: "Nov").font(.caption).hidden()
+                    Color.clear.frame(height: ActivityYearGrid.height(square))
+                }
+            }
         }
         .frame(width: fitsWidth ? nil : ActivityYearGrid(year: 2026, firstWeekday: 1, today: nil, counts: []).width(square),
                alignment: .leading)
@@ -529,4 +622,15 @@ private struct StatsActivityPlaceholder: View {
             EmptyView()
         }
     }
+}
+
+extension StatsActivity {
+    /// A day (H1) as a number of days since 1970-01-01 by its calendar date: a selection kept
+    /// this way names the same date after a rollover, when every H1 day moves by one.
+    public func absoluteDay(ofDay day: Int) -> Int { day + dayZeroAbsolute }
+
+    /// The day (H1) of an absolute day.
+    public func day(ofAbsoluteDay day: Int) -> Int { day - dayZeroAbsolute }
+
+    private var dayZeroAbsolute: Int { Int((days.dayZero.timeIntervalSince1970 / 86_400).rounded(.down)) }
 }

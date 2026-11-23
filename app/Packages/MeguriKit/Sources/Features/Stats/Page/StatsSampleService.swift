@@ -182,6 +182,9 @@ nonisolated struct StatsSampleCollection {
 
     private var reviewed: Bool { shape == .typical || shape == .recent }
     private var hasCards: Bool { shape != .noCards }
+    /// The days with reviews in the window, for the windows with no time axis: `recent` has
+    /// none before its first review.
+    private var reviewSpan: Int { min(-windowStart, -firstReviewDay + 1) }
     private var windowStart: Int { history == .allHistory ? Self.firstDay : -366 }
 
     func header(refresh: UInt64) -> StatsPageHeader {
@@ -308,7 +311,7 @@ nonisolated struct StatsSampleCollection {
         case .hours:
             let curve: [Double] = [0, 0, 0, 0, 0, 0, 1, 4, 8, 9, 6, 4, 5, 6, 3, 2, 2, 3, 5, 8, 10, 9, 6, 2]
             func hours(_ days: Int) -> [StatsHour] {
-                let total = Double(min(days, -windowStart) * dailyReviews)
+                let total = Double(min(days, reviewSpan) * dailyReviews)
                 return curve.map { StatsHour(total: Int(total * $0 / 93), correct: Int(total * $0 / 93 * 0.9)) }
             }
             func retention(_ days: Int) -> [StatsHourRetention] {
@@ -320,7 +323,7 @@ nonisolated struct StatsSampleCollection {
             return .hours(StatsHours(hours: windowValues(hours), retentionByHour: windowValues(retention)))
         case .buttons:
             return .buttons(StatsButtons(ranges: windowValues { days in
-                let n = Double(min(days, -windowStart) * dailyReviews)
+                let n = Double(min(days, reviewSpan) * dailyReviews)
                 return StatsButtonPresses(learning: [Int(n * 0.03), Int(n * 0.01), Int(n * 0.09), Int(n * 0.01)],
                                           young: [Int(n * 0.03), Int(n * 0.02), Int(n * 0.22), Int(n * 0.03)],
                                           mature: [Int(n * 0.04), Int(n * 0.03), Int(n * 0.43), Int(n * 0.06)])
@@ -443,7 +446,7 @@ nonisolated struct StatsSampleCollection {
         return children.map { id in
             let share = (Self.weight(id) ?? 0) / weight
             return StatsDeckRow(deckID: id, ownCards: false, cards: Int(Double(scaled(4_210)) * share), windows: windowValues { days in
-                let reviews = Int(Double(min(days, -windowStart) * dailyReviews) * share)
+                let reviews = Int(Double(min(days, reviewSpan) * dailyReviews) * share)
                 return StatsDeckValues(reviews: reviews, timeMilliseconds: reviews * 7_500,
                                        passed: Int(Double(reviews) * 0.9), failed: Int(Double(reviews) * 0.1))
             })

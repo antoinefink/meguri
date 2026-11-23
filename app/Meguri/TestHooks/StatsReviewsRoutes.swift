@@ -30,7 +30,10 @@ extension TestHooks.StatsRoutes {
             reviews(.typical, period: .oneMonth, pin: (.reviewsOverTime, { $0.data.bins.count - 3 }))
         }
         registry.registerShell("stats/chart/reviews-over-time/contrast") { _ in reviews(.typical, option: .contrast) }
-        registry.registerShell("stats/chart/activity/pinned") { _ in reviews(.typical, pin: (.activity, { _ in -2 })) }
+        registry.registerShell("stats/chart/activity/pinned") { _ in reviews(.typical, pin: (.activity, { content in
+                // Two days ago, stored as an absolute day as the box stores it.
+                if case let .activity(activity)? = content.detail { activity.absoluteDay(ofDay: -2) } else { -2 }
+            })) }
         registry.registerShell("stats/chart/activity/failed") { _ in reviews(.ending(.partFails(.activityDays))) }
         registry.registerShell("stats/chart/activity/recent") { _ in reviews(.shape(.recent)) }
     }
