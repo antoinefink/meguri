@@ -106,7 +106,6 @@ struct StatsText {
     var figureAverageADay: String { text("stats.figure.averageADay") }
     var figureAverageOnDaysStudied: String { text("stats.figure.averageOnDaysStudied") }
     var figureTimePerCard: String { text("stats.figure.timePerCard") }
-    var figureCurrentStreak: String { text("stats.figure.currentStreak") }
     /// Activity's headline and sentence (the owner's Option B, 2026-11-23).
     func inARow(_ n: Int, _ nText: String) -> String { text("stats.activity.inARow \(n) \(nText)") }
     var noStreak: String { text("stats.activity.noStreak") }
@@ -121,9 +120,6 @@ struct StatsText {
     /// The narrow page's Activity control (the coordinator's decision of 2026-11-23).
     var activityShowAllYears: String { text("stats.activity.showAllYears") }
     var activityShowLess: String { text("stats.activity.showLess") }
-    var figureLongestStreak: String { text("stats.figure.longestStreak") }
-    var figureDaysStudiedThisYear: String { text("stats.figure.daysStudiedThisYear") }
-    var figureAllReviews: String { text("stats.figure.allReviews") }
     func yearTotal(_ year: String, _ n: Int, _ nText: String) -> String { text("stats.activity.yearTotal \(year) \(n) \(nText)") }
 
     // MARK: Cards (S7.6 to S7.8)

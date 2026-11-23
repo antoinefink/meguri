@@ -6,9 +6,10 @@ import SwiftUI
 /// Activity (`stats/statistics-page` S7.5, contract N25.8, the owner's Option E): one grid for
 /// all of history (HeatmapKit's `ActivityContinuousGrid`: N24.6's fixed squares, the system
 /// green and AH7's levels), a column per week, wrapped onto lines like text, oldest at the top
-/// left and today at the bottom right; never scrolled sideways. Under it, in a row that wraps:
-/// Current Streak, Longest Streak, Days Studied This Year, All Reviews, then each year's total.
-/// The period never changes it. Hover (Mac) or a tap (touch) shows a day's date and count; a
+/// left and today at the bottom right; never scrolled sideways. Over it, the headline: the
+/// current streak and its sentence (the owner's Option B); each year's total beside its label
+/// on the grid; nothing under it but, on the narrow page, Show All Years (its recent lines,
+/// the coordinator's decision of 2026-11-23). The period never changes it. Hover (Mac) or a tap (touch) shows a day's date and count; a
 /// click pins it; Esc clears it; Left and Right move a week, Up and Down a day (S8.3, S14).
 /// The model writes every value (`StatsBoxDetail.activity`); this view only lays them out.
 struct StatsActivityBox: View {
@@ -61,6 +62,8 @@ struct StatsActivityBox: View {
                     .onGeometryChange(for: Int.self) {
                         ActivityContinuousGrid.Geometry.perLine(width: $0.size.width, square: Self.square)
                     } action: { perLine = $0 }
+                    .onChange(of: perLine) { dropHiddenPin(activity) }
+                    .onChange(of: recentWeeks) { dropHiddenPin(activity) }
                     .zIndex(1)
                 if narrow, let columns = (activity?.grid.columns ?? span?.grid().columns), perLine > 0,
                    ActivityContinuousGrid.Geometry.firstColumn(columns: columns, perLine: perLine,
@@ -151,6 +154,21 @@ struct StatsActivityBox: View {
         .accessibilityIdentifier("stats.box.activity.showAllYears")
     }
 
+    /// Whether a day (H1) is on a line drawn: with the recent lines, from their oldest day.
+    private func shows(_ day: Int, activity: StatsActivity) -> Bool {
+        guard recentWeeks != nil, perLine > 0 else { return true }
+        return day >= Self.oldestShownDay(activity.grid, perLine: perLine)
+    }
+
+    /// A pin left on a line the recent lines now leave out (a narrower window, a rotation, the
+    /// Duo folded) is let go: selection reaches only the days drawn.
+    private func dropHiddenPin(_ activity: StatsActivity?) {
+        let selection = slot.selection
+        guard let activity, let day = selection.wrappedValue.bin.map(activity.day(ofAbsoluteDay:)),
+              !shows(day, activity: activity) else { return }
+        selection.wrappedValue = .none
+    }
+
     /// The oldest day (H1, 0 or below) the recent lines show at `perLine` columns a line.
     nonisolated static func oldestShownDay(_ grid: ActivityContinuousGrid, perLine: Int) -> Int {
         let first = ActivityContinuousGrid.Geometry.firstColumn(columns: grid.columns, perLine: perLine,
@@ -230,7 +248,7 @@ struct StatsActivityBox: View {
 
     private func browseSelected(_ activity: StatsActivity) -> KeyPress.Result {
         guard let day = slot.selection.wrappedValue.bin.map(activity.day(ofAbsoluteDay:)), let showInBrowse,
-              (activity.counts[day] ?? 0) > 0 else { return .ignored }
+              shows(day, activity: activity), (activity.counts[day] ?? 0) > 0 else { return .ignored }
         showInBrowse(day)
         return .handled
     }
@@ -324,6 +342,9 @@ private struct StatsActivityGrid: View {
     @Environment(\.statsScrolling) private var scrolling
     /// The drawn size, for hit-testing and the overlays; the layout never reads it.
     @State private var size: CGSize = .zero
+    /// The recent lines the size was measured with: until the new size arrives after Show All
+    /// Years or Show Less, the overlays keep the geometry of what is drawn.
+    @State private var measuredRecentWeeks: Int?
 
     init(activity: StatsActivity, square: ActivityGrid.Square, recentWeeks: Int?, selection: Binding<StatsChartSelection>,
          showInBrowse: ((Int) -> Void)?, pinned: @escaping () -> Void) {
@@ -341,7 +362,7 @@ private struct StatsActivityGrid: View {
     private var grid: ActivityContinuousGrid { activity.grid }
     private var rightToLeft: Bool { layoutDirection == .rightToLeft }
     private var geometry: ActivityContinuousGrid.Geometry {
-        StatsActivityMetrics.geometry(size: size, columns: grid.columns, square: square, recentWeeks: recentWeeks)
+        StatsActivityMetrics.geometry(size: size, columns: grid.columns, square: square, recentWeeks: measuredRecentWeeks)
     }
 
     var body: some View {
@@ -352,7 +373,10 @@ private struct StatsActivityGrid: View {
                                 labels: StatsActivityDayLabels(days: activity.days, locale: locale, calendar: calendar),
                                 years: activity.years)
                 .equatable()
-                .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+                .onGeometryChange(for: CGSize.self) { $0.size } action: {
+                    size = $0
+                    measuredRecentWeeks = recentWeeks
+                }
                 .overlay(alignment: .topLeading) { interaction }
                 .overlay(alignment: .topLeading) {
                     // Only a day on a line drawn: a pin on a line the recent lines leave out shows nothing.
@@ -697,47 +721,6 @@ private struct StatsActivityPlaceholder: View {
                 .foregroundStyle(.secondary)
         case .ready:
             EmptyView()
-        }
-    }
-}
-
-/// Items side by side at their own widths, leading-aligned, wrapping onto a new line when the
-/// next does not fit, like words (the figures under the grid).
-struct StatsWrappingRow: Layout {
-    let spacing: CGFloat
-    let lineSpacing: CGFloat
-
-    /// Each item's frame for a width, and the height used.
-    private func frames(width: CGFloat, subviews: Subviews) -> (frames: [CGRect], size: CGSize) {
-        var frames: [CGRect] = []
-        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, used: CGFloat = 0
-        for subview in subviews {
-            var size = subview.sizeThatFits(.unspecified)
-            if size.width > width { size = subview.sizeThatFits(ProposedViewSize(width: width, height: nil)) }
-            if x > 0, x + size.width > width {
-                y += lineHeight + lineSpacing
-                x = 0
-                lineHeight = 0
-            }
-            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
-            used = max(used, x + size.width)
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
-        return (frames, CGSize(width: used, height: frames.isEmpty ? 0 : y + lineHeight))
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? .greatestFiniteMagnitude
-        let size = frames(width: width, subviews: subviews).size
-        return CGSize(width: proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? size.width, height: size.height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let placed = frames(width: bounds.width, subviews: subviews).frames
-        for (subview, frame) in zip(subviews, placed) {
-            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
-                          proposal: ProposedViewSize(frame.size))
         }
     }
 }

@@ -841,16 +841,6 @@
         }
       }
     },
-    "stats.figure.allReviews": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "All Reviews"
-          }
-        }
-      }
-    },
     "stats.figure.averageADay": {
       "localizations": {
         "en": {
@@ -911,16 +901,6 @@
         }
       }
     },
-    "stats.figure.currentStreak": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Current Streak"
-          }
-        }
-      }
-    },
     "stats.figure.dailyLoad": {
       "localizations": {
         "en": {
@@ -937,16 +917,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Days Studied"
-          }
-        }
-      }
-    },
-    "stats.figure.daysStudiedThisYear": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Days Studied This Year"
           }
         }
       }
@@ -987,16 +957,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Likely Forgotten"
-          }
-        }
-      }
-    },
-    "stats.figure.longestStreak": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Longest Streak"
           }
         }
       }
