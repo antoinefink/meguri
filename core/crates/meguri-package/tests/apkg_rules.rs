@@ -963,3 +963,51 @@ fn a_package_past_a_size_limit_is_refused_at_the_inspect_and_leaves_no_staging()
         assert_eq!(dump(&target), before);
     }
 }
+
+#[test]
+fn tag_uses_count_tags_and_not_their_bytes_or_padding() {
+    // One note with four tags of two-byte letters, stored padded.
+    let source = Fixture::new(0);
+    let id = crate::apkg_import::add_note(&source, source.notetype, &["front", "back"]);
+    raw(&source, move |scope| {
+        let mut note = scope.note(id)?.unwrap();
+        note.tags = format!(" {0} {0}a {0}b {0}c ", "é".repeat(100));
+        scope.put_note_forced(&note)?;
+        Ok(())
+    });
+    let package = export(&source, "deck.apkg");
+    let staged = tempfile::tempdir().unwrap();
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(&package).unwrap()).unwrap();
+    let bytes = zstd::decode_all(&crate::apkg_import::entry(&mut archive, "collection.anki21b")[..]).unwrap();
+    let path = staged.path().join("collection.anki2");
+    std::fs::write(&path, bytes).unwrap();
+    let limits = |tag_uses| meguri_storage::deck_package::DeckCandidateLimits {
+        tag_uses,
+        ..meguri_package::apkg::LIMITS
+    };
+    let prepare = |tag_uses| {
+        meguri_storage::deck_package::prepare_deck_candidate(
+            &path,
+            &meguri_storage::package_inspection::CandidateContext {
+                clock: source.clock.as_ref(),
+                random: source.random.as_ref(),
+                space: &meguri_storage::space::StatvfsSpace,
+                is_cancelled: &|| false,
+            },
+            &meguri_storage::deck_package::DeckCandidateRepair {
+                minutes_west_at: &|_| 0,
+                repair_fields: &|fields, _| fields,
+                limits: limits(tag_uses),
+            },
+        )
+    };
+    assert!(matches!(
+        prepare(3),
+        Err(meguri_storage::package_inspection::CandidateError::TooLarge {
+            what: "tag uses",
+            found: 4,
+            limit: 3
+        })
+    ));
+    assert_eq!(prepare(4).unwrap().notes, 1);
+}

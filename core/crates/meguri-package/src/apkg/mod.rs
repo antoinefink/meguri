@@ -48,7 +48,7 @@ pub const LIMITS: meguri_storage::deck_package::DeckCandidateLimits = meguri_sto
     // A page of notes is `gather::NOTE_PAGE` of these at most.
     note_bytes: 2 * 1024 * 1024,
     card_data_bytes: 64 * 1024,
-    tag_uses: 2 * MAX_ROWS,
+    tag_uses: 4 * MAX_ROWS,
     structure_rows: 10_000,
     notetype_parts: 5000,
     structure_bytes: 64 * 1024 * 1024,

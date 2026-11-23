@@ -250,7 +250,9 @@ pub fn apply(
     // The slot is held until the session has its result and the static
     // media are written: no second apply and no collection swap in between.
     let _held = slot;
-    meguri_model::faultpoint!("package.apkg.after_commit").map_err(crate::Error::from)?;
+    // A kill point only: an injected error here would return after the
+    // commit and before the session has its result.
+    let _ = meguri_model::faultpoint!("package.apkg.after_commit");
     match outcome {
         Ok(op) => finish(op.seq.0, op.generation.0, op.undo.map(|undo| undo.name), false).ok_or_else(|| {
             ApkgImportError::Io {

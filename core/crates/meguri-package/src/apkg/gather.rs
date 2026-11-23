@@ -36,7 +36,8 @@ pub(crate) struct NoteHead {
 /// What an apply keeps in memory of the package collection, as I3 left it:
 /// each note's identity and what the cards refer to. Field text, cards and
 /// review-log rows are read again in pages when they are needed (R1852), so
-/// memory grows by a few dozen bytes per note, never by the package's text.
+/// memory grows with the number of notes (and their GUIDs, which `LIMITS`
+/// caps at 255 bytes each), never with the package's text.
 pub(crate) struct RawPackage {
     /// In ascending id.
     pub notes: Vec<NoteHead>,

@@ -81,13 +81,16 @@ struct LogBudget {
 
 impl LogBudget {
     fn entry(&mut self, note: i64, fields: &[String], existing: Option<i64>) -> LogEntry {
-        let mut kept = Vec::new();
+        let mut kept: Vec<String> = Vec::new();
         if self.left > 0 {
             kept = fields.iter().map(|field| reduced(field)).collect();
-            let cost: usize =
-                kept.iter().map(|field: &String| field.len() + std::mem::size_of::<String>()).sum();
-            self.left = self.left.saturating_sub(cost.max(1));
+        }
+        let cost: usize = kept.iter().map(|field| field.len() + std::mem::size_of::<String>()).sum();
+        // Kept only when the whole entry fits what is left.
+        if self.left > 0 && cost <= self.left {
+            self.left -= cost;
         } else {
+            kept = Vec::new();
             self.omitted += 1;
         }
         LogEntry {

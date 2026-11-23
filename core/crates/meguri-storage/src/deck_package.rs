@@ -43,7 +43,8 @@ pub struct DeckCandidateLimits {
     pub note_bytes: u64,
     /// One card's data, in bytes.
     pub card_data_bytes: u64,
-    /// Tags over all notes, each use counted.
+    /// Tags over all notes, each use counted: the separating spaces of a
+    /// note's trimmed tags, plus one.
     pub tag_uses: u64,
     /// Rows of each of decks, presets and note types.
     pub structure_rows: u64,
@@ -66,7 +67,12 @@ fn check_limits(conn: &rusqlite::Connection, limits: &DeckCandidateLimits) -> Re
     let one = |sql: &str| -> Result<i64, CandidateError> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
     let cards = one("SELECT count(*) FROM cards")?;
     let (notes, guid, note, tags): (i64, i64, i64, i64) = conn.query_row(
-        "SELECT count(*),                 coalesce(max(length(CAST(guid AS BLOB))), 0),                 coalesce(max(length(CAST(flds AS BLOB)) + length(CAST(tags AS BLOB)) + length(CAST(data AS BLOB))), 0),                 coalesce(sum(length(CAST(tags AS BLOB)) - length(replace(CAST(tags AS BLOB), X'20', X'')) + 1), 0)          FROM notes",
+        "SELECT count(*), \
+                coalesce(max(length(CAST(guid AS BLOB))), 0), \
+                coalesce(max(length(CAST(flds AS BLOB)) + length(CAST(tags AS BLOB)) + length(CAST(data AS BLOB))), 0), \
+                coalesce(sum(CASE WHEN trim(CAST(tags AS TEXT)) = '' THEN 0 ELSE \
+                    length(trim(CAST(tags AS TEXT))) - length(replace(trim(CAST(tags AS TEXT)), ' ', '')) + 1 END), 0) \
+         FROM notes",
         [],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
     )?;
@@ -96,7 +102,9 @@ fn check_limits(conn: &rusqlite::Connection, limits: &DeckCandidateLimits) -> Re
     for table in ["fields", "templates"] {
         let (most, size): (i64, i64) = conn.query_row(
             &format!(
-                "SELECT coalesce(max(parts), 0), coalesce(sum(size), 0) FROM                  (SELECT count(*) AS parts, sum(length(CAST(name AS BLOB)) + length(config)) AS size                   FROM {table} GROUP BY ntid)"
+                "SELECT coalesce(max(parts), 0), coalesce(sum(size), 0) FROM \
+                 (SELECT count(*) AS parts, sum(length(CAST(name AS BLOB)) + length(config)) AS size \
+                  FROM {table} GROUP BY ntid)"
             ),
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
