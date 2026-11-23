@@ -432,7 +432,11 @@ public final class NoteTypesModel {
     /// detail swaps to it in one step if it is the selection.
     private func finishLoading(_ id: Int64) {
         loaded.insert(id)
-        if selection == id { showSelectionWhenReady() }
+        if selection == id {
+            showSelectionWhenReady()
+            // The record the preview waited for (a selection not read ahead, or the saved version).
+            preview.subjectChanged()
+        }
         readCounts(id)
         refreshIssues(id, immediately: true)
         referencesTask[id]?.cancel()

@@ -138,7 +138,7 @@ struct NoteTypePreviewPane: View {
                 message(Text("noteTypes.preview.deleted", bundle: .module), detail: nil, symbol: "trash")
             } else if case .templateError(let side) = preview.problem {
                 errorMessage(side)
-            } else if preview.problem == .unavailable, preview.shown == nil {
+            } else if preview.problem == .unavailable {
                 message(Text("noteTypes.preview.unavailable", bundle: .module),
                         detail: Text("noteTypes.preview.unavailable.message", bundle: .module), symbol: "eye.slash")
             }
@@ -146,11 +146,8 @@ struct NoteTypePreviewPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var covered: Bool {
-        if deleted { return true }
-        if case .templateError = preview.problem { return true }
-        return false
-    }
+    /// The card on the page is not the draft's: it stays, faded, under the reason.
+    private var covered: Bool { deleted || preview.problem != nil }
 
     /// The issue the status line shows for this card type and side, in its words.
     private func errorMessage(_ side: CardRenderSide) -> some View {

@@ -1049,8 +1049,8 @@ extension NoteTypesModelTests {
 @MainActor @Suite struct NoteTypePreviewTests {
     private final class Page { var shown: [String] = [] }
 
-    private func open(_ preview: FakePreviewBackend = FakePreviewBackend(),
-                      defaults: UserDefaults? = nil) async -> (NoteTypesModel, FakePreviewBackend, Page) {
+    private func open(_ preview: FakePreviewBackend = FakePreviewBackend(), defaults: UserDefaults? = nil,
+                      preferred: Int64? = nil) async -> (NoteTypesModel, FakePreviewBackend, Page) {
         let backend = FakeNoteTypesBackend()
         backend.records[7] = NoteTypeDraftTests.record(templates: [("Card 1", "{{Front}}", "{{FrontSide}}<hr id=answer>{{Back}}"),
                                                                    ("Card 2", "{{Back}}", "{{FrontSide}}<hr id=answer>{{Front}}")])
@@ -1062,6 +1062,7 @@ extension NoteTypesModelTests {
         model.preview.present = { payload in page.shown.append(payload.question); return true }
         model.appear()
         await model.settle()
+        model.preview.preferredNote[7] = preferred
         model.tab = .cards
         model.preview.visible = true
         await model.preview.settled()
@@ -1083,11 +1084,12 @@ extension NoteTypesModelTests {
         model.preview.step(by: -5)
         #expect(model.preview.notePosition! == (2, 3), "a step past the ends does nothing")
         // A way in names its note (W14): that one shows.
-        let (named, namedCore, _) = await open(FakePreviewBackend())
-        named.preview.preferredNote[7] = 3
-        named.preview.notesChanged()
-        await named.preview.settled()
+        let (named, namedCore, _) = await open(preferred: 3)
         #expect(namedCore.renders.last?.note == 3 && named.preview.notePosition! == (1, 3))
+        // Notes change elsewhere: the note shown stays when it is still there.
+        model.preview.notesChanged()
+        await model.preview.settled()
+        #expect(core.renders.last?.note == 5 && model.preview.notePosition! == (2, 3))
     }
 
     @Test func aTypeWithoutNotesPreviewsANewNoteWithFillEmptyFieldsOn() async {

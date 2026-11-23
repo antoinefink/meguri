@@ -61,7 +61,8 @@ public nonisolated struct NoteTypePreviewRender: Sendable, Hashable {
         let audio = side == .question ? questionAudio : answerAudio
         return CardPayload(cardID: cardID, ordinal: Int(ordinal), question: html, answer: html, questionReplayIDs: replay,
                            answerReplayIDs: replay, questionAudio: audio, answerAudio: audio, mediaRefs: mediaRefs, typeIn: nil,
-                           flag: flag, marked: marked, audioPolicy: CardAudioPolicy(autoplay: false, interrupt: true, replayQuestion: false))
+                           // V12: the preview draws no flag or mark.
+                           flag: 0, marked: false, audioPolicy: CardAudioPolicy(autoplay: false, interrupt: true, replayQuestion: false))
     }
 }
 
@@ -197,6 +198,8 @@ public final class NoteTypePreview {
     @ObservationIgnored var typingDelay: Duration = .milliseconds(300)
 
     @ObservationIgnored private var fillEmptyChoice: [Int64: Bool] = [:]
+    /// The note shown before the list was read again (`notesChanged`).
+    @ObservationIgnored private var keptNote: Int64?
     @ObservationIgnored private var token: UInt64 = 0
     @ObservationIgnored private var pending: Task<Void, Never>?
     /// What `shown` was made from: a side switch of the same input reuses it.
@@ -238,7 +241,8 @@ public final class NoteTypePreview {
 
     /// Notes of the shown type were added, removed or edited elsewhere.
     public func notesChanged() {
-        notesOf = nil
+        // The type stays: the note shown is found again in the new list.
+        keptNote = noteIndex.flatMap { notes?[safe: $0] }
         notes = nil
         notesTask?.cancel()
         notesTask = nil
@@ -352,6 +356,7 @@ public final class NoteTypePreview {
             notesOf = notetype
             notes = nil
             noteIndex = nil
+            keptNote = nil
             clozeNumber = 1
             shownKey = nil
         }
@@ -360,8 +365,17 @@ public final class NoteTypePreview {
         let read = await task.value
         guard notesOf == notetype else { return nil }
         notesTask = nil
-        notes = read ?? []
-        return notes
+        // A failed read is not "no notes": nothing is cached, and the next render reads again.
+        guard let read else {
+            problem = .unavailable
+            return nil
+        }
+        notes = read
+        if let kept = keptNote {
+            noteIndex = read.firstIndex(of: kept) ?? noteIndex.map { min($0, read.count - 1) }
+            keptNote = nil
+        }
+        return read
     }
 
     private func put(_ payload: CardPayload) async throws -> Bool {
