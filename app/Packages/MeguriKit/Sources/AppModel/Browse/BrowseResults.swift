@@ -302,6 +302,8 @@ public final class BrowseResults {
     /// V2.1: Cards / Notes. A complete handle toggles without a run (H11);
     /// otherwise the search runs again in the other mode.
     public func setMode(_ mode: BrowseMode, query: FilterQuery) {
+        // Card ids and note ids are separate spaces (H12): rows gone in one mode are not the other's.
+        goneIDs = []
         guard query == lastQuery else { return run(query, mode: mode) }
         lastMode = mode
         // A run text being read takes the mode when its search starts.
@@ -709,15 +711,16 @@ public final class BrowseResults {
 
     /// The Sort Field text of the row at `index` (V8.2's question), from
     /// the rows read when the list shows that column, else read for it.
-    func sortFieldText(at index: Int) async -> String? {
-        guard let list else { return nil }
-        if let column = list.columns.firstIndex(of: "noteFld"), let row = row(at: index), row.cells.indices.contains(column),
+    func sortFieldText(at index: Int, in target: BrowseTarget) async -> String? {
+        // The row read, while it is still that row of that revision.
+        if let list, list.handle == target.handle, list.revision == target.revision,
+           let column = list.columns.firstIndex(of: "noteFld"), let row = row(at: index), row.cells.indices.contains(column),
            case .text(let text) = row.cells[column] {
             return text
         }
-        guard let session, !list.released else { return nil }
+        guard let session else { return nil }
         let range = UInt64(index)..<UInt64(index + 1)
-        guard let read = try? await session.rows(list.handle, revision: list.revision, range: range, columns: ["noteFld"]),
+        guard let read = try? await session.rows(target.handle, revision: target.revision, range: range, columns: ["noteFld"]),
               case .row(let row)? = read.first, case .text(let text)? = row.cells.first else { return nil }
         return text
     }

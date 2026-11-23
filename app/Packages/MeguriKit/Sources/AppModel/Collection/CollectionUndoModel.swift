@@ -68,11 +68,13 @@ public final class CollectionUndoModel {
         let step: ReviewStepInfo? = if case .available(let step) = redo ? redoStatus : undoStatus { step } else { nil }
         task = Task {
             defer { busy = false; task = nil }
+            var done = false
             do {
                 let start: CoreUndoStart
                 if redo { start = try await service.startRedo(scope: .global) }
                 else { start = try await service.startUndo(scope: .global) }
                 _ = try await start.value()
+                done = true
             } catch {
                 if expected == owner.generation { owner.collectionUndoFailed() }
             }
@@ -81,7 +83,8 @@ public final class CollectionUndoModel {
             // The tree's refresh scheduled a peek; this one replaces it.
             refreshTask?.cancel(); refreshTask = nil
             await refreshNow()
-            if let step, let title = titles[step.id],
+            // Only a step that was undone or redone hands its title on.
+            if done, let step, let title = titles[step.id],
                case .available(let left) = redo ? undoStatus : redoStatus, left.name == step.name, left.id != step.id {
                 name(step: left.id, title)
             }

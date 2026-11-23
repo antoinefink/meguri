@@ -138,7 +138,23 @@ struct BrowseRowMenu: View {
     private var commands: BrowseCommands { model.commands }
 
     var body: some View {
-        if !rows.isEmpty {
+        // The rows as a command takes them, read once, when the menu is drawn (H12, K1).
+        if !rows.isEmpty, let target = commands.target(rows: rows) {
+            BrowseRowMenuItems(model: model, target: target)
+        }
+    }
+}
+
+/// The context menu's items, on the rows it was opened on.
+private struct BrowseRowMenuItems: View {
+    let model: BrowseModel
+    let target: BrowseTarget
+    @Environment(\.locale) private var locale
+
+    private var commands: BrowseCommands { model.commands }
+
+    var body: some View {
+        Group {
             Section {
                 item(.changeDeck, key: "d", [.command])
                 item(.addTags, key: "a", [.command, .shift])
@@ -172,9 +188,9 @@ struct BrowseRowMenu: View {
     @ViewBuilder
     private func item(_ command: BrowseCommand, key: KeyEquivalent? = nil, _ modifiers: EventModifiers = [],
                       role: ButtonRole? = nil) -> some View {
-        let state = commands.state(command, rows: rows)
+        let state = commands.state(command, on: target)
         if state.shown {
-            Button(role: role) { commands.perform(command, rows: rows) } label: {
+            Button(role: role) { commands.perform(command, on: target) } label: {
                 Text(verbatim: BrowseCommandText.title(command, state, locale: locale))
             }
             .keyboardShortcut(key.map { KeyboardShortcut($0, modifiers: modifiers) })
@@ -187,8 +203,8 @@ struct BrowseRowMenu: View {
     private var flagMenu: some View {
         Menu {
             ForEach(Array(UInt8(0)...7), id: \.self) { flag in
-                let state = commands.state(.flag(flag), rows: rows)
-                Button { commands.perform(.flag(flag), rows: rows) } label: {
+                let state = commands.state(.flag(flag), on: target)
+                Button { commands.perform(.flag(flag), on: target) } label: {
                     if flag == 0 {
                         Text(verbatim: BrowseCommandText.flag(0, names: model.flagNames, locale: locale))
                     } else {
@@ -202,7 +218,7 @@ struct BrowseRowMenu: View {
                 if flag == 0 { Divider() }
             }
         } label: {
-            Text(verbatim: BrowseCommandText.title(.flag(1), commands.state(.flag(1), rows: rows), locale: locale))
+            Text(verbatim: BrowseCommandText.title(.flag(1), commands.state(.flag(1), on: target), locale: locale))
         }
         .accessibilityIdentifier("browse.menu.flag")
     }

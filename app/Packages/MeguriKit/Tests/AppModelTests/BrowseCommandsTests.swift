@@ -138,6 +138,32 @@ import Testing
                                               target: BrowseTarget(handle: handle, revision: 0, ranges: [0..<2], mode: .cards)))
     }
 
+    @Test func aContextMenusRowsAreTakenWhenItIsDrawnAndRefusedWhenTheListMovedOn() async throws {
+        let (model, session) = try await browse()
+        await select(model, [0])
+        // The menu is drawn on row 2; then a prune moves the core's handle on.
+        let target = try #require(model.commands.target(rows: [2]))
+        let handle = try #require(model.results.list?.handle)
+        session.revisions[handle.rawValue] = 1
+        model.commands.perform(.suspend, on: target)
+        await until { model.commands.failed == .suspend }
+        // Nothing acted on the row now at index 2, and the selection was not taken instead.
+        #expect(session.actions.isEmpty && session.suspendedCards.isEmpty)
+    }
+
+    @Test func unsuspendOnAMenusRowsWithNoneSuspendedDoesNothing() async throws {
+        let (model, session) = try await browse()
+        model.setMode(.notes)
+        await until { model.results.list?.mode == .notes && model.results.row(at: 0) != nil }
+        await select(model, [0])
+        // Notes mode: the rows on screen do not tell; both of the pair show for another row.
+        let target = try #require(model.commands.target(rows: [1]))
+        #expect(model.commands.state(.unsuspend, on: target).shown)
+        model.commands.perform(.unsuspend, on: target)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(session.actions.isEmpty && model.commands.failed == nil && !model.commands.busy)
+    }
+
     @Test func rowsTheListNoLongerHasAtThatRevisionAreRefusedAndNothingIsWritten() async throws {
         let (model, session) = try await browse()
         var steps: [String] = []

@@ -189,6 +189,8 @@ public final class BrowseCommands {
     @ObservationIgnored private var factsTask: (target: BrowseTarget, task: Task<BrowseTargetFacts?, Never>)?
     @ObservationIgnored private var serial: UInt64 = 0
     @ObservationIgnored private var reading = false
+    /// Raised when the collection goes: a command started before lands nothing.
+    @ObservationIgnored private var generation: UInt64 = 0
     @ObservationIgnored private var readAgain = false
     /// A command recorded its undo step: its seq (the step's id) and the
     /// title Edit › Undo shows for it (V8.3).
@@ -207,13 +209,20 @@ public final class BrowseCommands {
     /// V8.1 for `command` on the selection, or on `rows` (a context menu
     /// opened on rows that are not the selection).
     public func state(_ command: BrowseCommand, rows: Set<Int>? = nil) -> BrowseCommandState {
-        let facts: BrowseTargetFacts?
-        if let rows, rows != results.selection {
-            facts = results.target(rows).map { localFacts($0) }
-        } else {
-            facts = self.facts
-        }
-        return BrowseCommandState.of(command, facts: facts, available: available(rows))
+        guard let rows else { return BrowseCommandState.of(command, facts: facts, available: available(nil)) }
+        return state(command, on: results.target(rows))
+    }
+
+    /// The rows a context menu was opened on, as its commands take them: read
+    /// once, when the menu is drawn, so a list that moves on while the menu is
+    /// open makes the core refuse them (K1) instead of acting on other rows.
+    public func target(rows: Set<Int>) -> BrowseTarget? { results.target(rows) }
+
+    /// V8.1 for `command` on `target` (a context menu's rows).
+    public func state(_ command: BrowseCommand, on target: BrowseTarget?) -> BrowseCommandState {
+        guard let target else { return BrowseCommandState.of(command, facts: nil, available: available(nil)) }
+        let facts = target == results.target() ? self.facts : localFacts(target)
+        return BrowseCommandState.of(command, facts: facts, available: available(nil))
     }
 
     /// The rows can take a command: a list that is not released, no other
@@ -313,29 +322,34 @@ public final class BrowseCommands {
         return facts
     }
 
-    /// The facts of `target`, waiting for the read under way when it is the
-    /// selection's.
-    private func facts(of target: BrowseTarget, session: any BrowseSearching) async -> BrowseTargetFacts? {
-        if target == factsTarget, let facts, facts.complete { return facts }
-        if let factsTask, factsTask.target == target, let read = await factsTask.task.value { return read }
-        return await read(target, local: localFacts(target), session: session)
-    }
-
     // MARK: Running
 
-    /// Runs `command` on the selection, or on `rows` (a context menu's).
-    /// A command whose sheet is not built does nothing.
+    /// Runs `command` on the selection, or on `rows`. A command whose sheet
+    /// is not built does nothing.
     public func perform(_ command: BrowseCommand, rows: Set<Int>? = nil) {
-        let state = state(command, rows: rows)
+        guard let rows else { return run(command, menu: nil) }
+        guard let target = results.target(rows) else { return }
+        run(command, menu: target)
+    }
+
+    /// Runs `command` on the rows a context menu was opened on, as they were
+    /// when it was drawn.
+    public func perform(_ command: BrowseCommand, on target: BrowseTarget) {
+        run(command, menu: target)
+    }
+
+    /// `menu` nil: the selection now (the menu bar's commands).
+    private func run(_ command: BrowseCommand, menu: BrowseTarget?) {
+        let state = menu.map { state(command, on: $0) } ?? state(command)
         guard state.enabled else { return }
         switch command {
         case .flag(let flag):
-            runCards(.setFlag(flag), command: command, count: nil, rows: rows)
-        case .suspend: runCards(.suspend, command: command, count: state.count, rows: rows)
-        case .unsuspend: runCards(.unsuspend, command: command, count: state.count, rows: rows)
-        case .bury: runCards(.bury, command: command, count: state.count, rows: rows)
-        case .unbury: runCards(.unbury, command: command, count: state.count, rows: rows)
-        case .delete: delete(rows: rows)
+            runCards(.setFlag(flag), command: command, count: nil, menu: menu)
+        case .suspend: runCards(.suspend, command: command, count: state.count, menu: menu)
+        case .unsuspend: runCards(.unsuspend, command: command, count: state.count, menu: menu)
+        case .bury: runCards(.bury, command: command, count: state.count, menu: menu)
+        case .unbury: runCards(.unbury, command: command, count: state.count, menu: menu)
+        case .delete: delete(menu: menu)
         case .editNoteType:
             if let id = facts?.notetypes?.first { openNoteType(id) }
         default:
@@ -344,26 +358,44 @@ public final class BrowseCommands {
     }
 
     /// V8.1's card commands: one bulk action on the target cards.
-    private func runCards(_ action: BulkCardAction, command: BrowseCommand, count: UInt64?, rows: Set<Int>?) {
-        guard let target = results.target(rows), let session = results.commandSession else { return }
+    private func runCards(_ action: BulkCardAction, command: BrowseCommand, count: UInt64?, menu: BrowseTarget?) {
+        guard let target = menu ?? results.target(), let session = results.commandSession else { return }
         busy = true
-        let picks = results.userSelections
+        let picks = results.userSelections, generation = generation
         Task {
-            defer { busy = false }
+            defer { if self.generation == generation { busy = false } }
+            var count = count
+            // Unsuspend and Unbury on rows whose counts the menu did not know
+            // yet (a context menu's rows outside the selection): with none
+            // suspended or buried there is nothing to do, and the core would
+            // refuse the empty list.
+            if action == .unsuspend || action == .unbury, count == nil {
+                guard let counts = try? await session.counts(of: target) else { return fail(command, generation) }
+                let left = action == .unsuspend ? counts.suspended : counts.buried
+                guard left > 0 else { return }
+                count = left
+            }
             do {
-                let result = try await run(action, on: target, session: session, again: rows == nil ? picks : nil)
+                let result = try await run(action, on: target, session: session, again: menu == nil ? picks : nil)
+                guard self.generation == generation else { return }
                 finished(command, count: count, result: result)
             } catch {
-                failed = command
+                fail(command, generation)
             }
         }
+    }
+
+    private func fail(_ command: BrowseCommand, _ generation: UInt64) {
+        guard self.generation == generation else { return }
+        failed = command
     }
 
     /// Runs `action` on `target`. When the core refuses it because the list
     /// moved on (a change pruned rows meanwhile, so the revision is not the
     /// one the rows were taken at) and the user chose no other rows, the
-    /// same rows are taken again in the new revision (the selection moved
-    /// with the prune) and run once more.
+    /// selection's rows are taken again in the new revision (the selection
+    /// moved with the prune) and run once more. A context menu's rows are
+    /// not taken again: nothing tells which rows they became.
     private func run(_ action: BulkCardAction, on target: BrowseTarget, session: any BrowseSearching,
                      again picks: UInt64?) async throws -> BulkActionResult {
         do { return try await session.run(action, on: target) } catch {
@@ -398,12 +430,15 @@ public final class BrowseCommands {
 
     /// Delete: asks when more than one note goes, or when the one note has
     /// other cards that go with it; otherwise deletes at once (Undo
-    /// restores it).
-    private func delete(rows: Set<Int>?) {
-        guard let target = results.target(rows), let session = results.commandSession else { return }
+    /// restores it). The rule reads the core's counts afresh: counts kept
+    /// from before a change (a card added to the note) must not skip it.
+    private func delete(menu: BrowseTarget?) {
+        guard let target = menu ?? results.target(), let session = results.commandSession else { return }
         busy = true
+        let generation = generation
         Task {
-            let question = await ask(target, session: session)
+            let question = await ask(target, session: session, generation: generation)
+            guard self.generation == generation else { return }
             busy = false
             if let question { deleteQuestion = question }
         }
@@ -411,38 +446,36 @@ public final class BrowseCommands {
 
     /// The question for `target`, or nil when it was deleted at once (one
     /// note with one card) or could not be counted.
-    private func ask(_ target: BrowseTarget, session: any BrowseSearching) async -> BrowseDeleteQuestion? {
-        guard let facts = await facts(of: target, session: session), let notes = facts.notes, notes > 0 else {
-            failed = .delete
+    private func ask(_ target: BrowseTarget, session: any BrowseSearching, generation: UInt64) async -> BrowseDeleteQuestion? {
+        // The selection's read under way first: two counts reads of a session
+        // at once cancel the older one in the core.
+        _ = await factsTask?.task.value
+        var counts = try? await session.counts(of: target)
+        if counts == nil { counts = try? await session.counts(of: target) }
+        guard let counts, counts.notes > 0, let cards = try? await session.cardsOfNotes(of: target) else {
+            fail(.delete, generation)
             return nil
         }
-        let cards: UInt64
-        if let known = facts.noteCards { cards = known } else {
-            guard let read = try? await session.cardsOfNotes(of: target) else {
-                failed = .delete
-                return nil
-            }
-            cards = read
-        }
-        if notes == 1, cards <= 1 {
-            _ = await deleteNow(target, notes: notes, session: session, asked: false)
+        if counts.notes == 1, cards <= 1 {
+            await deleteNow(target, notes: 1, session: session, generation: generation)
             return nil
         }
-        let sortField = notes == 1 ? await results.sortFieldText(at: Int(target.ranges[0].lowerBound)) : nil
+        let sortField = counts.notes == 1 ? await results.sortFieldText(at: Int(target.ranges[0].lowerBound), in: target) : nil
         serial &+= 1
-        return BrowseDeleteQuestion(id: serial, target: target, notes: notes, cards: cards, sortField: sortField)
+        return BrowseDeleteQuestion(id: serial, target: target, notes: counts.notes, cards: cards, sortField: sortField)
     }
 
     /// The question's Delete: the notes of the rows it asked about, at the
-    /// revision it asked at. Rows that moved meanwhile are asked about again.
+    /// revision it asked at. When the list moved on meanwhile the core
+    /// refuses them (K1): nothing is deleted and the failure says so.
     public func confirmDelete(_ question: BrowseDeleteQuestion) {
         guard deleteQuestion == question, let session = results.commandSession else { return }
         deleteQuestion = nil
         busy = true
+        let generation = generation
         Task {
-            let again = await deleteNow(question.target, notes: question.notes, session: session, asked: true)
-            busy = false
-            if again { delete(rows: nil) }
+            await deleteNow(question.target, notes: question.notes, session: session, generation: generation)
+            if self.generation == generation { busy = false }
         }
     }
 
@@ -451,18 +484,13 @@ public final class BrowseCommands {
         deleteQuestion = nil
     }
 
-    /// Deletes the notes of `target`; true when the rows moved on since they
-    /// were counted (K1 refuses them) after a question, so Delete counts the
-    /// rows chosen now and asks again.
-    private func deleteNow(_ target: BrowseTarget, notes: UInt64, session: any BrowseSearching, asked: Bool) async -> Bool {
+    private func deleteNow(_ target: BrowseTarget, notes: UInt64, session: any BrowseSearching, generation: UInt64) async {
         do {
             let result = try await session.run(.deleteNotes, on: target)
+            guard self.generation == generation else { return }
             finished(.delete, count: notes, result: result)
-            return false
         } catch {
-            if asked, results.target() != nil, results.list?.revision != target.revision { return true }
-            failed = .delete
-            return false
+            fail(.delete, generation)
         }
     }
 
@@ -493,6 +521,8 @@ public final class BrowseCommands {
 
     /// The collection went: nothing started before lands.
     func reset() {
+        generation &+= 1
+        busy = false
         factsTarget = nil
         facts = nil
         deleteQuestion = nil
