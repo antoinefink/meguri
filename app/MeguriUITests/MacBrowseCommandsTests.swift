@@ -247,7 +247,7 @@ final class MacBrowseCommandsTests: XCTestCase {
         capture(app, "kept-scroll")
         let trace = element(app, "browse.debug.scroll")
         XCTAssertTrue(waitUntil(timeout: 30) { onScreen(table.outlineRows.element(boundBy: index + 10)) },
-                      "row \(index + 10) is on screen again; trace: \(trace.exists ? trace.label : "unknown")")
+                      "row \(index + 10) is on screen again; trace: \(trace.exists ? trace.label : "unknown"); readout: \(keysAt(app))")
         XCTAssertFalse(onScreen(table.outlineRows.element(boundBy: 0)), "not back at the top")
     }
 

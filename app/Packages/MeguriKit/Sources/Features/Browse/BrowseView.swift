@@ -249,6 +249,9 @@ private struct BrowseKeys: View {
             focus.start(model: model)
         }
         .onDisappear { focus.stop() }
+        #if DEBUG
+        .onChange(of: model.results.scrollTrace) { _, steps in responder = "trace: " + steps.joined(separator: " | ") }
+        #endif
     }
 }
 

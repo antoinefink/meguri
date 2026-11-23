@@ -22,9 +22,6 @@ struct BrowseNoteTab: View {
     @State private var position = ScrollPosition(edge: .top)
     @State private var visible: CGRect = .zero
     @State private var fieldsTop: CGFloat = 0
-    /// Deck and Type: the rows' width and the longer label's, so the two pop-ups share one width.
-    @State private var rowsWidth: CGFloat = 0
-    @State private var labelWidth: CGFloat = 0
 
     private var inspector: BrowseInspector { model.inspector }
     private var host: FieldEditorHost? { note.runtime as? FieldEditorHost }
@@ -85,12 +82,9 @@ struct BrowseNoteTab: View {
 
     /// Option A: a short trailing-aligned label column, the two pop-ups the
     /// same width, filling the rest of the row.
-    private var popupWidth: CGFloat? { rowsWidth > 0 ? max(0, rowsWidth - labelWidth - Spacing.small) : nil }
-
     private func label(_ key: LocalizedStringKey) -> some View {
         Text(key, bundle: .module)
             .fixedSize()
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { labelWidth = max(labelWidth, $0) }
     }
 
     private var selectionRows: some View {
@@ -103,7 +97,13 @@ struct BrowseNoteTab: View {
                     }
                 } label: { Text("browse.inspector.deck", bundle: .module) }
                 .labelsHidden()
-                .frame(width: popupWidth, alignment: .leading)
+                // Both pop-ups fill the row to the pane's trailing inset, so their right
+                // edges align as in Apple's inspectors; a deck path too long for it is
+                // shortened in the middle, the whole path in its help.
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(Text(verbatim: deckChoices.first { $0.id == note.card?.deckId }
+                    .map { Self.deckName($0, home: homeDeck(for: $0)) } ?? ""))
                 .accessibilityIdentifier("browse.inspector.deck")
             }
             GridRow {
@@ -119,13 +119,12 @@ struct BrowseNoteTab: View {
                     }
                     .accessibilityIdentifier("browse.inspector.type.editNoteType")
                 } label: { Text(verbatim: note.notetype.name) }
-                .frame(width: popupWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel(Text("browse.inspector.type", bundle: .module))
                 .accessibilityIdentifier("browse.inspector.type")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowsWidth = $0 }
         .padding(.horizontal)
         .padding(.vertical, Spacing.small)
     }
