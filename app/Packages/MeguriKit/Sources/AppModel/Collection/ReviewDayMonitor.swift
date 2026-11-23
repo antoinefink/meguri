@@ -5,6 +5,9 @@ import Foundation
 /// check and resume results from events received while those calls awaited.
 public final class ReviewDayMonitor {
     public private(set) var deadline: Date?
+    /// The day boundary the last check or event gave (`next_day_at`, Unix seconds): when the
+    /// study day of the counts read now ends. Kept while paused, as the day it names is.
+    public private(set) var nextDayAt: Int64?
     private var version: UInt64 = 0
     private var open = true
     private let clock: AppClock
@@ -55,6 +58,7 @@ public final class ReviewDayMonitor {
     public func pause() { cancel?(); cancel = nil; deadline = nil; version &+= 1 }
     public func close() { open = false; pause() }
     private func arm(_ nextDayAt: Int64) {
+        self.nextDayAt = nextDayAt
         cancel?()
         let date = Self.deadline(nextDayAt: nextDayAt, now: clock.now(), zone: zone())
         deadline = date

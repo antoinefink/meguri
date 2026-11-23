@@ -25,6 +25,10 @@ public struct LaunchConfiguration {
     /// query and sidebar, `browser/config-keys` K11); nil keeps nothing, as
     /// a test-hook launch that starts fresh asks.
     public var deviceDefaults: UserDefaults? = .standard
+    /// Where Home keeps its last read for the next launch (N27.2, `HomeSnapshotStore`); nil
+    /// keeps nothing. The app passes `HomeSnapshotStore.standardFile`; a test-hook launch
+    /// keeps nothing unless it asks.
+    public var homeSnapshotFile: URL?
 
     public init() {}
 }

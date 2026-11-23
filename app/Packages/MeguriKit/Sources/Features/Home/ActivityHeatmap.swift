@@ -290,6 +290,8 @@ extension View {
 
 extension ReviewCollection {
     /// A review covering Home holds the heatmap's refreshes until it ends: its
-    /// answers would otherwise ask again after every card.
-    var heatmapRefreshes: Bool { review == nil && navigation.review == nil }
+    /// answers would otherwise ask again after every card. A launch holds them until
+    /// its first deck tree: the core's query lane is serial, and a history scan queued
+    /// first would delay the deck list (N27.5).
+    var heatmapRefreshes: Bool { review == nil && navigation.review == nil && deckTreeRead }
 }

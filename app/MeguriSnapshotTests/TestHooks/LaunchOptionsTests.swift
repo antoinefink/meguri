@@ -157,6 +157,32 @@ import Darwin
         #expect(throws: TestHookError.self) { try Options(arguments: ["-MeguriStudyTimings", "yes"]) }
     }
 
+    /// Home's kept read (N27.2): a hook launch keeps none unless it asks, a launch with no
+    /// hook option keeps the app's; the phase trace is an on/off probe.
+    @Test func homeSnapshotIsKeptOnlyWhenAskedAndTheTraceIsAnOnOffProbe() throws {
+        let installer = TestHooks.FixtureInstaller(bundleIdentifier: "x.dev")
+        let file = URL(filePath: "/tmp/home-snapshot.json")
+        var plain = LaunchConfiguration()
+        plain.homeSnapshotFile = file
+        try Options(arguments: []).apply(to: &plain, installer: installer, routes: .standard)
+        #expect(plain.homeSnapshotFile == file)
+        var optioned = LaunchConfiguration()
+        optioned.homeSnapshotFile = file
+        try Options(arguments: ["-MeguriTimeZone", "UTC"]).apply(to: &optioned, installer: installer, routes: .standard)
+        #expect(optioned.homeSnapshotFile == nil)
+        var asked = LaunchConfiguration()
+        asked.homeSnapshotFile = file
+        try Options(arguments: ["-MeguriTimeZone", "UTC", "-MeguriHomeSnapshot", "on"]).apply(to: &asked, installer: installer, routes: .standard)
+        #expect(asked.homeSnapshotFile == file)
+        var off = LaunchConfiguration()
+        off.homeSnapshotFile = file
+        try Options(arguments: ["-MeguriHomeSnapshot", "off"]).apply(to: &off, installer: installer, routes: .standard)
+        #expect(off.homeSnapshotFile == nil)
+        #expect(try Options(arguments: []).homeTrace == false)
+        #expect(try Options(arguments: ["-MeguriHomeTrace", "on"]).homeTrace)
+        #expect(throws: TestHookError.self) { try Options(arguments: ["-MeguriHomeSnapshot", "yes"]) }
+    }
+
     /// The size class is iOS's (the Mac has none), the integrations flag the
     /// Mac's (R11).
     @Test func theSizeClassIsIOSOnlyAndTheIntegrationsFlagMacOnly() throws {
