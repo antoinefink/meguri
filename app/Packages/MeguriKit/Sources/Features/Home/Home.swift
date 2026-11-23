@@ -159,29 +159,7 @@ public struct HomeView: View {
     }
     #endif
     /// N14.2, N20.1: one Add menu. On a deck page New Note presets that deck.
-    private var addMenu: some View {
-        let preset = deckID.flatMap { collection.deck($0)?.filtered == true ? nil : $0 }
-        return Menu {
-            Group {
-                Button { collection.navigation.present(.add(deck: preset.map { DeckID($0) })) } label: {
-                    Label { Text("New Note", bundle: .module) } icon: { Image(systemName: "square.and.pencil") }
-                }
-                .disabled(!collection.addNotePresentation.canPresent(presetDeck: preset))
-                .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
-                Button { collection.deckActions.present(.create) } label: {
-                    Label { Text("New Deck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
-                }
-                .disabled(!collection.deckActions.canPresent(.create))
-                .accessibilityIdentifier("home.collection.createDeck")
-            }
-            // N20.1: each item with its system symbol, on the Mac too.
-            .labelStyle(.titleAndIcon)
-        } label: {
-            Label { Text("Add", bundle: .module) } icon: { Image(systemName: "plus") }
-        }
-        .help(Text("Add", bundle: .module))
-        .accessibilityIdentifier("home.collection.add")
-    }
+    private var addMenu: some View { HomeAddMenu(collection: collection, deckID: deckID) }
     private var searchLayout: ShellLayout {
         #if os(macOS)
         .sidebar
@@ -1275,5 +1253,42 @@ public struct StudyRefusalFeedback: ViewModifier {
                 .keyboardShortcut(.defaultAction)
             Button(role: .cancel) { collection?.dismissStudyRefusal() } label: { Text("Cancel", bundle: .module) }
         }
+    }
+}
+
+/// N14.2, N20.1: round 6's Add menu, New Note and New Deck… (each with its
+/// system symbol). On a deck page New Note presets that deck; elsewhere
+/// (Today, Browse, N21.3) it opens on the default deck.
+public struct HomeAddMenu: View {
+    let collection: ReviewCollection
+    let deckID: Int64?
+
+    public init(collection: ReviewCollection, deckID: Int64? = nil) {
+        self.collection = collection
+        self.deckID = deckID
+    }
+
+    public var body: some View {
+        let preset = deckID.flatMap { collection.deck($0)?.filtered == true ? nil : $0 }
+        return Menu {
+            Group {
+                Button { collection.navigation.present(.add(deck: preset.map { DeckID($0) })) } label: {
+                    Label { Text("New Note", bundle: .module) } icon: { Image(systemName: "square.and.pencil") }
+                }
+                .disabled(!collection.addNotePresentation.canPresent(presetDeck: preset))
+                .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
+                Button { collection.deckActions.present(.create) } label: {
+                    Label { Text("New Deck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
+                }
+                .disabled(!collection.deckActions.canPresent(.create))
+                .accessibilityIdentifier("home.collection.createDeck")
+            }
+            // N20.1: each item with its system symbol, on the Mac too.
+            .labelStyle(.titleAndIcon)
+        } label: {
+            Label { Text("Add", bundle: .module) } icon: { Image(systemName: "plus") }
+        }
+        .help(Text("Add", bundle: .module))
+        .accessibilityIdentifier("home.collection.add")
     }
 }

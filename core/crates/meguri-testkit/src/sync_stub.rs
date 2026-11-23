@@ -13,7 +13,7 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -262,6 +262,8 @@ struct Shared {
     stop: AtomicBool,
     count: AtomicUsize,
     log: Mutex<Vec<Recorded>>,
+    /// Notified after each push to `log`.
+    recorded: Condvar,
     handler: Handler,
     tls: Option<Arc<rustls::ServerConfig>>,
 }
@@ -298,6 +300,7 @@ impl SyncStub {
             stop: AtomicBool::new(false),
             count: AtomicUsize::new(0),
             log: Mutex::new(Vec::new()),
+            recorded: Condvar::new(),
             handler,
             tls,
         });
@@ -342,6 +345,19 @@ impl SyncStub {
         let mut log = self.shared.log.lock().unwrap_or_else(PoisonError::into_inner).clone();
         log.sort_by_key(|r| r.head.index);
         log
+    }
+
+    /// Waits until a recorded request satisfies `found`; `false` when `timeout`
+    /// passes first. A script runs before its request is recorded, so a signal
+    /// sent from the script does not mean `requests` already holds it.
+    pub fn wait_for_request(&self, timeout: Duration, found: impl Fn(&Recorded) -> bool) -> bool {
+        let log = self.shared.log.lock().unwrap_or_else(PoisonError::into_inner);
+        let (log, _) = self
+            .shared
+            .recorded
+            .wait_timeout_while(log, timeout, |log| !log.iter().any(&found))
+            .unwrap_or_else(PoisonError::into_inner);
+        log.iter().any(&found)
     }
 }
 
@@ -415,6 +431,7 @@ fn record(shared: &Shared, head: Head, body: &BodyRead) {
             chunked: body.chunked,
             complete: body.result.is_ok(),
         });
+    shared.recorded.notify_all();
 }
 
 /// The head, or `None` when the client closed before sending one.

@@ -243,11 +243,7 @@ fn sanity_bad_keeps_counts_and_moves_only_scm() {
     f.clock.step_ms(60000);
     let before = f.images();
     let scm = schema(&f);
-    let (abort, aborted) = mpsc::sync_channel(1);
     let stub = SyncStub::serve(move |r| {
-        if r.path().ends_with("abort") {
-            let _ = abort.send(());
-        }
         if r.path().ends_with("sanityCheck2") {
             Reply::ok(br#"{"status":"bad","c":[[0,0,0],1,1,0,0,8,1,1],"s":[[0,0,0],2,2,0,0,8,1,1]}"#)
         } else {
@@ -257,7 +253,9 @@ fn sanity_bad_keeps_counts_and_moves_only_scm() {
         }
     });
     let error = f.start(&stub.url()).wait().unwrap_err();
-    aborted.recv_timeout(Duration::from_secs(2)).unwrap();
+    // `abort` is sent without being awaited (H12). Wait for the stub to record
+    // it: the script runs before the request enters the log read below.
+    assert!(stub.wait_for_request(Duration::from_secs(2), |r| r.path().ends_with("abort")));
     let client = meguri_sync::wire::sanity::SanityCounts {
         due: [0, 0, 0],
         cards: 1,

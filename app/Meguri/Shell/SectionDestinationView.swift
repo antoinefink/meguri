@@ -148,7 +148,7 @@ struct ShellFeatures {
                 }, editNoteType: { id in
                     collection.noteTypes.selection = id
                     navigation.select(.section(.noteTypes))
-                }))
+                }, addMenu: AnyView(HomeAddMenu(collection: collection))))
             #endif
             case .noteTypes: AnyView(NoteTypesView(model: collection.noteTypes))
             default: AnyView(HomeView(collection: collection))

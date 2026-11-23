@@ -28,7 +28,62 @@ public nonisolated protocol BrowseSearching: AnyObject, Sendable {
     /// H12: a selection and a current row mapped into `target`.
     func mapSelection(from source: BrowseMapSource, selected: BrowseSelected, current: Int64?, to target: BrowseHandle,
                       targetRevision: UInt64) async throws -> BrowseMappedSelection
+
+    // The commands (U275; `browser/workspace` V7, V8). Each takes the rows a
+    // command acts on as index ranges of a handle at a revision (H12): the
+    // core resolves them, and refuses them when that revision is no longer
+    // the handle's, so a command never acts on rows other than those chosen.
+
+    /// V7, V8.1: the counts of the target cards and notes (B1).
+    func counts(of target: BrowseTarget) async throws -> BrowseSelectionCounts
+    /// V8.2: every card of the target notes, those the search did not find
+    /// included: the cards a Delete removes.
+    func cardsOfNotes(of target: BrowseTarget) async throws -> UInt64
+    /// V7: every row of `target`'s handle whose note is a target note (Select
+    /// Sibling Cards), as ascending ranges of that handle at its revision.
+    func siblingRows(of target: BrowseTarget) async throws -> [Range<UInt64>]
+    /// V8.1: a card action on the target cards, one undo step.
+    func run(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BulkActionResult
+    /// V8.1: a note action on the target notes, one undo step.
+    func run(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BulkActionResult
 }
+
+/// The rows a command acts on (`browser/result-sets` H12): index ranges of
+/// a handle at one revision, in the handle's mode.
+public nonisolated struct BrowseTarget: Sendable, Hashable {
+    public let handle: BrowseHandle
+    public let revision: UInt64
+    /// Ascending, merged.
+    public let ranges: [Range<UInt64>]
+    public let mode: BrowseMode
+
+    public init(handle: BrowseHandle, revision: UInt64, ranges: [Range<UInt64>], mode: BrowseMode) {
+        self.handle = handle
+        self.revision = revision
+        self.ranges = ranges
+        self.mode = mode
+    }
+
+    /// The number of rows.
+    public var rows: Int { ranges.reduce(0) { $0 + Int(clamping: $1.count) } }
+}
+
+/// A session that runs no command (the test hooks' sample collections):
+/// each command fails, so its controls stay as they were.
+public extension BrowseSearching {
+    func counts(of target: BrowseTarget) async throws -> BrowseSelectionCounts { throw BrowseCommandUnsupported() }
+    func cardsOfNotes(of target: BrowseTarget) async throws -> UInt64 { throw BrowseCommandUnsupported() }
+    func siblingRows(of target: BrowseTarget) async throws -> [Range<UInt64>] { throw BrowseCommandUnsupported() }
+    func run(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BulkActionResult {
+        throw BrowseCommandUnsupported()
+    }
+    func run(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BulkActionResult {
+        throw BrowseCommandUnsupported()
+    }
+}
+
+/// A session without commands was asked to run one.
+public nonisolated struct BrowseCommandUnsupported: Error, Sendable {}
 
 /// The production session, over CoreBridge (U264).
 public nonisolated final class CoreBrowseSearch: BrowseSearching {
@@ -75,6 +130,40 @@ public nonisolated final class CoreBrowseSearch: BrowseSearching {
                              targetRevision: UInt64) async throws -> BrowseMappedSelection {
         try await session.mapSelection(from: source, selected: selected, current: current, to: target,
                                        targetRevision: targetRevision)
+    }
+
+    private func selection(_ target: BrowseTarget) async throws -> BrowseSelection {
+        try await session.selection(target.handle, revision: target.revision, ranges: target.ranges)
+    }
+
+    public func counts(of target: BrowseTarget) async throws -> BrowseSelectionCounts {
+        try await CoreBrowseQuery.startSelectionCounts(try await selection(target)).value()
+    }
+
+    public func cardsOfNotes(of target: BrowseTarget) async throws -> UInt64 {
+        // Notes mode: the target cards are already every card of the notes (B1).
+        if target.mode == .notes { return try await counts(of: target).cards }
+        let notes = try await selection(target).resolve(.notes)
+        guard !notes.isEmpty else { return 0 }
+        let text = "nid:" + notes.map(String.init).joined(separator: ",")
+        let counts = try await CoreBrowseQuery.startFilterCounts(.cards, items: [.saved(text)]).value()
+        return counts.first.flatMap { $0 } ?? 0
+    }
+
+    public func siblingRows(of target: BrowseTarget) async throws -> [Range<UInt64>] {
+        let notes = try await selection(target).resolve(.notes)
+        guard !notes.isEmpty else { return [] }
+        // H12, notes → cards: every card of those notes that the handle lists.
+        return try await session.mapSelection(from: .mode(.notes), selected: .ids(notes), current: nil, to: target.handle,
+                                              targetRevision: target.revision).selected
+    }
+
+    public func run(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BulkActionResult {
+        try await CoreBulkActions.start(action, on: try await selection(target)).value()
+    }
+
+    public func run(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BulkActionResult {
+        try await CoreBulkActions.start(action, on: try await selection(target)).value()
     }
 }
 

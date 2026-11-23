@@ -131,6 +131,22 @@ extension EventTests {
             await #expect(throws: BridgeError.findReplaceRefused(.separatorInReplacement)) {
                 try await previews.start(spaced, on: nil).value()
             }
+
+            // U275: card and note actions on the selection, resolved in the core (K1).
+            let suspended = try await CoreBulkActions.start(.suspend, on: selection).value()
+            #expect(suspended.affected == 2 && suspended.considered == 2 && suspended.summary.undoName == "Suspend")
+            let unsuspended = try await CoreBulkActions.start(.unsuspend, on: selection).value()
+            #expect(unsuspended.affected == 2 && unsuspended.summary.undoName == "Unbury/Unsuspend")
+            #expect(try await CoreBulkActions.start(.setFlag(4), on: selection).value().affected == 2)
+            // T13: Rename… (quotes dropped) and Delete of a saved search, each one undoable step.
+            #expect(try await CoreBrowseQuery.saveSearch(name: "Mine", search: "tag:plain").written)
+            let renamed = try await CoreBrowseQuery.renameSavedSearch("Mine", to: "Ou\"rs")
+            #expect(renamed.written && renamed.summary.undoName != nil)
+            #expect(try await CoreBrowseQuery.renameSavedSearch("Mine", to: "Other").written == false)
+            #expect(try await CoreBrowseQuery.deleteSavedSearches(["Ours", "Nope"]).written)
+            #expect(try await CoreBrowseQuery.deleteSavedSearches(["Ours"]).written == false)
+            let deleted = try await CoreBulkActions.start(.deleteNotes, on: selection).value()
+            #expect(deleted.affected == 2 && deleted.cardsRemoved == 2)
             try await session.close()
             try await service.close()
         } catch {
