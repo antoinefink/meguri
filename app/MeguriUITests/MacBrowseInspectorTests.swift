@@ -18,8 +18,8 @@ final class MacBrowseInspectorTests: XCTestCase {
     private func inspector(appearance: String) throws {
         let (app, bundle) = try launch(appearance: appearance)
         try openBrowse(app, bundle)
-        let table = app.tables["browse.results.table"]
-        XCTAssertTrue(waitUntil { table.tableRows.count > 3 }, "rows: \(table.tableRows.count)")
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count > 3 }, "rows: \(table.outlineRows.count)")
 
         // N21.3: the toggle is the toolbar's last item, after the Add menu.
         let toggle = element(app, "browse.toolbar.inspector"), add = element(app, "home.collection.add")
@@ -28,22 +28,22 @@ final class MacBrowseInspectorTests: XCTestCase {
 
         // No Selection.
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
-        XCUIElement.perform(withKeyModifiers: .command) { table.tableRows.element(boundBy: 0).click() }
+        press(table.outlineRows.element(boundBy: 0))
+        XCUIElement.perform(withKeyModifiers: .command) { press(table.outlineRows.element(boundBy: 0)) }
         XCTAssertTrue(element(app, "browse.inspector.empty").waitForExistence(timeout: 10), "No Selection")
         capture(app, "no-selection-\(appearance)")
 
         // Several rows: the summary and the commands.
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
-        XCUIElement.perform(withKeyModifiers: .shift) { table.tableRows.element(boundBy: 3).click() }
+        press(table.outlineRows.element(boundBy: 0))
+        XCUIElement.perform(withKeyModifiers: .shift) { press(table.outlineRows.element(boundBy: 3)) }
         XCTAssertTrue(element(app, "browse.inspector.summary.title").waitForExistence(timeout: 10), "V7's summary")
         sleep(1)
         capture(app, "several-rows-\(appearance)")
 
         // A card with a sound and an image (the Español deck's notes).
         try showDeck(app, bundle, containing: "Español", firstField: "palabra")
-        table.tableRows.element(boundBy: 0).click()
+        press(table.outlineRows.element(boundBy: 0))
         let note = element(app, "browse.inspector.note")
         XCTAssertTrue(note.waitForExistence(timeout: 10), "the Note tab")
         XCTAssertTrue(element(app, "browse.inspector.deck").exists && element(app, "browse.inspector.type").exists)
@@ -56,7 +56,7 @@ final class MacBrowseInspectorTests: XCTestCase {
 
         // Right to left, then CJK with a sound.
         try showDeck(app, bundle, containing: "العربية", firstField: "كلمة")
-        table.tableRows.element(boundBy: 0).click()
+        press(table.outlineRows.element(boundBy: 0))
         XCTAssertTrue(waitUntil { fields.count > 0 })
         sleep(1)
         capture(app, "right-to-left-\(appearance)")
@@ -65,9 +65,9 @@ final class MacBrowseInspectorTests: XCTestCase {
         fields.element(boundBy: 1).click()
         app.typeKey("a", modifierFlags: [.command])
         app.typeKey(.delete, modifierFlags: [])
-        table.tableRows.element(boundBy: 1).click()
+        press(table.outlineRows.element(boundBy: 1))
         XCTAssertTrue(waitUntil { fields.count > 0 })
-        table.tableRows.element(boundBy: 0).click()
+        press(table.outlineRows.element(boundBy: 0))
         let empty = element(app, "browse.inspector.emptyFields")
         XCTAssertTrue(empty.waitForExistence(timeout: 10), "the emptied field hides behind its row")
         let shown = fields.count
@@ -78,7 +78,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         capture(app, "empty-fields-open-\(appearance)")
         empty.click()
         try showDeck(app, bundle, containing: "語彙", firstField: "単語")
-        table.tableRows.element(boundBy: 0).click()
+        press(table.outlineRows.element(boundBy: 0))
         XCTAssertTrue(waitUntil { fields.count > 0 })
         sleep(2)
         capture(app, "cjk-with-sound-\(appearance)")
@@ -109,7 +109,7 @@ final class MacBrowseInspectorTests: XCTestCase {
 
         // V12, W2: choosing another row saves the edit first, one "Edit Note" step.
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 1).click()
+        press(table.outlineRows.element(boundBy: 1))
         try app.bringToFront(bundleIdentifier: bundle)
         app.menuBars.menuBarItems["Edit"].click()
         XCTAssertTrue(app.menuItems["Undo Edit Note"].waitForExistence(timeout: 10), "V8.3: the save's step")
@@ -125,11 +125,11 @@ final class MacBrowseInspectorTests: XCTestCase {
 
         // N21.3: under about 900 points the pane hides; Return shows it over the table.
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
+        press(table.outlineRows.element(boundBy: 0))
         try resize(app, bundle: bundle, to: "820x700")
         XCTAssertTrue(waitUntil { !note.exists }, "the pane hid itself")
         try app.bringToFront(bundleIdentifier: bundle)
-        table.tableRows.element(boundBy: 0).click()
+        press(table.outlineRows.element(boundBy: 0))
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(note.waitForExistence(timeout: 10), "Return shows it over the table")
         sleep(1)
@@ -144,9 +144,9 @@ final class MacBrowseInspectorTests: XCTestCase {
         let row = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "browse.sidebar.deck.", name)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the deck row \(name)")
-        row.click()
-        let table = app.tables["browse.results.table"]
-        let first = table.tableRows.element(boundBy: 0).staticTexts.matching(NSPredicate(format: "label CONTAINS %@", firstField))
+        press(row)
+        let table = resultsTable(app)
+        let first = table.outlineRows.element(boundBy: 0).descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", firstField))
         XCTAssertTrue(waitUntil(timeout: 30) { first.count > 0 }, "the deck's own results: \(name)")
         try app.bringToFront(bundleIdentifier: bundle)
     }
@@ -173,7 +173,7 @@ final class MacBrowseInspectorTests: XCTestCase {
     private func openBrowse(_ app: XCUIApplication, _ bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         element(app, "shell.root.sidebar.browse").click()
-        XCTAssertTrue(app.tables["browse.results.table"].waitForExistence(timeout: 20), "Browse's table")
+        XCTAssertTrue(resultsTable(app).waitForExistence(timeout: 20), "Browse's table")
     }
 
     private func resize(_ app: XCUIApplication, bundle: String, to size: String) throws {
@@ -185,6 +185,16 @@ final class MacBrowseInspectorTests: XCTestCase {
         center.postNotificationName(Notification.Name(bundle + ".testhooks.resizeWindow"), object: size,
             userInfo: nil, deliverImmediately: true)
         wait(for: [resized], timeout: 10)
+    }
+
+    /// SwiftUI's Table is an outline in the Mac's accessibility tree.
+    private func resultsTable(_ app: XCUIApplication) -> XCUIElement {
+        app.outlines.matching(identifier: "browse.results.table").firstMatch
+    }
+
+    /// A row is clicked at its point: XCTest's hit test reads a SwiftUI table's rows as not hittable.
+    private func press(_ row: XCUIElement) {
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
