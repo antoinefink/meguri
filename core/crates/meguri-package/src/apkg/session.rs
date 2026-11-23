@@ -124,6 +124,7 @@ fn candidate_error(error: CandidateError) -> ApkgImportError {
         }
         CandidateError::DiskFull => ApkgImportError::DiskFull,
         CandidateError::Cancelled => ApkgImportError::Cancelled,
+        CandidateError::TooLarge { what, found, limit } => ApkgImportError::TooLarge { what, found, limit },
     }
 }
 
@@ -216,9 +217,11 @@ pub fn inspect(
         &DeckCandidateRepair {
             minutes_west_at: &minutes_west,
             repair_fields: &repair_fields,
+            limits: super::LIMITS,
         },
     )
     .map_err(candidate_error)?;
+
 
     // Step 8: the media map.
     let media = archive.media_map(check)?;

@@ -580,7 +580,7 @@ fn the_options_are_stored_with_the_import_and_read_back() {
 }
 
 /// Runs `act` once, when the apply first reaches the named stage.
-struct AtStage {
+pub struct AtStage {
     stage: &'static str,
     act: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// How often the apply went back to planning: a sink starts in the
@@ -600,7 +600,7 @@ impl meguri_engine::ProgressListener for AtStage {
         }
     }
 }
-fn at_stage(stage: &'static str, act: impl FnOnce() + Send + 'static) -> (ProgressSink, Arc<AtStage>) {
+pub fn at_stage(stage: &'static str, act: impl FnOnce() + Send + 'static) -> (ProgressSink, Arc<AtStage>) {
     let listener = Arc::new(AtStage {
         stage,
         act: std::sync::Mutex::new(Some(Box::new(act))),

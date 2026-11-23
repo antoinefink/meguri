@@ -19,7 +19,7 @@ use super::gather;
 use super::plan::{self, ImportPlan};
 use super::session::ImportSession;
 use super::{
-    ApkgImportError, ConfirmationToken, ImportOptions, ImportOutcome, ImportResult, UpdateCondition,
+    ApkgImportError, ConfirmationToken, ImportOptions, ImportOutcome, ImportResult, StructureSummary, UpdateCondition,
 };
 
 /// The committed write phase's value and its safety backup's name, kept
@@ -105,6 +105,15 @@ pub fn apply(
     progress.set_phase(ProgressPhase::Planning);
     let check = || -> ImportOutcome<()> { cancel.check().map_err(Into::into) };
     let raw = Arc::new(gather::read(&session.collection_path(), &context, options.with_scheduling, &check)?);
+    // With the review log counted (it is brought only with scheduling).
+    let rows = (raw.notes.len() as u64).saturating_add(raw.cards).saturating_add(raw.revlog);
+    if rows > super::MAX_ROWS {
+        return Err(ApkgImportError::TooLarge {
+            what: "rows",
+            found: rows,
+            limit: super::MAX_ROWS,
+        });
+    }
     let taken = Arc::new(gather::take(&raw, &options));
     let service = MediaService::open(&collection, context.clock.clone())?;
 
@@ -201,12 +210,14 @@ pub fn apply(
         {
             let fault = Arc::clone(&fault);
             let kept = Arc::clone(&kept);
-            let clock = context.clock.clone();
+            let context = context.clone();
+            let package_path = session.collection_path();
             move |ctx, built| {
                 let backup = ctx.safety_backup_name().map(str::to_owned);
-                let committed = commit(ctx, built, clock.as_ref(), &fault)?;
-                *kept.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((committed.clone(), backup));
-                Ok(committed)
+                // Kept outside the op, once: the log holds an entry per note.
+                let committed = commit(ctx, built, &package_path, &context, &fault)?;
+                *kept.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((committed, backup));
+                Ok(())
             }
         },
     );
@@ -229,6 +240,7 @@ pub fn apply(
             undo_step: undo,
             log: committed.log,
             counts,
+            structure: StructureSummary::of(&committed.structure),
             safety_backup: backup,
             media_pending: pending,
         };
@@ -238,6 +250,9 @@ pub fn apply(
     // The slot is held until the session has its result and the static
     // media are written: no second apply and no collection swap in between.
     let _held = slot;
+    // A kill point only: an injected error here would return after the
+    // commit and before the session has its result.
+    let _ = meguri_model::faultpoint!("package.apkg.after_commit");
     match outcome {
         Ok(op) => finish(op.seq.0, op.generation.0, op.undo.map(|undo| undo.name), false).ok_or_else(|| {
             ApkgImportError::Io {

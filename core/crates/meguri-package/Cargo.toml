@@ -45,3 +45,13 @@ harness = false
 [[test]]
 name = "package_it"
 path = "tests/main.rs"
+
+# Its #[global_allocator] would serve every test in a shared binary.
+[[test]]
+name = "apkg_large"
+path = "tests/apkg_large.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "apkg_kill"
+path = "tests/apkg_kill.rs"

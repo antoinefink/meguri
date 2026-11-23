@@ -33,9 +33,6 @@ pub(crate) struct NotePlan {
     pub decision: Decision,
     /// The package `mid`, the key of the stage's routes.
     pub package_type: i64,
-    /// The field values after the merge's field map; for new and updated
-    /// notes, after the media rewrite once staging ran.
-    pub fields: Vec<String>,
 }
 
 pub(crate) struct ImportPlan {
@@ -60,8 +57,7 @@ impl ImportPlan {
             .filter(|note| matches!(note.decision, Decision::New | Decision::Updated { .. }))
             .count();
         notes
-            + self.taken.cards.len()
-            + self.taken.revlog.len()
+            + usize::try_from(self.raw.cards.saturating_add(self.raw.revlog)).unwrap_or(usize::MAX / 2)
             + self.stage.writes.len()
             + usize::try_from(self.stage.rows).unwrap_or(usize::MAX / 2)
     }
@@ -81,7 +77,7 @@ fn matching_notes<'p>(
     raw: &'p RawPackage,
     cancel: &CancelToken,
 ) -> ImportOutcome<HashMap<&'p [u8], NoteIdentity>> {
-    let wanted: HashMap<&[u8], ()> = raw.notes.iter().map(|note| (note.guid.as_bytes(), ())).collect();
+    let wanted: HashMap<&[u8], ()> = raw.notes.iter().map(|note| (note.guid.as_slice(), ())).collect();
     let mut found = HashMap::new();
     let mut after = None;
     loop {
@@ -100,7 +96,7 @@ fn matching_notes<'p>(
 }
 
 /// The field values of a package note as its route's note type holds them.
-fn routed_fields(stored: &str, map: Option<&Vec<Option<usize>>>, record: &Notetype) -> Vec<String> {
+pub(crate) fn routed_fields(stored: &str, map: Option<&Vec<Option<usize>>>, record: &Notetype) -> Vec<String> {
     let values: Vec<&str> = stored.split('\u{1f}').collect();
     match map {
         Some(map) => map
@@ -141,6 +137,22 @@ pub(crate) fn build(
     } else {
         plan_without_merge(&taken.notetypes, &targets, options, reader, cancel, progress)?
     };
+    // I10.2 as a dry run on the snapshot's decks: a name past the nesting
+    // limit refuses here, before media are staged or a backup is taken. The
+    // write phase places the decks again on the live rows.
+    match super::commit::place_decks(
+        reader.deck_rows()?,
+        &taken.decks,
+        target_today,
+        package_today,
+        meguri_model::time::EpochSecs(now_s),
+        &mut super::commit::DryDecks::new(),
+        &mut super::commit::DeckCounts::default(),
+    ) {
+        Ok(_) => {}
+        Err(super::commit::DeckFault::TooDeep(name)) => return Err(super::ApkgImportError::DeckTooDeep { name }),
+        Err(super::commit::DeckFault::Engine(error)) => return Err(error.into()),
+    }
     let mut notes = Vec::with_capacity(raw.notes.len());
     // GUID to the plan index of the first counted note that holds it.
     let mut counted: HashMap<&[u8], usize> = HashMap::new();
@@ -149,17 +161,15 @@ pub(crate) fn build(
             cancel.check()?;
             progress.report(index as u64, Some(raw.notes.len() as u64));
         }
-        let package_type = note.notetype_id.0;
+        let package_type = note.notetype;
         let Some(route) = stage.routes.get(&package_type) else {
             notes.push(NotePlan {
                 decision: Decision::MissingNotetype,
                 package_type,
-                fields: note.fields.split('\u{1f}').map(str::to_owned).collect(),
             });
             continue;
         };
-        let fields = routed_fields(&note.fields, route.field_map.as_ref(), &route.record);
-        let guid = note.guid.as_bytes();
+        let guid = note.guid.as_slice();
         let decision = if let Some(&earlier) = counted.get(guid) {
             let other = stage.routes.get(&notes[earlier].package_type).map(|route| route.target);
             Decision::DuplicateOf {
@@ -175,7 +185,7 @@ pub(crate) fn build(
             } else {
                 let stored = if stage.stamped.contains(&target.notetype.0) { now_s } else { target.mtime };
                 counted.insert(guid, index);
-                if update_holds(options.update_notes, stored, note.mtime.0) {
+                if update_holds(options.update_notes, stored, note.mtime) {
                     Decision::Updated { target: target.id }
                 } else {
                     Decision::Duplicate { target: target.id }
@@ -185,11 +195,7 @@ pub(crate) fn build(
             counted.insert(guid, index);
             Decision::New
         };
-        notes.push(NotePlan {
-            decision,
-            package_type,
-            fields,
-        });
+        notes.push(NotePlan { decision, package_type });
     }
     Ok(ImportPlan {
         options: *options,
