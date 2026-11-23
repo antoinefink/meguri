@@ -1,5 +1,8 @@
 import Darwin
 import Foundation
+#if DEBUG
+import Synchronization
+#endif
 
 public nonisolated enum MediaOrigin {
     public static let scheme = "meguri-media"
@@ -163,9 +166,28 @@ public actor MediaFile {
         self.descriptor = descriptor; self.name = name; self.length = UInt64(opening.st_size)
         self.opening = MediaFileIdentity(opening)
     }
-    isolated deinit {
+    #if DEBUG
+    /// Tests: files whose deinit is watched, and those whose deinit has run.
+    nonisolated static let deinits = Mutex<(watched: Set<ObjectIdentifier>, ran: Set<ObjectIdentifier>)>(([], []))
+    nonisolated static func watchDeinit(_ file: MediaFile) {
+        let id = ObjectIdentifier(file)
+        deinits.withLock { _ = $0.watched.insert(id) }
+    }
+    nonisolated static func deinitRan(_ id: ObjectIdentifier) -> Bool { deinits.withLock { $0.ran.remove(id) != nil } }
+    #endif
+    /// Nonisolated on purpose: it runs where the last reference goes, closes
+    /// the raw descriptor and drops the private copy, and puts nothing on this
+    /// actor. An `isolated deinit` runs as a job on the actor's queue whenever
+    /// the actor is not free at that release, and the runtime then destroys
+    /// the actor from inside that job; a device crashed there (2026-11-22:
+    /// `swift_defaultActor_destroy` aborting under `__isolated_deallocating_deinit`).
+    /// Owners close explicitly (`close`, `endNativePlayback`); this is the fallback.
+    deinit {
         if descriptor >= 0 { Darwin.close(descriptor) }
-        playbackCopy = nil
+        #if DEBUG
+        let id = ObjectIdentifier(self)
+        Self.deinits.withLock { if $0.watched.remove(id) != nil { $0.ran.insert(id) } }
+        #endif
     }
 
     public func read(offset: UInt64, count: Int) throws -> Data {
