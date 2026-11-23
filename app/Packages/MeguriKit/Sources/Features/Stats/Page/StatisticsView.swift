@@ -434,8 +434,8 @@ struct StatsDeckPopUp: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             #else
-            // A touch menu button draws no indicator of its own: the chevrons say it is a
-            // pop-up, as the Mac's does (N25.2).
+            // The touch pop-up is a menu button with the deck's name and a chevron (N25.2), so
+            // it reads as a pop-up as the Mac's does; the label carries the one indicator.
             HStack(spacing: Spacing.xxSmall) {
                 Text(verbatim: shown.name)
                     .lineLimit(1)
@@ -447,7 +447,6 @@ struct StatsDeckPopUp: View {
             }
             #endif
         }
-        .menuIndicator(.visible)
         .help(Text(verbatim: shown.full))
         .disabled(!model.controlsEnabled)
         .accessibilityLabel(Text("stats.deck.label", bundle: .module))

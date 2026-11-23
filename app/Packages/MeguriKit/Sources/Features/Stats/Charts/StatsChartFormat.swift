@@ -193,7 +193,6 @@ public struct StatsChartFormat: Sendable {
             }
             return labels
         }
-        let step = max(1, Int((Double(regular.count) / Double(maximum)).rounded(.up)))
         let spansYears: Bool = {
             let years = Set(regular.compactMap { index -> Int? in
                 if case let .month(date) = bins[index] { return calendar.component(.year, from: date) }
@@ -201,6 +200,10 @@ public struct StatsChartFormat: Sendable {
             })
             return years.count > 1
         }()
+        // A label with its year is about twice as wide: fewer of them, so they fit a lead box
+        // at compact width.
+        let fitting = spansYears ? min(maximum, max(3, maximum * 3 / 5)) : maximum
+        let step = max(1, Int((Double(regular.count) / Double(fitting)).rounded(.up)))
         for (n, index) in regular.reversed().enumerated() where n % step == 0 {
             labels[index] = axisLabel(bins[index], monthsShowYear: false, spansYears: spansYears)
         }

@@ -161,23 +161,23 @@ import Testing
         #expect(labels[9] == "Nov")
     }
 
-    /// The axis of a real collection two and a half years old read "Oct 28, Jan 29": two-digit
-    /// years after a month read as days. Every month label on an axis over two years now carries
-    /// the whole year.
+    /// On the synthetic 10k fixture (its clock in January 2030), All's axis read "Oct 28, Jan 29":
+    /// two-digit years after a month read as days. Every month label on an axis over more than
+    /// one year now carries the whole year, and fewer labels are drawn, as each is wider.
     @Test func monthsOverMoreThanOneYearCarryTheirWholeYear() {
         let first = Self.date(2028, 8, 1)
         let bins = (0..<18).map { StatsPeriod.month(Self.calendar.date(byAdding: .month, value: $0, to: first)!) }
-        for maximum in [4, 7] {
+        for (maximum, fitting) in [(4, 3), (7, 4)] {
             let labels = Self.format.labelledBins(bins, maximum: maximum)
-            #expect(!labels.isEmpty)
+            #expect(!labels.isEmpty && labels.count <= fitting)
             #expect(labels.values.allSatisfy { $0.contains("2028") || $0.contains("2029") || $0.contains("2030") }, "\(labels)")
             #expect(labels[17] == "Jan 2030")
         }
         let us = StatsChartFormat(locale: Locale(identifier: "en_US"), calendar: Self.calendar, now: Self.now)
         #expect(us.labelledBins(bins, maximum: 7)[17] == "Jan 2030")
-        // Every month labelled over a year boundary: each with its year too.
-        let short = (0..<5).map { StatsPeriod.month(Self.calendar.date(byAdding: .month, value: $0, to: Self.date(2025, 10, 1))!) }
-        #expect(Self.format.labelledBins(short, maximum: 7) == [0: "Oct 2025", 1: "Nov 2025", 2: "Dec 2025", 3: "Jan 2026", 4: "Feb 2026"])
+        // A few months over a year boundary: each label with its year too.
+        let short = (0..<4).map { StatsPeriod.month(Self.calendar.date(byAdding: .month, value: $0, to: Self.date(2025, 11, 1))!) }
+        #expect(Self.format.labelledBins(short, maximum: 7) == [0: "Nov 2025", 1: "Dec 2025", 2: "Jan 2026", 3: "Feb 2026"])
     }
 
     /// 1Y and 6M are weeks: a day and a month, never a year in two digits.
