@@ -92,8 +92,6 @@ Antoine decides. Until then, U178 implements and tests only the `estTimes` = tru
 
 The notice after a leech answer, its two sentences and when each shows: `sched/leeches#L5`, `review/reviewer-strings#S3` and the differences of `#S11`.
 
-Changed 2026-11-23 (leech icon): on screen the notice is one icon in the top controls with its details on a press (`docs/design/native-interface-contract.md` N16.11), not a row above the card.
-
 ## F6. Undo and redo on the review screen (R365 to R371, R724, R1264)
 
 ### F6.1 Anki
