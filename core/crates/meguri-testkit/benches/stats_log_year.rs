@@ -2,8 +2,9 @@
 //! current column caches (the Statistics plan's section 3: the review-log
 //! tier under 300 ms core for 12 months, under 1 s for all history). Each
 //! operation is one request naming Reviews, Retention, Hourly Breakdown and
-//! Answer Buttons. The round 11 parts (U288, U291) join these cases when
-//! they land.
+//! Answer Buttons. The round 11 parts (U288, U291) are page parts, measured
+//! with every other review-log part by `stats_page.log_year` and
+//! `.log_all`.
 //!
 //! - `stats_log_year.collection`: the Collection scope, 12 months.
 //! - `stats_log_year.deck`: the deck with the most cards, 12 months.

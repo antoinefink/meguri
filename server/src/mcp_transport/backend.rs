@@ -2,6 +2,7 @@
 //! Application seam. Authority is server-owned and deliberately generic here.
 use super::{descriptors::*, inputs::ToolCall};
 use axum::{http::HeaderMap, response::Response};
+pub use crate::error::McpDiagnosticDetail;
 use serde::Serialize;
 use std::{collections::BTreeMap, future::Future, pin::Pin};
 
@@ -44,6 +45,7 @@ pub trait Backend<A>: Send + Sync + 'static {
 /// supplies the same server-built challenge used by its HTTP authorizer.
 pub enum DispatchFailure {
     Tool(ToolFailure),
+    Diagnosed { failure: ToolFailure, detail: McpDiagnosticDetail },
     Challenge(Response),
 }
 impl From<ToolFailure> for DispatchFailure {
@@ -100,7 +102,7 @@ impl ToolOutput {
 }
 
 /// Fixed public outcomes prevent SQL, collection text or bearer material from
-/// entering protocol errors. Busy certifies that no write committed.
+/// entering protocol errors. Write busy certifies that no write committed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolFailure {
     NotFound,
@@ -123,6 +125,13 @@ impl ToolFailure {
             Self::AttachmentInvalid => "attachment_invalid", Self::AttachmentUnavailable => "attachment_unavailable",
             Self::AttachmentConflict => "attachment_conflict", Self::Internal => "internal_error",
         }
+    }
+    pub(super) fn value_for_access(self, access: Access) -> serde_json::Value {
+        if self == Self::Busy && access == Access::Read {
+            serde_json::json!({"error":{"code":"busy",
+                "message":"The collection is busy. Try again after one second.",
+                "retryable":true,"retry_after_ms":1000}})
+        } else { self.value() }
     }
     pub(super) fn value(self) -> serde_json::Value {
         let code = self.code();

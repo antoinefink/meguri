@@ -20,7 +20,8 @@ use meguri_stats::graphs::records::retention::{RetentionCounts, RetentionRecord}
 use meguri_stats::graphs::records::reviews::{ReviewKinds, ReviewsRecord};
 use meguri_stats::graphs::{Columns, Graph, GraphRecord, GraphRequest, GraphResult, History, Scope};
 use meguri_testkit::bench::fixtures::CoreHost;
-use serde_json::{Map, Value, json};
+use meguri_testkit::observe::stats::graph_part;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use crate::graphs_common::{LANG, fixture_path, insert_card};
@@ -641,16 +642,34 @@ fn g6_encodings_round_trip() {
     let decoded = decoder
         .list(|d| d.list(|d| Ok(hour(d.integer()? as u64, d.integer()? as u64))))
         .unwrap();
+    // H7: `six_months`, then `retention_by_hour`'s five ranges.
+    let six = decoder.list(|d| Ok(hour(d.integer()? as u64, d.integer()? as u64))).unwrap();
+    let kept = decoder
+        .list(|d| d.list(|d| Ok((d.integer()? as u64, d.integer()? as u64))))
+        .unwrap();
     assert!(decoder.is_done());
     let want: Vec<Vec<HourCounts>> = ranges(&parts.hourly).into_iter().map(|h| h.to_vec()).collect();
     assert_eq!(decoded, want);
+    assert_eq!(six, parts.hourly.six_months.to_vec());
+    let by_hour = &parts.hourly.retention_by_hour;
+    let want: Vec<Vec<(u64, u64)>> = [&by_hour.one_month, &by_hour.three_months, &by_hour.six_months, &by_hour.one_year]
+        .into_iter()
+        .chain(by_hour.all_time.as_ref())
+        .map(|hours| hours.iter().map(|h| (h.passed, h.failed)).collect())
+        .collect();
+    assert_eq!(kept, want);
     // Answer Buttons: per range three lists of four.
     let bytes = encode(&parts.buttons);
     let mut decoder = Decoder::new(&bytes);
     let decoded = decoder
         .list(|d| (0..3).map(|_| d.list(|d| d.integer())).collect::<Result<Vec<_>, _>>())
         .unwrap();
+    // H7: the `six_months` range.
+    let six: Vec<Vec<i64>> = (0..3).map(|_| decoder.list(|d| d.integer())).collect::<Result<_, _>>().unwrap();
     assert!(decoder.is_done());
+    let b = parts.buttons.six_months;
+    let want_six: Vec<Vec<i64>> = [b.learning, b.young, b.mature].iter().map(|p| p.iter().map(|v| *v as i64).collect()).collect();
+    assert_eq!(six, want_six);
     let want: Vec<Vec<Vec<i64>>> = button_ranges(&parts.buttons)
         .iter()
         .map(|b| [b.learning, b.young, b.mature].iter().map(|p| p.iter().map(|v| *v as i64).collect()).collect())
@@ -658,11 +677,12 @@ fn g6_encodings_round_trip() {
     assert_eq!(decoded, want);
 }
 
+/// The whole record.
 fn decode_reviews(bytes: &[u8]) -> ReviewsRecord {
     let mut decoder = Decoder::new(bytes);
     let map = decoder.sparse_map(&[MemberKind::Integers; 10]).unwrap();
-    assert!(decoder.is_done());
     let mut record = ReviewsRecord::default();
+    assert!(decoder.is_done());
     for (at, day) in map.keys.iter().enumerate() {
         let member = |m: usize| map.integers[m][at];
         let day = i32::try_from(*day).unwrap();
@@ -675,7 +695,9 @@ fn decode_reviews(bytes: &[u8]) -> ReviewsRecord {
 #[test]
 fn g6_twenty_years_of_daily_study_fit_the_limit() {
     // G6's test: 7,305 consecutive days, rows of every kind on each, 150
-    // counted rows a day, stored times of 5,000 to 60,000 ms.
+    // counted rows a day, stored times of 5,000 to 60,000 ms. The record
+    // holds Anki's members only: By Answer (H6) is a part of its own, whose
+    // size test is in history_parts.rs.
     let mut record = ReviewsRecord::default();
     for day in -7_304..=0 {
         let spread = i64::from(day).rem_euclid(97);
@@ -715,92 +737,9 @@ fn g6_a_record_past_the_limit_is_returned_whole() {
 // `creationOffset` and reopen, and observes Collection, Deck `Lang` or
 // Search `deck:Lang` requests. `reviews/time-wrap` is left out: its golden
 // is Anki's wrapped sum, which Meguri does not reproduce (V9,
-// `review_time_sums_no_wrap`).
-
-fn kinds_json(kinds: &ReviewKinds) -> Value {
-    let named = [
-        ("learn", kinds.learn),
-        ("relearn", kinds.relearn),
-        ("young", kinds.young),
-        ("mature", kinds.mature),
-        ("filtered", kinds.filtered),
-    ];
-    Value::Object(named.into_iter().filter(|(_, v)| *v != 0).map(|(k, v)| (k.to_owned(), json!(v))).collect())
-}
-
-fn reviews_json(record: &ReviewsRecord) -> Value {
-    if record.count.is_empty() {
-        return json!({});
-    }
-    let map = |days: &BTreeMap<i32, ReviewKinds>| -> Value {
-        Value::Object(days.iter().map(|(day, kinds)| (day.to_string(), kinds_json(kinds))).collect())
-    };
-    json!({"count": map(&record.count), "time": map(&record.time)})
-}
-
-fn retention_json(record: &RetentionRecord) -> Value {
-    let period = |c: &RetentionCounts| -> Value {
-        let named = [
-            ("young_passed", c.young_passed),
-            ("young_failed", c.young_failed),
-            ("mature_passed", c.mature_passed),
-            ("mature_failed", c.mature_failed),
-        ];
-        Value::Object(named.into_iter().filter(|(_, v)| *v != 0).map(|(k, v)| (k.to_owned(), json!(v))).collect())
-    };
-    let mut out = Map::new();
-    for (name, counts) in [
-        ("today", &record.today),
-        ("yesterday", &record.yesterday),
-        ("week", &record.week),
-        ("month", &record.month),
-        ("year", &record.year),
-    ] {
-        out.insert(name.into(), period(counts));
-    }
-    if let Some(all) = &record.all_time {
-        out.insert("all_time".into(), period(all));
-    }
-    Value::Object(out)
-}
-
-fn hourly_json(record: &HourlyRecord) -> Value {
-    let range = |hours: &Hours| -> Value {
-        hours
-            .iter()
-            .map(|h| {
-                let mut cell = Map::new();
-                if h.total != 0 {
-                    cell.insert("total".into(), json!(h.total));
-                }
-                if h.correct != 0 {
-                    cell.insert("correct".into(), json!(h.correct));
-                }
-                Value::Object(cell)
-            })
-            .collect()
-    };
-    let mut out = Map::new();
-    out.insert("one_month".into(), range(&record.one_month));
-    out.insert("three_months".into(), range(&record.three_months));
-    out.insert("one_year".into(), range(&record.one_year));
-    if let Some(all) = &record.all_time {
-        out.insert("all_time".into(), range(all));
-    }
-    Value::Object(out)
-}
-
-fn buttons_json(record: &AnswerButtonsRecord) -> Value {
-    let range = |b: &ButtonCounts| json!({"learning": b.learning, "young": b.young, "mature": b.mature});
-    let mut out = Map::new();
-    out.insert("one_month".into(), range(&record.one_month));
-    out.insert("three_months".into(), range(&record.three_months));
-    out.insert("one_year".into(), range(&record.one_year));
-    if let Some(all) = &record.all_time {
-        out.insert("all_time".into(), range(all));
-    }
-    Value::Object(out)
-}
+// `review_time_sums_no_wrap`). The parts are written by the testkit's
+// `stats` observation (`conformance/stats-ops` H10), which the conformance
+// runner also uses for these scenarios.
 
 /// The UTC offset at each scenario clock's start.
 fn offset_at(zone: &str, start: &str) -> i32 {
@@ -899,10 +838,10 @@ fn check_golden(name: &str) {
         assert_eq!(keys, wanted, "{name} {request}");
         for part in names {
             let mine = match part {
-                "reviews" => reviews_json(&parts.reviews),
-                "true_retention" => retention_json(&parts.retention),
-                "hours" => hourly_json(&parts.hourly),
-                "buttons" => buttons_json(&parts.buttons),
+                "reviews" => graph_part(&parts.reviews).unwrap(),
+                "true_retention" => graph_part(&parts.retention).unwrap(),
+                "hours" => graph_part(&parts.hourly).unwrap(),
+                "buttons" => graph_part(&parts.buttons).unwrap(),
                 other => panic!("{other}"),
             };
             assert_eq!(mine, expected[part], "{name} {request} {part}");

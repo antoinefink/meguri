@@ -25,7 +25,9 @@ struct CompactRootView: View {
         // The setter also runs when the selected tab is tapped again: that
         // pops its stack, then scrolls its root to the top (R19).
         TabView(selection: Binding(get: { navigation.compactTab }, set: { navigation.selectTab($0) })) {
-            ForEach(CompactTab.allCases.filter { features.availableSections.contains($0.section) }, id: \.self) { tab in
+            // Statistics' tab waits for its compact page (U304), whatever the sidebar shows.
+            ForEach(CompactTab.allCases.filter { features.availableSections.contains($0.section) && ($0 != .stats || features.statsTab) },
+                    id: \.self) { tab in
                 Tab(value: tab) {
                     stack(tab)
                 } label: {
@@ -38,6 +40,13 @@ struct CompactRootView: View {
             }
         }
         .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width } action: { isUpright = $0 }
+        // Statistics has no tab yet (U304): a window that narrows on it shows Decks.
+        .onChange(of: navigation.section == .stats && !features.statsTab, initial: true) { _, orphaned in
+            if orphaned { navigation.select(.section(.home)) }
+        }
+        // N23.1: the status panel's sheet opens at its measured height; the panel is
+        // measured here, out of sight, not in the toolbar item (N23.6).
+        .background { features.syncPanelMeasure?() }
         .onChange(of: besideDetail, initial: true) { _, known in
             if let known { lastBesideDetail = known }
         }
@@ -76,8 +85,9 @@ struct CompactRootView: View {
     private var decksList: some View {
         NavigationStack {
             SectionDestinationView(screen: .root(.home), navigation: navigation, features: features)
-                .toolbar { ToolbarItem(placement: .primaryAction) { features.syncStatus() } }
         }
+        // N23.6: the list's own trailing group carries the sync button first (Home).
+        .environment(\.syncStatusItem, features.syncStatus?())
         // Today shows beside this list: the list does not repeat it (N14.1).
         .environment(\.todayBesideDeckList, true)
     }
@@ -113,13 +123,15 @@ struct CompactRootView: View {
     private func singleStack(_ tab: CompactTab) -> some View {
         NavigationStack(path: Binding(get: { navigation.compactPath(tab) }, set: { navigation.setCompactPath($0, for: tab) })) {
             SectionDestinationView(screen: .root(tab.section), navigation: navigation, features: features)
-                .toolbar {
-                    if tab == .decks { ToolbarItem(placement: .primaryAction) { features.syncStatus() } }
-                }
                 .navigationDestination(for: Destination.self) { destination in
                     SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
                 }
         }
+        // N23.6: every screen of the Decks stack (the list, a deck page, a subdeck's)
+        // puts the sync button first in its own trailing group with search and Add, so
+        // the system keeps it in that group: never a separate item, which it moved
+        // to the bottom when the large title scrolled away.
+        .environment(\.syncStatusItem, tab == .decks ? features.syncStatus?() : nil)
     }
 }
 

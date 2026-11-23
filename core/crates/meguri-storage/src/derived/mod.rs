@@ -113,4 +113,52 @@ impl ReadSnapshot<'_> {
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    /// [`ReadSnapshot::derived_rows`] row by row, without keeping them:
+    /// each row's cells of `columns` go to `visit`, which returns false to
+    /// stop. Nothing is visited when no store is attached. `cancel` is
+    /// polled while SQLite works, as `ReadRows::visit_id_rows` polls it.
+    pub fn visit_derived(
+        &self,
+        component: &str,
+        table: &str,
+        columns: &str,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[Cell]) -> bool,
+    ) -> Result<(), StorageError> {
+        if self.reader().derived.is_none() {
+            return Ok(());
+        }
+        crate::search_rows::visit_cells(
+            self.conn(),
+            &format!("SELECT {columns} FROM {ATTACH_SCHEMA}.\"{component}__{table}\""),
+            &[],
+            cancel,
+            visit,
+        )
+    }
+
+    /// [`ReadSnapshot::visit_derived`] for the rows that `filter`, an SQL
+    /// condition on that table's columns, holds for: SQLite skips the rest
+    /// without building their cells.
+    pub fn visit_derived_where(
+        &self,
+        component: &str,
+        table: &str,
+        columns: &str,
+        filter: &str,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[Cell]) -> bool,
+    ) -> Result<(), StorageError> {
+        if self.reader().derived.is_none() {
+            return Ok(());
+        }
+        crate::search_rows::visit_cells(
+            self.conn(),
+            &format!("SELECT {columns} FROM {ATTACH_SCHEMA}.\"{component}__{table}\" WHERE {filter}"),
+            &[],
+            cancel,
+            visit,
+        )
+    }
 }

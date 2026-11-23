@@ -2,17 +2,26 @@
 //! `card_stats` observation (H9) reads Card Info's raw values from
 //! meguri-stats' snapshot, the product read (`stats/card-info` C3, C6.1).
 //! A snapshot that fails is a run error named by its C11 kind.
+//!
+//! The `stats` observation (H10, `stats/graphs-common` G14) runs the
+//! product's graph request (G8) once per listed request, each its own
+//! refresh, and writes the records with `observe::stats`.
 
+use meguri_engine::CancelToken;
 use meguri_model::{card_data::MemoryState, ids::CardId};
+use meguri_stats::graphs::{Columns, Graph, GraphRequest, GraphResult, History, Scope, ScopeError};
 use meguri_stats::{CardInfoOutcome, card_info::RawValues};
+use meguri_storage::{ReadRows, ReaderRole};
 use serde_json::{Map, Value, json};
 
 use super::{ExecError, Registry, Session};
 use crate::observe::f32_value;
-use crate::scenario::{ObservationArgs, ObservationRequest};
+use crate::observe::stats::{context_part, graph_part};
+use crate::scenario::{ObservationArgs, ObservationRequest, StatsHistory, StatsPart, StatsRequest, StatsScope};
 
 pub(super) fn register(registry: &mut Registry) {
     registry.observation("card_stats", card_stats);
+    registry.observation("stats", stats);
 }
 
 fn core(error: impl std::fmt::Display) -> ExecError {
@@ -121,4 +130,89 @@ fn card_stats(session: &mut Session<'_>, request: &ObservationRequest) -> Result
         out.insert(name, Value::Object(value));
     }
     Ok(Value::Object(out))
+}
+
+/// The graph a part names; `context` names none (G14).
+fn graph_of(part: StatsPart) -> Option<Graph> {
+    Some(match part {
+        StatsPart::Reviews => Graph::Reviews,
+        StatsPart::TrueRetention => Graph::Retention,
+        StatsPart::Hours => Graph::Hourly,
+        StatsPart::Buttons => Graph::AnswerButtons,
+        StatsPart::FutureDue => Graph::FutureDue,
+        StatsPart::CardCounts => Graph::CardCounts,
+        StatsPart::Intervals => Graph::Intervals,
+        StatsPart::Stability => Graph::Stability,
+        StatsPart::Difficulty => Graph::Difficulty,
+        StatsPart::Retrievability => Graph::Retrievability,
+        StatsPart::Added => Graph::Added,
+        StatsPart::Context => return None,
+    })
+}
+
+/// H10's Meguri side: the deck named with `::` by its id; a name that
+/// names no deck is a run error.
+fn typed_scope(collection: &meguri_engine::Collection, scope: &StatsScope) -> Result<Scope, ExecError> {
+    Ok(match scope {
+        StatsScope::Collection => Scope::Collection,
+        StatsScope::Search(text) => Scope::Search(text.clone()),
+        StatsScope::Deck(name) => {
+            let lease = collection.reader(ReaderRole::Query).map_err(core)?;
+            let decks = lease.snapshot().map_err(core)?.deck_rows().map_err(core)?;
+            let deck = decks
+                .iter()
+                .find(|deck| deck.human_name() == *name)
+                .ok_or_else(|| ExecError::new("unknown_ref", format!("no deck {name:?}")))?;
+            Scope::Deck(deck.id)
+        }
+    })
+}
+
+/// H10: one output per request, in order: its parts, or the scope's search
+/// error (`conformance/search-ops` S3), or `unreadable_row`.
+fn stats(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    let ObservationArgs::List(items) = &request.args else {
+        return Err(ExecError::new("invalid_scenario", "stats needs a request list"));
+    };
+    let wanted = StatsRequest::from_list(items).map_err(|error| ExecError::new("invalid_scenario", error.to_string()))?;
+    let collection = session.engine_collection()?;
+    let host = session.storage.host()?;
+    let mut outputs = Vec::with_capacity(wanted.len());
+    for (refresh, one) in (1..).zip(&wanted) {
+        let graph_request = GraphRequest {
+            scope: typed_scope(&collection, &one.scope)?,
+            history: match one.history {
+                StatsHistory::Year => History::Last12Months,
+                StatsHistory::All => History::AllHistory,
+            },
+            graphs: one.parts.iter().copied().filter_map(graph_of).collect(),
+            refresh,
+            context: None,
+            cancel: CancelToken::new(),
+            columns: Columns::Cached,
+        };
+        let output = match host.stats().request(&collection, host.derived(), &graph_request).map_err(core)? {
+            GraphResult::Data(data) => {
+                let mut parts = Map::new();
+                for record in &data.records {
+                    let value = graph_part(record.as_ref()).map_err(core)?;
+                    parts.insert(record.graph().part().to_owned(), value);
+                }
+                if one.parts.contains(&StatsPart::Context) {
+                    parts.insert("context".to_owned(), context_part(&data.context, &data.preferences));
+                }
+                Value::Object(parts)
+            }
+            GraphResult::ScopeError(ScopeError::Search(error)) => super::search::error_value(&error),
+            GraphResult::UnreadableRow(_) => json!({"error": "unreadable_row"}),
+            GraphResult::ScopeError(ScopeError::UnknownDeck) => {
+                return Err(ExecError::new("unknown_ref", "the deck went before its request ran"));
+            }
+            other @ (GraphResult::ContextChanged | GraphResult::Cancelled) => {
+                return Err(core(format!("a first request gave {other:?}")));
+            }
+        };
+        outputs.push(output);
+    }
+    Ok(Value::Array(outputs))
 }

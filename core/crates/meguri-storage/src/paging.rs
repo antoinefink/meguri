@@ -234,6 +234,16 @@ pub trait ReadRows: sealed::Connected {
     fn studied_since(&self, after: i64) -> Result<crate::queries::studied::Studied, StorageError> {
         crate::queries::studied::studied_since(self.connection(), after)
     }
+    /// [`ReadRows::studied_since`] over the rows of the cards whose `did`,
+    /// or non-zero `odid`, is one of `decks` (`stats/history-reads` H12,
+    /// `stats/graphs-common` G2.1); zeros for no deck.
+    fn studied_since_in(
+        &self,
+        after: i64,
+        decks: &[DeckId],
+    ) -> Result<crate::queries::studied::Studied, StorageError> {
+        crate::queries::studied::studied_since_in(self.connection(), after, decks)
+    }
 
     /// The Stats graphs' card columns (`stats/graphs-common` G4, G9.1), one
     /// row per card in ascending id order, as stored: `id`, `nid`, `did`,
@@ -282,6 +292,30 @@ pub trait ReadRows: sealed::Connected {
                 visit,
             ),
         }
+    }
+
+    /// Every card with its review-log rows of `id` ≥ 0, cards in `id`
+    /// order (`sched/fsrs-items` I1.1's bulk read, `stats/history-reads`
+    /// H14.2): one row per joined pair, as stored, the card's columns first
+    /// (`id`, `nid`, `did`, `odid`, `type`, `queue`, `due`, `odue`, `ivl`),
+    /// then the row's in [`ReadRows::visit_stats_revlog`]'s order, all NULL
+    /// for a card without rows. A card's rows come together, in no set
+    /// order. Cancelled as [`ReadRows::visit_id_rows`] is; `visit` returns
+    /// false to stop.
+    fn visit_stats_histories(
+        &self,
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[Cell]) -> bool,
+    ) -> Result<(), StorageError> {
+        crate::search_rows::visit_cells(
+            self.connection(),
+            "SELECT c.id, c.nid, c.did, c.odid, c.type, c.queue, c.due, c.odue, c.ivl, \
+             r.id, r.cid, r.usn, r.ease, r.ivl, r.lastIvl, r.factor, r.time, r.type \
+             FROM cards AS c LEFT JOIN revlog AS r ON r.cid = c.id AND r.id >= 0 ORDER BY c.id",
+            &[],
+            cancel,
+            visit,
+        )
     }
 
     /// The ids of the review-log rows whose `cid` is `card`, ascending (an

@@ -59,6 +59,7 @@ pub mod render;
 pub mod review_session;
 mod runtime;
 pub mod sched_ops;
+pub mod stats_page;
 pub mod studied;
 pub mod suspend;
 pub mod sync;

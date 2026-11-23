@@ -225,7 +225,8 @@ def is_system_identifier(e):
 def native_control_parts(root):
     """Parts SwiftUI creates that cannot take an identifier of their own:
     the segments of a segmented Picker (buttons directly in a segmentedControl
-    the app named), and the field `searchable` puts in a navigation bar."""
+    the app named), the field `searchable` puts in a navigation bar, and the
+    unnamed button a navigation bar item wraps its named control in."""
     parts = set()
     for e in root.walk():
         if e.type == "button" and not e.identifier and e.label and e.parent is not None \
@@ -233,6 +234,13 @@ def native_control_parts(root):
             parts.add(e)
         if e.type == "searchField" and not e.identifier and e.label and e.parent is not None \
                 and e.parent.type == "navigationBar":
+            parts.add(e)
+        # A toolbar item's own button on iPadOS: SwiftUI wraps the item's control (a Menu, a
+        # Button) in an unnamed button with the same frame, inside the button the app named.
+        if e.type == "button" and not e.identifier and e.parent is not None and e.parent.type == "button" \
+                and e.parent.identifier and not is_system_identifier(e.parent) \
+                and (e.x, e.y, e.w, e.h) == (e.parent.x, e.parent.y, e.parent.w, e.parent.h) \
+                and any(a.type == "navigationBar" for a in e.ancestors):
             parts.add(e)
     return parts
 

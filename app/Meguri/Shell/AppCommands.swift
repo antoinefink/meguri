@@ -2,6 +2,7 @@ import AppModel
 import CoreBridge
 import Editor
 import Home
+import Stats
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -13,6 +14,8 @@ struct NativeCommandContext {
     let collection: ReviewCollection
     let host: AppNavigation.SheetHost
     var layout: ShellLayout = .sidebar
+    /// The Statistics page, behind its flag (U296); nil while it cannot be reached.
+    var statsPage: StatsPage?
 
     var fileActionsAvailable: Bool {
         collection.navigation.sheet == nil && !collection.deckActions.busy && !collection.manualTransfers.busy
@@ -120,6 +123,27 @@ struct NativeCommandContext {
     func showBrowse() {
         guard canShowBrowse else { return }
         collection.navigation.select(.section(.browse))
+    }
+
+    /// N25.11: View › Statistics (⇧⌘S) selects the Statistics row, with the page's kept deck
+    /// and period (S13), under the guards of View › Browse.
+    var canShowStatistics: Bool {
+        statsPage != nil && host == .main && layout == .sidebar && collection.navigation.sheet == nil
+            && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
+    }
+    func showStatistics() {
+        guard canShowStatistics else { return }
+        collection.navigation.select(.section(.stats))
+    }
+
+    /// N25.11: View › Go to Section, while the page shows its sections.
+    var canGoToSection: Bool {
+        canShowStatistics && collection.navigation.section == .stats && statsPage?.shown == true
+            && statsPage?.model.state == .content
+    }
+    func goToSection(_ section: StatsSectionID) {
+        guard canGoToSection else { return }
+        statsPage?.go(to: section)
     }
 
     /// N21.8, V2.1: View › Cards and Notes (⌥⌘T) toggles Browse's mode
@@ -289,6 +313,19 @@ struct AppCommands: Commands {
         // N21.8: View › Browse (the Mac only: the iPad's Browse row waits for its own layout);
         // W14: View › Note Types; ⇧⌘N stays New Deck… (N22.1).
         CommandGroup(before: .sidebar) {
+            // N25.1, N25.11: Statistics before Browse, behind its flag (U296).
+            if StatsRollout.enabled {
+                Button("Statistics") { context?.showStatistics() }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+                    .disabled(context?.canShowStatistics != true)
+                Menu("Go to Section") {
+                    ForEach(StatsSectionID.allCases, id: \.self) { section in
+                        Button { context?.goToSection(section) } label: { Text(verbatim: section.title()) }
+                    }
+                }
+                .disabled(context?.canGoToSection != true)
+                .accessibilityIdentifier("stats.goToSection")
+            }
             #if os(macOS)
             Button("Browse") { context?.showBrowse() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])

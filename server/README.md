@@ -124,6 +124,19 @@ tools/mg sync-server-local start
 Remove the private password file after recovery. Keep failed MG evidence. This
 workflow does not publish, deploy, upgrade, back up or restore a service.
 
+MCP paged search builds an optional in-memory candidate index in a separate
+blocking job. One build and two retained snapshots are allowed per service;
+there is no queue or persisted index. Builds have a five-second cooperative
+limit. Snapshots have a 60-second eligibility lifetime, and failed builds have
+a 60-second cooldown. An idle repository retains this memory until the next
+lookup/cache operation removes expired entries or the service restarts. The
+index has fixed facet capacities (about 116 MiB peak requested Rust heap per
+build, excluding SQLite/allocator overhead); unavailable facets and capacity
+misses use the existing bounded search. Completed entries retain no SQLite
+reader, collection pin or root owner. Restart discards all entries. Epoch,
+publication and committed collection stamps are checked on every use. No
+operator rebuild, schema migration or additional permission is needed.
+
 Native collection and MCP diagnostics are opt-in for `serve` through
 `MEGURI_SYNC_LOG_LEVEL=off|info|debug` (default `off`). Only these exact lowercase
 values are accepted; empty, whitespace, unknown and non-Unicode values fail
@@ -134,7 +147,14 @@ the container; it is read at process startup and is not stored in the instance.
 For MCP, `off` emits nothing and `info` records failures and rejections.
 `debug` emits one `mcp_response_ready` record per prepared MCP response.
 Records contain a fixed stage, operation or tool name, HTTP status, outcome
-and reason. Debug records also include elapsed milliseconds. HTTP 200
+and reason. An optional typed `detail` field uses only these fixed labels:
+`publication_gate`, `native_writer`, `collection_path`, `collection_pin`,
+`collection_storage`, `collection_worker`, `authority_storage`, `collection_open`,
+`collection_access`, `sqlite_open`, `sqlite_open_busy`, `sqlite_access`,
+`sqlite_access_busy`. The `sqlite_*` labels identify directly observed SQLite
+failures; `*_busy` identifies BUSY/LOCKED. Phase labels for helpers that erased
+the cause make no claim about the underlying cause. Details never enter tool
+responses. Debug records also include elapsed milliseconds. HTTP 200
 success, invalid parameters, tool errors and permission requests have
 distinct outcomes. Each record describes response preparation. MCP diagnostics never include request values,
 IDs, headers, paths, credentials, collection content or internal error text.

@@ -7,6 +7,7 @@ import Home
 import NoteTypes
 import Review
 import Settings
+import Stats
 import SwiftUI
 
 /// The review with the sync status button only while sync waits on the
@@ -53,11 +54,23 @@ struct ShellFeatures {
         AnyView(ContentUnavailableView("Select a Deck", systemImage: "rectangle.stack"))
     }
     var availableSections: [AppSection] = AppSection.sidebar
+    /// The compact layout's Statistics tab (iPhone, the folded Duo: U304); the sidebar's row
+    /// follows `availableSections`.
+    var statsTab = false
+    /// The Statistics page behind `StatsRollout` (U296): View › Statistics and Go to Section act
+    /// on it; nil while it cannot be reached.
+    var statsPage: StatsPage?
+    /// What keeps the page's wiring to the collection alive for the app's run.
+    var statsHost: AnyObject?
     /// Whether a section's row shows now: Browse and Note Types read the
     /// collection, so with none on this device (first run, N18.3) they are
     /// not offered, nor their View commands.
     var sectionShown: (AppSection) -> Bool = { _ in true }
-    var syncStatus: () -> AnyView = { AnyView(EmptyView()) }
+    /// N23.6: the toolbar's sync status button; nil (sample shells) declares no item,
+    /// since an item with nothing in it would still get an empty glass.
+    var syncStatus: (() -> AnyView)?
+    /// iPhone: measures the status panel for its sheet (N23.1), behind the shell's root.
+    var syncPanelMeasure: (() -> AnyView)?
     var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
     /// N20.9: the Deck Options page pushed on a deck page.
     var deckOptions: (DeckID, AppNavigation) -> AnyView = { _, _ in AnyView(EmptyView()) }
@@ -106,10 +119,27 @@ struct ShellFeatures {
         // W14: Note Types has a sidebar row at regular width; the tab layout reaches it from Settings (U286).
         features.availableSections = [.home, .noteTypes, .settings]
         #endif
-        features.sectionShown = { section in Self.sectionShown(section, hasCollection: collection.hasCollection) }
+        let statsPage: StatsPage?
+        if StatsRollout.enabled {
+            // N25.1: Statistics second, under Today.
+            let host = StatsCollectionHost(collection: collection)
+            statsPage = host.page
+            features.statsHost = host
+            features.availableSections.insert(.stats, at: 1)
+        } else {
+            statsPage = nil
+        }
+        features.statsPage = statsPage
+        // Statistics, behind its flag, reads a collection as Browse does.
+        features.sectionShown = { section in
+            (section != .stats || statsPage != nil) && Self.sectionShown(section, hasCollection: collection.hasCollection)
+        }
         features.sectionRoot = { section, navigation in
             switch section {
             case .settings: AnyView(SettingsView(collection: collection))
+            case .stats:
+                statsPage.map { AnyView(StatisticsView(page: $0, navigation: navigation)) }
+                    ?? AnyView(HomeView(collection: collection))
             #if os(macOS)
             case .browse:
                 AnyView(BrowseView(model: collection.browse, addNote: {
@@ -130,6 +160,9 @@ struct ShellFeatures {
         }
         #endif
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
+        #if os(iOS)
+        features.syncPanelMeasure = { AnyView(CloudSyncPanelMeasure(collection: collection)) }
+        #endif
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
         #if os(iOS)
@@ -264,7 +297,7 @@ extension AppSection {
         switch self {
         case .home: "Home"
         case .browse: "Browse"
-        case .stats: "Stats"
+        case .stats: "Statistics"
         case .noteTypes: "Note Types"
         case .settings: "Settings"
         }
@@ -287,7 +320,7 @@ extension CompactTab {
         switch self {
         case .decks: "Decks"
         case .browse: "Browse"
-        case .stats: "Stats"
+        case .stats: "Statistics"
         case .settings: "Settings"
         }
     }

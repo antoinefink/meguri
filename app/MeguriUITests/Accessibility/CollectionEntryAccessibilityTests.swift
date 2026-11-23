@@ -50,7 +50,7 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
         }
     }
 
-    /// Scoped coverage of Home's shared import control in no-file and ready content.
+    /// Home with no file (the welcome and its Import) and ready (the deck tree, which has no Import).
     func testHomeEmptyAndTypicalImportControlPassesTheAudit() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
@@ -66,7 +66,12 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
                 state: state, launch: MeguriLaunch(locale: "en_US", animations: false, route: "home/deck-list/\(state)"),
                 waitFor: "home.collection.screen", suppressions: suppressions,
                 ready: { app in
-                    // The welcome and the deck tree are system lists: a collection view on touch.
+                    // Only the welcome offers Import (N18.3); the typical deck tree is audited as it is.
+                    guard state == "empty" else {
+                        XCTAssertFalse(app.buttons["home.collection.import"].exists)
+                        return
+                    }
+                    // The welcome is a system list: a collection view on touch.
                     let list = app.collectionViews.firstMatch
                     try self.scrollToRequiredControls(list.exists ? list : app.scrollViews.firstMatch, app: app, build: build,
                                                       identifiers: ["home.collection.import"])

@@ -39,6 +39,7 @@ pub use context::{Context, ContextToken, Preferences};
 pub use records::{Graph, GraphInput, GraphRecord, NotBuilt, Record};
 pub use rows::{StatsCard, StatsRow};
 pub use scope::{History, Scope, ScopeData, ScopeRow, Unreadable};
+pub(crate) use scope::Span;
 
 use columns::{CardsBuilder, RevlogBuilder};
 use overlay::{Patch, View};
@@ -164,6 +165,8 @@ enum Resolved {
 pub struct StatsCaches {
     shared: Arc<cache::Shared>,
     memo: Mutex<Option<Memo>>,
+    /// The `stats_history` component's state (`stats/history-reads` H14).
+    history: Arc<crate::history::Shared>,
 }
 
 impl Default for StatsCaches {
@@ -223,6 +226,7 @@ impl StatsCaches {
         StatsCaches {
             shared: Arc::default(),
             memo: Mutex::new(None),
+            history: Arc::default(),
         }
     }
 
@@ -231,7 +235,19 @@ impl StatsCaches {
         StatsColumns::new(Arc::clone(&self.shared))
     }
 
-    fn drop_memo(&self) {
+    /// The `stats_history` component (`stats/history-reads` H14), for the
+    /// derived host's builder.
+    pub fn history_component(&self) -> crate::history::StatsHistory {
+        crate::history::StatsHistory::new(Arc::clone(&self.history))
+    }
+
+    pub(crate) fn history_shared(&self) -> &crate::history::Shared {
+        &self.history
+    }
+
+    /// Drops the memo (G8.3): a newer refresh's first request, the page's
+    /// one request (`crate::page`) included, drops it whatever it returns.
+    pub(crate) fn drop_memo(&self) {
         *self.memo.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
@@ -393,6 +409,62 @@ impl StatsCaches {
         })))
     }
 
+    /// The Statistics page's request (`crate::page`, U293): [`Self::resolve`]
+    /// on `snapshot` with `context`, with no memo, over a view that holds
+    /// every row (from the caches, or read from the snapshot from id 0 on),
+    /// so the parts that read all history whatever the window
+    /// (`stats/history-reads` H9, H11) read the same view
+    /// ([`ScopeData::rows_from`]). `Err` holds the result that stops the
+    /// request (a scope error, `unreadable_row`, Cancelled).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn resolve_scope(
+        &self,
+        derived: &DerivedHost,
+        snapshot: &Snapshot<'_>,
+        context: &Context,
+        scope: &Scope,
+        history: History,
+        columns: Columns,
+        cancel: &Arc<CancelToken>,
+    ) -> Result<Result<(Arc<ScopeData>, BrowseScope), GraphResult>, StatsError> {
+        let span = Span {
+            start: history.window_start(context.next_day_at),
+            end: None,
+            view_from: 0,
+        };
+        Ok(match self.resolve_span(derived, snapshot, context, scope, span, columns, cancel)? {
+            Resolved::Scope(data, browse) => Ok((data, browse)),
+            Resolved::Stop(result) => Err(result),
+        })
+    }
+
+    /// The scope's cards and its rows with `start <= id < end` (no upper
+    /// end without `end`), on `snapshot` with `context`, with no memo: the
+    /// read behind one day's cards (`stats/history-reads` H13). An
+    /// unreadable row of the scope in that span stops it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn resolve_ids(
+        &self,
+        derived: &DerivedHost,
+        snapshot: &Snapshot<'_>,
+        context: &Context,
+        scope: &Scope,
+        start: i64,
+        end: Option<i64>,
+        columns: Columns,
+        cancel: &Arc<CancelToken>,
+    ) -> Result<Result<Arc<ScopeData>, GraphResult>, StatsError> {
+        let span = Span {
+            start,
+            end,
+            view_from: start,
+        };
+        Ok(match self.resolve_span(derived, snapshot, context, scope, span, columns, cancel)? {
+            Resolved::Scope(data, _) => Ok(data),
+            Resolved::Stop(result) => Err(result),
+        })
+    }
+
     /// G2, G3, G4 and Q2 on the snapshot: the scope's cards and window
     /// rows, the first unreadable one, and the browse scope text. Every
     /// request resolves the whole scope, whatever graphs it names (G8.3).
@@ -404,9 +476,25 @@ impl StatsCaches {
         scope: &Scope,
         request: &GraphRequest,
     ) -> Result<Resolved, StatsError> {
-        let cancelled = || request.cancel.is_cancelled();
+        let span = Span::window(request.history.window_start(context.next_day_at));
+        self.resolve_span(derived, snapshot, context, scope, span, request.columns, &request.cancel)
+    }
+
+    /// [`Self::resolve`] over the rows of `span`.
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_span(
+        &self,
+        derived: &DerivedHost,
+        snapshot: &Snapshot<'_>,
+        context: &Context,
+        scope: &Scope,
+        span: Span,
+        columns: Columns,
+        cancel: &Arc<CancelToken>,
+    ) -> Result<Resolved, StatsError> {
+        let cancelled = || cancel.is_cancelled();
         // Before the snapshot's first read of `derived` (D8).
-        let cached = if request.columns == Columns::Cached && derived.is_current(COMPONENT, snapshot) {
+        let cached = if columns == Columns::Cached && derived.is_current(COMPONENT, snapshot) {
             derived
                 .path()
                 .and_then(|store| self.shared.view(snapshot, &meguri_storage::derived::component_dir(&store, COMPONENT)))
@@ -432,17 +520,17 @@ impl StatsCaches {
         if cancelled() {
             return Ok(Resolved::Stop(GraphResult::Cancelled));
         }
-        let window_start = request.history.window_start(context.next_day_at);
         let from_caches = cached.is_some();
-        let view = match cached {
-            Some(view) => view,
-            None => match cold_view(snapshot, window_start, &cancelled) {
-                Ok(view) => view,
+        let (view, span) = match cached {
+            // The caches hold every row.
+            Some(view) => (view, Span { view_from: i64::MIN, ..span }),
+            None => match cold_view(snapshot, span.view_from.min(span.start), span.end, &cancelled) {
+                Ok(view) => (view, span),
                 Err(_) if cancelled() => return Ok(Resolved::Stop(GraphResult::Cancelled)),
                 Err(error) => return Err(error.into()),
             },
         };
-        let data = ScopeData::new(view, &membership, window_start, from_caches);
+        let data = ScopeData::new(view, &membership, span, from_caches);
         if let Some(bad) = data.first_unreadable() {
             return Ok(Resolved::Stop(GraphResult::UnreadableRow(bad)));
         }
@@ -506,10 +594,12 @@ fn search(
 }
 
 /// The copies built from the snapshot itself (G9.2: equal to the caches'):
-/// every card and the window's rows.
+/// every card and the rows with `from <= id < below` (no upper end without
+/// `below`).
 fn cold_view(
     snapshot: &Snapshot<'_>,
-    window_start: i64,
+    from: i64,
+    below: Option<i64>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<View, meguri_storage::StorageError> {
     let mut cards = CardsBuilder::default();
@@ -519,7 +609,7 @@ fn cold_view(
     })?;
     let slots = cards.slots();
     let mut revlog = RevlogBuilder::default();
-    snapshot.visit_stats_revlog(window_start, None, cancelled, &mut |cells| {
+    snapshot.visit_stats_revlog(from, below, cancelled, &mut |cells| {
         revlog.push(rows::read_row(cells), |cid| slots.get(&cid).copied());
         true
     })?;

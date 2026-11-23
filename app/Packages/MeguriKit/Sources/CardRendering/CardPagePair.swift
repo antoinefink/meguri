@@ -46,6 +46,15 @@ public final class CardPagePair {
     public var cardZoom = CardZoom() {
         didSet { for page in pages { page.webView.pageZoom = cardZoom.scale } }
     }
+    /// How much of the pages' bottom the review's answer area covers: the
+    /// pages tell WebKit, so a card's last line scrolls above it and its
+    /// fixed elements stay clear of it (N16.9).
+    public var obscuredBottom: CGFloat = 0 {
+        didSet {
+            let value = max(0, obscuredBottom.isFinite ? obscuredBottom : 0)
+            for page in pages { page.webView.obscuredBottom = value }
+        }
+    }
     public var inspectorPolicy = WebInspectorPolicy() {
         didSet { for page in pages { page.webView.isInspectable = inspectorPolicy.isInspectable } }
     }

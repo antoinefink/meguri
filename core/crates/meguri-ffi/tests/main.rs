@@ -45,6 +45,8 @@ pub mod find_replace_ffi;
 pub mod headless_parity;
 #[path = "notetype_reads_ffi.rs"]
 pub mod notetype_reads_ffi;
+#[path = "stats_page_ffi.rs"]
+pub mod stats_page_ffi;
 #[cfg(feature = "test-hooks")]
 #[path = "maintenance_ffi.rs"]
 pub mod maintenance_ffi;

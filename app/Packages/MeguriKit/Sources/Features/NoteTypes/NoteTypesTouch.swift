@@ -11,6 +11,8 @@ import SwiftUI
 /// a popover, and Edit gives drag handles and delete buttons.
 struct NoteTypesTouchRoot: View {
     @Bindable var model: NoteTypesModel
+    /// The sync button (N23.6), in the list's trailing place.
+    @Environment(\.syncStatusItem) private var syncStatusItem
 
     var body: some View {
         List {
@@ -19,6 +21,8 @@ struct NoteTypesTouchRoot: View {
                 NavigationLink(value: Destination.noteType(item.id)) {
                     NoteTypeListRow(item: item, edited: model.isEdited(item.id))
                 }
+                // Its record is read ahead (a pure read), so its page opens drawn.
+                .onAppear { model.warm(item.id) }
             }
         }
         .overlay {
@@ -49,6 +53,9 @@ struct NoteTypesTouchRoot: View {
         }
         .accessibilityIdentifier("noteTypes.list.table")
         .navigationTitle(Text("noteTypes.title", bundle: .module))
+        .toolbar {
+            if let syncStatusItem { ToolbarItem(placement: .primaryAction) { syncStatusItem } }
+        }
         .searchable(text: $model.filter, prompt: Text("noteTypes.list.filter", bundle: .module))
         .onAppear { model.appear() }
     }
@@ -61,6 +68,8 @@ public struct NoteTypePage: View {
     private let id: Int64
     @Environment(\.locale) private var locale
     @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The sync button (N23.6): after Fields | Cards, before Save, as on the Mac.
+    @Environment(\.syncStatusItem) private var syncStatusItem
     @State private var jobShown = SaveJobShown()
     private var jobRuns: Bool { model.progress?.notetypeId == id && jobShown.shown(for: id) }
 
@@ -88,6 +97,8 @@ public struct NoteTypePage: View {
                     }
                 }
                 // The centre keeps the note type's name and counts; Fields | Cards sit with Save.
+                // The segmented control draws its own capsule: no toolbar glass around it,
+                // or it reads as one capsule inside another.
                 ToolbarItem(placement: .topBarTrailing) {
                     Picker(selection: $model.tab) {
                         Text("noteTypes.tab.fields", bundle: .module).tag(NoteTypesModel.Tab.fields)
@@ -99,6 +110,11 @@ public struct NoteTypePage: View {
                     .labelsHidden()
                     .fixedSize()
                     .accessibilityIdentifier("noteTypes.list.tabs")
+                }
+                .sharedBackgroundVisibility(.hidden)
+                if let syncStatusItem {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                    ToolbarItem(placement: .topBarTrailing) { syncStatusItem }
                 }
                 if let progress = model.progress, progress.notetypeId == id, jobRuns, sizeClass == .compact {
                     // N22.5 at compact width, where the tab bar takes the bottom bar's
@@ -173,6 +189,8 @@ struct NoteTypeFieldsTouchList: View {
     var body: some View {
         // The column header stays above the rows, which never scroll under it.
         VStack(spacing: .zero) {
+            // The navigation bar's edge, as on the Cards tab.
+            Divider()
             header
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

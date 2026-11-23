@@ -1,5 +1,8 @@
 //! The `reviews` record (`stats/graphs-revlog` V1, V2): per day index, how
 //! many rows of each of five kinds were answered and how long they took.
+//! Round 11's By Answer (`stats/history-reads` H6) reads the same rows by
+//! the answer given as a part of its own (`crate::parts::by_answer`), so
+//! this record holds Anki's members only (G6's size limit).
 
 use std::collections::BTreeMap;
 
@@ -54,7 +57,6 @@ impl ReviewKinds {
 
 /// `stats/graphs-revlog` V2.2: two sparse maps, day index to the five
 /// kinds, with exactly the same keys: the days on which a row counted.
-/// The round 11 extras of H6 are U288's.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ReviewsRecord {
@@ -62,6 +64,29 @@ pub struct ReviewsRecord {
     /// Stored `time` values in milliseconds, summed in 64 bits with no wrap
     /// (V9 `stats-review-time-no-wrap`).
     pub time: BTreeMap<i32, ReviewKinds>,
+}
+
+/// What one day's rows add up to while the day is open.
+#[derive(Clone, Copy, Debug, Default)]
+struct DayTotals {
+    count: ReviewKinds,
+    time: ReviewKinds,
+}
+
+impl DayTotals {
+    fn add(&mut self, column: Column, row: &StatsRow) {
+        self.count.bump(column, 1);
+        self.time.bump(column, i64::from(row.time));
+    }
+
+    fn store(self, day: i32, record: &mut ReviewsRecord) {
+        let count = record.count.entry(day).or_default();
+        let time = record.time.entry(day).or_default();
+        for column in Column::ALL {
+            count.bump(column, self.count.get(column));
+            time.bump(column, self.time.get(column));
+        }
+    }
 }
 
 /// Which of the five kinds a row adds to.
@@ -91,6 +116,12 @@ fn column_of(row: &StatsRow) -> Option<Column> {
     })
 }
 
+/// Whether V2 counts the row (V1): every kind but Manual and Rescheduled,
+/// whatever its `ease`.
+pub(crate) fn counted(row: &StatsRow) -> bool {
+    column_of(row).is_some()
+}
+
 /// `stats/day-buckets` B3 with V2.1's 32-bit key: `(t − N) / 86,400`
 /// rounded toward zero, `t` the row's whole second, then its low 32 bits
 /// read as a signed integer.
@@ -106,36 +137,27 @@ pub(crate) fn build(input: &GraphInput<'_>) -> Result<ReviewsRecord, NotBuilt> {
     // Rows come in id order, so a day's rows are consecutive but for the
     // rare 32-bit cut: keep the current day open and store it when the key
     // changes.
-    let mut open: Option<(i32, ReviewKinds, ReviewKinds)> = None;
-    let close = |day: i32, count: ReviewKinds, time: ReviewKinds, record: &mut ReviewsRecord| {
-        let stored = record.count.entry(day).or_default();
-        let at = record.time.entry(day).or_default();
-        for column in Column::ALL {
-            stored.bump(column, count.get(column));
-            at.bump(column, time.get(column));
-        }
-    };
+    let mut open: Option<(i32, DayTotals)> = None;
     for scoped in input.scope.rows() {
         let row = scoped.row;
         let Some(column) = column_of(&row) else {
             continue;
         };
         let day = day_index(row.id, next_day_at);
-        match &mut open {
-            Some((current, _, _)) if *current == day => {}
+        match &open {
+            Some((current, _)) if *current == day => {}
             _ => {
-                if let Some((done, count, time)) = open.take() {
-                    close(done, count, time, &mut record);
+                if let Some((done, totals)) = open.take() {
+                    totals.store(done, &mut record);
                 }
-                open = Some((day, ReviewKinds::default(), ReviewKinds::default()));
+                open = Some((day, DayTotals::default()));
             }
         }
-        let (_, count, time) = open.as_mut().expect("opened above");
-        count.bump(column, 1);
-        time.bump(column, i64::from(row.time));
+        let (_, totals) = open.as_mut().expect("opened above");
+        totals.add(column, &row);
     }
-    if let Some((done, count, time)) = open {
-        close(done, count, time, &mut record);
+    if let Some((done, totals)) = open {
+        totals.store(done, &mut record);
     }
     Ok(record)
 }

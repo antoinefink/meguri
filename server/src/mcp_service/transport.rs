@@ -81,7 +81,10 @@ impl McpService {
         match error.code {
             "invalid_token" => DispatchFailure::Challenge(self.denial(oauth::BearerFailure::Invalid, write)),
             "insufficient_scope" => DispatchFailure::Challenge(self.denial(oauth::BearerFailure::InsufficientScope, write)),
-            _ => DispatchFailure::Tool(failure(error)),
+            _ => match error.mcp_detail {
+                Some(detail) => DispatchFailure::Diagnosed { failure: failure(error), detail },
+                None => DispatchFailure::Tool(failure(error)),
+            },
         }
     }
 }
@@ -148,6 +151,21 @@ mod tests {
         for code in ["storage_unavailable", "provision_unavailable", "media_integrity", "generated_unknown_fault"] {
             assert!(matches!(failure(Error::new(code)),ToolFailure::Internal));
         }
+    }
+    #[test]
+    fn diagnostic_phases_preserve_generic_errors_and_observed_details() {
+        let erased=Error::from(std::io::Error::other("generated private path/error"))
+            .mcp_storage_detail(Detail::CollectionOpen);
+        assert_eq!(erased.code,"storage_unavailable");
+        assert_eq!(erased.mcp_detail,Some(Detail::CollectionOpen));
+        assert_eq!(failure(erased),ToolFailure::Internal);
+        let locked=mcp::busy().with_mcp_detail(Detail::SqliteOpenBusy)
+            .mcp_storage_detail(Detail::CollectionWorker);
+        assert_eq!(locked.mcp_detail,Some(Detail::SqliteOpenBusy));
+        assert_eq!(failure(locked),ToolFailure::Busy);
+        let invalid=Error::new("invalid_input").mcp_storage_detail(Detail::CollectionStorage);
+        assert_eq!(invalid.mcp_detail,None);
+        assert_eq!(failure(invalid),ToolFailure::InvalidInput);
     }
     #[test]
     fn bearer_is_single_exact_and_has_no_cookie_fallback() {

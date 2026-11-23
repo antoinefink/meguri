@@ -15,7 +15,7 @@ use crate::{
     Error, Result, Service, accounts::{PublicationBarrier, oauth},
     collection::{mcp::{self, Backend, CatalogInput, CatalogResult, Context, CreateInput,
         EditInput, SearchInput, SearchResult, WriteResult, WriteRuntime}, session::Sessions},
-    crypto, storage::{self, DataRoot, collection::ReadPin},
+    crypto, error::McpDiagnosticDetail as Detail, storage::{self, DataRoot, collection::ReadPin},
 };
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::{path::{Path, PathBuf}, sync::Arc, time::Duration};
@@ -50,7 +50,12 @@ impl McpService {
     }
 
     pub(crate) async fn search_notes(&self, authority: oauth::Authority, input: SearchInput) -> Result<SearchResult> {
-        self.execute(authority, false, move |backend, path, a| backend.search_notes(path, a, input)).await
+        let cache = self.service.mcp_search_cache.clone();
+        self.execute(authority, false, move |backend, path, a| {
+            backend.search_notes_with_index(path, a, input, |c| {
+                cache.get_or_schedule(c, a.original.account_id(), a.original.data_epoch(), &a.held.root, path)
+            })
+        }).await
     }
 
     pub(crate) async fn list_decks_and_note_types(&self, authority: oauth::Authority, input: CatalogInput) -> Result<CatalogResult> {
@@ -79,8 +84,17 @@ impl McpService {
     ) -> Result<T> {
         // OAuth owns account resolution and barrier identity. Do not manufacture
         // a NativeAuthority or use a tool's note/deck IDs to select storage.
-        let barrier = self.service.mcp_publication_barrier(&original).await?;
-        let guard = barrier.try_enter().ok_or_else(mcp::busy)?;
+        let barrier = self.service.mcp_publication_barrier(&original).await
+            .map_err(|e| e.mcp_storage_detail(Detail::AuthorityStorage))?;
+        // Metadata resolution has finished. Wait without a connection, a files
+        // worker permit or a SQLite transaction; transport admission stays held.
+        let gate_busy = || mcp::busy().with_mcp_detail(Detail::PublicationGate);
+        let guard = if write {
+            barrier.try_enter().ok_or_else(gate_busy)?
+        } else {
+            tokio::time::timeout(Duration::from_millis(500), barrier.enter()).await
+                .map_err(|_| gate_busy())?
+        };
         let root = self.service.metadata.owner();
         let sessions = self.service.normal_sessions.clone();
         let backend = self.backend.clone();
@@ -91,14 +105,15 @@ impl McpService {
             // be cancelled. It cannot release the gate before SQLite finishes.
             let _publication = (barrier, guard);
             check_oauth(&root, &original, write)?;
-            let path = root.collection_path(original.account_id())?;
+            let path = root.collection_path(original.account_id())
+                .map_err(|e| e.mcp_storage_detail(Detail::CollectionPath))?;
             if pinned.as_ref().is_some_and(|p|p.path != path) { return Err(Error::new("conflict")); }
             // Move the acquisition pin into the durable worker through completion.
             let _acquisition_pin = pinned;
-            let pin = root.pin_collection(&path)?;
+            let pin = root.pin_collection(&path).map_err(|e| e.mcp_storage_detail(Detail::CollectionPin))?;
             let publication = path.parent().and_then(Path::file_name)
-                .and_then(|name| name.to_str()).ok_or(Error::new("storage_unavailable"))?.to_owned();
-            let context = Context { account: original.account_id().into(), publication };
+                .and_then(|name| name.to_str()).ok_or_else(|| Error::new("storage_unavailable").with_mcp_detail(Detail::CollectionPath))?.to_owned();
+            let context = Context { account: original.account_id().into(), publication: original.publication_context(&publication) };
             let held = Arc::new(HeldPublication { root, path: path.clone(), _pin: pin,
                 _barrier: _publication.0, _guard: _publication.1 });
             let authority = CollectionAuthority { original, context, held, sessions, write,
@@ -107,9 +122,9 @@ impl McpService {
             };
             // Also covers refusals made before Backend::transaction is reached.
             authority.check()?;
-            operation(&backend, &path, &authority)
+            operation(&backend, &path, &authority).map_err(|e| e.mcp_storage_detail(Detail::CollectionStorage))
             // Never convert an error after a successful commit into busy.
-        }).await
+        }).await.map_err(|e| e.mcp_storage_detail(Detail::CollectionWorker))
     }
 }
 
@@ -133,7 +148,7 @@ struct CollectionAuthority {
 impl CollectionAuthority {
     fn check(&self) -> Result<()> {
         check_oauth(&self.held.root, &self.original, self.write)?;
-        if self.held.root.collection_path(self.original.account_id())? != self.held.path {
+        if self.held.root.collection_path(self.original.account_id()).map_err(|e| e.mcp_storage_detail(Detail::CollectionPath))? != self.held.path {
             return Err(Error::new("conflict"));
         }
         Ok(())
@@ -148,8 +163,8 @@ impl mcp::Authority for CollectionAuthority {
         // A retained BEGIN IMMEDIATE writer remains live between native HTTP
         // requests. Inspect before even opening a writable SQLite connection.
         // Reads deliberately skip this inspection and see only committed WAL.
-        if write && self.sessions.has_retained_writer(self.original.account_id())? {
-            return Err(mcp::busy());
+        if write && self.sessions.has_retained_writer(self.original.account_id()).map_err(|e| e.mcp_storage_detail(Detail::CollectionStorage))? {
+            return Err(mcp::busy().with_mcp_detail(Detail::NativeWriter));
         }
         #[cfg(any(test, feature = "test-hooks"))]
         if let Some(probe) = &self.probe { probe(TestBoundary::Admitted); }
@@ -166,12 +181,15 @@ impl mcp::Authority for CollectionAuthority {
 }
 
 fn check_oauth(root: &DataRoot, original: &oauth::Authority, write: bool) -> Result<()> {
-    let mut c = storage::inspect(root.database())?;
-    c.busy_timeout(Duration::ZERO)?;
-    let tx = c.transaction()?;
-    oauth::check_authority(&tx, original, write)?;
-    tx.commit()?;
-    Ok(())
+    let check = || {
+        let mut c = storage::inspect(root.database())?;
+        c.busy_timeout(Duration::ZERO)?;
+        let tx = c.transaction()?;
+        oauth::check_authority(&tx, original, write)?;
+        tx.commit()?;
+        Ok(())
+    };
+    check().map_err(|e: Error| e.mcp_storage_detail(Detail::AuthorityStorage))
 }
 
 fn secret() -> Result<[u8; 32]> { crypto::bearer(&crypto::random_token()?) }

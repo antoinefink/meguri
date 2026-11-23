@@ -42,8 +42,12 @@ public enum HomeDeckListPreview: PreviewStates {
     public static func besideDetail(deck: Int64?) -> some View {
         HomeDeckTree(nodes: nodes(overflow: false),
             today: HomeTodayRow(waiting: 31, selection: DeckListSelection(deck: deck)) {}, select: { _ in })
-            // N26.3: the column beside Today carries the app's name.
-            .navigationTitle(Text(verbatim: "Meguri"))
+            // N26.6: the column beside Today draws no title; "Decks" names it for accessibility.
+            .navigationTitle(Text("Decks", bundle: .module))
+            #if !os(macOS)
+            .toolbarTitleDisplayMode(.inline)
+            .toolbar(removing: .title)
+            #endif
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home.collection.screen")
     }
