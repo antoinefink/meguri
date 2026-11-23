@@ -283,13 +283,14 @@ extension TestHooks {
             page?.selectPeriod(period)
         }
 
-        /// Scrolls the page section by section for about three seconds, animated, while it reads
-        /// (R2078's window, `stats.scrollDuringRead`).
-        func scroll() {
+        /// Scrolls the page section by section for about three seconds, animated: while it reads
+        /// (R2078's window, `stats.scrollDuringRead`), or with `reading` false over the filled page
+        /// with nothing reading (`stats.scrollSettled`, `statsScrollSettled`).
+        func scroll(reading: Bool = true) {
             guard let page else { return }
             Task { @MainActor in
-                let token = Signposts.begin(IntervalNames.statsScrollDuringRead)
-                page.model.refresh()
+                let token = Signposts.begin(reading ? IntervalNames.statsScrollDuringRead : IntervalNames.statsScrollSettled)
+                if reading { page.model.refresh() }
                 let order = StatsSectionID.allCases + StatsSectionID.allCases.reversed()
                 for section in order {
                     page.go(to: section)

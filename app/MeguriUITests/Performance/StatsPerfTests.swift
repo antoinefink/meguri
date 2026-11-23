@@ -12,7 +12,8 @@ import XCTest
 /// one. The Mac only in this version: the iPad's and the iPhone's runs come with U304 and U307.
 final class StatsPerfTests: PerfTestCase {
     override nonisolated class var intervalNames: [String] {
-        ["stats.keptOpen", "stats.coldOpen", "stats.scopeChange", "stats.selection", "stats.scrollDuringRead"]
+        ["stats.keptOpen", "stats.coldOpen", "stats.scopeChange", "stats.selection", "stats.scrollDuringRead",
+         "stats.scrollSettled"]
     }
     override nonisolated class var fixture: String? { "150k" }
     override nonisolated class var iterations: Int { 3 }
@@ -25,6 +26,7 @@ final class StatsPerfTests: PerfTestCase {
         case let test where test.contains("testScopeChange"): ["stats.scopeChange"]
         case let test where test.contains("testSelection"): ["stats.selection"]
         case let test where test.contains("testScrollDuringRead"): ["stats.scrollDuringRead"]
+        case let test where test.contains("testScrollSettled"): ["stats.scrollSettled"]
         default: Self.intervalNames
         }
         return (try? Self.registered(names)) ?? []
@@ -100,7 +102,7 @@ final class StatsPerfTests: PerfTestCase {
     /// R2078: scrolling while a refresh reads keeps the hitch time ratio under 5 ms/s.
     func testScrollDuringRead() throws {
         #if os(macOS)
-        let (app, bundle) = try launchStats()
+        let (app, bundle) = try launchStats(animations: true)
         showAndWaitFilled(bundle: bundle, timeout: 300)
         let done = "\(bundle).testhooks.statsScrolled"
         try measure(app: app) { _ in
@@ -114,14 +116,37 @@ final class StatsPerfTests: PerfTestCase {
         #endif
     }
 
+    /// R2078's settled case (the owner's report of 2026-11-23: scrolling "isn't very smooth" once
+    /// the page is drawn): the filled page scrolled with nothing reading, the pointer resting over
+    /// it, so the boxes pass under it as they do under a trackpad scroll.
+    func testScrollSettled() throws {
+        #if os(macOS)
+        let (app, bundle) = try launchStats(animations: true)
+        showAndWaitFilled(bundle: bundle, timeout: 300)
+        let content = app.descendants(matching: .any)["stats.page.content"]
+        XCTAssert(content.waitForExistence(timeout: 30), "the page's scroll view is not on screen")
+        content.hover()
+        let done = "\(bundle).testhooks.statsScrolled"
+        try measure(app: app) { _ in
+            let finished = expectation(forNotification: Notification.Name(done), object: nil,
+                                       notificationCenter: DistributedNotificationCenter.default())
+            post("\(bundle).testhooks.statsScrollSettled")
+            wait(for: [finished], timeout: 60)
+        }
+        #else
+        throw XCTSkip("The Mac's page on the 150k fixture; StatsTouchPerfTests scrolls the iPad's")
+        #endif
+    }
+
     // MARK: Support
 
     #if os(macOS)
     /// The 150k collection with Statistics behind its flag, on Today.
-    private func launchStats(open: Bool = false) throws -> (XCUIApplication, String) {
+    /// The scroll tests launch with animations, so the page glides from one heading to the next.
+    private func launchStats(open: Bool = false, animations: Bool = false) throws -> (XCUIApplication, String) {
         let build = try BuildUnderTest.current()
         let fixture = try BrowserSearchPerfTests.fixture150k(build.repositoryRoot)
-        let app = launch(MeguriLaunch(fixture: fixture, animations: false, windowSize: "large",
+        let app = launch(MeguriLaunch(fixture: fixture, animations: animations ? nil : false, windowSize: "large",
                                       extra: ["-MeguriStatsRollout", open ? "open" : "on"]))
         XCTAssert(app.descendants(matching: .any)["shell.root.sidebar.stats"].waitForExistence(timeout: 180),
                   "the shell did not show its Statistics row")
@@ -143,6 +168,66 @@ final class StatsPerfTests: PerfTestCase {
                                  notificationCenter: DistributedNotificationCenter.default())
         post("\(bundle).testhooks.\(command)")
         wait(for: [filled], timeout: timeout)
+    }
+    #endif
+}
+
+/// The iPad's page scrolled (R2078 on touch, the owner's report of 2026-11-23): the sample
+/// collection of the `stats/page/typical` route (`StatsSampleService`, about three years), since
+/// the 150k fixture reaches the test VM only for the Mac. Each run is the hooks' section-by-section
+/// scroll; the settled one also swipes the page by touch, as a finger does.
+final class StatsTouchPerfTests: PerfTestCase {
+    override nonisolated class var intervalNames: [String] { ["stats.scrollDuringRead", "stats.scrollSettled"] }
+    override nonisolated class var iterations: Int { 3 }
+
+    override var intervals: [IntervalName] {
+        let names: [String] = switch invocation?.selector.description ?? name {
+        case let test where test.contains("testScrollDuringRead"): ["stats.scrollDuringRead"]
+        case let test where test.contains("testScrollSettled"): ["stats.scrollSettled"]
+        default: Self.intervalNames
+        }
+        return (try? Self.registered(names)) ?? []
+    }
+
+    func testScrollSettled() throws {
+        #if os(iOS)
+        let (app, bundle) = try launchSample()
+        try measure(app: app) { app in
+            scroll("statsScrollSettled", bundle: bundle)
+            let page = app.descendants(matching: .any)["stats.page.content"]
+            for _ in 0..<3 { page.swipeUp(velocity: .fast) }
+            for _ in 0..<3 { page.swipeDown(velocity: .fast) }
+        }
+        #else
+        throw XCTSkip("Touch: StatsPerfTests measures the Mac")
+        #endif
+    }
+
+    func testScrollDuringRead() throws {
+        #if os(iOS)
+        let (app, bundle) = try launchSample()
+        try measure(app: app) { _ in scroll("statsScroll", bundle: bundle) }
+        #else
+        throw XCTSkip("Touch: StatsPerfTests measures the Mac")
+        #endif
+    }
+
+    #if os(iOS)
+    private func launchSample() throws -> (XCUIApplication, String) {
+        let bundle = try BuildUnderTest.current().expectedBundleIdentifier
+        let filled = XCTDarwinNotificationExpectation(notificationName: "\(bundle).testhooks.statsFilled")
+        let app = launch(MeguriLaunch(route: "stats/page/typical"))
+        wait(for: [filled], timeout: 120)
+        XCTAssert(app.descendants(matching: .any)["stats.page.content"].waitForExistence(timeout: 30),
+                  "the page's scroll view is not on screen")
+        return (app, bundle)
+    }
+
+    /// Posts a scroll command and waits for the page to report it done.
+    private func scroll(_ command: String, bundle: String) {
+        let finished = XCTDarwinNotificationExpectation(notificationName: "\(bundle).testhooks.statsScrolled")
+        post("\(bundle).testhooks.\(command)")
+        wait(for: [finished], timeout: 60)
     }
     #endif
 }

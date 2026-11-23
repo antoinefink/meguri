@@ -1338,7 +1338,39 @@ budgets:
         limit: 5
         strict: true
         where: [simulator, device]
-        note: The hooks scroll the page section by section for about three seconds (stats.scrollDuringRead) while a refresh reads.
+        note: The hooks scroll the page section by section for about three seconds (stats.scrollDuringRead) while a refresh reads. Measured on the Mac in the test VM (a simulator placement).
+      - id: scroll-settled
+        suite: StatsPerfTests
+        test: "StatsPerfTests/testScrollSettled*"
+        name: xctest.hitch
+        metric: hitch-time-ratio
+        unit: ms/s
+        limit: 5
+        strict: true
+        where: [simulator, device]
+        note: The owner's report of 2026-11-23, scrolling once the page is drawn. The same scroll over the filled page with nothing reading (stats.scrollSettled), the pointer resting over the page so the boxes pass under it. Measured on the Mac in the test VM.
+      - id: touch-scroll
+        suite: StatsTouchPerfTests
+        test: "StatsTouchPerfTests/testScrollDuringRead*"
+        name: xctest.hitch
+        metric: hitch-time-ratio
+        unit: ms/s
+        limit: 5
+        strict: true
+        fixture: null
+        where: [simulator, device]
+        note: The iPad's page on the stats/page/typical route's sample collection (the 150k fixture reaches the test VM only for the Mac), scrolled by the hooks while it reads. Measured on the iPad simulator in the test VM.
+      - id: touch-scroll-settled
+        suite: StatsTouchPerfTests
+        test: "StatsTouchPerfTests/testScrollSettled*"
+        name: xctest.hitch
+        metric: hitch-time-ratio
+        unit: ms/s
+        limit: 5
+        strict: true
+        fixture: null
+        where: [simulator, device]
+        note: The same page filled, scrolled by the hooks and by six fast swipes with nothing reading. Measured on the iPad simulator in the test VM.
   - id: R2079
     title: Selecting a value, changing a box's switch and changing the period within the last year take one frame and make no core call
     group: stats
