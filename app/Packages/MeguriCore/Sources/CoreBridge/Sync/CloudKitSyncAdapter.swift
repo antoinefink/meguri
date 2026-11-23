@@ -1958,8 +1958,10 @@ public actor CloudKitSyncAdapter {
                     _ = try await core.finishFetch(sdk: origin, id: id, successful: false)
                     try await reportOperation(execution, zones: [.root, .collection], kind: .fetch, started: false, error: error)
                 }
-                // Cleanup above retains its own errors. Only this drained
-                // preparation refusal can end without a fetch result or retry.
+                // Cleanup above retains its own errors. Here only this drained
+                // preparation refusal ends without a fetch result or retry; the
+                // policy action's catch also lets a fetch that ConfigureAutomatic
+                // retired inside the SDK end that way (P4, P15).
                 if reservedFetch, pinnedOrigin == origin,
                    invocationFailure?.original === instance.stopWitness,
                    instance.retirementFailure == nil, let execution,
