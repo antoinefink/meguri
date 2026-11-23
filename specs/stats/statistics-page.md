@@ -4,7 +4,7 @@ Spec: stats/statistics-page
 Requirements: R1290, R1291, R1294, R1295, R1349, R1353, R1356, R1363, R1365, R1368, R1397, R1398, R1403, R1405 to R1409, R1417 to R1420, R1439 to R1445, R1837, R1838, R2067, R2073, R2076 to R2079; supersedes in part R1350, R1352, R1354, R1355, R1357 to R1359, R1361, R1362, R1364, R1366, R1367, R1369 to R1372, R1375 to R1377, R1379 to R1383, R1386 to R1389, R1391, R1392, R1394 to R1396, R1399 to R1401, R1410, R1412, R1414 to R1416, R1421 (S18 and the plan's §5 list them)
 Anki: none (Meguri design, decided by Antoine on 2026-11-22, round 11: 1A 2A 3A 4A 5A 6A 7A 8A 9A, with All as the first period and Forgotten in orange; the loading rule of S10 decided the same day). The statistics it draws keep their own specs and Anki rules (`stats/graphs-revlog`, `stats/graphs-cards`, `stats/history-reads`)
 Scenarios: none; tests named in S20
-Status: Approved 2026-11-22 (R1357). Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22).
+Status: Approved 2026-11-22 (R1357). Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). The lines marked "changed 2026-11-23" or "added 2026-11-23", in any letter case (PR #151), were decided by Claude (coordinator) under the same permission, after independent review (`docs/design/decisions.md`, row `stats.overview` of 2026-11-23, "Statistics specs follow the built core").
 
 The behaviour of the Statistics page as round 11 decided it: one dense page of seven sections in a fixed order under a strip of today's figures, one deck filter and one period for the whole page, every chart in one system, each chart's own page, Show in Browse, the states, tiered loading with kept results, live refresh, and the speed targets. Layout and presentation are `docs/design/native-interface-contract.md` N25; the screen contract is `stats.overview` in `docs/design/screen-inventory.yaml`. The data are `stats/graphs-common` G8 requests with the parts of `stats/history-reads` H5. Where `stats/graph-presentation` or `stats/graphs-common` differ, this file wins for the Statistics page, and those sections carry a "Changed 2026-11-22 (round 11)" note (`stats/graph-presentation` P24).
 
@@ -40,7 +40,7 @@ On this page a review is remembered when `stats/graphs-revlog` V4.1 counts it an
 - The first time on a device, the deck is All Decks and the period is **All** (decided by Antoine, 2026-11-22: "All not 1y is the default").
 - Opening from a deck (S13) replaces the deck and keeps the period.
 - Each box's own switch is kept the same way, per device: Reviews Over Time's By Type or By Answer and Count or Time, Retention's All, Young or Mature. A stored value that is not an option reads as the first option.
-- A kept deck that no longer exists opens on S12.6's state.
+- A kept deck that no longer exists opens on S12.7's state (changed 2026-11-23: this named S12.6, the filtered deck's state).
 
 ### S3.4 Anki's synced display keys
 
@@ -141,7 +141,7 @@ Each box: its header (the title and a chevron, a button to its page, S9), one la
 
 ### S7.4 Reviews Over Time (lead)
 
-- Data: `reviews` (V2) with `count_by_answer` and `time_by_answer` (H6), summed per bar.
+- Data: `reviews` (V2) for By Type and `by_answer` (H6: `count_by_answer`, `time_by_answer`) for By Answer, summed per bar (changed 2026-11-23: By Answer is a part of its own, not members of `reviews`).
 - Switches: By Type or By Answer; Count or Time (on the iPhone, Count or Time is in the box's menu).
 - By Type: stacked bars from the baseline Mature, Young, Relearning, Learning, then Filtered only when the period has filtered rows (`stats/graphs-revlog` V1's kinds). By Answer: Again, Hard, Good, Easy from the baseline, in that fixed order.
 - Figure: reviews in the period (or the time); sentence: "<n> days in a row" when the current streak (S7.5) is above 1, else "<d> days studied".
@@ -262,7 +262,7 @@ No chart has a second y axis. A running total is in the callout (Reviews Due's "
 
 ### S8.3 Selection
 
-- Mac: the pointer over a chart shows a vertical rule and a callout; a click pins it; Esc or a click outside unpins.
+- Mac: the pointer over a chart shows a vertical rule and a callout; a click pins it; Esc, or a click outside, unpins. Changed 2026-11-23 (as built in PR #148): "a click outside" is a click on another chart, which pins there and unpins every other box, or a click on the page outside every chart, which unpins all. A click outside every chart moves no keyboard focus, so it unpins by this rule, not by taking the focus; a click on a plot pins and focuses that plot. As built, a pinned plot that loses the keyboard focus to another control (Tab) also unpins.
 - Touch: touch and hold, then drag along the chart; a plain vertical swipe still scrolls the page.
 - The callout names the period (the date, "Week of <date>", or the month and year), lists every series with its swatch, name and value, and ends with Show in Browse when the item can be listed (S8.4). Changing a switch or the period clears the selection.
 - Keyboard: S14.
@@ -319,6 +319,8 @@ The strip's Retention Today and Streak come with tier 2 (`stats/history-reads` H
 
 On a first open, a deck or period never viewed, or after the collection was replaced: every box is drawn at its final size with its title and legend, and a box whose data is not ready shows the system's small progress indicator inside its plot area, determinate when the core reports a fraction for its part (H15: the log pass, the knowledge replay), indeterminate otherwise. Boxes fill in as each tier completes. No full-page spinner, no skeleton or shimmer, no overlay.
 
+- Activity's grid area has, while `activity_days` has not returned or after it failed, the grid's own size for the box's width from the header's `oldest_day` (H9) to today (S7.5), so the box does not grow when the grid arrives; with `oldest_day` none or unavailable, one line (changed 2026-11-23, as built in PR #149; then with Option E, PR #152).
+
 - With All and nothing kept, the page makes two refreshes in a row: first one with `last12Months`, whose boxes it draws in All's monthly bars, with the older months empty and the review-log boxes' indicators still showing (the axis already spans from the first month, H9); then one with `allHistory`, a new refresh with its own context (`stats/graphs-common` G8.3), whose parts replace every box in place as they arrive. Each refresh is one request.
 
 ### S10.4 The status in the subtitle
@@ -344,7 +346,7 @@ Nothing is computed before the page asks: the history store builds on the first 
 
 ### S12.1 No collection open
 
-While no collection is open (the welcome screen, a collection still opening, a failed open): the Statistics section shows what the shell shows for that state in every section, with no boxes; its toolbar controls are disabled. With no collection on the device, the system's empty view titled "No Collection" with "Statistics appear once a collection is open." Every screen unit checks this state and first run (S20).
+While no collection is open (the welcome screen, a collection still opening, a failed open): the Statistics section shows what the shell shows for that state in every section, with no boxes; its toolbar controls are disabled. Changed 2026-11-23 (as built in PR #147): while a collection is still opening the page shows nothing; only when none is open does it show the system's empty view titled "No Collection" with "Statistics appear once a collection is open." Every screen unit checks this state and first run (S20).
 
 ### S12.2 An empty collection
 
@@ -403,7 +405,8 @@ A deck deleted while it is the filter (`unknown_deck`, G8.2), or kept from an ea
 - Series are told apart by legend, order and name as well as colour, and follow Increase Contrast.
 - Text follows Dynamic Type to the largest accessibility size; at the accessibility sizes legends and figures stack under the plot and the plot keeps its height.
 - The strip's figures, the tables' rows and the Activity grid's days are elements (S6, S7.5: a container per month of the grid, as `stats/heatmap-presentation` M15 does).
-- Identifiers: `stats.<element>` (R1445): `stats.deck`, `stats.period`, `stats.strip.<figure>`, `stats.section.<section>`, `stats.box.<box>`, `stats.box.<box>.header`, `stats.chartPage.<box>`, `stats.goToSection`.
+- Activity is a grid, not a chart: it has no Audio Graph and no element per bar. Each drawn day is a VoiceOver element (its date and its count, "Today, <n> reviews" for today), as `stats/heatmap-presentation` M15.6 says of the heatmap's year grids (changed 2026-11-23, as built in PR #149).
+- Identifiers: `stats.<element>` (R1445); the page's own follow R1964's area.screen.element rule: `stats.toolbar.deck` (its menu items `stats.toolbar.deck.all` and `stats.toolbar.deck.<deck id>`), `stats.toolbar.period` (its segments `.1m`, `.3m`, `.6m`, `.1y`, `.all`), `stats.boxSwitch.<switch>` (`reviewsMode`, `reviewsMeasure`, `retentionKind`), `stats.page.content` (the page's scroll view; the states `stats.page.opening`, `.noCollection`, `.noCards`, `.deckMissing`, `.unavailable`), `stats.page.strip`, `stats.page.filteredDeck`, `stats.page.showAllDecks`, `stats.strip.<figure>`, `stats.section.<section>` (and `.heading`), `stats.box.<box>` (and `.header`, `.plot`, `.showInBrowse`), `stats.box.activity.figures` and `stats.activity.yearTotal.<year>` (`stats.activity.block.<year>` went with the year blocks, 2026-11-23); `stats.chartPage.<box>` with the chart page's unit (S9, not built yet); the View menu's `stats.goToSection`, as built (a menu command, outside the page). Changed 2026-11-23 (as built in PR #147): this listed the two-part `stats.deck` and `stats.period`, which the hierarchy check refuses.
 
 ## S16. Strings
 
@@ -418,9 +421,10 @@ Meguri's own, in the String Catalog; `<…>` marks a value. Anki's strings that 
 | Sections | S5's titles and questions |
 | Box titles | `Knowledge Over Time`, `Retention`, `Forgotten`, `Reviews Over Time`, `Activity`, `Cards Over Time`, `Card Counts`, `Added and Started`, `Reviews Due`, `Answers`, `Time of Day`, `Retrievability`, `Stability`, `Difficulty`, `By Deck` |
 | Series | `Known`, `Studied`, `Desired retention`, `Average desired retention`, `Remembered`, `Forgotten`, `New`, `Learning`, `Relearning`, `Young`, `Mature`, `Suspended`, `Buried`, `Filtered`, `Again`, `Hard`, `Good`, `Easy`, `Added`, `Started`, `Overdue`, `Total by then`, `Reviews` |
-| Markers | `Estimated`, `Now` |
+| Markers | `Estimated`, `Now`; the Estimated marker's help (Mac tooltip, VoiceOver hint): `An estimate: each day is worked out again from your reviews up to that day, with today’s memory parameters.` (added 2026-11-23, PR #148) |
 | Figures | S7's figure labels and sentences |
 | Empty and states | `No reviews yet`, `This fills in as you study.`, `No reviews in the last month`, `… the last 3 months`, `… the last 6 months`, `… the last year`, `No reviews in <deck> in <span>`, `No cards due`, `No cards with a memory state`, `No cards with a memory estimate`, `Later`, `No Collection`, `Statistics appear once a collection is open.`, `No Cards`, `Add notes or import a collection to see statistics.`, `This deck no longer exists.`, `Show All Decks`, `This deck has no subdecks`, `A filtered deck shows the cards it holds now. Their reviews also count in their home decks.`, `Statistics Unavailable`, `A review or card record can't be read. Check Database can repair it.`, `Couldn't load this chart.`, `<n> suspended cards are not shown.`, `<n> suspended cards are not included.`, `<n> cards could not be estimated.`, `An open point has too few reviews to trust` |
+| Chart elements and callouts (added 2026-11-23, PRs #148, #149) | `Estimated knowledge` (the first words of Knowledge Over Time's element), `Too few reviews to trust` (an open Retention point's callout and element), `Today, <n> reviews` (Activity's element for today; `<n> reviews` is the day's count) |
 | Actions | `Show in Browse`, `Cards Reviewed on <date>`, `Cards Forgotten on <date>`, `About This Chart`, `Copy Image`, `Copy Values` |
 
 `Show in Browse` replaces P19's `Show in Browser`, as the section is named Browse.
