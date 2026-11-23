@@ -1,6 +1,9 @@
 import Foundation
 import Instrumentation
 import XCTest
+#if os(iOS)
+import notify
+#endif
 
 /// The Statistics page on the 150k fixture (plan U296; `stats/statistics-page` S19, R2076 to
 /// R2079, R1838's scope case): the app opens the generated 150k collection (`tools/mg fixtures
@@ -104,13 +107,9 @@ final class StatsPerfTests: PerfTestCase {
         #if os(macOS)
         let (app, bundle) = try launchStats(animations: true)
         showAndWaitFilled(bundle: bundle, timeout: 300)
-        let done = "\(bundle).testhooks.statsScrolled"
-        try measure(app: app) { _ in
-            let finished = expectation(forNotification: Notification.Name(done), object: nil,
-                                       notificationCenter: DistributedNotificationCenter.default())
-            post("\(bundle).testhooks.statsScroll")
-            wait(for: [finished], timeout: 60)
-        }
+        var pacing: [StatsFramePacingReading] = []
+        try measure(app: app) { _ in pacing.append(scroll("statsScroll", bundle: bundle)) }
+        StatsFramePacingReading.check(pacing)
         #else
         throw XCTSkip("The Mac's page in this version (U304 and U307 run the touch layouts)")
         #endif
@@ -126,13 +125,9 @@ final class StatsPerfTests: PerfTestCase {
         let content = app.descendants(matching: .any)["stats.page.content"]
         XCTAssert(content.waitForExistence(timeout: 30), "the page's scroll view is not on screen")
         content.hover()
-        let done = "\(bundle).testhooks.statsScrolled"
-        try measure(app: app) { _ in
-            let finished = expectation(forNotification: Notification.Name(done), object: nil,
-                                       notificationCenter: DistributedNotificationCenter.default())
-            post("\(bundle).testhooks.statsScrollSettled")
-            wait(for: [finished], timeout: 60)
-        }
+        var pacing: [StatsFramePacingReading] = []
+        try measure(app: app) { _ in pacing.append(scroll("statsScrollSettled", bundle: bundle)) }
+        StatsFramePacingReading.check(pacing)
         #else
         throw XCTSkip("The Mac's page on the 150k fixture; StatsTouchPerfTests scrolls the iPad's")
         #endif
@@ -151,6 +146,19 @@ final class StatsPerfTests: PerfTestCase {
         XCTAssert(app.descendants(matching: .any)["shell.root.sidebar.stats"].waitForExistence(timeout: 180),
                   "the shell did not show its Statistics row")
         return (app, build.expectedBundleIdentifier)
+    }
+
+    /// Posts a scroll command and returns the frame pacing the app reports with `statsScrolled`.
+    private func scroll(_ command: String, bundle: String) -> StatsFramePacingReading {
+        let reading = StatsFramePacingText()
+        let finished = expectation(forNotification: Notification.Name("\(bundle).testhooks.statsScrolled"), object: nil,
+                                   notificationCenter: DistributedNotificationCenter.default()) { notification in
+            reading.text = notification.object as? String ?? ""
+            return true
+        }
+        post("\(bundle).testhooks.\(command)")
+        wait(for: [finished], timeout: 60)
+        return StatsFramePacingReading(text: reading.text)
     }
 
     private func show(today: Bool, bundle: String) {
@@ -192,12 +200,14 @@ final class StatsTouchPerfTests: PerfTestCase {
     func testScrollSettled() throws {
         #if os(iOS)
         let (app, bundle) = try launchSample()
+        var pacing: [StatsFramePacingReading] = []
         try measure(app: app) { app in
-            scroll("statsScrollSettled", bundle: bundle)
+            pacing.append(scroll("statsScrollSettled", bundle: bundle))
             let page = app.descendants(matching: .any)["stats.page.content"]
             for _ in 0..<3 { page.swipeUp(velocity: .fast) }
             for _ in 0..<3 { page.swipeDown(velocity: .fast) }
         }
+        StatsFramePacingReading.check(pacing)
         #else
         throw XCTSkip("Touch: StatsPerfTests measures the Mac")
         #endif
@@ -206,7 +216,9 @@ final class StatsTouchPerfTests: PerfTestCase {
     func testScrollDuringRead() throws {
         #if os(iOS)
         let (app, bundle) = try launchSample()
-        try measure(app: app) { _ in scroll("statsScroll", bundle: bundle) }
+        var pacing: [StatsFramePacingReading] = []
+        try measure(app: app) { _ in pacing.append(scroll("statsScroll", bundle: bundle)) }
+        StatsFramePacingReading.check(pacing)
         #else
         throw XCTSkip("Touch: StatsPerfTests measures the Mac")
         #endif
@@ -223,11 +235,50 @@ final class StatsTouchPerfTests: PerfTestCase {
         return (app, bundle)
     }
 
-    /// Posts a scroll command and waits for the page to report it done.
-    private func scroll(_ command: String, bundle: String) {
-        let finished = XCTDarwinNotificationExpectation(notificationName: "\(bundle).testhooks.statsScrolled")
+    /// Posts a scroll command, waits for the page to report it done and reads the hitch time
+    /// ratio it left as the notification's state (thousandths of a ms/s).
+    private func scroll(_ command: String, bundle: String) -> StatsFramePacingReading {
+        let name = "\(bundle).testhooks.statsScrolled"
+        let finished = XCTDarwinNotificationExpectation(notificationName: name)
         post("\(bundle).testhooks.\(command)")
         wait(for: [finished], timeout: 60)
+        var token: Int32 = 0
+        var state: UInt64 = 0
+        if notify_register_check(name, &token) == NOTIFY_STATUS_OK {
+            notify_get_state(token, &state)
+            notify_cancel(token)
+        }
+        return StatsFramePacingReading(text: "ratio=\(Double(state) / 1_000)")
     }
     #endif
+}
+
+/// The frame pacing the app measured over one hooks' scroll (`TestHooks.StatsFramePacing`):
+/// R2078's hitch time ratio, measured on the main thread's display link in the test VM, where
+/// XCTest's own hitch metric reports nothing. Each test records its readings as an activity and
+/// fails above R2078's 5 ms/s.
+struct StatsFramePacingReading {
+    let text: String
+
+    /// The late time per second of the scroll, in ms/s; nil when the app sent none.
+    var ratio: Double? {
+        text.split(separator: ";").first { $0.hasPrefix("ratio=") }.flatMap { Double($0.dropFirst("ratio=".count)) }
+    }
+
+    /// R2078: below 5 ms/s on every measured run (VM-measured).
+    @MainActor static func check(_ readings: [StatsFramePacingReading]) {
+        XCTContext.runActivity(named: "meguri.stats.framePacing: " + readings.map(\.text).joined(separator: " | ")) { _ in }
+        for reading in readings {
+            guard let ratio = reading.ratio else {
+                XCTFail("the app reported no frame pacing for a scroll")
+                continue
+            }
+            XCTAssertLessThan(ratio, 5, "R2078: a hitch time ratio of \(ratio) ms/s while scrolling (\(reading.text))")
+        }
+    }
+}
+
+/// The text a notification handler hands back.
+private final class StatsFramePacingText: @unchecked Sendable {
+    var text = ""
 }

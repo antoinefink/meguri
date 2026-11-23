@@ -4,10 +4,13 @@ import CoreBridge
 import DesignSystem
 import Home
 import Instrumentation
+import QuartzCore
 import Stats
 import SwiftUI
 #if os(iOS)
 import notify
+#else
+import AppKit
 #endif
 
 extension TestHooks {
@@ -237,6 +240,70 @@ extension TestHooks {
         }
     }
 
+    /// The main thread's frame pacing while the hooks scroll the page (R2078): the display link's
+    /// callbacks, each late by however much its interval exceeds the display's frame. XCTest's
+    /// hitch metric reports nothing in the test VM (0 on its Mac, no value on its simulators), so
+    /// the scroll tests read this instead: `ratio` is the late time per second of the window, in
+    /// ms/s, as Apple's hitch time ratio counts it.
+    @MainActor final class StatsFramePacing: NSObject {
+        struct Result: CustomStringConvertible {
+            var ratio: Double
+            var frames: Int
+            var late: Int
+            var worst: Double
+            var seconds: Double
+            var description: String {
+                String(format: "ratio=%.2f;frames=%d;late=%d;worstMs=%.1f;seconds=%.2f", ratio, frames, late, worst, seconds)
+            }
+        }
+
+        private var link: AnyObject?
+        private var previous: CFTimeInterval?
+        private var started: CFTimeInterval = 0
+        private var lateTime: CFTimeInterval = 0
+        private var frames = 0
+        private var late = 0
+        private var worst: CFTimeInterval = 0
+
+        func start() {
+            started = CACurrentMediaTime()
+            #if os(iOS)
+            let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+            link.add(to: .main, forMode: .common)
+            self.link = link
+            #else
+            guard let view = NSApplication.shared.windows.first(where: { $0.isVisible })?.contentView else { return }
+            let link = view.displayLink(target: self, selector: #selector(tick(_:)))
+            link.add(to: .main, forMode: .common)
+            self.link = link
+            #endif
+        }
+
+        @objc private func tick(_ link: CADisplayLink) {
+            let now = link.timestamp
+            let frame = link.targetTimestamp - link.timestamp
+            if let previous, frame > 0 {
+                let interval = now - previous
+                let over = interval - frame
+                // Half a frame of jitter is not a late frame.
+                if over > frame / 2 {
+                    lateTime += over
+                    late += 1
+                }
+                worst = max(worst, interval)
+            }
+            previous = now
+            frames += 1
+        }
+
+        func stop() -> Result {
+            (link as? CADisplayLink)?.invalidate()
+            link = nil
+            let seconds = max(CACurrentMediaTime() - started, 0.001)
+            return Result(ratio: lateTime * 1_000 / seconds, frames: frames, late: late, worst: worst * 1_000, seconds: seconds)
+        }
+    }
+
     /// What the hooks' commands do to the Statistics page (`ShellCommands`: `statsReload`,
     /// `statsPeriodAll`, `statsPeriodYear`, `statsPeriodHalfYear`, `statsScroll`), for the
     /// performance tests (`StatsPerfTests`) that drive it with no synthesized input; it answers
@@ -247,6 +314,10 @@ extension TestHooks {
         private(set) weak var page: StatsPage?
         /// The page is a route's, over the sample collection.
         private var sample = false
+        #if os(iOS)
+        /// Holds `statsScrolled`'s state (the last scroll's hitch time ratio) for the test to read.
+        private var stateToken: Int32?
+        #endif
 
         /// The page of a route, or the app's (from `MeguriApp`, behind the flag).
         func attach(_ page: StatsPage?, sample: Bool) {
@@ -289,7 +360,14 @@ extension TestHooks {
         func scroll(reading: Bool = true) {
             guard let page else { return }
             Task { @MainActor in
+                // The display's own pacing with nothing moving, as a baseline for the run's machine.
+                let idle = StatsFramePacing()
+                idle.start()
+                try? await Task.sleep(for: .seconds(1))
+                let baseline = idle.stop()
                 let token = Signposts.begin(reading ? IntervalNames.statsScrollDuringRead : IntervalNames.statsScrollSettled)
+                let frames = StatsFramePacing()
+                frames.start()
                 if reading { page.model.refresh() }
                 let order = StatsSectionID.allCases + StatsSectionID.allCases.reversed()
                 for section in order {
@@ -297,7 +375,19 @@ extension TestHooks {
                     try? await Task.sleep(for: .milliseconds(220))
                 }
                 Signposts.end(token)
-                Self.answer("statsScrolled")
+                let pacing = frames.stop()
+                #if os(iOS)
+                // Darwin notifications carry no object: the ratio in thousandths of a ms/s is the
+                // notification's state, read by the test. notifyd keeps a name's state only while a
+                // client holds it, so the token stays registered.
+                let name = "\(Bundle.main.bundleIdentifier ?? "").testhooks.statsScrolled"
+                if stateToken == nil {
+                    var token: Int32 = 0
+                    if notify_register_check(name, &token) == NOTIFY_STATUS_OK { stateToken = token }
+                }
+                if let stateToken { notify_set_state(stateToken, UInt64(max(0, pacing.ratio * 1_000).rounded())) }
+                #endif
+                Self.answer("statsScrolled", object: "\(pacing.description);idleRatio=\(String(format: "%.2f", baseline.ratio))")
             }
         }
 
