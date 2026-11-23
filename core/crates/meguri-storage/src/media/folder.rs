@@ -939,6 +939,34 @@ impl MediaStore {
         }
         Err(MediaError::NameTaken)
     }
+    /// Whether the folder holds a present case variant of `name`, or an
+    /// uncommitted op has staged one (`media/media-files` M2).
+    pub fn case_variant_present(&self, name: &str) -> Result<bool> {
+        self.check_changes()?;
+        let mut db = self.db()?;
+        if !self.candidates(&mut db, name)?.is_empty() {
+            return Ok(true);
+        }
+        // A file registration does not track (M7.1) is still in the way.
+        Ok(self.media_dir().join(name).symlink_metadata().is_ok())
+    }
+    /// An exact-name write (M6 step 4) that never replaces: `None` when a
+    /// case variant of `name` is present, whatever its content. A deck
+    /// package's static entry (`package/apkg-import` I12.3).
+    pub fn write_static_if_absent(&self, name: &str, bytes: &[u8]) -> Result<Option<String>> {
+        if !normalized(name) {
+            return Err(MediaError::InvalidName);
+        }
+        if ignored(name) {
+            return Err(MediaError::IgnoredName);
+        }
+        if self.case_variant_present(name)? {
+            return Ok(None);
+        }
+        let mut db = self.db()?;
+        self.install_locked(&mut db, name, bytes, &[])?;
+        Ok(Some(name.into()))
+    }
     pub fn ensure_static_media(&self, name: &str, bytes: &[u8]) -> Result<String> {
         if !normalized(name) {
             return Err(MediaError::InvalidName);

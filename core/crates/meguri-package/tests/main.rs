@@ -8,6 +8,8 @@
 // common;`), as it did in a binary of its own.
 #![allow(clippy::duplicate_mod)]
 
+#[path = "apkg_import.rs"]
+pub mod apkg_import;
 #[path = "backup_retention.rs"]
 pub mod backup_retention;
 #[path = "backup_service.rs"]

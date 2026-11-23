@@ -492,6 +492,11 @@ fn run_op<T>(
         on_commit: Vec::new(),
         before_commit: Vec::new(),
         random: Arc::clone(&env.reopen.random),
+        safety_backup: spec
+            .safety_backup
+            .as_ref()
+            .and_then(|backup| backup.receipt.as_ref())
+            .map(|receipt| receipt.name.clone()),
     };
     // O3 and C12.3 share one failure boundary. The scope stays uncommitted
     // throughout validation and the file worker's durable receipt response.

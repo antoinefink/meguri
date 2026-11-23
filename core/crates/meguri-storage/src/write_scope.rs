@@ -684,11 +684,17 @@ impl<'c> WriteScope<'c> {
         first: &[&str],
     ) -> Result<Written, StorageError> {
         let stored = rows::select_image(self.conn, Table::Config, &RowKey::text(key))?;
-        let (usn, mtime) = match &stored {
+        let (usn, mut mtime) = match &stored {
             Some(row) if same_value(&row[3], value) => return Ok(Written::Unchanged),
             Some(row) => (row[1].clone(), row[2].clone()),
             None => (Cell::Integer(0), Cell::Integer(0)),
         };
+        if self.mode == StampMode::KeepMtime {
+            // A value set by key arrives with no time of its own: in a
+            // scope that keeps arriving times it is a local change made now
+            // (`package/apkg-import` I5, `storage/config-table` C4).
+            mtime = Cell::Integer(self.now().whole_secs().0);
+        }
         let cells = vec![
             Cell::text(key),
             usn,

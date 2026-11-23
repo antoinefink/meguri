@@ -172,7 +172,7 @@ pub(crate) fn bounded_read(
         Ok(())
     })
 }
-fn bounded_read_fallible(
+pub(crate) fn bounded_read_fallible(
     mut input: impl Read,
     limit: u64,
     total: &mut u64,

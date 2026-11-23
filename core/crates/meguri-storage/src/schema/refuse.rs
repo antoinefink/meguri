@@ -19,11 +19,18 @@ pub(crate) fn version(version: i64) -> Option<OpenError> {
 
 /// C1, then C2.2.
 pub(crate) fn refuse(probed: &Probed) -> Result<(), OpenError> {
+    refuse_as(probed, false)
+}
+
+/// [`refuse`], where `package_v1` lets the v1 marker pass: the staged
+/// collection of a deck package (`package/apkg-import` I3 step 3).
+pub(crate) fn refuse_as(probed: &Probed, package_v1: bool) -> Result<(), OpenError> {
     if let Some(error) = version(probed.version) {
         return Err(error);
     }
     match probed.scheduler {
         Scheduler::V2 => Ok(()),
+        Scheduler::V1 if package_v1 => Ok(()),
         Scheduler::V1 | Scheduler::NotRead => Err(OpenError::V1Scheduler),
         // The upgrade could not read it either (step 14 converts it).
         Scheduler::ConfNotAnObject => Err(OpenError::UpgradeFailed {
