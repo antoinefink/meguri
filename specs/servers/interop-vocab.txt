@@ -574,3 +574,6 @@ unbury_unsuspend
 permission
 sentence
 success
+
+download_collection
+download_url

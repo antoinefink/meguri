@@ -94,6 +94,12 @@ impl transport::Backend<oauth::Authority> for McpService {
         Box::pin(async move {
             let write = call.access() == Access::Write;
             Ok(match call {
+                ToolCall::DownloadCollection => {
+                    let (download_url, expires) = self.download_collection(authority).await.map_err(|e|self.dispatch_failure(e,write))?;
+                    let expires_at = time::OffsetDateTime::from_unix_timestamp(expires).map_err(|_|DispatchFailure::Tool(ToolFailure::Internal))?
+                        .format(&time::format_description::well_known::Rfc3339).map_err(|_|DispatchFailure::Tool(ToolFailure::Internal))?;
+                    ToolOutput::Download { download_url, expires_at }
+                }
                 ToolCall::PrepareMediaUpload => {
                     let (upload_id, upload_url, expires) = self.prepare_media_upload(authority).await.map_err(|e|self.dispatch_failure(e,write))?;
                     let expires_at = time::OffsetDateTime::from_unix_timestamp(expires).map_err(|_|DispatchFailure::Tool(ToolFailure::Internal))?

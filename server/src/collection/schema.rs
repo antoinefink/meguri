@@ -37,7 +37,7 @@ pub(crate) fn open_upload(path: &Path) -> Result<Connection> {
 
 /// Page-local request open: no integrity scan, copy, hash, or migration. The
 /// publication adapter has already admitted and pinned a verified schema-18 file.
-pub(super) fn open_mcp(path: &Path, writable: bool) -> Result<Connection> {
+pub(crate) fn open_mcp(path: &Path, writable: bool) -> Result<Connection> {
     use crate::error::McpDiagnosticDetail as Detail;
     crate::storage::private_collection_file(path).map_err(|e| e.mcp_storage_detail(Detail::CollectionStorage))?;
     let flags = OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW
@@ -180,7 +180,13 @@ pub fn validate(c: &Connection) -> Result<()> {
 /// SQLite backup includes committed WAL pages without regenerating records or
 /// running VACUUM's schema programs. Destination was exclusively created by us.
 pub fn snapshot(source: &Connection, destination: &Path) -> Result<()> {
-    let mut target = open(destination, true)?;
+    crate::storage::private_collection_file(destination)?;
+    let flags = OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW | OpenFlags::SQLITE_OPEN_READ_WRITE;
+    let target = configure(Connection::open_with_flags(destination, flags)?, false)?;
+    // WAL fixes the empty destination's page size; match the source first.
+    let page_size: i64 = source.pragma_query_value(None, "page_size", |r| r.get(0))?;
+    target.pragma_update(None, "page_size", page_size)?;
+    let mut target = configure(target, true)?;
     let backup = rusqlite::backup::Backup::new(source, &mut target)?;
     backup.run_to_completion(128, Duration::from_millis(5), None)?;
     drop(backup);

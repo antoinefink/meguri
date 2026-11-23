@@ -527,7 +527,7 @@ async fn mounted_mcp_uses_real_oauth_collection_and_preserves_native_and_browser
     assert_eq!(list.headers()["x-frame-options"],"DENY");
     assert_eq!(list.headers()["x-content-type-options"],"nosniff");
     assert_eq!(list.headers()["cache-control"],"no-store");
-    assert_eq!(list.json::<Value>().await.unwrap()["result"]["tools"].as_array().unwrap().len(),5);
+    assert_eq!(list.json::<Value>().await.unwrap()["result"]["tools"].as_array().unwrap().len(),6);
     for (tool,args) in [("list_decks_and_note_types",json!({})),("search_notes",json!({"note_id":"1"}))] {
         let r=mcp_request(&h,&c,access,"tools/call",json!({"name":tool,"arguments":args})).send().await.unwrap();
         assert_eq!(r.status(),200);
@@ -800,4 +800,145 @@ async fn expanded_staged_types_preserve_exact_references_bytes_and_usns_through_
     assert_eq!(attachment_media_json(&h,&key,"mediaChanges",json!({"lastUsn":4})).await,json!([]));
     assert_eq!(attachment_media_json(&h,&key,"mediaSanity",json!({"local":4})).await,"OK");
     drop(metadata); h.stop().await;
+}
+
+async fn collection_ticket(h: &Harness, c: &Client, access: &str) -> String {
+    let response=mcp_request(h,c,access,"tools/call",json!({"name":"download_collection","arguments":{}})).send().await.unwrap();
+    assert_eq!(response.status(),200);
+    let body:Value=response.json().await.unwrap();
+    assert_eq!(body["result"]["isError"],false,"{body}");
+    let output=&body["result"]["structuredContent"];
+    let url=output["download_url"].as_str().unwrap();
+    assert!(body["result"]["content"][0]["text"].as_str().unwrap().contains(url));
+    assert!(output["expires_at"].as_str().unwrap().ends_with('Z'));
+    url.strip_prefix(&format!("{ORIGIN}/mcp/download#download=")).unwrap().into()
+}
+async fn redeem_collection(h: &Harness, c: &Client, cookie: &str, ticket: &str) -> reqwest::Response {
+    c.post(format!("{}/api/mcp/collection-download",h.base)).header("origin",ORIGIN).header("cookie",cookie)
+        .header("content-type","application/x-www-form-urlencoded").body(format!("ticket={ticket}"))
+        .timeout(std::time::Duration::from_secs(15)).send().await.unwrap()
+}
+#[tokio::test]
+async fn mcp_collection_download_is_a_committed_wal_snapshot_without_sync_stamp_changes() {
+    use std::os::unix::fs::PermissionsExt;
+    let h=Harness::new().await;let c=local_client();let identity=h.setup().await;let cookie=h.login("root.admin",PASSWORD).await;
+    let path=attachment_collection(&h,identity["id"].as_str().unwrap());
+    let temp=h.stop().await;
+    // Change page size only on this generated, offline fixture in rollback mode.
+    let db=meguri_sync_server::collection::schema::open(&path,true).unwrap();
+    db.pragma_update(None,"journal_mode","DELETE").unwrap();
+    db.pragma_update(None,"page_size",65536).unwrap();
+    db.execute_batch("VACUUM").unwrap();
+    assert_eq!(db.pragma_query_value(None,"page_size",|r|r.get::<_,i64>(0)).unwrap(),65536);
+    drop(db);
+    let h=Harness::reopen(temp).await;
+    let tokens=grant(&h,&c,&cookie,false,false).await;
+    let ticket=collection_ticket(&h,&c,tokens["access_token"].as_str().unwrap()).await;
+    let db=meguri_sync_server::collection::schema::open(&path,true).unwrap();
+    db.pragma_update(None,"journal_mode","WAL").unwrap();
+    db.pragma_update(None,"wal_autocheckpoint",0).unwrap();
+    db.execute("INSERT INTO config VALUES('generated-opaque',0,0,?1)",[b"\x00\xff\x80opaque\x00".as_slice()]).unwrap();
+    let wal=std::path::PathBuf::from(format!("{}-wal",path.display()));
+    assert!(std::fs::metadata(&wal).unwrap().len()>32,"committed change must actually be in WAL");
+    let stamp=||db.query_row("SELECT mod,scm,usn,ls FROM col WHERE id=1",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?))).unwrap();
+    let before=stamp();
+    db.execute_batch("BEGIN IMMEDIATE; INSERT INTO config VALUES('generated-uncommitted',0,0,x'01')").unwrap();
+    let main_before=std::fs::read(&path).unwrap();let wal_before=std::fs::read(&wal).unwrap();
+    let response=redeem_collection(&h,&c,&cookie,&ticket).await;
+    assert_eq!(response.status(),200);
+    assert_eq!(response.headers()["content-type"],"application/vnd.sqlite3");
+    assert_eq!(response.headers()["content-disposition"],"attachment; filename=\"collection.anki2\"");
+    assert_eq!(response.headers()["cache-control"],"no-store");
+    let bytes=response.bytes().await.unwrap();assert!(bytes.starts_with(b"SQLite format 3\0"));
+    let downloaded=h.path().parent().unwrap().join("generated-download.anki2");std::fs::write(&downloaded,&bytes).unwrap();
+    std::fs::set_permissions(&downloaded,std::fs::Permissions::from_mode(0o600)).unwrap();
+    let copy=meguri_sync_server::collection::schema::open(&downloaded,false).unwrap();
+    assert_eq!(copy.pragma_query_value(None,"page_size",|r|r.get::<_,i64>(0)).unwrap(),65536);
+    assert_eq!(copy.query_row::<String,_,_>("PRAGMA integrity_check",[],|r|r.get(0)).unwrap(),"ok");
+    assert_eq!(copy.query_row::<Vec<u8>,_,_>("SELECT val FROM config WHERE key='generated-opaque'",[],|r|r.get(0)).unwrap(),b"\x00\xff\x80opaque\x00");
+    assert_eq!(copy.query_row::<i64,_,_>("SELECT count(*) FROM config WHERE key='generated-uncommitted'",[],|r|r.get(0)).unwrap(),0);
+    assert_eq!(copy.query_row::<i64,_,_>("SELECT count(*) FROM sqlite_schema WHERE name IN ('accounts','oauth_tokens','media_names')",[],|r|r.get(0)).unwrap(),0);
+    assert_eq!(copy.query_row("SELECT mod,scm,usn,ls FROM col WHERE id=1",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?))).unwrap(),before);
+    assert_eq!(stamp(),before);
+    assert_eq!(std::fs::read(&path).unwrap(),main_before);assert_eq!(std::fs::read(&wal).unwrap(),wal_before);
+    db.execute_batch("ROLLBACK").unwrap();
+    assert_ne!(redeem_collection(&h,&c,&cookie,&ticket).await.status(),200);
+    drop(copy);drop(db);h.stop().await;
+}
+#[tokio::test]
+async fn mcp_collection_download_survives_refresh_but_rejects_wrong_account_origin_and_replay() {
+    let h=Harness::new().await;let c=local_client();h.setup().await;let cookie=h.login("root.admin",PASSWORD).await;
+    h.member(&cookie,"generated.other").await;let other=h.login("generated.other",PASSWORD).await;
+    let tokens=grant(&h,&c,&cookie,false,false).await;
+    let ticket=collection_ticket(&h,&c,tokens["access_token"].as_str().unwrap()).await;
+    assert_eq!(redeem_collection(&h,&c,&other,&ticket).await.status(),403);
+    let signed_out=redeem_collection(&h,&c,"",&ticket).await;
+    assert_eq!(signed_out.status(),401);
+    assert!(signed_out.text().await.unwrap().contains("You are signed out."));
+    for origin in [None,Some("null"),Some("https://wrong.example.test")] {
+        let mut request=c.post(format!("{}/api/mcp/collection-download",h.base)).header("cookie",&cookie)
+            .header("content-type","application/x-www-form-urlencoded").body(format!("ticket={ticket}"));
+        if let Some(origin)=origin {request=request.header("origin",origin);}
+        assert_eq!(request.send().await.unwrap().status(),403);
+    }
+    assert_eq!(redeem_collection(&h,&c,&cookie,&ticket).await.status(),200);
+    let ticket=collection_ticket(&h,&c,tokens["access_token"].as_str().unwrap()).await;
+    let exchange:BTreeMap<String,String>=[("grant_type","refresh_token".into()),("client_id",CLIENT.into()),("refresh_token",tokens["refresh_token"].as_str().unwrap().into()),("resource",format!("{ORIGIN}/mcp"))].into_iter().map(|(k,v)|(k.into(),v)).collect();
+    let rotated:Value=c.post(format!("{}/oauth/token",h.base)).header("content-type","application/x-www-form-urlencoded").body(encoded(&exchange)).send().await.unwrap().json().await.unwrap();
+    // Ordinary refresh does not consume an otherwise valid original access token.
+    let response=redeem_collection(&h,&c,&cookie,&ticket).await;
+    assert_eq!(response.status(),200);assert!(response.bytes().await.unwrap().starts_with(b"SQLite format 3\0"));
+    let original_ticket=collection_ticket(&h,&c,tokens["access_token"].as_str().unwrap()).await;
+    assert_eq!(redeem_collection(&h,&c,&cookie,&original_ticket).await.status(),200);
+    let replay_ticket=collection_ticket(&h,&c,rotated["access_token"].as_str().unwrap()).await;
+    let replay=c.post(format!("{}/oauth/token",h.base)).header("content-type","application/x-www-form-urlencoded").body(encoded(&exchange)).send().await.unwrap();
+    assert_eq!(replay.status(),400);
+    let refused=redeem_collection(&h,&c,&cookie,&replay_ticket).await;
+    assert_eq!(refused.status(),403);assert!(refused.text().await.unwrap().contains("This link is unavailable for this account."));
+    h.stop().await;
+}
+// Separate generated roots keep independent mutations within the IP capability budget.
+#[tokio::test]
+async fn mcp_collection_download_rejects_explicit_revoke() {
+    let h=Harness::new().await;let c=local_client();h.setup().await;let cookie=h.login("root.admin",PASSWORD).await;
+    let rotated=grant(&h,&c,&cookie,false,false).await;
+    let ticket=collection_ticket(&h,&c,rotated["access_token"].as_str().unwrap()).await;
+    let grants:Value=h.get("/api/me/mcp-grants",Some(&cookie)).await.json().await.unwrap();
+    for grant in grants["data"]["grants"].as_array().unwrap() {
+        assert_eq!(h.post(&format!("/api/me/mcp-grants/{}/revoke",grant["id"].as_str().unwrap()),json!({}),Some(&cookie)).await.status(),200);
+    }
+    assert_ne!(redeem_collection(&h,&c,&cookie,&ticket).await.status(),200);
+    h.stop().await;
+}
+#[tokio::test]
+async fn mcp_collection_download_rejects_data_reset() {
+    let h=Harness::new().await;let c=local_client();let identity=h.setup().await;let cookie=h.login("root.admin",PASSWORD).await;
+    let fresh=grant(&h,&c,&cookie,false,false).await;
+    let ticket=collection_ticket(&h,&c,fresh["access_token"].as_str().unwrap()).await;
+    // Reset can reuse the initial publication path; the original epoch must fail.
+    assert_eq!(h.post(&format!("/api/admin/accounts/{}/reset-data",identity["id"].as_str().unwrap()),json!({}),Some(&cookie)).await.status(),200);
+    assert_ne!(redeem_collection(&h,&c,&cookie,&ticket).await.status(),200);
+    h.stop().await;
+}
+#[tokio::test]
+async fn mcp_collection_download_advertises_remaining_access_lifetime_and_refuses_expiry() {
+    let h=Harness::new().await;let c=local_client();h.setup().await;let cookie=h.login("root.admin",PASSWORD).await;
+    let tokens=grant(&h,&c,&cookie,false,false).await;
+    let access=tokens["access_token"].as_str().unwrap();
+    let expiry=time::OffsetDateTime::now_utc().unix_timestamp()+120;
+    let db=rusqlite::Connection::open(h.database()).unwrap();
+    db.execute("UPDATE oauth_tokens SET expires_at=?1 WHERE kind='access'",[expiry]).unwrap();
+    let response=mcp_request(&h,&c,access,"tools/call",json!({"name":"download_collection","arguments":{}})).send().await.unwrap();
+    assert_eq!(response.status(),200);
+    let body:Value=response.json().await.unwrap();
+    let output=&body["result"]["structuredContent"];
+    assert_eq!(output["expires_at"].as_str().unwrap(),time::OffsetDateTime::from_unix_timestamp(expiry).unwrap().format(&time::format_description::well_known::Rfc3339).unwrap());
+    let ticket=output["download_url"].as_str().unwrap().split_once("#download=").unwrap().1;
+    db.execute("UPDATE oauth_tokens SET expires_at=0 WHERE kind='access'",[]).unwrap();
+    let refused=redeem_collection(&h,&c,&cookie,ticket).await;
+    assert_eq!(refused.status(),403);
+    assert_eq!(refused.headers()["content-type"],"text/html; charset=utf-8");
+    let text=refused.text().await.unwrap();
+    assert!(text.contains("This link is unavailable for this account."));assert!(!text.contains(ticket));
+    drop(db);h.stop().await;
 }

@@ -293,3 +293,14 @@ async fn completed_body_and_error_keep_admission_until_response_is_dropped() {
         .collect::<Vec<_>>();
     drop(held);
 }
+
+#[test]
+fn download_form_is_one_exact_opaque_field() {
+    let token = crate::crypto::random_token().unwrap();
+    assert_eq!(download_form(format!("ticket={token}").as_bytes()).unwrap(), token);
+    for form in [String::new(), token.clone(), format!("ticket={token}&ticket={token}"),
+        format!("ticket={token}&other=1"), format!("ticket=%41{}", &token[1..]),
+        format!("ticket={token}+"), format!("Ticket={token}"), format!("ticket={token}\n")] {
+        assert!(download_form(form.as_bytes()).is_err());
+    }
+}

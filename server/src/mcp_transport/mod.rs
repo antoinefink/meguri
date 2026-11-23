@@ -285,7 +285,10 @@ async fn dispatch<A: Clone + Send + Sync + 'static>(
 }
 
 fn tool_result(value: Value, is_error: bool) -> Value {
-    let text = serde_json::to_string(&value).expect("JSON tool payload");
+    let text = match (value.get("download_url").and_then(Value::as_str), value.get("expires_at").and_then(Value::as_str)) {
+        (Some(url), Some(expires)) if !is_error => format!("[Download collection]({url})\n\nShare this link with the user. Sign in to the same Meguri account and choose Download collection before {expires}. This link can be used once."),
+        _ => serde_json::to_string(&value).expect("JSON tool payload"),
+    };
     json!({"content":[{"type":"text", "text":text}],
         "structuredContent":value, "isError":is_error})
 }
