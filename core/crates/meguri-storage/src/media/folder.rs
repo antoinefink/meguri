@@ -939,6 +939,50 @@ impl MediaStore {
         }
         Err(MediaError::NameTaken)
     }
+    /// Whether the folder holds a present case variant of `name`, or an
+    /// uncommitted op has staged one (`media/media-files` M2).
+    pub fn case_variant_present(&self, name: &str) -> Result<bool> {
+        self.check_changes()?;
+        let db = self.db()?;
+        self.occupied_locked(&db, name)
+    }
+    /// Presence only, never content: a tracked case variant whose file is
+    /// there, a name an uncommitted op staged, or anything at the exact
+    /// path (registration may not track it, M7.1).
+    fn occupied_locked(&self, db: &Connection, name: &str) -> Result<bool> {
+        for entry in journal_db::variants(db, name)? {
+            if regular(&self.media_dir().join(&entry.name))?.is_some() {
+                return Ok(true);
+            }
+        }
+        let mut staged = db.prepare("SELECT name FROM staged_files")?;
+        for other in staged.query_map([], |r| r.get::<_, String>(0))? {
+            if case_key(&other?) == case_key(name) {
+                return Ok(true);
+            }
+        }
+        Ok(self.media_dir().join(name).symlink_metadata().is_ok())
+    }
+    /// An exact-name write (M6 step 4) that never replaces: `None` when a
+    /// case variant of `name` is present, whatever its content. A deck
+    /// package's static entry (`package/apkg-import` I12.3).
+    pub fn write_static_if_absent(&self, name: &str, bytes: &[u8]) -> Result<Option<String>> {
+        if !normalized(name) {
+            return Err(MediaError::InvalidName);
+        }
+        if ignored(name) {
+            return Err(MediaError::IgnoredName);
+        }
+        self.check_changes()?;
+        // The check and the write share one hold of the journal, so no add
+        // of this store can take the name in between.
+        let mut db = self.db()?;
+        if self.occupied_locked(&db, name)? {
+            return Ok(None);
+        }
+        self.install_locked(&mut db, name, bytes, &[])?;
+        Ok(Some(name.into()))
+    }
     pub fn ensure_static_media(&self, name: &str, bytes: &[u8]) -> Result<String> {
         if !normalized(name) {
             return Err(MediaError::InvalidName);

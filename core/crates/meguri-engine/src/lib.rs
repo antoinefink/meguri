@@ -65,7 +65,7 @@ pub use derived_host::{DerivedApplied, DerivedHost, DerivedReadiness, Readiness}
 pub use error::EngineError;
 pub use executor::catalog::{OpDef, UndoClass};
 pub use executor::op::{OpContext, OpResult, OpSpec, OpTiming, Pending, UndoMeta, WriteDelay};
-pub use executor::plan_commit::{Plan, PlanContext, plan_and_commit, plan_and_commit_with, plan_and_commit_with_replans};
+pub use executor::plan_commit::{Plan, PlanContext, plan_and_commit, plan_and_commit_with, plan_and_commit_with_replans, plan_stage_and_commit};
 pub use executor::preconditions::Precondition;
 pub use jobs::registry::{JobRegistry, RunningJob};
 pub use jobs::{JobContext, JobHandle, JobId, JobKind, JobOutcome};
