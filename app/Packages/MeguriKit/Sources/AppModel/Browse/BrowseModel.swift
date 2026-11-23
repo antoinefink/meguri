@@ -36,6 +36,9 @@ public final class BrowseModel {
     /// Browse has opened in this launch (T14's first open has run).
     public private(set) var opened = false
     public private(set) var savedSearches: [SavedSearch] = []
+    /// The query each user saved search set when last clicked (T7's reading
+    /// of its text): its row shows selected while the query equals it.
+    public private(set) var savedReadings: [SavedSearch: FilterQuery] = [:]
     /// Every deck's value as the core makes it (T3), by deck id.
     public private(set) var deckValues: [Int64: FilterValue] = [:]
     public private(set) var notetypes: [NotetypeName] = []
@@ -327,7 +330,7 @@ public final class BrowseModel {
 
     /// T14 "with a search", and T9's saved searches: the whole query
     /// becomes T7's reading of `text`, unless the query changed meanwhile.
-    func replace(byReading text: String, handed: Bool = false) {
+    func replace(byReading text: String, handed: Bool = false, savedAs name: String? = nil) {
         queryRevision &+= 1
         let revision = queryRevision, epoch = epoch
         // A handed search is kept until it is applied: a failed read, or one the
@@ -336,6 +339,9 @@ public final class BrowseModel {
         Task {
             guard let read = try? await backend.read(text), self.epoch == epoch, revision == queryRevision else { return }
             if handed, pendingSearch == text { pendingSearch = nil }
+            if let name, savedSearches.contains(SavedSearch(name: name, text: text)) {
+                savedReadings[SavedSearch(name: name, text: text)] = read
+            }
             setQuery(read)
         }
     }
@@ -350,10 +356,12 @@ public final class BrowseModel {
         pendingSearch = nil
         switch row {
         case .builtIn(let search):
-            setQuery(search.query)
+            // A second click on the saved search the query holds clears it (T9).
+            setQuery(query == search.query ? FilterQuery() : search.query)
         case .saved(let name):
             guard let saved = savedSearches.first(where: { $0.name == name }) else { return }
-            replace(byReading: saved.text)
+            if savedReadings[saved] == query { return setQuery(FilterQuery()) }
+            replace(byReading: saved.text, savedAs: name)
         case .showAllTags:
             showsAllTags = true
         case .section:
@@ -387,6 +395,9 @@ public final class BrowseModel {
     /// kind's **is** token.
     public var selectedRows: Set<BrowseSidebarTag> {
         var rows = Set<BrowseSidebarTag>()
+        // A saved search shows selected while the query is the one it sets (T9).
+        for search in FilterBuiltIn.allCases where query == search.query { rows.insert(.builtIn(search)) }
+        for (saved, reading) in savedReadings where reading == query { rows.insert(.saved(saved.name)) }
         for case .value(let values, false) in query.tokens {
             for value in values {
                 switch value {
@@ -501,7 +512,7 @@ public final class BrowseModel {
         replacements &+= 1
         query = FilterQuery()
         queryRevision &+= 1
-        savedSearches = []; deckValues = [:]; notetypes = []; tags = []; flagNames = []
+        savedSearches = []; savedReadings = [:]; deckValues = [:]; notetypes = []; tags = []; flagNames = []
         counts = [:]; tagNotes = [:]; tagExpansion = [:]; tagWrites = [:]; filter = ""
         liveRun?.cancel()
         suggestions = []; suggestionScope = nil; suggestedField = nil; tokenOffers = [:]; valueCounts = [:]
@@ -532,6 +543,8 @@ public final class BrowseModel {
                 savedSearches = savedRows.compactMap {
                     if case .savedSearch(let name, let text) = $0 { SavedSearch(name: name, text: text) } else { nil }
                 }
+                // A saved search renamed, edited or deleted is read again on its next click.
+                savedReadings = savedReadings.filter { saved, _ in savedSearches.contains(saved) }
             }
             if let deckRows {
                 var values: [Int64: FilterValue] = [:]

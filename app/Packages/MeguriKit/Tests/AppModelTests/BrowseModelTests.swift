@@ -132,6 +132,62 @@ import Testing
         #expect(model.query == after)
     }
 
+    /// Decided 2026-11-23 (T9): a click on the row that is its kind's whole
+    /// token removes it; on a saved search the query holds, it clears it.
+    @Test func aSecondClickOnASelectedRowRemovesItsFilter() async {
+        let (model, core) = await makeModel()
+        model.activate(.state(.new))
+        model.activate(.deck(10))
+        #expect(model.selectedRows == [.state(.new), .deck(10)])
+        // The list's selection after a plain click on a selected row is that row alone.
+        _ = model.listSelectionChanged(to: [.state(.new)], click: .plain)
+        #expect(model.query.tokens == [token(Self.spanish)] && model.selectedRows == [.deck(10)])
+        // Every kind: decks, note types, tags, flags.
+        model.activate(.deck(10))
+        model.activate(.notetype(7)); model.activate(.notetype(7))
+        model.activate(.tag("brask")); model.activate(.tag("brask"))
+        model.activate(.flag(2)); model.activate(.flag(2))
+        model.activate(.flag(0)); model.activate(.flag(0))
+        #expect(model.query.tokens.isEmpty)
+        // A token holding two values, or an is-not token: a click makes it is {v}.
+        model.activate(.deck(10)); model.activate(.deck(20), click: .command)
+        model.activate(.deck(10))
+        #expect(model.query.tokens == [token(Self.spanish)])
+        model.activate(.state(.new), click: .option)
+        model.activate(.state(.new))
+        #expect(model.query.tokens.last == token(.state(.new)))
+        // Saved searches: the second click empties the query they set.
+        model.activate(.builtIn(.dueToday))
+        #expect(model.selectedRows == [.builtIn(.dueToday)])
+        model.activate(.builtIn(.dueToday))
+        #expect(model.query == FilterQuery())
+        core.reads["is:due -tag:x"] = FilterQuery(tokens: [.advanced("is:due"), token(.tag("x"), negated: true)])
+        model.activate(.saved("Hard Ones"))
+        await until { model.selectedRows == [.saved("Hard Ones")] }
+        model.activate(.saved("Hard Ones"))
+        #expect(model.query == FilterQuery() && model.selectedRows.isEmpty)
+    }
+
+    /// The rows follow the field both ways: a token edited or removed in
+    /// the field deselects at once; a saved search shows selected only while
+    /// the query equals it.
+    @Test func theSidebarFollowsTheTokensInTheField() async {
+        let (model, core) = await makeModel()
+        core.reads["is:due -tag:x"] = FilterQuery(tokens: [.advanced("is:due"), token(.tag("x"), negated: true)])
+        model.activate(.saved("Hard Ones"))
+        await until { model.selectedRows.contains(.saved("Hard Ones")) }
+        // The query is the saved search's, so the is-not tag selects no Tags row.
+        #expect(model.selectedRows == [.saved("Hard Ones")])
+        model.setQuery(model.query.clicking(.state(.review)))
+        #expect(model.selectedRows == [.state(.review)])
+        model.setQuery(FilterQuery(tokens: [token(.due(.today))]))
+        #expect(model.selectedRows == [.builtIn(.dueToday)])
+        model.setQuery(FilterQuery(tokens: [token(.due(.today))], text: "plimb"))
+        #expect(model.selectedRows.isEmpty)
+        model.setQuery(FilterQuery(tokens: [token(Self.spanish, Self.japanese)]))
+        #expect(model.selectedRows == [.deck(10), .deck(20)])
+    }
+
     @Test func savedSearchesReplaceTheWholeQuery() async {
         let (model, core) = await makeModel()
         core.reads["is:due -tag:x"] = FilterQuery(tokens: [.advanced("is:due"), token(.tag("x"), negated: true)])
@@ -140,12 +196,15 @@ import Testing
         #expect(model.query == FilterQuery(tokens: [token(.due(.today))]))
         model.activate(.builtIn(.leeches))
         #expect(model.query == FilterQuery(tokens: [token(.state(.leech))]))
-        // Leech is a Card State value, but no Card State row shows it.
-        #expect(model.selectedRows.isEmpty)
+        // Leech is a Card State value, but no Card State row shows it: the
+        // saved search that set it does.
+        #expect(model.selectedRows == [.builtIn(.leeches)])
         model.activate(.saved("Hard Ones"))
         await until { model.query.tokens.first == .advanced("is:due") }
         #expect(model.query == core.reads["is:due -tag:x"])
-        // A newer change wins over a reading still on its way.
+        // A newer change wins over a reading still on its way (the query first
+        // differs from the saved search's, else the click would clear it).
+        model.activate(.deck(10))
         core.holdReads = true
         model.activate(.saved("Hard Ones"))
         await until { core.heldReadCount == 1 }

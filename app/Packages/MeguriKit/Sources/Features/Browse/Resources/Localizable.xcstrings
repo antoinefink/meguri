@@ -2169,6 +2169,17 @@
         }
       }
     },
+    "browse.sidebar.row.removeHint": {
+      "comment": "VoiceOver hint on a selected Browse sidebar filter row: activating it again removes its filter.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activate again to remove this filter."
+          }
+        }
+      }
+    },
     "browse.span.days": {
       "localizations": {
         "en": {

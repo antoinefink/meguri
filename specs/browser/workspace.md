@@ -101,7 +101,8 @@ Numbers and dates use tabular figures; numbers align at the trailing edge, text 
 - Each value row shows its count (`search/filter-tokens` T12.3). The Tags section, when it has more than 12 top-level tags, shows the 8 with the most notes (descendants counted), in tree order, then "Show All <N>…", which shows the whole tree (remembered on the device).
 - The sidebar's search field (N20.1's field) filters the rows as `browser/sidebar` S6 does while Browse is selected; with Today selected it is the deck search of N20.1.
 - Section folding is device state (K11). The synced `collapse*` keys are not read or written by this sidebar (superseded R1157's storage; they stay untouched).
-- Clicks: `search/filter-tokens` T9.
+- Clicks: `search/filter-tokens` T9, including the second click on a selected row, which removes its filter (2026-11-23).
+- The rows show the query: each value row of an **is** token, and the saved search whose query the field holds, show the system's selected-row highlight beside the Browse row (T9).
 - Context menus: a note type row: Edit Note Type… (`notetypes/workspace` W14); a user saved search: Rename…, Delete (T13); a deck row: Browse Only This Deck (same as a click) is not added; no other management action in this version (renaming, deleting and dragging decks and tags inside Browse wait; `browser/sidebar` S9 and S10 stay the reference for later).
 - Replaces: R1157's sections and order, R1159 (Today section), R1162's root and Current deck rows, R1163's children, R1166 to R1180 for this version (later work).
 

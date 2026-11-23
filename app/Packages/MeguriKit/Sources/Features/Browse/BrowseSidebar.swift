@@ -52,6 +52,14 @@ public struct BrowseSidebar<Header: View>: View {
             notetypes
             tags
         }
+        // T9: Return or Space on the one selected filter row acts as a second
+        // click on it: its filter is removed. On the list only, not its field.
+        .onKeyPress(keys: [.return, .space]) { _ in
+            let rows = model.selectedRows
+            guard rows.count == 1, let row = rows.first else { return .ignored }
+            model.activate(row)
+            return .handled
+        }
         // N20.6 (2026-11-22): the system's own prompt, "Search", as with Today selected.
         .searchable(text: $model.filter, placement: .sidebar)
         .accessibilityIdentifier("browse.sidebar.list")
@@ -331,6 +339,7 @@ public struct BrowseSidebar<Header: View>: View {
             .help(help.map { Text(verbatim: $0) } ?? Text(verbatim: label))
             .badge(model.counts[tag].map { Text($0, format: .number) })
             .accessibilityValue(model.counts[tag].map { Text(verbatim: BrowseStrings.count($0, mode: model.mode)) } ?? Text(verbatim: ""))
+            .accessibilityHint(model.selectedRows.contains(tag) ? Text("browse.sidebar.row.removeHint", bundle: .module) : Text(verbatim: ""))
             .accessibilityIdentifier("browse.sidebar.\(identifier)")
             .tag(tag)
     }

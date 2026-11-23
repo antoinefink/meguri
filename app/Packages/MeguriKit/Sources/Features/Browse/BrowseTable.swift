@@ -74,7 +74,9 @@ struct BrowseTable: View {
             .accessibilityIdentifier("browse.results.table")
             .onChange(of: results.scrollTarget) {
                 guard let target = results.scrollTarget, target.token == list?.token else { return }
-                proxy.scrollTo(target.index, anchor: .center)
+                // Only as far as brings the row into view: a row already shown
+                // stays put, and the first rows stay below the column header.
+                proxy.scrollTo(target.index)
             }
             .onChange(of: focused, initial: true) { _, focused in results.tableFocused = focused }
             .onAppear {
@@ -82,9 +84,9 @@ struct BrowseTable: View {
                 // row a new list brought into view.
                 let kept = results.tableAppeared()
                 let target = results.scrollTarget.flatMap { $0.token == list?.token ? $0.index : nil }
-                guard let row = kept ?? target else { return results.tableSettled() }
+                guard kept != nil || target != nil else { return results.tableSettled() }
                 Task { @MainActor in
-                    proxy.scrollTo(row, anchor: .center)
+                    if let kept { proxy.scrollTo(kept, anchor: .center) } else if let target { proxy.scrollTo(target) }
                     results.tableSettled()
                 }
             }

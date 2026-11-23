@@ -783,7 +783,9 @@ public final class BrowseResults {
         var low = index, high = index
         while onScreen.contains(low - 1) { low -= 1 }
         while onScreen.contains(high + 1) { high += 1 }
-        keptRow = (list.token, (low + high) / 2)
+        // At its top, the table comes back unscrolled: centring a row there
+        // drew the first row under the column header (owner's Mac, 2026-11-23).
+        keptRow = low == 0 ? nil : (list.token, (low + high) / 2)
     }
 
     // MARK: Rows
