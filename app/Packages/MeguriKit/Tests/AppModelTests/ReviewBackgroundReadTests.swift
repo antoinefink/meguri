@@ -305,6 +305,33 @@ extension ReviewCoordinatorTests {
         #expect(await fixture.model.end())
     }
 
+    /// The work one answer costs the review, with the Meguri Sync round that
+    /// follows it (its merge rebuilds the session, which reports a new head):
+    /// one answer call, one head read, two undo reads after each, one render
+    /// per head and one presentation; then nothing more while the card stays.
+    @Test func oneAnswerAndItsSyncRoundCostABoundedNumberOfCoreCalls() async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        let reads = fixture.client.headReads, undo = fixture.client.undoReads
+        let renders = fixture.surface.calls.filter { $0 == "render" }.count
+        let presents = fixture.surface.calls.filter { $0 == "present" }.count
+        fixture.model.rate(.good); await fixture.model.settled()
+        Self.deliver(.syncRebuild, to: fixture); await fixture.model.settled()
+        for _ in 0..<20 { await Task.yield() }
+        await fixture.model.settled()
+        #expect(fixture.client.answers == 1)
+        #expect(fixture.client.headReads - reads == 1, "one head read, for the round's rebuild")
+        #expect(fixture.client.undoReads - undo == 4, "Undo and Redo, after the answer and after the read")
+        #expect(fixture.surface.calls.filter { $0 == "render" }.count - renders == 2)
+        #expect(fixture.surface.calls.filter { $0 == "present" }.count - presents == 1, "the next card, once")
+        // A read that changed nothing starts no other read (no event loop).
+        let settledReads = fixture.client.headReads
+        for _ in 0..<20 { await Task.yield() }
+        #expect(fixture.client.headReads == settledReads)
+        #expect(await fixture.model.end())
+    }
+
     /// `head(_:)` with another state token (and render key): the same card, changed elsewhere.
     static func head(_ id: Int64, token: UInt8, key: UInt8? = nil) -> ReviewHead {
         let base = head(id), item = base.items[0]
