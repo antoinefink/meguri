@@ -2,8 +2,9 @@ import Foundation
 import XCTest
 
 /// The Statistics page's shell (plan U296; `stats/statistics-page` S13, S14; contract N25.1,
-/// N25.11), behind `StatsRollout`: with the flag off nothing reaches it; with it on the sidebar's
-/// Statistics row is second under Today and View › Statistics (⇧⌘S) opens the page; Tab walks the
+/// N25.11): on by default on the Mac (U307's part for the Mac and the iPad), where the sidebar's
+/// Statistics row is second under Today and View › Statistics (⇧⌘S) opens the page, and
+/// `-MeguriStatsRollout off` still hides it; Tab walks the
 /// toolbar's two controls, then each box's header and switches; a loading phase never unpins a
 /// pinned selection (deferred from the chart system, U295); real clicks and keys pin, move and
 /// clear a plot's selection (U297).
@@ -12,21 +13,22 @@ final class StatisticsShellUITests: XCTestCase {
     // MARK: Flag
 
     #if os(macOS)
-    func testFlagOffOffersNoStatistics() throws {
-        let (app, _) = try launchFixture(rollout: nil)
+    func testTheOffOptionHidesStatistics() throws {
+        let (app, _) = try launchFixture(rollout: "off")
         XCTAssertTrue(element(app, "shell.root.sidebar.browse").waitForExistence(timeout: 20))
-        XCTAssertFalse(element(app, "shell.root.sidebar.stats").exists, "No Statistics row while the flag is off")
+        XCTAssertFalse(element(app, "shell.root.sidebar.stats").exists, "No Statistics row with the flag off")
         let view = app.menuBars.menuBarItems["View"]
         XCTAssertTrue(view.waitForExistence(timeout: 10))
-        XCTAssertFalse(app.menuBars.menuItems["Statistics"].exists, "No View › Statistics while the flag is off")
+        XCTAssertFalse(app.menuBars.menuItems["Statistics"].exists, "No View › Statistics with the flag off")
     }
 
+    /// With no option at all: Statistics is in the product on the Mac.
     func testStatisticsRowIsSecondAndShiftCommandSOpensIt() throws {
-        let (app, bundle) = try launchFixture(rollout: "on")
+        let (app, bundle) = try launchFixture(rollout: nil)
         let today = element(app, "shell.root.sidebar.home")
         let stats = element(app, "shell.root.sidebar.stats")
         let browse = element(app, "shell.root.sidebar.browse")
-        XCTAssertTrue(stats.waitForExistence(timeout: 20), "The Statistics row behind the flag")
+        XCTAssertTrue(stats.waitForExistence(timeout: 20), "The Statistics row, on by default")
         XCTAssertLessThan(today.frame.minY, stats.frame.minY, "Statistics under Today (N25.1)")
         XCTAssertLessThan(stats.frame.minY, browse.frame.minY, "Statistics above Browse (N25.1)")
         XCTAssertFalse(element(app, "stats.page.content").exists)

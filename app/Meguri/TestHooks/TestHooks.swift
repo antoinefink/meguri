@@ -136,6 +136,7 @@ enum TestHooks {
             )
             AppearanceOverrides.applyProcessWide(options)
             if options.statsRollout != nil { StatsRollout.enabled = true }
+            if options.statsRolloutOff { StatsRollout.enabled = false }
             return Session(options: options, shell: shell, ownedProvider: ownedProvider)
         } catch {
             return Session(error: error)
