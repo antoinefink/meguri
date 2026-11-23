@@ -555,7 +555,18 @@ public actor CloudKitSyncAdapter {
         guard !quiescing, requestedRunning, intentGeneration == intent else { throw CancellationError() }
         #endif
     }
+    // A shutdown that cancels this start also ends its account read and
+    // admission, so a later step (runtime preparation, SDK registration) then
+    // refuses an unverified or unavailable account. Report the cancellation
+    // that caused it. Typed outcomes, such as an original guard refusal, keep
+    // their own qualification.
     private func startPrepared(automaticallySync: Bool, readIdentity: Bool, intent: UInt64, execution: CoreCloudPolicyExecution? = nil, preparationAttempt: CoreCloudPolicyExecution? = nil) async throws {
+        do {
+            try await startPreparedSteps(automaticallySync: automaticallySync, readIdentity: readIdentity, intent: intent,
+                execution: execution, preparationAttempt: preparationAttempt)
+        } catch is BridgeError where Task.isCancelled { throw CancellationError() }
+    }
+    private func startPreparedSteps(automaticallySync: Bool, readIdentity: Bool, intent: UInt64, execution: CoreCloudPolicyExecution?, preparationAttempt: CoreCloudPolicyExecution?) async throws {
         try checkIntent(intent)
         for task in stopTasks.values {
             #if DEBUG
