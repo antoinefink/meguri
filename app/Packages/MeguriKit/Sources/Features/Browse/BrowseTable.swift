@@ -73,6 +73,8 @@ struct BrowseTable: View {
             }
             .focused($focused)
             #if os(macOS)
+            // N21.3: Return shows the inspector too (the primary action answers a double click).
+            .onKeyPress(.return) { model.inspector.show(); return .handled }
             .background { BrowseScrollReporter(results: results, token: list?.token) }
             #endif
             // Another handle shown is another table: no diff of its rows with the last list's.

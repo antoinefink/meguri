@@ -1,0 +1,20 @@
+# The review's leech notice (N16.11): with a leech threshold of 1, the first
+# lapse of a review card is a leech answer. One deck tags the note only, one
+# also suspends the card.
+recipe: leech-review
+description: "Due review cards whose next Again is a leech answer: tag only, and suspend."
+now: "2030-01-15T10:00:00+01:00"
+presets:
+  - {name: "Leech Tag", leech_threshold: 1, leech_action: tag}
+  - {name: "Leech Suspend", leech_threshold: 1, leech_action: suspend}
+decks:
+  - name: "Leech Tag"
+    preset: "Leech Tag"
+    due: 3
+    tags: ["leech-review"]
+    fields: ["Tag question {n}", "Tag answer {n}"]
+  - name: "Leech Suspend"
+    preset: "Leech Suspend"
+    due: 3
+    tags: ["leech-review"]
+    fields: ["Suspend question {n}", "Suspend answer {n}"]

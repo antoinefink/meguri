@@ -565,8 +565,10 @@ screens:
       line). Speed: V17. Commands (U275, Mac): the row's context menu (N21.5), the Note and Card
       menus' Browse items and Edit's Select Sibling Cards (N21.8), the Delete question (V8.2),
       undo titles after the command (V8.3); identifiers browse.menu.<command>. The inspector
-      (U273, Mac): no selection, one row's Note tab (preview, Deck and Type, fields, empty
-      fields, tags, formatting bar; identifiers browse.inspector.*), several rows' summary
+      (U273, Mac; Option A, 2026-11-23): no selection, one row's Note tab in one scroll view
+      (preview, Deck and Type, the fields as a plain list with sound chips and thumbnails,
+      empty fields, a Tags section; the formatting bar pinned at the bottom; identifiers
+      browse.inspector.*), several rows' summary
       with the commands (browse.inspector.command.<command>), hidden under 900 points and shown
       over the table by Return; the Info tab comes with U274. Identifiers
       browse.<element>, rows browse.table.row.<id>. This replaces

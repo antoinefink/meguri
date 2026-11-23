@@ -838,15 +838,25 @@ struct ReviewLeechButton: View {
     var body: some View {
         Button { shown = true } label: {
             Label { Text("review.leech.title", bundle: .module) } icon: {
-                // The symbol's own colours: the system's yellow triangle in light,
-                // dark and Increase Contrast.
-                Image(systemName: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
+                // The system's yellow triangle (Antoine: "we can keep it in
+                // yellow"). The glass toolbar group draws its icons as templates,
+                // so the symbol's multicolour alone came out black or white; the
+                // system yellow as its style and the button's tint keep it yellow,
+                // with Increase Contrast's darker yellow where that is on.
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .symbolRenderingMode(.multicolor)
+                    .foregroundStyle(.yellow)
             }
         }
+        .tint(.yellow)
         .help(Text("review.leech.title", bundle: .module))
         .accessibilityHint(Text("review.leech.hint", bundle: .module))
         .accessibilityIdentifier("review.session.leech")
-        .popover(isPresented: $shown) { ReviewLeechDetails(notice: notice) }
+        .popover(isPresented: $shown) {
+            ReviewLeechDetails(notice: notice)
+                // A popover sized to its text at compact width too (N16.11).
+                .presentationCompactAdaptation(.popover)
+        }
     }
 }
 
@@ -866,9 +876,6 @@ struct ReviewLeechDetails: View {
         .frame(idealWidth: ContentWidth.primaryAction, maxWidth: ContentWidth.readable, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review.session.leech.details")
-        #if !os(macOS)
-        .presentationDetents([.medium])
-        #endif
     }
 }
 

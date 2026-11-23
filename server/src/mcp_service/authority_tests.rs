@@ -487,19 +487,32 @@ async fn export_expiry_and_ticket_limit_are_bounded_and_lazily_reclaimed() {
     assert_eq!(f.service.redeem_collection(&tickets[0]).await.err().unwrap().code,"capability_invalid");
     bridge.download_collection(a).await.unwrap();
 }
+#[cfg(feature="test-hooks")]
 #[tokio::test]
 async fn export_failed_preparation_retains_ticket_and_replay_is_atomic() {
     use axum::body::to_bytes;
     let f=Fixture::new(false).await;
     let ticket=export_ticket(&f).await;
     let full=f.service.temp.reserve(f.service.config.temp_bytes.get()).unwrap();
-    assert!(f.service.redeem_collection(&ticket).await.is_err());
+    assert_eq!(f.service.redeem_collection(&ticket).await.err().unwrap().code,"storage_unavailable");
+    assert_eq!(f.service.temp.used(),f.service.config.temp_bytes.get());
     drop(full);assert_eq!(f.service.temp.used(),0);
-    let (first,second)=tokio::join!(f.service.redeem_collection(&ticket),f.service.redeem_collection(&ticket));
-    let response=match (first,second) {
-        (Ok(r),Err(error)) | (Err(error),Ok(r))=>{assert_eq!(error.code,"capability_invalid");r},
-        _=>panic!("exactly one redemption must succeed"),
-    };
+    let ready=f.service.hooks.arm("collection_export_ready");
+    let owner=f.service.clone();let original_ticket=ticket.clone();
+    let mut first=tokio::spawn(async move {owner.redeem_collection(&original_ticket).await});
+    tokio::time::timeout(Duration::from_secs(10),async {
+        tokio::select! {
+            _=ready.arrived()=>{},
+            _=&mut first=>panic!("first redemption completed before export ready"),
+        }
+    }).await.unwrap();
+    // The first copy has closed its source. Let the second consume the ticket
+    // before the first reaches its final atomic replay check.
+    let second=tokio::time::timeout(Duration::from_secs(5),f.service.redeem_collection(&ticket)).await;
+    ready.resume();
+    let first=tokio::time::timeout(Duration::from_secs(5),first).await.unwrap().unwrap();
+    let response=second.unwrap().unwrap();
+    assert_eq!(first.err().unwrap().code,"capability_invalid");
     assert!(to_bytes(response.into_body(),1024*1024).await.unwrap().starts_with(b"SQLite format 3\0"));
     assert_eq!(f.service.temp.used(),0);
 }
