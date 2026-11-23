@@ -1,6 +1,36 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "browse.addTags.add": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add"
+          }
+        }
+      }
+    },
+    "browse.addTags.footer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Separate tags with spaces. Use “::” to put a tag inside another."
+          }
+        }
+      }
+    },
+    "browse.addTags.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Tags"
+          }
+        }
+      }
+    },
     "browse.cell.deckCount": {
       "localizations": {
         "en": {
@@ -67,6 +97,106 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sound"
+          }
+        }
+      }
+    },
+    "browse.changeDeck.create": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create deck named “%@”"
+          }
+        }
+      }
+    },
+    "browse.changeDeck.current": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current deck"
+          }
+        }
+      }
+    },
+    "browse.changeDeck.failed.filteredDeck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cards can’t be moved into a filtered deck."
+          }
+        }
+      }
+    },
+    "browse.changeDeck.failed.filteredParent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A deck can’t be created inside a filtered deck."
+          }
+        }
+      }
+    },
+    "browse.changeDeck.failed.tooDeep": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This deck name has too many levels."
+          }
+        }
+      }
+    },
+    "browse.changeDeck.move": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move"
+          }
+        }
+      }
+    },
+    "browse.changeDeck.noMatches": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Matching Decks"
+          }
+        }
+      }
+    },
+    "browse.changeDeck.readFailed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t read the decks."
+          }
+        }
+      }
+    },
+    "browse.changeDeck.search": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search"
+          }
+        }
+      }
+    },
+    "browse.changeDeck.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change Deck"
           }
         }
       }
@@ -967,6 +1097,102 @@
         }
       }
     },
+    "browse.done.forgotten": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@cards@"
+          },
+          "substitutions": {
+            "cards": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ card forgotten"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ cards forgotten"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.done.moved": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@cards@"
+          },
+          "substitutions": {
+            "cards": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ card moved"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ cards moved"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.done.rescheduled": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@cards@"
+          },
+          "substitutions": {
+            "cards": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ card rescheduled"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ cards rescheduled"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "browse.done.suspended": {
       "localizations": {
         "en": {
@@ -990,6 +1216,38 @@
                     "stringUnit": {
                       "state": "translated",
                       "value": "%2$@ cards suspended"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.done.tagsChanged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@notes@"
+          },
+          "substitutions": {
+            "notes": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ note changed"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ notes changed"
                     }
                   }
                 }
@@ -1271,6 +1529,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Turquoise Flag"
+          }
+        }
+      }
+    },
+    "browse.forget.forget": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forget"
+          }
+        }
+      }
+    },
+    "browse.forget.kept": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review history is kept."
+          }
+        }
+      }
+    },
+    "browse.forget.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forget Cards"
           }
         }
       }
@@ -1827,6 +2115,46 @@
         }
       }
     },
+    "browse.removeTags.footer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Removing a tag also removes the tags inside it."
+          }
+        }
+      }
+    },
+    "browse.removeTags.none": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected notes have no tags."
+          }
+        }
+      }
+    },
+    "browse.removeTags.remove": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove"
+          }
+        }
+      }
+    },
+    "browse.removeTags.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove Tags"
+          }
+        }
+      }
+    },
     "browse.renameSearch.rename": {
       "localizations": {
         "en": {
@@ -1843,6 +2171,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Rename Saved Search"
+          }
+        }
+      }
+    },
+    "browse.reset.resetCounts": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset repetition and lapse counts"
+          }
+        }
+      }
+    },
+    "browse.reset.restorePosition": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore original position where possible"
           }
         }
       }
@@ -2165,6 +2513,188 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tags"
+          }
+        }
+      }
+    },
+    "browse.setDue.error.empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a number of days."
+          }
+        }
+      }
+    },
+    "browse.setDue.error.malformed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a number of days, such as 3, or a range, such as 3-7."
+          }
+        }
+      }
+    },
+    "browse.setDue.error.tooLarge": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This number is too large."
+          }
+        }
+      }
+    },
+    "browse.setDue.field": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due in Days"
+          }
+        }
+      }
+    },
+    "browse.setDue.footer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "0 is today and 1 is tomorrow. A range such as 3-7 gives each card its own day in it."
+          }
+        }
+      }
+    },
+    "browse.setDue.preview.days": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@days@"
+          },
+          "substitutions": {
+            "days": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Due in %2$@ day"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Due in %2$@ days"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.setDue.preview.range": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due in %1$@ to %2$@ days"
+          }
+        }
+      }
+    },
+    "browse.setDue.preview.today": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due today"
+          }
+        }
+      }
+    },
+    "browse.setDue.preview.tomorrow": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due tomorrow"
+          }
+        }
+      }
+    },
+    "browse.setDue.set": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set"
+          }
+        }
+      }
+    },
+    "browse.setDue.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set Due Date"
+          }
+        }
+      }
+    },
+    "browse.sheet.cancel": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "browse.sheet.cancelling": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelling…"
+          }
+        }
+      }
+    },
+    "browse.sheet.failed.other": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri couldn’t finish this command. Nothing was changed."
+          }
+        }
+      }
+    },
+    "browse.sheet.failed.rowsChanged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The rows changed after this sheet opened, so nothing was changed. Close the sheet and choose the rows again."
+          }
+        }
+      }
+    },
+    "browse.sheet.working": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Working…"
           }
         }
       }
@@ -2512,6 +3042,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "· %@ selected"
+          }
+        }
+      }
+    },
+    "browse.tags.prompt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags"
           }
         }
       }

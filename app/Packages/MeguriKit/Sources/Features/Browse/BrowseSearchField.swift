@@ -369,22 +369,34 @@ private struct BrowseSuggestionRow: View {
 // MARK: Save Search and Contains…
 
 /// T13's sheet: a name, Cancel and Save; a name already saved asks whether
-/// to replace it (Replace, Cancel).
+/// to replace it (Replace, Cancel). The command sheets' frame (U276): the
+/// title leads above the field on the Mac, and Save stays disabled while the
+/// name is empty or white space.
 private struct SaveSearchSheet: View {
     let model: BrowseModel
     @State private var name = ""
     @FocusState private var focused: Bool
 
+    private var canSave: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.savingSearch?.saving != true }
+
     var body: some View {
-        // A stack of its own, so Save and Cancel show on touch as on the Mac.
-        NavigationStack { form }
+        BrowseSheetFrame(title: Text("browse.saveSearch.title", bundle: .module), confirm: Text("browse.saveSearch.save", bundle: .module),
+                         canConfirm: canSave, canCancel: true, identifier: "browse.saveSearch",
+                         onConfirm: save, onCancel: { model.cancelSavingSearch() }) {
+            form
+        }
+    }
+
+    private func save() {
+        guard canSave else { return }
+        model.saveSearch(named: name)
     }
 
     private var form: some View {
         Form {
             TextField(text: $name) { Text("browse.saveSearch.name", bundle: .module) }
                 .focused($focused)
-                .onSubmit { model.saveSearch(named: name) }
+                .onSubmit(save)
                 .accessibilityIdentifier("browse.saveSearch.name")
             if model.savingSearch?.failed == true {
                 Text("browse.saveSearch.failed", bundle: .module)
@@ -392,17 +404,11 @@ private struct SaveSearchSheet: View {
                     .accessibilityIdentifier("browse.saveSearch.failed")
             }
         }
+        #if os(macOS)
+        .formStyle(.columns)
+        #else
         .formStyle(.grouped)
-        .navigationTitle(Text("browse.saveSearch.title", bundle: .module))
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button { model.cancelSavingSearch() } label: { Text("browse.saveSearch.cancel", bundle: .module) }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button { model.saveSearch(named: name) } label: { Text("browse.saveSearch.save", bundle: .module) }
-                    .accessibilityIdentifier("browse.saveSearch.save")
-            }
-        }
+        #endif
         .alert(Text(verbatim: BrowseStrings.replaceSavedSearch(model.savingSearch?.replacing ?? "")), isPresented: Binding(
             get: { model.savingSearch?.replacing != nil }, set: { if !$0 { model.keepNaming() } }),
                presenting: model.savingSearch?.replacing) { replacing in

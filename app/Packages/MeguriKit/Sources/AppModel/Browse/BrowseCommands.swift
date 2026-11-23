@@ -15,16 +15,15 @@ public nonisolated enum BrowseCommand: Hashable, Sendable {
     /// N21.8's Note › Edit Note in Browse: the inspector's first field.
     case editNote
 
-    /// The commands that run now (U275). The others open a sheet or a pane
-    /// that a later unit builds (Change Deck, the tags, Set Due Date and
-    /// Forget: U276; Find and Replace and Find Duplicates: U277; Change Note
-    /// Type: U284; Edit Note: the inspector, U273): until then they are in
-    /// their places, disabled.
+    /// The commands that run now (U275) or open their sheet (U276). The
+    /// others open a sheet that a later unit builds (Find and Replace and
+    /// Find Duplicates: U277; Change Note Type: U284): until then they are
+    /// in their places, disabled.
     public var built: Bool {
         switch self {
         case .flag, .suspend, .unsuspend, .bury, .unbury, .delete, .editNoteType, .editNote: true
-        case .changeDeck, .addTags, .removeTags, .setDueDate, .forget, .changeNoteType, .findReplace, .findDuplicates:
-            false
+        case .changeDeck, .addTags, .removeTags, .setDueDate, .forget: true
+        case .changeNoteType, .findReplace, .findDuplicates: false
         }
     }
 
@@ -52,6 +51,8 @@ public nonisolated struct BrowseTargetFacts: Equatable, Sendable {
     /// V7: the target cards' distinct home decks, and that deck when one.
     public var decks: UInt64?
     public var deck: Int64?
+    /// Every one of those decks, ascending.
+    public var deckIDs: [Int64]?
 
     public init(mode: BrowseMode, rows: Int, cards: UInt64? = nil, notes: UInt64? = nil, suspended: UInt64? = nil,
                 buried: UInt64? = nil, notetypes: [Int64]? = nil, noteCards: UInt64? = nil) {
@@ -136,6 +137,9 @@ public nonisolated struct BrowseDeleteQuestion: Identifiable, Equatable, Sendabl
 public nonisolated struct BrowseAnnouncement: Equatable, Sendable {
     public enum Kind: Sendable, Hashable {
         case suspended, unsuspended, buried, unburied, flagged, unflagged, deleted
+        /// U276's sheets: cards moved, notes changed (tags), cards given a
+        /// due date, cards forgotten.
+        case moved, tagsChanged, rescheduled, forgotten
     }
 
     public let kind: Kind
@@ -186,8 +190,15 @@ public final class BrowseCommands {
     public private(set) var announcement: BrowseAnnouncement?
     /// A command that was refused or failed: nothing was written (K4).
     public private(set) var failed: BrowseCommand?
+    /// U276: the command sheet open, on the rows it opened on.
+    public private(set) var sheet: BrowseSheet?
 
-    @ObservationIgnored private let results: BrowseResults
+    @ObservationIgnored let results: BrowseResults
+    /// The sheets' own reads (U276).
+    @ObservationIgnored let sheetReads: any BrowseSheetReads
+    /// What Set Due Date and Forget prefill (B10), read ahead so a sheet
+    /// opens filled; read again after each of them runs.
+    @ObservationIgnored private var sheetDefaults: BrowseSheetDefaults?
     @ObservationIgnored private var factsTarget: BrowseTarget?
     /// The rows the core's counts in `facts` were last read for.
     @ObservationIgnored private(set) var factsRead: BrowseTarget?
@@ -196,7 +207,7 @@ public final class BrowseCommands {
     @ObservationIgnored private var serial: UInt64 = 0
     @ObservationIgnored private var reading = false
     /// Raised when the collection goes: a command started before lands nothing.
-    @ObservationIgnored private var generation: UInt64 = 0
+    @ObservationIgnored private(set) var generation: UInt64 = 0
     @ObservationIgnored private var readAgain = false
     /// A command recorded its undo step: its seq (the step's id) and the
     /// title Edit › Undo shows for it (V8.3).
@@ -208,8 +219,9 @@ public final class BrowseCommands {
     /// The collection is ready for writes.
     @ObservationIgnored public var ready: @MainActor () -> Bool = { true }
 
-    init(results: BrowseResults) {
+    init(results: BrowseResults, sheetReads: any BrowseSheetReads) {
         self.results = results
+        self.sheetReads = sheetReads
     }
 
     // MARK: What each command shows
@@ -237,7 +249,7 @@ public final class BrowseCommands {
     /// command running, no question open.
     private func available(_ rows: Set<Int>?) -> Bool {
         guard let list = results.list, !list.released, !results.isDimmed else { return false }
-        return !busy && deleteQuestion == nil && ready()
+        return !busy && deleteQuestion == nil && sheet == nil && ready()
     }
 
     /// The selection or the list changed: its facts are read again, the
@@ -329,6 +341,7 @@ public final class BrowseCommands {
         facts.notetypes = counts.notetypes
         facts.decks = counts.decks
         facts.deck = counts.deck
+        facts.deckIDs = counts.deckIDs
         if counts.notes == 1 {
             facts.noteCards = target.mode == .notes ? counts.cards : try? await session.cardsOfNotes(of: target)
         }
@@ -389,6 +402,9 @@ public final class BrowseCommands {
             if let id = facts?.notetypes?.first { openNoteType(id) }
         case .editNote:
             editNote()
+        case .changeDeck, .addTags, .removeTags, .setDueDate, .forget:
+            guard let kind = BrowseSheetKind(command), let target = menu ?? results.target() else { return }
+            openSheet(kind, on: target)
         default:
             return
         }
@@ -462,6 +478,10 @@ public final class BrowseCommands {
         case .flag(0): .unflagged
         case .flag: .flagged
         case .delete: .deleted
+        case .changeDeck: .moved
+        case .addTags, .removeTags: .tagsChanged
+        case .setDueDate: .rescheduled
+        case .forget: .forgotten
         default: nil
         }
         guard let kind else { return }
@@ -564,6 +584,92 @@ public final class BrowseCommands {
 
     public func selectAll() { results.selectAll() }
 
+    // MARK: Sheets (U276)
+
+    /// The sheet of `kind` on `target`, the rows as they are now: its
+    /// command acts on exactly these, at this revision.
+    private func openSheet(_ kind: BrowseSheetKind, on target: BrowseTarget) {
+        serial &+= 1
+        let sheet = BrowseSheet(id: serial, kind: kind, target: target, commands: self, reads: sheetReads,
+                                defaults: sheetDefaults)
+        self.sheet = sheet
+        // The selection's counts when they are the ones read for these rows.
+        let known: BrowseSelectionCounts? = if target == factsRead, let facts, facts.complete, let cards = facts.cards,
+            let notes = facts.notes, let suspended = facts.suspended, let buried = facts.buried,
+            let notetypes = facts.notetypes {
+            BrowseSelectionCounts(cards: cards, notes: notes, suspended: suspended, buried: buried, decks: facts.decks ?? 0,
+                                  deck: facts.deck, deckIDs: facts.deckIDs ?? [], notetypes: notetypes)
+        } else { nil }
+        sheet.load(session: results.commandSession, facts: known, waitFirst: factsTask?.task)
+        if sheetDefaults == nil, kind == .setDueDate || kind == .forget {
+            Task { [weak sheet] in
+                guard let defaults = try? await sheetReads.sheetDefaults() else { return }
+                sheetDefaults = defaults
+                sheet?.prefill(defaults)
+            }
+        }
+    }
+
+    /// Reads ahead what Set Due Date and Forget prefill, so their sheets
+    /// open filled (a pure read).
+    func preloadSheetDefaults() {
+        let generation = generation
+        Task {
+            guard let defaults = try? await sheetReads.sheetDefaults(), self.generation == generation else { return }
+            sheetDefaults = defaults
+        }
+    }
+
+    /// The sheet's Cancel, Esc, or the end of its command.
+    func closeSheet(_ sheet: BrowseSheet) {
+        if self.sheet === sheet { self.sheet = nil }
+    }
+
+    /// The sheet closed by the system (a window closing).
+    public func dismissSheet() {
+        guard let sheet else { return }
+        if sheet.isRunning { sheet.cancel() } else { self.sheet = nil }
+    }
+
+    /// Runs the sheet's command on its rows. No second try on other rows:
+    /// when the list moved on the core refuses the rows and the sheet says
+    /// so, nothing written.
+    func runSheet(_ sheet: BrowseSheet, _ action: BrowseSheet.Either) {
+        guard let session = results.commandSession else { return sheet.failed(.failed) }
+        let generation = generation, target = sheet.target, command = sheet.kind.command
+        // A list that already moved on is refused here, as the core would.
+        if let list = results.list, list.handle != target.handle || list.revision != target.revision {
+            return sheet.failed(.rowsChanged)
+        }
+        Task {
+            do {
+                let running = switch action {
+                case .card(let action): try await session.start(action, on: target)
+                case .note(let action): try await session.start(action, on: target)
+                }
+                guard self.generation == generation else { return }
+                sheet.started(running)
+                let progress = Task { @MainActor in
+                    for await report in running.progress { sheet.progressed(report) }
+                }
+                defer { progress.cancel() }
+                let result = try await running.result()
+                guard self.generation == generation else { return }
+                closeSheet(sheet)
+                finished(command, count: nil, result: result)
+                if command == .setDueDate || command == .forget { preloadSheetDefaults() }
+            } catch {
+                guard self.generation == generation else { return }
+                if let failure = BrowseSheet.failure(error) {
+                    sheet.failed(failure)
+                } else {
+                    // Cancelled: nothing was written.
+                    closeSheet(sheet)
+                }
+            }
+        }
+    }
+
     /// The collection went: nothing started before lands.
     func reset() {
         generation &+= 1
@@ -573,5 +679,7 @@ public final class BrowseCommands {
         facts = nil
         deleteQuestion = nil
         failed = nil
+        sheet = nil
+        sheetDefaults = nil
     }
 }

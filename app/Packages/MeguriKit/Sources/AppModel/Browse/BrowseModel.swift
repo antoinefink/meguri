@@ -157,13 +157,17 @@ public final class BrowseModel {
     /// "with a search" replaces the query by its reading.
     @ObservationIgnored public var takeEntrySearch: @MainActor () -> String? = { nil }
 
+    /// `sheetReads` defaults to the backend's when it gives them, else the
+    /// core's (U276).
     public init(backend: any BrowseBackend, store: BrowseDeviceStore = BrowseDeviceStore(defaults: nil),
-                inspectorBackend: any BrowseInspectorBackend = CoreBrowseInspectorBackend()) {
+                inspectorBackend: any BrowseInspectorBackend = CoreBrowseInspectorBackend(),
+                sheetReads: (any BrowseSheetReads)? = nil) {
         self.backend = backend
         self.store = store
         let results = BrowseResults(backend: backend)
         self.results = results
-        let commands = BrowseCommands(results: results)
+        let commands = BrowseCommands(results: results,
+                                      sheetReads: sheetReads ?? (backend as? any BrowseSheetReads) ?? CoreBrowseSheetReads())
         self.commands = commands
         let device = store.load()
         let inspector = BrowseInspector(backend: inspectorBackend, results: results, commands: commands,
@@ -196,7 +200,11 @@ public final class BrowseModel {
         guard ready() else { return }
         if !opened { open() }
         takeHandedSearch()
-        if stale { reload() }
+        if stale {
+            reload()
+            // U276: Set Due Date's and Forget's remembered inputs, so their sheets open filled.
+            commands.preloadSheetDefaults()
+        }
         // The rows of the query, once the first open has read it (T14).
         if !openInFlight, !results.hasRun { showResults() }
     }
@@ -506,6 +514,7 @@ public final class BrowseModel {
             if !opened { open() }
             takeHandedSearch()
             reload()
+            commands.preloadSheetDefaults()
         }
     }
 
