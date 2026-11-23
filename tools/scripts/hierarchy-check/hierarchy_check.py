@@ -15,7 +15,8 @@ Reads the JSON that AgentDriverTests writes before and after every drive step
 - duplicate-identifier: one identifier on several elements;
 - text-overlap: two text elements of one window whose visible frames overlap
   (R1965); a text inside a scrolling container shows only where that
-  container does, so a row scrolled past its edge overlaps nothing there;
+  container does, so a row scrolled past its edge overlaps nothing there; on
+  touch, nor where a navigation bar covers the scroll view running under it;
 - text-outside-window: a text element that is not wholly inside its window or
   sheet and not inside a scrolling container (R1965).
 
@@ -626,6 +627,34 @@ def navigation_bar_title_pairs(root):
     return pairs
 
 
+def under_bars(element, rect, bars):
+    """On touch, the part of a scrolled text's shown rect that no navigation
+    bar of its window covers: a scroll view runs under the bar, which draws
+    over its content with the scroll edge effect, so a heading scrolled up
+    under the title is not beside it on screen. Only for text inside a
+    scrolling container that reaches up under the bar; the bar's own texts
+    and fixed content keep their overlaps. None when a bar covers it all."""
+    if rect is None or element.under(BARS):
+        return rect
+    containers = [a for a in element.ancestors if a.type in SCROLLING]
+    if not containers:
+        return rect
+    x, y, w, h = rect
+    x1, y1 = x + w, y + h
+    for bar in bars:
+        if bar.window() is not element.window():
+            continue
+        bottom = bar.y + bar.h
+        if not any(c.y < bottom for c in containers):
+            continue
+        if min(x1, bar.x + bar.w) - max(x, bar.x) <= 0:
+            continue
+        y = max(y, bottom)
+    if y1 <= y:
+        return None
+    return x, y, w, y1 - y
+
+
 def check(document):
     """The issues in one hierarchy export, as a list of dicts with a `kind`."""
     if not isinstance(document, dict) or document.get("schema") != 1 or not isinstance(document.get("root"), dict):
@@ -701,6 +730,9 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
 
     texts = [e for e in elements if e.type in TEXT and e.visible]
     shown = [(e, e.shown()) for e in texts]
+    if document.get("platform") != "mac":
+        bars = [e for e in elements if e.type == "navigationBar" and e.visible]
+        shown = [(e, under_bars(e, r, bars)) if r else (e, r) for e, r in shown]
     shown = [(e, r) for e, r in shown if r]
     for i, (a, (ax, ay, aw, ah)) in enumerate(shown):
         for b, (bx, by, bw, bh) in shown[i + 1:]:

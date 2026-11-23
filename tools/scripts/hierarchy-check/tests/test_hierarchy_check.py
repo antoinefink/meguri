@@ -1033,6 +1033,22 @@ class TextOverlap(unittest.TestCase):
             el("staticText", "testhooks.shell.state", "layout=sidebar", f=(0, 1334.5, 1032, 41.5)), window=(0, 0, 1032, 1376))
         self.assertEqual(hierarchy_check.check(tree), [])
 
+    def test_a_heading_scrolled_under_a_touch_navigation_bar_does_not_overlap_its_title(self):
+        # Seen in the Statistics page's iPad capture: the scroll view runs
+        # under the navigation bar, which covers the heading scrolled up there.
+        bar = el("navigationBar", "Statistics", f=(0, 32, 1032, 54), children=[
+            el("staticText", label="Statistics", f=(340, 37.5, 67.5, 18.5))])
+        tree = doc(bar, el("scrollView", "stats.page.content", f=(0, 0, 1032, 1376), children=[
+            el("staticText", label="Knowledge", f=(336, 25, 103, 24)),
+            el("staticText", label="Retention", f=(336, 80, 103, 24))]), window=(0, 0, 1032, 1376))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_a_fixed_label_under_a_touch_navigation_bar_still_overlaps(self):
+        bar = el("navigationBar", "Statistics", f=(0, 32, 1032, 54), children=[
+            el("staticText", label="Statistics", f=(340, 37.5, 67.5, 18.5))])
+        tree = doc(bar, el("staticText", label="Knowledge", f=(336, 40, 103, 24)), window=(0, 0, 1032, 1376))
+        self.assertEqual(kinds(hierarchy_check.check(tree)), ["text-overlap"])
+
     def test_the_visible_part_of_a_clipped_row_still_overlaps(self):
         # A label floating over the scroll view's last visible points.
         tree = doc(el("scrollView", f=(0, 0, 400, 400), children=[
