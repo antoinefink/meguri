@@ -737,6 +737,25 @@ public enum CoreBrowseQuery {
         }
     }
 
+    /// Rename… of a user saved search (T13, K7.2): `old` becomes `newName`
+    /// with every `"` removed, replacing a saved search of that name (the
+    /// caller asks first), as one undoable "Rename Saved Search" step.
+    /// `written` is false when the cleaned name is empty, equals `old`, or
+    /// no saved search is named `old`.
+    public static func renameSavedSearch(_ old: String, to newName: String) async throws(BridgeError) -> BoolMutation {
+        try await InteractiveLane.shared.call(.renameBrowserSavedSearch) {
+            BoolMutation(try renameBrowserSavedSearch(old: old, newName: newName))
+        }
+    }
+
+    /// Delete of user saved searches (T13, K7.2), one undoable "Delete Saved
+    /// Search" step; `written` is false when no name was a saved search.
+    public static func deleteSavedSearches(_ names: [String]) async throws(BridgeError) -> BoolMutation {
+        try await InteractiveLane.shared.call(.deleteBrowserSavedSearches) {
+            BoolMutation(try deleteBrowserSavedSearches(names: names))
+        }
+    }
+
     /// V7, V8.1: the counts of a selection's target cards and notes, as a
     /// job. A newer call for a selection of the same session cancels this
     /// one. When the selection itself is refused, `value()` throws that
