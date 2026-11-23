@@ -25,6 +25,7 @@ public struct CollectionEntryView: View {
 /// asked. While the import sheet shows (a refused file, "Choose Another
 /// File"), the sheet presents the picker instead.
 public struct CollectionImportPicker: ViewModifier {
+    @Environment(\.filesPickerDirectory) private var directory
     private let coordinator: CollectionEntryCoordinator?
     private let hosts: Bool
     public init(coordinator: CollectionEntryCoordinator?, hosts: Bool) {
@@ -41,6 +42,7 @@ public struct CollectionImportPicker: ViewModifier {
                                  set: { if !$0, hosts { coordinator?.pickerPresented = false } }),
             allowedContentTypes: [UTType(importedAs: "com.antoinefink.meguri.collection-package")],
             allowsMultipleSelection: false) { coordinator?.selection($0) }
+            .fileDialogDefaultDirectory(directory)
     }
 }
 

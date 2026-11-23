@@ -395,6 +395,10 @@ extension TestHooks {
     }
     /// Source availability only. This helper never inspects or imports a package.
     enum ImportSourceInstaller {
+        /// The folder the package is staged in; the Files pickers open there.
+        static func directory(documents: URL = .documentsDirectory) -> URL {
+            documents.appending(path: "RF2 Import Tests", directoryHint: .isDirectory)
+        }
         static func install(from source: URL, bundleIdentifier: String, documents: URL = .documentsDirectory) throws(TestHookError) {
             guard bundleIdentifier.hasSuffix(".dev") else { throw TestHookError("ImportSourceInstaller requires a .dev bundle") }
             do {
@@ -403,7 +407,7 @@ extension TestHooks {
                       values.isRegularFile == true, values.isSymbolicLink != true else {
                     throw TestHookError("-MeguriImportSource requires a regular public synthetic .colpkg fixture")
                 }
-                let directory = documents.appending(path: "RF2 Import Tests", directoryHint: .isDirectory)
+                let directory = Self.directory(documents: documents)
                 let files = FileManager.default
                 if files.fileExists(atPath: directory.path) {
                     let values = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])

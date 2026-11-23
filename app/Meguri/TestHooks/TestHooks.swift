@@ -180,6 +180,9 @@ enum TestHooks {
                 #if os(iOS)
                 .background(SizeClassOverride(sizeClass: session.options.sizeClass))
                 .environment(\.layoutFollowsForcedSizeClass, session.options.sizeClass != nil)
+                // The Files pickers open where -MeguriImportSource staged its package.
+                .environment(\.filesPickerDirectory,
+                    session.options.importSource == nil ? nil : TestHooks.ImportSourceInstaller.directory())
                 #endif
                 .modifier(AppearanceOverrides(options: session.options))
             }

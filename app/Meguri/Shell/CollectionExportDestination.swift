@@ -6,6 +6,9 @@ import UniformTypeIdentifiers
 
 struct CollectionExportDestination: View {
     let coordinator: CollectionExportCoordinator
+    #if os(iOS)
+    @Environment(\.filesPickerDirectory) private var directory
+    #endif
     var body: some View {
         CollectionExportSheet(coordinator: coordinator)
         #if os(macOS)
@@ -13,7 +16,7 @@ struct CollectionExportDestination: View {
         #else
             .sheet(isPresented: Binding(get: { coordinator.destinationPresented }, set: { _ in })) {
                 if let lease = coordinator.providerLease {
-                    CollectionFilesPicker(coordinator: coordinator, url: lease.url)
+                    CollectionFilesPicker(coordinator: coordinator, url: lease.url, directory: directory)
                         .interactiveDismissDisabled()
                 }
             }
@@ -46,9 +49,11 @@ import UIKit
 private struct CollectionFilesPicker: UIViewControllerRepresentable {
     let coordinator: CollectionExportCoordinator
     let url: URL
+    let directory: URL?
     func makeCoordinator() -> Delegate { Delegate(coordinator) }
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let picker = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+        picker.directoryURL = directory
         picker.delegate = context.coordinator
         return picker
     }

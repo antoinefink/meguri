@@ -81,7 +81,10 @@ public struct DeckNameSheet: View {
                     LabeledContent { Text(verbatim: finalName) } label: {
                         Text("Saved name", bundle: .module)
                     }
-                    .accessibilityElement(children: .combine)
+                    // One element with the label and the name as its value. Combining
+                    // the children dropped the value on the Mac: VoiceOver read only
+                    // "Saved name".
+                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel(Text("Saved name", bundle: .module))
                     .accessibilityValue(Text(verbatim: finalName))
                     .accessibilityIdentifier("home.deckName.savedName")

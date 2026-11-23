@@ -335,7 +335,7 @@ import notify
         #endif
         // N17.3: a finished save closes the export by itself; nothing is left to discard.
         let saved = try exerciseNativeExport(app, bundle, destinationFolder: folder)
-        let settingsContent = element(app, "settings.root.content")
+        let settingsContent = collectionSettingsContent(app)
         XCTAssertFalse(element(app, "settings.importExport.content").exists, app.debugDescription)
         let importCollection = app.buttons["settings.root.importCollection"].firstMatch
         #if os(iOS)
@@ -740,6 +740,18 @@ import notify
         #endif
     }
 
+    /// Where Settings shows its collection file actions: the Settings form itself
+    /// (`settings.root.content`) or, where Settings lists pages, the Collection
+    /// page's form it pushes.
+    private func collectionSettingsContent(_ app: XCUIApplication) -> XCUIElement {
+        #if os(iOS)
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR elementType == %d",
+            "settings.root.content", XCUIElement.ElementType.collectionView.rawValue)).firstMatch
+        #else
+        element(app, "settings.root.content")
+        #endif
+    }
+
     private func openCollectionSettings(_ app: XCUIApplication, _ bundle: String) throws {
         #if os(macOS)
         try app.bringToFront(bundleIdentifier: bundle)
@@ -761,14 +773,18 @@ import notify
         let settings = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.settings",
             sidebarIdentifier: "shell.root.sidebar.settings", compactLabel: "Settings", timeout: 10), app.debugDescription)
         try click(settings, app, bundle)
+        // Settings that lists its pages pushes the Collection page from its row.
+        if let collection = waitForHittable(app.buttons.matching(identifier: "settings.root.collection"), timeout: 5) {
+            try click(collection, app, bundle)
+        }
         #endif
     }
 
     #if os(iOS)
     private func revealSettingsControl(_ identifier: String, _ app: XCUIApplication) throws {
-        let root = element(app, "settings.root.content")
-        let target = root.buttons.matching(identifier: identifier).firstMatch
-        let window = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
+        let root = collectionSettingsContent(app)
+        let target = app.buttons.matching(identifier: identifier).firstMatch
+        let window = app.windows.firstMatch
         let scroll: XCUIElement? = {
             guard root.exists else { return nil }
             if [.scrollView, .table, .collectionView].contains(root.elementType) { return root }
@@ -816,7 +832,7 @@ import notify
     private func exerciseNativeExport(_ app: XCUIApplication, _ bundle: String,
                                       destinationFolder: URL?, destinationFilename: String? = nil) throws -> URL {
         try openCollectionSettings(app, bundle)
-        let settingsContent = element(app, "settings.root.content")
+        let settingsContent = collectionSettingsContent(app)
         XCTAssertTrue(settingsContent.waitForExistence(timeout: 10), "Native navigation must open Settings: \(app.debugDescription)")
         let export = app.buttons["settings.root.exportCollection"].firstMatch
         #if os(iOS)
@@ -1272,8 +1288,21 @@ import notify
         let cancelButton = app.buttons.matching(exactCancel).firstMatch
         let cancelMenuItem = app.menuItems.matching(exactCancel).firstMatch
         let cancelOther = app.otherElements.matching(exactCancel).firstMatch
-        let back = app.buttons.matching(identifier: "BackButton").firstMatch
-        let more = app.buttons.matching(identifier: "OverflowBarButtonItem").firstMatch
+        // The picker's own Back: Settings' BackButton stays in the tree under the sheet.
+        let pickerBar = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"]
+        var back: XCUIElement {
+            let own = pickerBar.buttons.matching(identifier: "BackButton").firstMatch
+            return own.exists ? own : app.buttons.matching(identifier: "BackButton").firstMatch
+        }
+        // iOS 27.2 names the overflow TopOverflowBarButtonItem.
+        let more = app.buttons.matching(NSPredicate(format: "identifier IN %@",
+            ["OverflowBarButtonItem", "TopOverflowBarButtonItem"])).firstMatch
+        // iOS 27.2 labels Back "Back"; the folder shown is the title's actions menu.
+        let folderMenu = pickerBar.buttons.matching(NSPredicate(format: "label ENDSWITH %@", ", Actions Menu")).firstMatch
+        func location() -> String {
+            if folderMenu.exists { return String(folderMenu.label.dropLast(", Actions Menu".count)) }
+            return back.label
+        }
         func actionable(_ target: XCUIElement) -> Bool {
             target.exists && target.isEnabled && target.isHittable
         }
@@ -1283,7 +1312,7 @@ import notify
             return actionable(cancelOther) ? cancelOther : nil
         }
         func completedRoot() -> Bool {
-            !back.exists && actionable(more)
+            !pickerBar.buttons.matching(identifier: "BackButton").firstMatch.exists && actionable(more)
         }
         func captureFailure(_ reason: String) {
             capturePicker(app)
@@ -1315,8 +1344,9 @@ import notify
         var steps = 0
         var visited: Set<String> = []
         while actionableCancel() == nil, actionable(back), steps < 4 {
-            let label = back.label
-            guard ["Meguri", "On My iPhone", "On My iPad", "Browse"].contains(label) else {
+            let label = location()
+            guard ["RF2 Import Tests", "Meguri", "On My iPhone", "On My iPad", "Browse"].contains(label)
+                || (back.label == "Back" && folderMenu.exists) else {
                 captureFailure("Unexpected native Back destination: \(label)")
                 XCTFail("Native export picker left the known local folder hierarchy")
                 return
@@ -1330,7 +1360,7 @@ import notify
             steps += 1
             let navigated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 actionableCancel() != nil
-                    || (actionable(back) && back.label != label)
+                    || (actionable(back) && location() != label)
                     || completedRoot()
             }, object: nil)
             guard XCTWaiter().wait(for: [navigated], timeout: 10) == .completed else {
@@ -1344,7 +1374,7 @@ import notify
             return
         }
         // Only inspect the native overflow once, after Back navigation ends.
-        if !back.exists, actionable(more) {
+        if !pickerBar.buttons.matching(identifier: "BackButton").firstMatch.exists, actionable(more) {
             try click(more, app, bundle)
             let offered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in actionableCancel() != nil }, object: nil)
             if XCTWaiter().wait(for: [offered], timeout: 5) == .completed, let cancel = actionableCancel() {
@@ -1462,8 +1492,22 @@ import notify
             #endif
             try waitForAdmission(localDeck, app, bundle)
         }
-        let entry = element(app, "home.collection.import")
-        XCTAssertTrue(entry.waitForExistence(timeout: 20))
+        // N18.2: Home offers Import only on the welcome screen. With a collection
+        // open, a user imports from Settings › Collection (N15.1).
+        let entry: XCUIElement
+        if hasLocalCollection {
+            try openCollectionSettings(app, bundle)
+            XCTAssertTrue(collectionSettingsContent(app).waitForExistence(timeout: 10), app.debugDescription)
+            #if os(iOS)
+            try revealSettingsControl("settings.root.importCollection", app)
+            #endif
+            entry = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "settings.root.importCollection")),
+                app.debugDescription)
+            XCTAssertTrue(entry.isEnabled)
+        } else {
+            entry = element(app, "home.collection.import")
+            XCTAssertTrue(entry.waitForExistence(timeout: 20))
+        }
         // N17.2: the system picker opens directly; the one sheet follows the choice.
         try click(entry, app, bundle)
         XCTAssertFalse(element(app, "onboarding.collectionImport.content").exists)
@@ -1488,6 +1532,21 @@ import notify
         // Real activation dismisses entry; nothing asks after it (N18.1).
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: entryContent)], timeout: 30), .completed)
+        if hasLocalCollection {
+            // Back to the decks from Settings, as a user would.
+            #if os(macOS)
+            let settings = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
+            if settings.exists {
+                try app.bringToFront(bundleIdentifier: bundle)
+                settings.typeKey("w", modifierFlags: .command)
+                XCTAssertTrue(settings.waitForNonExistence(timeout: 10), "Close the native Settings window")
+            }
+            #else
+            let home = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.decks",
+                sidebarIdentifier: "shell.root.sidebar.home", compactLabel: "Decks", timeout: 30), app.debugDescription)
+            try click(home, app, bundle)
+            #endif
+        }
         let importedDeck = deckRows(app, identifier: "home.deck.row.1788249600212")
         try waitForAdmission(importedDeck, app, bundle)
         XCTAssertFalse(element(app, "onboarding.collectionImport.error").exists)
@@ -1612,7 +1671,9 @@ import notify
         // ImportSource publishes every admitted package under this fixed Files name.
         let labels = ["review", "review.colpkg"]
         let file = app.cells.containing(NSPredicate(format: "label IN %@", labels)).firstMatch
-        let rememberedFile = file.waitForExistence(timeout: 2)
+        // The picker opens in the folder the import hook staged (filesPickerDirectory);
+        // its listing can take several seconds to load in the VM.
+        let rememberedFile = file.waitForExistence(timeout: 20)
         capturePicker(app)
         // The picker remembers folders. iPad can keep its Browse sidebar up.
         if !rememberedFile {
@@ -1772,6 +1833,11 @@ import notify
     private func waitForHittable(_ query: XCUIElementQuery, timeout: TimeInterval = 20) -> XCUIElement? {
         var target: XCUIElement?
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            // The first match is usually the one: under host load each extra
+            // element resolution is a slow snapshot, and one long evaluation was
+            // interrupted by the waiter's deadline (2026-11-20).
+            let first = query.firstMatch
+            if first.exists && first.isHittable { target = first; return true }
             target = query.allElementsBoundByIndex.first { $0.exists && $0.isHittable }
             return target != nil
         }, object: nil)
