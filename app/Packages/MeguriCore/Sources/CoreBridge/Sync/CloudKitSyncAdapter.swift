@@ -555,7 +555,18 @@ public actor CloudKitSyncAdapter {
         guard !quiescing, requestedRunning, intentGeneration == intent else { throw CancellationError() }
         #endif
     }
+    // A shutdown that cancels this start also ends its account read and
+    // admission, so a later step (runtime preparation, SDK registration) then
+    // refuses an unverified or unavailable account. Report the cancellation
+    // that caused it. Typed outcomes, such as an original guard refusal, keep
+    // their own qualification.
     private func startPrepared(automaticallySync: Bool, readIdentity: Bool, intent: UInt64, execution: CoreCloudPolicyExecution? = nil, preparationAttempt: CoreCloudPolicyExecution? = nil) async throws {
+        do {
+            try await startPreparedSteps(automaticallySync: automaticallySync, readIdentity: readIdentity, intent: intent,
+                execution: execution, preparationAttempt: preparationAttempt)
+        } catch is BridgeError where Task.isCancelled { throw CancellationError() }
+    }
+    private func startPreparedSteps(automaticallySync: Bool, readIdentity: Bool, intent: UInt64, execution: CoreCloudPolicyExecution?, preparationAttempt: CoreCloudPolicyExecution?) async throws {
         try checkIntent(intent)
         for task in stopTasks.values {
             #if DEBUG
@@ -1947,8 +1958,10 @@ public actor CloudKitSyncAdapter {
                     _ = try await core.finishFetch(sdk: origin, id: id, successful: false)
                     try await reportOperation(execution, zones: [.root, .collection], kind: .fetch, started: false, error: error)
                 }
-                // Cleanup above retains its own errors. Only this drained
-                // preparation refusal can end without a fetch result or retry.
+                // Cleanup above retains its own errors. Here only this drained
+                // preparation refusal ends without a fetch result or retry; the
+                // policy action's catch also lets a fetch that ConfigureAutomatic
+                // retired inside the SDK end that way (P4, P15).
                 if reservedFetch, pinnedOrigin == origin,
                    invocationFailure?.original === instance.stopWitness,
                    instance.retirementFailure == nil, let execution,
@@ -2664,13 +2677,21 @@ public actor CloudKitSyncAdapter {
             // engine. That refusal supplies no transport result. The original
             // command's control guard must still pass; a changed account,
             // binding, generation or actual SDK failure is not this case.
-            guard case .requestSend = command.action,
-                  await schedulingRetired(instance, execution: execution, error: error) else { throw error }
+            // A fetch retired after it entered the SDK is the same case: P4's
+            // ConfigureAutomatic stops the old instance without waiting for its
+            // fetch, and that cancellation is no failing cycle (P15). Its
+            // retired callbacks drain nothing, so no fetch result is claimed.
+            switch command.action {
+            case .requestSend, .requestFetch: break
+            default: throw error
+            }
+            guard await schedulingRetired(instance, execution: execution, error: error) else { throw error }
         }
     }
     private func schedulingRetired(_ instance: Instance, execution: CoreCloudPolicyExecution, error: any Error) async -> Bool {
         guard !Task.isCancelled else { return false }
-        guard error is CancellationError || (error as? BridgeError) == .cloudPolicy(.staleCommand)
+        // CloudKit reports its own cancellation as operationCancelled (code 20).
+        guard cloudOperationWasCancelled(error) || (error as? BridgeError) == .cloudPolicy(.staleCommand)
                 || (error as? BridgeError) == .cloudConnection(.authorityChanged) else { return false }
         func ownedStop() -> Bool {
             (instance.firstStopReason == .policyConfigureAutomatic || instance.firstStopReason == .configureAutomatic)

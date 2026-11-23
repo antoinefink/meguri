@@ -256,7 +256,7 @@ actor ServiceSDK: CloudKitEngine {
     }
     func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue {
         try await waitForEventBookkeeping()
-        guard !released else { throw ServiceWorkflowFailure.refused }
+        guard !released else { throw CancellationError() }
         cancelled = false
         let lifetime = lifetime, generation = lifetime.authority()
         return CloudKitNetworkEnqueue { prepare, validate in
@@ -295,7 +295,7 @@ actor ServiceSDK: CloudKitEngine {
     }
     func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
         try await waitForEventBookkeeping()
-        guard !released else { throw ServiceWorkflowFailure.refused }
+        guard !released else { throw CancellationError() }
         cancelled = false
         let lifetime = lifetime, generation = lifetime.authority()
         if scheduledFirstFetch {
@@ -361,7 +361,10 @@ actor ServiceSDK: CloudKitEngine {
         try await fetchPass(options: options)
     }
     private func requireNetwork() throws {
-        guard !eventActive, !cancelled, !released, delegate != nil else { throw ServiceWorkflowFailure.refused }
+        guard !eventActive else { throw ServiceWorkflowFailure.refused }
+        // As NativeCloudKitEngine: a cancelled or released SDK ends its
+        // network call as a cancellation, never as a distinct SDK failure.
+        guard !cancelled, !released, delegate != nil else { throw CancellationError() }
         try Task.checkCancellation()
     }
     func sendChanges(zones: [String]) async throws {
