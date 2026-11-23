@@ -145,10 +145,11 @@ final class MacBrowseInspectorTests: XCTestCase {
         let row = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "browse.sidebar.deck.", name)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), "the deck row \(name)")
-        let count = row.value as? String ?? ""
+        // "90 cards" on the row; "90 of 415 cards · 1 selected" on the status line.
+        let count = (row.value as? String ?? "").split(separator: " ").first.map(String.init) ?? ""
         row.click()
         let status = element(app, "browse.status.text")
-        XCTAssertTrue(waitUntil(timeout: 30) { !count.isEmpty && (status.value as? String ?? "").hasPrefix(count) },
+        XCTAssertTrue(waitUntil(timeout: 30) { !count.isEmpty && (status.value as? String ?? "").hasPrefix(count + " ") },
                       "the deck's own results: \(name) \(count) \(status.value as? String ?? "")")
         try app.bringToFront(bundleIdentifier: bundle)
     }
