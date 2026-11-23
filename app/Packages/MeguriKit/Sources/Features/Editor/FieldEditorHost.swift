@@ -27,7 +27,25 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     public private(set) var fieldFocused = false
     /// Browse's inspector: the page opens a note in its "browse" mode, with
     /// no field focused (`browser/inspector` I3).
-    public var browsing = false
+    public var browsing = false {
+        didSet {
+            #if os(macOS)
+            (webView as? FieldEditorMacWebView)?.inInspector = browsing
+            #endif
+        }
+    }
+    /// Browse's inspector: the collection's media folder, which the page's
+    /// thumbnails load from; nil loads none.
+    public var mediaDirectory: URL? {
+        get { document.mediaDirectory }
+        set { document.mediaDirectory = newValue }
+    }
+    /// Browse's inspector: the caret's line in the page, top and bottom in
+    /// points, so the inspector's scroll view keeps it in sight.
+    public private(set) var caret: ClosedRange<Double>?
+    /// Browse's inspector: a sound chip or a thumbnail was clicked.
+    public var onPlayMedia: (@MainActor (String) -> Void)?
+    public var onOpenMedia: (@MainActor (String) -> Void)?
     private let isCurrent: @MainActor () -> Bool
     private let document: EditorDocument
     private let relay: EditorMessageRelay
@@ -77,6 +95,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         super.init()
         pageReady = true; loadID = previous.loadID; firstLoad = previous.loadID
         browsing = previous.browsing
+        onPlayMedia = previous.onPlayMedia; onOpenMedia = previous.onOpenMedia
         relay.owner = self; webView.navigationDelegate = self
         #if os(iOS)
         (webView as? FieldEditorWebView)?.owner = self
@@ -108,7 +127,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         view.isOpaque = false; view.backgroundColor = .clear; view.scrollView.backgroundColor = .clear
         webView = view
         #else
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = FieldEditorMacWebView(frame: .zero, configuration: configuration)
         #endif
         super.init()
         relay.owner = self; webView.navigationDelegate = self
@@ -297,7 +316,13 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     public enum InlineFormat: String, CaseIterable, Sendable { case bold, italic, underline, superscript, `subscript` }
 
     /// F2: the commands act on the focused rich field only.
-    public var canFormat: Bool { editable && !held && fieldFocused && focusedMode == .rich }
+    public var canFormat: Bool { Self.formats(editable: editable, held: held, fieldFocused: fieldFocused, mode: focusedMode) }
+    /// Option A: the source toggle, like the rest of the bar, only while a field has the focus.
+    public var canToggleSource: Bool { editable && !held && fieldFocused && focusedMode != nil }
+    /// The bar's rule: a page taking input, a field with the focus, in rich mode.
+    nonisolated static func formats(editable: Bool, held: Bool, fieldFocused: Bool, mode: NoteEditorDraft.Mode?) -> Bool {
+        editable && !held && fieldFocused && mode == .rich
+    }
     /// W2: Cloze in a cloze note type's cloze field.
     public var canCloze: Bool {
         guard canFormat, let ord = draft.focusedField else { return false }
@@ -480,6 +505,10 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
             }
         case "focusLeave": draft.setFocus(nil); focusLeave?(message.body["direction"] as? String == "previous")
         case "contentHeight": contentHeight = EditorBridgeMessage.number(message.body["height"])!
+        case "caret":
+            caret = EditorBridgeMessage.number(message.body["top"])!...EditorBridgeMessage.number(message.body["bottom"])!
+        case "playMedia": if let name = MediaName.plain(message.body["name"] as! String) { onPlayMedia?(name) }
+        case "openMedia": if let name = MediaName.plain(message.body["name"] as! String) { onOpenMedia?(name) }
         default: throw EditorRuntimeError.invalidMessage
         }
         refreshAccessory()
@@ -572,6 +601,25 @@ private struct FieldEditorMount: UIViewRepresentable {
     let host: FieldEditorHost
     func makeUIView(context: Context) -> WKWebView { host.webView }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+#endif
+
+#if os(macOS)
+/// In Browse's inspector the page is as tall as its fields and sits in the
+/// pane's scroll view: it never scrolls itself, so the wheel goes to the
+/// scroll view, and it paints no background of its own, so the pane's shows
+/// through (the page's own CSS is transparent there).
+final class FieldEditorMacWebView: WKWebView {
+    var inInspector = false {
+        didSet {
+            // WebKit's background switch has no public setter on the Mac; KVC reaches it
+            // only where it exists, and the page stays readable on its default otherwise.
+            if responds(to: NSSelectorFromString("_setDrawsBackground:")) { setValue(!inInspector, forKey: "drawsBackground") }
+        }
+    }
+    override func scrollWheel(with event: NSEvent) {
+        if inInspector, let next = nextResponder { next.scrollWheel(with: event) } else { super.scrollWheel(with: event) }
+    }
 }
 #endif
 

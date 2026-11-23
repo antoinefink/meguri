@@ -1,3 +1,4 @@
+import AVFoundation
 import CardRendering
 import CoreBridge
 import Foundation
@@ -96,6 +97,25 @@ public final class BrowseInspector {
         -> any BrowseFieldRuntime)?
     /// A save recorded its undo step: its seq and V8.3's title, "Edit Note".
     @ObservationIgnored public var stepRecorded: @MainActor (UInt64, String) -> Void = { _, _ in }
+    /// The collection's media folder: the fields' thumbnails and sound chips.
+    @ObservationIgnored public var mediaDirectory: URL?
+    @ObservationIgnored private var player: AVAudioPlayer?
+
+    /// A sound chip was clicked: its file plays (once; a new click starts it again).
+    public func playSound(_ name: String) {
+        guard let directory = mediaDirectory else { return }
+        player?.stop()
+        player = try? AVAudioPlayer(contentsOf: directory.appending(path: name, directoryHint: .notDirectory))
+        player?.play()
+    }
+
+    /// The file of a thumbnail, for the larger view.
+    public func mediaFile(_ name: String) -> URL? {
+        guard let directory = mediaDirectory else { return nil }
+        let url = directory.appending(path: name, directoryHint: .notDirectory)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     /// How long a read runs before the pane says it is loading.
     @ObservationIgnored public var loadingDelay: Duration = .milliseconds(500)
 

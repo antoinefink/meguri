@@ -838,13 +838,17 @@ struct ReviewLeechButton: View {
     var body: some View {
         Button { shown = true } label: {
             Label { Text("review.leech.title", bundle: .module) } icon: {
-                // Asked for in the symbol's own colours, the system's yellow
-                // triangle. Known gap (captures, 2026-11-23): the iOS glass
-                // toolbar group still draws it as a template, black in light
-                // and white in dark.
-                Image(systemName: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
+                // The system's yellow triangle (Antoine: "we can keep it in
+                // yellow"). The glass toolbar group draws its icons as templates,
+                // so the symbol's multicolour alone came out black or white; the
+                // system yellow as its style and the button's tint keep it yellow,
+                // with Increase Contrast's darker yellow where that is on.
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .symbolRenderingMode(.multicolor)
+                    .foregroundStyle(.yellow)
             }
         }
+        .tint(.yellow)
         .help(Text("review.leech.title", bundle: .module))
         .accessibilityHint(Text("review.leech.hint", bundle: .module))
         .accessibilityIdentifier("review.session.leech")

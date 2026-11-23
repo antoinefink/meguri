@@ -45,9 +45,10 @@ final class ReviewLeechUITests: XCTestCase {
         let details = element(app, "review.session.leech.details")
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         settle()
-        let text = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "leech threshold")).firstMatch
+        // The Mac exposes a text's words as its value, touch as its label.
+        let text = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "leech threshold", "leech threshold")).firstMatch
         XCTAssertTrue(text.exists, "The details say what a leech is")
-        let suspendedText = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "unsuspend")).firstMatch
+        let suspendedText = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "unsuspend", "unsuspend")).firstMatch
         XCTAssertEqual(suspendedText.exists, suspended, "The suspended variant says the card is suspended")
         capture(app, "leech-\(name)-popover")
         dismiss(app, details)

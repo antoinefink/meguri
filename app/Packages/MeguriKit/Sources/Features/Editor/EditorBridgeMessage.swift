@@ -27,6 +27,9 @@ struct EditorBridgeMessage {
         case "historyState": members = ["type", "loadId", "seq", "ord", "canUndo", "canRedo"]
         case "contentHeight": members = ["type", "loadId", "seq", "height"]
         case "flush": members = ["type", "loadId", "seq", "commits"]
+        // Browse's inspector: where the caret is, and a media reference clicked.
+        case "caret": members = ["type", "loadId", "seq", "top", "bottom"]
+        case "playMedia", "openMedia": members = ["type", "loadId", "seq", "name"]
         default: throw EditorRuntimeError.invalidMessage
         }
         guard Set(body.keys) == members else { throw EditorRuntimeError.invalidMessage }
@@ -52,6 +55,16 @@ struct EditorBridgeMessage {
             guard let direction = body["direction"] as? String, ["next", "previous"].contains(direction) else {
                 throw EditorRuntimeError.invalidMessage
             }
+        }
+        if type == "caret" {
+            guard let top = Self.number(body["top"]), let bottom = Self.number(body["bottom"]), top >= 0, bottom >= top else {
+                throw EditorRuntimeError.invalidMessage
+            }
+        }
+        // A reference the inspector cannot serve (a web address, a folder) is not a protocol
+        // error: the host ignores it (`MediaName.plain`) and the page keeps editing.
+        if type == "playMedia" || type == "openMedia" {
+            guard body["name"] is String else { throw EditorRuntimeError.invalidMessage }
         }
         if type == "contentHeight" {
             guard let height = Self.number(body["height"]), height >= 0 else { throw EditorRuntimeError.invalidMessage }
@@ -94,4 +107,16 @@ struct EditorBridgeMessage {
 
 enum EditorRuntimeError: Error {
     case invalidMessage, unavailable, sequenceGap, processTerminated
+}
+
+/// A media reference as a field holds it, reduced to a plain file name of
+/// the collection's media folder: no folder, no parent, nothing a page
+/// could use to reach another file. Nil otherwise.
+enum MediaName {
+    static func plain(_ reference: String) -> String? {
+        let name = reference.removingPercentEncoding ?? reference
+        guard !name.isEmpty, name.count <= 255, !name.contains("/"), !name.contains("\\"), name != ".", name != "..",
+              !name.hasPrefix("."), !name.unicodeScalars.contains(where: { $0.value < 0x20 }) else { return nil }
+        return name
+    }
 }
