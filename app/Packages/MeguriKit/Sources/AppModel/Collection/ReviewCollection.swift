@@ -1,6 +1,7 @@
 import CardRendering
 import CoreBridge
 import Foundation
+import Instrumentation
 import Observation
 #if DEBUG
 import OSLog
@@ -617,6 +618,33 @@ public final class ReviewCollection: ChangeFanoutSink {
     public let activity = ActivityHeatmapStore()
     private var recoveryDrops: [Int64] = []
 
+    // MARK: Home before its first read (N27)
+
+    /// Where Home's last read is kept between launches; nil keeps nothing (tests, hook launches).
+    @ObservationIgnored let homeSnapshots: HomeSnapshotStore?
+    /// This collection's last read, shown until this launch's own first read arrives (N27.2).
+    public private(set) var keptHome: KeptHome?
+    /// Whether the collection file existed when the app started: a launch that will open a
+    /// collection lays out the shell for one from its first frame (N27.6).
+    public let collectionFileAtLaunch: Bool
+    /// The open generation's file, which a snapshot written for it names.
+    @ObservationIgnored private var snapshotIdentity: (generation: UInt64, identity: CollectionFileIdentity)?
+    @ObservationIgnored private var lastSnapshot: HomeSnapshot?
+    /// The day end the applied counts were read for.
+    @ObservationIgnored private var countsDayEndsAt: Int64?
+    /// The day end Today's numbers were read for.
+    @ObservationIgnored private var studiedDayEndsAt: Int64?
+    /// The generation whose first deck-tree read failed, until a read succeeds.
+    private(set) var deckTreeFailedGeneration: UInt64?
+    /// The open applied the record's recovery drops: later ones apply as they come.
+    @ObservationIgnored private var recordDropsApplied = false
+    /// The generation Today's numbers (T12, the next learning card) were last read for.
+    private(set) var todayNumbersGeneration: UInt64?
+    /// R1818's interval: the launch until its first deck tree is shown.
+    @ObservationIgnored private var deckListInteractive: IntervalToken?
+    /// How long a press on kept content waits for the first read before it is dropped (N27.4).
+    @ObservationIgnored var firstReadWait: Duration = .seconds(3)
+
     public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil) {
         loadMediaIndex = { @MainActor in try await CoreMediaService().trackedNames() }
         loadDeckTree = { @MainActor in try await CoreDeckService().treeWithCounts() }
@@ -626,6 +654,17 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         self.exportService = exportService ?? CoreCollectionExportService()
         self.configuration = configuration; self.navigation = navigation
+        // One stat and a few kilobytes, before the first frame: the launch draws the last read (N27.2).
+        let collectionFile = configuration.collectionLocation.collectionFile
+        let fileAtLaunch = FileManager.default.fileExists(atPath: collectionFile.path(percentEncoded: false))
+        let snapshots = configuration.homeSnapshotFile.map(HomeSnapshotStore.init(file:))
+        collectionFileAtLaunch = fileAtLaunch
+        homeSnapshots = snapshots
+        // A snapshot for another file, or with no file at all, is deleted here.
+        if let snapshot = snapshots?.load(for: collectionFile) {
+            keptHome = KeptHome(snapshot: snapshot, now: configuration.clock.now())
+        }
+        if fileAtLaunch { deckListInteractive = Signposts.begin(IntervalNames.launchToDeckListInteractive) }
         self.providerDirectory = providerDirectory ?? CoreBridge.CollectionLocation(
             collectionDirectory: configuration.collectionLocation.directory,
             backupsDirectory: configuration.collectionLocation.backupsDirectory,
@@ -889,6 +928,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     private func openCollection() async {
         opening = true; state = .loading; error = nil; closed = false; releasedManualHostState = nil
+        recordDropsApplied = false
         defer { opening = false }
         configuration.recordDiagnostic(.init(component: .startup, operation: .open, stage: .requested, outcome: .observed))
         #if DEBUG
@@ -896,6 +936,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         #endif
         do {
             await sync.preparePlatform()
+            startupStep?("platformPrepared")
             try await configuration.nativeReviewInput?.prepare()
             #if DEBUG
             openPhase = .eventSubscription
@@ -906,6 +947,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             #endif
             let location = try await Self.prepareOpenLocation(configuration.collectionLocation, providerDirectory: providerDirectory)
             guard await Self.exists(configuration.collectionLocation.collectionFile) else {
+                dropKeptHome(replaced: true)
                 state = .noFile
                 configuration.recordDiagnostic(.init(component: .startup, operation: .open, stage: .admission, outcome: .refused, failure: .unavailable))
                 return
@@ -925,6 +967,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             #else
             try await collection.startOpen(location, randomSeed: seed).value()
             #endif
+            startupStep?("coreOpened")
             try await completeStartupHost()
             #if DEBUG
             openFailureDiagnosticValue = nil
@@ -959,6 +1002,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         let changed = generation != value
         if changed { invalidateDeckActions(); exportOwner?.generationChanged() }
         generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
+        // The file this generation opened, which Home's snapshot names (N27.2).
+        snapshotIdentity = CollectionFileIdentity.of(configuration.collectionLocation.collectionFile).map { (value, $0) }
+        // The file opened is not the one the kept read names (replaced while opening): drop it.
+        if let keptHome, keptHome.snapshot.collection != snapshotIdentity?.identity { self.keptHome = nil }
         // The retained host's history, also after a replacement that kept the generation.
         undoOwner?.scheduleRefresh()
         try sync.releaseEntryActivation()
@@ -974,28 +1021,50 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         // The open-time exchange may end before the steps below do (F5.1).
         studyPreparation.hostOpened()
-        await sync.completeOpenedHost(generation: value, startupForeground: startupForeground)
+        startupStep?("ready")
+        // N27.5: Home's first deck tree comes first. The session record is one small file and
+        // the day check settles the day the counts are for (a rollover unburies); the sync
+        // attachment, the media index and study preparation follow the tree, never before it.
+        // A failed save still ends the completion, as before, once the sync attachment has run.
+        var recordFailure: (any Error)?
         if loadRecord {
             do { previousRecord = try await records.load() }
             catch { self.error = "Couldn’t read the previous session record. \(error)" }
             if var previousRecord, !recoveryDrops.isEmpty {
                 for card in recoveryDrops { previousRecord.reject(cardID: card) }
                 self.previousRecord = previousRecord
-                try await records.save(previousRecord, version: 1)
+                // Taken before the save: a drop that arrives during it applies on its own.
+                recoveryDrops.removeAll(); recordDropsApplied = true
+                do { try await records.save(previousRecord, version: 1) } catch { recordFailure = error }
             }
         }
-        recoveryDrops.removeAll()
+        if !recordDropsApplied { recoveryDrops.removeAll() }
+        if loadRecord { recordDropsApplied = true }
+        startupStep?("recordLoaded")
         day?.close()
         day = ReviewDayMonitor(clock: configuration.clock, zone: { [configuration] in configuration.timeZone ?? .autoupdatingCurrent },
             didCheck: { [weak self] in self?.refreshCounts(); self?.review?.requestRefresh() })
         if foreground { await day?.checkNow() }
+        startupStep?("dayChecked")
+        // Changes committed during the open (an open-time exchange, a rollover) cannot
+        // refresh the counts while it runs: read once more at its end if any came.
+        let countsAtRead = countsRevision
+        await loadCounts()
+        startupStep?("treeRead")
+        await sync.completeOpenedHost(generation: value, startupForeground: startupForeground)
+        startupStep?("syncAttached")
+        if let recordFailure { throw recordFailure }
         await refreshMedia()
+        startupStep?("mediaRead")
         // Presented whatever the status: the read never waits for the job (F5.1).
         await studyPreparation.collectionOpened()
-        await loadCounts()
+        startupStep?("studyPrepared")
+        if countsRevision != countsAtRead || deckTreeGeneration != generation { await loadCounts() }
         preparedGeneration = generation
         studyWarmup.warm()
     }
+    /// Each step of a host's completion as it ends (`launchTimingFirstDeckTreeIsReadBeforeTheRestOfTheHostCompletes` (AppModelTests)).
+    @ObservationIgnored var startupStep: (@MainActor (String) -> Void)?
     func prepareEntry() async throws -> CoreBridge.CollectionLocation {
         await sync.preparePlatform()
         try await configuration.nativeReviewInput?.prepare()
@@ -1135,6 +1204,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         guard manualAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
         opening = true
+        // A transfer may replace the collection: its last read is not kept for it.
+        dropKeptHome(replaced: false)
         day?.pause(); countTimer?.invalidate(); countsTask?.cancel()
     }
     func beginEntryActivation(replacement: UUID? = nil, entry: CollectionEntryCoordinator? = nil) throws {
@@ -1148,6 +1219,8 @@ public final class ReviewCollection: ChangeFanoutSink {
             throw BridgeError.busy(runningOperation: "collection preparation")
         }
         opening = true
+        // An import or a first download replaces the collection: its last read is not kept for it.
+        dropKeptHome(replaced: false)
         day?.pause(); countTimer?.invalidate(); countsTask?.cancel()
         sync.beginEntryActivation()
     }
@@ -1317,6 +1390,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             previousRecord = nil; studyRefusal = nil; dropWalk()
             studyPreparation.collectionEnded()
             decks = []; deckTreeGeneration = nil; countTimer?.invalidate(); countsTask?.cancel()
+            dropKeptHome(replaced: true)
             navigation.collectionReplaced(keepingEntrySheet: opening)
             browseCollectionReplaced()
             if !opening {
@@ -1334,7 +1408,16 @@ public final class ReviewCollection: ChangeFanoutSink {
                     catch { if self.generation == next { self.error = Self.openExplanation(error) } }
                 }
             }
-        case .recoveryDropped(_, let cardID, _): recoveryDrops.append(cardID)
+        case .recoveryDropped(_, let cardID, _):
+            // A drop that arrives after the open applied the record's drops is applied now.
+            if recordDropsApplied, var record = previousRecord {
+                record.reject(cardID: cardID)
+                previousRecord = record
+                let records = records
+                Task { try? await records.save(record, version: 1) }
+            } else {
+                recoveryDrops.append(cardID)
+            }
         case .sessionEnded:
             if !opening { Task { await studyPreparation.sessionEnded() } }
         default: break
@@ -1393,6 +1476,11 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
 
     private var canSaveDeckState: Bool { state == .ready && !opening && !closed && !closing && !resuming }
+    /// The open has finished: a deck can be selected and studied (N27.4).
+    var deckActionsReady: Bool { canSaveDeckState }
+    /// Home shows decks (kept, or read during the rest of the open) that cannot act yet: a
+    /// press waits for the read and the open's end (N27.4).
+    public var awaitingOpen: Bool { homePhase.unknown || (homePhase == .decks && opening) }
 
     private func invalidateDeckActions() {
         undoOwner?.generationEnded()
@@ -1406,6 +1494,17 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     /// Admission is synchronous so a later row/section click wins even before a task runs.
     @discardableResult public func openDeckPage(deckID: Int64) -> Task<Bool, Never> {
+        if awaitingOpen {
+            // A row of the kept list, or of the read one before the open ends (N27.4): the press waits for the read and opens the deck
+            // only if the read tree has it; a later press or selection supersedes it.
+            let intent = navigation.beginDeckSelection()
+            let task = Task { () -> Bool in
+                guard await awaitFirstRead(intent: intent), deck(deckID) != nil else { return false }
+                return await openDeckPage(deckID: deckID).value
+            }
+            deckPageOpening = task
+            return task
+        }
         let detail = currentSelectedDeckDetail
         return openDeckPage(deckID: deckID, detail: detail?.id == deckID ? detail : nil)
     }
@@ -1478,7 +1577,8 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     public func studyExpanded(deckID: Int64) -> Bool {
         if let pending = pendingStudyCollapse[deckID] { return !pending.collapsed }
-        return deck(deckID).map { !$0.studyCollapsed } ?? false
+        // The kept tree keeps its saved disclosures, so the read one lands on the same rows (N27.2).
+        return homeDeck(deckID).map { !$0.studyCollapsed } ?? false
     }
 
     public func isStudyExpansionPending(deckID: Int64) -> Bool {
@@ -1554,6 +1654,9 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     func loadCounts() async {
         let expected = generation, revision = deckTreeRevision
+        // The day these counts are for: read before the tree, so a rollover meanwhile never
+        // gives old counts the new day's end (N27.3).
+        let dayEnd = day?.nextDayAt
         do {
             let tree = try await loadDeckTree()
             guard expected == generation, tree.generation == generation, revision == deckTreeRevision, !closed else { return }
@@ -1561,7 +1664,11 @@ public final class ReviewCollection: ChangeFanoutSink {
             if tree.nodes != decks { studyWarmup.invalidate() }
             decks = tree.nodes
             deckTreeGeneration = tree.generation
+            deckTreeFailedGeneration = nil
+            countsDayEndsAt = dayEnd
             countsSnapshot &+= 1
+            if let token = deckListInteractive { deckListInteractive = nil; Signposts.end(token) }
+            saveHomeSnapshot()
             refreshTodayNumbers()
             countTimer?.invalidate(); countTimer = nil
             if foreground && !configuration.clock.isFixed && Double(tree.nextChangeAt) < Date.distantFuture.timeIntervalSince1970 {
@@ -1572,7 +1679,13 @@ public final class ReviewCollection: ChangeFanoutSink {
                 }
                 if let countTimer { RunLoop.main.add(countTimer, forMode: .common) }
             }
-        } catch { if expected == generation, revision == deckTreeRevision, !closed { self.error = "Couldn’t refresh decks. Try again." } }
+        } catch {
+            if expected == generation, revision == deckTreeRevision, !closed {
+                self.error = "Couldn’t refresh decks. Try again."
+                // A first read that failed is known: Home says so instead of waiting (N27.1).
+                if deckTreeGeneration != generation { deckTreeFailedGeneration = generation }
+            }
+        }
     }
     public func deck(_ id: Int64) -> CountedDeckNode? {
         func find(_ nodes: [CountedDeckNode]) -> CountedDeckNode? {
@@ -1721,6 +1834,10 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// What every start needs, a walk's later turns included (they start while its review shows).
     private var studyAdmissible: Bool { !sync.meguriCollectionWorkHeld && !deckNamesReserved && !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting }
     public func startStudy(deckID: Int64) async {
+        if awaitingOpen {
+            // Study on a kept page, or before the open ends (N27.4): after the read, for the deck the read tree has.
+            guard await awaitFirstRead(intent: navigation.intentRevision), deck(deckID) != nil else { return }
+        }
         _ = await startStudy(deckID: deckID, entry: .study)
     }
 
@@ -1992,6 +2109,10 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// ordinary session, in one review presentation. Its availability is read again when
     /// it runs, not only when the click or key arrived.
     public func startStudyAll() async {
+        if awaitingOpen {
+            // Today's Study on kept content, or before the open ends (N27.4): the walk is the read tree's.
+            guard await awaitFirstRead(intent: navigation.intentRevision) else { return }
+        }
         guard studyAllAvailable else { return }
         await startStudyAll(entry: .study)
     }
@@ -2166,12 +2287,14 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     func loadTodayNumbers() async {
         let expected = generation, snapshot = countsSnapshot
+        let dayEnd = day?.nextDayAt
         if let numbers = try? await studiedTodayService.numbers(),
            expected == generation, numbers.generation == expected, !closed {
             studiedToday = numbers
+            studiedDayEndsAt = dayEnd
         }
         guard expected == generation, !closed else { return }
-        guard studyAllDecks.isEmpty else { nextLearningReadyAt = nil; return }
+        guard studyAllDecks.isEmpty else { nextLearningReadyAt = nil; todayNumbersRead(generation: expected); return }
         // Only while nothing waits: one C7 read per top-level normal deck. A deck that could
         // not be read leaves the time unknown, so none shows until a later refresh reads it.
         var earliest: Int64?
@@ -2183,7 +2306,39 @@ public final class ReviewCollection: ChangeFanoutSink {
         // A newer count read asked for its own scan meanwhile: this one is dropped.
         guard expected == generation, snapshot == countsSnapshot, !closed, studyAllDecks.isEmpty else { return }
         nextLearningReadyAt = unread ? nil : earliest.map { Date(timeIntervalSince1970: Double($0)) }
+        todayNumbersRead(generation: expected)
     }
+    private func todayNumbersRead(generation expected: UInt64) {
+        todayNumbersGeneration = expected
+        saveHomeSnapshot()
+        // Both reads are this launch's now: the kept one has nothing left to show.
+        if deckTreeRead { keptHome = nil }
+    }
+
+    /// Keeps what Home shows for the next launch (N27.2): after each read that applied, for
+    /// the file this generation opened. Writes only when something changed, off the main thread.
+    private func saveHomeSnapshot() {
+        // Not during a review: its answers refresh the counts after each card; its end saves.
+        guard let homeSnapshots, deckTreeRead, review == nil, let identity = snapshotIdentity,
+              identity.generation == generation else { return }
+        let snapshot = HomeSnapshot(collection: identity.identity, dayEndsAt: countsDayEndsAt, decks: decks,
+            // Today's numbers only with the counts of the same study day.
+            studied: studiedDayEndsAt == countsDayEndsAt ? studiedToday : nil, nextLearningReadyAt: todayNumbersGeneration == generation ? nextLearningReadyAt : nil,
+            previous: previousSession, previousAnswers: previousRecord?.answers.count)
+        guard snapshot != lastSnapshot else { return }
+        lastSnapshot = snapshot
+        homeSnapshots.save(snapshot)
+    }
+
+    /// The collection is replaced, removed or about to be: its last read never shows again (N27.2).
+    /// `replaced`: the open generation is another file now, whose own read writes the next one.
+    private func dropKeptHome(replaced: Bool) {
+        keptHome = nil; lastSnapshot = nil
+        if replaced { snapshotIdentity = nil; todayNumbersGeneration = nil }
+        homeSnapshots?.remove()
+    }
+    /// Waits for queued snapshot writes (tests).
+    func flushHomeSnapshot() { homeSnapshots?.flush() }
     public func navigationChanged() {
         if navigation.review == nil, review != nil { Task { await finishReview() } }
     }

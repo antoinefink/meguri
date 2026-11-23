@@ -846,8 +846,11 @@ PUBLIC_ARTIFACTS = {
         '34f18c2a351778b43a6d71e8a774bca913c140feec5015689233502aa49df933',
     'server/src/httpapi/oauth.rs':
         'efe2fe1940f7a3e08f0982fd79073a64ec0202a1af8932254207f95e2b2e43c8',
+    # Complete-content PUBLIC review: mcp-automatic-media, 2026-11-23.
+    'server/src/mcp_transport/descriptors.rs':
+        'c23fa9bc748dca54d7fc9464f896894b55ad21a238acd0128da736dd9e0accf8',
     'server/tests/mcp_oauth.rs':
-        'f24e5bf89ad95dd53b90d300bebe3d1b6318c41c082171361f90a5c49441db75',
+        '088eb8ae77b445f5c3d2566678cc9d9b594f7982f466b6d40dfac878a10fbf3a',
     'server/src/mcp_service/transport.rs':
         '6c0fed2e3865fbdf02cd4faa84340fc70e8b888f3834cd64529ade113705bab9',
     # Complete-content PUBLIC review: mcp-search-candidates, 2026-11-22.

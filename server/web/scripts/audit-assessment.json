@@ -28,8 +28,8 @@
         "sha256": "847e3146fdc8b8cd99167dabf13c492ccd16373113b015813dc61142672e72b8"
       },
       "DEPENDENCIES.md": {
-        "bytes": 15868,
-        "sha256": "6bd7a30150ccaa02d3471a3a8a4e056bf74ae4ba05c34e4d29e9041c6981ec89"
+        "bytes": 16262,
+        "sha256": "c0c7a492883bcfd1ca27d1eaa887626cb41b3225f7fed2e438271b6c8a9a6902"
       },
       "LICENSE": {
         "bytes": 1076,
@@ -130,20 +130,20 @@
         "sha256": "1ed4afb68d79be9a0a6ea2ec5a4e1a836fe8d5c7728caf1d95ab1d3275d5c749"
       },
       "src/api.ts": {
-        "bytes": 5893,
-        "sha256": "40296d6cc3e07462b7ad038cb9b5fc093277c61e51994283085ef28b6b1b5553"
+        "bytes": 5377,
+        "sha256": "095239bbdd42f84fa7c0d65e6355b46709af35c5e276134b1c5605c93c9685a7"
       },
       "src/app.tsx": {
-        "bytes": 13704,
-        "sha256": "363af8ab9035e86034e351f13a9eff20e7bda9449c67e42e2f8dd9ae1470a53a"
+        "bytes": 13351,
+        "sha256": "7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63"
       },
       "src/apple-touch-icon.png": {
         "bytes": 50588,
         "sha256": "99b018fd248f79257b07351374ba7b8799e4b81968486c389784990f26388b87"
       },
       "src/bootstrap.ts": {
-        "bytes": 1160,
-        "sha256": "3929ddca3360a92f26e521e351761b2d9743fc4473db06d06999ad65e7244fbf"
+        "bytes": 1111,
+        "sha256": "7c47a2f985e545fceba68c55efdd34106ad303b67bc92e399b726179ff5c47d8"
       },
       "src/collection.tsx": {
         "bytes": 1919,
@@ -169,17 +169,13 @@
         "bytes": 8876,
         "sha256": "abef1bdecf89ce85548f905e008d2b1cdcb9de9a948ca4eb85b48a2e6bf307bb"
       },
-      "src/media-upload.tsx": {
-        "bytes": 6269,
-        "sha256": "dfebcf55e28fd74a50c7d1b88ed849da834aa3bc3a1dd6c6ab05829f67fac2c5"
-      },
       "src/mount.tsx": {
         "bytes": 222,
         "sha256": "f1c21dbde4da1fc705470cb7853d88b378d9ea047213ee7950023a2b39dd407c"
       },
       "src/policy.ts": {
-        "bytes": 1123,
-        "sha256": "64b9a94990e5993e6c37350b574365bf027e3a531949f6947aa4c43c1cb106bc"
+        "bytes": 1108,
+        "sha256": "d5e5a802944792c447eec3aedfd219eac889624d213490a2c375897aea9bc0e4"
       },
       "src/storage.ts": {
         "bytes": 346,
@@ -194,8 +190,8 @@
         "sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
       },
       "tests/api.test.ts": {
-        "bytes": 5666,
-        "sha256": "9a700b10e5b1edfcd79ba024bd66ef51cb2d2a5c2b9ca5dcddbde1070172563a"
+        "bytes": 4776,
+        "sha256": "9cefc3723cf52869ccaf3d2dbe1b775b0668c77570945ea3e448f971cf4ccad8"
       },
       "tests/browser/account-actions.spec.ts": {
         "bytes": 8640,
@@ -208,10 +204,6 @@
       "tests/browser/mcp.spec.ts": {
         "bytes": 37514,
         "sha256": "9377050f417a5b5a72d1f83b0f54944233e1d1891e36af1954ec902780dd748c"
-      },
-      "tests/browser/media-upload.spec.ts": {
-        "bytes": 10091,
-        "sha256": "bd06b5d9185eafe955b8ad8622b85bed2aa9edcc0611c8e0bd17a4c105e3eea3"
       },
       "tests/policy.test.ts": {
         "bytes": 1397,
@@ -235,7 +227,7 @@
       },
       "upstream-records.json": {
         "bytes": 7364,
-        "sha256": "37dbda7a5080ac66cd27bdcebdd4465525a704f6dde6680a2dd8e05dc3fcf818"
+        "sha256": "dcc688efcf71f4d94de14736eb09932e5fcf6be12f3315c15241f4d9c6573d26"
       },
       "vite.config.ts": {
         "bytes": 1520,
@@ -285,12 +277,12 @@
         "sha256": "303972069cba005453abe7939235e27b5622e986968adb0344836cb0475875d9"
       },
       "server/src/httpapi/mod.rs": {
-        "bytes": 24247,
-        "sha256": "1812f9c8613cd1341e154ad685dfc953be280278ebc8908b316ece993b45d122"
+        "bytes": 24500,
+        "sha256": "31b4f6b9d2790302ff01aa23288a6a8b95b5d92104cf2da77009d35536192f19"
       },
       "server/src/webassets/mod.rs": {
-        "bytes": 4527,
-        "sha256": "0ad6d487b3437a8458067232dcaa3125fd44a16b140945d2b1bca5a353dc82e4"
+        "bytes": 4512,
+        "sha256": "425a127952bd8194275c19669a315e9e3367d60e361f569ac1135884429975f2"
       },
       "server/tools/package-context.py": {
         "bytes": 4733,

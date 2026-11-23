@@ -32,6 +32,7 @@ pub mod media;
 pub mod normal_stage;
 pub mod one_way;
 pub mod open;
+pub mod deck_package;
 pub mod package_inspection;
 pub mod paging;
 pub mod paths;
@@ -57,7 +58,7 @@ pub use day_writes::CardQueueRow;
 pub use error::{BuilderRefusal, OpenError, StorageError, UpgradeStage};
 pub use journal::{Journal, JournalOptions};
 pub use open::{OpenEvent, OpenOptions, OpenedCollection, open_collection};
-pub use paging::{ReadRows, StoredConfig};
+pub use paging::{NoteIdentity, ReadRows, StoredConfig};
 pub use rows::config::ConfigValue;
 pub use rows::{Cell, Record, RowError, RowImage, RowKey, Table};
 /// Initializers receive the connection (C5); other crates register their SQL

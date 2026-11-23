@@ -33,7 +33,7 @@ pub fn take_counter(scope: &mut WriteScope<'_>) -> Result<u32, EngineError> {
     Ok(counter)
 }
 
-pub(crate) fn read_counter(rows: &impl ReadRows) -> Result<u32, EngineError> {
+pub fn read_counter(rows: &impl ReadRows) -> Result<u32, EngineError> {
     Ok(rows
         .config_value("nextPos")?
         .and_then(|v| v.as_u64())

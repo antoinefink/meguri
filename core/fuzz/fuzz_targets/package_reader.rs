@@ -1,5 +1,6 @@
 #![no_main]
-//! P14: exercise the real bounded package reader/inspection paths. Synthetic
+//! P14, P17 and `package/apkg-import` I3: exercise the real bounded package
+//! reader/inspection paths, the legacy formats and the deck package inspect. Synthetic
 //! in-target seeds reach SQLite and media-map decoding without external data.
 use libfuzzer_sys::fuzz_target;
 use meguri_model::{
@@ -77,6 +78,61 @@ fn envelope(data: &[u8]) -> Vec<u8> {
     }
     archive
 }
+/// P17: a legacy package around the fuzzed bytes: the collection member
+/// raw (the bootstrap seed, or the bytes themselves), a JSON media map (the
+/// bytes, or a fixed one) and one numbered payload.
+fn legacy_envelope(data: &[u8]) -> Vec<u8> {
+    let mode = data.first().copied().unwrap_or(0) % 6;
+    let body = data.get(1..).unwrap_or_default();
+    let member = if mode % 2 == 0 { "collection.anki21" } else { "collection.anki2" };
+    let collection: &[u8] = if mode >= 4 { body } else { seed() };
+    let map: &[u8] = if mode < 2 { body } else { br#"{"0":"picture.png","007":"x.mp3"}"# };
+    let method = if data.first().is_some_and(|byte| byte & 0x80 != 0) {
+        CompressionMethod::Deflated
+    } else {
+        CompressionMethod::Stored
+    };
+    let options = SimpleFileOptions::default().compression_method(method);
+    let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+    let version: &[u8] = &[8, 1 + mode % 2];
+    let mut members: Vec<(&str, &[u8])> = vec![(member, collection), ("media", map), ("0", body)];
+    if mode == 3 {
+        members.insert(0, ("meta", version));
+    }
+    for (name, content) in members {
+        archive.start_file(name, options).unwrap();
+        archive.write_all(content).unwrap();
+    }
+    archive.finish().unwrap().into_inner()
+}
+/// `package/apkg-import` I3 on arbitrary bytes: no panic, the selected
+/// file unchanged, and nothing left in the collection directory once the
+/// session (if any) is dropped.
+fn inspect_deck_package(directory: &Path, bytes: &[u8], before: &[std::ffi::OsString]) {
+    let source = directory.join("input.apkg");
+    fs::write(&source, bytes).unwrap();
+    let mut expected = before.to_vec();
+    expected.push("input.apkg".into());
+    expected.sort();
+    let context = meguri_package::apkg::ApkgContext {
+        collection_directory: directory.to_path_buf(),
+        clock: std::sync::Arc::new(FixedClock::new(0, UtcOffset::UTC)),
+        random: std::sync::Arc::new(SeededRandom::new(124)),
+        space: std::sync::Arc::new(Capacity),
+    };
+    let cancel = meguri_engine::CancelToken::new();
+    let progress = meguri_engine::ProgressSink::new();
+    let session = meguri_package::apkg::inspect(&source, "input.apkg", &context, &cancel, &progress);
+    if let Ok(session) = &session {
+        let facts = session.facts();
+        assert!(facts.media_files <= 400_000);
+    }
+    drop(session);
+    assert_eq!(names(directory), expected, "deck package staging must be removed on every outcome");
+    assert_eq!(fs::read(&source).unwrap(), bytes);
+    let _ = meguri_package::apkg::classify(&source, "input");
+    fs::remove_file(&source).unwrap();
+}
 fn names(path: &Path) -> Vec<std::ffi::OsString> {
     let mut names: Vec<_> = fs::read_dir(path)
         .unwrap()
@@ -136,4 +192,9 @@ fuzz_target!(|data: &[u8]| {
             b"protected synthetic local state"
         );
     }
+    // U120: the same bytes, and a legacy envelope of them, as deck packages.
+    inspect_deck_package(directory.path(), &bytes, &before);
+    inspect_deck_package(directory.path(), &legacy_envelope(data), &before);
+    assert_eq!(fs::read(&live).unwrap(), b"protected synthetic live collection");
+    assert_eq!(fs::read(&sidecar).unwrap(), b"protected synthetic local state");
 });

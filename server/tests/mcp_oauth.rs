@@ -348,9 +348,21 @@ async fn note_write_tool(h: &Harness, c: &Client, access: &str, name: &str, argu
     assert_eq!(response.status(),200);
     let body:Value=response.json().await.unwrap();
     assert_eq!(body["result"]["isError"],false,"{body}");
-    let text:Value=serde_json::from_str(body["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(body["result"]["structuredContent"],text);
-    text
+    let text=body["result"]["content"][0]["text"].as_str().unwrap();
+    let output=body["result"]["structuredContent"].clone();
+    if name == "prepare_media_upload" {
+        assert_eq!(output["upload_url"],format!("{ORIGIN}/api/mcp/media-upload"));
+        assert_eq!(output.as_object().unwrap().len(),3);
+        let id=output["upload_id"].as_str().unwrap();
+        assert_eq!(id.len(),43); crypto::bearer(id).unwrap();
+        assert!(text.contains("Authorization: Bearer upload_id"));
+        assert!(text.contains("Content-Type: application/octet-stream"));
+        assert!(text.contains("Keep upload_id out of URLs and user-facing chat"));
+        assert!(!text.contains(id));
+    } else {
+        assert_eq!(output,serde_json::from_str::<Value>(text).unwrap());
+    }
+    output
 }
 
 // Complete W6–W12 receiver round for the generated one-note fixture below.
@@ -621,9 +633,94 @@ fn attachment_collection(h: &Harness, id: &str) -> std::path::PathBuf {
     tx.execute("INSERT INTO templates VALUES(10,0,'Generated',0,0,?1)",[ProtoBlob::new(template).to_bytes().into_owned()]).unwrap();
     tx.execute("INSERT INTO config VALUES('nextPos',0,0,?1)",[b"1".as_slice()]).unwrap();tx.commit().unwrap();drop(db);path
 }
-async fn stage_attachment(h: &Harness, cookie: &str, id: &str, bytes: Vec<u8>) -> reqwest::Response {
-    h.client.post(format!("{}/api/mcp/media-upload",h.base)).header("origin",ORIGIN).header("cookie",cookie)
-        .header("x-meguri-upload",id).header("content-type","application/octet-stream").body(bytes).send().await.unwrap()
+fn attachment_post(h: &Harness, c: &Client) -> reqwest::RequestBuilder {
+    c.post(format!("{}/api/mcp/media-upload",h.base))
+        .header("content-type","application/octet-stream")
+        .timeout(std::time::Duration::from_secs(15))
+}
+async fn stage_attachment(h: &Harness, id: &str, bytes: Vec<u8>) -> reqwest::Response {
+    let c=local_client();
+    let request=attachment_post(h,&c).bearer_auth(id).body(bytes).build().unwrap();
+    assert!(!request.headers().contains_key("origin"));
+    assert!(!request.headers().contains_key("cookie"));
+    assert_eq!(request.url().path(),"/api/mcp/media-upload");
+    assert!(request.url().query().is_none()); assert!(request.url().fragment().is_none());
+    let response=c.execute(request).await.unwrap();
+    assert_eq!(response.headers()["cache-control"],"no-store");
+    assert_eq!(response.headers()["connection"],"close");
+    response
+}
+async fn upload_unauthorized(response: reqwest::Response) {
+    assert_eq!(response.status(),401);
+    assert_eq!(response.headers()["www-authenticate"],"Bearer");
+    assert_eq!(response.headers()["cache-control"],"no-store");
+    assert_eq!(response.headers()["connection"],"close");
+    assert_eq!(response.json::<Value>().await.unwrap(),json!({"error":{"code":"authentication_failed"}}));
+}
+
+#[tokio::test]
+async fn mcp_machine_upload_requires_one_dedicated_bearer_and_exact_binary_route() {
+    let h=Harness::new().await; let c=local_client(); let identity=h.setup().await;
+    let cookie=h.login("root.admin",PASSWORD).await;
+    attachment_collection(&h,identity["id"].as_str().unwrap());
+    let tokens=grant(&h,&c,&cookie,true,false).await;
+    let access=tokens["access_token"].as_str().unwrap();
+    let prepared=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
+    let id=prepared["upload_id"].as_str().unwrap();
+    assert_eq!(mcp_request(&h,&c,id,"tools/list",json!({})).send().await.unwrap().status(),401);
+    upload_unauthorized(c.get(format!("{}/api/mcp/collection-download",h.base)).bearer_auth(id)
+        .send().await.unwrap()).await;
+    let now=time::OffsetDateTime::now_utc().unix_timestamp();
+    let timestamp=|seconds|time::OffsetDateTime::from_unix_timestamp(seconds).unwrap()
+        .format(&time::format_description::well_known::Rfc3339).unwrap();
+    let expiry=prepared["expires_at"].as_str().unwrap();
+    assert!(expiry > timestamp(now).as_str() && expiry <= timestamp(now+600).as_str());
+    for request in [
+        attachment_post(&h,&c),
+        attachment_post(&h,&c).header("cookie",&cookie),
+        attachment_post(&h,&c).header("cookie",&cookie).header("x-meguri-upload",id),
+        attachment_post(&h,&c).bearer_auth(access),
+        attachment_post(&h,&c).bearer_auth(tokens["refresh_token"].as_str().unwrap()),
+        attachment_post(&h,&c).bearer_auth(crypto::random_token().unwrap()),
+        attachment_post(&h,&c).bearer_auth(id).header("authorization",format!("Bearer {id}")),
+    ] {
+        upload_unauthorized(request.body(attachment_png()).send().await.unwrap()).await;
+    }
+    for value in ["Basic generated", "Bearer", "Bearer ", "Bearer  generated", "Bearer bad,other",
+        "Bearer generated extra", "Bearer short", &format!("Bearer {}", "A".repeat(42)),
+        &format!("Bearer {}=", "A".repeat(43)), &format!("Bearer {}B", "A".repeat(42))] {
+        upload_unauthorized(attachment_post(&h,&c).header("authorization",value)
+            .body(attachment_png()).send().await.unwrap()).await;
+    }
+    for media_type in ["image/png", "application/octet-stream; charset=utf-8", "Application/Octet-Stream"] {
+        let response=c.post(format!("{}/api/mcp/media-upload",h.base)).bearer_auth(id)
+            .header("content-type",media_type).body(attachment_png()).send().await.unwrap();
+        assert_eq!(response.status(),415);
+    }
+    let response=attachment_post(&h,&c).bearer_auth(id).header("content-type","application/octet-stream")
+        .body(attachment_png()).send().await.unwrap();
+    assert_eq!(response.status(),415,"duplicate content types are refused");
+    for origin in ["https://unsuitable.example.test", "null"] {
+        assert_eq!(attachment_post(&h,&c).bearer_auth(id).header("origin",origin)
+            .body(attachment_png()).send().await.unwrap().status(),403);
+    }
+    assert_eq!(attachment_post(&h,&c).bearer_auth(id).header("origin",ORIGIN).header("origin",ORIGIN)
+        .body(attachment_png()).send().await.unwrap().status(),403);
+    for method in [reqwest::Method::GET,reqwest::Method::HEAD,reqwest::Method::PUT,
+        reqwest::Method::DELETE,reqwest::Method::OPTIONS] {
+        assert_eq!(c.request(method,format!("{}/api/mcp/media-upload",h.base)).bearer_auth(id)
+            .header("origin",ORIGIN).send().await.unwrap().status(),404);
+    }
+    assert_eq!(c.post(format!("{}/api/mcp/media-upload?unexpected=1",h.base)).bearer_auth(id)
+        .header("origin",ORIGIN).send().await.unwrap().status(),400);
+    assert_eq!(c.post(format!("{}/api/mcp/media-upload/",h.base)).bearer_auth(id)
+        .header("origin",ORIGIN).send().await.unwrap().status(),404);
+    assert_eq!(stage_attachment(&h,id,vec![0;8*1024*1024+1]).await.status(),413);
+    assert_eq!(stage_attachment(&h,id,attachment_png()).await.status(),200);
+    upload_unauthorized(stage_attachment(&h,id,attachment_mp3()).await).await;
+    note_write_tool(&h,&c,access,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{},
+        "uploads":[{"upload_id":id,"field":"Front"}]})).await;
+    h.stop().await;
 }
 async fn attachment_media(h: &Harness, key: &str, method: &str, request: Value) -> Vec<u8> {
     let response=h.client.post(format!("{}/msync/{method}",h.base))
@@ -651,7 +748,7 @@ async fn attachment_failure(h: &Harness,c: &Client,access: &str,name: &str,args:
     assert_eq!(body["result"]["isError"],true);assert_eq!(body["result"]["structuredContent"]["error"]["code"],code);
 }
 #[tokio::test]
-async fn mcp_browser_attachments_reach_native_notes_and_media_and_reuse_after_refresh() {
+async fn mcp_machine_attachments_reach_native_notes_and_media_and_reuse_after_refresh() {
     let h=Harness::new().await;let c=local_client();let identity=h.setup().await;let cookie=h.login("root.admin",PASSWORD).await;
     let path=attachment_collection(&h,identity["id"].as_str().unwrap());
     let tokens=grant(&h,&c,&cookie,true,false).await;let access=tokens["access_token"].as_str().unwrap();
@@ -659,14 +756,13 @@ async fn mcp_browser_attachments_reach_native_notes_and_media_and_reuse_after_re
     let before=native_exchange(&h,&c,"meta",&key,json!({"v":11,"cv":"synthetic"})).await;
     let picture=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
     let audio=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
-    assert_eq!(picture["upload_url"],format!("{ORIGIN}/mcp/upload#upload={}",picture["upload_id"].as_str().unwrap()));
-    assert_eq!(h.get("/mcp/upload",Some(&cookie)).await.status(),200);
+    assert_eq!(h.get("/mcp/upload",None).await.status(),404);
     let png=attachment_png();let mp3=attachment_mp3();
-    assert_eq!(stage_attachment(&h,&cookie,picture["upload_id"].as_str().unwrap(),png.clone()).await.status(),200);
-    assert_eq!(stage_attachment(&h,&cookie,audio["upload_id"].as_str().unwrap(),mp3.clone()).await.status(),200);
+    assert_eq!(stage_attachment(&h,picture["upload_id"].as_str().unwrap(),png.clone()).await.status(),200);
+    assert_eq!(stage_attachment(&h,audio["upload_id"].as_str().unwrap(),mp3.clone()).await.status(),200);
     let metadata=rusqlite::Connection::open(h.database()).unwrap();
     let counts=||metadata.query_row("SELECT media_usn,(SELECT count(*) FROM media_names),(SELECT count(*) FROM media_blobs) FROM accounts WHERE id=?1",[identity["id"].as_str().unwrap()],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?))).unwrap();
-    assert_eq!(counts(),(0,0,0),"browser upload only stages bytes");
+    assert_eq!(counts(),(0,0,0),"machine upload only stages bytes");
     let uploads=json!([{"upload_id":picture["upload_id"],"field":"Front"},{"upload_id":audio["upload_id"],"field":"Back"}]);
     let created=note_write_tool(&h,&c,access,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{"Front":"question","Back":"answer"},"uploads":uploads})).await;
     let read=note_write_tool(&h,&c,access,"search_notes",json!({"note_id":created["note_id"]})).await;
@@ -674,7 +770,7 @@ async fn mcp_browser_attachments_reach_native_notes_and_media_and_reuse_after_re
     let png_name=format!("meguri-{}.png",crypto::digest(&png).iter().map(|b|format!("{b:02x}")).collect::<String>());
     let mp3_name=format!("meguri-{}.mp3",crypto::digest(&mp3).iter().map(|b|format!("{b:02x}")).collect::<String>());
     assert_eq!(fields["Front"],format!("question<br><img src=\"{png_name}\">"));assert_eq!(fields["Back"],format!("answer<br>[sound:{mp3_name}]"));
-    let (_,_,chunk)=note_write_round(&h,&c,&key,&before["usn"],1).await;
+    let (synced,_,chunk)=note_write_round(&h,&c,&key,&before["usn"],1).await;
     assert_eq!(chunk["notes"][0][6],format!("{}\u{1f}{}",fields["Front"].as_str().unwrap(),fields["Back"].as_str().unwrap()));
     assert_eq!(counts(),(2,2,2));
     let listing=attachment_media_json(&h,&key,"mediaChanges",json!({"lastUsn":0})).await;
@@ -689,11 +785,15 @@ async fn mcp_browser_attachments_reach_native_notes_and_media_and_reuse_after_re
     assert_ne!(edited["revision"],created["revision"]);
     attachment_failure(&h,&c,access,"edit_note",json!({"note_id":created["note_id"],"revision":created["revision"],"uploads":uploads}),"conflict").await;
     assert_eq!(counts(),(2,2,2));
+    let (_,_,chunk)=note_write_round(&h,&c,&key,&synced["usn"],1).await;
+    assert_eq!(chunk["notes"][0][6],format!("replacement<br><img src=\"{png_name}\">\u{1f}answer<br>[sound:{mp3_name}]"));
+    let delivered=attachment_download(&h,&key,&[&png_name,&mp3_name]).await;
+    assert_eq!(delivered[&png_name],png); assert_eq!(delivered[&mp3_name],mp3);
     let exchange:BTreeMap<String,String>=[("grant_type","refresh_token".into()),("client_id",CLIENT.into()),("refresh_token",tokens["refresh_token"].as_str().unwrap().into()),("resource",format!("{ORIGIN}/mcp"))].into_iter().map(|(k,v)|(k.into(),v)).collect();
     let rotated:Value=c.post(format!("{}/oauth/token",h.base)).header("content-type","application/x-www-form-urlencoded").body(encoded(&exchange)).send().await.unwrap().json().await.unwrap();
     note_write_tool(&h,&c,rotated["access_token"].as_str().unwrap(),"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{"Front":"second"},"uploads":uploads})).await;
     assert_eq!(counts(),(2,2,2));
-    assert_eq!(stage_attachment(&h,&cookie,picture["upload_id"].as_str().unwrap(),attachment_png()).await.status(),403);
+    upload_unauthorized(stage_attachment(&h,picture["upload_id"].as_str().unwrap(),attachment_png()).await).await;
     let db=meguri_sync_server::collection::schema::open(&path,false).unwrap();
     assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM notes",[],|r|r.get(0)).unwrap(),2);drop(db);drop(metadata);h.stop().await;
 }
@@ -704,14 +804,17 @@ async fn mcp_uploads_deny_other_accounts_and_grants_and_unsupported_files() {
     h.member(&cookie,"generated.other").await;let other=h.login("generated.other",PASSWORD).await;
     let first=grant(&h,&c,&cookie,true,false).await;let access=first["access_token"].as_str().unwrap();
     let upload=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;let id=upload["upload_id"].as_str().unwrap();
-    assert_eq!(stage_attachment(&h,&other,id,attachment_png()).await.status(),403);
-    assert_eq!(stage_attachment(&h,&cookie,id,b"unsupported synthetic svg".to_vec()).await.status(),400);
-    assert_eq!(stage_attachment(&h,&cookie,id,attachment_png()).await.status(),200);
+    assert_eq!(stage_attachment(&h,id,b"unsupported synthetic svg".to_vec()).await.status(),400);
+    // An unrelated browser cookie never selects the account for the dedicated bearer.
+    assert_eq!(attachment_post(&h,&c).bearer_auth(id).header("cookie",&other)
+        .body(attachment_png()).send().await.unwrap().status(),200);
     let args=json!({"deck_id":"1","note_type_id":"10","fields":{},"uploads":[{"upload_id":id,"field":"Front"}]});
     let second=grant(&h,&c,&cookie,true,false).await;
     let other_grant=grant(&h,&c,&other,true,false).await;
     for token in [second["access_token"].as_str().unwrap(),other_grant["access_token"].as_str().unwrap()] {
         attachment_failure(&h,&c,token,"create_note",args.clone(),"attachment_unavailable").await;
+        attachment_failure(&h,&c,token,"edit_note",json!({"note_id":"1","revision":"generated",
+            "uploads":[{"upload_id":id,"field":"Front"}]}),"attachment_unavailable").await;
     }
     let db=rusqlite::Connection::open(h.database()).unwrap();assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM media_names",[],|r|r.get(0)).unwrap(),0);drop(db);h.stop().await;
 }
@@ -731,7 +834,7 @@ async fn mcp_uploads_are_fenced_by_grant_revocation_and_account_reset() {
     attachment_collection(&h,identity["id"].as_str().unwrap());
     let first=grant(&h,&c,&cookie,true,false).await;let access=first["access_token"].as_str().unwrap();
     let upload=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;let id=upload["upload_id"].as_str().unwrap();
-    assert_eq!(stage_attachment(&h,&cookie,id,attachment_png()).await.status(),200);
+    assert_eq!(stage_attachment(&h,id,attachment_png()).await.status(),200);
     let args=json!({"deck_id":"1","note_type_id":"10","fields":{},"uploads":[{"upload_id":id,"field":"Front"}]});
     let pending=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
     let grants=h.get("/api/me/mcp-grants",Some(&cookie)).await.json::<Value>().await.unwrap();
@@ -739,12 +842,19 @@ async fn mcp_uploads_are_fenced_by_grant_revocation_and_account_reset() {
     for grant in grants["data"]["grants"].as_array().unwrap() {
         assert_eq!(h.post(&format!("/api/me/mcp-grants/{}/revoke",grant["id"].as_str().unwrap()),json!({}),Some(&cookie)).await.status(),200);
     }
-    assert_eq!(stage_attachment(&h,&cookie,pending["upload_id"].as_str().unwrap(),attachment_png()).await.status(),403);
+    upload_unauthorized(stage_attachment(&h,pending["upload_id"].as_str().unwrap(),attachment_png()).await).await;
     let refused=mcp_request(&h,&c,access,"tools/call",json!({"name":"create_note","arguments":args})).send().await.unwrap();assert_eq!(refused.status(),401);
     let fresh=grant(&h,&c,&cookie,true,false).await;
+    attachment_failure(&h,&c,fresh["access_token"].as_str().unwrap(),"create_note",json!({"deck_id":"1","note_type_id":"10",
+        "fields":{},"uploads":[{"upload_id":id,"field":"Front"}]}),"attachment_unavailable").await;
     let pending=note_write_tool(&h,&c,fresh["access_token"].as_str().unwrap(),"prepare_media_upload",json!({})).await;
+    let staged=note_write_tool(&h,&c,fresh["access_token"].as_str().unwrap(),"prepare_media_upload",json!({})).await;
+    assert_eq!(stage_attachment(&h,staged["upload_id"].as_str().unwrap(),attachment_png()).await.status(),200);
     assert_eq!(h.post(&format!("/api/admin/accounts/{}/reset-data",identity["id"].as_str().unwrap()),json!({}),Some(&cookie)).await.status(),200);
-    assert_eq!(stage_attachment(&h,&cookie,pending["upload_id"].as_str().unwrap(),attachment_png()).await.status(),403);
+    upload_unauthorized(stage_attachment(&h,pending["upload_id"].as_str().unwrap(),attachment_png()).await).await;
+    let after_reset=grant(&h,&c,&cookie,true,false).await;
+    attachment_failure(&h,&c,after_reset["access_token"].as_str().unwrap(),"create_note",json!({"deck_id":"1","note_type_id":"10",
+        "fields":{},"uploads":[{"upload_id":staged["upload_id"],"field":"Front"}]}),"attachment_unavailable").await;
     let db=rusqlite::Connection::open(h.database()).unwrap();assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM media_names",[],|r|r.get(0)).unwrap(),0);drop(db);h.stop().await;
 }
 
@@ -754,11 +864,126 @@ async fn mcp_staged_uploads_are_discarded_on_server_restart() {
     attachment_collection(&h,identity["id"].as_str().unwrap());
     let tokens=grant(&h,&c,&cookie,true,false).await;let access=tokens["access_token"].as_str().unwrap();
     let pending=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
-    assert_eq!(stage_attachment(&h,&cookie,pending["upload_id"].as_str().unwrap(),attachment_png()).await.status(),200);
+    assert_eq!(stage_attachment(&h,pending["upload_id"].as_str().unwrap(),attachment_png()).await.status(),200);
     let temp=h.stop().await;let h=Harness::reopen(temp).await;
+    upload_unauthorized(stage_attachment(&h,pending["upload_id"].as_str().unwrap(),attachment_png()).await).await;
     attachment_failure(&h,&c,access,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{},"uploads":[{"upload_id":pending["upload_id"],"field":"Front"}]}),"attachment_unavailable").await;
     let db=rusqlite::Connection::open(h.database()).unwrap();
     assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM media_blobs",[],|r|r.get(0)).unwrap(),0);drop(db);h.stop().await;
+}
+
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn mcp_machine_upload_expiry_fences_pending_and_staged_ids() {
+    let h=Harness::new().await; let c=local_client(); let identity=h.setup().await;
+    let cookie=h.login("root.admin",PASSWORD).await;
+    let path=attachment_collection(&h,identity["id"].as_str().unwrap());
+    let tokens=grant(&h,&c,&cookie,true,false).await; let access=tokens["access_token"].as_str().unwrap();
+    let pending=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
+    let staged=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
+    assert_eq!(stage_attachment(&h,staged["upload_id"].as_str().unwrap(),attachment_png()).await.status(),200);
+    for upload in [&pending,&staged] {
+        meguri_sync_server::test_hooks::expire_media_upload(&h.service,upload["upload_id"].as_str().unwrap());
+    }
+    upload_unauthorized(stage_attachment(&h,pending["upload_id"].as_str().unwrap(),attachment_png()).await).await;
+    attachment_failure(&h,&c,access,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{},
+        "uploads":[{"upload_id":staged["upload_id"],"field":"Front"}]}),"attachment_unavailable").await;
+    let db=meguri_sync_server::collection::schema::open(&path,false).unwrap();
+    assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM notes",[],|r|r.get(0)).unwrap(),0);
+    drop(db); h.stop().await;
+}
+
+#[tokio::test]
+async fn mcp_machine_upload_refresh_replay_invalidates_pending_and_staged_ids() {
+    let h=Harness::new().await; let c=local_client(); let identity=h.setup().await;
+    let cookie=h.login("root.admin",PASSWORD).await;
+    attachment_collection(&h,identity["id"].as_str().unwrap());
+    let tokens=grant(&h,&c,&cookie,true,false).await; let access=tokens["access_token"].as_str().unwrap();
+    let pending=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
+    let staged=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
+    assert_eq!(stage_attachment(&h,staged["upload_id"].as_str().unwrap(),attachment_png()).await.status(),200);
+    let exchange:BTreeMap<String,String>=[("grant_type","refresh_token".into()),("client_id",CLIENT.into()),
+        ("refresh_token",tokens["refresh_token"].as_str().unwrap().into()),("resource",format!("{ORIGIN}/mcp"))]
+        .into_iter().map(|(k,v)|(k.into(),v)).collect();
+    let rotated=c.post(format!("{}/oauth/token",h.base)).header("content-type","application/x-www-form-urlencoded")
+        .body(encoded(&exchange)).send().await.unwrap();
+    assert_eq!(rotated.status(),200);
+    let replay=c.post(format!("{}/oauth/token",h.base)).header("content-type","application/x-www-form-urlencoded")
+        .body(encoded(&exchange)).send().await.unwrap();
+    assert_eq!(replay.status(),400);
+    upload_unauthorized(stage_attachment(&h,pending["upload_id"].as_str().unwrap(),attachment_png()).await).await;
+    let fresh=grant(&h,&c,&cookie,true,false).await;
+    attachment_failure(&h,&c,fresh["access_token"].as_str().unwrap(),"create_note",json!({"deck_id":"1",
+        "note_type_id":"10","fields":{},"uploads":[{"upload_id":staged["upload_id"],"field":"Front"}]}),"attachment_unavailable").await;
+    h.stop().await;
+}
+
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn mcp_machine_upload_rechecks_lifecycle_and_publication_at_staging_commit() {
+    for mutation in ["expiry","grant_expiry","revoke","password","reset","publication"] {
+        let h=Harness::new().await; let c=local_client(); let identity=h.setup().await;
+        let cookie=h.login("root.admin",PASSWORD).await;
+        attachment_collection(&h,identity["id"].as_str().unwrap());
+        let tokens=grant(&h,&c,&cookie,true,false).await; let access=tokens["access_token"].as_str().unwrap();
+        let prepared=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
+        let staged=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
+        assert_eq!(stage_attachment(&h,staged["upload_id"].as_str().unwrap(),attachment_png()).await.status(),200);
+        let id=prepared["upload_id"].as_str().unwrap();
+        let pause=h.service.hooks.arm("mcp_upload_before_commit");
+        let request=attachment_post(&h,&c).bearer_auth(id).body(attachment_png());
+        let upload=tokio::spawn(async move {request.send().await.unwrap()});
+        tokio::time::timeout(std::time::Duration::from_secs(10),pause.arrived()).await.unwrap();
+        // Body acquisition owns bounded bytes, but no publication or metadata writer.
+        match mutation {
+            "expiry"=>{
+                meguri_sync_server::test_hooks::expire_media_upload(&h.service,id);
+                meguri_sync_server::test_hooks::expire_media_upload(&h.service,staged["upload_id"].as_str().unwrap());
+            }
+            "grant_expiry"=>{
+                let db=rusqlite::Connection::open(h.database()).unwrap();
+                db.execute("UPDATE oauth_grants SET created_at=1, expires_at=2",[]).unwrap();
+            }
+            "revoke"=>{
+                let grants:Value=h.get("/api/me/mcp-grants",Some(&cookie)).await.json().await.unwrap();
+                let grant=grants["data"]["grants"][0]["id"].as_str().unwrap();
+                assert_eq!(h.post(&format!("/api/me/mcp-grants/{grant}/revoke"),json!({}),Some(&cookie)).await.status(),200);
+            }
+            "password"=>assert_eq!(h.post("/api/password",json!({"current_password":PASSWORD,
+                "new_password":NEW_PASSWORD}),Some(&cookie)).await.status(),200),
+            "reset"=>assert_eq!(h.post(&format!("/api/admin/accounts/{}/reset-data",identity["id"].as_str().unwrap()),
+                json!({}),Some(&cookie)).await.status(),200),
+            "publication"=>{
+                use std::os::unix::fs::OpenOptionsExt;
+                let replacement=h.temp.path().join("replacement.anki2");
+                std::fs::OpenOptions::new().create_new(true).write(true).mode(0o600).open(&replacement).unwrap();
+                meguri_sync_server::collection::schema::create_blank(&replacement,123,456).unwrap();
+                let key=native_exchange(&h,&c,"hostKey","",json!({"u":"root.admin","p":PASSWORD})).await["key"].as_str().unwrap().to_owned();
+                let response=c.post(format!("{}/sync/upload",h.base))
+                    .header("anki-sync",json!({"v":11,"k":key,"c":"synthetic-attachments","s":""}).to_string())
+                    .body(zstd::stream::encode_all(std::fs::read(&replacement).unwrap().as_slice(),0).unwrap())
+                    .send().await.unwrap();
+                assert_eq!(response.status(),200);
+                assert_eq!(zstd::stream::decode_all(response.bytes().await.unwrap().as_ref()).unwrap(),b"OK");
+            }
+            _=>unreachable!(),
+        }
+        pause.resume();
+        upload_unauthorized(tokio::time::timeout(std::time::Duration::from_secs(15),upload).await.unwrap().unwrap()).await;
+        // The same invalidation also fences admission before the next body read.
+        upload_unauthorized(stage_attachment(&h,id,b"unsupported synthetic bytes".to_vec()).await).await;
+        let args=json!({"deck_id":"1","note_type_id":"10","fields":{},
+            "uploads":[{"upload_id":staged["upload_id"],"field":"Front"}]});
+        if matches!(mutation,"expiry"|"reset"|"publication") {
+            attachment_failure(&h,&c,access,"create_note",args,"attachment_unavailable").await;
+        } else {
+            assert_eq!(mcp_request(&h,&c,access,"tools/call",json!({"name":"create_note","arguments":args}))
+                .send().await.unwrap().status(),401);
+        }
+        let db=rusqlite::Connection::open(h.database()).unwrap();
+        assert_eq!(db.query_row::<i64,_,_>("SELECT count(*) FROM media_names",[],|r|r.get(0)).unwrap(),0);
+        drop(db); h.stop().await;
+    }
 }
 
 #[tokio::test]
@@ -777,7 +1002,7 @@ async fn expanded_staged_types_preserve_exact_references_bytes_and_usns_through_
         ("pdf",attachment_formats::pdf(),"<a href=\"NAME\">Open PDF</a><object data=\"NAME\" hidden></object>"),
     ] {
         let prepared=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
-        assert_eq!(stage_attachment(&h,&cookie,prepared["upload_id"].as_str().unwrap(),bytes.clone()).await.status(),200);
+        assert_eq!(stage_attachment(&h,prepared["upload_id"].as_str().unwrap(),bytes.clone()).await.status(),200);
         uploads.push(json!({"upload_id":prepared["upload_id"],"field":"Front"}));
         let name=format!("meguri-{}.{ext}",crypto::digest(&bytes).iter().map(|b|format!("{b:02x}")).collect::<String>());
         references.push(template.replace("NAME",&name)); names.push(name); originals.push(bytes);
@@ -789,7 +1014,7 @@ async fn expanded_staged_types_preserve_exact_references_bytes_and_usns_through_
     let expected=format!("question<br>{}",references.join("<br>"));
     let read=note_write_tool(&h,&c,access,"search_notes",json!({"note_id":created["note_id"]})).await;
     assert_eq!(read["notes"][0]["fields"]["Front"],expected);
-    let (_,_,chunk)=note_write_round(&h,&c,&key,&before["usn"],1).await;
+    let (synced,_,chunk)=note_write_round(&h,&c,&key,&before["usn"],1).await;
     assert_eq!(chunk["notes"][0][6],format!("{expected}\u{1f}"));
     let changes=attachment_media_json(&h,&key,"mediaChanges",json!({"lastUsn":0})).await;
     assert_eq!(changes.as_array().unwrap().len(),4); assert_eq!(usn(),4);
@@ -797,6 +1022,14 @@ async fn expanded_staged_types_preserve_exact_references_bytes_and_usns_through_
     for (name,bytes) in names.iter().zip(&originals) { assert_eq!(&delivered[name],bytes); }
     let noop=note_write_tool(&h,&c,access,"edit_note",json!({"note_id":created["note_id"],"revision":created["revision"],"uploads":uploads})).await;
     assert_eq!(noop,created); assert_eq!(usn(),4);
+    let back_uploads=uploads.iter().map(|upload|json!({"upload_id":upload["upload_id"],"field":"Back"})).collect::<Vec<_>>();
+    note_write_tool(&h,&c,access,"edit_note",json!({"note_id":created["note_id"],"revision":created["revision"],
+        "fields":{"Back":"answer"},"uploads":back_uploads})).await;
+    let (_,_,chunk)=note_write_round(&h,&c,&key,&synced["usn"],1).await;
+    assert_eq!(chunk["notes"][0][6],format!("{expected}\u{1f}answer<br>{}",references.join("<br>")));
+    let delivered=attachment_download(&h,&key,&names.iter().map(String::as_str).collect::<Vec<_>>()).await;
+    for (name,bytes) in names.iter().zip(&originals) { assert_eq!(&delivered[name],bytes); }
+    assert_eq!(usn(),4);
     assert_eq!(attachment_media_json(&h,&key,"mediaChanges",json!({"lastUsn":4})).await,json!([]));
     assert_eq!(attachment_media_json(&h,&key,"mediaSanity",json!({"local":4})).await,"OK");
     drop(metadata); h.stop().await;

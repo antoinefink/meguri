@@ -302,7 +302,9 @@ public final class StatsPageModel {
         selection.period = period
         store.save(selection)
         inputs &+= 1
-        selections = [:]
+        // Activity keeps a pinned day while it is still drawn (its view lets go of one the new
+        // window leaves out); every other box's selection goes (S8.3).
+        selections = selections.filter { $0.key == .activity }
         if period.needsNewRequest(after: previous) {
             cancelRunning()
             rebuild()
@@ -557,7 +559,8 @@ public final class StatsPageModel {
         let running = running.flatMap { $0.scope == selection.scope ? $0.set.header : nil }
         guard let header = running ?? kept.sets(for: selection.scope).lazy.compactMap(\.header).first,
               case let .day(oldest) = header.oldestDay else { return nil }
-        return StatsActivitySpan(firstDay: oldest, days: StatsDays(context: header.context, calendar: calendar))
+        return StatsActivitySpan(firstDay: selection.period.activityFirstDay(oldest: oldest),
+                                 days: StatsDays(context: header.context, calendar: calendar))
     }
 
     private func content(_ id: StatsBoxID) -> StatsBoxContent {

@@ -25,8 +25,9 @@ use crate::scenario::{
 pub(super) fn register(registry: &mut Registry) {
     registry.op("export", export);
     registry.op_part("export.colpkg");
-    registry.op_rejecting("import", &["too_new", "corrupt"], import);
+    registry.op_rejecting("import", &["too_new", "corrupt", "notetype_kind_conflict"], import);
     registry.op_part("import.colpkg");
+    registry.op_part("import.apkg");
     registry.observation("package_listing", listing);
     registry.op("add_backup_files", add_backup_files);
     registry.op("force_backup", force_backup);
@@ -94,6 +95,9 @@ fn import(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError>
     let Step::Import(args) = step else {
         return Err(invalid("expected import"));
     };
+    if args.0.get("format").and_then(Value::as_str) == Some("apkg") {
+        return import_apkg(session, &args.0);
+    }
     let args = CollectionPackageImportArgs::from_mapping(&args.0).map_err(invalid)?;
     let source = source(session, &args.source)?;
     let live = session
@@ -152,6 +156,109 @@ fn import(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError>
     session.review_session = None;
     session.held_queue = None;
     Ok(OpResult::Done)
+}
+
+/// E6: inspect, apply with the five options (accepting a merge preview at
+/// once), close. The log names target notes by their logical ids.
+fn import_apkg(session: &mut Session<'_>, args: &Map<String, Value>) -> Result<OpResult, ExecError> {
+    use meguri_package::apkg::{self, ApkgContext, ApkgImportError, ImportOptions, UpdateCondition};
+    let mut named = Map::new();
+    for key in ["name", "fixture"] {
+        if let Some(value) = args.get(key) {
+            named.insert(key.to_owned(), value.clone());
+        }
+    }
+    let request = PackageListingRequest::from_mapping(&named).map_err(invalid)?;
+    let path = source(session, &request)?;
+    let flag = |key: &str| args.get(key).and_then(Value::as_bool).ok_or_else(|| invalid(key));
+    let rule = |key: &str| match args.get(key).and_then(Value::as_str) {
+        Some("if_newer") => Ok(UpdateCondition::IfNewer),
+        Some("always") => Ok(UpdateCondition::Always),
+        Some("never") => Ok(UpdateCondition::Never),
+        _ => Err(invalid(key)),
+    };
+    let options = ImportOptions {
+        merge_notetypes: flag("merge_notetypes")?,
+        update_notes: rule("update_notes")?,
+        update_notetypes: rule("update_notetypes")?,
+        with_scheduling: flag("with_scheduling")?,
+        with_deck_configs: flag("with_deck_configs")?,
+    };
+    // Promote before creating staging, as the collection form does.
+    session.engine_collection()?;
+    let context = ApkgContext {
+        collection_directory: session.storage.dir()?,
+        clock: session.clock.clone(),
+        random: session.random.clone(),
+        space: std::sync::Arc::new(StatvfsSpace),
+    };
+    let rejected = |refusal: &ApkgImportError| match refusal {
+        ApkgImportError::TooNew => Some("too_new"),
+        ApkgImportError::Corrupt { .. }
+        | ApkgImportError::SchemaUnsupported { .. }
+        | ApkgImportError::UnsupportedFile => Some("corrupt"),
+        ApkgImportError::NotetypeKindConflict { .. } => Some("notetype_kind_conflict"),
+        _ => None,
+    };
+    let cancel = meguri_engine::CancelToken::new();
+    let progress = meguri_engine::ProgressSink::new();
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("package.apkg").to_owned();
+    let imported = match apkg::inspect(&path, &name, &context, &cancel, &progress) {
+        Ok(imported) => imported,
+        Err(refusal) => {
+            return match rejected(&refusal) {
+                Some(kind) => Ok(OpResult::Rejected(kind)),
+                None => Err(error(refusal)),
+            };
+        }
+    };
+    let engine = session.storage.host()?.engine().clone();
+    let mut token = None;
+    let result = loop {
+        match apkg::apply(&engine, &imported, options, token.as_deref(), &cancel, &progress) {
+            Ok(result) => break result,
+            Err(ApkgImportError::ConfirmationRequired { token: fresh, .. }) if token.as_ref() != Some(&fresh) => {
+                token = Some(fresh);
+            }
+            Err(refusal) => {
+                return match rejected(&refusal) {
+                    Some(kind) => Ok(OpResult::Rejected(kind)),
+                    None => Err(error(refusal)),
+                };
+            }
+        }
+    };
+    imported.close();
+    let logical = |id: i64| {
+        session
+            .notes
+            .iter()
+            .position(|known| *known == id)
+            .map_or_else(|| json!(id), |at| json!(format!("#n{}", at + 1)))
+    };
+    let list = |entries: &[apkg::LogEntry], named: bool| -> Value {
+        entries
+            .iter()
+            .map(|entry| {
+                json!({
+                    "note": if named { logical(entry.note) } else { json!(entry.note) },
+                    "fields": entry.fields,
+                })
+            })
+            .collect()
+    };
+    let log = &result.log;
+    Ok(OpResult::Output(json!({
+        "found_notes": log.found_notes,
+        "new": list(&log.new, true),
+        "updated": list(&log.updated, true),
+        "duplicate": list(&log.duplicate, true),
+        "conflicting": list(&log.conflicting, false),
+        "missing_notetype": list(&log.missing_notetype, false),
+        "missing_deck": list(&log.missing_deck, true),
+        "first_field_match": [],
+        "empty_first_field": [],
+    })))
 }
 
 fn listing(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {

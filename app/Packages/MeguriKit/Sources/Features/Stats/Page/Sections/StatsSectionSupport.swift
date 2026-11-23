@@ -77,3 +77,26 @@ struct StatsLegendEntry: View {
         }
     }
 }
+
+/// A number in a table column, right-aligned in tabular digits and as wide as the column's
+/// widest value, so the column lines up on the right in any locale ("52,6 %", "1 234") and a
+/// value never truncates or pushes the row past its box.
+struct StatsColumnText: View {
+    let text: String
+    /// Every value of the column.
+    let widest: [String]
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            ForEach(Array(Set(widest)).sorted(), id: \.self) { value in
+                Text(verbatim: value).hidden()
+            }
+            Text(verbatim: text)
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: text))
+    }
+}

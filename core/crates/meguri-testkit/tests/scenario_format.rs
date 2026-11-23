@@ -3435,7 +3435,8 @@ fn held_apkg_sources_options_limits_and_finer_needs_are_exact() {
     assert!(parsed.needs().ops.contains("import.apkg"));
     assert!(parsed.needs().ops.contains("export.apkg"));
     let capabilities = meguri_testkit::exec::MeguriExecutor::default().capabilities();
-    assert!(!capabilities.ops.contains("import.apkg"));
+    // U120 added the deck-package import (E6); the export waits for U122.
+    assert!(capabilities.ops.contains("import.apkg"));
     assert!(!capabilities.ops.contains("export.apkg"));
     for (op, args) in [("import", &import), ("export", &export)] {
         for key in args.as_object().unwrap().keys() {

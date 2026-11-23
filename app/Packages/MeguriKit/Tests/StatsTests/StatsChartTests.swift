@@ -342,13 +342,13 @@ import Testing
     @Test(arguments: [StatsPlotSize.lead, .regular])
     func aBoxKeepsItsSizeInEveryPhase(size: StatsPlotSize) {
         let samples = StatsChartSamples(period: .year, calendar: Self.calendar, now: Self.now)
-        func height(_ phase: StatsBoxPhase) -> CGFloat {
+        func height(_ phase: StatsBoxPhase, footnoteLines: Int = 1) -> CGFloat {
             let box = StatsChartBox(
                 box: "sample", title: "Reviews Over Time",
                 figure: StatsBoxFigure(value: "41,233 reviews", sentence: "23 days in a row"),
                 data: samples.reviewsByType(browsable: false), phase: phase, size: size,
                 figures: [.init(label: "Days Studied", value: "318 of 330"), .init(label: "Average a Day", value: "125")],
-                footnoteLines: 1
+                footnoteLines: footnoteLines
             )
             .frame(width: 520)
             .environment(\.locale, Self.locale)
@@ -359,6 +359,13 @@ import Testing
         #expect(ready > 0)
         for phase in [StatsBoxPhase.loading(fraction: nil), .loading(fraction: 0.4), .empty("No reviews in the last month"), .failed] {
             #expect(height(phase) == ready, "\(phase) against ready \(ready)")
+        }
+        // A box with no footnote keeps no line for one (Antoine, 2026-11-23: "a lot of white
+        // space"), and still keeps one height in every phase.
+        let bare = height(.ready, footnoteLines: 0)
+        #expect(bare < ready)
+        for phase in [StatsBoxPhase.loading(fraction: nil), .empty("No reviews in the last month"), .failed] {
+            #expect(height(phase, footnoteLines: 0) == bare, "\(phase) against ready \(bare)")
         }
     }
     #endif

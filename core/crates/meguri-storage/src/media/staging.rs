@@ -39,6 +39,10 @@ pub struct StagedOp {
     finished: bool,
     _live: Arc<()>,
 }
+enum Source<'a> {
+    Bytes(&'a [u8]),
+    File(&'a std::path::Path),
+}
 #[derive(Debug)]
 struct FileRecord {
     idx: i64,
@@ -92,19 +96,35 @@ impl StagedOp {
         self.store.media_dir().parent().expect("media root has a parent")
     }
     pub fn add(&mut self, desired: &str, bytes: &[u8]) -> Result<String> {
+        let hash = folder::hash_bytes(bytes);
+        self.add_source(desired, &Source::Bytes(bytes), &hash).map(|(name, _)| name)
+    }
+    /// [`StagedOp::add`] for content already decoded into `file`, whose
+    /// SHA-1 is `sha1` (lower-case hex): a deck package's payload, never held
+    /// in memory whole (`package/apkg-import` I12.4). `file` must lie on the
+    /// collection's file system; it is moved into staging when the content
+    /// is to be written and left in place otherwise. Returns the stored
+    /// name and whether this op staged the content.
+    pub fn add_file(&mut self, desired: &str, file: &std::path::Path, sha1: &str) -> Result<(String, bool)> {
+        if sha1.len() != 40 || !sha1.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(MediaError::InvalidManifest("staged file digest".into()));
+        }
+        self.add_source(desired, &Source::File(file), sha1)
+    }
+    fn add_source(&mut self, desired: &str, source: &Source<'_>, hash: &str) -> Result<(String, bool)> {
         self.store.check_changes()?;
         for attempt in 0..3 {
-            match self.add_checked(desired, bytes, attempt == 2) {
+            match self.add_checked(desired, source, hash, attempt == 2) {
                 Err(MediaError::NameTaken) if attempt < 2 => self.store.register_full(|_, _| true)?,
                 other => return other,
             }
         }
         Err(MediaError::NameTaken)
     }
-    fn add_checked(&mut self, desired: &str, bytes: &[u8], force_hash: bool) -> Result<String> {
+    fn add_checked(&mut self, desired: &str, source: &Source<'_>, hash: &str, force_hash: bool) -> Result<(String, bool)> {
         let mut db = self.store.db()?;
         require_manifest(&db, self.id)?;
-        let hash = folder::hash_bytes(bytes);
+        let hash = hash.to_owned();
         let (mut name, write) = self.store.choose(&mut db, desired, &hash)?;
         if !write {
             let own: bool = db.query_row(
@@ -113,7 +133,7 @@ impl StagedOp {
                 |r| r.get(0),
             )?;
             if own || folder::regular(&self.store.media_dir().join(&name))?.is_some() {
-                return Ok(name);
+                return Ok((name, false));
             }
             // Another uncommitted op owns the same bytes: keep our own copy,
             // so its rollback cannot remove this operation's attachment.
@@ -137,14 +157,14 @@ impl StagedOp {
             let variants = self.store.candidates(&mut db, &name)?;
             for (candidate, candidate_hash) in variants {
                 if candidate_hash == hash && folder::regular(&self.store.media_dir().join(&candidate))?.is_some() {
-                    return Ok(candidate);
+                    return Ok((candidate, false));
                 }
             }
         }
         let replace_existing = name == hash_name;
         if folder::regular(&target)?.is_some() {
             if folder::hash_file(&target)? == hash {
-                return Ok(name);
+                return Ok((name, false));
             }
             if name != hash_name {
                 return Err(MediaError::NameTaken);
@@ -156,7 +176,22 @@ impl StagedOp {
             |r| r.get(0),
         )?;
         let path = format!("{}-{index}--{name}", self.id);
-        self.store.write_bytes(&self.store.staging_dir().join(&path), bytes)?;
+        let staged = self.store.staging_dir().join(&path);
+        let size = match source {
+            Source::Bytes(bytes) => {
+                self.store.write_bytes(&staged, bytes)?;
+                bytes.len() as u64
+            }
+            Source::File(file) => {
+                let handle = fs::File::open(file)?;
+                crate::atomic_file::full_sync(&handle)?;
+                let size = handle.metadata()?.len();
+                drop(handle);
+                fs::rename(file, &staged)?;
+                crate::atomic_file::sync_directory(self.store.staging_dir())?;
+                size
+            }
+        };
         meguri_model::faultpoint!("media.stage.after_write")?;
         db.execute(
             "INSERT INTO staged_files(op_id,idx,name,sha1,size,path,replace_existing) VALUES(?1,?2,?3,?4,?5,?6,?7)",
@@ -165,12 +200,12 @@ impl StagedOp {
                 index,
                 name,
                 hash,
-                journal_db::sqlite_integer(bytes.len() as u64)?,
+                journal_db::sqlite_integer(size)?,
                 path,
                 replace_existing
             ],
         )?;
-        Ok(name)
+        Ok((name, true))
     }
     pub fn names(&self) -> Result<Vec<String>> {
         let db = self.store.db()?;

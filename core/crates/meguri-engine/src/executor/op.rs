@@ -28,6 +28,7 @@ use crate::undo::{Restore, UndoManager, UndoNotes, UndoSpec};
 #[derive(Clone, Debug)]
 pub struct OpSpec {
     pub(crate) schema_reasons: Vec<crate::SchemaReason>,
+    pub(crate) safety_required: bool,
     pub(crate) safety_admitted: bool,
     pub(crate) safety_backup: Option<crate::ports::GuardedBackup>,
     pub(crate) recorded_clock: Option<Arc<dyn meguri_model::clock::Clock>>,
@@ -48,6 +49,7 @@ impl OpSpec {
     pub fn new(def: OpDef, source: OpSource) -> OpSpec {
         OpSpec {
             schema_reasons: Vec::new(),
+            safety_required: false,
             safety_admitted: false,
             safety_backup: None,
             recorded_clock: None,
@@ -80,8 +82,18 @@ impl OpSpec {
         &self.schema_reasons
     }
 
+    /// Takes the safety backup of a structural edit, with its coalescing,
+    /// for an op whose plan marks no schema reason: an import whose
+    /// confirmed merge preview drops content
+    /// (`package/backup-triggers` T6.1, `package/notetype-merge` J9).
+    pub fn require_safety_backup(mut self) -> Self {
+        self.safety_required = true;
+        self
+    }
+
     pub(crate) fn needs_safety_backup(&self) -> bool {
-        self.def.undo_class().is_some_and(|class| class.requires_backup())
+        self.safety_required
+            || self.def.undo_class().is_some_and(|class| class.requires_backup())
             || self.schema_reasons.iter().any(|reason| reason.is_structural())
     }
 
@@ -208,6 +220,8 @@ pub struct OpContext<'s, 'c> {
     pub(crate) before_commit: Vec<Box<dyn FnOnce() -> Result<(), EngineError> + Send>>,
     /// The collection's random source (R1875): new field and template ids.
     pub(crate) random: Arc<dyn RandomSource>,
+    /// The name of the safety backup admitted for this op, if any (T6.2).
+    pub(crate) safety_backup: Option<String>,
 }
 
 /// What an op's commit hook learns: the op's seq and generation, and
@@ -258,6 +272,12 @@ impl<'c> OpContext<'_, 'c> {
     /// older than the current file or external invalidation is conservative.
     pub fn local_modification_since(&self, since: Seq) -> bool {
         self.touched.local_modification_since(since)
+    }
+
+    /// The safety backup taken or reused for this op (`package/backup-triggers`
+    /// T6.2), for results that report its name.
+    pub fn safety_backup_name(&self) -> Option<&str> {
+        self.safety_backup.as_deref()
     }
 
     pub fn source(&self) -> OpSource {
