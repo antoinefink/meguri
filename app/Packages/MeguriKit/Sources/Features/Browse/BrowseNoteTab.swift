@@ -28,9 +28,11 @@ struct BrowseNoteTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // The preview's header stays; the card under it scrolls with the rest.
+            BrowsePreviewSection(inspector: inspector, note: note, part: .header)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    BrowsePreviewSection(inspector: inspector, note: note)
+                    BrowsePreviewSection(inspector: inspector, note: note, part: .card)
                     Divider()
                     if let error = note.error {
                         ContentUnavailableView {
@@ -51,6 +53,8 @@ struct BrowseNoteTab: View {
             .scrollPosition($position)
             .onScrollGeometryChange(for: CGRect.self) { $0.visibleRect } action: { _, rect in visible = rect }
             .onChange(of: host?.caret) { _, caret in follow(caret) }
+            // A line typed at the end: the page grows after the caret moves there.
+            .onChange(of: host?.contentHeight) { follow(host?.caret) }
             if note.error == nil {
                 Divider()
                 BrowseFormattingBar(host: host, cloze: note.isCloze)
@@ -60,28 +64,39 @@ struct BrowseNoteTab: View {
         .accessibilityIdentifier("browse.inspector.note")
     }
 
-    private static let content = "browse.inspector.content"
+    nonisolated private static let content = "browse.inspector.content"
 
     /// The caret's line stays in sight while typing in a long field.
     private func follow(_ caret: ClosedRange<Double>?) {
-        guard let caret, visible.height > 0 else { return }
-        let top = fieldsTop + caret.lowerBound, bottom = fieldsTop + caret.upperBound, margin = Spacing.small
-        if bottom > visible.maxY - margin { position.scrollTo(y: bottom - visible.height + margin) }
-        else if top < visible.minY + margin { position.scrollTo(y: max(0, top - margin)) }
+        guard let caret, host?.fieldFocused == true else { return }
+        // After this layout pass, so the scroll view already has the page's new height.
+        Task { @MainActor in
+            guard visible.height > 0 else { return }
+            let top = fieldsTop + caret.lowerBound, bottom = fieldsTop + caret.upperBound, margin = Spacing.small
+            if bottom > visible.maxY - margin { position.scrollTo(y: bottom - visible.height + margin) }
+            else if top < visible.minY + margin { position.scrollTo(y: max(0, top - margin)) }
+        }
     }
 
     // MARK: Deck and Type (N17.1's rows)
 
+    /// Option A: a short trailing-aligned label column, the two pop-ups the
+    /// same width, filling the rest of the row.
     private var selectionRows: some View {
-        Form {
-            Picker(selection: Binding(get: { note.card?.deckId ?? 0 }, set: { inspector.chooseDeck($0) })) {
-                ForEach(deckChoices, id: \.id) { deck in
-                    Text(verbatim: Self.deckName(deck, home: homeDeck(for: deck))).tag(deck.id)
-                }
-            } label: { Text("browse.inspector.deck", bundle: .module) }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier("browse.inspector.deck")
-            LabeledContent {
+        Grid(alignment: .leading, horizontalSpacing: Spacing.small, verticalSpacing: Spacing.small) {
+            GridRow {
+                Text("browse.inspector.deck", bundle: .module).gridColumnAlignment(.trailing)
+                Picker(selection: Binding(get: { note.card?.deckId ?? 0 }, set: { inspector.chooseDeck($0) })) {
+                    ForEach(deckChoices, id: \.id) { deck in
+                        Text(verbatim: Self.deckName(deck, home: homeDeck(for: deck))).tag(deck.id)
+                    }
+                } label: { Text("browse.inspector.deck", bundle: .module) }
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("browse.inspector.deck")
+            }
+            GridRow {
+                Text("browse.inspector.type", bundle: .module)
                 Menu {
                     // Choosing another type opens Change Note Type… on this note (U284).
                     ForEach(model.notetypes.filter { $0.id != note.notetype.id }, id: \.id) { type in
@@ -93,11 +108,11 @@ struct BrowseNoteTab: View {
                     }
                     .accessibilityIdentifier("browse.inspector.type.editNoteType")
                 } label: { Text(verbatim: note.notetype.name) }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel(Text("browse.inspector.type", bundle: .module))
                 .accessibilityIdentifier("browse.inspector.type")
-            } label: { Text("browse.inspector.type", bundle: .module) }
+            }
         }
-        .formStyle(.columns)
         .padding(.horizontal)
         .padding(.vertical, Spacing.small)
     }
@@ -205,64 +220,75 @@ struct BrowseNoteTab: View {
 /// away; a click flips question and answer; "Card <i> of <k> ›" steps
 /// through the note's cards.
 struct BrowsePreviewSection: View {
+    enum Part { case header, card }
     let inspector: BrowseInspector
     let note: BrowseInspectorNote
+    let part: Part
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button { inspector.previewFolded.toggle() } label: {
-                    Label {
-                        Text("browse.inspector.preview", bundle: .module)
-                    } icon: {
-                        Image(systemName: "chevron.right").rotationEffect(.degrees(inspector.previewFolded ? 0 : 90)).imageScale(.small)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .font(.headline)
-                .accessibilityValue(Text(verbatim: inspector.previewFolded ? "collapsed" : "expanded"))
-                .accessibilityIdentifier("browse.inspector.preview.header")
-                Spacer()
-                if inspector.preview.hasAudio {
-                    Button { inspector.preview.replay() } label: {
-                        Label { Text("browse.inspector.preview.play", bundle: .module) } icon: { Image(systemName: "speaker.wave.2") }
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .help(Text("browse.inspector.preview.play", bundle: .module))
-                    .accessibilityIdentifier("browse.inspector.preview.play")
-                }
-                if note.cards.count > 1 {
-                    Button { inspector.showCard((note.cardIndex + 1) % note.cards.count) } label: {
-                        HStack(spacing: Spacing.xxSmall) {
-                            Text(verbatim: BrowseInspectorText.card(note.cardIndex, of: note.cards.count, locale: locale))
-                            Image(systemName: "chevron.right").imageScale(.small)
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityIdentifier("browse.inspector.preview.nextCard")
-                }
+        switch part {
+        case .header:
+            // The header is always there, folded or not: it keeps the card's appearance.
+            header.onChange(of: colorScheme, initial: true) { _, scheme in
+                inspector.preview.setAppearance(scheme == .dark ? .dark : .light)
             }
-            .padding(.horizontal)
-            .padding(.vertical, Spacing.xSmall)
-            if !inspector.previewFolded {
-                Group {
-                    if let pair = inspector.preview.pair {
-                        BrowsePreviewCard(pair: pair) { inspector.preview.flip() }
-                    } else {
-                        Color.clear
+        case .card: card
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Button { inspector.previewFolded.toggle() } label: {
+                Label {
+                    Text("browse.inspector.preview", bundle: .module)
+                } icon: {
+                    Image(systemName: "chevron.right").rotationEffect(.degrees(inspector.previewFolded ? 0 : 90)).imageScale(.small)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .font(.headline)
+            .accessibilityValue(Text(verbatim: inspector.previewFolded ? "collapsed" : "expanded"))
+            .accessibilityIdentifier("browse.inspector.preview.header")
+            Spacer()
+            if inspector.preview.hasAudio {
+                Button { inspector.preview.replay() } label: {
+                    Label { Text("browse.inspector.preview.play", bundle: .module) } icon: { Image(systemName: "speaker.wave.2") }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help(Text("browse.inspector.preview.play", bundle: .module))
+                .accessibilityIdentifier("browse.inspector.preview.play")
+            }
+            if note.cards.count > 1 {
+                Button { inspector.showCard((note.cardIndex + 1) % note.cards.count) } label: {
+                    HStack(spacing: Spacing.xxSmall) {
+                        Text(verbatim: BrowseInspectorText.card(note.cardIndex, of: note.cards.count, locale: locale))
+                        Image(systemName: "chevron.right").imageScale(.small)
                     }
                 }
-                .frame(height: BrowseInspectorMetrics.previewHeight)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("browse.inspector.preview")
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("browse.inspector.preview.nextCard")
             }
         }
-        .onChange(of: colorScheme, initial: true) { _, scheme in
-            inspector.preview.setAppearance(scheme == .dark ? .dark : .light)
+        .padding(.horizontal)
+        .padding(.vertical, Spacing.xSmall)
+    }
+
+    @ViewBuilder private var card: some View {
+        if !inspector.previewFolded {
+            Group {
+                if let pair = inspector.preview.pair {
+                    BrowsePreviewCard(pair: pair) { inspector.preview.flip() }
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(height: BrowseInspectorMetrics.previewHeight)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("browse.inspector.preview")
         }
     }
 }

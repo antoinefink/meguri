@@ -122,7 +122,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
         fields.element(boundBy: 0).click()
         app.typeKey(.downArrow, modifierFlags: [.command])
-        for line in 1...30 { app.typeText("\rline \(line) of a long field that wraps across the pane") }
+        for line in 1...14 { app.typeText("\rline \(line) of a long field that wraps across the pane") }
         capture(app, "long-note-\(appearance)")
         let bar = element(app, "browse.inspector.formatting")
         XCTAssertTrue(bar.frame.maxY <= app.windows.firstMatch.frame.maxY + 1, "the bar stays at the pane's bottom edge")

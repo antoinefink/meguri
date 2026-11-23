@@ -69,6 +69,10 @@ struct BrowseTable: View {
                 model.inspector.show()
             }
             .focused($focused)
+            // N21.3: Return shows the inspector too (the primary action answers a double click).
+            #if os(macOS)
+            .onKeyPress(.return) { model.inspector.show(); return .handled }
+            #endif
             // Another handle shown is another table: no diff of its rows with the last list's.
             .id(list?.token ?? 0)
             .accessibilityIdentifier("browse.results.table")
