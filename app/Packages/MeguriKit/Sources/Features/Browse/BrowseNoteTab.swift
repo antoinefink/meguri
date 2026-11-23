@@ -22,6 +22,9 @@ struct BrowseNoteTab: View {
     @State private var position = ScrollPosition(edge: .top)
     @State private var visible: CGRect = .zero
     @State private var fieldsTop: CGFloat = 0
+    /// Deck and Type: the rows' width and the longer label's, so the two pop-ups share one width.
+    @State private var rowsWidth: CGFloat = 0
+    @State private var labelWidth: CGFloat = 0
 
     private var inspector: BrowseInspector { model.inspector }
     private var host: FieldEditorHost? { note.runtime as? FieldEditorHost }
@@ -82,21 +85,29 @@ struct BrowseNoteTab: View {
 
     /// Option A: a short trailing-aligned label column, the two pop-ups the
     /// same width, filling the rest of the row.
+    private var popupWidth: CGFloat? { rowsWidth > 0 ? max(0, rowsWidth - labelWidth - Spacing.small) : nil }
+
+    private func label(_ key: LocalizedStringKey) -> some View {
+        Text(key, bundle: .module)
+            .fixedSize()
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { labelWidth = max(labelWidth, $0) }
+    }
+
     private var selectionRows: some View {
         Grid(alignment: .leading, horizontalSpacing: Spacing.small, verticalSpacing: Spacing.small) {
             GridRow {
-                Text("browse.inspector.deck", bundle: .module).gridColumnAlignment(.trailing)
+                label("browse.inspector.deck").gridColumnAlignment(.trailing)
                 Picker(selection: Binding(get: { note.card?.deckId ?? 0 }, set: { inspector.chooseDeck($0) })) {
                     ForEach(deckChoices, id: \.id) { deck in
                         Text(verbatim: Self.deckName(deck, home: homeDeck(for: deck))).tag(deck.id)
                     }
                 } label: { Text("browse.inspector.deck", bundle: .module) }
                 .labelsHidden()
-                .frame(maxWidth: .infinity)
+                .frame(width: popupWidth, alignment: .leading)
                 .accessibilityIdentifier("browse.inspector.deck")
             }
             GridRow {
-                Text("browse.inspector.type", bundle: .module)
+                label("browse.inspector.type")
                 Menu {
                     // Choosing another type opens Change Note Type… on this note (U284).
                     ForEach(model.notetypes.filter { $0.id != note.notetype.id }, id: \.id) { type in
@@ -108,11 +119,13 @@ struct BrowseNoteTab: View {
                     }
                     .accessibilityIdentifier("browse.inspector.type.editNoteType")
                 } label: { Text(verbatim: note.notetype.name) }
-                .frame(maxWidth: .infinity)
+                .frame(width: popupWidth, alignment: .leading)
                 .accessibilityLabel(Text("browse.inspector.type", bundle: .module))
                 .accessibilityIdentifier("browse.inspector.type")
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowsWidth = $0 }
         .padding(.horizontal)
         .padding(.vertical, Spacing.small)
     }
