@@ -51,7 +51,7 @@ final class NavigationLayoutTests: XCTestCase {
 
     func testTheSidebarListsTheSectionsThenTheDecks() throws {
         let app = try launch(route: "shell/root/typical", sizeClass: "regular")
-        let rows = ["home", "browse", "stats", "noteTypes", "settings"].map { element(app, "shell.root.sidebar.\($0)") }
+        let rows = ["home", "stats", "browse", "noteTypes", "settings"].map { element(app, "shell.root.sidebar.\($0)") }
         XCTAssert(rows[0].waitForExistence(timeout: 15), "no sidebar at regular width")
         let decksHeader = element(app, "shell.root.sidebarDecks")
         let firstDeck = element(app, "testhooks.shell.deck.1")
@@ -59,7 +59,7 @@ final class NavigationLayoutTests: XCTestCase {
             XCTAssert(item.exists, "\(item) is missing")
         }
         let tops = (rows + [decksHeader, firstDeck]).map(\.frame.minY)
-        XCTAssertEqual(tops, tops.sorted(), "the sidebar is not Home, Browse, Stats, Note Types, Settings, then Decks: \(tops)")
+        XCTAssertEqual(tops, tops.sorted(), "the sidebar is not Home, Statistics, Browse, Note Types, Settings, then Decks: \(tops)")
         XCTAssertFalse(app.tabBars.firstMatch.exists, "a tab bar shows in the sidebar layout")
     }
 

@@ -70,6 +70,10 @@ public struct ReviewView: View {
             if let editNote, editNote.flow.isPresented { editNote.form }
         }
         #endif
+        .onChange(of: model.leechNoticeID) { _, id in
+            guard id != nil, let text = model.notice else { return }
+            AccessibilityNotification.Announcement(text).post()
+        }
         // N20.8: no banner or toast; VoiceOver says what happened.
         .onChange(of: model.cardActionAnnouncement?.id) { _, id in
             guard id != nil, let action = model.cardActionAnnouncement?.action else { return }

@@ -155,6 +155,151 @@ extension ReviewCollectionStartupTests {
         _ = await fixture.model.end()
     }
 
+    @Test(arguments: [false, true])
+    func leechNoticeExpiresOnSameNextQuestion(suspended: Bool) async throws {
+        let fixture = Fixture()
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(2), marks: [], removed: [1]),
+            leech: true, suspended: suspended, rolledOver: false)
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.model.rate(.again); await fixture.model.settled()
+        #expect(fixture.model.notice == (suspended ? "Card was a leech. It has been suspended." : "Card was a leech."))
+        #expect(fixture.model.phase == .question && fixture.model.shownItem?.cardId == 2)
+        #expect(fixture.model.canReveal && fixture.model.canUndo && fixture.model.canFinish)
+        #expect(fixture.model.record.suspended.contains(1) == suspended)
+
+        // Observe real monotonic expiry with a bounded wait; no further input or refresh.
+        let deadline = ContinuousClock.now + .seconds(3)
+        while fixture.model.notice != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(fixture.model.notice == nil)
+        #expect(fixture.model.phase == .question && fixture.model.shownItem?.cardId == 2)
+        #expect(fixture.surface.presented == [1, 2])
+        #expect(await fixture.model.end())
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func freshLeechNoticeReplacesExpiryAndPreservesNewerError(throwsOnCancellation: Bool) async throws {
+        let fixture = Fixture()
+        let first = ExpiryGate(), second = ExpiryGate()
+        defer { first.release(); second.release() }
+        fixture.model.waitForLeechNoticeExpiry = {
+            await first.wait()
+            #expect(Task.isCancelled)
+            if throwsOnCancellation { try Task.checkCancellation() }
+        }
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(2), marks: [], removed: [1]),
+            leech: true, suspended: false, rolledOver: false)
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.model.rate(.again); await fixture.model.settled()
+        await first.requested()
+        let firstExpiry = try #require(fixture.model.leechNoticeTask)
+        let firstID = try #require(fixture.model.leechNoticeID)
+        fixture.model.waitForLeechNoticeExpiry = {
+            await second.wait()
+            #expect(Task.isCancelled)
+            if throwsOnCancellation { try Task.checkCancellation() }
+        }
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(3), marks: [], removed: [2]),
+            leech: true, suspended: false, rolledOver: false)
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.model.rate(.again); await fixture.model.settled()
+        await second.requested()
+        let secondExpiry = try #require(fixture.model.leechNoticeTask)
+        let secondID = try #require(fixture.model.leechNoticeID)
+        #expect(secondID != firstID)
+        // Deliver the cancelled old wait only after the identical replacement exists.
+        first.release(); await firstExpiry.value
+        #expect(fixture.model.notice == "Card was a leech.")
+        #expect(fixture.model.leechNoticeID == secondID)
+        #expect(fixture.model.phase == .question && fixture.model.shownItem?.cardId == 3)
+        fixture.model.showNotice("A newer review error")
+        second.release(); await secondExpiry.value
+        #expect(fixture.model.notice == "A newer review error")
+        #expect(fixture.model.leechNoticeID == nil)
+        #expect(await fixture.model.end())
+        #expect(fixture.model.notice == "A newer review error")
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func commitFailureBeforeAcceptedLeechRestoresQuestionAndKeepsError() async throws {
+        let fixture = Fixture(), accepted = CancellableGate()
+        defer { accepted.release() }
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(2), marks: [], removed: [1]),
+            leech: true, suspended: false, rolledOver: false)
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.client.onAnswerResult = { try await accepted.wait() }
+        fixture.model.rate(.again)
+        await accepted.requested()
+        fixture.client.currentHead = Self.head(1)
+        fixture.model.commitFailed(cardID: 1, error: .internal("injected disk failure"))
+        let failure = try #require(fixture.model.notice)
+        #expect(failure.contains("injected disk failure"))
+        accepted.release(); await fixture.model.settled()
+        #expect(!accepted.cancelled && fixture.client.answers == 1 && fixture.client.used.count == 1)
+        #expect(fixture.client.headReads == 1)
+        #expect(fixture.model.phase == .question && fixture.model.shownItem?.cardId == 1)
+        #expect(fixture.surface.presented == [1, 1])
+        #expect(fixture.model.record.answers.isEmpty)
+        #expect(fixture.model.notice == failure && fixture.model.leechNoticeID == nil)
+        #expect(await fixture.model.end())
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func acceptedLeechPreservesNoticePublishedAfterAdmission(sameText: Bool) async throws {
+        let fixture = Fixture(), accepted = CancellableGate()
+        defer { accepted.release() }
+        let original = "A persistent review error"
+        let newer = sameText ? original : "A newer review error"
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(2), marks: [], removed: [1]),
+            leech: true, suspended: false, rolledOver: false)
+        await fixture.model.start()
+        fixture.model.showNotice(original)
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.client.onAnswerResult = { try await accepted.wait() }
+        fixture.model.rate(.again)
+        await accepted.requested()
+        fixture.model.showNotice(newer)
+        accepted.release(); await fixture.model.settled()
+        #expect(!accepted.cancelled && fixture.client.answers == 1 && fixture.client.used.count == 1)
+        #expect(fixture.model.record.answers.map(\.cardID) == [1])
+        #expect(fixture.model.phase == .question && fixture.model.shownItem?.cardId == 2)
+        #expect(fixture.model.notice == newer && fixture.model.leechNoticeID == nil)
+        #expect(await fixture.model.end())
+    }
+
+    @Test(arguments: ["progress", "undoRedo", "end", "generation"])
+    func leechNoticeDismissesWithReviewProgressOrEnd(action: String) async {
+        let fixture = Fixture()
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(2), marks: [], removed: [1]),
+            leech: true, suspended: false, rolledOver: false)
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.model.rate(.again); await fixture.model.settled()
+        #expect(fixture.model.notice == "Card was a leech.")
+        switch action {
+        case "progress":
+            fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(3), marks: [], removed: [2]),
+                leech: false, suspended: false, rolledOver: false)
+            fixture.model.reveal(); await fixture.model.settled()
+            fixture.model.rate(.good); await fixture.model.settled()
+            #expect(fixture.model.shownItem?.cardId == 3)
+        case "undoRedo":
+            fixture.model.restore()
+            #expect(fixture.model.notice == nil, "Undo dismisses the warning on admission")
+            await fixture.model.settled()
+            fixture.model.restore(redo: true); await fixture.model.settled()
+            #expect(fixture.client.restores == [false, true])
+        case "end": #expect(await fixture.model.end())
+        default: fixture.model.generationEnded()
+        }
+        #expect(fixture.model.notice == nil)
+        #expect(await fixture.model.end())
+    }
+
     @Test func commitFailureAfterAdvanceRestoresOriginalQuestionAndRecord() async throws {
         let fixture = Fixture()
         await fixture.model.start()
@@ -1396,6 +1541,19 @@ extension ReviewCollectionStartupTests {
         func requested() async { for await _ in entered.stream { return } }
         func release() { held.continuation.finish(); entered.continuation.finish() }
     }
+    // Unlike the cancellable gate, hold completion until release even after cancellation.
+    final class ExpiryGate {
+        private let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        private var continuation: CheckedContinuation<Void, Never>?
+        func wait() async {
+            await withCheckedContinuation {
+                continuation = $0
+                entered.continuation.yield(())
+            }
+        }
+        func requested() async { for await _ in entered.stream { return } }
+        func release() { continuation?.resume(); continuation = nil }
+    }
     final class SummaryGate {
         let state: ReviewDeckStudyState
         private var continuation: CheckedContinuation<ReviewDeckStudyState, Never>?
@@ -1458,12 +1616,14 @@ extension ReviewCollectionStartupTests {
         }
         func answer(sessionID: UInt64, item: ReviewHeadItem, rating: ReviewRating, at: Int64, elapsed: UInt64) async throws -> ReviewAnswerOutcome {
             answers += 1
+            let result = answerHead
+            // Core advances before result delivery. A failure during the hold can roll it back.
+            if !answerFailure, case .accepted(let diff, _, _, _) = result { currentHead = diff.head }
             try await onAnswerResult?()
             self.elapsed.append(elapsed)
             used.append((sessionID, item, rating, at))
             if answerFailure { throw BridgeError.internal("native input completion failure") }
-            if case .accepted(let diff, _, _, _) = answerHead { currentHead = diff.head }
-            return answerHead
+            return result
         }
         var undoStep = (name: "Answer Card", kind: ReviewStepKind.answer)
         var undoReads = 0

@@ -200,10 +200,9 @@ struct StatsPresenter {
     // S7.1
     func knowledge() -> Outcome {
         guard case let .knowledgeOverTime(value)? = set.value(.knowledgeOverTime) else { return .unavailable }
-        var notes: [String] = []
-        if value.leftOut > 0 { notes.append(text.suspendedNotIncluded(value.leftOut, count(value.leftOut))) }
-        if value.failed > 0 { notes.append(text.couldNotEstimate(value.failed, count(value.failed))) }
-        let footnote = notes.count == 2 ? text.footnotes(notes[0], notes[1]) : notes.first
+        // The suspended cards left out are said by the Estimated marker's help, not on the box
+        // (Antoine, 2026-11-23); the chart's page (U302) says it in its About text.
+        let footnote = value.failed > 0 ? text.couldNotEstimate(value.failed, count(value.failed)) : nil
         guard !value.samples.isEmpty else {
             return noRows
                 ? empty(.knowledgeOverTime, .noReviewsYet, detail: text.fillsIn, footnote: footnote)
@@ -798,7 +797,11 @@ struct StatsSeriesKit {
                 StatsSeries(id: "studied", name: text.studied, color: .reference, mark: .line(dashed: true), values: studied),
             ],
             yScale: .fitted,
-            calloutLines: axis == nil ? [] : [StatsCalloutLine(id: "likelyForgotten", name: text.likelyForgotten, values: gap, texts: gapTexts)]
+            calloutLines: axis == nil ? [] : [StatsCalloutLine(id: "likelyForgotten", name: text.likelyForgotten, values: gap,
+                                                               texts: gapTexts, color: .forgotten)],
+            // The gap between what was studied and what is known, as a band (Antoine, 2026-11-23).
+            bands: [StatsBand(id: "likelyForgotten", name: text.likelyForgotten, color: .forgotten, lower: "known",
+                              upper: "studied", spoken: text.likelyForgottenBand)]
         )
     }
 
