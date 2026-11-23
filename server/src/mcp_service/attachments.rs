@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-//! M8 acquisition and ephemeral browser staging. Never diagnose input metadata.
+//! M8 acquisition and ephemeral machine staging. Never diagnose input metadata.
 mod download;
 mod format;
 use super::*;
-use crate::{accounts::{self, BrowserAuthority}, mcp_transport::inputs::{FileInput, UploadInput}, media};
+use crate::{accounts, mcp_transport::inputs::{FileInput, UploadInput}, media};
 use std::{collections::BTreeMap, sync::{Mutex, Weak}};
 use tokio::sync::{Semaphore, OwnedSemaphorePermit};
 
@@ -57,8 +57,8 @@ impl Uploads {
     fn slot(&self) -> Result<OwnedSemaphorePermit> {
         self.capacity.clone().try_acquire_owned().map_err(|_| mcp::busy())
     }
-    #[cfg(test)]
-    pub(super) fn expire_fixture(&self, id: &str) {
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub(crate) fn expire_fixture(&self, id: &str) {
         self.records.lock().unwrap().get_mut(&upload_key(id).unwrap()).unwrap().expires = accounts::now() - 1;
     }
     fn read(&self, key: &[u8;32]) -> Result<Record> {
@@ -139,7 +139,7 @@ impl McpService {
                 if let Ok(mut records) = store.records.lock() { records.retain(|_, r|r.expires > accounts::now()); }
             }
         });
-        Ok((id.clone(), format!("{}/mcp/upload#upload={id}",self.service.config.origin()), expires))
+        Ok((id, format!("{}/api/mcp/media-upload",self.service.config.origin()), expires))
     }
     pub(super) async fn write_with_media(&self, original: oauth::Authority,
         files: Option<Vec<FileInput>>, fields: Option<Vec<String>>, uploads: Option<Vec<UploadInput>>,
@@ -147,7 +147,9 @@ impl McpService {
     ) -> Result<WriteResult> {
         // Bounded before DNS, allocations or filesystem work, even if called outside transport.
         crate::mcp_transport::inputs::validate_attachments(&files,&fields,&uploads).map_err(|_| invalid())?;
-        if files.is_some() && !oauth::direct_file_client(&original) { return Err(unavailable()); }
+        if files.is_some() && !oauth::direct_file_client(&original) {
+            return Err(unavailable().with_mcp_detail(Detail::AttachmentClient));
+        }
         let mut permit = self.service.mcp_uploads.slot()?;
         let pinned = self.pin(original.clone()).await?;
         let mut acquired = Vec::new();
@@ -155,7 +157,8 @@ impl McpService {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
         let mut total = 0usize;
         for (file,field) in files.unwrap_or_default().into_iter().zip(fields.unwrap_or_default()) {
-            let bytes = tokio::time::timeout_at(deadline,self.fetch_direct(&file.download_url,FILE_BYTES.min(TOTAL_BYTES-total))).await.map_err(|_| unavailable())??;
+            let bytes = tokio::time::timeout_at(deadline,self.fetch_direct(&file.download_url,FILE_BYTES.min(TOTAL_BYTES-total)))
+                .await.map_err(|_| unavailable().with_mcp_detail(Detail::AttachmentTimeout))??;
             total = total.checked_add(bytes.len()).filter(|n|*n <= TOTAL_BYTES).ok_or_else(invalid)?;
             let validated = self.service.metadata.files(move |_| Ok((Arc::new(Validated::new(bytes)?),permit))).await?;
             permit = validated.1;
@@ -203,21 +206,22 @@ impl McpService {
 }
 impl Service {
     pub(crate) fn media_upload_slot(&self) -> Result<OwnedSemaphorePermit> { self.mcp_uploads.slot() }
-    pub(crate) async fn check_media_upload(&self, browser: BrowserAuthority, id: &str) -> Result<()> {
+    pub(crate) async fn check_media_upload(&self, id: &str) -> Result<()> {
         let key = upload_key(id).map_err(|_| Error::new("capability_invalid"))?;
         let record = self.mcp_uploads.read(&key).map_err(|_| Error::new("capability_invalid"))?;
-        self.metadata.files(move |root| check_browser_upload(root,&browser,&record)).await
+        self.metadata.files(move |root| check_upload(root,&record)).await
     }
-    pub(crate) async fn accept_media_upload(&self, browser: BrowserAuthority, id: String, bytes: Vec<u8>, permit: OwnedSemaphorePermit) -> Result<()> {
+    pub(crate) async fn accept_media_upload(&self, id: String, bytes: Vec<u8>, permit: OwnedSemaphorePermit) -> Result<()> {
         let key = upload_key(&id).map_err(|_| Error::new("capability_invalid"))?;
         let record = self.mcp_uploads.read(&key).map_err(|_| Error::new("capability_invalid"))?;
         let (content,permit) = self.metadata.files(move |_| Ok((Arc::new(Validated::new(bytes)?),permit))).await?;
+        self.pause("mcp_upload_before_commit").await;
         let barrier = self.barriers.get(record.authority.account_id())?;
         let guard = barrier.try_enter().ok_or_else(mcp::busy)?;
         let store = self.mcp_uploads.clone();
         self.metadata.files(move |root| {
             let _held = (permit,barrier,guard);
-            check_browser_upload(root,&browser,&record)?;
+            check_upload(root,&record)?;
             store.check(&key,&record).map_err(|_| Error::new("capability_invalid"))?;
             let mut records = store.records.lock().map_err(|_| unavailable())?;
             if records.values().filter_map(|r|r.content.as_ref()).map(|v|v.bytes.len()).sum::<usize>() + content.bytes.len() > STORED_BYTES { return Err(invalid()); }
@@ -228,12 +232,11 @@ impl Service {
         }).await
     }
 }
-fn check_browser_upload(root: &DataRoot, browser: &BrowserAuthority, record: &Record) -> Result<()> {
+fn check_upload(root: &DataRoot, record: &Record) -> Result<()> {
     let mut c = storage::inspect(root.database())?;
     let tx = c.transaction()?;
-    let account = accounts::check_browser(&tx,browser,"authentication_failed")?;
     oauth::check_upload_binding(&tx,&record.authority)?;
-    if account.identity.id != record.authority.account_id() || record.expires <= accounts::now() || record.content.is_some()
+    if record.expires <= accounts::now() || record.content.is_some()
         || root.collection_path(record.authority.account_id())? != record.path { return Err(Error::new("capability_invalid")); }
     Ok(())
 }

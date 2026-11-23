@@ -234,3 +234,11 @@ This is a bounded source/evidence correction, not a passing run. No build,
 browser execution, dependency audit or image rebuild ran here. Retain the red
 receipt; independent exact review, an ordinary `sync-web-image` rebuild and the
 required web/package checks must bind the new bytes before acceptance.
+
+### M8 automatic media transfer (2026-11-23)
+
+The machine upload replaces the browser picker added above. The web
+input inventory drops the picker and its browser tests. The server
+HTTP tests cover the binary POST and note attachment without a browser.
+The inventory records the exact browser input and packaging-control
+changes. The dependency graph, upstream inputs and notices stay pinned.

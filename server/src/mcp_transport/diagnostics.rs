@@ -7,7 +7,7 @@ use crate::config::LogLevel;
 use std::io::Write;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Operation { Unknown, Discover, Initialize, Initialized, Ping, List, Search, Catalog, Create, Edit, Download }
+pub(super) enum Operation { Unknown, Discover, Initialize, Initialized, Ping, List, Search, Catalog, Create, Edit, Download, PrepareUpload }
 impl Operation {
     pub fn classify(value: &serde_json::Value) -> Self {
         match value.get("method").and_then(serde_json::Value::as_str) {
@@ -22,6 +22,7 @@ impl Operation {
                 Some("create_note") => Self::Create,
                 Some("edit_note") => Self::Edit,
                 Some("download_collection") => Self::Download,
+                Some("prepare_media_upload") => Self::PrepareUpload,
                 _ => Self::Unknown,
             },
             _ => Self::Unknown,
@@ -33,6 +34,7 @@ impl Operation {
             Self::Initialized => "initialized", Self::Ping => "ping", Self::List => "tools_list",
             Self::Search => "search_notes", Self::Catalog => "list_decks_and_note_types",
             Self::Create => "create_note", Self::Edit => "edit_note", Self::Download => "download_collection",
+            Self::PrepareUpload => "prepare_media_upload",
         }
     }
 }

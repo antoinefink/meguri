@@ -368,7 +368,9 @@ async fn direct_refusals_and_late_revocation_or_expiry_never_publish() {
     bridge.direct_fixture=Some(Arc::new(|_| panic!("a refused URL must not reach the fixture")));
     for url in ["http://files.oaiusercontent.com/generated","https://untrusted.example.test/generated","https://files.oaiusercontent.com/generated#fragment"] {
         let result=mapped(&bridge,&f,"edit_note",json!({"note_id":"1","revision":"stale","files":[{"download_url":url,"file_id":"f"}],"file_fields":["Front"]})).await;
-        assert!(matches!(result,Err(transport::DispatchFailure::Tool(transport::ToolFailure::AttachmentUnavailable))));
+        assert!(matches!(result,Err(transport::DispatchFailure::Diagnosed {
+            failure:transport::ToolFailure::AttachmentUnavailable,detail:Detail::AttachmentUrl,
+        })));
     }
     assert_eq!(media_counts(&f),(0,0,0));
 }
