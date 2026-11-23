@@ -55,14 +55,17 @@ public struct BrowseSidebar<Header: View>: View {
         // The list's own row actions: the row menus, and its primary action, which
         // macOS runs on Return (and a double click). T9: Return on the one selected
         // filter row is a second click on it. A double click is two clicks already.
+        #if os(macOS)
         .contextMenu(forSelectionType: BrowseSidebarTag.self) { rows in
             rowMenu(rows)
         } primaryAction: { rows in
-            #if os(macOS)
             guard NSApp.currentEvent?.type == .keyDown else { return }
-            #endif
             model.activateByKey(rows)
         }
+        #else
+        // On touch a tap is the selection's (a primary action would take every tap).
+        .contextMenu(forSelectionType: BrowseSidebarTag.self) { rows in rowMenu(rows) }
+        #endif
         // T9: Space on the one selected filter row, as Return.
         .onKeyPress(.space) { model.activateByKey(selection) ? .handled : .ignored }
         // N20.6 (2026-11-22): the system's own prompt, "Search", as with Today selected.

@@ -378,10 +378,13 @@ private struct BrowseScrollReporter: NSViewRepresentable {
                     // Only the user's scrolling moves the kept row: the clip view also
                     // moves while SwiftUI takes the table down for another section
                     // (a click in the sidebar), and that must not keep its top.
-                    let type = NSApp.currentEvent?.type
-                    switch type {
-                    case .scrollWheel, .keyDown, .leftMouseDragged, .swipe: self?.report()
-                    default: self?.skipped(type)
+                    let event = NSApp.currentEvent
+                    switch event?.type {
+                    case .scrollWheel, .keyDown, .leftMouseDragged, .swipe, .periodic: self?.report()
+                    // A click on the scroller's track pages the table: also the user's scroll.
+                    case .leftMouseDown where self?.onScroller(event) == true, .leftMouseUp where self?.onScroller(event) == true:
+                        self?.report()
+                    default: self?.skipped(event?.type)
                     }
                 }
             }
@@ -425,6 +428,14 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             if case .some(let last) = lastSkipped, last == type { return }
             lastSkipped = .some(type)
             results.trace("moved on \(type.map { "\($0.rawValue)" } ?? "no event")")
+        }
+
+        /// The event lands on the table's vertical scroller.
+        private func onScroller(_ event: NSEvent?) -> Bool {
+            guard let event, let scroller = table?.enclosingScrollView?.verticalScroller, scroller.window === event.window else {
+                return false
+            }
+            return scroller.convert(scroller.bounds, to: nil).contains(event.locationInWindow)
         }
 
         private func report() {
