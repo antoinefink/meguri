@@ -80,6 +80,24 @@ import Testing
 
     // MARK: Tiers and phases (S10.1, S10.3, S12.8)
 
+    /// S10.3: before `activity_days` returns, Activity keeps room for every year back to the
+    /// header's oldest review (H9), so the box is at its final height.
+    @Test func activityKeepsRoomForItsYearsFromTheHeader() async throws {
+        let model = model()
+        model.appear()
+        let request = try await request(1)
+        #expect(model.box(.activity).detail == nil, "no header yet")
+        // Today is 2026-10-12; 400 days back is 2025-09-07: two year blocks.
+        service.answer(request, tier1)
+        await settle { model.box(.activity).detail != nil }
+        #expect(model.box(.activity).phase == .loading(fraction: nil))
+        #expect(model.box(.activity).detail == .activityYears(2))
+        service.answer(request, tier2)
+        await settle { model.box(.activity).phase == .ready }
+        guard case let .activity(activity)? = model.box(.activity).detail else { Issue.record("no activity"); return }
+        #expect(activity.years.count == 2)
+    }
+
     @Test func boxesFillByTierWithTheirOwnProgress() async throws {
         let model = model()
         model.appear()

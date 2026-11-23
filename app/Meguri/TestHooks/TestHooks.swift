@@ -2,6 +2,7 @@
 import AppModel
 import DesignSystem
 import Foundation
+import Stats
 import SwiftUI
 
 /// Test-only launch hooks (KTD18, R1963, R1967), compiled into Debug and
@@ -41,7 +42,15 @@ enum TestHooks {
             shell?.prepare(navigation)
             if options.statsRollout == .open {
                 // After the app's own launch selection (Today), once the shell starts.
-                Task { @MainActor in navigation.select(.section(.stats)) }
+                Task { @MainActor in
+                    navigation.select(.section(.stats))
+                    guard let name = options.statsSection, let section = StatsSectionID(rawValue: name) else { return }
+                    // Once every box shows its value (the collection opened and read), as View › Go to
+                    // Section would then.
+                    for _ in 0..<300 where StatsHooks.shared.page?.filled != true { try? await Task.sleep(for: .milliseconds(100)) }
+                    try? await Task.sleep(for: .milliseconds(300))
+                    StatsHooks.shared.page?.go(to: section)
+                }
             }
             if let render = options.syncRender, let collection {
                 SyncRoutes.showRender(render, over: collection, clock: collection.configuration.clock)

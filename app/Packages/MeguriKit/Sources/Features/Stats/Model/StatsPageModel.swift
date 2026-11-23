@@ -498,8 +498,19 @@ public final class StatsPageModel {
 
     private func skeletonContent(_ id: StatsBoxID, phase: StatsBoxPhase) -> StatsBoxContent {
         let kit = StatsSeriesKit(text: text)
-        return StatsBoxContent(phase: phase, data: kit.skeleton(id, selection: selection),
-                               figures: kit.skeletonFigures(id, selection: selection))
+        var content = StatsBoxContent(phase: phase, data: kit.skeleton(id, selection: selection),
+                                      figures: kit.skeletonFigures(id, selection: selection))
+        if id == .activity, case .loading = phase, let years = activityYears() { content.detail = .activityYears(years) }
+        return content
+    }
+
+    /// Activity's year blocks from the running request's header (H9's oldest review: every year
+    /// back to it, the current one included), before `activity_days` returns (S10.3).
+    private func activityYears() -> Int? {
+        guard let running, running.scope == selection.scope, let header = running.set.header else { return nil }
+        guard case let .day(oldest) = header.oldestDay else { return nil }
+        let days = StatsDays(context: header.context, calendar: calendar)
+        return max(1, days.year(ofDay: 0) - days.year(ofDay: min(oldest, 0)) + 1)
     }
 
     private func content(_ id: StatsBoxID) -> StatsBoxContent {
@@ -570,7 +581,9 @@ public final class StatsPageModel {
         }()
         if note != filteredDeckNote { filteredDeckNote = note }
         var next = boxes
-        for id in StatsBoxID.allCases where part.map({ id.reads($0, reviewsMode: selection.reviewsMode) }) ?? true {
+        // Activity while it has no detail yet: the first part's header sizes its years (S10.3).
+        for id in StatsBoxID.allCases where part.map({ id.reads($0, reviewsMode: selection.reviewsMode) }) ?? true
+            || (id == .activity && boxes[id]?.detail == nil) {
             let content = content(id)
             next[id] = content
             carrySelection(id, to: content)
