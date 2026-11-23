@@ -14,6 +14,7 @@
 //! learn_ahead_secs: 1200              # optional, default 1200
 //! presets:                            # optional; Default (id 1) always exists
 //!   - {name: Light, new_per_day: 10, reviews_per_day: 50}
+//!   - {name: Leeches, leech_threshold: 1, leech_action: suspend}  # both optional
 //! decks:                              # parents of `A::B` are made when missing
 //!   - name: "Languages::日本語"
 //!     preset: Light                   # optional, default Default
@@ -84,6 +85,20 @@ pub struct PresetSpec {
     pub new_per_day: Option<u32>,
     #[serde(default)]
     pub reviews_per_day: Option<u32>,
+    /// `lapse.leechFails`, 1 to 9,999 (`sched/leeches#L1`; F9.1).
+    #[serde(default)]
+    pub leech_threshold: Option<u32>,
+    /// `tag` or `suspend` (`sched/leeches#L3`; F9.1).
+    #[serde(default)]
+    pub leech_action: Option<LeechAction>,
+}
+
+/// A recipe preset's leech action (`sched/leeches#L3`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LeechAction {
+    Tag,
+    Suspend,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -335,6 +350,18 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
         }
         if let Some(n) = spec.reviews_per_day {
             message.reviews_per_day = n;
+        }
+        if let Some(n) = spec.leech_threshold {
+            if !(1..=9999).contains(&n) {
+                return Err(GenError::Recipe(format!("leech_threshold {n} is not 1 to 9999")));
+            }
+            message.leech_threshold = n;
+        }
+        if let Some(action) = spec.leech_action {
+            message.leech_action = match action {
+                LeechAction::Suspend => 0,
+                LeechAction::Tag => 1,
+            };
         }
         let id = DeckConfigId(ids.presets.claim(timeline.crt_ms() + i as i64 + 1));
         presets.push(preset(id, &spec.name, message, &timeline));

@@ -19,6 +19,8 @@ The choices U162's import and export sheets offer, in which order, starting from
 
 Meguri shows the preview facts of `package/apkg-import#I4` (notes, cards, decks, whether the package carries scheduling) above the options, once the inspect has run. Anki shows only the options. Deviation noted in R1600 itself; no golden sees it.
 
+Changed 2026-11-23 (deck package import), to match the engine: the sheet shows the four facts above, taken from the inspect's `PreviewFacts` (format, notes, cards, decks, note types, whether it carries scheduling and presets, media files and bytes, and the repairs made); the options' starting values are not among them, and come from `read_options`, a pure read of the open collection made when the sheet opens (I4, I5). What the options will do (new, updated, duplicate notes) is known only from the result (X2.5); a merge's destructive mappings only from the apply (X2.3).
+
 ### X2.2 Options (R1601)
 
 Anki 26.9.3's page shows the five options in two groups, in this order:
@@ -36,7 +38,17 @@ Meguri keeps this order: the two progress options first, then the three update o
 
 ### X2.3 Merge note types (R1605)
 
-Anki's help for Merge note types warns that a merge needs a one-way sync. Meguri shows no such warning: with Merge note types on, a merge with destructive mappings shows U121's preview before anything is written (`package/apkg-import#I8`, `package/notetype-merge#J10`), and Anki full-transfer warnings belong to explicit manual transfers only (R1605).
+Anki's help for Merge note types warns that a merge needs a one-way sync. Meguri shows no such warning: with Merge note types on, a merge with destructive mappings shows U121's preview before anything is written (`package/apkg-import#I8`, `package/notetype-merge#J10`), and Anki full-transfer warnings belong to explicit manual transfers only (R1605). The one exception is Meguri's own: with a ready Meguri Sync binding, a structural import's confirmation carries the sync paragraph below (changed 2026-11-23 (deck package import), `sync/meguri-provider#MP7.1`).
+
+**The confirmation flow** (changed 2026-11-23 (deck package import), to match the engine). The engine gives the merge preview only through the apply: the inspect has none, and no call previews a merge without applying. So the sheet's flow is: Import calls the apply with the chosen options and no token; when the plan needs a confirmation the apply returns `ConfirmationRequired{preview, token}` and writes nothing; the sheet shows the preview; the confirm button calls the apply again with the same options and that token. An apply that returns `ConfirmationRequired` again (the preview changed in between: an edit, or MP7.1's round) replaces the shown preview with the new one and its token. Changing an option after a preview goes back to the options: a token holds the options it was given for (I8). Cancel calls nothing: the collection is unchanged, no backup is taken, and the session stays open. Both applies run with progress and Cancel (X2.4); the first one plans before it returns the preview.
+
+- **The preview** (`package/notetype-merge#J10`; Meguri's wording, S4). Title: `Import “<file name>”?`. One row per entry, in the preview's order, the losses in red:
+  - an emptied field: "<field>" of "<note type>": its content in <n> notes is deleted;
+  - a removed note type: "<note type>" is removed; its <n> notes move to "<note type>";
+  - dropped values: "<note type>": <n> notes hold more values than it has fields, and the extra values are deleted.
+
+  The engine gives the names of an emptied field's note type and field and of a removed note type, but only the ids of the note type a removed one's notes move to and of a note type with dropped values. Those are note types of the open collection: the sheet reads their names by id from it when it shows the preview. Then, in the secondary colour, one line that a backup of the collection is kept on this device (J9: a confirmed preview always takes one, `package/apkg-import#I14.4`). Buttons: Cancel, and Import, destructive and never the default, so Return does nothing destructive.
+- **With Meguri Sync** (a ready binding, `sync/meguri-provider#MP7.1`; not built yet). The sheet asks the apply to confirm structure (`package/apkg-import#I8`). A plan with a structural reason is then confirmed too, its preview possibly empty, and the confirmation adds `notetypes/draft-save` D4's sync paragraph in the import's words: "**Meguri Sync will be replaced.** This import changes the structure of your note types, so it cannot be merged. Meguri syncs this <device> first, imports, then uploads this collection in place of the one on Meguri Sync." then "Sync your other devices before you continue. Changes on them that have not synced will be lost." then, in the secondary colour, "A backup of the collection is kept on this <device>." The confirm button reads "Import and Upload". As D3 says for Save and Upload, it has the destructive role when the preview lists losses, and is never the default either way. With rows and the paragraph, the backup line is shown once, at the end. When Meguri Sync cannot be reached (D4's check, made when the confirmation shows), the first paragraph reads "**Meguri Sync cannot be reached.** Meguri imports on this <device> now and asks you to upload this collection when the server can be reached." and the button reads Import. A plan with a structural reason and no preview has no rows: the paragraph alone, under the title. Accepting runs MP7.1's job. With iCloud or Off, a structural plan with an empty preview asks nothing (`notetypes/draft-save` D3). The engine cannot give this confirmation yet: today it reports a plan's structural reasons only in the result (`package/apkg-import#I14.5`).
 
 ### X2.4 Progress and cancel
 
@@ -62,13 +74,44 @@ Meguri (`package/apkg-import#I13`, I17):
 - **Placed in the default deck**: `missing_deck` entries are not failures in Meguri: those notes were imported and their cards went to the default deck (I11.1, I17). They get a fifth line after the four, shown only when not empty, with Show. Each of these notes is also counted in its own line (new, updated or duplicate), so this line is not added to the others.
 - The table has one row per note, read in pages through U133: its status (added, updated or skipped) from its one list among new, updated, duplicate, conflicting and `missing_notetype` (I13: a note is in exactly one of them), with that list's reason, and the entry's first field (I13's reduced text, as I13 says the UI shows). A note that is also in `missing_deck` keeps that one row and gains the default-deck reason beside its own; it never gets a second row.
 - Each row of a note that was imported (new, updated, duplicate, and so every `missing_deck` note) offers Show in Browse for that one note, as Anki's row button does; a row of "could not be imported" offers none.
-- After a successful import, an Undo action for the one "Import" step (I14.3) stays available as the app's undo toast does.
+- After a successful import, an Undo action for the one "Import" step (I14.3) stays available as the app's undo toast does. Changed 2026-11-23 (deck package import): only when the result names an undo step; an import that changed nothing has none, and MP7.1's upload clears it.
+- Changed 2026-11-23 (deck package import): when the result's counts hold skipped media files (for example a static file the folder already has, a static file over 64 MiB or whose name is not a safe media name (`package/apkg-import#I12.3`), or static files left unwritten after `MediaCommitPending`), one line under the four says how many media files were not added. No Show.
+- Changed 2026-11-23 (deck package import): an entry can carry no fields once the log's text budget is spent (`package/apkg-import#I13`, `fields_omitted`). Its row shows, in place of the first field, that the note's text is not shown here, in the secondary colour; its status, reason and Show stay, since its ids are kept. When `fields_omitted` is above 0, one line under the table says that some notes are listed without their text, with no count: `fields_omitted` counts entries, and a note in `missing_deck` has two.
 
 ### X2.6 Errors
 
 The kinds are `package/apkg-import#I16`; the sheet words each (Meguri). `TooNew` says that the package was made by a newer version (R1597). `SchemaUnsupported{gate}` says which: a collection too old to read, too new, or one that uses the old scheduler. `NotetypeKindConflict` says that a cloze note type and a standard one cannot be merged and that the import can run with Merge note types off, which is what Anki's message says too.
 
 - Every error before the commit, `Cancelled` included, says that the collection is unchanged.
+
+Changed 2026-11-23 (deck package import): what each of the engine's refusals says (Meguri's wording, S4), and what the sheet offers after it.
+
+- "Retry" after an apply calls the apply again on the same session (I2: a refused apply leaves it open). After an inspect there is no session (its staging is removed): Retry runs the inspect again on the same file, from the intake (`package/file-intake#K3`), and becomes "another file" when the file can no longer be read.
+- "Another file" closes the session and goes back to the picker.
+
+| Error (`package/apkg-import#I16`) | Where | The message says | Offers |
+|---|---|---|---|
+| `UnsupportedFile` | before the sheet | a message, not a sheet (X1, `package/file-intake#K6`) | — |
+| `TooNew`, `SchemaUnsupported{gate}` | inspect | as above | another file |
+| `Corrupt{detail}` | inspect or apply (the apply rereads the package and can find it damaged or changed) | that the file is damaged or not a deck package; the detail is for Copy Debug Info, never shown | another file |
+| `TooLarge{what, found, limit}` | inspect | that the package is too large for Meguri to import, naming what is over: too many notes and cards (`rows`), a note's text too long (`note bytes`), a card's data too large (`card data bytes`), too many tags (`tag uses`), a note's GUID that is too long (`guid bytes`), or too many or too large decks, presets or note types (`structure rows`, `note type parts`, `structure bytes`) | another file |
+| `TooLarge{what: "rows"}` | apply, Import any learning progress on | that with its learning progress the package has too many notes, cards and reviews together to import, and that it can be imported without its learning progress (`package/apkg-import#I15.1`) | turning Import any learning progress off and importing again; another file |
+| `NotetypeKindConflict{incoming, target}` | apply | as above | turning Merge note types off |
+| `DeckTooDeep{name}` | apply | that a deck of the package, named, is nested too deeply to add | another file |
+| `InsufficientSpace{needed, available}` | inspect or apply | how much more space this device needs (`needed` − `available`), in the system's file-size format | Retry |
+| `DiskFull`, `Io` | inspect or apply | that the device could not write the files it needed | Retry |
+| `Stale` | apply | that the collection kept changing while the import was prepared | Retry |
+| `Busy{running_op}` | apply | that another long task is running (named as the sheet names long tasks), to try once it ends | Retry |
+| `SafetyBackupFailed{cause}` | apply | that the backup made before this import could not be written, so nothing was imported | Retry |
+| `CollectionUnavailable`, `StaleGeneration` | apply | that the collection is not available now | Retry |
+| `SessionClosed` | apply | that the file must be chosen again | another file |
+| any other engine refusal (the import error that carries an engine error not named above) | apply | that the import could not finish; before the commit, that the collection is unchanged | Retry |
+| an engine error after the commit (the import error that carries `CommitCompleted` or `MediaCommitPending` with no result, or `Io` "committed without a result") | apply | that the notes were imported and the result cannot be shown; never that the collection is unchanged, never an offer to import again | — |
+| `read_options` fails (no open collection, `package/file-intake#K6`'s states) | sheet opening | the intake's message for that state; the sheet does not open | — |
+| `Cancelled` | inspect or apply | only that the collection is unchanged | the options again (apply), or nothing (inspect) |
+| `ConfirmationRequired{preview, token}` | apply | not an error: the confirmation of X2.3 | — |
+| `MediaCommitPending` | after the commit | below | — |
+
 - `MediaCommitPending` comes after the commit (I14.5): the sheet shows the result of X2.5 with one line saying that the notes were imported and that some media files are still being put in place, which finishes on its own (the journal's recovery). It never says that the collection is unchanged and never offers to import again.
 
 ## X3. Collection package import (R1626, R1628)
@@ -155,7 +198,7 @@ Export is disabled while the collection is in an exclusive phase (U153's gate); 
 | Situation | Anki 26.9.3 | Meguri | Why |
 |---|---|---|---|
 | Deck package import sheet | options only | preview facts first (X2.1) | R1600 |
-| Merge note types help | warns of a one-way sync | merge preview, no full-transfer warning (X2.3) | R1605 |
+| Merge note types help | warns of a one-way sync | merge preview, no full-transfer warning (X2.3); with a ready Meguri Sync binding, a structural import's confirmation carries Meguri's own sync paragraph (X2.3, MP7.1) | R1605, `sync/meguri-provider#MP7.1` |
 | `missing_deck` notes in the result | its page would group them under "could not be imported"; its deck package import never produces them (I17) | a separate line; the notes were imported (X2.5) | `package/apkg-import#I17` |
 | `conflicting` rows | the package note only | may name the matched target note (X2.5) | `package/apkg-import#I13` |
 | Collection package confirmation | a warning, default No | the inspect's preview, then a destructive confirmation that is never the default (X3) | R1626, N8 |
@@ -172,6 +215,7 @@ U162's tests (`ImportFlowTests.swift`, `ExportSheetTests.swift`, `app/MeguriUITe
 - the import sheet shows X2.2's order, starting from a FakeCore config that holds each I5 value; changing "Import any learning progress" and importing sends that value (core write recorded);
 - a FakeCore log with entries in each I13 list → the lines of X2.5 in order, empty ones hidden, Show on the first three and on the default-deck line with the `nid:` search of their target ids, none on "could not be imported"; a log with only duplicates → one line; a note in `new` and `missing_deck` → one row with both reasons; a row's Show opens Browse on that note, none on a "could not be imported" row;
 - `MediaCommitPending` → the result with the media line and no "unchanged" text; `SchemaUnsupported` for each gate → its own message;
+- changed 2026-11-23 (deck package import): the options start from a FakeCore `read_options` and the inspect is not asked for them; Import with a merge whose FakeCore apply returns `ConfirmationRequired` → the preview's rows, no write recorded, Return does nothing, the destructive Import sends the same options with that token; a second `ConfirmationRequired` → the new preview replaces the old; changing an option after a preview → back to the options, the old token never sent; Cancel → no apply call; each X2.6 row → its message and offer, `TooLarge{what: "rows"}` at the apply offering to turn learning progress off; a log with `fields_omitted` above 0 → rows without text keep their status and Show, and the line under the table; a result with no undo step → no Undo; the preview's title, and one backup line when rows and the sync paragraph show together; Retry after an inspect refusal runs the inspect again (another file when the file can no longer be read); the catch-all and post-commit rows of X2.6 never say "unchanged" after a commit and never offer to import again; `read_options` failing → no sheet, the intake's message; skipped media files in the counts → the line under the four;
 - the collection package confirmation in `Ready`, `NoCollection` and `Failed` → X3's text for each; Return confirms nothing, the destructive button starts the import (X3); changed 2026-11-19: the text is X7.2's, and X7.4 adds the import and export flow tests;
 - each X4.1 entry point → the format, scope, scheduling value and formats offered it gives, with no remembered values, then with remembered ones; Export Collection with Media… with Include media remembered off → on; switching File › Export… to the deck package → the whole-collection entry;
 - the deck scope list equals D17's list after a "whole collection" entry, a filtered deck and the default deck included; from a Browse selection the list is the selection alone;
