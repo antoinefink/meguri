@@ -1134,6 +1134,10 @@ public final class SyncCoordinator {
     @ObservationIgnored var meguriMediaRetryDelay: ((Duration?) -> Duration?)?
     @ObservationIgnored var meguriMediaResumeObserver: ((MeguriMediaResume.Trigger) -> Void)?
     private var meguriWake: (id: UUID, task: Task<Void, Never>, availability: MeguriWakeAvailability)?
+    /// MP6.10: a review session's changes wait for one window before their round.
+    @ObservationIgnored lazy var meguriReviewRounds = MeguriReviewRounds { [weak self] in
+        self?.requestMeguriWake(automatic: true)
+    }
     private var meguriAddressDrain: Task<Void, Never>?
     private var meguriPauseDrain: Task<Void, Never>?
     private var meguriCancellation: Task<Void, Never>?
@@ -2270,6 +2274,8 @@ public final class SyncCoordinator {
                 let recoveryRevision = meguriReachabilityRecoveryRevision
                 meguriWakePending = false; meguriWakeManual = false
                 guard meguriSchedulingAllowed(automatic: !manual) else { return }
+                // MP6.10: this round carries every change committed so far.
+                meguriReviewRounds.roundStarting()
                 meguriRoutine = .exchanging
                 let availabilityRevision = availability.revision
                 do {
@@ -2735,10 +2741,13 @@ public final class SyncCoordinator {
             meguriWake?.availability.observe(kind: event.kind, sequence: event.seq, generation: event.generation)
             switch event.kind {
             case .changes(let changes):
-                if changes.source != .syncIncoming && changes.source != .cloudIncoming && changes.source != .cloudRekey {
-                    requestMeguriWake(automatic: true)
+                if changes.source != .syncIncoming && changes.source != .cloudIncoming && changes.source != .cloudRekey,
+                   meguriReviewRounds.localChange(), meguriRoutine == .idle {
+                    // MP6.10: waiting for the window is pending, never up to date.
+                    meguriRoutine = .pending
                 }
-            case .sessionEnded: requestMeguriWake(automatic: true)
+            case .sessionStarted(let id, _): meguriReviewRounds.sessionStarted(id)
+            case .sessionEnded(let id): meguriReviewRounds.sessionEnded(id)
             case .available:
                 if meguriWake == nil { requestMeguriWake(automatic: true) }
             default: break
@@ -3873,6 +3882,12 @@ public final class SyncCoordinator {
         guard !replacing else { return false }
         if initialAdoptionEnabledBefore != nil { initialOwnAdmission.setOpen(false) }
         if providerState?.selection == .meguri {
+            // MP6.10: changes waiting for a review window go before the app is suspended,
+            // within the background time the system gave.
+            if meguriReviewRounds.flush(), let wake = meguriWake {
+                await Self.join(wake.task, within: Self.meguriBackgroundBudget(deadlineMilliseconds: deadlineMilliseconds,
+                    now: Int64(clock.now().timeIntervalSince1970 * 1_000)))
+            }
             suspended = true
             await drainMeguriProduct()
         }
@@ -3897,6 +3912,29 @@ public final class SyncCoordinator {
             DebugCloudDiagnostics.record(.suspendFreeze, error: error)
             #endif
             operationFailed = true; return false
+        }
+    }
+    /// MP6.10: the share of the system's background time a waiting round may take,
+    /// leaving the rest for the local flush and the suspension that follow.
+    static func meguriBackgroundBudget(deadlineMilliseconds: Int64?, now: Int64) -> Duration {
+        guard let deadlineMilliseconds else {
+            // The Mac keeps running when it is hidden: no system deadline, the same bound.
+            #if os(macOS)
+            return .seconds(20)
+            #else
+            return .zero
+            #endif
+        }
+        let left = max(0, deadlineMilliseconds - now - 5_000)
+        return .milliseconds(min(left, 20_000))
+    }
+    private static func join(_ task: Task<Void, Never>, within budget: Duration) async {
+        guard budget > .zero else { return }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await task.value }
+            group.addTask { try? await Task.sleep(for: budget) }
+            await group.next()
+            group.cancelAll()
         }
     }
     public func backgroundExpired() {
@@ -4378,6 +4416,7 @@ public final class SyncCoordinator {
             if desiredVisibleMedia?.generation != next { desiredVisibleMedia = nil }
             deliveredVisibleMedia = nil
             generation = next; status = nil; preview = nil; recovery = nil
+            meguriReviewRounds.reset()
             retainedRecoveryStart = nil
             hasDeferredNativeWork = false
             hostRevision &+= 1
