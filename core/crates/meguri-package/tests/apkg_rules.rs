@@ -861,3 +861,55 @@ fn low_space_at_the_extraction_and_at_the_media_preflight_refuses_before_writing
     space.0.store(false, std::sync::atomic::Ordering::SeqCst);
     assert_eq!(apply(&target, &session, ALL_OFF).unwrap().counts.notes_added, 1);
 }
+
+/// Reports the free space it was last given.
+struct Level(std::sync::atomic::AtomicU64);
+impl meguri_storage::space::SpaceProvider for Level {
+    fn available_bytes(&self, _: &std::path::Path) -> Result<u64, meguri_storage::StorageError> {
+        Ok(self.0.load(std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
+#[test]
+fn the_media_preflight_counts_the_safety_backup_a_structural_import_takes() {
+    use std::sync::atomic::Ordering::SeqCst;
+    // What the media preflight asks for, read from its refusal.
+    let needed = |target: &Fixture, package: &std::path::Path| -> (u64, meguri_package::apkg::ImportSession, std::sync::Arc<Level>) {
+        let space = std::sync::Arc::new(Level(u64::MAX.into()));
+        let mut context = crate::apkg_import::context(target);
+        context.space = space.clone();
+        let session = meguri_package::apkg::inspect(
+            package,
+            "media.apkg",
+            &context,
+            &meguri_engine::CancelToken::new(),
+            &meguri_engine::ProgressSink::new(),
+        )
+        .unwrap();
+        space.0.store(1024, SeqCst);
+        let Err(ApkgImportError::InsufficientSpace { needed, available: 1024 }) = apply(target, &session, ALL_OFF) else {
+            panic!("a space refusal at the media preflight");
+        };
+        (needed, session, space)
+    };
+    let (_source, package, structural) = sort_field_case();
+    // The same package into a target without the note type: it is added,
+    // nothing structural changes, and no backup is taken.
+    let plain = Fixture::new(0);
+    let (without, ..) = needed(&plain, &package);
+    let size = |path: std::path::PathBuf| std::fs::metadata(path).map_or(0, |m| m.len());
+    let live = structural.collection.path().to_owned();
+    let mut wal = live.clone().into_os_string();
+    wal.push("-wal");
+    let backup = 2 * (size(live) + size(wal.into())) + 4 * 1024 * 1024;
+    let (with, session, space) = needed(&structural, &package);
+    assert_eq!(with, without + backup, "the backup's need on top of the media's");
+
+    // One byte short refuses before the backup; the exact need imports.
+    let stores = backup_count(&structural);
+    space.0.store(with - 1, SeqCst);
+    assert!(matches!(apply(&structural, &session, ALL_OFF), Err(ApkgImportError::InsufficientSpace { .. })));
+    assert_eq!(backup_count(&structural), stores);
+    space.0.store(with, SeqCst);
+    assert!(apply(&structural, &session, ALL_OFF).unwrap().safety_backup.is_some());
+}
