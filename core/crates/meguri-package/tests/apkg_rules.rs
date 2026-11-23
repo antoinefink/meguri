@@ -971,7 +971,8 @@ fn tag_uses_count_tags_and_not_their_bytes_or_padding() {
     let id = crate::apkg_import::add_note(&source, source.notetype, &["front", "back"]);
     raw(&source, move |scope| {
         let mut note = scope.note(id)?.unwrap();
-        note.tags = format!(" {0} {0}a {0}b {0}c ", "é".repeat(100));
+        // The first holds a NUL, where a text length would stop counting.
+        note.tags = format!(" {0}\0z {0}a {0}b {0}c ", "é".repeat(100));
         scope.put_note_forced(&note)?;
         Ok(())
     });

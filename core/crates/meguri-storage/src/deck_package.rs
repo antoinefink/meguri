@@ -72,7 +72,8 @@ fn check_limits(conn: &rusqlite::Connection, limits: &DeckCandidateLimits) -> Re
                 coalesce(max(length(CAST(flds AS BLOB)) + length(CAST(tags AS BLOB)) + length(CAST(data AS BLOB)) \
                     + length(CAST(sfld AS BLOB))), 0), \
                 coalesce(sum(CASE WHEN trim(CAST(tags AS TEXT)) = '' THEN 0 ELSE \
-                    length(trim(CAST(tags AS TEXT))) - length(replace(trim(CAST(tags AS TEXT)), ' ', '')) + 1 END), 0) \
+                    length(CAST(trim(CAST(tags AS TEXT)) AS BLOB)) \
+                    - length(CAST(replace(trim(CAST(tags AS TEXT)), ' ', '') AS BLOB)) + 1 END), 0) \
          FROM notes",
         [],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
