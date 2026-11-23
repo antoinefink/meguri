@@ -13,7 +13,7 @@ extension TestHooks.StatsRoutes {
     ///   a day pinned), `contrast` (Increase Contrast).
     /// - `stats/chart/activity/<state>`: `pinned` (a day pinned), `failed` (its part fails alone),
     ///   `recent` (reviews only this year: one partial year).
-    static func registerReviews(in registry: inout RouteRegistry) {
+    static func registerReviews(in registry: inout TestHooks.RouteRegistry) {
         registry.registerShell("stats/chart/reviews-over-time/by-answer") { _ in reviews(.typical) { $0.setReviewsMode(.byAnswer) } }
         registry.registerShell("stats/chart/reviews-over-time/time") { _ in reviews(.typical) { $0.setReviewsMeasure(.time) } }
         registry.registerShell("stats/chart/reviews-over-time/1m") { _ in reviews(.typical, period: .oneMonth) }
@@ -41,9 +41,9 @@ extension TestHooks.StatsRoutes {
         _ sample: Sample, period: StatsPagePeriod = .all, deck: Int64? = nil, option: Option = .none,
         pin: (box: StatsBoxID, bin: (StatsBoxContent) -> Int)? = nil,
         configure: (StatsPageModel) -> Void = { _ in }
-    ) -> ShellLaunch {
+    ) -> TestHooks.ShellLaunch {
         var launch = page(sample, period: period, deck: deck, box: .reviewsOverTime, option: option)
-        guard let model = StatsHooks.shared.page?.model else { return launch }
+        guard let model = TestHooks.StatsHooks.shared.page?.model else { return launch }
         configure(model)
         if let pin {
             let prepare = launch.prepare

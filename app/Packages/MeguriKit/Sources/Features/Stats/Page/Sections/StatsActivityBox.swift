@@ -77,19 +77,10 @@ struct StatsActivityBox: View {
     @ViewBuilder
     private func grid(_ activity: StatsActivity?, blocks: [Block], phase: StatsBoxPhase, scrolls: Bool) -> some View {
         if let activity, !blocks.isEmpty {
-            let years = StatsActivityYears(blocks: blocks, activity: activity, square: Self.square,
-                                           selection: slot.selection, showInBrowse: showInBrowse)
-            Group {
-                if scrolls {
-                    // A width narrower than a year (a narrow window, the iPad's compact width) scrolls
-                    // the blocks together, starting at today's week.
-                    ScrollView(.horizontal) { years }
-                        .defaultScrollAnchor(UnitPoint(x: todayFraction(blocks), y: 0))
-                        .scrollIndicators(.automatic)
-                } else {
-                    years
-                }
-            }
+            // A width narrower than a year (a narrow window, the iPad's compact width) scrolls each
+            // block sideways under its year label, starting at its newest drawn week.
+            StatsActivityYears(blocks: blocks, activity: activity, square: Self.square, scrolls: scrolls,
+                               selection: slot.selection, showInBrowse: showInBrowse)
             .focusable()
             .focused($focused)
             .onKeyPress(.leftArrow) { move(layoutDirection == .rightToLeft ? 1 : -1, blocks: blocks) }
@@ -110,14 +101,8 @@ struct StatsActivityBox: View {
             .accessibilityValue(summary(activity))
             .accessibilityIdentifier("stats.box.activity.plot")
         } else {
-            StatsActivityPlaceholder(square: Self.square, phase: phase)
+            StatsActivityPlaceholder(square: Self.square, phase: phase, fitsWidth: scrolls)
         }
-    }
-
-    /// Where today's week sits across a block, so a scrolled grid starts there.
-    private func todayFraction(_ blocks: [Block]) -> CGFloat {
-        guard let current = blocks.first?.grid, let today = current.today, current.weeks > 1 else { return 1 }
-        return CGFloat(current.cell(ofDay: today).column) / CGFloat(current.weeks - 1)
     }
 
     /// The grid's value: the streaks and the year totals, as the figures beside it say.
@@ -164,11 +149,12 @@ struct StatsActivityBox: View {
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("stats.box.activity.year.\(year.year)")
+                            .accessibilityIdentifier("stats.activity.yearTotal.\(year.year)")
                     }
                 }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("stats.box.activity.figures")
     }
 
@@ -203,6 +189,8 @@ private struct StatsActivityYears: View {
     let blocks: [StatsActivityBox.Block]
     let activity: StatsActivity
     let square: ActivityGrid.Square
+    /// Each block scrolls sideways (narrower than a year).
+    let scrolls: Bool
     @Binding var selection: StatsChartSelection
     let showInBrowse: ((Int) -> Void)?
 
@@ -210,11 +198,12 @@ private struct StatsActivityYears: View {
     @Environment(\.calendar) private var calendar
     @Environment(\.layoutDirection) private var layoutDirection
 
-    init(blocks: [StatsActivityBox.Block], activity: StatsActivity, square: ActivityGrid.Square,
+    init(blocks: [StatsActivityBox.Block], activity: StatsActivity, square: ActivityGrid.Square, scrolls: Bool,
          selection: Binding<StatsChartSelection>, showInBrowse: ((Int) -> Void)?) {
         self.blocks = blocks
         self.activity = activity
         self.square = square
+        self.scrolls = scrolls
         _selection = selection
         self.showInBrowse = showInBrowse
     }
@@ -229,25 +218,45 @@ private struct StatsActivityYears: View {
                     Text(verbatim: String(block.year.year))
                         .font(.subheadline.weight(.semibold))
                         .accessibilityHidden(true)
-                    StatsActivityMonthLabels(grid: block.grid, square: square)
-                    StatsActivitySquares(grid: block.grid, firstDay: block.year.firstDay, square: square,
-                                         labels: StatsActivityDayLabels(days: activity.days, locale: locale, calendar: calendar))
-                        .equatable()
-                        .overlay(alignment: .topLeading) {
-                            interaction(block)
-                        }
-                        .overlay(alignment: .topLeading) {
-                            if let selected { selectionMarks(block, day: selected) }
-                        }
+                    if scrolls {
+                        ScrollView(.horizontal) { grid(block, selected: selected) }
+                            .defaultScrollAnchor(UnitPoint(x: newestFraction(block.grid), y: 0))
+                    } else {
+                        grid(block, selected: selected)
+                    }
                 }
                 // The block holding the callout is drawn over the blocks after it.
                 .zIndex(selected == nil ? 0 : 1)
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(block.year.totalText)
-                .accessibilityIdentifier("stats.box.activity.block.\(block.year.year)")
+                .accessibilityIdentifier("stats.activity.block.\(block.year.year)")
             }
         }
-        .fixedSize()
+        .fixedSize(horizontal: !scrolls, vertical: true)
+    }
+
+    /// The month labels and the squares of a block, with the selection over them.
+    private func grid(_ block: StatsActivityBox.Block, selected: Int?) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            StatsActivityMonthLabels(grid: block.grid, square: square)
+            StatsActivitySquares(grid: block.grid, firstDay: block.year.firstDay, square: square,
+                                 labels: StatsActivityDayLabels(days: activity.days, locale: locale, calendar: calendar))
+                .equatable()
+                .overlay(alignment: .topLeading) {
+                    interaction(block)
+                }
+                .overlay(alignment: .topLeading) {
+                    if let selected { selectionMarks(block, day: selected) }
+                }
+        }
+    }
+
+    /// Where a block's newest drawn week sits across it (today's in the current year), so a
+    /// scrolled block starts there.
+    private func newestFraction(_ grid: ActivityYearGrid) -> CGFloat {
+        guard grid.weeks > 1 else { return 1 }
+        let column = CGFloat(grid.cell(ofDay: grid.drawnDays - 1).column) / CGFloat(grid.weeks - 1)
+        return rightToLeft ? 1 - column : column
     }
 
     private var rightToLeft: Bool { layoutDirection == .rightToLeft }
@@ -476,6 +485,9 @@ private struct StatsActivityMonthLabels: View {
 private struct StatsActivityPlaceholder: View {
     let square: ActivityGrid.Square
     let phase: StatsBoxPhase
+    /// Narrower than a year: the box's width; else a year's, so the figures beside it keep
+    /// their place when the grid arrives.
+    let fitsWidth: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xxSmall) {
@@ -483,8 +495,9 @@ private struct StatsActivityPlaceholder: View {
             Text(verbatim: "Nov").font(.caption).hidden()
             Color.clear.frame(height: ActivityYearGrid.height(square))
         }
-        .frame(minWidth: ActivityYearGrid(year: 2026, firstWeekday: 1, today: nil, counts: []).width(square) * 0.5,
-               maxWidth: .infinity, alignment: .leading)
+        .frame(width: fitsWidth ? nil : ActivityYearGrid(year: 2026, firstWeekday: 1, today: nil, counts: []).width(square),
+               alignment: .leading)
+        .frame(maxWidth: fitsWidth ? .infinity : nil, alignment: .leading)
         .overlay { message }
         .accessibilityIdentifier("stats.box.activity.plot")
     }

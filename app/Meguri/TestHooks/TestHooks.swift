@@ -45,9 +45,10 @@ enum TestHooks {
                 Task { @MainActor in
                     navigation.select(.section(.stats))
                     guard let name = options.statsSection, let section = StatsSectionID(rawValue: name) else { return }
-                    // Once the page shows its boxes, as View › Go to Section would.
-                    for _ in 0..<100 where StatsHooks.shared.page?.shown != true { try? await Task.sleep(for: .milliseconds(100)) }
-                    try? await Task.sleep(for: .milliseconds(600))
+                    // Once every box shows its value (the collection opened and read), as View › Go to
+                    // Section would then.
+                    for _ in 0..<300 where StatsHooks.shared.page?.filled != true { try? await Task.sleep(for: .milliseconds(100)) }
+                    try? await Task.sleep(for: .milliseconds(300))
                     StatsHooks.shared.page?.go(to: section)
                 }
             }
