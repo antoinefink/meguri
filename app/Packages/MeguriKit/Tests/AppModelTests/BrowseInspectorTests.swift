@@ -63,6 +63,22 @@ import Testing
         #expect(!inspector.loading)
     }
 
+    @Test func anotherCardOfTheShownNoteWinsWhenItsCardsAreReadAgain() async throws {
+        // Cards 1 and 2 belong to note 10; the first read of its cards knows only card 1.
+        let fixture = try await Fixture(notesOf: [1: 10, 2: 10])
+        fixture.backend.cards[10] = [NoteCard(id: 1, ord: 0, deckId: 1, originalDeckId: 0)]
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.card?.id == 1 }
+        fixture.backend.cards[10] = [NoteCard(id: 1, ord: 0, deckId: 1, originalDeckId: 0),
+                                     NoteCard(id: 2, ord: 1, deckId: 2, originalDeckId: 0)]
+        fixture.select([1])
+        try await pollUntil { fixture.inspector.note?.cards.count == 2 }
+        await fixture.inspector.settled()
+        #expect(fixture.inspector.note?.card?.id == 2 && fixture.inspector.note?.card?.deckId == 2,
+                "the selected row's card, not the one shown before")
+        #expect(fixture.page.opened == [10], "the same note: no reopen")
+    }
+
     @Test func aSlowFirstReadSaysItIsLoadingOnlyAfterHalfASecond() async throws {
         let fixture = try await Fixture()
         fixture.inspector.loadingDelay = .milliseconds(50)
@@ -339,9 +355,10 @@ import Testing
         var inspector: BrowseInspector { model.inspector }
         var runtime: FakeFieldRuntime? { inspector.note?.runtime as? FakeFieldRuntime }
 
-        init(mode: BrowseMode = .cards) async throws {
+        init(mode: BrowseMode = .cards, notesOf: [Int64: Int64] = [:]) async throws {
             let browse = FakeBrowseBackend()
             browse.searchSession = session
+            session.notesOf = notesOf
             session.results[""] = [1, 2, 3, 4, 5]
             model = BrowseModel(backend: browse, inspectorBackend: backend)
             model.results.progressDelay = .seconds(60)

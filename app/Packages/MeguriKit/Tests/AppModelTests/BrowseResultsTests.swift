@@ -488,7 +488,9 @@ import Testing
 
     struct TimedOut: Error {}
 
-    private func until(_ condition: () -> Bool, timeout: Duration = .seconds(5)) async throws {
+    /// The budget is for a loaded machine running suites side by side: a
+    /// condition that holds returns at once, whatever the budget.
+    private func until(_ condition: () -> Bool, timeout: Duration = .seconds(30)) async throws {
         let clock = ContinuousClock(), end = clock.now + timeout
         while !condition() {
             guard clock.now < end else {
