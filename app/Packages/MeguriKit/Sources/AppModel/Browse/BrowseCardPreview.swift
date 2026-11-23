@@ -17,6 +17,8 @@ public final class BrowseCardPreview {
     public private(set) var card: Int64?
     /// The last render failed (a template error, a missing card).
     public private(set) var failed = false
+    /// The card shown has sounds: the preview's header offers to play them.
+    public private(set) var hasAudio = false
 
     /// The collection's media, bound as review binds it.
     @ObservationIgnored var resolver: @MainActor () async -> MediaPathResolver? = { nil }
@@ -57,6 +59,7 @@ public final class BrowseCardPreview {
                 guard token == self.token else { return }
                 try pair.present(update)
                 self.payload = payload
+                hasAudio = !payload.questionAudio.isEmpty || !payload.answerAudio.isEmpty
                 side = .question
                 card = id
                 failed = false
@@ -88,6 +91,9 @@ public final class BrowseCardPreview {
         }
     }
 
+    /// The side shown's sounds, from the start (they never play by themselves).
+    public func replay() { pair?.replay() }
+
     /// The system appearance the card is drawn in.
     public func setAppearance(_ value: CardRuntime.Appearance) {
         guard value != appearance else { return }
@@ -100,6 +106,7 @@ public final class BrowseCardPreview {
     func clear() {
         token &+= 1
         card = nil
+        hasAudio = false
         payload = nil
         pair?.pauseAudio()
     }

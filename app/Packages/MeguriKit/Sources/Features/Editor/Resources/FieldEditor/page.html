@@ -1,7 +1,7 @@
 <!doctype html>
 <html class="{{editor.platform}}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src 'none'; media-src 'none'; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src meguri-editor:; media-src 'none'; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <style>
 /* N17.1: each field is a section of the Add form: its name as the header, a box under it. */
 :root { color-scheme: light dark; font: -apple-system-body; background: transparent; }
@@ -32,4 +32,24 @@ html.mac .fieldBoundary, html.mac textarea { grid-column: 2; min-height: 28px; p
 html.mac .fieldBoundary:focus-within, html.mac textarea:focus { outline: 3px solid Highlight; outline-color: -webkit-focus-ring-color; outline-offset: -1px; }
 html.mac textarea { min-height: 6em; resize: vertical; }
 html.mac #hint { grid-column: 2; margin: 0; }
+/* Browse's inspector (Option A): a plain list. Each field's name on its own
+   line in the small secondary style, its text at the system body size under
+   it, no box until it is edited, a hairline between fields. The page never
+   scrolls; the inspector's scroll view does. */
+html.inspector, html.inspector body { background: transparent; overflow: hidden; height: auto; }
+html.inspector body { padding: 0 16px 4px; font: -apple-system-body; }
+html.inspector main { display: block; }
+html.inspector section { display: block; padding: 8px 0; }
+html.inspector section:not([hidden]) ~ section:not([hidden]) { border-top: 1px solid -apple-system-separator; }
+html.inspector header { text-align: start; }
+html.inspector .label { display: block; width: 100%; min-height: 0; padding: 0 0 2px; font: 11px -apple-system; font-weight: 400;
+    text-align: start; white-space: normal; overflow-wrap: anywhere; color: GrayText; color: -apple-system-secondary-label; cursor: default; }
+html.inspector .fieldBoundary { min-height: 0; padding: 2px 4px; margin: 0 -4px; border: 0; border-radius: 5px; background: transparent;
+    font: -apple-system-body; color: CanvasText; color: -apple-system-label; }
+html.inspector .fieldBoundary:focus-within { background: -apple-system-text-background; outline: 3px solid -webkit-focus-ring-color; outline-offset: 0; }
+html.inspector textarea { min-height: 2.5em; padding: 4px; margin: 0 -4px; width: calc(100% + 8px); border: 0; border-radius: 5px; resize: none;
+    overflow: hidden; font: 12px ui-monospace, monospace; background: -apple-system-text-background; color: -apple-system-label; }
+html.inspector textarea:focus { outline: 3px solid -webkit-focus-ring-color; outline-offset: 0; }
+html.inspector ::selection { background: -apple-system-selected-text-background; }
+html.inspector #hint { margin: 0; }
 </style></head><body><main id="fields" inert></main><p id="hint" role="status"></p></body></html>
