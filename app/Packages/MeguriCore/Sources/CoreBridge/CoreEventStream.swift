@@ -86,6 +86,12 @@ public struct CoreEvent: Sendable, Hashable {
             kind = .nextDayAtChanged(nextDayAt: nextDayAt)
         }
     }
+
+    /// Tests: an event of a kind the binding records cannot spell briefly
+    /// (a session's head diff).
+    init(seq: UInt64, generation: UInt64, causeSeq: UInt64? = nil, kind: Kind) {
+        self.seq = seq; self.generation = generation; self.causeSeq = causeSeq; self.kind = kind
+    }
 }
 
 /// The core event channel on the Swift side. The core's single dispatcher

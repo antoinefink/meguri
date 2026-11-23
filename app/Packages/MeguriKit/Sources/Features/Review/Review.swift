@@ -32,7 +32,7 @@ public struct ReviewView: View {
     public var body: some View {
         ReviewLayout(progress: walk?.progress ?? model.sessionProgress, notice: model.notice,
             undoDescription: undoDescription, canUndo: model.canUndo, canRedo: model.canRedo,
-            phase: model.phase, states: model.item?.nextStates, enabled: !model.paused,
+            phase: model.phase, states: model.shownItem?.nextStates, enabled: !model.paused,
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
             reveal: model.reveal, rate: model.rate,
             redoDescription: redoDescription, status: status,
