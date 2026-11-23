@@ -700,8 +700,12 @@ screens:
       This replaces the earlier text of this entry (the scope and history header, the thirteen
       boxes in Anki's order, the heatmap and streaks not here, per-graph ranges and toggles).
       Reached before U307 shows it through StatsRollout (routes stats/page/<state>,
-      stats/period/<period>, stats/deck/<deck>, stats/chart/<box>). Toolbar identifiers are
-      stats.toolbar.deck and stats.toolbar.period (R1964's area.screen.element).
+      stats/period/<period>, stats/deck/<deck>, stats/chart/<box>; the Reviews section's
+      states stats/chart/reviews-over-time/<state> and stats/chart/activity/<state>; over a
+      fixture, -MeguriStatsRollout open:<section> scrolls to a section). Toolbar identifiers are
+      stats.toolbar.deck and stats.toolbar.period (R1964's area.screen.element). Activity's
+      identifiers: stats.box.activity.plot, stats.activity.block.<year>,
+      stats.activity.yearTotal.<year>.
   - id: stats.heatmapSettings
     title: Heatmap settings
     units: [U229]
