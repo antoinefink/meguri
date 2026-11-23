@@ -32,10 +32,37 @@ import Testing
         }
     }
 
-    private func layout<Card: View>(phase: ReviewCoordinator.Phase, @ViewBuilder card: @escaping () -> Card) -> ReviewLayout<Card> {
-        ReviewLayout(progress: ReviewSessionProgress(answered: 1, remaining: 3), notice: nil,
+    private func layout<Card: View>(phase: ReviewCoordinator.Phase, notice: String? = nil, leech: ReviewLeechNotice? = nil,
+                                    @ViewBuilder card: @escaping () -> Card) -> ReviewLayout<Card> {
+        ReviewLayout(progress: ReviewSessionProgress(answered: 1, remaining: 3), notice: notice,
             undoDescription: "Undo", canUndo: false, canRedo: false, phase: phase, states: nil, enabled: true,
-            close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in }) { card() }
+            close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in }, leech: leech) { card() }
+    }
+
+    /// N16.11: the leech notice takes no row above the card: the card keeps
+    /// the window's whole height, as with no notice; another notice still
+    /// takes its banner row.
+    @Test func leechNoticeTakesNoRowAboveTheCard() async throws {
+        func cardHeight(notice: String?, icon: ReviewLeechNotice?) async throws -> CGFloat {
+            let height = Width()
+            let (window, hosting) = host(layout(phase: .question, notice: notice, leech: icon) {
+                Color.clear.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height.value = $0 }
+            }, size: CGSize(width: 900, height: 700))
+            defer { window.close() }
+            try await settle(hosting) { height.value >= 0 }
+            return height.value
+        }
+        let plain = try await cardHeight(notice: nil, icon: nil)
+        let withIcon = try await cardHeight(notice: nil, icon: ReviewLeechNotice(suspended: true))
+        let withRow = try await cardHeight(notice: "Sample notice", icon: nil)
+        #expect(withIcon == plain, "the icon takes no row")
+        #expect(withRow < plain, "another notice keeps its row")
+    }
+
+    /// S3's two sentences, announced once when the icon appears.
+    @Test func leechAnnouncementKeepsEachVariant() {
+        #expect(ReviewLeechButton.announcement(ReviewLeechNotice(suspended: false)) == "Card was a leech.")
+        #expect(ReviewLeechButton.announcement(ReviewLeechNotice(suspended: true)) == "Card was a leech. It has been suspended.")
     }
 
     /// N16.4 (changed 2026-11-20): no reading column for the card. With the

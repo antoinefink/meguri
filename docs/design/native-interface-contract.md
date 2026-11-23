@@ -642,6 +642,19 @@ Decided by the coordinator under Antoine's delegation on 2026-11-22, from his ca
 - A tap or click in the answer area that misses its buttons does nothing on either side: the area takes it, so it reaches neither the card's page nor the tap zones, and no grade comes from a near miss of a button (U180). A drag that starts there does not scroll the card.
 - Replaces: the answer row's band of the page colour between the card and the bottom edge (N3's reserved region now lies over the card, still the same height on both sides, so reveal moves nothing).
 
+### N16.11 The leech notice is an icon (2026-11-23)
+
+Decided by the coordinator on 2026-11-23, pending Antoine's look. He showed "Card was a leech." drawn as a banner row above the card and asked for one yellow icon in the top controls instead. It takes no extra height, is less prominent, and can be pressed when needed.
+
+- **Placement:**
+  - No banner row: the card keeps that height on every platform.
+  - While the notice applies (`review/reviewer-strings#S3`; it lasts as the banner did, until another notice replaces it), the review's top-trailing controls start with a button showing `exclamationmark.triangle.fill` in the symbol's own multicolour rendering, the system's yellow triangle: [leech][undo][more] on touch, with the opened foldable's side column in the same order. On the Mac it is the first trailing toolbar item.
+  - When no notice applies the button is absent and the group is as before.
+- **The press:** a popover (on compact width the system's adaptation, a sheet at medium height) titled "Leech". Its text says, in plain words, that the card reached its deck's leech threshold, that its note is tagged "leech", and that the card is suspended when the answer suspended it (`sched/leeches` L1 to L3, L5's `suspended` flag).
+- **Not built: Edit Note and Suspend Card in the popover.** The leech card is the one just answered. The review's existing commands act on the card on screen, the next one, so they would edit or suspend the wrong card. Acting on the answered card would be new behaviour; this decision asked for none. Open for Antoine.
+- **Accessibility:** label "Leech", hint "Shows what this means."; VoiceOver announces S3's sentence once when the icon appears (S2). The toolbar gives the button its system target on touch and keyboard focus on the Mac.
+- **Other notices** (a refused or failed answer, media, a changed card, the session record) keep their banner row unchanged.
+
 ## N17. Round 5 editor and file transfer decisions (2026-11-19)
 
 Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`, `collection.import`, `settings.importExport`; round 5 options 1B, 2B, 3B and the Duo answer). Where earlier text differs, this section wins. Media is never a separate choice in any of these flows.

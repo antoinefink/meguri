@@ -16,7 +16,13 @@ public final class ReviewCoordinator {
     public private(set) var shownItem: ReviewHeadItem?
     public private(set) var counts = ReviewCounts(new: 0, learning: 0, review: 0)
     public private(set) var sessionID: UInt64?
-    public private(set) var notice: String?
+    /// A notice above the card. Setting one replaces the leech icon, as it
+    /// replaced the leech banner before (N16.11).
+    public private(set) var notice: String? { didSet { if notice != nil { leechNotice = nil } } }
+    /// N16.11: the leech notice of `sched/leeches#L5` (`review/reviewer-strings#S3`),
+    /// shown as one icon in the top controls instead of a banner above the card.
+    /// It lasts as the banner did: until another notice replaces it.
+    public private(set) var leechNotice: ReviewLeechNotice?
     public private(set) var undoStatus: ReviewUndoStatus = .unavailable(reason: .none)
     public private(set) var redoStatus: ReviewUndoStatus = .unavailable(reason: .none)
     public private(set) var record: ReviewRecord
@@ -401,7 +407,7 @@ public final class ReviewCoordinator {
                         record.answers.append(pendingAnswer); record.undone.removeAll()
                         self.pendingAnswer = nil
                     }
-                    if leech { notice = suspended ? "Card was a leech. It has been suspended." : "Card was a leech." }
+                    if leech { notice = nil; leechNotice = ReviewLeechNotice(suspended: suspended) }
                     if suspended { record.suspended.insert(item.cardId) }
                     enqueuePersistence(diagnosticAnswer: true)
                     let needsRefresh = refreshPending
@@ -1131,6 +1137,14 @@ public final class ReviewCoordinator {
     public static func name(_ rating: ReviewRating) -> String {
         switch rating { case .again: "again"; case .hard: "hard"; case .good: "good"; case .easy: "easy" }
     }
+}
+
+/// A leech answer's notice (`review/reviewer-strings#S3`): the answered card's
+/// note was tagged, and the card suspended when its deck's leech action says so.
+public nonisolated struct ReviewLeechNotice: Equatable, Sendable {
+    public let id = UUID()
+    public let suspended: Bool
+    public init(suspended: Bool) { self.suspended = suspended }
 }
 
 /// The More menu's card actions (N20.8).

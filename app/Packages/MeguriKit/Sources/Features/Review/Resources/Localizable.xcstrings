@@ -310,6 +310,66 @@
           }
         }
       }
+    },
+    "review.leech.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leech"
+          }
+        }
+      }
+    },
+    "review.leech.hint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows what this means."
+          }
+        }
+      }
+    },
+    "review.leech.tagged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A card you answered in this session has been forgotten many times: it reached its deck’s leech threshold. Its note is now tagged “leech”, so you can find it in Browse and rework it."
+          }
+        }
+      }
+    },
+    "review.leech.suspended": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A card you answered in this session has been forgotten many times: it reached its deck’s leech threshold. Its note is now tagged “leech”, and the card is suspended: it will not come up again until you unsuspend it."
+          }
+        }
+      }
+    },
+    "review.toast.leech": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card was a leech."
+          }
+        }
+      }
+    },
+    "review.toast.leechSuspended": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card was a leech. It has been suspended."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
