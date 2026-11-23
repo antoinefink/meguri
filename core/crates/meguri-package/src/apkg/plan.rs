@@ -40,7 +40,6 @@ pub(crate) struct NotePlan {
 
 pub(crate) struct ImportPlan {
     pub options: ImportOptions,
-    pub snapshot_seq: u64,
     /// The target's day at the plan (I11.2's T) and the package's (P).
     pub target_today: u32,
     pub package_today: u32,
@@ -122,7 +121,6 @@ pub(crate) fn build(
     raw: &Arc<RawPackage>,
     taken: &Arc<Taken>,
     options: &ImportOptions,
-    snapshot_seq: u64,
     target_today: u32,
     package_today: u32,
     now_s: i64,
@@ -191,7 +189,6 @@ pub(crate) fn build(
     }
     Ok(ImportPlan {
         options: *options,
-        snapshot_seq,
         target_today,
         package_today,
         stage,

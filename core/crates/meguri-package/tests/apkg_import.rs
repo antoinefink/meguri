@@ -578,3 +578,195 @@ fn the_options_are_stored_with_the_import_and_read_back() {
     target.collection.undo(UndoScope::Global).unwrap();
     assert_eq!(apkg::read_options(&target.collection).unwrap(), ImportOptions::default());
 }
+
+/// Runs `act` once, when the apply first reaches the named stage.
+struct AtStage {
+    stage: &'static str,
+    act: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// How often the apply went back to planning: a sink starts in the
+    /// planning phase, so only a return to it is delivered.
+    replans: std::sync::atomic::AtomicUsize,
+}
+impl meguri_engine::ProgressListener for AtStage {
+    fn on_progress(&self, progress: &meguri_engine::Progress) {
+        use meguri_engine::ProgressPhase;
+        if progress.phase == ProgressPhase::Planning && progress.completed == 0 && progress.total.is_none() {
+            self.replans.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        if progress.phase == ProgressPhase::Named(self.stage)
+            && let Some(act) = self.act.lock().unwrap().take()
+        {
+            act();
+        }
+    }
+}
+fn at_stage(stage: &'static str, act: impl FnOnce() + Send + 'static) -> (ProgressSink, Arc<AtStage>) {
+    let listener = Arc::new(AtStage {
+        stage,
+        act: std::sync::Mutex::new(Some(Box::new(act))),
+        replans: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let sink = ProgressSink::new();
+    sink.set_listener(listener.clone());
+    (sink, listener)
+}
+
+fn media_package(source: &Fixture) -> PathBuf {
+    source.clock.step_ms(1000);
+    add_note(source, source.notetype, &["<img src=\"a.png\">", "back"]);
+    with_media(
+        &export(source, "deck.apkg"),
+        "media.apkg",
+        &[("a.png", b"pixels"), ("_static.css", b"sheet")],
+    )
+}
+
+#[test]
+fn an_answer_during_the_plan_does_not_replan_and_a_note_edit_replans_once() {
+    // An answer on the interactive lane while media are staged.
+    let source = Fixture::new(2);
+    let package = media_package(&source);
+    let target = Fixture::new(2);
+    let session = inspect(&target, &package).unwrap();
+    let collection = target.collection.clone();
+    let card = target.cards[0];
+    let (sink, seen) = at_stage("media", move || {
+        let prediction =
+            meguri_engine::sched::answer::predict(&collection, card, &mut Default::default(), None).unwrap();
+        let request = prediction.answer(meguri_testkit::normal_support::Rating::Good, 3000);
+        meguri_engine::sched::answer::answer(&collection, request).unwrap();
+    });
+    let result = apkg::apply(target.host.engine(), &session, ALL_OFF, None, &CancelToken::new(), &sink).unwrap();
+    assert_eq!(result.counts.notes_added, 1);
+    assert_eq!(seen.replans.load(std::sync::atomic::Ordering::SeqCst), 0, "an answer never makes the plan stale");
+    let reader = target.collection.reader(ReaderRole::Query).unwrap();
+    assert_eq!(reader.revlog_after(None, 10).unwrap().len(), 1, "the answer is committed");
+    drop(reader);
+
+    // An edit of a target note while media are staged: one replan, and the
+    // edit survives.
+    let source = Fixture::new(2);
+    let package = media_package(&source);
+    let target = Fixture::new(2);
+    let edited = note_ids(&target)[0];
+    let session = inspect(&target, &package).unwrap();
+    let collection = target.collection.clone();
+    let (sink, seen) = at_stage("media", move || {
+        meguri_engine::notes::update(
+            &collection,
+            meguri_engine::notes::UpdateNote {
+                id: edited,
+                fields: vec!["edited meanwhile".into(), "back".into()],
+                tags: vec![],
+            },
+            OpSource::UserUndoable,
+        )
+        .unwrap();
+    });
+    let result = apkg::apply(target.host.engine(), &session, ALL_OFF, None, &CancelToken::new(), &sink).unwrap();
+    assert_eq!(result.counts.notes_added, 1);
+    assert_eq!(seen.replans.load(std::sync::atomic::Ordering::SeqCst), 1, "a note edit costs one replan");
+    let reader = target.collection.reader(ReaderRole::Query).unwrap();
+    assert_eq!(reader.note(edited).unwrap().unwrap().fields, "edited meanwhile\u{1f}back");
+    drop(reader);
+    assert_eq!(media_files(&target).len(), 2);
+}
+
+#[test]
+fn a_cancel_during_media_staging_leaves_no_file_and_no_row() {
+    let source = Fixture::new(2);
+    let package = media_package(&source);
+    let target = Fixture::new(2);
+    let before = dump(&target);
+    let session = inspect(&target, &package).unwrap();
+    let cancel = CancelToken::new();
+    let stop = cancel.clone();
+    let (sink, _) = at_stage("media", move || stop.cancel());
+    assert!(matches!(
+        apkg::apply(target.host.engine(), &session, ALL_OFF, None, &cancel, &sink),
+        Err(ApkgImportError::Cancelled)
+    ));
+    assert_eq!(dump(&target), before);
+    assert!(media_files(&target).is_empty(), "no checked and no static file is written");
+    let staging = target.collection.path().parent().unwrap().join("media.staging");
+    assert!(std::fs::read_dir(&staging).map_or(true, |mut entries| entries.next().is_none()));
+}
+
+#[test]
+fn a_small_collection_member_that_decodes_past_the_ratio_limit_is_corrupt() {
+    let f = Fixture::new(1);
+    let files = listing(&f);
+    // About 2 KiB of zstd that decodes to 20 MiB of zeros.
+    let bomb = zstd::encode_all(&vec![0_u8; 20 * 1024 * 1024][..], 19).unwrap();
+    assert!(bomb.len() < 16 * 1024);
+    let package = f.dir.path().join("bomb.apkg");
+    write_zip(&package, &[("meta".into(), vec![8, 3]), ("collection.anki21b".into(), bomb)]);
+    assert!(matches!(inspect(&f, &package), Err(ApkgImportError::Corrupt { .. })));
+    assert_eq!(listing(&f), files, "the staging directory is removed");
+}
+
+#[test]
+fn a_legacy_member_that_decodes_past_its_directory_size_is_corrupt() {
+    let source = Fixture::new(1);
+    source.clock.step_ms(1000);
+    add_note(&source, source.notetype, &["<img src=\"big.png\">", "back"]);
+    let exported = export(&source, "deck.apkg");
+    let mut archive = ZipArchive::new(std::fs::File::open(&exported).unwrap()).unwrap();
+    let collection = zstd::decode_all(&entry(&mut archive, "collection.anki21b")[..]).unwrap();
+    // A deflated member of 4,000 bytes whose directory records say 1,024.
+    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+    let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    let deflated = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    writer.start_file("collection.anki21", stored).unwrap();
+    writer.write_all(&collection).unwrap();
+    writer.start_file("media", stored).unwrap();
+    writer.write_all(br#"{"0":"big.png"}"#).unwrap();
+    writer.start_file("0", deflated).unwrap();
+    writer.write_all(&vec![7_u8; 4000]).unwrap();
+    let mut bytes = writer.finish().unwrap().into_inner();
+    let size = 4000_u32.to_le_bytes();
+    let mut patched = 0;
+    for at in 0..bytes.len() - 4 {
+        // The local header (size at +22) and the central record (at +24) of
+        // the one-character member `0`.
+        let local = bytes[at..].starts_with(b"PK\x03\x04") && bytes.get(at + 22..at + 26) == Some(&size[..]);
+        let central = bytes[at..].starts_with(b"PK\x01\x02") && bytes.get(at + 24..at + 28) == Some(&size[..]);
+        if local || central {
+            let field = at + if local { 22 } else { 24 };
+            bytes[field..field + 4].copy_from_slice(&1024_u32.to_le_bytes());
+            patched += 1;
+        }
+    }
+    assert_eq!(patched, 2);
+    let package = exported.with_file_name("short.apkg");
+    std::fs::write(&package, bytes).unwrap();
+    let target = Fixture::new(1);
+    let before = dump(&target);
+    let session = inspect(&target, &package).unwrap();
+    assert_eq!(session.facts().media_bytes, 1024);
+    assert!(matches!(apply(&target, &session, ALL_OFF), Err(ApkgImportError::Corrupt { .. })));
+    assert_eq!(dump(&target), before);
+    assert!(media_files(&target).is_empty());
+    let scratch = session.facts().media_files;
+    assert_eq!(scratch, 1);
+}
+
+#[test]
+fn imported_rows_are_pending_for_the_next_sync() {
+    let source = Fixture::new(1);
+    source.clock.step_ms(1000);
+    add_note(&source, source.notetype, &["fresh", "back"]);
+    let package = export(&source, "deck.apkg");
+    let target = Fixture::new(1);
+    let old = target.collection.reader(ReaderRole::Query).unwrap().col().unwrap();
+    target.clock.step_ms(5000);
+    let result = import(&target, &package, ImportOptions { with_scheduling: true, ..ALL_OFF }).unwrap();
+    let reader = target.collection.reader(ReaderRole::Query).unwrap();
+    let col = reader.col().unwrap();
+    assert_eq!(col.modified.0, target.clock.now_ms(), "col.mod moves once");
+    assert_eq!(col.schema_modified, old.schema_modified, "an ordinary import needs no one-way sync");
+    let added = NoteId(result.log.new[0].note);
+    assert_eq!(reader.note(added).unwrap().unwrap().usn.0, -1);
+    assert!(reader.cards_of_note(added).unwrap().iter().all(|card| card.usn.0 == -1));
+    assert!(reader.grave(added.0, meguri_model::grave::GraveKind::Note).unwrap().is_none());
+}

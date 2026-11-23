@@ -35,7 +35,7 @@ pub struct ImportSession {
     pub(crate) id: u64,
     pub(crate) context: ApkgContext,
     staging: tempfile::TempDir,
-    pub(crate) format: PackageFormat,
+    format: PackageFormat,
     pub(crate) media: Vec<MediaEntry>,
     facts: PreviewFacts,
     pub(crate) state: Mutex<SessionState>,
@@ -50,6 +50,10 @@ impl std::fmt::Debug for ImportSession {
 impl ImportSession {
     pub fn facts(&self) -> &PreviewFacts {
         &self.facts
+    }
+
+    pub fn format(&self) -> PackageFormat {
+        self.format
     }
 
     /// The committed import's result, for paging its log (I13).
@@ -102,7 +106,7 @@ fn candidate_error(error: CandidateError) -> ApkgImportError {
     use meguri_storage::OpenError;
     match error {
         CandidateError::Gate(gate @ (OpenError::TooOld { .. } | OpenError::TooNew { .. })) => {
-            ApkgImportError::SchemaUnsupported { gate }
+            ApkgImportError::SchemaUnsupported { gate: Box::new(gate) }
         }
         CandidateError::Gate(OpenError::Io { detail }) => ApkgImportError::Io { detail },
         CandidateError::Gate(gate) => corrupt(format!("candidate gate: {gate}")),

@@ -87,7 +87,6 @@ pub(crate) struct TypeStage {
     pub added: u64,
     pub updated: u64,
     pub copied: u64,
-    pub notes_moved: u64,
 }
 
 impl TypeStage {

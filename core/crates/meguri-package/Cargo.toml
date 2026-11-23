@@ -36,6 +36,10 @@ meguri-model = { workspace = true, features = ["test-hooks"] }
 name = "backup"
 harness = false
 
+[[bench]]
+name = "import"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]

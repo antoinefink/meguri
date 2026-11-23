@@ -215,7 +215,7 @@ fn import_apkg(session: &mut Session<'_>, args: &Map<String, Value>) -> Result<O
     let engine = session.storage.host()?.engine().clone();
     let mut token = None;
     let result = loop {
-        match apkg::apply(&engine, &imported, options, token.as_ref(), &cancel, &progress) {
+        match apkg::apply(&engine, &imported, options, token.as_deref(), &cancel, &progress) {
             Ok(result) => break result,
             Err(ApkgImportError::ConfirmationRequired { token: fresh, .. }) if token.as_ref() != Some(&fresh) => {
                 token = Some(fresh);

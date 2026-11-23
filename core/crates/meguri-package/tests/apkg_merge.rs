@@ -220,12 +220,12 @@ fn a_dropped_field_needs_a_confirmation_that_survives_other_writes() {
         with_scheduling: true,
         ..MERGE
     };
-    let again = apkg::apply(target.host.engine(), &session, other, Some(&token), &CancelToken::new(), &ProgressSink::new());
+    let again = apkg::apply(target.host.engine(), &session, other, Some(&*token), &CancelToken::new(), &ProgressSink::new());
     assert!(matches!(again, Err(ApkgImportError::ConfirmationRequired { .. })));
     // A write elsewhere between the two calls keeps the token valid.
     let unrelated = add(&target, target.notetype.0, "g-unrelated", &["cloud", "nuage"], 1);
     let result =
-        apkg::apply(target.host.engine(), &session, MERGE, Some(&token), &CancelToken::new(), &ProgressSink::new())
+        apkg::apply(target.host.engine(), &session, MERGE, Some(&*token), &CancelToken::new(), &ProgressSink::new())
             .unwrap();
     assert_eq!(result.log.updated.len(), 1);
     assert_eq!(note(&target, held).fields, "sun\u{1f}soleil\u{1f}");
@@ -264,7 +264,7 @@ fn an_earlier_copy_is_merged_back_removed_and_undo_restores_it() {
     let removed = &preview.removed_notetypes[0];
     assert_eq!((removed.notetype, removed.name.as_str(), removed.moved_to, removed.notes), (copy, "Pair+", 5000, 1));
     let result =
-        apkg::apply(target.host.engine(), &session, MERGE, Some(&token), &CancelToken::new(), &ProgressSink::new())
+        apkg::apply(target.host.engine(), &session, MERGE, Some(&*token), &CancelToken::new(), &ProgressSink::new())
             .unwrap();
     assert_eq!((result.counts.notes_moved, result.counts.notetypes_removed), (1, 1));
     assert!(stored_notetype(&target, copy).is_none());
@@ -310,7 +310,7 @@ fn a_note_held_under_another_note_type_brings_both_together() {
     };
     assert_eq!(preview.removed_notetypes[0].notetype, 7000);
     let result =
-        apkg::apply(target.host.engine(), &session, options, Some(&token), &CancelToken::new(), &ProgressSink::new())
+        apkg::apply(target.host.engine(), &session, options, Some(&*token), &CancelToken::new(), &ProgressSink::new())
             .unwrap();
     assert!(result.log.conflicting.is_empty(), "with a merge no note is conflicting");
     assert_eq!(result.log.duplicate.len(), 1);

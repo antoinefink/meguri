@@ -293,7 +293,7 @@ pub enum ApkgImportError {
         detail: String,
     },
     SchemaUnsupported {
-        gate: meguri_storage::OpenError,
+        gate: Box<meguri_storage::OpenError>,
     },
     InsufficientSpace {
         needed: u64,
@@ -303,8 +303,8 @@ pub enum ApkgImportError {
     /// After three replans (I14.2).
     Stale,
     ConfirmationRequired {
-        preview: MergePreview,
-        token: ConfirmationToken,
+        preview: Box<MergePreview>,
+        token: Box<ConfirmationToken>,
     },
     /// A standard and a cloze note type would merge (R1606).
     NotetypeKindConflict {
@@ -325,7 +325,7 @@ pub enum ApkgImportError {
     /// `Busy`, `CollectionUnavailable`, `StaleGeneration`,
     /// `SafetyBackupFailed` and any other engine refusal, as the engine
     /// words it.
-    Engine(EngineError),
+    Engine(Box<EngineError>),
 }
 
 impl std::fmt::Display for ApkgImportError {
@@ -343,7 +343,7 @@ impl From<crate::Error> for ApkgImportError {
         match error {
             E::TooNew => Self::TooNew,
             E::Corrupt { detail } => Self::Corrupt { detail },
-            E::SchemaUnsupported { gate } => Self::SchemaUnsupported { gate },
+            E::SchemaUnsupported { gate } => Self::SchemaUnsupported { gate: Box::new(gate) },
             E::InsufficientSpace { needed, available } => Self::InsufficientSpace { needed, available },
             E::DiskFull => Self::DiskFull,
             E::Cancelled => Self::Cancelled,
@@ -360,7 +360,7 @@ impl From<EngineError> for ApkgImportError {
         match error {
             EngineError::Cancelled => Self::Cancelled,
             EngineError::Stale { .. } => Self::Stale,
-            other => Self::Engine(other),
+            other => Self::Engine(Box::new(other)),
         }
     }
 }

@@ -22,6 +22,10 @@ use super::{
     ApkgImportError, ConfirmationToken, ImportOptions, ImportOutcome, ImportResult, UpdateCondition,
 };
 
+/// The committed write phase's value and its safety backup's name, kept
+/// outside the op for results the engine reports as errors after a commit.
+type Kept = Arc<Mutex<Option<(Committed, Option<String>)>>>;
+
 /// I14.2: a write phase above this many rows declares its length.
 const LONG_WRITE_ROWS: usize = 5000;
 
@@ -50,7 +54,7 @@ pub fn read_options(collection: &Collection) -> Result<ImportOptions, EngineErro
 fn stash(fault: &Fault, error: ApkgImportError) -> EngineError {
     match error {
         ApkgImportError::Cancelled => EngineError::Cancelled,
-        ApkgImportError::Engine(error) => error,
+        ApkgImportError::Engine(error) => *error,
         other => {
             *fault.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(other);
             EngineError::InvalidArgument {
@@ -92,7 +96,7 @@ pub fn apply(
     let service = MediaService::open(&collection, context.clock.clone())?;
 
     let fault: Fault = Arc::new(Mutex::new(None));
-    let kept: Arc<Mutex<Option<(Committed, Option<String>)>>> = Arc::new(Mutex::new(None));
+    let kept: Kept = Arc::new(Mutex::new(None));
     let spec = OpSpec::new(catalog::APKG_APPLY, OpSource::UserUndoable)
         .stamp(StampMode::KeepMtime)
         .undo_step(meguri_engine::undo::names::IMPORT, StepKind::Other)
@@ -112,7 +116,6 @@ pub fn apply(
                 &raw,
                 &taken,
                 &options,
-                planning.seq().0,
                 today,
                 gather::package_today(&raw, &context),
                 now_s,
@@ -130,13 +133,13 @@ pub fn apply(
                     return Err(stash(
                         &fault,
                         ApkgImportError::ConfirmationRequired {
-                            preview: built.stage.preview.clone(),
-                            token: ConfirmationToken {
+                            preview: Box::new(built.stage.preview.clone()),
+                            token: Box::new(ConfirmationToken {
                                 session: session.id,
                                 options,
                                 digest,
                                 snapshot_seq: planning.seq().0,
-                            },
+                            }),
                         },
                     ));
                 }
@@ -221,12 +224,12 @@ pub fn apply(
         }),
         Err(EngineError::CommitCompleted { seq, message }) => {
             finish(seq.0, collection.generation().0, Some(meguri_engine::undo::names::IMPORT), false)
-                .ok_or(ApkgImportError::Engine(EngineError::CommitCompleted { seq, message }))
+                .ok_or_else(|| ApkgImportError::Engine(Box::new(EngineError::CommitCompleted { seq, message })))
         }
         Err(EngineError::MediaCommitPending { seq, message }) => {
             match finish(seq.0, collection.generation().0, Some(meguri_engine::undo::names::IMPORT), true) {
                 Some(result) => Err(ApkgImportError::MediaCommitPending(Box::new(result))),
-                None => Err(ApkgImportError::Engine(EngineError::MediaCommitPending { seq, message })),
+                None => Err(ApkgImportError::Engine(Box::new(EngineError::MediaCommitPending { seq, message }))),
             }
         }
         Err(error) => {
