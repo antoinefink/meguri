@@ -16,8 +16,9 @@ nonisolated enum Fixture {
     static func calendar(firstWeekday: Int = 2, zone: String = "Europe/Paris") -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: zone)!
-        calendar.firstWeekday = firstWeekday
+        // The locale first: setting it resets the first weekday.
         calendar.locale = locale
+        calendar.firstWeekday = firstWeekday
         return calendar
     }
 

@@ -79,7 +79,23 @@ nonisolated public struct StatsPageSelection: Hashable, Sendable, Codable, RawRe
     }
 
     public var rawValue: String {
-        (try? JSONEncoder().encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return (try? encoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
+
+    // Field by field: RawRepresentable's own `==` would compare the JSON text.
+    public static func == (lhs: StatsPageSelection, rhs: StatsPageSelection) -> Bool {
+        lhs.deck == rhs.deck && lhs.period == rhs.period && lhs.reviewsMode == rhs.reviewsMode
+            && lhs.reviewsMeasure == rhs.reviewsMeasure && lhs.retentionKind == rhs.retentionKind
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(deck)
+        hasher.combine(period)
+        hasher.combine(reviewsMode)
+        hasher.combine(reviewsMeasure)
+        hasher.combine(retentionKind)
     }
 }
 

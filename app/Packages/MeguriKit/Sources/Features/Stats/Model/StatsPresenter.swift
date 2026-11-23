@@ -23,6 +23,12 @@ struct StatsPresenter {
     let text: StatsText
     let kit: StatsSeriesKit
     let locale: Locale
+    /// The axis of the past, made once per presenter (All's months cost calendar work).
+    private let cache = Cache()
+
+    private final class Cache {
+        var pastAxis: StatsTimeAxis?
+    }
 
     init?(set: StatsPartSet, period: StatsPagePeriod, selection: StatsPageSelection, decks: StatsDeckDirectory,
           calendar: Calendar, locale: Locale) {
@@ -85,7 +91,12 @@ struct StatsPresenter {
         return max(min(candidates.min() ?? 0, 0), floor)
     }
 
-    var pastAxis: StatsTimeAxis { StatsAxes.past(period, days: days, allFirstDay: allFirstDay) }
+    var pastAxis: StatsTimeAxis {
+        if let axis = cache.pastAxis { return axis }
+        let axis = StatsAxes.past(period, days: days, allFirstDay: allFirstDay)
+        cache.pastAxis = axis
+        return axis
+    }
 
     /// S4.3's window of a part with no time axis; nil when the set does not have it (All's
     /// `allTime`, read only with all history).

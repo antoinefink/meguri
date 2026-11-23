@@ -75,6 +75,8 @@ public final class StatsPageModel {
     @ObservationIgnored private var live: StatsTimerToken?
     @ObservationIgnored private var justNow: StatsTimerToken?
     @ObservationIgnored private var lastBins: [StatsBoxID: [StatsPeriod]] = [:]
+    /// One presenter per set during a rebuild: its axis and formatters are made once.
+    @ObservationIgnored private var presenters: [UUID: StatsPresenter] = [:]
 
     // MARK: Seams
 
@@ -394,7 +396,11 @@ public final class StatsPageModel {
     }
 
     private func presenter(_ set: StatsPartSet) -> StatsPresenter? {
-        StatsPresenter(set: set, period: selection.period, selection: selection, decks: decks, calendar: calendar, locale: locale)
+        if let cached = presenters[set.id] { return cached }
+        let made = StatsPresenter(set: set, period: selection.period, selection: selection, decks: decks, calendar: calendar,
+                                  locale: locale)
+        presenters[set.id] = made
+        return made
     }
 
     /// The progress the running request reports for the parts of a box it has not returned.
@@ -468,6 +474,8 @@ public final class StatsPageModel {
 
     /// Writes every value from the sets, the period, the switches and the decks.
     private func rebuild() {
+        presenters = [:]
+        defer { presenters = [:] }
         let scope = selection.scope
         state = pageState(scope)
         filteredDeckNote = {
@@ -500,6 +508,8 @@ public final class StatsPageModel {
 
     /// Progress alone moves only the boxes that are loading.
     private func updateLoadingPhases() {
+        presenters = [:]
+        defer { presenters = [:] }
         var next = boxes
         for (id, content) in boxes {
             guard case .loading = content.phase else { continue }

@@ -21,6 +21,7 @@ public final class StatsKeptResults {
     private var entries: [Key: [StatsPartSet]] = [:]
     @ObservationIgnored private var recent: [Key] = []
     @ObservationIgnored private var loading: [Key: Task<Void, Never>] = [:]
+    @ObservationIgnored private var writes: [Task<Void, Never>] = []
     /// The collection the sets are of; nil keeps nothing.
     public private(set) var collection: String?
     @ObservationIgnored private let disk: StatsKeptDisk?
@@ -110,7 +111,8 @@ public final class StatsKeptResults {
             let key = Key(scope: scope, history: history)
             guard let sets = entries[key], !sets.isEmpty else { continue }
             let epoch = epoch
-            Task { await disk.save(sets, key: key, collection: collection, epoch: epoch) }
+            writes.removeAll { $0.isCancelled }
+            writes.append(Task { await disk.save(sets, key: key, collection: collection, epoch: epoch) })
         }
     }
 
@@ -137,6 +139,13 @@ public final class StatsKeptResults {
     /// Waits for the reads `prepare` started (tests).
     func waitForLoads() async {
         for task in Array(loading.values) { await task.value }
+    }
+
+    /// Waits for the writes `persist` started (tests).
+    func waitForWrites() async {
+        let pending = writes
+        writes = []
+        for task in pending { await task.value }
     }
 
     private func touch(_ key: Key) {
