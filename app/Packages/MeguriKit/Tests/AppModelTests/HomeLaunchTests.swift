@@ -114,127 +114,14 @@ import Testing
         #expect(!KeptHome(snapshot: Self.snapshot(identity, dayEndsAt: nil), now: before).countsCurrent)
     }
 
-    // MARK: The real collection: write, read, row identities, a press while not ready
-
-    @Test(.timeLimit(.minutes(3))) func launchWritesTheSnapshotAndTheNextLaunchDrawsItFirst() async throws {
-        let fixture = try Fixture()
-        defer { fixture.remove() }
-        // First launch: nothing kept; the open shows no welcome and no "No Decks".
-        let first = fixture.owner()
-        #expect(first.keptHome == nil)
-        #expect(first.homePhase == .pending)
-        let seen = Phases(first.homePhase)
-        first.startupStep = { [weak first] _ in if let first { seen.values.append(first.homePhase) } }
-        await first.start()
-        seen.values.append(first.homePhase)
-        #expect(first.homePhase == .decks)
-        #expect(!seen.values.contains(.welcome) && !seen.values.contains(.noDecks), "\(seen.values)")
-        let read = first.decks
-        first.flushHomeSnapshot()
-        #expect(await first.close())
-
-        // Second launch: the kept tree before any open, with today's counts and the saved disclosures.
-        let second = fixture.owner()
-        let kept = try #require(second.keptHome)
-        #expect(kept.countsCurrent)
-        #expect(second.homePhase == .kept)
-        #expect(second.homeDecks == read)
-        for node in Self.flattened(read) {
-            #expect(second.studyExpanded(deckID: node.id) == !node.studyCollapsed)
-        }
-        let phases = Phases(second.homePhase)
-        second.startupStep = { [weak second] _ in if let second { phases.values.append(second.homePhase) } }
-        await second.start()
-        phases.values.append(second.homePhase)
-        #expect(!phases.values.contains(.welcome) && !phases.values.contains(.noDecks) && !phases.values.contains(.pending),
-                "\(phases.values)")
-        // In place: the read tree has the kept rows' identities, in the same order.
-        #expect(Self.flattened(second.homeDecks).map(\.id) == Self.flattened(read).map(\.id))
-        #expect(second.homePhase == .decks)
-        #expect(await second.close())
-    }
-
-    @Test(.timeLimit(.minutes(3))) func aSnapshotOfAnotherCollectionNeverShows() async throws {
-        let fixture = try Fixture()
-        defer { fixture.remove() }
-        let first = fixture.owner()
-        await first.start()
-        first.flushHomeSnapshot()
-        #expect(await first.close())
-        // The same path, another file (a restored backup, an import done elsewhere).
-        let collection = fixture.directory.appending(path: "collection.anki2")
-        let copy = fixture.directory.appending(path: "copy.anki2")
-        try FileManager.default.copyItem(at: collection, to: copy)
-        _ = try FileManager.default.replaceItemAt(collection, withItemAt: copy)
-        let second = fixture.owner()
-        #expect(second.keptHome == nil)
-        #expect(second.homePhase == .pending)
-    }
-
-    @Test(.timeLimit(.minutes(3))) func aReplacementDropsTheKeptRead() async throws {
-        let fixture = try Fixture()
-        defer { fixture.remove() }
-        let first = fixture.owner()
-        await first.start()
-        first.flushHomeSnapshot()
-        #expect(await first.close())
-        let second = fixture.owner()
-        try #require(second.keptHome != nil)
-        second.receive(CoreEvent(seq: 1, generation: 99, kind: .collectionReplaced(generation: 99)))
-        #expect(second.keptHome == nil)
-        #expect(second.homePhase != .kept)
-        second.flushHomeSnapshot()
-        #expect(!FileManager.default.fileExists(atPath: fixture.snapshotFile.path(percentEncoded: false)))
-        await second.waitForCloudActivation()
-        _ = await second.close()
-    }
-
-    @Test(.timeLimit(.minutes(3))) func aPressOnKeptContentWaitsAndActsOnTheReadTree() async throws {
-        let fixture = try Fixture()
-        defer { fixture.remove() }
-        let first = fixture.owner()
-        await first.start()
-        let deck = try #require(first.decks.first)
-        first.flushHomeSnapshot()
-        #expect(await first.close())
-
-        // A deck the read tree has: the press waits for the read, then opens it.
-        let second = fixture.owner()
-        try #require(second.homePhase == .kept)
-        let open = second.openDeckPage(deckID: deck.id)
-        #expect(second.navigation.homeDeckPage == nil, "Nothing opens before the read")
-        await second.start()
-        #expect(await open.value)
-        #expect(second.navigation.homeDeckPage == DeckID(deck.id))
-        #expect(await second.close())
-
-        // A kept deck the read tree lacks (deleted elsewhere): the press does nothing.
-        let third = fixture.owner(keptExtraDeck: 987_654_321)
-        try #require(third.homeDeck(987_654_321) != nil)
-        let stale = third.openDeckPage(deckID: 987_654_321)
-        await third.start()
-        #expect(!(await stale.value))
-        #expect(third.navigation.homeDeckPage == nil)
-
-        // A later press supersedes an earlier one that still waits.
-        #expect(await third.close())
-        let fourth = fixture.owner()
-        let superseded = fourth.openDeckPage(deckID: deck.id)
-        fourth.navigation.openHome()
-        await fourth.start()
-        #expect(!(await superseded.value))
-        #expect(fourth.navigation.homeDeckPage == nil)
-        #expect(await fourth.close())
-    }
-
     // MARK: Support
 
-    private final class Phases {
+    final class Phases {
         var values: [HomePhase]
         init(_ first: HomePhase) { values = [first] }
     }
 
-    private final class Fixture {
+    final class Fixture {
         let directory: URL
         let snapshotFile: URL
         init() throws {
@@ -289,4 +176,122 @@ import Testing
     }
 
     static func allCounts(_ nodes: [CountedDeckNode]) -> [ReviewCounts] { flattened(nodes).map(\.counts) }
+}
+
+/// The real-collection cases: the process has one collection, so they run serialized with
+/// the other suites that own it.
+extension ReviewCollectionStartupTests {
+    // MARK: The real collection: write, read, row identities, a press while not ready
+
+    @Test(.timeLimit(.minutes(3))) func homeLaunchWritesTheSnapshotAndTheNextLaunchDrawsItFirst() async throws {
+        let fixture = try HomeLaunchTests.Fixture()
+        defer { fixture.remove() }
+        // First launch: nothing kept; the open shows no welcome and no "No Decks".
+        let first = fixture.owner()
+        #expect(first.keptHome == nil)
+        #expect(first.homePhase == .pending)
+        let seen = HomeLaunchTests.Phases(first.homePhase)
+        first.startupStep = { [weak first] _ in if let first { seen.values.append(first.homePhase) } }
+        await first.start()
+        seen.values.append(first.homePhase)
+        #expect(first.homePhase == .decks)
+        #expect(!seen.values.contains(.welcome) && !seen.values.contains(.noDecks), "\(seen.values)")
+        let read = first.decks
+        first.flushHomeSnapshot()
+        #expect(await first.close())
+
+        // Second launch: the kept tree before any open, with today's counts and the saved disclosures.
+        let second = fixture.owner()
+        let kept = try #require(second.keptHome)
+        #expect(kept.countsCurrent)
+        #expect(second.homePhase == .kept)
+        #expect(second.homeDecks == read)
+        for node in HomeLaunchTests.flattened(read) {
+            #expect(second.studyExpanded(deckID: node.id) == !node.studyCollapsed)
+        }
+        let phases = HomeLaunchTests.Phases(second.homePhase)
+        second.startupStep = { [weak second] _ in if let second { phases.values.append(second.homePhase) } }
+        await second.start()
+        phases.values.append(second.homePhase)
+        #expect(!phases.values.contains(.welcome) && !phases.values.contains(.noDecks) && !phases.values.contains(.pending),
+                "\(phases.values)")
+        // In place: the read tree has the kept rows' identities, in the same order.
+        #expect(HomeLaunchTests.flattened(second.homeDecks).map(\.id) == HomeLaunchTests.flattened(read).map(\.id))
+        #expect(second.homePhase == .decks)
+        #expect(await second.close())
+    }
+
+    @Test(.timeLimit(.minutes(3))) func homeLaunchASnapshotOfAnotherCollectionNeverShows() async throws {
+        let fixture = try HomeLaunchTests.Fixture()
+        defer { fixture.remove() }
+        let first = fixture.owner()
+        await first.start()
+        first.flushHomeSnapshot()
+        #expect(await first.close())
+        // The same path, another file (a restored backup, an import done elsewhere).
+        let collection = fixture.directory.appending(path: "collection.anki2")
+        let copy = fixture.directory.appending(path: "copy.anki2")
+        try FileManager.default.copyItem(at: collection, to: copy)
+        _ = try FileManager.default.replaceItemAt(collection, withItemAt: copy)
+        let second = fixture.owner()
+        #expect(second.keptHome == nil)
+        #expect(second.homePhase == .pending)
+    }
+
+    @Test(.timeLimit(.minutes(3))) func homeLaunchAReplacementDropsTheKeptRead() async throws {
+        let fixture = try HomeLaunchTests.Fixture()
+        defer { fixture.remove() }
+        let first = fixture.owner()
+        await first.start()
+        first.flushHomeSnapshot()
+        #expect(await first.close())
+        let second = fixture.owner()
+        try #require(second.keptHome != nil)
+        second.receive(CoreEvent(seq: 1, generation: 99, kind: .collectionReplaced(generation: 99)))
+        #expect(second.keptHome == nil)
+        #expect(second.homePhase != .kept)
+        second.flushHomeSnapshot()
+        #expect(!FileManager.default.fileExists(atPath: fixture.snapshotFile.path(percentEncoded: false)))
+        await second.waitForCloudActivation()
+        _ = await second.close()
+    }
+
+    @Test(.timeLimit(.minutes(3))) func homeLaunchAPressOnKeptContentWaitsAndActsOnTheReadTree() async throws {
+        let fixture = try HomeLaunchTests.Fixture()
+        defer { fixture.remove() }
+        let first = fixture.owner()
+        await first.start()
+        let deck = try #require(first.decks.first)
+        first.flushHomeSnapshot()
+        #expect(await first.close())
+
+        // A deck the read tree has: the press waits for the read, then opens it.
+        let second = fixture.owner()
+        try #require(second.homePhase == .kept)
+        let open = second.openDeckPage(deckID: deck.id)
+        #expect(second.navigation.homeDeckPage == nil, "Nothing opens before the read")
+        await second.start()
+        #expect(await open.value)
+        #expect(second.navigation.homeDeckPage == DeckID(deck.id))
+        #expect(await second.close())
+
+        // A kept deck the read tree lacks (deleted elsewhere): the press does nothing.
+        let third = fixture.owner(keptExtraDeck: 987_654_321)
+        try #require(third.homeDeck(987_654_321) != nil)
+        let stale = third.openDeckPage(deckID: 987_654_321)
+        await third.start()
+        #expect(!(await stale.value))
+        #expect(third.navigation.homeDeckPage == nil)
+
+        // A later press supersedes an earlier one that still waits.
+        #expect(await third.close())
+        let fourth = fixture.owner()
+        let superseded = fourth.openDeckPage(deckID: deck.id)
+        fourth.navigation.openHome()
+        await fourth.start()
+        #expect(!(await superseded.value))
+        #expect(fourth.navigation.homeDeckPage == nil)
+        #expect(await fourth.close())
+    }
+
 }

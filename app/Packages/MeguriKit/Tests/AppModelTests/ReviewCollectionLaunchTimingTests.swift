@@ -7,9 +7,8 @@ import Testing
 /// process's real collection: run it with a focused selector. Set
 /// `MEGURI_LAUNCH_TIMING_FIXTURE` to a generated collection (`tools/mg fixtures 10k`) to time
 /// a larger one; the default is the package's small schema-18 fixture.
-@MainActor
-@Suite(.serialized) struct ReviewCollectionLaunchTimingTests {
-    @Test(.timeLimit(.minutes(5))) func firstDeckTreeIsReadBeforeTheRestOfTheHostCompletes() async throws {
+extension ReviewCollectionStartupTests {
+    @Test(.timeLimit(.minutes(5))) func launchTimingFirstDeckTreeIsReadBeforeTheRestOfTheHostCompletes() async throws {
         let source: URL
         if let path = ProcessInfo.processInfo.environment["MEGURI_LAUNCH_TIMING_FIXTURE"] {
             source = URL(filePath: path)
@@ -30,7 +29,7 @@ import Testing
                 providerDirectory: directory.appending(path: "synthetic-installation", directoryHint: .isDirectory))
             let clock = ContinuousClock()
             let started = clock.now
-            let trace = Trace()
+            let trace = LaunchTimingTrace()
             let elapsed: @MainActor () -> Double = {
                 let duration = clock.now - started
                 return Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15
@@ -61,7 +60,7 @@ import Testing
         print("LAUNCH-TIMING " + lines.joined(separator: "; "))
     }
 
-    private final class Trace {
+    private final class LaunchTimingTrace {
         var marks: [String: Double] = [:]
         var order: [String] = []
     }

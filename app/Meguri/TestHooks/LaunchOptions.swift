@@ -70,7 +70,8 @@ extension TestHooks {
         var integrations: Bool?
         var route: Route?
         var studyTimings = false
-        var homeSnapshot = false
+        /// Nil when not given: an explicit off differs from a launch with no option.
+        var homeSnapshot: Bool?
         var homeTrace = false
         var statsRollout: StatsRolloutOption?
         /// `-MeguriStatsRollout off`: Statistics hidden where it would show (the Mac, the iPad).
@@ -230,7 +231,7 @@ extension TestHooks {
             }
             integrations = try values["Integrations"].map { value throws(TestHookError) in try Self.onOff(value, "Integrations") }
             studyTimings = try values["StudyTimings"].map { value throws(TestHookError) in try Self.onOff(value, "StudyTimings") } ?? false
-            homeSnapshot = try values["HomeSnapshot"].map { value throws(TestHookError) in try Self.onOff(value, "HomeSnapshot") } ?? false
+            homeSnapshot = try values["HomeSnapshot"].map { value throws(TestHookError) in try Self.onOff(value, "HomeSnapshot") }
             homeTrace = try values["HomeTrace"].map { value throws(TestHookError) in try Self.onOff(value, "HomeTrace") } ?? false
             if let value = values["Route"] {
                 route = try Route(value)
@@ -309,7 +310,7 @@ extension TestHooks {
             }
             // A hook launch starts from what it installs: no last read of an earlier run
             // shows unless it asks (N27.2).
-            if self != LaunchOptions(), !homeSnapshot { configuration.homeSnapshotFile = nil }
+            if self != LaunchOptions(), homeSnapshot != true { configuration.homeSnapshotFile = nil }
             if let nativeReview {
                 guard installer.bundleIdentifier.hasSuffix(".dev") else { throw TestHookError("NativeReview requires a .dev bundle") }
                 #if os(macOS)

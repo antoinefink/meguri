@@ -186,7 +186,8 @@ public struct HomeView: View {
         guard todayBesideDeckList else { return nil }
         let navigation = collection.navigation
         return HomeTodayRow(waiting: TodayDecks(nodes: collection.homeDecks).totals.waiting,
-            selection: DeckListSelection(homeDeckPage: navigation.homeDeckPage)) { navigation.openHome() }
+            selection: DeckListSelection(homeDeckPage: navigation.homeDeckPage),
+            countsHeld: collection.homeCountsHeld) { navigation.openHome() }
     }
     /// Today beside the list (N14.1) already shows the previous session.
     private var showsPreviousSession: Bool {
@@ -964,9 +965,12 @@ public struct HomeTodayRow {
     public let waiting: Int
     public let selection: DeckListSelection
     public let open: () -> Void
+    /// The kept counts are an earlier study day's: no number is drawn or spoken (N27.3).
+    public var countsHeld = false
     public var selected: Bool { selection.today }
-    public init(waiting: Int, selection: DeckListSelection = DeckListSelection(deck: nil), open: @escaping () -> Void) {
-        self.waiting = waiting; self.selection = selection; self.open = open
+    public init(waiting: Int, selection: DeckListSelection = DeckListSelection(deck: nil), countsHeld: Bool = false,
+                open: @escaping () -> Void) {
+        self.waiting = waiting; self.selection = selection; self.countsHeld = countsHeld; self.open = open
     }
 }
 
@@ -985,7 +989,8 @@ private struct HomeTodayRowView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text("Today", bundle: .module))
-        .accessibilityValue(Text("\(row.waiting) cards waiting", bundle: .module))
+        // Held counts are not spoken (N27.3).
+        .accessibilityValue(row.countsHeld ? Text(verbatim: "") : Text("\(row.waiting) cards waiting", bundle: .module))
         .accessibilityAddTraits(row.selected ? .isSelected : [])
         .accessibilityIdentifier("home.today.row")
         #if !os(macOS)

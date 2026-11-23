@@ -51,7 +51,8 @@ final class HomeLaunchTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(fixture: fixture, now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris",
             locale: "en_US", animations: false,
-            extra: ["-MeguriHomeTrace", "on", "-MeguriHomeSnapshot", snapshot ? "on" : "off"]).arguments
+            // The tab layout's list on every device class (an iPad's sidebar rows have other identifiers).
+            extra: ["-MeguriSizeClass", "compact", "-MeguriHomeTrace", "on", "-MeguriHomeSnapshot", snapshot ? "on" : "off"]).arguments
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
         return app

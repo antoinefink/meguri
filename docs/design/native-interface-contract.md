@@ -1474,7 +1474,7 @@ Cause: the open set the collection ready before Home's first deck tree was read,
 ### N27.5 Nothing else before the first tree
 
 - The first deck tree is read as soon as the open's day check has run, before the sync attachment, the media index and study preparation; if changes were committed meanwhile, the open reads the tree once more at its end. Recovery drops that arrive after the session record was read apply as they come. The snapshot is not written during a review (its end writes it). The heatmap's reads wait for it (the core's query lane is serial; a history scan queued first delayed the tree). R1818's interval `launch.toDeckListInteractive` runs from the collection owner's creation to the first tree.
-- Measured with `ReviewCollectionLaunchTimingTests` on the generated 10k collection (this Mac, Debug build, other jobs running, median of five opens): the core open takes about 200 ms. From the ready state to the first tree took 4.7 ms before and 3.7 ms after. The moved steps are short in that test, which has no sync service; on a device the sync attachment runs in that window. With a kept read the decks are in the first frame and nothing waits on screen.
+- Measured with `launchTimingFirstDeckTreeIsReadBeforeTheRestOfTheHostCompletes` (AppModelTests) on the generated 10k collection (this Mac, Debug build, other jobs running, median of five opens): the core open takes about 200 ms. From the ready state to the first tree took 4.7 ms before and 3.7 ms after. The moved steps are short in that test, which has no sync service; on a device the sync attachment runs in that window. With a kept read the decks are in the first frame and nothing waits on screen.
 
 ### N27.6 The opened Duo's layout
 

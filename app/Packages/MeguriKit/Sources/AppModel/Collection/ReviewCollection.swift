@@ -625,6 +625,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     @ObservationIgnored private var lastSnapshot: HomeSnapshot?
     /// The day end the applied counts were read for.
     @ObservationIgnored private var countsDayEndsAt: Int64?
+    /// The day end Today's numbers were read for.
+    @ObservationIgnored private var studiedDayEndsAt: Int64?
     /// The generation whose first deck-tree read failed, until a read succeeds.
     private(set) var deckTreeFailedGeneration: UInt64?
     /// The open applied the record's recovery drops: later ones apply as they come.
@@ -1052,7 +1054,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         preparedGeneration = generation
         studyWarmup.warm()
     }
-    /// Each step of a host's completion as it ends (`ReviewCollectionLaunchTimingTests`).
+    /// Each step of a host's completion as it ends (`launchTimingFirstDeckTreeIsReadBeforeTheRestOfTheHostCompletes` (AppModelTests)).
     @ObservationIgnored var startupStep: (@MainActor (String) -> Void)?
     func prepareEntry() async throws -> CoreBridge.CollectionLocation {
         await sync.preparePlatform()
@@ -2273,9 +2275,11 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     func loadTodayNumbers() async {
         let expected = generation, snapshot = countsSnapshot
+        let dayEnd = day?.nextDayAt
         if let numbers = try? await studiedTodayService.numbers(),
            expected == generation, numbers.generation == expected, !closed {
             studiedToday = numbers
+            studiedDayEndsAt = dayEnd
         }
         guard expected == generation, !closed else { return }
         guard studyAllDecks.isEmpty else { nextLearningReadyAt = nil; todayNumbersRead(generation: expected); return }
@@ -2306,7 +2310,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard let homeSnapshots, deckTreeRead, review == nil, let identity = snapshotIdentity,
               identity.generation == generation else { return }
         let snapshot = HomeSnapshot(collection: identity.identity, dayEndsAt: countsDayEndsAt, decks: decks,
-            studied: studiedToday, nextLearningReadyAt: todayNumbersGeneration == generation ? nextLearningReadyAt : nil,
+            // Today's numbers only with the counts of the same study day.
+            studied: studiedDayEndsAt == countsDayEndsAt ? studiedToday : nil, nextLearningReadyAt: todayNumbersGeneration == generation ? nextLearningReadyAt : nil,
             previous: previousSession, previousAnswers: previousRecord?.answers.count)
         guard snapshot != lastSnapshot else { return }
         lastSnapshot = snapshot

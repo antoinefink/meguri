@@ -174,6 +174,10 @@ import Darwin
         asked.homeSnapshotFile = file
         try Options(arguments: ["-MeguriTimeZone", "UTC", "-MeguriHomeSnapshot", "on"]).apply(to: &asked, installer: installer, routes: .standard)
         #expect(asked.homeSnapshotFile == file)
+        var off = LaunchConfiguration()
+        off.homeSnapshotFile = file
+        try Options(arguments: ["-MeguriHomeSnapshot", "off"]).apply(to: &off, installer: installer, routes: .standard)
+        #expect(off.homeSnapshotFile == nil)
         #expect(try Options(arguments: []).homeTrace == false)
         #expect(try Options(arguments: ["-MeguriHomeTrace", "on"]).homeTrace)
         #expect(throws: TestHookError.self) { try Options(arguments: ["-MeguriHomeSnapshot", "yes"]) }
