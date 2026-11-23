@@ -627,6 +627,11 @@ def navigation_bar_title_pairs(root):
     return pairs
 
 
+# How far below a scroll view's top a navigation bar can start and still be its top bar (the
+# status bar's room above it).
+STATUS_BAR_ROOM = 64.0
+
+
 def under_bars(element, rect, bars):
     """On touch, the part of a scrolled text's shown rect that no navigation
     bar of its window covers: a scroll view runs under the bar, which draws
@@ -645,9 +650,15 @@ def under_bars(element, rect, bars):
         if bar.window() is not element.window():
             continue
         bottom = bar.y + bar.h
-        if not any(c.y < bottom for c in containers):
+        # The bar at the top of a scroll view that runs under it (and under the status bar
+        # above it): it covers the band from the scroll view's top to its own bottom.
+        tops = [c.y for c in containers if c.y <= bar.y <= c.y + STATUS_BAR_ROOM and c.y < bottom]
+        if not tops:
             continue
         if min(x1, bar.x + bar.w) - max(x, bar.x) <= 0:
+            continue
+        # Only a text whose top lies in that band loses its top part; a text below keeps it.
+        if not min(tops) <= y < bottom:
             continue
         y = max(y, bottom)
     if y1 <= y:

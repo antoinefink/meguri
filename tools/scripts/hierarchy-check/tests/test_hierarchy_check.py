@@ -1043,6 +1043,15 @@ class TextOverlap(unittest.TestCase):
             el("staticText", label="Retention", f=(336, 80, 103, 24))]), window=(0, 0, 1032, 1376))
         self.assertEqual(hierarchy_check.check(tree), [])
 
+    def test_a_scrolled_text_above_or_starting_above_a_bar_keeps_its_frame(self):
+        # A bar lower in the window clips nothing above it, nor a text that starts above it.
+        bar = el("navigationBar", "Statistics", f=(0, 100, 400, 44), children=[
+            el("staticText", label="Statistics", f=(150, 110, 100, 20))])
+        tree = doc(bar, el("scrollView", f=(0, 0, 400, 800), children=[
+            el("staticText", label="Above", f=(20, 40, 100, 20)),
+            el("staticText", label="Across", f=(140, 90, 100, 40))]))
+        self.assertEqual([i["labels"] for i in hierarchy_check.check(tree)], [["Statistics", "Across"]])
+
     def test_a_fixed_label_under_a_touch_navigation_bar_still_overlaps(self):
         bar = el("navigationBar", "Statistics", f=(0, 32, 1032, 54), children=[
             el("staticText", label="Statistics", f=(340, 37.5, 67.5, 18.5))])
