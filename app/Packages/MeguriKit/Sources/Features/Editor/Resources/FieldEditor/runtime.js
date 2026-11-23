@@ -165,7 +165,7 @@
         field.redo = []; field.lastKind = kind; field.lastEdit = now;
     }
     function restore(field, value) {
-        if (field.mode === "html") field.source.value = value;
+        if (field.mode === "html") { field.source.value = value; if (browsing) grow(field.source); }
         else field.rich.replaceChildren(parse(value));
         field.caret = null; field.sourceCaret = null;
         dirty(field); focus(field); historyState(field);

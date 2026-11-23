@@ -49,7 +49,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertTrue(element(app, "browse.inspector.deck").exists && element(app, "browse.inspector.type").exists)
         XCTAssertTrue(element(app, "browse.inspector.tags").exists && element(app, "browse.inspector.formatting").exists)
         let fields = note.textViews
-        XCTAssertTrue(waitUntil { fields.count > 0 }, "the note's fields")
+        XCTAssertTrue(shows(fields, "palabra"), "the selected row's note")
         XCTAssertFalse(element(app, "browse.inspector.format.bold").isEnabled, "Option A: the bar is dimmed until a field has the focus")
         sleep(2)
         capture(app, "sound-and-image-\(appearance)")
@@ -57,7 +57,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         // Right to left, then CJK with a sound.
         try showDeck(app, bundle, containing: "العربية", firstField: "كلمة")
         press(table.outlineRows.element(boundBy: 0))
-        XCTAssertTrue(waitUntil { fields.count > 0 })
+        XCTAssertTrue(shows(fields, "كلمة"), "the selected row's note")
         sleep(1)
         capture(app, "right-to-left-\(appearance)")
         // V12: a field emptied, then behind its row on the note's next showing, then shown.
@@ -66,7 +66,8 @@ final class MacBrowseInspectorTests: XCTestCase {
         app.typeKey("a", modifierFlags: [.command])
         app.typeKey(.delete, modifierFlags: [])
         press(table.outlineRows.element(boundBy: 1))
-        XCTAssertTrue(waitUntil { fields.count > 0 })
+        XCTAssertTrue(waitUntil(timeout: 20) { fields.count > 1 && !(fields.element(boundBy: 1).value as? String ?? "").isEmpty },
+                      "the next row's note, whose second field is filled")
         press(table.outlineRows.element(boundBy: 0))
         let empty = element(app, "browse.inspector.emptyFields")
         XCTAssertTrue(empty.waitForExistence(timeout: 10), "the emptied field hides behind its row")
@@ -79,7 +80,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         empty.click()
         try showDeck(app, bundle, containing: "語彙", firstField: "単語")
         press(table.outlineRows.element(boundBy: 0))
-        XCTAssertTrue(waitUntil { fields.count > 0 })
+        XCTAssertTrue(shows(fields, "単語"), "the selected row's note")
         sleep(2)
         capture(app, "cjk-with-sound-\(appearance)")
 
@@ -185,6 +186,12 @@ final class MacBrowseInspectorTests: XCTestCase {
         center.postNotificationName(Notification.Name(bundle + ".testhooks.resizeWindow"), object: size,
             userInfo: nil, deliverImmediately: true)
         wait(for: [resized], timeout: 10)
+    }
+
+    /// The inspector shows the selected row's note: its first field holds `text` (the
+    /// previous note's page stays shown while the next one is read).
+    private func shows(_ fields: XCUIElementQuery, _ text: String) -> Bool {
+        waitUntil(timeout: 20) { fields.count > 0 && (fields.element(boundBy: 0).value as? String ?? "").contains(text) }
     }
 
     /// SwiftUI's Table is an outline in the Mac's accessibility tree.
