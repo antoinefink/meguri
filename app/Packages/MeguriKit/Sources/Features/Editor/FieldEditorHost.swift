@@ -10,7 +10,7 @@ import WebKit
 /// data bridge is in a named content world and admits its main frame only.
 /// This component deliberately offers no Add/Edit/Browse persistence command.
 @Observable @MainActor
-public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteFieldRuntime {
+public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteFieldRuntime, BrowseFieldRuntime {
     public let draft: NoteEditorDraft
     public let webView: WKWebView
     public private(set) var editable = false
@@ -21,6 +21,13 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     public private(set) var canRedo = false
     /// The native containing form supplies the next/previous focus target.
     public var focusLeave: ((Bool) -> Void)?
+    /// Browse's inspector: a field lost the focus, after its commit (V12 saves).
+    public var onFieldBlur: (@MainActor () -> Void)?
+    /// A field of the page has the keyboard focus now (not only had it).
+    public private(set) var fieldFocused = false
+    /// Browse's inspector: the page opens a note in its "browse" mode, with
+    /// no field focused (`browser/inspector` I3).
+    public var browsing = false
     private let isCurrent: @MainActor () -> Bool
     private let document: EditorDocument
     private let relay: EditorMessageRelay
@@ -69,6 +76,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         document = previous.document; relay = previous.relay; webView = previous.webView
         super.init()
         pageReady = true; loadID = previous.loadID; firstLoad = previous.loadID
+        browsing = previous.browsing
         relay.owner = self; webView.navigationDelegate = self
         #if os(iOS)
         (webView as? FieldEditorWebView)?.owner = self
@@ -212,11 +220,15 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
                 "rtl": field.definition.rtl, "collapsed": field.collapsed, "mode": field.mode.rawValue,
                 "clozeField": draft.notetype.clozeFields.contains(UInt32(index))]
             if field.changed { value["baselineHtml"] = display.baselines[index] }
+            if draft.hiddenFields.contains(index) { value["hidden"] = true }
             return value
         }
-        let focus = draft.focusedField ?? draft.fields.indices.first(where: { !draft.fields[$0].collapsed })
+        let focus = !browsing ? draft.focusedField ?? draft.fields.indices.first(where: {
+            !draft.fields[$0].collapsed && !draft.hiddenFields.contains($0)
+        }) : nil
         openedLoad = expected
-        _ = try await call(["type": "openNote", "protocol": 1, "loadId": expected, "mode": draft.noteID == nil ? "add" : "edit", "fields": fields,
+        let mode = browsing ? "browse" : draft.noteID == nil ? "add" : "edit"
+        _ = try await call(["type": "openNote", "protocol": 1, "loadId": expected, "mode": mode, "fields": fields,
             "focus": focus.map { $0 as Any } ?? NSNull(), "theme": [String: String](),
             "options": ["closeHTMLTags": false, "shrinkImages": false]], load: expected)
         try requireCurrent(expected)
@@ -227,6 +239,9 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     /// Resolve all earlier sequence numbers before returning the flushed draft
     /// targets. A caller must not submit a write before this returns.
     public func flush(hold: Bool) async throws {
+        // Browse's inspector flushes for a save, a cloze and a reload: a flush
+        // waits for the one under way rather than fail (no input is skipped).
+        while browsing, editable, commandLoad != nil { try await Task.sleep(for: .milliseconds(5)) }
         guard editable, let expected = activeLoad, commandLoad == nil else { throw EditorRuntimeError.unavailable }
         try requireCurrent(expected)
         commandLoad = expected
@@ -262,6 +277,77 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         guard editable, !held, let expected = activeLoad, draft.fields.indices.contains(ord) else { throw EditorRuntimeError.unavailable }
         _ = try await call(["type": "setFocus", "loadId": expected, "ord": ord], load: expected)
     }
+    /// Browse's inspector (V12): the fields the page leaves out.
+    public func setHiddenFields(_ ords: Set<Int>) async throws {
+        draft.hiddenFields = ords
+        guard editable, let expected = activeLoad else { throw EditorRuntimeError.unavailable }
+        _ = try await call(["type": "setHidden", "loadId": expected, "ords": ords.sorted()], load: expected)
+    }
+    /// N21.8's Edit Note: the page takes the keyboard focus, then the field.
+    public func focusField(_ ord: Int) async throws {
+        #if os(macOS)
+        webView.window?.makeFirstResponder(webView)
+        #endif
+        try await setFocus(ord)
+    }
+
+    // MARK: Formatting (editor/formatting F3, editor/cloze-wrap)
+
+    /// F3's inline formats the inspector's bar and Format menu offer.
+    public enum InlineFormat: String, CaseIterable, Sendable { case bold, italic, underline, superscript, `subscript` }
+
+    /// F2: the commands act on the focused rich field only.
+    public var canFormat: Bool { editable && !held && fieldFocused && focusedMode == .rich }
+    /// W2: Cloze in a cloze note type's cloze field.
+    public var canCloze: Bool {
+        guard canFormat, let ord = draft.focusedField else { return false }
+        return draft.notetype.kind == 1 && draft.notetype.clozeFields.contains(UInt32(ord))
+    }
+
+    public func format(_ command: InlineFormat) {
+        guard canFormat, let expected = activeLoad else { return }
+        Task { _ = try? await call(["type": "format", "loadId": expected, "command": command.rawValue], load: expected) }
+    }
+
+    /// W3: the number from every field's session value after a flush; W4: the page wraps the selection.
+    public func cloze(sameNumber: Bool) {
+        guard canCloze, let expected = activeLoad else { return }
+        Task {
+            do {
+                try await flush(hold: false)
+                let highest = Self.highestCloze(draft.values)
+                let number = sameNumber ? max(highest, 1) : highest + 1
+                _ = try await call(["type": "wrap", "loadId": expected, "prefix": "{{c\(number)::", "suffix": "}}"], load: expected)
+            } catch {}
+        }
+    }
+
+    /// W3 step 2: every `{{c` + ASCII digits + `::` in the text, saturating at 2^53 - 1.
+    nonisolated static func highestCloze(_ values: [String]) -> UInt64 {
+        let limit: UInt64 = 9_007_199_254_740_991
+        var highest: UInt64 = 0
+        for value in values {
+            let bytes = Array(value.utf8)
+            var index = 0
+            while index + 3 < bytes.count {
+                guard bytes[index] == 0x7B, bytes[index + 1] == 0x7B, bytes[index + 2] == 0x63 else { index += 1; continue }
+                var cursor = index + 3, number: UInt64 = 0, digits = 0
+                while cursor < bytes.count, (0x30...0x39).contains(bytes[cursor]) {
+                    let digit = UInt64(bytes[cursor] - 0x30)
+                    number = number > (limit - digit) / 10 ? limit : number * 10 + digit
+                    cursor += 1; digits += 1
+                }
+                if digits > 0, cursor + 1 < bytes.count, bytes[cursor] == 0x3A, bytes[cursor + 1] == 0x3A {
+                    highest = max(highest, number)
+                    index = cursor + 2
+                } else {
+                    index += 3
+                }
+            }
+        }
+        return highest
+    }
+
     public func setMode(_ mode: NoteEditorDraft.Mode, ord: Int) async throws {
         guard editable, !held, let expected = activeLoad, draft.fields.indices.contains(ord) else { throw EditorRuntimeError.unavailable }
         _ = try await call(["type": "setFieldState", "loadId": expected, "ord": ord, "mode": mode.rawValue], load: expected)
@@ -383,8 +469,8 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
             try requireCurrent(expected)
             checkFields(load: expected)
         case "dirty": draft.markDirty(EditorBridgeMessage.integer(message.body["ord"])!)
-        case "focus": draft.setFocus(EditorBridgeMessage.integer(message.body["ord"]))
-        case "blur": break
+        case "focus": draft.setFocus(EditorBridgeMessage.integer(message.body["ord"])); fieldFocused = true
+        case "blur": fieldFocused = false; onFieldBlur?()
         case "modeChanged": draft.setMode(NoteEditorDraft.Mode(rawValue: message.body["mode"] as! String)!, ord: EditorBridgeMessage.integer(message.body["ord"])!)
         case "collapsedChanged": draft.setCollapsed(EditorBridgeMessage.boolean(message.body["collapsed"])!, ord: EditorBridgeMessage.integer(message.body["ord"])!)
         case "historyState":

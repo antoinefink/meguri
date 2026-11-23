@@ -53,12 +53,11 @@ struct ShellFeatures {
     var today: (AppNavigation) -> AnyView = { _ in
         AnyView(ContentUnavailableView("Select a Deck", systemImage: "rectangle.stack"))
     }
+    /// The sections this device offers: the sidebar's rows, and the tab layout's tabs (Note
+    /// Types inside Settings). Statistics' tab and row both follow it (U304).
     var availableSections: [AppSection] = AppSection.sidebar
-    /// The compact layout's Statistics tab (iPhone, the folded Duo: U304); the sidebar's row
-    /// follows `availableSections`.
-    var statsTab = false
-    /// The Statistics page where `StatsRollout` shows it (the Mac and the iPad): View ›
-    /// Statistics and Go to Section act on it; nil while it cannot be reached.
+    /// The Statistics page where `StatsRollout` shows it: View › Statistics and Go to Section
+    /// act on it; nil while it cannot be reached.
     var statsPage: StatsPage?
     /// What keeps the page's wiring to the collection alive for the app's run.
     var statsHost: AnyObject?

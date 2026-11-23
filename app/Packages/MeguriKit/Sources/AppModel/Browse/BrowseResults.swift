@@ -705,6 +705,21 @@ public final class BrowseResults {
     /// The session commands run in, once one is open.
     var commandSession: (any BrowseSearching)? { session }
 
+    /// The card (Cards mode) and the note of the row at `index` of the list
+    /// shown, from the rows read or else read for it (the inspector, U273).
+    /// Nil when the row is gone, an error row, or the list moved on.
+    func rowIDs(at index: Int) async -> (card: Int64?, note: Int64)? {
+        guard let list, index >= 0, index < list.count else { return nil }
+        if let row = row(at: index), row.status == .row, let id = row.id, let note = row.noteID {
+            return (list.mode == .cards ? id : nil, note)
+        }
+        guard let session, !list.released else { return nil }
+        let range = UInt64(index)..<UInt64(index + 1)
+        guard let read = try? await session.rows(list.handle, revision: list.revision, range: range, columns: []),
+              case .row(let row)? = read.first, self.list?.token == list.token else { return nil }
+        return (list.mode == .cards ? row.id : nil, row.noteID)
+    }
+
     /// Raised by every selection the user makes.
     var userSelections: UInt64 { selectionRevision }
 

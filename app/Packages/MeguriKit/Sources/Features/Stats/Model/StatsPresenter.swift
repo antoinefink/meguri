@@ -394,20 +394,29 @@ struct StatsPresenter {
             let first = days.firstDay(ofYear: year) ?? Int.min
             let last = (days.firstDay(ofYear: year + 1) ?? 1) - 1
             let total = streaks.counts.reduce(0) { $0 + ($1.key >= first && $1.key <= last ? $1.value : 0) }
-            return StatsActivity.Year(year: year, total: total, totalText: text.yearTotal(String(year), total, count(total)))
+            return StatsActivity.Year(year: year, total: total, totalText: text.yearTotal(String(year), total, count(total)),
+                                      totalFull: text.totalFull(total, count(total)), totalNumber: text.totalNumber(count(total)))
         }
         let thisYearStart = days.firstDay(ofYear: days.year(ofDay: 0)) ?? 0
         let thisYear = streaks.counts.keys.filter { $0 >= thisYearStart }.count
-        let activity = StatsActivity(span: span, counts: streaks.counts, years: years, currentStreak: streaks.current,
+        var activity = StatsActivity(span: span, counts: streaks.counts, years: years, currentStreak: streaks.current,
                                      longestStreak: streaks.longest, daysStudiedThisYear: thisYear, days: days)
-        return content(.ready, data: StatsChartData(bins: [], series: []),
-                       figures: [
-                           StatsSmallFigure(label: text.figureCurrentStreak, value: text.days(streaks.current, count(streaks.current))),
-                           StatsSmallFigure(label: text.figureLongestStreak, value: text.days(streaks.longest, count(streaks.longest))),
-                           StatsSmallFigure(label: text.figureDaysStudiedThisYear, value: count(thisYear)),
-                           StatsSmallFigure(label: text.figureAllReviews, value: count(activity.total)),
-                       ],
+        activity.daysThisYear = max(1, 1 - thisYearStart)
+        return content(.ready, figure: Self.activityFigure(activity, text: text, count: count), data: StatsChartData(bins: [], series: []),
                        detail: .activity(activity))
+    }
+
+    /// Activity's headline and sentence (the owner's Option B, 2026-11-23): the current streak as
+    /// "<n> days in a row" ("No streak today" at 0), then the longest streak, or "Your longest
+    /// streak" when the current one is it, and the days studied of this year's days so far.
+    static func activityFigure(_ activity: StatsActivity, text: StatsText, count: (Int) -> String) -> StatsBoxFigure {
+        let studied = text.studiedThisYear(count(activity.daysStudiedThisYear), activity.daysThisYear, count(activity.daysThisYear))
+        let current = activity.currentStreak, longest = activity.longestStreak
+        guard current > 0 else {
+            return StatsBoxFigure(value: text.noStreak, sentence: text.longest(text.days(longest, count(longest)), studied))
+        }
+        let sentence = current >= longest ? text.yourLongest(studied) : text.longest(text.days(longest, count(longest)), studied)
+        return StatsBoxFigure(value: text.inARow(current, count(current)), sentence: sentence)
     }
 
     // S7.6
@@ -933,7 +942,8 @@ struct StatsSeriesKit {
         case .reviewsOverTime:
             [text.figureDaysStudied, text.figureAverageADay, text.figureAverageOnDaysStudied]
                 + (selection.reviewsMeasure == .time ? [text.figureTimePerCard] : [])
-        case .activity: [text.figureCurrentStreak, text.figureLongestStreak, text.figureDaysStudiedThisYear, text.figureAllReviews]
+        // Nothing under Activity's grid (Option B): its headline carries the streaks.
+        case .activity: []
         case .cardsOverTime: [text.figureNew, text.figureLearning, text.figureYoung, text.figureMature]
         case .cardCounts: [text.figureMature]
         case .addedAndStarted: [text.figureAddedADay, text.figureStartedADay]

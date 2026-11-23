@@ -564,7 +564,11 @@ screens:
       Try Again; never a syntax error), loading (previous results stay; Searching… in the status
       line). Speed: V17. Commands (U275, Mac): the row's context menu (N21.5), the Note and Card
       menus' Browse items and Edit's Select Sibling Cards (N21.8), the Delete question (V8.2),
-      undo titles after the command (V8.3); identifiers browse.menu.<command>. Identifiers
+      undo titles after the command (V8.3); identifiers browse.menu.<command>. The inspector
+      (U273, Mac): no selection, one row's Note tab (preview, Deck and Type, fields, empty
+      fields, tags, formatting bar; identifiers browse.inspector.*), several rows' summary
+      with the commands (browse.inspector.command.<command>), hidden under 900 points and shown
+      over the table by Return; the Info tab comes with U274. Identifiers
       browse.<element>, rows browse.table.row.<id>. This replaces
       the earlier text of this entry (R1086 to R1093's syntax tokens, chips, Today section,
       three inspector tabs).
@@ -717,6 +721,16 @@ screens:
       long-pinned and ax5 add about seven years of sample history and the largest text size.
       Identifiers: stats.box.activity.plot, stats.box.activity.figures,
       stats.activity.yearTotal.<year>.
+      Narrow page (U304, PR #162): the Statistics tab between Decks and Browse (Browse absent
+      until its compact layout; no tab with no collection on the device), the inline title with
+      the deck pop-up leading, the period pinned under the bar, the sync button and the Jump menu
+      (stats.toolbar.jump, items stats.toolbar.jump.<section>) trailing, four strip tiles, the
+      grouped column with the small boxes two abreast on the Duo held tall, Count and Time in
+      Reviews Over Time's menu (stats.box.reviewsOverTime.menu), and Activity's recent lines with
+      Show All Years (stats.box.activity.showAllYears; coordinator, 2026-11-23, pending the owner).
+      Activity on every device (the owner's Option B, 2026-11-23): the current streak as its
+      headline, each year's total beside its label on the grid, nothing under the grid; route
+      stats/chart/activity/no-streak shows "No streak today".
       Knowledge section (U297): Knowledge Over Time's Estimated marker explains, as help, that
       each day is worked out again with today's memory parameters; an open Retention point's
       callout says it has too few reviews to trust; route stats/page/pinned shows a pinned bar

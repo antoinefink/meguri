@@ -66,6 +66,8 @@ public struct StatsBoxAccessory: View {
     let id: StatsBoxID
     let model: StatsPageModel
     @Environment(\.locale) private var locale
+    @Environment(\.statsNarrow) private var statsNarrow
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     public init(id: StatsBoxID, model: StatsPageModel) {
         self.id = id
@@ -79,14 +81,26 @@ public struct StatsBoxAccessory: View {
     public var body: some View {
         switch id {
         case .reviewsOverTime:
+            let mode = StatsBoxSwitch(id: "stats.boxSwitch.reviewsMode", label: text("stats.switch.mode"),
+                                      selection: Binding(get: { model.selection.reviewsMode }, set: { model.setReviewsMode($0) }),
+                                      options: [(.byType, text("stats.switch.byType"), "byType"),
+                                                (.byAnswer, text("stats.switch.byAnswer"), "byAnswer")])
+            let measure = StatsBoxSwitch(id: "stats.boxSwitch.reviewsMeasure", label: text("stats.switch.measure"),
+                                         selection: Binding(get: { model.selection.reviewsMeasure }, set: { model.setReviewsMeasure($0) }),
+                                         options: [(.count, text("stats.switch.count"), "count"), (.time, text("stats.switch.time"), "time")])
             HStack(spacing: Spacing.xSmall) {
-                StatsBoxSwitch(id: "stats.boxSwitch.reviewsMode", label: text("stats.switch.mode"),
-                               selection: Binding(get: { model.selection.reviewsMode }, set: { model.setReviewsMode($0) }),
-                               options: [(.byType, text("stats.switch.byType"), "byType"),
-                                         (.byAnswer, text("stats.switch.byAnswer"), "byAnswer")])
-                StatsBoxSwitch(id: "stats.boxSwitch.reviewsMeasure", label: text("stats.switch.measure"),
-                               selection: Binding(get: { model.selection.reviewsMeasure }, set: { model.setReviewsMeasure($0) }),
-                               options: [(.count, text("stats.switch.count"), "count"), (.time, text("stats.switch.time"), "time")])
+                mode
+                // N25.6: on the narrow page Count | Time is in the box's menu, By Type | By
+                // Answer stays in the header.
+                if StatsNarrowLayout.measureInMenu(narrow: statsNarrow ?? (horizontalSizeClass == .compact)) {
+                    StatsBoxMenu(label: text("stats.switch.measure"), value: model.selection.reviewsMeasure == .count
+                                 ? text("stats.switch.count") : text("stats.switch.time")) {
+                        measure.inline
+                    }
+                    .accessibilityIdentifier("stats.box.reviewsOverTime.menu")
+                } else {
+                    measure
+                }
             }
         case .retention:
             StatsBoxSwitch(id: "stats.boxSwitch.retentionKind", label: text("stats.switch.kind"),
@@ -101,16 +115,42 @@ public struct StatsBoxAccessory: View {
     }
 }
 
-/// One of a box's switches: a small segmented control (N25.4), its options identified
-/// `<id>.<option>`.
+/// One of a box's switches: a small segmented control (N25.4), or on the narrow page where that
+/// does not fit beside the title a menu showing the chosen option (N25.6); its options
+/// identified `<id>.<option>`.
 struct StatsBoxSwitch<Value: Hashable>: View {
     let id: String
     let label: String
     @Binding var selection: Value
     /// The value, its title and its identifier part.
     let options: [(Value, String, String)]
+    @Environment(\.statsSwitchStyle) private var style
 
     var body: some View {
+        switch style {
+        case .segmented:
+            picker
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityIdentifier(id)
+        case .menu:
+            picker
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityIdentifier(id)
+        }
+    }
+
+    /// The options as a picker inside a menu (the box's menu, N25.6).
+    var inline: some View {
+        picker
+            .pickerStyle(.inline)
+            .accessibilityIdentifier(id)
+    }
+
+    private var picker: some View {
         Picker(selection: $selection) {
             ForEach(options, id: \.2) { option in
                 Text(verbatim: option.1).tag(option.0)
@@ -119,9 +159,24 @@ struct StatsBoxSwitch<Value: Hashable>: View {
         } label: {
             Text(verbatim: label)
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+    }
+}
+
+/// A box's own menu (`ellipsis.circle` in its header, N25.6): the switches the narrow page moves
+/// out of the header, read as the switch's name and its chosen option.
+struct StatsBoxMenu<Content: View>: View {
+    let label: String
+    let value: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Menu(content: content) {
+            Label { Text(verbatim: label) } icon: { Image(systemName: "ellipsis.circle") }
+                .labelStyle(.iconOnly)
+        }
+        .menuIndicator(.hidden)
         .fixedSize()
-        .accessibilityIdentifier(id)
+        .accessibilityLabel(Text(verbatim: label))
+        .accessibilityValue(Text(verbatim: value))
     }
 }

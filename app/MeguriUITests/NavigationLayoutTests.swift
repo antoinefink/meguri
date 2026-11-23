@@ -29,18 +29,19 @@ final class NavigationLayoutTests: XCTestCase {
 
     // MARK: Layouts (R2–R4, R17, R18)
 
-    func testTheTabLayoutHasDecksBrowseStatsAndSettings() throws {
+    func testTheTabLayoutHasDecksStatisticsBrowseAndSettings() throws {
         #if os(macOS)
         throw XCTSkip("the Mac always shows the sidebar layout")
         #else
         let app = try launch(route: "shell/root/typical", sizeClass: "compact")
         let tabBar = app.tabBars.firstMatch
         XCTAssert(tabBar.waitForExistence(timeout: 15), "no tab bar at compact width")
-        XCTAssertEqual(tabBar.buttons.allElementsBoundByIndex.map(\.label), ["Decks", "Browse", "Stats", "Settings"])
+        // N25.1: Statistics between Decks and Browse.
+        XCTAssertEqual(tabBar.buttons.allElementsBoundByIndex.map(\.label), ["Decks", "Statistics", "Browse", "Settings"])
         // Each tab button has its own identifier (R1964), so tests and agents
         // reach a tab whatever the language. SwiftUI sets them a moment
         // after launch.
-        let identifiers = ["decks", "browse", "stats", "settings"].map { "shell.root.tab.\($0)" }
+        let identifiers = ["decks", "stats", "browse", "settings"].map { "shell.root.tab.\($0)" }
         XCTAssert(
             waitUntil { tabBar.buttons.allElementsBoundByIndex.map(\.identifier) == identifiers },
             "\(tabBar.buttons.allElementsBoundByIndex.map(\.identifier))"

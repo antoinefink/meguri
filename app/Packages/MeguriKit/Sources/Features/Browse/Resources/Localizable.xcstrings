@@ -1255,6 +1255,398 @@
         }
       }
     },
+    "browse.inspector.cardOf": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card %1$@ of %2$@"
+          }
+        }
+      }
+    },
+    "browse.inspector.cardsSelected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@cards@"
+          },
+          "substitutions": {
+            "cards": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ Card Selected"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ Cards Selected"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.inspector.deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck"
+          }
+        }
+      }
+    },
+    "browse.inspector.decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@decks@"
+          },
+          "substitutions": {
+            "decks": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ deck"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ decks"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.inspector.editorUnavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This note can’t be edited here."
+          }
+        }
+      }
+    },
+    "browse.inspector.emptyFields": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@fields@"
+          },
+          "substitutions": {
+            "fields": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ Empty Field"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ Empty Fields"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.inspector.format.attach": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attach"
+          }
+        }
+      }
+    },
+    "browse.inspector.format.bold": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bold"
+          }
+        }
+      }
+    },
+    "browse.inspector.format.cloze": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloze Deletion"
+          }
+        }
+      }
+    },
+    "browse.inspector.format.html": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HTML Editor"
+          }
+        }
+      }
+    },
+    "browse.inspector.format.italic": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Italic"
+          }
+        }
+      }
+    },
+    "browse.inspector.format.underline": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Underline"
+          }
+        }
+      }
+    },
+    "browse.inspector.hide": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide Inspector"
+          }
+        }
+      }
+    },
+    "browse.inspector.noSelection": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Selection"
+          }
+        }
+      }
+    },
+    "browse.inspector.noteDeleted": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This note was deleted, so your last changes couldn’t be saved."
+          }
+        }
+      }
+    },
+    "browse.inspector.notes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@notes@"
+          },
+          "substitutions": {
+            "notes": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ note"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ notes"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.inspector.notesSelected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@notes@"
+          },
+          "substitutions": {
+            "notes": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ Note Selected"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ Notes Selected"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.inspector.preview": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview"
+          }
+        }
+      }
+    },
+    "browse.inspector.saveFailed.checkDatabase": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This note can’t be saved until you run Check Database."
+          }
+        }
+      }
+    },
+    "browse.inspector.saveFailed.notSaved": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your changes couldn’t be saved."
+          }
+        }
+      }
+    },
+    "browse.inspector.show": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Inspector"
+          }
+        }
+      }
+    },
+    "browse.inspector.suspended": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@suspended@"
+          },
+          "substitutions": {
+            "suspended": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ suspended"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ suspended"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.inspector.tags": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags"
+          }
+        }
+      }
+    },
+    "browse.inspector.toggle": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspector"
+          }
+        }
+      }
+    },
+    "browse.inspector.type": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type"
+          }
+        }
+      }
+    },
+    "browse.inspector.unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note Unavailable"
+          }
+        }
+      }
+    },
     "browse.kind.added": {
       "localizations": {
         "en": {

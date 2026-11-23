@@ -25,10 +25,10 @@ nonisolated public enum AppSection: String, CaseIterable, Codable, Sendable {
     /// The sidebar's section group, top to bottom (R17; N25.1: Statistics second, under Today).
     public static let sidebar: [AppSection] = [.home, .stats, .browse, .noteTypes, .settings]
 
-    /// Whether the Statistics section is in the product on a device family (N25.1, plan U307
-    /// for the Mac and the iPad): its page is built for the Mac and the iPad at regular width
-    /// (U296 to U301); the iPhone, the Duo and the compact layouts wait for U304.
-    public static func statisticsShown(on family: DeviceFamily) -> Bool { family != .phone }
+    /// Whether the Statistics section is in the product on a device family (N25.1, plan U307):
+    /// its page is built for the Mac and the iPad at regular width (U296 to U301) and for the
+    /// iPhone, the Duo and the compact layouts (U304), so on every family.
+    public static func statisticsShown(on family: DeviceFamily) -> Bool { true }
 
     /// The product sidebar's section rows on a device family, top to bottom (N21.1, N22.1,
     /// N25.1): Today, Statistics when it is shown, then Browse and Note Types on the Mac, Note
@@ -56,9 +56,10 @@ nonisolated public enum DeviceFamily: Sendable {
     case mac, pad, phone
 }
 
-/// The tab layout's tabs, in tab bar order (R18).
+/// The tab layout's tabs, in tab bar order (R18; N25.1: Decks, Statistics, Browse, Settings).
+/// A tab whose section has no compact layout yet (Browse) is left out of the bar, not moved.
 nonisolated public enum CompactTab: String, CaseIterable, Codable, Sendable {
-    case decks, browse, stats, settings
+    case decks, stats, browse, settings
 
     /// The section at the tab's root.
     public var section: AppSection {
