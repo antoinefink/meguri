@@ -69,6 +69,25 @@ import Testing
         #expect(tomorrow.grid.cell(daysAgo: 3).row == today.grid.cell(daysAgo: 2).row)
     }
 
+    /// N25.4: the callout sits beside the day where a side has room, else under or over it;
+    /// never over the day, always inside the grid.
+    @Test func theCalloutNeverCoversTheDay() {
+        let grid = CGSize(width: 330, height: 400)
+        let left = StatsActivityBox.calloutOrigin(day: CGRect(x: 20, y: 50, width: 16, height: 16), callout: 200, 60, in: grid)
+        #expect(left == CGPoint(x: 44, y: 42), "first half: to its right")
+        let right = StatsActivityBox.calloutOrigin(day: CGRect(x: 300, y: 50, width: 16, height: 16), callout: 200, 60, in: grid)
+        #expect(right == CGPoint(x: 92, y: 42), "second half: to its left")
+        // Neither side has room for 200 pt beside a day in the middle: under it.
+        let middle = CGRect(x: 160, y: 50, width: 16, height: 16)
+        let under = StatsActivityBox.calloutOrigin(day: middle, callout: 200, 60, in: grid)
+        #expect(under == CGPoint(x: 68, y: 74))
+        #expect(!CGRect(origin: under, size: CGSize(width: 200, height: 60)).intersects(middle))
+        // At the grid's bottom edge: over it.
+        let lowest = CGRect(x: 160, y: 380, width: 16, height: 16)
+        let over = StatsActivityBox.calloutOrigin(day: lowest, callout: 200, 60, in: grid)
+        #expect(over == CGPoint(x: 68, y: 312))
+    }
+
     /// S14 on the grid: Left and Right a week (the square beside), Up and Down a day (the
     /// square above or below), kept between the first day and today; none selected: today.
     @Test func keysMoveAWeekSidewaysAndADayUpOrDown() {

@@ -180,6 +180,24 @@ struct StatsActivityBox: View {
         return min(max(day + step, first), last)
     }
 
+    /// Where the callout goes, never over the day (N25.4): beside it, on the side with room
+    /// (its right in the grid's first half, its left in the second, when both have room), level
+    /// with it; when neither side has room, under the day, or over it at the grid's bottom edge. Always
+    /// inside the grid, so it never runs onto the figures.
+    nonisolated static func calloutOrigin(day: CGRect, callout width: CGFloat, _ height: CGFloat, in grid: CGSize) -> CGPoint {
+        let gap = Spacing.xSmall
+        let left = day.minX - gap - width, right = day.maxX + gap
+        let fitsLeft = left >= 0, fitsRight = right + width <= grid.width
+        let preferLeft = day.midX > grid.width / 2
+        func clampedY(_ y: CGFloat) -> CGFloat { min(max(0, y), max(0, grid.height - height)) }
+        if fitsLeft && (preferLeft || !fitsRight) { return CGPoint(x: left, y: clampedY(day.minY - gap)) }
+        if fitsRight { return CGPoint(x: right, y: clampedY(day.minY - gap)) }
+        let x = min(max(0, day.midX - width / 2), max(0, grid.width - width))
+        let below = day.maxY + gap
+        let y = below + height <= grid.height ? below : max(0, day.minY - gap - height)
+        return CGPoint(x: x, y: y)
+    }
+
     private func clear() -> KeyPress.Result {
         let selection = slot.selection
         guard selection.wrappedValue != .none else { return .ignored }
@@ -392,15 +410,10 @@ private struct StatsActivityGrid: View {
             .environment(\.layoutDirection, layoutDirection)
             .fixedSize()
             .alignmentGuide(.leading) { dimensions in
-                // Beside the day: to its right in the grid's first half, to its left in the second;
-                // kept inside the grid's width.
-                let leading = rect.midX > width / 2
-                let origin = leading ? rect.minX - Spacing.xSmall - dimensions.width : rect.maxX + Spacing.xSmall
-                return -max(0, min(origin, width - dimensions.width))
+                -StatsActivityBox.calloutOrigin(day: rect, callout: dimensions.width, dimensions.height, in: CGSize(width: width, height: height)).x
             }
             .alignmentGuide(.top) { dimensions in
-                // Level with the day, kept inside the grid, so it never runs onto the figures.
-                -min(max(0, rect.minY - Spacing.xSmall), max(0, height - dimensions.height))
+                -StatsActivityBox.calloutOrigin(day: rect, callout: dimensions.width, dimensions.height, in: CGSize(width: width, height: height)).y
             }
             .allowsHitTesting(selection.pinned)
         }
