@@ -61,6 +61,12 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertTrue(waitUntil { bold.isEnabled }, "Bold acts on the focused field")
         bold.click()
         capture(app, "formatting-bar-\(appearance)")
+        // F14: ⌘I reaches Format › Italic (the menu's key equivalent) while the field has the focus.
+        app.typeKey(.rightArrow, modifierFlags: [])
+        app.typeText(" vintor")
+        app.typeKey(.leftArrow, modifierFlags: [.option, .shift])
+        app.typeKey("i", modifierFlags: [.command])
+        capture(app, "format-key-cmd-i-\(appearance)")
 
         // V12, W2: choosing another row saves the edit first, one "Edit Note" step.
         try app.bringToFront(bundleIdentifier: bundle)

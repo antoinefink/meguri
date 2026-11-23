@@ -662,9 +662,12 @@ public final class BrowseInspector {
     public func dismissNotice() { notice = nil }
 
     private func refreshCards(_ note: BrowseInspectorNote, card: Int64?, epoch: UInt64) async {
+        let before = note.card?.id
         guard let cards = try? await backend.cards(ofNote: note.noteID), self.epoch == epoch, self.note === note else { return }
-        // The card chosen meanwhile ("Card <i> of <k>") wins over the one asked for.
-        let wanted = note.card?.id ?? card
+        // The card asked for (the selected row's), unless the person chose
+        // another one ("Card <i> of <k>") while the list was read.
+        let chosen = note.card?.id
+        let wanted = chosen != before ? chosen : card ?? chosen
         note.cards = cards
         note.cardIndex = wanted.flatMap { id in cards.firstIndex { $0.id == id } } ?? 0
     }
