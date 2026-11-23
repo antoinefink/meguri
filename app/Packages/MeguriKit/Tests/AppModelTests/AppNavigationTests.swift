@@ -20,8 +20,9 @@ import AppModel
     // MARK: Structure (R17, R18)
 
     @Test func theCompactLayoutHasFourTabsAndNoteTypesIsNotOne() {
-        #expect(CompactTab.allCases == [.decks, .browse, .stats, .settings])
-        #expect(CompactTab.allCases.map(\.section) == [.home, .browse, .stats, .settings])
+        // N25.1: Statistics between Decks and Browse.
+        #expect(CompactTab.allCases == [.decks, .stats, .browse, .settings])
+        #expect(CompactTab.allCases.map(\.section) == [.home, .stats, .browse, .settings])
         // Note Types lives in the Settings tab (R18).
         #expect(AppSection.noteTypes.tab == .settings)
     }
@@ -36,7 +37,8 @@ import AppModel
     @Test func statisticsShowsOnTheMacAndTheIPadSecondUnderToday() {
         #expect(AppSection.statisticsShown(on: .mac))
         #expect(AppSection.statisticsShown(on: .pad))
-        #expect(!AppSection.statisticsShown(on: .phone))
+        // U304: the narrow page exists, so the iPhone and the Duo show it too.
+        #expect(AppSection.statisticsShown(on: .phone))
         #expect(AppSection.productSidebar(on: .mac, statistics: true) == [.home, .stats, .browse, .noteTypes])
         #expect(AppSection.productSidebar(on: .pad, statistics: true) == [.home, .stats, .noteTypes, .settings])
         #expect(AppSection.productSidebar(on: .phone, statistics: false) == [.home, .noteTypes, .settings])

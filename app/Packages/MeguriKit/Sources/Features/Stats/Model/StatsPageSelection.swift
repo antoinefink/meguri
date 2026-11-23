@@ -120,4 +120,16 @@ public struct StatsSelectionStore: Sendable {
     public func save(_ selection: StatsPageSelection) {
         defaults?.set(selection.rawValue, forKey: Self.key)
     }
+
+    /// Whether the narrow page's Activity grid shows every year (Show All Years), kept per device;
+    /// the first time it shows the recent lines.
+    public static let activityAllYearsKey = "meguri.stats.activityAllYears"
+
+    public func loadActivityAllYears() -> Bool {
+        defaults?.bool(forKey: Self.activityAllYearsKey) ?? false
+    }
+
+    public func saveActivityAllYears(_ value: Bool) {
+        defaults?.set(value, forKey: Self.activityAllYearsKey)
+    }
 }
