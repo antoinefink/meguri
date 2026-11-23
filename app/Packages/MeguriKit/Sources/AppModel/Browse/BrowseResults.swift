@@ -211,8 +211,9 @@ public final class BrowseResults {
     @ObservationIgnored private var sortOverride: (mode: BrowseMode, sort: BrowseSort)?
     /// The set's sort writes, one after another.
     @ObservationIgnored private var sortWrite: Task<Void, Never>?
-    /// Ids of rows change sets removed while this query showed (`restoreRows`).
-    @ObservationIgnored private var goneIDs: Set<Int64> = []
+    /// Ids of cards and notes change sets removed while this query showed (`restoreRows`).
+    @ObservationIgnored private var goneCards: Set<Int64> = []
+    @ObservationIgnored private var goneNotes: Set<Int64> = []
     /// The page whose neighbours were last kept.
     @ObservationIgnored private var keptCenter: Int?
     @ObservationIgnored private var queued: Request?
@@ -251,7 +252,7 @@ public final class BrowseResults {
     /// A query or mode to show: its run text (T4) searched with the column
     /// set's sort for the mode (V2.2, V4.3).
     public func run(_ query: FilterQuery, mode: BrowseMode) {
-        if query != lastQuery { sortOverride = nil; goneIDs = [] }
+        if query != lastQuery { sortOverride = nil; goneCards = []; goneNotes = [] }
         rejected = false
         lastQuery = query
         lastMode = mode
@@ -302,8 +303,6 @@ public final class BrowseResults {
     /// V2.1: Cards / Notes. A complete handle toggles without a run (H11);
     /// otherwise the search runs again in the other mode.
     public func setMode(_ mode: BrowseMode, query: FilterQuery) {
-        // Card ids and note ids are separate spaces (H12): rows gone in one mode are not the other's.
-        goneIDs = []
         guard query == lastQuery else { return run(query, mode: mode) }
         lastMode = mode
         // A run text being read takes the mode when its search starts.
@@ -995,14 +994,16 @@ public final class BrowseResults {
     /// a change set that adds back an id a change set removed while this
     /// query showed runs the search again, with those rows selected.
     private func restoreRows(_ changes: ChangeSet) {
+        // Card ids and note ids are separate spaces (H12): each is kept on its
+        // own, so an undo after a Cards / Notes switch still finds its rows.
+        if goneCards.count < Self.goneLimit { goneCards.formUnion(changes.cards.lazy.filter { $0.change == .removed }.map(\.id)) }
+        if goneNotes.count < Self.goneLimit { goneNotes.formUnion(changes.notes.lazy.filter { $0.change == .removed }.map(\.id)) }
         let mode = list?.mode ?? lastMode
         let rows = mode == .cards ? changes.cards.map { ($0.id, $0.change) } : changes.notes.map { ($0.id, $0.change) }
-        let back = rows.compactMap { $0.1 == .added && goneIDs.contains($0.0) ? $0.0 : nil }
-        if goneIDs.count < Self.goneLimit {
-            goneIDs.formUnion(rows.lazy.filter { $0.1 == .removed }.map(\.0))
-        }
+        let gone = mode == .cards ? goneCards : goneNotes
+        let back = rows.compactMap { $0.1 == .added && gone.contains($0.0) ? $0.0 : nil }
         guard !back.isEmpty else { return }
-        goneIDs.subtract(back)
+        if mode == .cards { goneCards.subtract(back) } else { goneNotes.subtract(back) }
         guard let list, !runPending, newest?.shown != false, ready() else { return }
         let request = Request(kind: .search, text: list.text, mode: list.mode, sort: list.sort, columns: list.columns,
                               queryIsEmpty: list.queryIsEmpty)
@@ -1141,7 +1142,8 @@ public final class BrowseResults {
         failed = false
         rejected = false
         hasRun = false
-        goneIDs = []
+        goneCards = []
+        goneNotes = []
         keptRow = nil
     }
 

@@ -253,6 +253,27 @@ import Testing
         #expect(results.row(at: 1)?.id == 2 && results.currentIndex == 1)
     }
 
+    @Test func undoOfADeleteAfterACardsNotesSwitchBringsTheNoteBack() async throws {
+        let (model, session) = try await browse()
+        let results = model.results
+        // Card 2 and its note 20 are deleted in Cards mode...
+        results.changesCommitted(Self.changes(card: 2, note: 20, .removed), seq: 7)
+        // ...the list switches to Notes, then the delete is undone.
+        model.setMode(.notes)
+        await until { results.list?.mode == .notes }
+        let starts = session.starts.count + session.toggles.count
+        results.changesCommitted(Self.changes(card: 2, note: 20, .added), seq: 8)
+        await until { session.starts.count + session.toggles.count == starts + 1 }
+    }
+
+    static func changes(card: Int64, note: Int64, _ change: ChangeSet.Change) -> ChangeSet {
+        ChangeSet(wholeCollection: false, source: .userUndoable,
+                  cards: [ChangeSet.Card(id: card, noteID: note, change: change, memoryStateOnly: false)],
+                  notes: [ChangeSet.Row(id: note, change: change)], notetypes: [], decks: [], deckConfigs: [], configKeys: [],
+                  tags: [], revlogAdded: [], revlogRemoved: [], mediaAdded: [], mediaRemoved: [], skippedIncomingCards: [],
+                  skippedIncomingNotes: [], skippedIncomingDecks: [], collectionRow: false)
+    }
+
     // MARK: Selection commands (V7)
 
     @Test func selectAllAndSelectSiblingCards() async throws {
