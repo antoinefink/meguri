@@ -13,6 +13,10 @@ import Testing
     nonisolated final class FakeService: ActivityService, @unchecked Sendable {
         private let lock = NSLock()
         private var _calls: [Int64?] = []
+        private var _historyCalls: [Int64?] = []
+        var history: [Int: UInt32]?
+        var deckHistory: [Int64: [Int: UInt32]] = [:]
+        var historyCalls: [Int64?] { lock.withLock { _historyCalls } }
         private var holds: [CheckedContinuation<Void, Never>] = []
         private var holding = false
         var generation: UInt64 = 1
@@ -30,6 +34,16 @@ import Testing
             waiting.forEach { $0.resume() }
         }
         var held: Int { lock.withLock { holds.count } }
+
+        func heatmapHistory(deckID: Int64?) async throws(BridgeError) -> ActivityDays {
+            let history = lock.withLock {
+                _historyCalls.append(deckID)
+                return deckID.flatMap { deckHistory[$0] } ?? self.history
+            }
+            let bounded = try await heatmap(deckID: deckID)
+            return ActivityDays(generation: bounded.generation, schedulerDay: bounded.schedulerDay,
+                                nextDayAt: bounded.nextDayAt, today: bounded.today, counts: bounded.counts, history: history)
+        }
 
         func heatmap(deckID: Int64?) async throws(BridgeError) -> ActivityDays {
             let (wait, generation, value, fails) = lock.withLock { () -> (Bool, UInt64, UInt32, Bool) in
@@ -89,6 +103,39 @@ import Testing
         await store.load(store.request(.collection))
         #expect(service.calls.count == 1)
     }
+
+    #if os(macOS)
+    @Test func sparseOlderCountsSurviveScopedCachingAndResizeWithoutAnotherRead() async throws {
+        let service = FakeService()
+        service.value = 0
+        service.history = [371: 3, 500: 5, Int.max / 100: 1]
+        service.deckHistory = [5: [371: 2], 6: [:]]
+        let store = ActivityHeatmapStore(service: service)
+        await loaded(store, .collection, .deck(5), .deck(6))
+        #expect(service.historyCalls == [nil, 5, 6])
+        for (scope, totals) in [(ActivityScope.collection, [0, 0, 3, 8, 0]), (.deck(5), [0, 0, 2, 2, 0]),
+                                (.deck(6), [0, 0, 0, 0, 0])] {
+            let days = try #require(store.days(scope))
+            let history = try #require(days.history)
+            let request = store.request(scope)
+            let grids = [CGFloat(634), 645.99, 646, 1_000, 634].map {
+                let geometry = ActivityGrid.Geometry(width: $0, square: .mac, maximumWeeks: nil)
+                return ActivityGrid(history: history, weeks: geometry.weeks,
+                                    todayWeekday: days.today.weekday, firstWeekday: 1)
+            }
+            #expect(grids.map(\.total) == totals)
+            #expect(store.request(scope) == request)
+            await store.load(request)
+        }
+        #expect(service.historyCalls == [nil, 5, 6], "resize and revisits slice the cached scoped result")
+        store.changesCommitted(Self.changes(cards: [.init(id: 1, noteID: 1, change: .updated, memoryStateOnly: false)]))
+        service.deckHistory[5] = [500: 4]
+        await loaded(store, .collection, .deck(5))
+        #expect(service.historyCalls == [nil, 5, 6, 5])
+        #expect(store.days(.deck(5))?.history == [500: 4])
+        #expect(store.days(.collection)?.history == service.history)
+    }
+    #endif
 
     @Test func reviewsAddedOrRemovedRefreshEveryScope() async {
         for change in [Self.changes(added: [1]), Self.changes(removed: [1]), Self.changes(whole: true),

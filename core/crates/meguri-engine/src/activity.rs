@@ -1,4 +1,4 @@
-//! The activity heatmap's data (`stats/activity-heatmap`): one bounded query
+//! The activity heatmap's data (`stats/activity-heatmap`): one aggregated query
 //! per scope on the query reader, for the scheduler day the due counts use.
 
 use meguri_model::ids::DeckId;
@@ -34,31 +34,64 @@ pub struct ActivityHeatmap {
     pub counts: Vec<u32>,
 }
 
+/// Mac Home's all-history result, retaining the existing bounded value unchanged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActivityHeatmapHistory {
+    pub window: ActivityHeatmap,
+    pub history: Vec<(i64, u32)>,
+}
+
 /// The heatmap of the whole collection (`deck` `None`) or of a deck and its
 /// descendants by home deck (AH4). Reads only: the day comes from the day
 /// clock as the due counts take it, the rows from one statement on the
 /// query reader.
 pub fn activity_heatmap(collection: &Collection, deck: Option<DeckId>) -> Result<ActivityHeatmap, EngineError> {
+    Ok(read_activity(collection, deck, false)?.window)
+}
+
+/// Mac Home's sparse all-history variant; existing bounded callers stay unchanged.
+pub fn activity_heatmap_history(
+    collection: &Collection,
+    deck: Option<DeckId>,
+) -> Result<ActivityHeatmapHistory, EngineError> {
+    read_activity(collection, deck, true)
+}
+
+fn read_activity(
+    collection: &Collection,
+    deck: Option<DeckId>,
+    all_history: bool,
+) -> Result<ActivityHeatmapHistory, EngineError> {
     let day = collection.check_rollover()?;
     let clock = &collection.core.exec.clock;
     let offset = i64::from(clock.utc_offset_at(clock.now_ms()).seconds());
     let lease = collection.reader(ReaderRole::Query)?;
     let rows = lease.snapshot()?;
     let hour = SchedConfig::new(&*rows).rollover_hour()?;
-    let counts = match deck {
-        None => rows.activity_day_counts(ActivityScope::Collection, day.next_day_at)?,
-        Some(deck) => {
-            let decks = subtree(&*rows, deck)?;
-            rows.activity_day_counts(ActivityScope::HomeDecks(&decks), day.next_day_at)?
+    let decks = deck.map(|id| subtree(&*rows, id)).transpose()?;
+    let scope = decks.as_deref().map(ActivityScope::HomeDecks).unwrap_or(ActivityScope::Collection);
+    let (counts, history) = if all_history {
+        let history = rows.activity_history_counts(scope, day.next_day_at)?;
+        let mut counts = vec![0; ACTIVITY_DAYS as usize];
+        for &(k, n) in &history {
+            if let Some(slot) = usize::try_from(k).ok().and_then(|k| counts.get_mut(k)) {
+                *slot = n;
+            }
         }
+        (counts, history)
+    } else {
+        (rows.activity_day_counts(scope, day.next_day_at)?, Vec::new())
     };
     debug_assert_eq!(counts.len(), ACTIVITY_DAYS as usize);
-    Ok(ActivityHeatmap {
-        generation: collection.generation().0,
-        today: day.today,
-        next_day_at: day.next_day_at,
-        today_date: today_date(day.next_day_at, hour, offset),
-        counts,
+    Ok(ActivityHeatmapHistory {
+        window: ActivityHeatmap {
+            generation: collection.generation().0,
+            today: day.today,
+            next_day_at: day.next_day_at,
+            today_date: today_date(day.next_day_at, hour, offset),
+            counts,
+        },
+        history,
     })
 }
 
