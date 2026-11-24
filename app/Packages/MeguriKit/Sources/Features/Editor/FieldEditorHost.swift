@@ -142,7 +142,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     /// The field the one mode control acts on: the field that has, or last had, focus.
     public var modeField: Int? {
         guard editable, let ord = draft.focusedField, draft.fields.indices.contains(ord),
-              !draft.fields[ord].collapsed else { return nil }
+              (browsing || !draft.fields[ord].collapsed), !draft.hiddenFields.contains(ord) else { return nil }
         return ord
     }
     public var focusedMode: NoteEditorDraft.Mode? { modeField.map { draft.fields[$0].mode } }
@@ -157,7 +157,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     }
     /// The next or previous expanded field, as Tab moves (F4), without leaving the page.
     func adjacentField(previous: Bool) -> Int? {
-        let shown = draft.fields.indices.filter { !draft.fields[$0].collapsed }
+        let shown = draft.fields.indices.filter { (browsing || !draft.fields[$0].collapsed) && !draft.hiddenFields.contains($0) }
         guard let current = draft.focusedField, let index = shown.firstIndex(of: current) else { return nil }
         let target = index + (previous ? -1 : 1)
         return shown.indices.contains(target) ? shown[target] : nil
@@ -236,7 +236,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
             var value: [String: Any] = ["ord": index, "name": field.definition.name,
                 "html": display.targets[index], "description": field.definition.description,
                 "fontFamily": family, "fontSize": field.definition.fontSize == 0 ? 20 : field.definition.fontSize,
-                "rtl": field.definition.rtl, "collapsed": field.collapsed, "mode": field.mode.rawValue,
+                "rtl": field.definition.rtl, "collapsed": browsing ? false : field.collapsed, "mode": field.mode.rawValue,
                 "clozeField": draft.notetype.clozeFields.contains(UInt32(index))]
             if field.changed { value["baselineHtml"] = display.baselines[index] }
             if draft.hiddenFields.contains(index) { value["hidden"] = true }
