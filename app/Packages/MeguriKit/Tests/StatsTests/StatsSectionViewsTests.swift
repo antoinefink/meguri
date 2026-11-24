@@ -145,7 +145,7 @@ import Testing
         let side = StatsCardCountsBox.side, limit = StatsCardCountsBox.largeSide
         #expect(side < limit)
         let grow = { (height: CGFloat, room: CGFloat) in
-            StatsPieBesideTable.pieSide(side: side, limit: limit, height: height, room: room)
+            StatsPieBesideTable.pieSide(side: side, limit: limit, own: side, height: height, room: room)
         }
         #expect(grow(side, 400) == side)
         #expect(grow(side + 30, 400) == side + 30)
@@ -153,6 +153,11 @@ import Testing
         #expect(grow(limit + 80, side + 10) == side + 10)
         #expect(grow(limit + 80, side - 40) == side)
         #expect(grow(0, 0) == side)
+        // A table taller than the pie (large text) sets the pair's own height: the pie keeps its
+        // side there, and grows only in height beyond it.
+        let tall = side + 30
+        #expect(StatsPieBesideTable.pieSide(side: side, limit: limit, own: tall, height: tall, room: 400) == side)
+        #expect(StatsPieBesideTable.pieSide(side: side, limit: limit, own: tall, height: tall + 10, room: 400) == tall + 10)
     }
 
     /// Answers stack each kind to 100%: Young's 1, 1, 6 and 2 presses are 10%, 10%, 60% and 20%,
