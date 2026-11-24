@@ -99,7 +99,12 @@ extension EventTests {
             let selection = try await session.selection(notesHandle, revision: 0, ranges: [0..<2])
             let selected = try await CoreBrowseQuery.startSelectionCounts(selection).value()
             #expect(selected == BrowseSelectionCounts(cards: 2, notes: 2, suspended: 0, buried: 0, decks: 1, deck: 1,
-                                                      notetypes: [added.id]))
+                                                      deckIDs: [1], notetypes: [added.id]))
+            // U276: the reads of a selection in the core: the notes' cards and,
+            // in notes mode, the selection itself as its sibling rows.
+            #expect(try await CoreBrowseQuery.startNoteCards(selection).value() == 2)
+            #expect(try await selection.siblingRows() == [0..<2])
+            #expect(try await CoreBrowseQuery.startSelectionTags(selection).value().allSatisfy { !$0.isEmpty })
 
             // V10: a note whose Front differs from alpha's only in case,
             // markup and spaces. All Notes finds the pair; the selection's
