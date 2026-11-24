@@ -1,16 +1,21 @@
 # Mac UI tests and simulators in a VM
 
-Current storage: the dedicated VM may live in the ignored `.local/meguri-vm/`
-directory. T9 is optional when the local copy is configured. See
-[`new-machine.md`](new-machine.md) for migration and host setup. The T9 paths
-below record the original installation.
+Current topology (2026-11-24): M5 is the sole MG scheduler and build
+coordinator. The dedicated headless `meguri-mac` VM lives on T9 attached to
+M3 Max, reached through private coordinator wrappers. T9 must be mounted on
+M3 Max; there is no coordinator-local guest fallback. See
+[`new-machine.md`](new-machine.md#current-coordinator-and-remote-test-vm) for
+atomic installation, removal of old activation overrides and verification.
+The provisioning and dated results below describe the original installation.
 
 Antoine decided on 2026-10-15 that Mac UI-driving suites run in a macOS virtual machine on this Mac. Before, they ran on the real screen, at most once an hour. Plan unit U8b implements the change. The same day he extended it: everything that would disturb his Mac runs in the VM, as soon and as often as useful. Plan unit U8c moves the simulators there. This page records provisioning and subsequent verification. The 2026-10-19 supplement below moves the remaining Mac app-hosted checks into the VM.
 
 ## Recovery permission (2026-10-22)
 
-The orchestrator may stop that VM once no test is running and start it with
-`/Volumes/T9/meguri-vm/bin/tart run meguri-mac --no-graphics` in the background.
+The orchestrator may stop that VM once no test is running and start it through
+the configured coordinator `tart` wrapper with `run --no-graphics meguri-mac`.
+The remote wrapper detaches that exact MG headless form on the hosting Mac;
+its private log path is printed to stderr. Do not launch a second local guest.
 Use `tools/mg doctor` to check readiness, then `tools/mg catch-up` for queued
 checks. Keep the VM running headlessly. This permission covers the Meguri test
 VM; it does not change the host-screen or other-project data rules.
@@ -47,11 +52,14 @@ Results on 2026-10-15, on feat/meguri-v1 at 5e24d8a:
 
 ## How jobs use it (U8b)
 
-The host's config, `~/Library/Application Support/meguri/mac-vm.json`, names the wrappers and the VM:
-
-```json
-{"tart": "/Volumes/T9/meguri-vm/bin/tart", "ssh": "/Volumes/T9/meguri-vm/bin/vm-ssh", "vms": ["meguri-mac"]}
-```
+The coordinator's default per-user config,
+`~/Library/Application Support/meguri/mac-vm.json`, names its stable private
+`remote-vm/current/tart` and `remote-vm/current/vm-ssh` executable files and
+`vms: ["meguri-mac"]`, using absolute paths. Install it as documented in
+[`new-machine.md`](new-machine.md#install-the-coordinator-wrappers), clearing
+old activation overrides in every shell. The SSD paths above are used only
+on the hosting Mac. Manual VNC needs a separate tunnel; the remote launcher
+does not detach VNC sessions or rewrite their addresses.
 
 `tools/mg mac-ui`, `tools/mg a11y --platform mac` and `tools/mg drive --platform mac` build on the host, take the VM's lease (one run at a time per VM, across checkouts), start the VM headless when it is stopped, and then follow the steps above. They copy `app/Fixtures` and a drive's script and fixtures too. They run as often as needed, with the host locked or not. Their `result.json` has `details.mac_runner: "vm"`. `tools/mg doctor` shows the VM's state. Conventions and traps: `tools/vm/AGENTS.md`.
 
@@ -142,7 +150,7 @@ The partition stays removed. Recovery mode has not been booted since, so a secon
 
 ## Limits
 
-- The T9 drive must be connected and mounted. Without it, there is no VM.
+- T9 must be connected and mounted on M3 Max, and coordinator SSH must reach it. Without either, VM work queues with host fallbacks disabled.
 - Timings in the VM do not represent the hardware. Mac and iOS UI performance suites (`ui-perf`, U12) run in the VM against baselines recorded there; CPU benchmarks without UI (`bench-mac`) stay on the host.
 - One VM holds the simulator pool (the first configured VM that can run). A second VM adds capacity for Mac UI suites only.
 - The VM has 6 CPUs and 12 GB of memory. Pool devices stay booted (five on 2026-10-15), and a device's first boots load the VM for several minutes: a suite that runs meanwhile can time out. More CPUs and memory (`tart set meguri-mac --cpu … --memory …`, with the VM stopped) would give simulators more room.

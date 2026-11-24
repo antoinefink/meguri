@@ -1353,6 +1353,7 @@ PUBLIC_ARTIFACTS = {
     'server/tools/package-smoke.mjs': '8a4ac4d7a54677a9fee3f64c4132de34e088d2f514c74c16083dbe9236ac456b',
     'tools/mg.d/meguri-provider-test.sh': 'bf637fbb25533a5cb354c079f4ee89d1518693e8e3b47c4c6d12b5c5467921f0',
     'tools/mg.d/meguri-native-provider.sh': '054b3eddd84f0d3f58a46075d4b0181a610a13ae728b87cfeda2ed09c779e94d',
+    'tools/tests/remote_wrapper.bats': '4c167356b41f7f6b30467e109e1855169fbfa2bbf6f4a06c83a98fd60912af5c',
     'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
     'tools/tests/meguri_provider_real_server.bats': '08ede8953f4bd60ee36a9ae0824347d1b5340cb48a412b95523241a1dd661cbe',
     'tools/tests/meguri_native_provider.bats': 'efa0d705a98ddcec7570a1ceb9b84e828808555ca7d3252d2e3c48e5542df74f',
