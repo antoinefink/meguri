@@ -847,9 +847,9 @@ PUBLIC_ARTIFACTS = {
         '1bf97e602e93e0809c259aae993be3b7328aab5ce181f192cfdf95cadc3bfa8d',
     'core/crates/meguri-storage/tests/activity.rs':
         'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
-    # Complete-content PUBLIC review: s-20261124T065111Z-cc535ede, 20261124T151622Z-59160.
+    # Complete-content PUBLIC review: s-20261124T123814Z-b6a481ac, 20261124T195423Z-42752.
     'docs/design/native-interface-contract.md':
-        '2ba0dc17770ff4254aa00063825bf2bc29a8f2996b816a8c7e9fbddaa65ff6fc',
+        '4dad165a4448a914c773d7bfdac5fa65bc1f9b2e6f4078aac082dedd3a5f0bb6',
     # Complete-file review of the Duo transport repair, 2026-11-24.
     'docs/process/new-machine.md':
         'ca64a19aae880b88be34955af62194f9f8a358f361aa20d801e789a287534b6a',
