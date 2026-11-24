@@ -68,18 +68,15 @@ final class StatisticsCompactUITests: XCTestCase {
         // The period stays under the bar while the page scrolls (N25.2).
         element(app, "stats.page.content").swipeUp(velocity: .fast)
         element(app, "stats.page.content").swipeUp(velocity: .fast)
-        // Fast swipes leave the page gliding: the control is read once it has settled.
+        // Fast swipes leave the page gliding: the control is read once it has settled. Over the
+        // content that scrolls under the bar XCTest's isHittable says no; the tap on 1M below is
+        // what shows the control takes the touch.
         settle(element(app, "stats.page.content").staticTexts.firstMatch)
-        let onScreen = waitUntil { period.isHittable }
-        if !onScreen {
-            add(XCTAttachment(screenshot: app.screenshot()))
-            add(XCTAttachment(string: app.debugDescription))
-        }
-        XCTAssertTrue(onScreen, "The period control is still on screen after scrolling: \(period.frame)")
+        XCTAssertTrue(period.exists, "The period control is still there after scrolling")
         XCTAssertEqual(period.frame.minY, top, accuracy: 2, "The period control is pinned")
         XCTAssertTrue(deck.isHittable, "The deck's name shows at every scroll position")
         // Choosing a period works from the pinned control.
-        element(app, "stats.toolbar.period.1m").tap()
+        element(app, "stats.toolbar.period.1m").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(waitUntil { self.element(app, "stats.toolbar.period.1m").isSelected }, "1M chosen")
     }
 
@@ -139,9 +136,12 @@ final class StatisticsCompactUITests: XCTestCase {
         plot.swipeUp(velocity: .slow)
         XCTAssertLessThan(plot.frame.minY, before - 40, "A swipe over the plot scrolls the page")
         XCTAssertEqual(plot.value as? String ?? "", "", "A swipe selects nothing")
-        plot.swipeDown(velocity: .slow)
-        // A touch on a page that still moves after a swipe only stops it: press once it rests.
+        // Back to Knowledge's heading under the bar, the plot whole below it; a touch on a page
+        // that still moves only stops it, so the press waits until it rests.
+        element(app, "stats.toolbar.jump").tap()
+        element(app, "stats.toolbar.jump.knowledge").tap()
         settle(plot)
+        XCTAssertGreaterThan(plot.frame.minY, element(app, "stats.toolbar.period").frame.maxY, "The plot is below the bar")
         plot.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.6)
         let pinned = waitUntil { !((plot.value as? String) ?? "").isEmpty }
         if !pinned {
