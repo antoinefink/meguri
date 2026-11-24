@@ -25,7 +25,7 @@ struct StatsActivityBox: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.statsNarrow) private var statsNarrow
     @Environment(\.statsKeepInPlace) private var keepInPlace
-    /// Where the control was tapped in the page's scroll view, for `keepInPlace`.
+    /// Where Show All Years is in the page's visible area, for `keepInPlace`.
     @State private var tapPlace = StatsTapPlace()
     @FocusState private var focused: Bool
     /// Counts the keys' moves, so the page scrolls the newly selected day into view.
@@ -141,8 +141,7 @@ struct StatsActivityBox: View {
         return Button {
             let model = slot.model
             let selection = slot.selection
-            // VoiceOver's activation has no tap: the control is then centred.
-            keepInPlace(id: Self.allYearsID, onScreenY: { defer { place.y = nil }; return place.y }) {
+            keepInPlace(id: Self.allYearsID, place: place.frame) {
                 if all, let activity, let day = selection.wrappedValue.bin.map(activity.day(ofAbsoluteDay:)),
                    day < StatsActivityBox.oldestShownDay(activity.grid, perLine: perLine) {
                     selection.wrappedValue = .none
@@ -154,8 +153,9 @@ struct StatsActivityBox: View {
         }
         .buttonStyle(.borderless)
         .font(.subheadline)
-        // The tap's place in the page's scroll view, read after the button acts.
-        .simultaneousGesture(SpatialTapGesture(coordinateSpace: .scrollView).onEnded { place.y = $0.location.y })
+        // Its frame in the page's visible area, read when it acts (not observed: a scroll
+        // redraws nothing).
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .scrollView) } action: { place.frame = $0 }
         .id(Self.allYearsID)
         .accessibilityIdentifier("stats.box.activity.showAllYears")
     }

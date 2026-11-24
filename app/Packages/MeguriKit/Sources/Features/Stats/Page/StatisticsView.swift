@@ -259,21 +259,16 @@ private struct StatsPageScroll: View {
             .modifier(StatsScrollPosition(navigation: navigation))
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport.height = $0 }
             .environment(\.statsScrolling, scrolling)
-            .environment(\.statsKeepInPlace, StatsKeepInPlace { id, onScreenY, change in
+            .environment(\.statsKeepInPlace, StatsKeepInPlace { id, place, change in
                 // The change lays out, then the page scrolls so the view `id` (the control that
                 // made it) is back where it was on the screen: what is under it stays put and
-                // the grid grows or shrinks above it.
+                // the grid grows or shrinks above it. An anchor u puts the point u down the view
+                // at u down the visible area, so its top lands at u × (visible − its height).
                 change()
                 Task { @MainActor in
                     await Task.yield()
-                    var y = onScreenY()
-                    if y == nil {
-                        // The tap's own gesture may end just after the button acts.
-                        try? await Task.sleep(for: .milliseconds(30))
-                        y = onScreenY()
-                    }
-                    let height = viewport.height
-                    let unit = y.map { height > 0 ? min(max($0 / height, 0), 1) : 0.5 } ?? 0.5
+                    let room = viewport.height - (place?.height ?? 0)
+                    let unit = place.map { room > 0 ? min(max($0.minY / room, 0), 1) : 0.5 } ?? 0.5
                     proxy.scrollTo(id, anchor: UnitPoint(x: 0.5, y: unit))
                 }
             })

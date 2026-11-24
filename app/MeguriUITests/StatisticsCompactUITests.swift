@@ -33,7 +33,9 @@ final class StatisticsCompactUITests: XCTestCase {
         let tabs = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'shell.root.tab.'"))
         func ordered() -> [XCUIElement] { tabs.allElementsBoundByIndex.sorted { $0.frame.minX < $1.frame.minX } }
         let identifiers = ["decks", "stats", "settings"].map { "shell.root.tab.\($0)" }
-        XCTAssertTrue(waitUntil { ordered().map(\.identifier) == identifiers },
+        let found = waitUntil { ordered().map(\.identifier) == identifiers }
+        if !found { add(XCTAttachment(string: app.debugDescription)) }
+        XCTAssertTrue(found,
                       "Decks, Statistics, Settings (Browse has no compact layout): \(ordered().map(\.identifier))")
         XCTAssertEqual(ordered().map(\.label), ["Decks", "Statistics", "Settings"])
         XCTAssertTrue(element(app, "stats.page.content").waitForExistence(timeout: 20), "The route reaches the page on the iPhone")
@@ -137,7 +139,12 @@ final class StatisticsCompactUITests: XCTestCase {
         XCTAssertEqual(plot.value as? String ?? "", "", "A swipe selects nothing")
         plot.swipeDown(velocity: .slow)
         plot.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.6)
-        XCTAssertTrue(waitUntil { !((plot.value as? String) ?? "").isEmpty }, "A hold pins the bar under the finger")
+        let pinned = waitUntil { !((plot.value as? String) ?? "").isEmpty }
+        if !pinned {
+            add(XCTAttachment(screenshot: app.screenshot()))
+            add(XCTAttachment(string: app.debugDescription))
+        }
+        XCTAssertTrue(pinned, "A hold pins the bar under the finger: \(plot.frame)")
     }
 
     /// Activity's recent lines (the coordinator's decision of 2026-11-23): Show All Years grows the
