@@ -5,23 +5,25 @@ import XCTest
 /// U274; `browser/workspace` V2.3, V4.1, V13; N21.3, N21.4), over the
 /// generated typical recipe on the real core: the header's context menu
 /// with every column checked or not, a column added and one removed, a
-/// header dragged to another place and an edge dragged, a sort by a header
-/// click; Notes mode's own columns; the layout read back after a relaunch;
-/// then the Info tab for a reviewed card, a new card and several rows.
+/// sort by a header click; Notes mode's own columns; the layout read back
+/// after a relaunch; a header dragged and an edge dragged (its own test);
+/// the Info tab for a reviewed card, a new card and several rows.
 /// Each step attaches a capture (the screen while a menu is open).
 @MainActor
 final class MacBrowseColumnsTests: XCTestCase {
     #if os(macOS)
-    func testColumnsAndInfoLight() throws { try columnsAndInfo(appearance: "light", relaunch: true) }
-    func testColumnsAndInfoDark() throws { try columnsAndInfo(appearance: "dark", relaunch: false) }
+    // The column chooser (V2.3), a sort (V4.1), Notes mode's own list and the layout after a relaunch (V2.4).
+    func testColumnsLight() throws { try columns(appearance: "light", relaunch: true) }
+    func testColumnsDark() throws { try columns(appearance: "dark", relaunch: false) }
+    // A header dragged to another place and an edge dragged (R1135, V2.3).
+    func testHeaderDragAndResizeLight() throws { try dragAndResize(appearance: "light") }
+    // The Info tab (V13): a reviewed card, a new card, several rows.
+    func testInfoLight() throws { try info(appearance: "light") }
+    func testInfoDark() throws { try info(appearance: "dark") }
 
-    private func columnsAndInfo(appearance: String, relaunch: Bool) throws {
+    private func columns(appearance: String, relaunch: Bool) throws {
         var (app, bundle) = try launch(appearance: appearance, fixture: true)
-        try openBrowse(app, bundle)
-        let table = resultsTable(app)
-        XCTAssertTrue(waitUntil { table.outlineRows.count > 3 }, "rows: \(table.outlineRows.count)")
-        XCTAssertTrue(waitUntil { self.columns(app).hasPrefix("model noteFld,template,deck,cardDue,cardMod") },
-                      "the standard set: \(columns(app))")
+        let table = try standardTable(app, bundle)
 
         // V2.3: the header's context menu lists every column, the set's checked.
         try openHeaderMenu(app, bundle, table)
@@ -34,27 +36,8 @@ final class MacBrowseColumnsTests: XCTestCase {
                       "Interval added at the end: \(columns(app))")
         try openHeaderMenu(app, bundle, table)
         columnItem(app, "deck").click()
-        XCTAssertTrue(waitUntil { self.columns(app).hasPrefix("model noteFld,template,cardDue,cardMod,cardIvl") },
-                      "Deck removed: \(columns(app))")
-
-        // R1135: a header dragged before another reorders the set.
-        try app.bringToFront(bundleIdentifier: bundle)
-        let source = header(app, "Interval"), target = header(app, "Card Type")
-        XCTAssertTrue(source.waitForExistence(timeout: 10) && target.exists, "the headers")
-        source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .click(forDuration: 0.6, thenDragTo: target.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)),
-                   withVelocity: .slow, thenHoldForDuration: 0.4)
-        XCTAssertTrue(waitUntil(timeout: 15) { self.columns(app).hasPrefix("model noteFld,cardIvl,template,cardDue,cardMod") },
-                      "Interval moved before Card Type: \(columns(app))")
-
-        // V2.3: an edge dragged sets the width.
-        try app.bringToFront(bundleIdentifier: bundle)
-        let due = header(app, "Due")
-        let before = due.frame.width
-        due.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: -1, dy: 0))
-            .click(forDuration: 0.4, thenDragTo: due.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
-                .withOffset(CGVector(dx: 60, dy: 0)))
-        XCTAssertTrue(waitUntil { self.header(app, "Due").frame.width > before + 20 }, "Due wider: \(before) → \(header(app, "Due").frame.width)")
+        let customised = "model noteFld,template,cardDue,cardMod,cardIvl"
+        XCTAssertTrue(waitUntil { self.columns(app).hasPrefix(customised) }, "Deck removed: \(columns(app))")
 
         // V4.1: a click on a sortable header sorts by it, in its first direction.
         try app.bringToFront(bundleIdentifier: bundle)
@@ -71,20 +54,47 @@ final class MacBrowseColumnsTests: XCTestCase {
         sleep(1)
         capture(app, "notes-columns-\(appearance)")
         modeButton(app, "Cards").click()
-        XCTAssertTrue(waitUntil(timeout: 15) { self.columns(app).hasPrefix("model noteFld,cardIvl,template,cardDue,cardMod") },
+        XCTAssertTrue(waitUntil(timeout: 15) { self.columns(app).hasPrefix(customised) },
                       "back in Cards mode with its own list: \(columns(app))")
 
-        if relaunch {
-            // V2.4: the set and its sort are the collection's: a relaunch reads them back.
-            app.terminate()
-            (app, bundle) = try launch(appearance: appearance, fixture: false)
-            try openBrowse(app, bundle)
-            XCTAssertTrue(waitUntil(timeout: 30) {
-                self.columns(app).hasPrefix("model noteFld,cardIvl,template,cardDue,cardMod")
-                    && self.columns(app).contains("sort cardDue descending")
-            }, "the layout after a relaunch: \(columns(app))")
-            capture(app, "after-relaunch-\(appearance)")
-        }
+        guard relaunch else { return }
+        // V2.4: the set and its sort are the collection's: a relaunch reads them back.
+        app.terminate()
+        (app, bundle) = try launch(appearance: appearance, fixture: false)
+        try openBrowse(app, bundle)
+        XCTAssertTrue(waitUntil(timeout: 30) {
+            self.columns(app).hasPrefix(customised) && self.columns(app).contains("sort cardDue descending")
+        }, "the layout after a relaunch: \(columns(app))")
+        capture(app, "after-relaunch-\(appearance)")
+    }
+
+    private func dragAndResize(appearance: String) throws {
+        let (app, bundle) = try launch(appearance: appearance, fixture: true)
+        _ = try standardTable(app, bundle)
+
+        // R1135: a header dragged before another reorders the set.
+        try app.bringToFront(bundleIdentifier: bundle)
+        let source = header(app, "Due"), target = header(app, "Card Type")
+        XCTAssertTrue(source.waitForExistence(timeout: 10) && target.exists, "the headers")
+        source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .click(forDuration: 0.6, thenDragTo: target.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)),
+                   withVelocity: .slow, thenHoldForDuration: 0.4)
+        XCTAssertTrue(waitUntil(timeout: 15) { self.columns(app).hasPrefix("model noteFld,cardDue,template,deck,cardMod") },
+                      "Due moved before Card Type: \(columns(app))")
+
+        // V2.3: an edge dragged sets the width.
+        try app.bringToFront(bundleIdentifier: bundle)
+        let due = header(app, "Due")
+        let before = due.frame.width
+        due.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: -1, dy: 0))
+            .click(forDuration: 0.4, thenDragTo: due.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
+                .withOffset(CGVector(dx: 60, dy: 0)))
+        XCTAssertTrue(waitUntil { self.header(app, "Due").frame.width > before + 20 }, "Due wider: \(before) → \(header(app, "Due").frame.width)")
+    }
+
+    private func info(appearance: String) throws {
+        let (app, bundle) = try launch(appearance: appearance, fixture: true)
+        _ = try standardTable(app, bundle)
 
         // V13: the Info tab of a reviewed card.
         try app.bringToFront(bundleIdentifier: bundle)
@@ -94,8 +104,9 @@ final class MacBrowseColumnsTests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
         tab(app, "Info").click()
         XCTAssertTrue(element(app, "cardInfo.history").waitForExistence(timeout: 15), "a reviewed card's history")
-        let reviews = element(app, "cardInfo.row.reviews")
-        XCTAssertTrue(reviews.exists && reviews.label == "Reviews", "one element per row: \(reviews.label) \(reviews.value ?? "")")
+        let reviews = app.descendants(matching: .any).matching(identifier: "cardInfo.row.reviews")
+        XCTAssertEqual(reviews.count, 1, "one element per row")
+        XCTAssertTrue(reviews.firstMatch.label == "Reviews", "the row reads its label: \(reviews.firstMatch.label)")
         XCTAssertTrue(element(app, "cardInfo.row.card_id").exists && element(app, "cardInfo.row.deck").exists)
         sleep(1)
         capture(app, "info-reviewed-\(appearance)")
@@ -117,6 +128,16 @@ final class MacBrowseColumnsTests: XCTestCase {
         XCTAssertTrue(element(app, "browse.inspector.summary.title").waitForExistence(timeout: 10), "V7's summary on the Info tab")
         sleep(1)
         capture(app, "info-several-\(appearance)")
+    }
+
+    /// Browse open on the whole collection in the standard set.
+    private func standardTable(_ app: XCUIApplication, _ bundle: String) throws -> XCUIElement {
+        try openBrowse(app, bundle)
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count > 3 }, "rows: \(table.outlineRows.count)")
+        XCTAssertTrue(waitUntil { self.columns(app).hasPrefix("model noteFld,template,deck,cardDue,cardMod") },
+                      "the standard set: \(columns(app))")
+        return table
     }
 
     // MARK: Helpers

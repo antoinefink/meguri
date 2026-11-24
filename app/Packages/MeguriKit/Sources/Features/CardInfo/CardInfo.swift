@@ -343,6 +343,8 @@ private struct CardInfoCurveChart: View {
             }
         }
         .chartLegend(.hidden)
+        // The line never draws past the plot's edges.
+        .chartPlotStyle { $0.clipped() }
         .accessibilityElement(children: .contain)
     }
 }
