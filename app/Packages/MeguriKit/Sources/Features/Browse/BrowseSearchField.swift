@@ -55,7 +55,7 @@ private struct BrowseTokenView: View {
             } label: {
                 label(filter)
             }
-            .accessibilityLabel(Text(verbatim: BrowseStrings.accessibility(filter, flagNames: model.flagNames)))
+            .accessibilityLabel(Text(verbatim: spoken(filter)))
             .accessibilityIdentifier("browse.search.token.\(index)")
         }
     }
@@ -70,15 +70,33 @@ private struct BrowseTokenView: View {
                 // The kind (and "is not") is the token's menu part, drawn by the
                 // system from the menu's first checked item; the label is the values.
                 Label {
-                    Text(verbatim: BrowseStrings.values(values, flagNames: model.flagNames))
+                    if let duplicates = duplicates(filter) {
+                        // V10: "Duplicates in <field>: <g> groups", the kind drawn by the token.
+                        Text(verbatim: BrowseFindText.duplicatesValue(field: duplicates.field, groups: duplicates.groups))
+                    } else {
+                        Text(verbatim: BrowseStrings.values(values, flagNames: model.flagNames))
+                    }
                 } icon: {
                     if let flag {
                         Image(systemName: "circle.fill").foregroundStyle(BrowseStrings.flagColor(flag))
                     }
                 }
-                .help(Text(verbatim: BrowseStrings.accessibility(filter, flagNames: model.flagNames)))
+                .help(Text(verbatim: spoken(filter)))
             }
         }
+    }
+
+    /// The facts of the Duplicates token Find Duplicates made, when this is it.
+    private func duplicates(_ filter: FilterToken) -> BrowseModel.Duplicates? {
+        guard case .value([.duplicates(let ids)], _) = filter, let info = model.duplicates, info.noteIDs == ids else { return nil }
+        return info
+    }
+
+    private func spoken(_ filter: FilterToken) -> String {
+        if let duplicates = duplicates(filter) {
+            return BrowseFindText.duplicates(field: duplicates.field, groups: duplicates.groups)
+        }
+        return BrowseStrings.accessibility(filter, flagNames: model.flagNames)
     }
 }
 

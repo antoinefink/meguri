@@ -18,6 +18,9 @@ nonisolated public struct BrowseDeviceState: Codable, Equatable, Sendable {
     public var recentSuggestions: [String]?
     /// The inspector's own (U273, `browser/inspector` I8, V12); nil before.
     public var inspector: BrowseInspectorDevice?
+    /// Find and Replace's remembered inputs (U277, `browser/find-replace`
+    /// F2, `browser/workspace` V9); nil before the first Replace.
+    public var findReplace: BrowseFindReplaceDevice?
 
     public init(runText: String? = nil, notesMode: Bool? = nil, folded: Set<BrowseSidebarSection> = BrowseSidebarSection.foldedByDefault,
                 showsAllTags: Bool = false) {
@@ -25,6 +28,34 @@ nonisolated public struct BrowseDeviceState: Codable, Equatable, Sendable {
         self.notesMode = notesMode
         self.folded = folded
         self.showsAllTags = showsAllTags
+    }
+}
+
+/// What Find and Replace remembers on this device (F2, V9): the three
+/// options, the In choice as its entry's text and position, and the Find
+/// and Replace With histories, newest first, at most 30 each.
+nonisolated public struct BrowseFindReplaceDevice: Codable, Equatable, Sendable {
+    public var matchCase = false
+    public var wholeWords = false
+    public var regex = false
+    /// The In entry chosen last, as `BrowseFieldEntry.Kind.memory` writes
+    /// it, and its position in the menu.
+    public var inEntry: String?
+    public var inPosition: Int?
+    public var finds: [String] = []
+    public var replaces: [String] = []
+
+    public init() {}
+
+    /// F2: the histories' length.
+    public static let historyLimit = 30
+
+    /// F2: `text` enters at the front; one already there moves to the front
+    /// (compared code point by code point); an empty text never enters.
+    public static func entering(_ text: String, into history: [String]) -> [String] {
+        guard !text.isEmpty else { return history }
+        let scalars = Array(text.unicodeScalars)
+        return Array(([text] + history.filter { Array($0.unicodeScalars) != scalars }).prefix(historyLimit))
     }
 }
 
