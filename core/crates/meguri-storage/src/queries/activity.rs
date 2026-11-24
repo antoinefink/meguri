@@ -25,7 +25,9 @@ pub enum ActivityScope<'a> {
 
 /// Collection scope. `?1` is `N` (epoch seconds), `?2` the window's first id.
 /// The `id` range is a rowid range: the statement never reads rows before it.
-pub const COLLECTION_SQL: &str = "SELECT max(0, (?1 - id / 1000) / 86400), count(*) FROM revlog \
+/// Negative milliseconds need floor seconds. Adding 1 before dividing is safe
+/// even for i64::MIN; nonnegative ids keep their plain integer division.
+pub const COLLECTION_SQL: &str = "SELECT max(0, (?1 - CASE WHEN id >= 0 THEN id / 1000 ELSE (id + 1) / 1000 - 1 END) / 86400), count(*) FROM revlog \
      WHERE id >= ?2 AND ease > 0 GROUP BY 1";
 
 /// Deck scope for `decks` deck ids, bound as `?3` onwards. Each half of
@@ -37,7 +39,7 @@ pub const COLLECTION_SQL: &str = "SELECT max(0, (?1 - id / 1000) / 86400), count
 pub fn deck_sql(decks: usize) -> String {
     let list = (0..decks.max(1)).map(|i| format!("?{}", i + 3)).collect::<Vec<_>>().join(", ");
     format!(
-        "SELECT max(0, (?1 - r.id / 1000) / 86400), count(*) FROM revlog r \
+        "SELECT max(0, (?1 - CASE WHEN r.id >= 0 THEN r.id / 1000 ELSE (r.id + 1) / 1000 - 1 END) / 86400), count(*) FROM revlog r \
          WHERE r.id >= ?2 AND r.ease > 0 AND r.cid IN (\
            SELECT c.id FROM cards c WHERE c.odid = 0 AND c.did IN ({list}) \
            UNION ALL \

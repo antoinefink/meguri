@@ -843,7 +843,7 @@ PUBLIC_ARTIFACTS = {
     'core/crates/meguri-ffi/src/activity.rs':
         '1bf97e602e93e0809c259aae993be3b7328aab5ce181f192cfdf95cadc3bfa8d',
     'core/crates/meguri-storage/tests/activity.rs':
-        'b142ca5b47ae06e9d99567401d278c5c11378486d6d1142d1bcdc18cecebed04',
+        'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
     'docs/design/native-interface-contract.md':
         'a1307b9b035f8494659e8e4dd4bd57d2c7f434aa2a8904f52356b41b90776ef7',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
