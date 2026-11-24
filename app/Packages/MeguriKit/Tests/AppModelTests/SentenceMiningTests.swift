@@ -167,9 +167,9 @@ import Testing
 
     @Test func preferencesStartOffAndWaitForLaunchCompletion() {
         let model = SentenceMining(defaults: nil, collectionKey: "synthetic")
-        #expect(!model.enabled && model.status == "Off")
+        #expect(!model.enabled && model.status == "Off · Port 44432")
         model.setEnabled(true)
-        #expect(model.enabled && model.status == "Waiting for collection") // No bind before entry completes.
+        #expect(model.enabled && model.status == "Waiting for collection · Port 44432") // No bind before entry completes.
     }
     static func type(_ fields: [String]) -> NotetypeRecord {
         .init(id: 1, name: "Imported", kind: 0, sortField: 0, css: "", base: Array(repeating: 1, count: 32),

@@ -7,6 +7,8 @@ nonisolated struct MiningHTTPRequest: Sendable {
     var target: String
     var headers: [(String, String)]
     var body: Data
+    /// Filled by the listener, never taken from a client header.
+    var localPort: UInt16 = 44432
     func values(_ name: String) -> [String] { headers.filter { $0.0 == name.lowercased() }.map(\.1) }
     func header(_ name: String) -> String? { values(name).first }
     var path: String { target.split(separator: "?", maxSplits: 1).first.map(String.init) ?? target }

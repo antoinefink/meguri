@@ -40,7 +40,7 @@ import Testing
         window.orderFront(nil)
         do {
             await model.settle()
-            #expect(!model.enabled && model.status == "Off")
+            #expect(!model.enabled && model.status == "Off · Port 0")
             try await pressMiningToggle(in: window)
             await model.settle()
             let deadline = ContinuousClock.now + .seconds(5)
@@ -59,7 +59,7 @@ import Testing
             #expect((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["version"] as? String == "4")
             try await pressMiningToggle(in: window)
             await model.settle()
-            #expect(!model.enabled && model.status == "Off" && !defaults.bool(forKey: "mining.enabled"))
+            #expect(!model.enabled && model.status == "Off · Port \(model.port)" && !defaults.bool(forKey: "mining.enabled"))
             await #expect(throws: (any Error).self) { _ = try await session.data(from: url) }
             await model.shutdown()
         } catch {

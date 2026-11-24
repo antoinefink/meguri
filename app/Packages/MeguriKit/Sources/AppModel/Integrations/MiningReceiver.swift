@@ -136,7 +136,7 @@ actor MiningReceiver {
         }
         switch request.path {
         case "/srs-check": return .json(200, ["ok": await collection.available() != nil, "version": "4"])
-        case "/anki-hello": return .json(200, ["status": "connect", "port": 44432])
+        case "/anki-hello": return .json(200, ["status": "connect", "port": Int(request.localPort)])
         case "/srs-import", "/srs-import-info", "/srs-sample-card": return .error(501, "Importing into Migaku Memory is not supported by Meguri.")
         case "/receive", "/":
             // Actor reentrancy does not serialize an awaited collection write.

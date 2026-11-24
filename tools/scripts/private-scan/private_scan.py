@@ -835,17 +835,19 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningPortTests.swift':
+        '2891a6487d8e9ce694c1fedd30afafea69ea4e5ef3e79b807f1d0cd669dbb997',
     # Complete-content PUBLIC review: cleanroom 20261124T133218Z-2230.
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningHTTP.swift':
-        'f67a2676af411161273fefdb3e42075a06439e127ca36fbd1c63a822386de3bc',
+        '7ac595380c49c7fd8efeed1facefd52a5af02d81c9aba6eb086be874ad82fa2e',
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningListener.swift':
-        '3267e9b13a59e5b755195e28f0f5e607edf66a9dc5293bb9f84891e7a2c13db2',
+        'fa76893ac344a3107fc104d7cf79ab5cb256cc0022ce95d422539e55bfa87696',
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningWebSocket.swift':
         'df27734289781f686114ed98ac44d3e468f73abda3ea22512c3bc41f91b640c1',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':
-        '4235c4ac441eb5cd6bde3ed06672de8935a9dea1e9c426378aafe8f80756b1bf',
+        'fe7395eb8aeebfd1f955609e2e6826b1f0336caeb1f84319aea6c8ad2a41f361',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningTests.swift':
-        '3a7041ea9d378203d85d2672aa83cd6649749f51f50e96c7ff59696f3ec6a758',
+        'ddf4517aee456b7ba60998e22fa2155cb4fe1088903b2c8a13485a6a3ad68eb7',
     'core/crates/meguri-ffi/src/notes.rs':
         'e9fdf9804387494879a07f43a8cf21fa59343f0a7f41d1759512aee5315d61ae',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -1350,7 +1352,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'cb6f0e96c2e62e3d319bf735eef43e24db160b8399e0bd81d5fb49e99f212903',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '06e4793856546d1de83b01b03321cdf0a8256687b0dfbca936a50752a2ac11ff',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',

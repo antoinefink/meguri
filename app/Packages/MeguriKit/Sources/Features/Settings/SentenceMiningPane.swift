@@ -6,7 +6,12 @@ import SwiftUI
 /// Native grouped Form; actual listener state stays visible beside setup.
 public struct SentenceMiningPane: View {
     @Bindable private var model: SentenceMining
-    public init(model: SentenceMining) { self.model = model }
+    @State private var portEntry: String
+    @State private var invalidPort = false
+    public init(model: SentenceMining) {
+        self.model = model
+        _portEntry = State(initialValue: String(model.configuredPort))
+    }
     public var body: some View {
         Form {
             Section {
@@ -14,10 +19,25 @@ public struct SentenceMiningPane: View {
                     .accessibilityIdentifier("settings.integrations.enabled")
                 LabeledContent("Status") { Text(verbatim: model.status).textSelection(.enabled) }
                     .accessibilityIdentifier("settings.integrations.status")
-                LabeledContent("Local port") { Text(verbatim: String(model.port)) }
-                    .accessibilityIdentifier("settings.integrations.port")
+                LabeledContent("Local port") {
+                    HStack {
+                        TextField("Port", text: $portEntry)
+                            .labelsHidden()
+                            .accessibilityLabel("Local port")
+                            .accessibilityIdentifier("settings.integrations.port")
+                            .onSubmit(commitPort)
+                        Button("Apply", action: commitPort)
+                            .disabled(portEntry == String(model.configuredPort))
+                            .accessibilityIdentifier("settings.integrations.applyPort")
+                    }
+                }
+                if invalidPort {
+                    Text("Enter a port from 1024 through 65535. The configured port has not changed.")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("settings.integrations.portError")
+                }
             } header: { Text("Sentence Mining") }
-            footer: { Text("Choose Anki in Migaku. Keep Meguri running to save sentences to this collection.") }
+            footer: { Text("Choose Anki in Migaku. Current Migaku expects port 44432. A client that supports another port must use the same value as Meguri. Keep Meguri running to save sentences to this collection.") }
             Section {
                 Picker("Deck", selection: Binding(get: { model.selectedDeck }, set: model.selectDeck)) {
                     Text("Choose a deck").tag(Int64(0))
@@ -47,6 +67,13 @@ public struct SentenceMiningPane: View {
         .formStyle(.grouped)
         .navigationTitle("Integrations")
         .accessibilityIdentifier("settings.integrations.content")
+        .onChange(of: portEntry) { invalidPort = false }
+        .onChange(of: model.configuredPort) { portEntry = String(model.configuredPort) }
+    }
+
+    private func commitPort() {
+        invalidPort = !model.applyPort(portEntry)
+        if !invalidPort { portEntry = String(model.configuredPort) }
     }
 }
 #endif

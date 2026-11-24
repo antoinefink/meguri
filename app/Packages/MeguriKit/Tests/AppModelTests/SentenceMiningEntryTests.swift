@@ -34,7 +34,7 @@ extension ReviewCollectionStartupTests {
         do {
             await owner.start()
             try #require(owner.state == .noFile)
-            #expect(!mining.enabled && mining.status == "Off" && mining.port == 0)
+            #expect(!mining.enabled && mining.status == "Off · Port 0" && mining.port == 0)
             // Invoke the same production action as SentenceMiningPane's Toggle;
             // neither a substitute listener nor a separately configured receiver.
             mining.setEnabled(true)
@@ -112,7 +112,7 @@ extension ReviewCollectionStartupTests {
             // Turning off uses the production owner, closes its WebSocket and
             // persists the switch. Re-enabling creates a fresh listener.
             mining.setEnabled(false)
-            #expect(mining.status == "Off" && !defaults.bool(forKey: "mining.enabled"))
+            #expect(mining.status == "Off · Port \(bound)" && !defaults.bool(forKey: "mining.enabled"))
             await mining.settle()
             await #expect(throws: (any Error).self) { _ = try await socket.receive() }
             #expect(webSocket?.closeCode == .goingAway)

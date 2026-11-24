@@ -16,7 +16,7 @@ import Observation
     public private(set) var fieldMapping: [String] = []
     public private(set) var error: String?
     public private(set) var port: UInt16
-    @ObservationIgnored private let requestedPort: UInt16
+    public private(set) var configuredPort: UInt16
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored private let prefix: String
     @ObservationIgnored private let receiver: MiningReceiver
@@ -25,6 +25,7 @@ import Observation
     @ObservationIgnored private var began = false
     @ObservationIgnored private var generation: UInt64?
     @ObservationIgnored private var appliedEnabled: Bool?
+    @ObservationIgnored private var appliedPort: UInt16?
     @ObservationIgnored private var appliedDestination: MiningDestination?
     @ObservationIgnored private var controlToken = UUID()
     @ObservationIgnored private var listenerToken = UUID()
@@ -33,16 +34,36 @@ import Observation
     @ObservationIgnored private var refreshToken = UUID()
     @ObservationIgnored private var state: MiningListener.State = .off
     @ObservationIgnored public var enabledChanged: ((Bool) -> Void)?
-    public init(defaults: UserDefaults?, collectionKey: String, port: UInt16 = 44432) {
+    /// An explicit port is a launch/test override; only tests use zero.
+    public init(defaults: UserDefaults?, collectionKey: String, port: UInt16? = nil) {
         self.defaults = defaults
-        self.port = port
-        requestedPort = port
+        let selectedPort = port ?? Self.validPort(defaults?.string(forKey: "mining.port") ?? "") ?? 44432
+        self.port = selectedPort
+        configuredPort = selectedPort
         prefix = "mining.destination." + MiningPayload.hash(Data(collectionKey.utf8))
         receiver = MiningReceiver()
         enabled = defaults?.bool(forKey: "mining.enabled") ?? false
         selectedDeck = Int64(defaults?.string(forKey: prefix + ".deck") ?? "") ?? 0
         selectedType = Int64(defaults?.string(forKey: prefix + ".type") ?? "") ?? 0
-        if enabled { status = "Waiting for collection" }
+        updateStatus()
+    }
+
+    private static func validPort(_ text: String) -> UInt16? {
+        guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }),
+              let value = UInt16(text), value >= 1024 else { return nil }
+        return value
+    }
+
+    /// Drafts never affect admission. A committed change uses the same
+    /// synchronous fence and serialized control path as the receiving toggle.
+    @discardableResult public func applyPort(_ text: String) -> Bool {
+        guard let value = Self.validPort(text) else { return false }
+        guard value != configuredPort else { return true }
+        configuredPort = value
+        port = value
+        defaults?.set(Int(value), forKey: "mining.port")
+        apply()
+        return true
     }
 
     public func setEnabled(_ value: Bool) {
@@ -152,15 +173,18 @@ import Observation
             return
         }
         let value = enabled && began
+        let requestedPort = configuredPort
+        let portChanged = appliedPort != requestedPort
         let destination = generation.flatMap { generation in
             selectedDeck != 0 && selectedType != 0
                 ? MiningDestination(generation: generation, deck: selectedDeck, type: selectedType) : nil
         }
-        guard appliedEnabled != value || appliedDestination != destination else {
+        guard appliedEnabled != value || appliedDestination != destination || portChanged else {
             updateStatus()
             return
         }
         appliedEnabled = value
+        appliedPort = requestedPort
         appliedDestination = destination
         // This synchronous fence stops admission even while an older control
         // task is suspended in an actor call or a collection write is running.
@@ -169,7 +193,7 @@ import Observation
         controlToken = token
         let previous = control
         let retired: MiningListener?
-        if !value {
+        if !value || portChanged {
             retired = listener
             listener = nil
             listenerToken = UUID()
@@ -178,6 +202,7 @@ import Observation
         } else {
             retired = nil
         }
+        updateStatus()
         control = Task { [weak self] in
             _ = await previous?.value
             guard let self, controlToken == token else {
@@ -225,13 +250,13 @@ import Observation
 
     private func updateStatus() {
         guard enabled else {
-            status = "Off"
+            status = "Off · Port \(port)"
             return
         }
         switch state {
-        case .off: status = began ? "Starting…" : "Waiting for collection"
-        case .starting: status = "Starting…"
-        case .listening: status = available ? "Listening on 127.0.0.1:\(port)" : "Listening · Collection unavailable"
+        case .off: status = began ? "Starting on 127.0.0.1:\(port)…" : "Waiting for collection · Port \(port)"
+        case .starting: status = "Starting on 127.0.0.1:\(port)…"
+        case .listening: status = "Listening on 127.0.0.1:\(port)" + (available ? "" : " · Collection unavailable")
         case .portInUse: status = "Port \(port) is in use. Quit Anki or the other app using this port. Meguri retries automatically."
         }
     }

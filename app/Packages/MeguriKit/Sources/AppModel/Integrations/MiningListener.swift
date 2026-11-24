@@ -376,6 +376,7 @@ nonisolated final class MiningListener: @unchecked Sendable {
             }
             var completedRequest = head
             completedRequest.body = body
+            completedRequest.localPort = listener?.port?.rawValue ?? port
             let request = completedRequest
             peer.data = Data()
             peer.head = nil
