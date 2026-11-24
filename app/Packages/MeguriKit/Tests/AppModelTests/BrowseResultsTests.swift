@@ -827,7 +827,7 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
 
     func preview(_ request: FindReplaceRequest, on target: BrowseTarget) async throws -> FindReplacePreview {
         let notes = notes(try check(target), target.mode)
-        previewCalls.append(FindReplaceCall(request: request, notes: notes, confirmed: nil))
+        locked { _previewCalls.append(FindReplaceCall(request: request, notes: notes, confirmed: nil)) }
         return try previewing(request, notes)
     }
 
@@ -835,14 +835,17 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
         -> BrowseRunning<FindReplaceResult> {
         let notes = notes(try check(target), target.mode)
         let run: @Sendable () async throws -> FindReplaceResult = {
-            self.replaceCalls.append(FindReplaceCall(request: request, notes: notes, confirmed: confirmed))
+            self.locked { self._replaceCalls.append(FindReplaceCall(request: request, notes: notes, confirmed: confirmed)) }
             if let error = self.replaceError { throw error }
             let changed = try self.previewing(request, notes).changed
             let summary = Self.result(affected: 0, considered: 0, undo: changed > 0 ? "Find and Replace" : nil).summary
             return FindReplaceResult(affected: changed, considered: UInt64(notes.count), summary: summary)
         }
         guard holdsReplace else { return .finishing(run) }
-        let held = heldAction.running { try await Self.result(affected: Int(try await run().affected), considered: 0, undo: nil) }
+        let held = heldAction.running {
+            let affected = Int(try await run().affected)
+            return Self.result(affected: affected, considered: 0, undo: nil)
+        }
         return BrowseRunning(progress: held.progress, cancel: held.cancel, result: {
             let done = try await held.result()
             return FindReplaceResult(affected: done.affected, considered: UInt64(notes.count),
@@ -852,7 +855,7 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
 
     func startFindDuplicates(field: String, on target: BrowseTarget?) async throws -> BrowseRunning<FindDuplicatesResult> {
         let notes = try target.map { notes(try check($0), $0.mode) }
-        duplicatesCalls.append(DuplicatesCall(field: field, notes: notes))
+        locked { _duplicatesCalls.append(DuplicatesCall(field: field, notes: notes)) }
         let found = duplicates
         return .finishing { found }
     }

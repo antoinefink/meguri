@@ -215,7 +215,7 @@ public final class BrowseModel {
     }
 
     /// The Duplicates token's facts while it is in the query.
-    public private(set) var duplicates: Duplicates?
+    public internal(set) var duplicates: Duplicates?
 
     /// V10: the groups replace the query with one Duplicates token, in Notes
     /// mode, sorted by the field with its column shown while the token is

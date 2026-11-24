@@ -88,7 +88,8 @@ private struct BrowseTokenView: View {
 
     /// The facts of the Duplicates token Find Duplicates made, when this is it.
     private func duplicates(_ filter: FilterToken) -> BrowseModel.Duplicates? {
-        guard case .value([.duplicates(let ids)], _) = filter, let info = model.duplicates, info.noteIDs == ids else { return nil }
+        guard case .value(let values, _) = filter, values.count == 1, case .duplicates(let ids) = values[0],
+              let info = model.duplicates, info.noteIDs == ids else { return nil }
         return info
     }
 
