@@ -42,6 +42,11 @@ public final class BrowseModel {
     /// Every deck's value as the core makes it (T3), by deck id.
     public private(set) var deckValues: [Int64: FilterValue] = [:]
     public private(set) var notetypes: [NotetypeName] = []
+    /// V2.3's Fields submenu: each note type's field names in field order,
+    /// read after the note types (pure reads); read again when note types change.
+    public private(set) var notetypeFields: [Int64: [String]] = [:]
+    @ObservationIgnored private var fieldsStale = true
+    @ObservationIgnored private var fieldsTask: Task<Void, Never>?
     public private(set) var tags: [TagNode] = [] {
         didSet { tagsRevision &+= 1; updateShownTags() }
     }
@@ -161,7 +166,7 @@ public final class BrowseModel {
     /// core's (U276).
     public init(backend: any BrowseBackend, store: BrowseDeviceStore = BrowseDeviceStore(defaults: nil),
                 inspectorBackend: any BrowseInspectorBackend = CoreBrowseInspectorBackend(),
-                sheetReads: (any BrowseSheetReads)? = nil) {
+                sheetReads: (any BrowseSheetReads)? = nil, cardInfo: (any CardInfoReading)? = nil) {
         self.backend = backend
         self.store = store
         let results = BrowseResults(backend: backend)
@@ -171,7 +176,8 @@ public final class BrowseModel {
         self.commands = commands
         let device = store.load()
         let inspector = BrowseInspector(backend: inspectorBackend, results: results, commands: commands,
-                                        device: device.inspector ?? BrowseInspectorDevice())
+                                        device: device.inspector ?? BrowseInspectorDevice(),
+                                        cardInfo: cardInfo ?? CoreCardInfoReader())
         self.inspector = inspector
         results.selectionObserver = { [weak commands, weak inspector] in
             commands?.selectionChanged()
@@ -183,6 +189,12 @@ public final class BrowseModel {
         self.device = device
         folded = device.folded
         showsAllTags = device.showsAllTags
+        results.restoreWidths(device.columnWidths ?? [:])
+        results.storeWidths = { [weak self] widths in
+            guard let self else { return }
+            self.device.columnWidths = widths
+            self.saveDevice()
+        }
         inspector.store = { [weak self] state in
             guard let self else { return }
             self.device.inspector = state
@@ -481,6 +493,7 @@ public final class BrowseModel {
     /// The collection's rows changed (`engine/change-stream`): the names
     /// and counts are read again while Browse shows, else when it next does.
     public func changesCommitted(_ changes: ChangeSet, seq: UInt64) {
+        if changes.wholeCollection || !changes.notetypes.isEmpty { fieldsStale = true }
         results.changesCommitted(changes, seq: seq)
         inspector.changesCommitted(changes, seq: seq)
         // The selection's counts (suspended, buried, note types) may have changed.
@@ -496,6 +509,7 @@ public final class BrowseModel {
     /// The scheduler day or the time zone changed: day values count again.
     public func dayChanged() {
         results.dayChanged()
+        if inspector.tab == .info { inspector.cardInfo.dayChanged() }
         stale = true
         if visible, ready() { reload() }
     }
@@ -543,6 +557,7 @@ public final class BrowseModel {
         query = FilterQuery()
         queryRevision &+= 1
         savedSearches = []; savedReadings = [:]; deckValues = [:]; notetypes = []; tags = []; flagNames = []
+        notetypeFields = [:]; fieldsStale = true; fieldsTask?.cancel()
         counts = [:]; tagNotes = [:]; tagExpansion = [:]; tagWrites = [:]; filter = ""
         liveRun?.cancel()
         suggestions = []; suggestionScope = nil; suggestedField = nil; tokenOffers = [:]; valueCounts = [:]
@@ -583,7 +598,10 @@ public final class BrowseModel {
                 }
                 deckValues = values
             }
-            if let notetypeList { self.notetypes = notetypeList }
+            if let notetypeList {
+                self.notetypes = notetypeList
+                readFields(notetypeList)
+            }
             if let tagTree { self.tags = tagTree; tagExpansion = [:] }
             if let flagList { flagNames = flagList }
             // The names the field's menus and suggestions offer may have changed.
@@ -738,6 +756,24 @@ public final class BrowseModel {
                     tagWrites[name] = nil
                 }
             }
+        }
+    }
+
+    /// The field names of `list`'s note types, unless already read for them.
+    private func readFields(_ list: [NotetypeName]) {
+        let ids = Set(list.map(\.id))
+        guard fieldsStale || Set(notetypeFields.keys) != ids else { return }
+        fieldsStale = false
+        fieldsTask?.cancel()
+        let backend = backend, epoch = epoch
+        fieldsTask = Task {
+            var fields: [Int64: [String]] = [:]
+            for type in list {
+                guard !Task.isCancelled else { return }
+                if let names = try? await backend.fieldNames(notetype: type.id) { fields[type.id] = names }
+            }
+            guard self.epoch == epoch, !Task.isCancelled else { return }
+            if fields != notetypeFields { notetypeFields = fields }
         }
     }
 

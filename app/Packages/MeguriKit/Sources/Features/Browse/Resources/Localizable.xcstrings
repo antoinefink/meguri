@@ -431,6 +431,48 @@
         }
       }
     },
+    "browse.columns.fields": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fields"
+          }
+        }
+      }
+    },
+    "browse.columns.moreFields": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@fields@"
+          },
+          "substitutions": {
+            "fields": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ More Field"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ More Fields"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "browse.columns.own": {
       "localizations": {
         "en": {
@@ -441,12 +483,42 @@
         }
       }
     },
+    "browse.columns.reset": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset to Standard Columns"
+          }
+        }
+      }
+    },
+    "browse.columns.sizeToFit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Size Columns to Fit"
+          }
+        }
+      }
+    },
     "browse.columns.standard": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Standard Columns"
+          }
+        }
+      }
+    },
+    "browse.columns.standardMenu": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standard"
           }
         }
       }
@@ -1921,6 +1993,36 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "browse.inspector.tab.info": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Info"
+          }
+        }
+      }
+    },
+    "browse.inspector.tab.label": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspector"
+          }
+        }
+      }
+    },
+    "browse.inspector.tab.note": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note"
           }
         }
       }

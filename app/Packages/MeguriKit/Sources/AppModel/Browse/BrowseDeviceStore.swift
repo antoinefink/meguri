@@ -18,6 +18,10 @@ nonisolated public struct BrowseDeviceState: Codable, Equatable, Sendable {
     public var recentSuggestions: [String]?
     /// The inspector's own (U273, `browser/inspector` I8, V12); nil before.
     public var inspector: BrowseInspectorDevice?
+    /// The columns' widths the person set (U272, `browser/workspace` V2.3):
+    /// by set and mode ("std/cards", "<note type id>/notes"), then column
+    /// key, in points; nil before the first.
+    public var columnWidths: [String: [String: Double]]?
 
     public init(runText: String? = nil, notesMode: Bool? = nil, folded: Set<BrowseSidebarSection> = BrowseSidebarSection.foldedByDefault,
                 showsAllTags: Bool = false) {

@@ -240,6 +240,10 @@ private struct BrowseKeys: View {
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
                 .accessibilityIdentifier("browse.debug.scroll")
+            Text(verbatim: model.results.columnTrace)
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .accessibilityIdentifier("browse.debug.columns")
             #endif
         }
         .onAppear {

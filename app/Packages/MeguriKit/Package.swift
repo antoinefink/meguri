@@ -84,6 +84,7 @@ let package = Package(
         .testTarget(name: "HomeTests", dependencies: ["Home"], swiftSettings: settings),
         .testTarget(name: "DeckOptionsTests", dependencies: ["DeckOptions", "AppModel"], swiftSettings: settings),
         .testTarget(name: "BrowseTests", dependencies: ["Browse", "AppModel", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
+        .testTarget(name: "CardInfoTests", dependencies: ["CardInfo", "AppModel", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
         .testTarget(name: "NoteTypesTests", dependencies: ["NoteTypes", "AppModel", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
         .testTarget(name: "HeatmapKitTests", dependencies: ["HeatmapKit"], swiftSettings: settings),
         .testTarget(name: "StatsTests", dependencies: ["Stats", "HeatmapKit", .product(name: "CoreBridge", package: "MeguriCore")], swiftSettings: settings),
@@ -104,10 +105,10 @@ let package = Package(
         .target(
             name: name,
             dependencies: ["AppModel", "DesignSystem"] + (["Review", "Browse"].contains(name) ? ["CardRendering"] : [])
-                // Browse's inspector shows the note in the round 5 editor (U273).
-                + (name == "Browse" ? ["Editor"] : []) + (["Home", "Stats"].contains(name) ? ["HeatmapKit"] : []) + (["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (["Editor", "Stats"].contains(name) ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
+                // Browse's inspector shows the note in the round 5 editor (U273) and its Card Info (U274).
+                + (name == "Browse" ? ["Editor", "CardInfo"] : []) + (["Home", "Stats"].contains(name) ? ["HeatmapKit"] : []) + (["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats", "CardInfo"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (["Editor", "Stats"].contains(name) ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
             path: "Sources/Features/\(name)",
-            resources: ["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats"].contains(name) ? [.process("Resources")] : [],
+            resources: ["Home", "Review", "Settings", "Editor", "DeckOptions", "NoteTypes", "Browse", "Stats", "CardInfo"].contains(name) ? [.process("Resources")] : [],
             swiftSettings: settings
         )
     }

@@ -717,11 +717,31 @@ import Testing
     var ownSets: [Int64: ColumnSetShown] = [:]
     var runTextDelay: Duration?
     func openSearchSession() async throws -> any BrowseSearching { searchSession }
-    func columnSet(notetype: Int64?) async throws -> ColumnSetShown { notetype.flatMap { ownSets[$0] } ?? Self.standard }
+    func columnSet(notetype: Int64?) async throws -> ColumnSetShown {
+        notetype.flatMap { ownSets[$0] } ?? storedStandard ?? Self.standard
+    }
+    var columnModes: [BrowseMode] = []
+    var useStandardCalls: [Int64] = []
+    /// The standard set's changes are kept, as the collection keeps them (U272).
+    var persistsColumns = false
+    var storedStandard: ColumnSetShown?
+    var columnChangeDelay: Duration?
     func changeColumnSet(_ set: ColumnSetID, mode: BrowseMode, change: ColumnSetChange) async throws {
+        if let delay = columnChangeDelay { try? await Task.sleep(for: delay) }
         columnChanges.append(change)
         columnChangeSets.append(set)
+        columnModes.append(mode)
+        guard persistsColumns, set == .standard else { return }
+        let stored = storedStandard ?? Self.standard
+        var columns = stored.columns(mode)
+        switch change {
+        case .show(let key): columns.append(key)
+        case .hide(let key): columns.removeAll { $0 == key }
+        case .reorder(let keys): columns = keys
+        case .sortBy, .setSort: break
+        }
+        storedStandard = stored.with(columns, mode: mode)
     }
-    func useStandardColumns(notetype: Int64) async throws {}
+    func useStandardColumns(notetype: Int64) async throws { useStandardCalls.append(notetype) }
     func setNotesMode(_ notes: Bool) async throws { notesModeWrites.append(notes) }
 }

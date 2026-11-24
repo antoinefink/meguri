@@ -52,6 +52,13 @@ import Foundation
     func useStandardColumns(notetype: Int64) async throws
     /// V2.1, K6.1: the Cards / Notes control's write.
     func setNotesMode(_ notes: Bool) async throws
+    /// V2.3's Fields submenu: a note type's field names in field order.
+    func fieldNames(notetype: Int64) async throws -> [String]
+}
+
+extension BrowseBackend {
+    /// No field columns to offer (the model's own tests).
+    public func fieldNames(notetype: Int64) async throws -> [String] { [] }
 }
 
 /// The shell's reads over CoreBridge.
@@ -86,6 +93,9 @@ import Foundation
         try await CoreBrowseQuery.suggestions(for: FilterQuery(), caret: 0, scope: section, labels: labels).map(\.row)
     }
     public func notetypes() async throws -> [NotetypeName] { try await notetypeReads.notetypeList() }
+    public func fieldNames(notetype: Int64) async throws -> [String] {
+        try await notetypeReads.readNotetype(id: notetype).fields.map(\.name)
+    }
     public func tagTree() async throws -> [TagNode] { try await tags.tagTree() }
     public func flagNames() async throws -> [String] { try await tags.flagNames() }
     public func counts(_ mode: BrowseMode, _ items: [FilterCountItem]) async throws -> [UInt64?] {

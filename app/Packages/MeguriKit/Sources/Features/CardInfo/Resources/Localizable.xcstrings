@@ -1,0 +1,476 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "cardInfo.copied": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied to clipboard"
+          }
+        }
+      }
+    },
+    "cardInfo.copyDebug": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Debug Info"
+          }
+        }
+      }
+    },
+    "cardInfo.curve": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forgetting Curve"
+          }
+        }
+      }
+    },
+    "cardInfo.curve.allTime": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All Time"
+          }
+        }
+      }
+    },
+    "cardInfo.curve.firstMonth": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Month"
+          }
+        }
+      }
+    },
+    "cardInfo.curve.firstWeek": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Week"
+          }
+        }
+      }
+    },
+    "cardInfo.curve.firstYear": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Year"
+          }
+        }
+      }
+    },
+    "cardInfo.curve.range": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Range"
+          }
+        }
+      }
+    },
+    "cardInfo.history": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review History"
+          }
+        }
+      }
+    },
+    "cardInfo.history.date": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Date"
+          }
+        }
+      }
+    },
+    "cardInfo.history.interval": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interval"
+          }
+        }
+      }
+    },
+    "cardInfo.history.rating": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rating"
+          }
+        }
+      }
+    },
+    "cardInfo.history.time": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time"
+          }
+        }
+      }
+    },
+    "cardInfo.history.type": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type"
+          }
+        }
+      }
+    },
+    "cardInfo.noCard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(No card to display.)"
+          }
+        }
+      }
+    },
+    "cardInfo.row.added": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Added"
+          }
+        }
+      }
+    },
+    "cardInfo.row.average_time": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Average Time"
+          }
+        }
+      }
+    },
+    "cardInfo.row.card_id": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card ID"
+          }
+        }
+      }
+    },
+    "cardInfo.row.card_type": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card Type"
+          }
+        }
+      }
+    },
+    "cardInfo.row.custom_data": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom Data"
+          }
+        }
+      }
+    },
+    "cardInfo.row.deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck"
+          }
+        }
+      }
+    },
+    "cardInfo.row.difficulty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Difficulty"
+          }
+        }
+      }
+    },
+    "cardInfo.row.due": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due"
+          }
+        }
+      }
+    },
+    "cardInfo.row.first_review": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Review"
+          }
+        }
+      }
+    },
+    "cardInfo.row.interval": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interval"
+          }
+        }
+      }
+    },
+    "cardInfo.row.lapses": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lapses"
+          }
+        }
+      }
+    },
+    "cardInfo.row.latest_review": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Latest Review"
+          }
+        }
+      }
+    },
+    "cardInfo.row.note_id": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note ID"
+          }
+        }
+      }
+    },
+    "cardInfo.row.note_type": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note Type"
+          }
+        }
+      }
+    },
+    "cardInfo.row.position": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Position"
+          }
+        }
+      }
+    },
+    "cardInfo.row.preset": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preset"
+          }
+        }
+      }
+    },
+    "cardInfo.row.retrievability": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retrievability"
+          }
+        }
+      }
+    },
+    "cardInfo.row.reviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviews"
+          }
+        }
+      }
+    },
+    "cardInfo.row.stability": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stability"
+          }
+        }
+      }
+    },
+    "cardInfo.row.total_time": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Total Time"
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.filteredHomeDeck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card's home deck is a filtered deck."
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.fsrsFailed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card's memory state cannot be computed with its preset's FSRS parameters."
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.invalidCutoff": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The “Ignore cards reviewed before” date of this card's preset cannot be read. Change it in Deck Options."
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.missingDeck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card's deck is missing."
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.missingHomeDeck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card's home deck is missing."
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.missingNote": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card's note is missing."
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.missingNotetype": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card's note type is missing."
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.missingPreset": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card's preset is missing."
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.missingTemplate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card's card type is missing from its note type."
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.repair": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check Database can repair it."
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card Info Unavailable"
+          }
+        }
+      }
+    },
+    "cardInfo.unavailable.unreadableRecord": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some of this card's records cannot be read."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
