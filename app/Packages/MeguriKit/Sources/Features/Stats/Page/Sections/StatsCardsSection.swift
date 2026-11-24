@@ -118,6 +118,10 @@ struct StatsCardCountsBox: View {
                         rows(table, highlighted: highlighted)
                     }
                 }
+                // Beside a taller box the row's height is more than the pie and table need: they
+                // sit in the middle of what is left under the header, not at its top with an
+                // empty band under them. Alone in its row the box keeps its own height.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contextMenu { if let table { exportMenu(table) } }
                 // The narrow page (N25.6), the Duo held tall included, whatever its size class.
                 if statsNarrow ?? (horizontalSizeClass == .compact) {

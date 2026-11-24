@@ -174,6 +174,11 @@ struct StatsChartPlot: View {
     @FocusState private var focused: Bool
     /// The bins of the last ready data, kept across a loading phase.
     @State private var lastReadyBins: [StatsPeriod] = []
+    #if os(iOS)
+    /// A hold has selected since the finger went down: the tap the lift also ends must not
+    /// clear what the hold chose.
+    @State private var held = false
+    #endif
 
     private var format: StatsChartFormat { StatsChartFormat(locale: locale, calendar: calendar, now: clock.now()) }
     private var separated: Bool { separatesSeries ?? differentiateWithoutColor }
@@ -616,9 +621,14 @@ struct StatsChartPlot: View {
             // The selection stays after the finger lifts, so the callout's
             // button can be tapped; a short tap clears it.
             .gesture(StatsHoldGesture { location in
+                held = true
                 selection = StatsChartSelection(bin: bin(at: location.x + plot.minX, proxy: proxy, plot: plot), pinned: true)
+            } ended: {
+                // After any tap the same lift ends.
+                Task { @MainActor in held = false }
             })
-            .simultaneousGesture(TapGesture().onEnded { selection = .none })
+            // A tap ends on lift however long the finger stayed: only one with no hold clears.
+            .simultaneousGesture(TapGesture().onEnded { if !held { selection = .none } })
             #endif
             .accessibilityHidden(true)
     }
@@ -686,6 +696,7 @@ struct StatsChartPlot: View {
 /// a still finger and beats on a swipe.
 struct StatsHoldGesture: UIGestureRecognizerRepresentable {
     let changed: (CGPoint) -> Void
+    var ended: () -> Void = {}
 
     func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
         let recognizer = UILongPressGestureRecognizer()
@@ -696,6 +707,7 @@ struct StatsHoldGesture: UIGestureRecognizerRepresentable {
     func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
         switch recognizer.state {
         case .began, .changed: changed(context.converter.localLocation)
+        case .ended, .cancelled, .failed: ended()
         default: break
         }
     }

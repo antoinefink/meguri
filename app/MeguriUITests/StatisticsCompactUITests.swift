@@ -28,10 +28,14 @@ final class StatisticsCompactUITests: XCTestCase {
         let app = launch(route: "stats/page/typical")
         let tabBar = app.tabBars.firstMatch
         XCTAssertTrue(tabBar.waitForExistence(timeout: 20), "No tab bar")
+        // The tab bar's own buttons carry no identifier on iOS 27; the elements that do are read
+        // in their order across the bar.
+        let tabs = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'shell.root.tab.'"))
+        func ordered() -> [XCUIElement] { tabs.allElementsBoundByIndex.sorted { $0.frame.minX < $1.frame.minX } }
         let identifiers = ["decks", "stats", "settings"].map { "shell.root.tab.\($0)" }
-        XCTAssertTrue(waitUntil { tabBar.buttons.allElementsBoundByIndex.map(\.identifier) == identifiers },
-                      "Decks, Statistics, Settings (Browse has no compact layout): \(tabBar.buttons.allElementsBoundByIndex.map(\.identifier))")
-        XCTAssertEqual(tabBar.buttons.allElementsBoundByIndex.map(\.label), ["Decks", "Statistics", "Settings"])
+        XCTAssertTrue(waitUntil { ordered().map(\.identifier) == identifiers },
+                      "Decks, Statistics, Settings (Browse has no compact layout): \(ordered().map(\.identifier))")
+        XCTAssertEqual(ordered().map(\.label), ["Decks", "Statistics", "Settings"])
         XCTAssertTrue(element(app, "stats.page.content").waitForExistence(timeout: 20), "The route reaches the page on the iPhone")
         XCTAssertTrue(element(app, "shell.root.tab.stats").isSelected, "The Statistics tab is selected")
         // A second tab and back keeps the page (its own stack).
@@ -110,8 +114,12 @@ final class StatisticsCompactUITests: XCTestCase {
         XCTAssertTrue(element(app, "stats.boxSwitch.reviewsMode").exists, "By Type | By Answer stays in the header")
         XCTAssertEqual(menu.value as? String, "Count")
         menu.tap()
-        let time = element(app, "stats.boxSwitch.reviewsMeasure.time")
-        XCTAssertTrue(time.waitForExistence(timeout: 5), "Count and Time in the menu")
+        // A picker's options in a menu carry no identifier on iOS: the menu's items by their
+        // titles (the launch is en_US).
+        let items = app.collectionViews.buttons
+        let time = items["Time"]
+        XCTAssertTrue(time.waitForExistence(timeout: 5) && items["Count"].exists, "Count and Time in the menu")
+        XCTAssertTrue(items["Count"].isSelected, "Count is the chosen one")
         time.tap()
         XCTAssertTrue(waitUntil { (menu.value as? String) == "Time" }, "Time chosen from the menu")
     }
@@ -144,9 +152,13 @@ final class StatisticsCompactUITests: XCTestCase {
         let toggle = element(app, "stats.box.activity.showAllYears")
         XCTAssertTrue(waitFor(toggle, NSPredicate(format: "exists == true AND label == 'Show All Years'"), 20),
                       "Three years of history: the recent lines and Show All Years")
-        // Bring the control to the middle of the screen, then expand.
-        app.swipeUp(velocity: .slow)
-        XCTAssertTrue(toggle.isHittable)
+        // Bring the control into the upper half of the screen, a short drag at a time, then expand.
+        let window = app.windows.firstMatch.frame
+        for _ in 0..<8 where !(toggle.isHittable && toggle.frame.maxY < window.midY) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+        }
+        XCTAssertTrue(toggle.isHittable, "Show All Years on screen: \(toggle.frame) in \(window)")
         let before = toggle.frame.minY
         let shortGrid = plot.frame.height
         toggle.tap()
