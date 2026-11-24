@@ -139,6 +139,22 @@ import Testing
         #expect(StatsCardCountsPie.state(at: CGPoint(x: 2, y: 2), in: size, counts: counts) == nil)
     }
 
+    /// Beside a taller box the pie takes the height it is given, up to its limit and never
+    /// width the table needs; at its own height, or with no room, it keeps its side.
+    @Test func thePieGrowsIntoTheRowsHeight() {
+        let side = StatsCardCountsBox.side, limit = StatsCardCountsBox.largeSide
+        #expect(side < limit)
+        let grow = { (height: CGFloat, room: CGFloat) in
+            StatsPieBesideTable.pieSide(side: side, limit: limit, height: height, room: room)
+        }
+        #expect(grow(side, 400) == side)
+        #expect(grow(side + 30, 400) == side + 30)
+        #expect(grow(limit + 80, 400) == limit)
+        #expect(grow(limit + 80, side + 10) == side + 10)
+        #expect(grow(limit + 80, side - 40) == side)
+        #expect(grow(0, 0) == side)
+    }
+
     /// Answers stack each kind to 100%: Young's 1, 1, 6 and 2 presses are 10%, 10%, 60% and 20%,
     /// each written with its count, and the kind's 10 answers end its callout.
     @Test func answersAreSharesOfEachKind() throws {
