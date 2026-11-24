@@ -130,6 +130,8 @@ public final class ImportIntake {
 
     private func route(_ url: URL, kind: PackageFileClass, owner: ReviewCollection, others: Bool,
                        fromPicker: Bool = false, release: (@MainActor () -> Void)?) {
+        // K4: a collection being created for an earlier file takes nothing else.
+        if creating { message = .alreadyOpen; release?(); return }
         if owner.navigation.sheet != nil, owner.navigation.sheet != .deckImport {
             message = .alreadyOpen; release?(); return
         }
