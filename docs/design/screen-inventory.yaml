@@ -325,8 +325,8 @@ screens:
       More beside Undo; Mac: a visible icon-only ellipsis toolbar Menu at the upper right, with localized
       Review actions help and accessibility label, user-approved 2026-11-24), in shared
       groups with system symbols and shared enablement: Edit Note | Bury Card, Suspend Card.
-      The Mac Card menu and card context menu remain, with Edit Note ⌘E, Bury Card ⌘J and Suspend Card
-      ⇧⌘J. The toolbar menu shows keys only where supported without duplicate shortcut handlers;
+      The Mac Note menu keeps Edit Note ⌘E; the Card menu keeps Bury Card ⌘J and Suspend Card
+      ⇧⌘J, and the card context menu keeps all three. The toolbar menu shows keys only where supported without duplicate shortcut handlers;
       SwiftUI currently omits them there to preserve keyboard ownership (N4). Later card actions slot into
       groups. Bury Card and Suspend Card act on the card on screen, the next card appears, no banner
       or toast; VoiceOver announces Card Buried or Card Suspended, and Undo names the step (Undo
@@ -362,7 +362,7 @@ screens:
       N20.8, review/edit-current; decided 2026-11-20): round 5's Add Note form titled "Edit Note",
       with Cancel and Done and the subtitle "<deck> · <note type>", which cannot be changed here.
       Opened from the touch review's More menu or Mac Review actions toolbar menu (N20.8),
-      Card › Edit Note (⌘E) and the card's context menu on Mac, and E. iPhone and the Duo folded or held tall: a sheet; the Duo held
+      Note › Edit Note (⌘E) and the card's context menu on Mac, and E. iPhone and the Duo folded or held tall: a sheet; the Duo held
       wide: the whole screen with a centred column; iPad: a page sheet; Mac: a panel over the card.
       Changes are a draft: Done saves them in one note update and returns to the same card,
       re-rendered; Cancel asks "Discard changes?" when there is a change. Error: a failed save keeps

@@ -67,6 +67,20 @@ final class ReviewActionsMacUITests: XCTestCase {
             predicate: NSPredicate(format: "exists == false"), object: edit)], timeout: 10), .completed)
         XCTAssertTrue(reveal.exists, "Dismissing the menu leaves the question unanswered")
         XCTAssertFalse(element(app, "review.session.rate.good").exists)
+
+        menu.click()
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        XCTAssertTrue(edit.isEnabled && edit.isHittable)
+        edit.click()
+        let form = element(app, "review.editCurrent")
+        XCTAssertTrue(form.waitForExistence(timeout: 15), "The toolbar menu opens Edit Note")
+        let cancel = element(app, "review.editCurrent.cancel")
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10))
+        XCTAssertTrue(cancel.isEnabled && cancel.isHittable)
+        cancel.click()
+        XCTAssertTrue(form.waitForNonExistence(timeout: 10), "Cancel closes the unchanged draft")
+        XCTAssertTrue(reveal.exists, "Closing Edit Note returns to the unanswered card")
+        XCTAssertFalse(element(app, "review.session.rate.good").exists)
     }
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
