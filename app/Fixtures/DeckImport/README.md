@@ -1,0 +1,1 @@
+Public synthetic picker source: `shared-deck.apkg` is byte-identical to `conformance/fixtures/package/apkg/deck-tree.apkg` (a legacy 2 deck package of `storage/schema-11.anki2` with two decks renamed `A::B` and `F::x`). The deck package import UI tests choose it in the system picker; it is never passed to `-MeguriFixture`.

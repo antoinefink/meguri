@@ -89,7 +89,9 @@ extension TestHooks {
             var value = FakeDeckPackageImportService.Script(inspect: .success(facts), applies: [])
             switch script {
             case .plain: value.applies = [.imported(result)]
-            case .confirm: value.applies = [.confirmationRequired(.init(preview: preview, reasons: [], fakeToken: 1)), .imported(result)]
+            case .confirm:
+                value.applies = [.confirmationRequired(.init(preview: preview, reasons: [], fakeToken: 1)),
+                                 .confirmationRequired(.init(preview: preview, reasons: [], fakeToken: 2)), .imported(result)]
             case .refused: value.applies = [.refused(.stale), .imported(result)]
             }
             value.log = [.new: (1...40).map { .init(noteId: Int64($0), fields: ["word \($0)", "meaning"]) },

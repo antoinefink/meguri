@@ -1,4 +1,5 @@
 import AppModel
+import CoreBridge
 import DesignSystem
 import SwiftUI
 import UniformTypeIdentifiers
@@ -39,9 +40,9 @@ struct FileIntakeDrop: ViewModifier {
 /// The window's own edge, in the accent colour, while it would take a dropped file.
 struct FileDropOutline: View {
     var body: some View {
-        Radius.concentric
+        Radius.rounded(Radius.medium)
             .strokeBorder(.tint, lineWidth: ControlMetrics.dropOutline)
-            .background(Radius.concentric.fill(.tint.quinary))
+            .background(Radius.rounded(Radius.medium).fill(.tint.quinary))
             .padding(Spacing.xxSmall)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
