@@ -831,7 +831,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 
 ### N20.4 The menu bar by object
 
-The menu bar, in order: Meguri, File, Edit, View, Deck, Card, Window, Help. The Study menu is removed: there is one Undo and one Redo, in Edit. The Go to Deck… item is removed.
+The menu bar, with N21.8's newer ordering: Meguri, File, Edit, View, Deck, Note, Format, Card, Window, Help. Round 6 originally had neither Note nor Format and placed Edit Note in Card; N21.8 moves Edit Note to Note and places Format between Note and Card. The Study menu is removed: there is one Undo and one Redo, in Edit. The Go to Deck… item is removed.
 
 | Menu | Item | Key | Enabled when |
 |---|---|---|---|
@@ -849,18 +849,18 @@ The menu bar, in order: Meguri, File, Edit, View, Deck, Card, Window, Help. The 
 | Deck | New Subdeck… | | a normal deck is shown |
 | Deck | Delete Deck | ⌘⌫ | a deck is shown, filtered included, outside review, and no text field, sheet or panel owns the keys (N4, H9.2); N20.7 |
 | Deck | Deck Options… | ⌥⌘O | a normal deck is shown, outside review; N20.9 |
+| Note | Edit Note | ⌘E | in review, a card is presented, on either side, and nothing else owns the keys (N20.8); in Browse, N21.8 |
 | Card | Show Answer | Space | review shows a question side |
 | Card | Again, Hard, Good, Easy | 1, 2, 3, 4 | review shows an answer side |
-| Card | Edit Note | ⌘E | a card is presented, on either side, and nothing else owns the keys; N20.8 |
-| Card | Bury Card | ⌘J | as Edit Note; N20.8 |
-| Card | Suspend Card | ⇧⌘J | as Edit Note; N20.8 |
+| Card | Bury Card | ⌘J | in review, as Edit Note (N20.8); in Browse, N21.8 |
+| Card | Suspend Card | ⇧⌘J | in review, as Edit Note (N20.8); in Browse, N21.8 |
 | Card | Back to Decks | Esc | during review |
 
 - Edit keeps the system's text items intact: its Find submenu and every other item the system adds for text. Meguri's Find… is a separate item placed just before that group; while enabled it takes ⌘F, while disabled the system's Find ▸ Find… of a focused text view keeps it. ⇧⌘O is a hidden second key equivalent of Meguri's Find…, with no menu item; on iPad it is a key command with no discoverability title.
-- Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo, Paste and Meguri's Find…; Deck after Study, New Subdeck… and Delete Deck; Card after Show Answer, Easy, Suspend Card and Back to Decks. A separator with nothing after it yet is left out.
+- Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo, Paste and Meguri's Find…; Deck after Study, New Subdeck… and Delete Deck. Round 6 placed Card separators after Show Answer, Easy, Suspend Card and Back to Decks; N21.8 gives the newer Note, Format and Card grouping and ordering. A separator with nothing after it yet is left out.
 - The Deck menu acts on the deck the workspace shows: the sidebar's selection (Mac, iPad), or the deck page shown (tab layout). With none (Today, the welcome, review) its items are disabled.
 - Each command follows N4: disabled outside its context, routed through the action and guard of its visible control, and subject to input ownership. The Card menu's unmodified keys follow N11.3: the card page keeps the first claim. ⌘⌫ and the other menu key equivalents never take a key from a text input (H9.2). The one exception is Find…: while enabled it takes ⌘F even when a text input has focus, as its row above says.
-- iPad with a keyboard: the same menus, items and keys in the iPad menu bar and in the list the system shows while ⌘ is held (SwiftUI `commands`), except the Card menu's single keys (Show Answer, the four ratings, Back to Decks): they carry no key equivalents on iPad, because the card host keeps the single key registration (N11.3's first claim), so the ⌘-held list does not list the review keys. The Card menu's ⌘ items (Edit Note ⌘E, Bury Card ⌘J, Suspend Card ⇧⌘J, N20.8) are not single keys and keep their equivalents there. iPhone and the iPhone Duo have no menu bar: with a keyboard the same keys act, and where the system shows its ⌘-held list it follows these menus.
+- iPad with a keyboard: the same menus, items and keys in the iPad menu bar and in the list the system shows while ⌘ is held (SwiftUI `commands`), except the Card menu's single keys (Show Answer, the four ratings, Back to Decks): they carry no key equivalents on iPad, because the card host keeps the single key registration (N11.3's first claim), so the ⌘-held list does not list the review keys. Note › Edit Note ⌘E, Card › Bury Card ⌘J and Card › Suspend Card ⇧⌘J (N20.8, N21.8) are not single keys and keep their equivalents there. iPhone and the iPhone Duo have no menu bar: with a keyboard the same keys act, and where the system shows its ⌘-held list it follows these menus.
 - Built 2026-11-24 (U162; the implementer's reading, pending the coordinator and Antoine): File › Import Collection… is "Import…" (⇧⌘I, same enablement), since its picker now takes deck packages too (N17.2's built line); the table's "Import Collection…" label described the collection-only picker. Settings › Collection's row reads "Import…" as well.
 - Replaces: N11.3's first bullet's Study menu, and the Undo Answer and Redo Answer items it named; R280's New Deck… ⌥⌘N, Export… ⌘E (⌘E becomes Edit Note's) and the labels "Import…" and "Export…"; R282's ⇧⌘N for Note Types (the key is New Deck…'s; Note Types' key is open); R283's Go to Deck… (⇧⌘O is Find…'s second key), its S and Return as Study's menu keys (S and Return stay deck-list keys, H9.2) and "Delete Deck…" (now "Delete Deck"); the current Deck menu's "Rename Deck…" (now "Rename…").
 
@@ -900,7 +900,7 @@ The English text of the screens above. "New" marks text not used before this rou
 | Find… | Edit menu | new |
 | Deck Options… | the Deck menu, the deck menu | N20.9 |
 | Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
-| Edit Note | the Card menu, the card's context menu (Mac), the touch review's More menu, the form's title | N20.8 |
+| Edit Note | the Note menu (moved from Card by N21.8), the card's context menu (Mac), the touch review's More menu, the form's title | N20.8, N21.8 |
 
 - No longer used: "Go to Deck…", "Create Deck", "Overview", "Deck Actions", "Deck name", "Rename Deck…", "Close Review", the Study menu's title and its "Undo Answer" and "Redo Answer" items (Edit's Undo still reads "Undo Answer Card" after an answer, from the core's step name), "Import…", "Export…".
 
