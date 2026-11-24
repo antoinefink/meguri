@@ -158,6 +158,8 @@ import Testing
         let tall = side + 30
         #expect(StatsPieBesideTable.pieSide(side: side, limit: limit, own: tall, height: tall, room: 400) == side)
         #expect(StatsPieBesideTable.pieSide(side: side, limit: limit, own: tall, height: tall + 10, room: 400) == tall + 10)
+        // A table taller than the limit, offered more height still: the pie reaches the limit.
+        #expect(StatsPieBesideTable.pieSide(side: side, limit: limit, own: limit + 20, height: limit + 90, room: 400) == limit)
     }
 
     /// Answers stack each kind to 100%: Young's 1, 1, 6 and 2 presses are 10%, 10%, 60% and 20%,

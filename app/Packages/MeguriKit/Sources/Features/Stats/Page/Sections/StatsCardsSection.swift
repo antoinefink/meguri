@@ -282,7 +282,10 @@ struct StatsPieBesideTable: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard subviews.count == 2 else { return }
         let table = subviews[1].sizeThatFits(.unspecified)
-        let pie = Self.pieSide(side: side, limit: limit, own: max(side, table.height), height: bounds.height,
+        // The height offered, not only the bounds: a table taller than the limit keeps the bounds
+        // at its own height, and the pie still grows to the limit beside it.
+        let pie = Self.pieSide(side: side, limit: limit, own: max(side, table.height),
+                               height: max(bounds.height, proposal.height ?? 0),
                                room: bounds.width - spacing - table.width)
         subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
                           proposal: ProposedViewSize(width: pie, height: pie))
