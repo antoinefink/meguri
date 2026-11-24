@@ -125,19 +125,19 @@ public final class StatsPageModel {
     @ObservationIgnored private var unpublished: Set<StatsBoxID> = []
     /// The presenters of the sets shown, kept while the inputs they were made for hold: a set's
     /// axis, formatters and streaks are made once, not on every part.
-    @ObservationIgnored private var presenters: [PresenterKey: StatsPresenter] = [:]
+    @ObservationIgnored private var presenters: [StatsRenderKey: StatsPresenter] = [:]
+    /// One undecorated presentation per box. A visit's progress and Updating mark can change
+    /// without re-binning or formatting the same records (S10.2, S10.5, S19).
+    @ObservationIgnored private var rendered: [StatsBoxID: (key: StatsRenderKey, outcome: StatsPresenter.Outcome)] = [:]
+    /// Cheap characterization of actual box work on the normal model paths, including work
+    /// before appearance. Detached jobs run once even if their publication is superseded.
+    @ObservationIgnored private(set) var boxBuilds = 0
+    @ObservationIgnored private(set) var synchronousBoxBuilds = 0
     @ObservationIgnored private var inputs: UInt64 = 0
     /// A refresh waits for the device's kept sets of its scope (S10.3 decides on them).
     @ObservationIgnored private var refreshAfterLoad = false
     /// The collection this model was told is open (the kept results are shared by every window).
     @ObservationIgnored private var openedIdentity: String?
-
-    private struct PresenterKey: Hashable {
-        let set: UUID
-        let parts: Int
-        let inputs: UInt64
-        let extras: [UUID]
-    }
 
     // MARK: Seams
 
@@ -187,6 +187,10 @@ public final class StatsPageModel {
         let changed = !collectionOpen || kept.collection != identity
         // Another collection in place of the open one: its deck tree is not this one's.
         if collectionOpen, openedIdentity != identity { forgetDecks() }
+        if openedIdentity != identity {
+            rendered = [:]
+            presenters = [:]
+        }
         openedIdentity = identity
         collectionOpen = true
         kept.open(collection: identity)
@@ -210,6 +214,8 @@ public final class StatsPageModel {
         openedIdentity = nil
         kept.show(nil, by: ObjectIdentifier(self))
         kept.close()
+        rendered = [:]
+        presenters = [:]
         // The next collection's tree is read when it opens; until then no deck is known, so the
         // pop-up never offers the closed collection's decks (the page shows S12.1 meanwhile).
         forgetDecks()
@@ -262,6 +268,8 @@ public final class StatsPageModel {
         if staleness == .collectionReplaced {
             cancelRunning()
             kept.collectionReplaced()
+            rendered = [:]
+            presenters = [:]
             pageEnd = nil
             ended = .none
             completedAt = nil
@@ -281,6 +289,7 @@ public final class StatsPageModel {
         kept.trim()
         // The presenters hold their sets; the next rebuild makes the shown ones again.
         presenters = [:]
+        rendered = [:]
     }
 
     // MARK: Controls
@@ -535,9 +544,14 @@ public final class StatsPageModel {
         kept.sets(for: selection.scope).first { $0.value(part) != nil }
     }
 
-    private func presenter(_ set: StatsPartSet) -> StatsPresenter? {
+    /// Both presenter and box caches use the same source versions and model inputs.
+    private func presentation(_ set: StatsPartSet) -> (key: StatsRenderKey, extras: [StatsPartSet]) {
         let extras = [StatsPart.retentionByDay, .activityDays].compactMap { set.value($0) == nil ? extra($0) : nil }
-        let key = PresenterKey(set: set.id, parts: set.parts.count, inputs: inputs, extras: extras.map(\.id))
+        return (StatsRenderKey(set: StatsSetVersion(set), inputs: inputs, extras: extras.map(StatsSetVersion.init)), extras)
+    }
+
+    private func presenter(_ set: StatsPartSet) -> StatsPresenter? {
+        let (key, extras) = presentation(set)
         if let cached = presenters[key] { return cached }
         let made = StatsPresenter(set: set, period: selection.period, selection: selection, decks: decks, calendar: calendar,
                                   locale: locale, extras: extras)
@@ -580,14 +594,6 @@ public final class StatsPageModel {
                                  days: StatsDays(context: header.context, calendar: calendar))
     }
 
-    /// A box's content, written now on the main actor.
-    private func content(_ id: StatsBoxID) -> StatsBoxContent {
-        switch plan(id) {
-        case let .done(content): content
-        case let .job(job): job.run()
-        }
-    }
-
     /// What a box shows: decided on the main actor where that is cheap (its progress, a failed
     /// part, the skeleton), or a job that writes its values from a set, which can run off it.
     private enum Plan {
@@ -612,8 +618,8 @@ public final class StatsPageModel {
         }
         var unavailable = skeletonContent(id, phase: unfinished(parts))
         unavailable.updating = updating
-        let extras = [StatsPart.retentionByDay, .activityDays].compactMap { set.value($0) == nil ? extra($0) : nil }
-        return .job(StatsBoxJob(id: id, set: set, extras: extras, period: selection.period, selection: selection, decks: decks,
+        let (key, extras) = presentation(set)
+        return .job(StatsBoxJob(id: id, key: key, set: set, extras: extras, period: selection.period, selection: selection, decks: decks,
                                 calendar: calendar, locale: locale, complete: isComplete(set, parts),
                                 unfinished: unfinished(parts), updating: updating, unavailable: unavailable))
     }
@@ -641,7 +647,6 @@ public final class StatsPageModel {
         return presenter(set)?.strip(id) ?? .loading
     }
 
-    /// Writes every value from the sets, the period, the switches and the decks.
     /// Writes every value from the sets, the period, the switches and the decks; after a part,
     /// only the boxes and figures that read it (their "updating" mark aside, which a part never
     /// changes for another box).
@@ -673,12 +678,22 @@ public final class StatsPageModel {
                 unpublished.remove(id)
                 next[id] = content
                 carrySelection(id, to: content)
-            case let .job(job) where offMain:
-                unpublished.insert(id)
-                jobs.append(job)
             case let .job(job):
+                let outcome: StatsPresenter.Outcome
+                if let cached = rendered[id], cached.key == job.key {
+                    outcome = cached.outcome
+                } else if offMain {
+                    unpublished.insert(id)
+                    jobs.append(job)
+                    continue
+                } else {
+                    boxBuilds += 1
+                    synchronousBoxBuilds += 1
+                    outcome = job.render()
+                    rendered[id] = (job.key, outcome)
+                }
                 unpublished.remove(id)
-                let content = job.run()
+                let content = job.finish(outcome)
                 next[id] = content
                 carrySelection(id, to: content)
             }
@@ -696,17 +711,20 @@ public final class StatsPageModel {
     /// Writes the jobs' boxes off the main actor, then publishes those no newer write superseded.
     private func write(_ jobs: [StatsBoxJob]) {
         let stamps = Dictionary(uniqueKeysWithValues: jobs.map { ($0.id, writes[$0.id, default: 0]) })
+        boxBuilds += jobs.count
         Task.detached(priority: .userInitiated) { [weak self] in
-            let written = jobs.map { ($0.id, $0.run()) }
+            let written = jobs.map { ($0, $0.render()) }
             await self?.publish(written, stamps: stamps)
         }
     }
 
-    private func publish(_ written: [(StatsBoxID, StatsBoxContent)], stamps: [StatsBoxID: UInt64]) {
+    private func publish(_ written: [(StatsBoxJob, StatsPresenter.Outcome)], stamps: [StatsBoxID: UInt64]) {
         var next = boxes
-        for (id, written) in written where writes[id, default: 0] == stamps[id] {
+        for (job, outcome) in written where writes[job.id, default: 0] == stamps[job.id] {
+            let id = job.id
             unpublished.remove(id)
-            var content = written
+            rendered[id] = (job.key, outcome)
+            var content = job.finish(outcome)
             // Progress that arrived while the box was written stays: a loading box never goes
             // back to the fraction it had when the write began.
             if case .loading = content.phase, case let .loading(shown)? = boxes[id]?.phase {
@@ -818,6 +836,7 @@ extension StatsBoxContent {
 /// about it: Sendable, so the page model can write it off the main actor while the page scrolls.
 nonisolated struct StatsBoxJob: Sendable {
     let id: StatsBoxID
+    let key: StatsRenderKey
     let set: StatsPartSet
     let extras: [StatsPartSet]
     let period: StatsPagePeriod
@@ -833,10 +852,15 @@ nonisolated struct StatsBoxJob: Sendable {
     /// What the box shows when the set has no value for the period yet.
     let unavailable: StatsBoxContent
 
-    func run() -> StatsBoxContent {
+    func render() -> StatsPresenter.Outcome {
         guard let presenter = StatsPresenter(set: set, period: period, selection: selection, decks: decks, calendar: calendar,
-                                             locale: locale, extras: extras) else { return unavailable }
-        switch presenter.box(id) {
+                                             locale: locale, extras: extras) else { return .unavailable }
+        return presenter.box(id)
+    }
+
+    /// Apply the current request's state even when its values were already presented.
+    func finish(_ outcome: StatsPresenter.Outcome) -> StatsBoxContent {
+        switch outcome {
         case .unavailable:
             return unavailable
         case var .content(content):
@@ -849,4 +873,22 @@ nonisolated struct StatsBoxJob: Sendable {
             return content
         }
     }
+}
+
+/// Stable across copies of a set, different after any accepted part, including a replacement
+/// of a part with the same count and context. These keys never go into the public/cache format.
+nonisolated struct StatsSetVersion: Hashable, Sendable {
+    let id: UUID
+    let revision: UInt64
+
+    init(_ set: StatsPartSet) {
+        id = set.presentationID
+        revision = set.revision
+    }
+}
+
+nonisolated struct StatsRenderKey: Hashable, Sendable {
+    let set: StatsSetVersion
+    let inputs: UInt64
+    let extras: [StatsSetVersion]
 }
