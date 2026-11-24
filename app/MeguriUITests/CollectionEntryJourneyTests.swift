@@ -392,8 +392,9 @@ import notify
         XCTAssertTrue(sheet.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(element(app, "onboarding.collectionImport.content").exists)
         let title = "Import “shared-deck.apkg”"
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@",
-            "settings.deckImport.title", title)).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        let heading = element(app, "settings.deckImport.title")
+        XCTAssertTrue(heading.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue("\(heading.label) \(heading.value as? String ?? "")".contains(title), heading.debugDescription)
         capture(app, "deck-import-picked")
         try click(element(app, "settings.deckImport.import"), app, bundle)
         let done = element(app, "settings.deckImport.done")

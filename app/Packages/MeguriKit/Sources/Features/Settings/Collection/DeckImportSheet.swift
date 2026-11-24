@@ -593,7 +593,7 @@ struct DeckImportContent: View {
                           line: String) -> some View {
         HStack {
             VStack(alignment: .leading) {
-                if let first = entry.fields.first(where: { !$0.isEmpty }) ?? entry.fields.first {
+                if let first = entry.fields.first(where: { !$0.isEmpty }) {
                     Text(verbatim: first).lineLimit(2)
                 } else {
                     Text(verbatim: entry.fields.isEmpty ? DeckImportText.textNotShown : DeckImportText.noText)
@@ -727,6 +727,7 @@ struct DeckImportContent: View {
             #else
             ToolbarItem(placement: .cancellationAction) {
                 Button(action: actions.cancelConfirmation) { Text(verbatim: "Cancel") }
+                    .focused($focus, equals: .cancel)
                     .accessibilityIdentifier("\(Self.id).cancel")
             }
             ToolbarItem(placement: .confirmationAction) { confirmButton }
@@ -765,6 +766,7 @@ struct DeckImportContent: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button(action: actions.close) { Text(verbatim: "Done") }
                     .keyboardShortcut(.defaultAction)
+                    .focused($focus, equals: .done)
                     .accessibilityIdentifier("\(Self.id).done")
             }
         }

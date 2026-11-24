@@ -55,7 +55,7 @@ public final class ImportIntake {
     /// An import flow is open or starting: nothing else is admitted (K4).
     public var importOpen: Bool {
         guard let owner else { return false }
-        return classifying || owner.deckImport.active || owner.entry.busy || owner.entry.preview != nil
+        return classifying || creating || owner.deckImport.active || owner.entry.busy || owner.entry.preview != nil
             || owner.navigation.sheet == .collectionEntry || owner.navigation.sheet == .deckImport
     }
 
@@ -168,6 +168,8 @@ public final class ImportIntake {
     /// The file Welcome asks about: create a collection and import it.
     public private(set) var pendingCreation: URL?
     @ObservationIgnored private var pendingRelease: (@MainActor () -> Void)?
+    /// K6.1's creation runs: nothing else is taken until its sheet opens.
+    public private(set) var creating = false
 
     /// A second file replaces the first (K6.1).
     private func askToCreate(_ url: URL, release: (@MainActor () -> Void)?) {
@@ -192,9 +194,9 @@ public final class ImportIntake {
     }
 
     private func createCollection(then url: URL, owner: ReviewCollection, release: (@MainActor () -> Void)?) {
-        classifying = true
+        creating = true
         Task {
-            defer { classifying = false }
+            defer { creating = false }
             await owner.startEmptyFromPress()
             // A creation failure shows its error on Welcome and drops the file.
             guard owner.state == .ready, owner.hasCollection else { release?(); return }

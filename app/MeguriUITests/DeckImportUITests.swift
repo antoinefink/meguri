@@ -109,9 +109,12 @@ import XCTest
     private func text(_ app: XCUIApplication, _ text: String) -> XCUIElement {
         #if os(macOS)
         // The Mac's title leads the form (`SheetTitle`), with its own identifier.
-        app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "\(id).title", text)).firstMatch
+        let title = element(app, "\(id).title")
+        _ = title.waitForExistence(timeout: 5)
+        XCTAssertTrue(label(title).contains(text), "title reads \(label(title))")
+        return title
         #else
-        app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch
+        return app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch
         #endif
     }
     private func click(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {

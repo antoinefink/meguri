@@ -13,6 +13,9 @@ import Testing
         let launch = Date(timeIntervalSince1970: 1_900_000_000)
         let dropped = drops.appending(path: "A1"); try files.createDirectory(at: dropped, withIntermediateDirectories: true)
         try Data("x".utf8).write(to: dropped.appending(path: "Sample.apkg"))
+        try files.setAttributes([.modificationDate: launch.addingTimeInterval(-60)], ofItemAtPath: dropped.path)
+        let current = drops.appending(path: "B2"); try files.createDirectory(at: current, withIntermediateDirectories: true)
+        try files.setAttributes([.modificationDate: launch.addingTimeInterval(5)], ofItemAtPath: current.path)
         let old = inbox.appending(path: "Old.apkg"), fresh = inbox.appending(path: "Fresh.apkg")
         let kept = other.appending(path: "backup.colpkg")
         for file in [old, fresh, kept] { try Data("x".utf8).write(to: file) }
@@ -22,6 +25,7 @@ import Testing
         #expect(ImportStagingSweep.run(drops: drops, inbox: inbox, launchedAt: launch) == 2)
         #expect(!files.fileExists(atPath: dropped.path) && !files.fileExists(atPath: old.path))
         #expect(files.fileExists(atPath: fresh.path), "a delivery for this launch is kept")
+        #expect(files.fileExists(atPath: current.path), "a drop made since launch is kept")
         #expect(files.fileExists(atPath: kept.path), "nothing outside the staging places is touched")
     }
 
@@ -30,7 +34,7 @@ import Testing
         let drops = files.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? files.removeItem(at: drops) }
         for index in 0..<5 { try files.createDirectory(at: drops.appending(path: "\(index)"), withIntermediateDirectories: true) }
-        #expect(ImportStagingSweep.run(drops: drops, inbox: nil, launchedAt: .now, limit: 3) == 3)
+        #expect(ImportStagingSweep.run(drops: drops, inbox: nil, launchedAt: .now.addingTimeInterval(60), limit: 3) == 3)
         #expect(try files.contentsOfDirectory(atPath: drops.path).count == 2)
     }
 }

@@ -16,8 +16,10 @@ nonisolated public enum ImportStagingSweep {
             (try? files.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey],
                                             options: [.skipsHiddenFiles])) ?? []
         }
-        // Drop copies are this run's only: every folder left is a past run's.
+        // A past run's drop copies; one made since launch is this run's own.
         for item in items(drops) where removed < limit {
+            let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            guard let modified, modified < launchedAt else { continue }
             if (try? files.removeItem(at: item)) != nil { removed += 1 }
         }
         guard let inbox else { return removed }
