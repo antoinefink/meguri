@@ -396,6 +396,18 @@ pub trait ReadRows: sealed::Connected {
         crate::search_rows::visit_note_tags(self.connection(), cancel, visit)
     }
 
+    /// The `tags` of each listed note that exists, by ascending id
+    /// (Remove Tags' suggestions, `browser/workspace` V8.1): text, or none
+    /// for NULL and BLOB; cancelled as [`ReadRows::visit_id_rows`] is.
+    fn visit_tags_of_notes(
+        &self,
+        notes: &[i64],
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(i64, Option<&str>) -> bool,
+    ) -> Result<(), StorageError> {
+        crate::search_rows::visit_tags_of_notes(self.connection(), notes, cancel, visit)
+    }
+
     /// Find Duplicates' read (`browser/workspace` V10): the id, `mid` and
     /// `flds` of each note of one of `notetypes`, limited to `notes` when
     /// given, in no promised order: text, or none for NULL and BLOB;

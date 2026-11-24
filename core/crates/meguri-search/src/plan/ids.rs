@@ -42,3 +42,9 @@ pub const HOME_DECKS_AND_QUEUES_OF_NOTES: &str = "SELECT c.id, CASE WHEN c.odid 
 
 /// The notes of `?1` that exist, each with its note type (V8.1).
 pub const NOTETYPES_OF_NOTES: &str = "SELECT n.id, n.mid FROM notes n WHERE n.id IN (SELECT value FROM json_each(?1))";
+
+/// The cards of the notes in `?1` whose note row exists (the cards a
+/// Delete Notes removes, `browser/workspace` V8.2; `browser/bulk-actions`
+/// B11).
+pub const CARDS_OF_EXISTING_NOTES: &str = "SELECT c.id FROM cards c WHERE c.nid IN \
+     (SELECT n.id FROM notes n WHERE n.id IN (SELECT value FROM json_each(?1)))";

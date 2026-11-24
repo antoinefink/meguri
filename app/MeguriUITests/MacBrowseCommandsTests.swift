@@ -56,13 +56,14 @@ final class MacBrowseCommandsTests: XCTestCase {
         press(table.outlineRows.element(boundBy: 0))
         capture(app, "suspended-selected-\(appearance)")
 
-        // One row: Unsuspend shows, Suspend does not; the later sheets are there, disabled.
+        // One row: Unsuspend shows, Suspend does not; U277's sheets are there, disabled.
         press(table.outlineRows.element(boundBy: 0), right: true)
         XCTAssertTrue(waitUntil { (try? self.contextMenu(app))?["Unsuspend Card"] != nil })
         let one = try contextMenu(app)
         XCTAssertEqual(one["Unsuspend Card"], true)
         XCTAssertNil(one["Suspend Card"], "V8.1: Suspend is not shown for a suspended card: \(one.keys.sorted())")
-        XCTAssertEqual(one["Change Deck…"], false, "Change Deck… waits for U276")
+        XCTAssertEqual(one["Change Deck…"], true, "Change Deck… opens its sheet (U276)")
+        XCTAssertEqual(one["Find and Replace…"], false, "Find and Replace… waits for U277")
         XCTAssertEqual(one["Bury Card"], true)
         screen(app, "context-menu-one-row-cards-\(appearance)")
         app.typeKey(.escape, modifierFlags: [])

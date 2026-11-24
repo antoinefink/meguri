@@ -475,6 +475,10 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let deleteBrowserSavedSearches = BridgeCall("delete_browser_saved_searches")
     public static let startBrowseSelectionCounts = BridgeCall("start_browse_selection_counts")
     public static let browseSelectionCountsJobResult = BridgeCall("BrowseSelectionCountsJob.result")
+    public static let startBrowseSelectionRead = BridgeCall("start_browse_selection_read")
+    public static let browseSelectionReadJobResult = BridgeCall("BrowseSelectionReadJob.result")
+    public static let browseSelectionSiblingRows = BridgeCall("BrowseSelection.sibling_rows")
+    public static let browseSheetDefaults = BridgeCall("browse_sheet_defaults")
     public static let browseOpening = BridgeCall("browse_opening")
     public static let startFindDuplicates = BridgeCall("start_find_duplicates")
     public static let findDuplicatesJobResult = BridgeCall("FindDuplicatesJob.result")
@@ -799,7 +803,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         startNotetypeTemplateCardCounts, notetypeTemplateCardCountsJobResult, notetypeTemplateIssues, notetypeReplaceFieldReferences,
         notetypeTemplateSyntax, notetypeStylingSyntax, renderNotetypeDraft, notetypeNoteIds,
         openSearchSession, browseStartSearch, browseResort, browseToggle, browseReverse, browseInvalidatedRows, browseRows, browseQaCells, browseIndexOf, browseMapSelection, browseResolveSelection, browseSelection, browseHandleState, browseClose, browseSelectionResolve,
-        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, setBrowserNotesMode, saveBrowserSearch, renameBrowserSavedSearch, deleteBrowserSavedSearches, startBrowseSelectionCounts, browseSelectionCountsJobResult, browseOpening,
+        filterRunText, filterReadText, filterCommit, filterTextIncomplete, filterDeckValue, filterSuggestions, startFilterCounts, filterCountsJobResult, browserColumnSet, changeBrowserColumnSet, useStandardBrowserColumns, setBrowserNotesMode, saveBrowserSearch, renameBrowserSavedSearch, deleteBrowserSavedSearches, startBrowseSelectionCounts, browseSelectionCountsJobResult, startBrowseSelectionRead, browseSelectionReadJobResult, browseSelectionSiblingRows, browseSheetDefaults, browseOpening,
         startFindDuplicates, findDuplicatesJobResult,
         findReplacePreviewsNew, findReplacePreviewsStart, findReplacePreviewJobResult, startFindReplace, bulkActionJobResult,
         startBulkCardActionOnSelection, startBulkNoteActionOnSelection,

@@ -102,6 +102,38 @@ pub(crate) fn visit_note_tags(
     })
 }
 
+/// The `tags` of each note of `notes` that exists, by ascending id,
+/// read as [`visit_note_tags`] reads them (Remove Tags' suggestions,
+/// `browser/workspace` V8.1). Cancelled as [`visit`] is.
+pub(crate) fn visit_tags_of_notes(
+    conn: &Connection,
+    notes: &[i64],
+    cancel: &dyn Fn() -> bool,
+    visit: &mut dyn FnMut(i64, Option<&str>) -> bool,
+) -> Result<(), StorageError> {
+    if notes.is_empty() {
+        return Ok(());
+    }
+    with_cancel(conn, cancel, || {
+        let mut statement = conn.prepare(
+            "SELECT id, CASE WHEN typeof(tags) IN ('integer', 'real') THEN CAST(tags AS TEXT) ELSE tags END FROM notes \
+             WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id",
+        )?;
+        let mut rows = statement.query([json_list(notes)])?;
+        while let Some(row) = rows.next()? {
+            let id = row.get::<_, i64>(0)?;
+            let keep = match row.get_ref(1)? {
+                rusqlite::types::ValueRef::Text(bytes) => visit(id, Some(&String::from_utf8_lossy(bytes))),
+                _ => visit(id, None),
+            };
+            if !keep {
+                break;
+            }
+        }
+        Ok(())
+    })
+}
+
 /// What [`visit_note_fields`] hands each note: its id, `mid` and `flds`;
 /// false stops the read.
 pub type FieldsVisit<'v> = dyn FnMut(i64, i64, Option<&str>) -> bool + 'v;

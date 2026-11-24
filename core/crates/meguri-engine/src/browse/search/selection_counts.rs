@@ -17,7 +17,7 @@ use meguri_model::ids::{DeckId, NotetypeId};
 use meguri_search::SearchMode;
 use meguri_search::plan::ids;
 use meguri_search::plan::sql::id_list;
-use meguri_storage::ReadRows;
+use meguri_storage::{ReadRows, ReadSnapshot};
 
 use super::registry::bridge;
 use super::selection::merged;
@@ -44,15 +44,42 @@ pub struct SelectionCounts {
     pub decks: u64,
     /// That deck when there is exactly one.
     pub deck: Option<DeckId>,
+    /// Every one of those decks, ascending (Change Deck's sheet marks them,
+    /// `browser/workspace` V8.1).
+    pub deck_ids: Vec<DeckId>,
     /// The note types of the target notes that exist, ascending.
     pub notetypes: Vec<NotetypeId>,
 }
 
-/// The counts of `selection`, in one snapshot of a search worker's reader.
-/// Refused as `resolve_selection` refuses (`UnknownHandle`,
+/// The rows of a selection as one snapshot read them: the handle's mode,
+/// the selected ids in index order, and in cards mode each selected card's
+/// note (`browser/result-sets` H12).
+pub(super) struct Picked {
+    pub(super) mode: SearchMode,
+    pub(super) selected: Vec<i64>,
+    pub(super) notes_of_cards: Vec<i64>,
+}
+
+impl Picked {
+    /// B1's target notes, with repeats: the selected notes, or the notes of
+    /// the selected cards.
+    pub(super) fn notes(&self) -> &[i64] {
+        match self.mode {
+            SearchMode::Cards => &self.notes_of_cards,
+            SearchMode::Notes => &self.selected,
+        }
+    }
+}
+
+/// Runs `read` on one snapshot of a search worker's reader with the rows of
+/// `selection`. Refused as `resolve_selection` refuses (`UnknownHandle`,
 /// `StaleRevision`, `OutOfRange`); `Cancelled` once `cancel` or a stop
-/// cancels it.
-pub fn selection_counts(selection: &HandleSelection, cancel: &CancelToken) -> Result<SelectionCounts, BrowseError> {
+/// cancels it. `read` gets the token to poll.
+pub(super) fn read_selection<T>(
+    selection: &HandleSelection,
+    cancel: &CancelToken,
+    read: impl FnOnce(&ReadSnapshot<'_>, Picked, &CancelToken) -> Result<T, BrowseError>,
+) -> Result<T, BrowseError> {
     let cancelled = || BrowseError::Engine(EngineError::Cancelled);
     let shared = &selection.shared;
     // A released handle is unknown, whatever else is unavailable (H6).
@@ -73,7 +100,7 @@ pub fn selection_counts(selection: &HandleSelection, cancel: &CancelToken) -> Re
     let lease = collection.search_reader(slot.index)?;
     let snapshot = lease.snapshot()?;
     // H6: the generation is compared while the reader is held.
-    let (mode, selected, notes_of_cards) = {
+    let picked = {
         let handle = shared.handle(selection.handle)?;
         let handle = lock(&handle);
         if handle.generation != collection.generation() {
@@ -86,12 +113,38 @@ pub fn selection_counts(selection: &HandleSelection, cancel: &CancelToken) -> Re
         }
         let indexes = ranges.iter().flat_map(|range| range.start as usize..range.end as usize);
         let selected: Vec<i64> = indexes.clone().map(|index| handle.ids[index]).collect();
-        let notes: Vec<i64> = match handle.mode {
+        let notes_of_cards: Vec<i64> = match handle.mode {
             SearchMode::Cards => indexes.map(|index| handle.nids[index]).collect(),
             SearchMode::Notes => Vec::new(),
         };
-        (handle.mode, selected, notes)
+        Picked {
+            mode: handle.mode,
+            selected,
+            notes_of_cards,
+        }
     };
+    let result = read(&snapshot, picked, &token)?;
+    if token.is_cancelled() {
+        return Err(cancelled());
+    }
+    Ok(result)
+}
+
+/// The counts of `selection`, in one snapshot of a search worker's reader.
+/// Refused as `resolve_selection` refuses (`UnknownHandle`,
+/// `StaleRevision`, `OutOfRange`); `Cancelled` once `cancel` or a stop
+/// cancels it.
+pub fn selection_counts(selection: &HandleSelection, cancel: &CancelToken) -> Result<SelectionCounts, BrowseError> {
+    read_selection(selection, cancel, counts_in)
+}
+
+fn counts_in(snapshot: &ReadSnapshot<'_>, picked: Picked, token: &CancelToken) -> Result<SelectionCounts, BrowseError> {
+    let cancelled = || BrowseError::Engine(EngineError::Cancelled);
+    let Picked {
+        mode,
+        selected,
+        notes_of_cards,
+    } = picked;
     // B1: the target cards are the selected cards, or every card of the
     // selected notes; the target notes the selected notes, or the notes of
     // the selected cards.
@@ -150,6 +203,9 @@ pub fn selection_counts(selection: &HandleSelection, cancel: &CancelToken) -> Re
         1 => decks.iter().next().copied().map(DeckId),
         _ => None,
     };
+    let mut deck_ids: Vec<i64> = decks.into_iter().collect();
+    deck_ids.sort_unstable();
+    counts.deck_ids = deck_ids.into_iter().map(DeckId).collect();
     counts.notetypes = notetypes.into_iter().map(NotetypeId).collect();
     Ok(counts)
 }

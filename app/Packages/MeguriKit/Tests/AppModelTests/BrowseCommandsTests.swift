@@ -31,15 +31,15 @@ import Testing
         for command in every { #expect(!state(command, nil).enabled, "\(command) with no selection") }
         // Three cards, none suspended or buried, one note type.
         let plain = facts(rows: 3)
-        let built: Set<BrowseCommand> = [.flag(0), .flag(3), .suspend, .bury, .delete, .editNoteType]
+        let built: Set<BrowseCommand> = [.flag(0), .flag(3), .suspend, .bury, .delete, .editNoteType, .changeDeck, .addTags,
+                                         .removeTags, .setDueDate, .forget]
         for command in every {
             #expect(state(command, plain).enabled == built.contains(command), "\(command) on three plain cards")
         }
         #expect(!state(.unsuspend, plain).shown && !state(.unbury, plain).shown)
         #expect(state(.suspend, plain).shown && state(.bury, plain).shown && state(.suspend, plain).count == 3)
         // Their sheets come later: shown, disabled.
-        for later: BrowseCommand in [.changeDeck, .addTags, .removeTags, .setDueDate, .forget, .changeNoteType, .findReplace,
-                                     .findDuplicates] {
+        for later: BrowseCommand in [.changeNoteType, .findReplace, .findDuplicates] {
             #expect(state(later, plain).shown && !state(later, plain).enabled, "\(later) waits for its sheet")
         }
         // Edit Note shows one row's note in the inspector (U273): one row only.

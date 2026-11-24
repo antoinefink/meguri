@@ -95,6 +95,10 @@ public enum BrowseCommandText {
         case .flagged: String(localized: "browse.done.flagged", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
         case .unflagged: String(localized: "browse.done.unflagged", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
         case .deleted: String(localized: "browse.done.deleted", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
+        case .moved: String(localized: "browse.done.moved", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
+        case .tagsChanged: String(localized: "browse.done.tagsChanged", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
+        case .rescheduled: String(localized: "browse.done.rescheduled", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
+        case .forgotten: String(localized: "browse.done.forgotten", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
         }
     }
 }
@@ -132,7 +136,8 @@ public struct BrowseFlagSymbol: View {
 /// Forget…] | [Change Note Type…, Edit Note Type…] | [Find and Replace…,
 /// Find Duplicates…] | [Delete], each with its key. A command V8.1 does
 /// not show for these rows is left out; one whose sheet a later unit
-/// builds is there, disabled. It acts on the rows it was opened on.
+/// builds is there, disabled. It acts on the rows it was opened on; a sheet
+/// it opens (U276) acts on those rows too.
 struct BrowseRowMenu: View {
     let model: BrowseModel
     let rows: Set<Int>
@@ -277,6 +282,10 @@ struct BrowseCommandFeedback: ViewModifier {
                     .keyboardShortcut(.defaultAction)
             } message: {
                 Text("browse.failed.command.message", bundle: .module)
+            }
+            // U276: the command sheet, on the rows it opened on.
+            .sheet(item: Binding(get: { commands.sheet }, set: { if $0 == nil { commands.dismissSheet() } })) { sheet in
+                BrowseCommandSheetView(model: model, sheet: sheet)
             }
             .onChange(of: commands.announcement) { _, result in
                 guard let result else { return }

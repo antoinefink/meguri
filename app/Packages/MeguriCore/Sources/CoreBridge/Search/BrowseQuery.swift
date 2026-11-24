@@ -574,15 +574,19 @@ public struct BrowseSelectionCounts: Sendable, Hashable {
     public let decks: UInt64
     /// That deck when there is exactly one.
     public let deck: Int64?
+    /// Every one of those decks, ascending (Change Deck's sheet marks them).
+    public let deckIDs: [Int64]
     /// The target notes' note types, ascending.
     public let notetypes: [Int64]
-    public init(cards: UInt64, notes: UInt64, suspended: UInt64, buried: UInt64, decks: UInt64, deck: Int64?, notetypes: [Int64]) {
+    public init(cards: UInt64, notes: UInt64, suspended: UInt64, buried: UInt64, decks: UInt64, deck: Int64?,
+                deckIDs: [Int64] = [], notetypes: [Int64]) {
         self.cards = cards
         self.notes = notes
         self.suspended = suspended
         self.buried = buried
         self.decks = decks
         self.deck = deck
+        self.deckIDs = deckIDs
         self.notetypes = notetypes
     }
 }
@@ -770,9 +774,55 @@ public enum CoreBrowseQuery {
             return CoreBrowseReadJob(job: try Jobs.track(start.handle), resultCall: .browseSelectionCountsJobResult) {
                 try result.result().map {
                     BrowseSelectionCounts(cards: $0.cards, notes: $0.notes, suspended: $0.suspended, buried: $0.buried,
-                                          decks: $0.decks, deck: $0.deck, notetypes: $0.notetypes)
+                                          decks: $0.decks, deck: $0.deck, deckIDs: $0.deckIds, notetypes: $0.notetypes)
                 }
             }
+        }
+    }
+
+    /// V8.2: every card of a selection's target notes that exist, those the
+    /// search did not find included (the cards a Delete removes), read in
+    /// the core, as a job. When the selection itself is refused, `value()`
+    /// throws that `BridgeError.browse` failure. It writes nothing.
+    public static func startNoteCards(_ selection: BrowseSelection) async throws(BridgeError) -> CoreBrowseReadJob<UInt64> {
+        try await startSelectionRead(selection, .noteCards) { read in
+            guard case .noteCards(let cards) = read else { throw BridgeError.internal("Unexpected selection read") }
+            return cards
+        }
+    }
+
+    /// V8.1: the tags a selection's target notes store, each once, sorted
+    /// (Remove Tags' field suggests only these), as a job. It writes nothing.
+    public static func startSelectionTags(_ selection: BrowseSelection) async throws(BridgeError) -> CoreBrowseReadJob<[String]> {
+        try await startSelectionRead(selection, .tags) { read in
+            guard case .tags(let tags) = read else { throw BridgeError.internal("Unexpected selection read") }
+            return tags
+        }
+    }
+
+    private static func startSelectionRead<T: Sendable>(
+        _ selection: BrowseSelection, _ what: MeguriCoreBindings.BrowseSelectionRead,
+        _ value: @escaping @Sendable (MeguriCoreBindings.BrowseSelectionReadResult) throws -> T
+    ) async throws(BridgeError) -> CoreBrowseReadJob<T> {
+        try await CoreEventStream.shared.start()
+        let raw = selection.raw
+        return try await MaintenanceLane.shared.call(.startBrowseSelectionRead) {
+            let start = try MeguriCoreBindings.startBrowseSelectionRead(selection: raw, read: what)
+            let result = start.result
+            return CoreBrowseReadJob(job: try Jobs.track(start.handle), resultCall: .browseSelectionReadJobResult) {
+                try result.result().map(value)
+            }
+        }
+    }
+
+    /// B10: what the Set Due Date and Forget sheets open with
+    /// (`setDueBrowser`, `restorePositionBrowser`, `resetCountsBrowser`, or
+    /// their defaults). It writes nothing.
+    public static func sheetDefaults() async throws(BridgeError) -> BrowseSheetDefaults {
+        try await QueryLane.shared.call(.browseSheetDefaults) {
+            let read = try MeguriCoreBindings.browseSheetDefaults()
+            return BrowseSheetDefaults(setDueDays: read.setDueDays, restorePosition: read.restorePosition,
+                                       resetCounts: read.resetCounts)
         }
     }
 
@@ -805,6 +855,22 @@ public enum CoreBrowseQuery {
             let opening = try MeguriCoreBindings.browseOpening()
             return BrowseOpening(defaultSearch: opening.defaultSearch, notesMode: opening.notesMode)
         }
+    }
+}
+
+/// What the Set Due Date and Forget sheets open with (`browser/bulk-actions`
+/// B10, `browser/config-keys` K6.6).
+public struct BrowseSheetDefaults: Sendable, Hashable {
+    /// `setDueBrowser`, or "0".
+    public let setDueDays: String
+    /// `restorePositionBrowser`, default true.
+    public let restorePosition: Bool
+    /// `resetCountsBrowser`, default false.
+    public let resetCounts: Bool
+    public init(setDueDays: String, restorePosition: Bool, resetCounts: Bool) {
+        self.setDueDays = setDueDays
+        self.restorePosition = restorePosition
+        self.resetCounts = resetCounts
     }
 }
 
