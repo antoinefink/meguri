@@ -4,13 +4,13 @@ Spec: stats/activity-heatmap
 Requirements: R1272, R1275, R1276, R1278, R1280, R1281, R1284, R1291, R1295
 Anki: 26.09.3 (the review-log rows of `stats/counting-rules` N1 and the scheduler day of `stats/day-buckets` B3 and `sched/day-clock`, which it reuses)
 Scenarios: none. It is a Meguri query and presentation with no Anki or add-on behaviour to compare; core unit tests check it against the tables below.
-Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). The 2026-11-24 changes to AH1 and AH9 implement Antoine's full-width macOS Home heatmap decision and are in force. Every other section is in force and unchanged.
+Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). The 2026-11-24 changes to AH1, AH5, AH6, AH7 and AH9 are in force for Antoine's decision to show more weeks on wider Mac windows. Every other section is in force and unchanged.
 
 ## AH1. What this heatmap is
 
 Changed 2026-11-22 (round 11): the Statistics page's Activity (`stats/statistics-page` S7.5) is this grid extended to every year, with streaks beside it (under it since 2026-11-23), from the part `activity_days` (`stats/history-reads` H11): AH2's rows and AH3's days, the page's deck rule (G2.1) instead of AH4's home deck, and AH7's levels per year block (changed 2026-11-23, the owner's Option E: one continuous grid for all of history, wrapped onto lines, with AH7's levels over every day it shows). This heatmap on Today, the deck list and deck pages is unchanged and still has no streaks (round 10).
 
-Changed 2026-11-24 (owner decision): Mac Home (Today and the shared deck surfaces) selects whole weeks at the existing 10 pt baseline square and 2 pt gap, at most 53, then sizes square cells to fill the row with that fixed gap, including at very wide widths. The side is (W − (weeks − 1) × gap) ÷ weeks. A positive width below one baseline cell shows one current-week column with smaller day squares; unmeasured or invalid widths show no weeks and reserve the baseline height. Labels use the resulting pitch and width; seven rows, placeholders and hover regions use the resulting side. Width changes update layout without a query. Study stays primary. Touch, Statistics and widgets keep their existing sizing. This supersedes earlier fixed-size wording for Mac Home only (contract N14.11, N24.6).
+Changed 2026-11-24 at Antoine's request. On Mac Home, each day is a 10 pt square with a 2 pt gap between squares. The current week is the trailing column. Widening the row reveals earlier weeks at the leading edge, including weeks more than a year ago. A 634 pt row holds 53 weeks, a 646 pt row holds 54, and each additional 12 pt fits another week. The month labels, daily counts and summary follow the visible weeks (N14.11, N24.6, AH7 to AH9).
 
 The minimal heatmap on Home's Today page, the touch deck list and deck pages (`docs/design/native-interface-contract.md` N14.11). It is a Meguri design:
 
@@ -65,9 +65,9 @@ With `t = floor(id / 1,000)`, a row in the window (AH5) is on day
 
 ## AH5. Window and query
 
-- The query covers 371 days, `k` = 0 to 370: 53 weeks, which is 52 full weeks plus the current partial week, the most the grid can show.
-- It reads only rows with `id` ≥ (N − 371 × 86,400 + 1) × 1,000, so that `k` ≤ 370, and every later row. With the AH3 example's `N` the bound is 1759802401000.
-- One statement per scope, which groups and counts the rows by `k` inside SQLite and returns (`k`, count) pairs. It is bounded by the review log's primary key (`id` is the rowid). It never scans the whole review log and never runs one query per day.
+- Mac Home reads all counted reviews for the requested scope (AH2, AH4). The query groups them in SQLite by the day index in AH3. A cached result for the scope and scheduler day serves every window width. A resize alone never requests another read.
+- Touch reads 371 days, `k` = 0 to 370, enough for up to 53 week columns including the current partial week. Its query reads rows with `id` ≥ (N − 371 × 86,400 + 1) × 1,000. With the AH3 example's `N` the bound is 1759802401000.
+- Each read groups the counted rows for its scope in one statement and returns (`k`, count) pairs.
 - The deck scope finds its cards through the existing indexes: `ix_cards_sched` (its `did` prefix, for cards with `odid` 0) and `idx_cards_odid` (partial, `odid` != 0). It finds their rows through `ix_revlog_cid` or the `id` range. It adds no index (`storage/schema-18` S3; the S6 guard).
 - It runs on a read-only reader, the query role of `storage/open-and-connections` C6.
 - It never writes the collection, as `stats/counting-rules` N8 says (R1295): no row, `usn`, `mod` or config key changes. The day query that gives `N` may write as `sched/day-clock` D5 and D8 say; those writes belong to the day clock, not to this query.
@@ -77,7 +77,7 @@ With `t = floor(id / 1,000)`, a row in the window (AH5) is on day
 - The scheduler day number (today) and the `N` it was computed with.
 - `T0`, as a date and its weekday (AH3).
 - The collection generation (`engine/lifecycle`) the query read.
-- The 371 counts, indexed by `k`, zeros included.
+- Mac Home receives a sparse result keyed by days ago (`k`), with one entry for each day with counted reviews. A day absent from that result has zero counted reviews. Touch receives 371 counts indexed by `k`, zeros included.
 
 The host derives everything it shows from these values. Its only day arithmetic is `T0 − k` for labels.
 
@@ -85,7 +85,7 @@ The host derives everything it shows from these values. Its only day arithmetic 
 
 Changed 2026-11-21 (round 10; `docs/design/native-interface-contract.md` N24.6; Antoine's answer 4B). In force: approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/round10-today-20261121.md`). It replaces the rule that divided by the busiest day.
 
-There are five levels, from the days the view shows (not all 371). Let `D` be the counts above 0 among those days, in ascending order, `n` their number and `D[0]` to `D[n − 1]` its members. The three thresholds are `t1 = D[(n − 1) div 4]`, `t2 = D[(2 × (n − 1)) div 4]` and `t3 = D[(3 × (n − 1)) div 4]`, in integer arithmetic (multiply, then divide); `M = D[n − 1]` is the busiest day. A day with count `c` has:
+The days visible in the grid determine its five shading levels. Let `D` be the counts above 0 among those days, in ascending order, `n` their number and `D[0]` to `D[n − 1]` its members. The three thresholds are `t1 = D[(n − 1) div 4]`, `t2 = D[(2 × (n − 1)) div 4]` and `t3 = D[(3 × (n − 1)) div 4]`, in integer arithmetic (multiply, then divide); `M = D[n − 1]` is the busiest day. A day with count `c` has:
 
 - level 0 when `c` is 0;
 - level 4 when `c` is `M`;
@@ -118,5 +118,5 @@ Changed 2026-11-21 (round 10; `docs/design/native-interface-contract.md` N24.6).
 - A column is labelled when its drawn days include the first day of a month (a 1st after today, in the current week, is not drawn and labels nothing): that month's short standalone name in the app's locale, leading-aligned with the column. No year.
 - The first column shown is also labelled with its month, even with no 1st in it, but only when at least three columns of that month are shown.
 - Labels are placed from the newest column back. A label that would run past the grid's trailing edge ends at that edge instead; a label that would overlap one already placed is left out. Under right-to-left layout the labels mirror with the columns.
-- The labels update with the days shown and the grid geometry (a new day, a width change, including Mac Home resizes that keep the same week count), never with a new query.
+- When a Mac window widens, apply the same label rules to the earlier week columns it reveals. The view derives the labels from the dates in the visible grid.
 - `ActivityGridTests` checks: a 1st in each of a few columns; a partial current week whose 1st is after today; the first-column rule with two and with three columns of its month; and an overlap.
