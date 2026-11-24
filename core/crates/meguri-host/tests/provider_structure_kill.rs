@@ -257,7 +257,7 @@ fn import_child(point: &str) {
 }
 /// [`kill`] for a device that holds the import's target note type, with
 /// the package beside it.
-fn kill_import(test: &str) -> Killed {
+fn kill_import(test: &str, staged: usize) -> Killed {
     let root = tempfile::tempdir().unwrap();
     let rig = s::rig_with(root.path(), 1, i::target_setup);
     i::sorting_package(root.path());
@@ -273,6 +273,10 @@ fn kill_import(test: &str) -> Killed {
         .status().unwrap();
     assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(6), "SIGABRT");
     assert!(root.path().join(REACHED).exists(), "the child reached the named point before it died");
+    // What the dead process left of its session's staging, before the open below sweeps.
+    let left = std::fs::read_dir(config.collection_directory.clone()).unwrap()
+        .filter(|entry| entry.as_ref().unwrap().file_name().to_string_lossy().starts_with(".meguri-stage-")).count();
+    assert_eq!(left, staged, "the session's staging directories at the kill");
     let host = CoreHost::open(config).unwrap();
     b::settle(&host);
     Killed { path: root.path().to_owned(), _root: root, host, connection: rig.connection, notetype: rig.notetype,
@@ -285,7 +289,7 @@ fn kill_import(test: &str) -> Killed {
 fn import_job_killed_before_its_import_imported_nothing() {
     import_child("before-import");
     let _lane = b::LANE.lock().unwrap();
-    let k = kill_import("import_job_killed_before_its_import_imported_nothing");
+    let k = kill_import("import_job_killed_before_its_import_imported_nothing", 1);
     assert_eq!((i::guids(&k.host), i::sort_field(&k.host)), (vec!["g-two".to_owned()], 0));
     assert!(!k.host.meguri_structure_upload_pending().unwrap() && !record(&k.host) && ready(&k.host));
     assert!(!meguri_engine::schema_gate::is_modified(&s::col(&k.host)));
@@ -302,12 +306,11 @@ fn import_job_killed_before_its_import_imported_nothing() {
 fn import_job_killed_after_its_commit_leaves_the_upload_pending() {
     import_child("after-import");
     let _lane = b::LANE.lock().unwrap();
-    let k = kill_import("import_job_killed_after_its_commit_leaves_the_upload_pending");
+    let k = kill_import("import_job_killed_after_its_commit_leaves_the_upload_pending", 0);
     assert_eq!((i::guids(&k.host), i::sort_field(&k.host)), (vec!["g-one".to_owned(), "g-two".into()], 1));
     assert!(record(&k.host) && k.host.meguri_structure_upload_pending().unwrap());
     assert!(meguri_engine::schema_gate::is_modified(&s::col(&k.host)));
     assert!(ready(&k.host), "the binding is held only once the upload runs");
-    assert_eq!(i::staging(&k.host), 0, "the launch sweep removed the dead session's staging");
     let silent = r::Script::new(vec![]);
     assert!(matches!(k.host.start_meguri_collection(r::access(&k.connection, &silent)), MeguriRoundStart::Refused(_)));
     // The relaunch dropped the undo step; the import's safety backup stays.

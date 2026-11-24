@@ -12,6 +12,9 @@ private final class ImportClock: CollectionClock {
     func zoneIdentifier() -> String { "UTC" }
 }
 
+/// A failed requirement, thrown so that the test's cleanup still runs.
+private struct ImportExpectation: Error { let what: String }
+
 private final class ImportDiskCapacity: DiskSpaceProviding {
     func availableBytes(at directory: URL) throws -> UInt64 { .max }
 }
@@ -118,7 +121,7 @@ extension EventTests {
             options.withScheduling = true
             guard case .imported(let result) = try await imports.apply(session, options: options, confirmation: nil,
                                                                         askStructure: false).value() else {
-                Issue.record("the import commits"); return
+                throw ImportExpectation(what: "the import commits")
             }
             #expect(result.counts.notesAdded == 2 && result.counts.cardsAdded == 2 && result.counts.notesUpdated == 0)
             #expect(result.log.foundNotes == 2 && result.log[.new] == 2 && result.log[.duplicate] == 0)
@@ -130,13 +133,13 @@ extension EventTests {
             #expect(try await imports.logPage(session, category: .new, offset: 1, count: 5) == Array(all[1...]))
             #expect(try await imports.logPage(session, category: .new, offset: 2, count: 5).isEmpty)
             guard case .available(let step) = try await undo.peekUndo(scope: .global) else {
-                Issue.record("the import is the undo step"); return
+                throw ImportExpectation(what: "the import is the undo step")
             }
             #expect(step.name == "Import")
             // A session commits once, and its staging goes when it closes.
             guard case .refused(.sessionClosed) = try await imports.apply(session, options: options, confirmation: nil,
                                                                            askStructure: false).value() else {
-                Issue.record("a second apply of one session is refused"); return
+                throw ImportExpectation(what: "a second apply of one session is refused")
             }
             await imports.close(session)
             await imports.close(session)
@@ -148,7 +151,7 @@ extension EventTests {
             let second = try await imports.inspect(file: later).value()
             guard case .imported(let updated) = try await imports.apply(second, options: options, confirmation: nil,
                                                                          askStructure: false).value() else {
-                Issue.record("the second import commits"); return
+                throw ImportExpectation(what: "the second import commits")
             }
             #expect(updated.counts.notesAdded == 0 && updated.counts.notesUpdated == 1)
             #expect(updated.log[.new] == 0 && updated.log[.updated] == 1 && updated.log[.duplicate] == 1)
@@ -157,7 +160,7 @@ extension EventTests {
             // Undo takes that import back; the first one is the next step.
             _ = try await undo.startUndo(scope: .global).value()
             guard case .available(let earlier) = try await undo.peekUndo(scope: .global) else {
-                Issue.record("the first import is still undoable"); return
+                throw ImportExpectation(what: "the first import is still undoable")
             }
             #expect(earlier.name == "Import")
 
@@ -197,20 +200,20 @@ extension EventTests {
         #expect(session.facts.notes == 3 && fake.openSessions == 1)
         guard case .confirmationRequired(let asked) = try await fake.apply(session, options: .init(), confirmation: nil,
                                                                             askStructure: true).value() else {
-            Issue.record("the fake asks first"); return
+            throw ImportExpectation(what: "the fake asks first")
         }
         #expect(asked.reasons == [.notetypesMerged] && !asked.preview.isEmpty)
         #expect(try await fake.logPage(session, category: .new, offset: 0, count: 5).isEmpty)
         guard case .imported(let imported) = try await fake.apply(session, options: .init(), confirmation: asked,
                                                                    askStructure: false).value() else {
-            Issue.record("the fake imports"); return
+            throw ImportExpectation(what: "the fake imports")
         }
         #expect(imported == result)
         #expect(fake.applied.map(\.confirmation) == [nil, 9] && fake.applied.map(\.askStructure) == [true, false])
         #expect(try await fake.logPage(session, category: .new, offset: 1, count: 5) == [.init(noteId: 2, fields: ["b"])])
         guard case .refused(.sessionClosed) = try await fake.apply(session, options: .init(), confirmation: nil,
                                                                     askStructure: false).value() else {
-            Issue.record("one commit per session"); return
+            throw ImportExpectation(what: "one commit per session")
         }
         await fake.close(session)
         #expect(fake.openSessions == 0)

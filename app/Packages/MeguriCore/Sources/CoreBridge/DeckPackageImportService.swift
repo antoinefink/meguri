@@ -297,6 +297,12 @@ extension CoreMeguriRoundService {
                 // The op's own refusal before the apply answered (a changed
                 // generation, a job that could not start), or a job whose
                 // owner changed after the import: the session says which.
+                // The job keeps the import's answer even after the session ended.
+                let kept = try? await MaintenanceLane.shared.call(.providerStructureImportOutcome) {
+                    try job.importOutcome().map(DeckImportApplyOutcome.init)
+                }
+                if case .imported(let result)? = kept { return .imported(result, upload: .pending(.failed)) }
+                if case .refused(.committedWithoutResult)? = kept { return .importedWithoutResult(upload: nil) }
                 switch await committed() {
                 case .some(.some(let result)): return .imported(result, upload: .pending(.failed))
                 case .some(.none): return .notImported(.refused(DeckImportRefusal(error)))
@@ -432,6 +438,8 @@ public final class FakeDeckPackageImportService: DeckPackageImportService, Senda
                 let answer = state.script.applies[min(state.answered, state.script.applies.count - 1)]
                 state.answered += 1
                 if case .imported(let result) = answer { state.committed[id] = result }
+                // A commit whose result was lost also ends the session.
+                if case .refused(.committedWithoutResult) = answer { state.open.remove(id) }
                 return answer
             }
             if case .imported = answer { for stage in script.applyStages where stage.stage == .committing { progress(stage) } }

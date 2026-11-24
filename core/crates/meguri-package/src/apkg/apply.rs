@@ -99,6 +99,24 @@ pub fn apply_confirming(
     cancel: &Arc<CancelToken>,
     progress: &ProgressSink,
 ) -> ImportOutcome<ImportResult> {
+    apply_on(engine, session, options, token, confirm_structure, None, cancel, progress)
+}
+
+/// [`apply_confirming`] for a caller admitted on one collection generation
+/// (`sync/meguri-provider` MP7.1's job): when the collection the slot is
+/// taken on is another one, the apply refuses with `StaleGeneration` and
+/// writes nothing.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_on(
+    engine: &Engine,
+    session: &ImportSession,
+    options: ImportOptions,
+    token: Option<&ConfirmationToken>,
+    confirm_structure: bool,
+    admitted: Option<meguri_engine::Generation>,
+    cancel: &Arc<CancelToken>,
+    progress: &ProgressSink,
+) -> ImportOutcome<ImportResult> {
     {
         let state = session.lock();
         if state.closed || state.result.is_some() {
@@ -109,6 +127,15 @@ pub fn apply_confirming(
     // The handle of the collection the slot was taken on, never one opened
     // since; and the session's state again, now that no other apply runs.
     let collection = slot.collection()?;
+    if let Some(planned) = admitted
+        && collection.generation() != planned
+    {
+        return Err(EngineError::StaleGeneration {
+            planned,
+            current: collection.generation(),
+        }
+        .into());
+    }
     // I2: a session belongs to the engine whose collection directory holds
     // its staging; it never applies to another engine's collection.
     if collection.path().parent() != Some(session.context.collection_directory.as_path()) {

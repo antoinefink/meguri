@@ -25,7 +25,7 @@ use meguri_model::clock::Clock;
 use meguri_model::rng::RandomSource;
 use meguri_storage::space::SpaceProvider;
 
-pub use apply::{apply, apply_confirming, read_options};
+pub use apply::{apply, apply_confirming, apply_on, read_options};
 pub use archive::PackageFormat;
 pub use classify::{PackageClass, classify, classify_name};
 pub use session::{ImportSession, inspect};

@@ -25,12 +25,10 @@ impl CoreHost {
         let answer = DeckImportAnswer::default();
         let (engine, output) = (self.engine().clone(), answer.clone());
         let work: MeguriStructureWork = Box::new(move |collection, job| {
-            // The collection the job was admitted on, and no other.
-            let current = engine.collection()?.generation();
-            if current != collection.generation() {
-                return Err(EngineError::StaleGeneration { planned: collection.generation(), current });
-            }
-            let outcome = apkg::apply_confirming(&engine, &session, options, token.as_ref(), true, &job.cancel, &job.progress);
+            // The collection the job was admitted on, and no other: checked
+            // by the apply once it holds the slot.
+            let outcome = apkg::apply_on(&engine, &session, options, token.as_ref(), true, Some(collection.generation()),
+                &job.cancel, &job.progress);
             let told = match &outcome {
                 Ok(_) => Ok(()),
                 Err(ApkgImportError::MediaCommitPending(result)) => Err(EngineError::MediaCommitPending {

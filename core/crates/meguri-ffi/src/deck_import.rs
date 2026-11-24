@@ -613,6 +613,12 @@ impl DeckImportSession {
         if let Some(session) = session { session.end(); }
     }
 }
+impl Drop for DeckImportSession {
+    /// Letting the object go is `close`: an apply still queued is refused.
+    fn drop(&mut self) {
+        self.end();
+    }
+}
 impl DeckImportConfirmation {
     pub(crate) fn token(&self) -> ConfirmationToken { self.token.clone() }
 }

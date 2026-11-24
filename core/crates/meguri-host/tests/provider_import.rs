@@ -341,11 +341,12 @@ fn a_failure_reported_after_the_commit_keeps_the_rows_and_leaves_a_structural_up
     let task = rig.host.start_meguri_structure_save(s::source(&rig.connection, &script), first, true).unwrap();
     assert!(matches!(*s::drive(&rig.host, &task), O::NotSaved(Stop::Refused(_))));
     let ApkgImportError::ConfirmationRequired { token, .. } = refusal(&answer) else { panic!("asks first") };
-    let (import, _) = rig.host.deck_import_work(session, i::OFF, Some(*token));
+    let (import, kept) = rig.host.deck_import_work(session, i::OFF, Some(*token));
     let work: MeguriStructureWork = Box::new(move |collection, job| { import(collection, job)?; Err(pending(2)) });
     let script = r::Script::new(s::quiet_round(&rig.host));
     let task = rig.host.start_meguri_structure_save(s::source(&rig.connection, &script), work, true).unwrap();
     assert!(matches!(*s::drive(&rig.host, &task), O::Saved(U::Pending(P::Failed))));
+    assert_eq!(kept.lock().unwrap().clone().unwrap().unwrap().counts.notes_added, 1, "the result is kept for the sheet");
     script.assert_done();
     assert!(script.bodies(Method::Upload).is_empty());
     assert!(record(&rig.host) && rig.host.meguri_structure_upload_pending().unwrap());
