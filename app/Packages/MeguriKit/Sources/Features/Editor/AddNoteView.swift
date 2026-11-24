@@ -168,30 +168,19 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
     let host: FieldEditorHost?
     let decisions: Decisions
     let attemptClose: () -> Void
+    /// Mac: Edit Note is a window-modal sheet (N20.8, option A): the title
+    /// over its subtitle, and Cancel beside Done at the bottom trailing
+    /// corner, as every Mac sheet places them. Add keeps its panel's header.
+    var sheet = false
     @ViewBuilder let cancel: () -> Cancel
     @ViewBuilder let confirm: () -> Confirm
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         #if os(macOS)
-        VStack(spacing: 0) {
-            HStack {
-                title.font(.headline)
-                if let subtitle {
-                    Text(verbatim: subtitle).foregroundStyle(.secondary)
-                        .accessibilityIdentifier(subtitleIdentifier)
-                }
-                Spacer()
-                cancel()
-            }
-            .padding()
-            Divider()
-            content()
-            Divider()
-            HStack { modeToggle; Spacer(); confirm() }.padding()
+        Group {
+            if sheet { sheetBody } else { panelBody }
         }
-        // The page's own background, so the fields and their form read as one surface.
-        .background(Color(nsColor: .textBackgroundColor))
         .modifier(decisions)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
@@ -230,6 +219,43 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
     }
     #endif
     #if os(macOS)
+    private var panelBody: some View {
+        VStack(spacing: 0) {
+            HStack {
+                title.font(.headline)
+                if let subtitle { subtitleText(subtitle) }
+                Spacer()
+                cancel()
+            }
+            .padding()
+            Divider()
+            content()
+            Divider()
+            HStack { modeToggle; Spacer(); confirm() }.padding()
+        }
+        // The page's own background, so the fields and their form read as one surface.
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+    /// The sheet keeps the window's own background; the page draws the
+    /// fields' grouped box on it (`FieldEditor/page.html`).
+    private var sheetBody: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading) {
+                title.font(.headline)
+                if let subtitle { subtitleText(subtitle).font(.subheadline) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            content()
+            Divider()
+            HStack { modeToggle; Spacer(); cancel(); confirm() }.padding()
+        }
+        .frame(minWidth: 520, idealWidth: 640, maxWidth: 900, minHeight: 420, idealHeight: 640, maxHeight: .infinity)
+    }
+    private func subtitleText(_ subtitle: String) -> some View {
+        Text(verbatim: subtitle).foregroundStyle(.secondary)
+            .accessibilityIdentifier(subtitleIdentifier)
+    }
     /// The one mode control, for the field that has focus (⇧⌘X does the same).
     @ViewBuilder private var modeToggle: some View {
         if let host {

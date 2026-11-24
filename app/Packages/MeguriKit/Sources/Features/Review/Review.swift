@@ -61,15 +61,10 @@ public struct ReviewView: View {
                 stateContent
             }
         }
-        #if os(iOS)
+        // N20.8: a sheet on every platform; on the Mac it drops from the
+        // window's title bar and holds the window (and its Back to Decks)
+        // while it shows. The review's input is held meanwhile (N11.1).
         .modifier(ReviewEditNotePresentation(editNote: editNote))
-        #else
-        // N20.8: on the Mac the form is a panel over the card, which owns the
-        // keys while it shows (the review's input is held, N11.1).
-        .overlay {
-            if let editNote, editNote.flow.isPresented { editNote.form }
-        }
-        #endif
         .onChange(of: model.leechAnnouncement?.id) { _, id in
             guard id != nil, let text = model.leechAnnouncement?.text else { return }
             AccessibilityNotification.Announcement(text).post()
@@ -301,6 +296,9 @@ struct ReviewLayout<Card: View>: View {
                         .labelStyle(.iconOnly)
                 }
                 .help(Text("Back to Decks", bundle: .module))
+                // N20.8: never ends the review under an open Edit Note; its
+                // sheet holds the window, and this states it as well.
+                .disabled(model.editingNote)
                 .accessibilityIdentifier("review.session.close")
             }
             ToolbarSpacer()
@@ -448,27 +446,44 @@ extension EnvironmentValues {
     @Entry var reviewAnswerAreaTop: CGFloat? = nil
 }
 
-#if os(iOS)
 /// Edit Note's form as Add Note's is placed (N17.1): a sheet, or the whole
 /// screen on an iPhone at regular width. A fold moves the same draft and
 /// page to the other presentation; the swipe down asks as Cancel does.
+/// Mac: a window-modal sheet (user-approved 2026-11-24, option A).
 private struct ReviewEditNotePresentation: ViewModifier {
     let editNote: ReviewEditNote?
+    #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     private var coversScreen: Bool {
         AddNotePresentation.coversScreen(phone: UIDevice.current.userInterfaceIdiom == .phone, regularWidth: sizeClass == .regular)
     }
+    #else
+    private let coversScreen = false
+    // A Mac sheet takes these from its own window, not from the presenter
+    // (app/AGENTS.md): the form gets the review's again.
+    @Environment(\.locale) private var locale
+    @Environment(\.timeZone) private var timeZone
+    @Environment(\.appClock) private var clock
+    #endif
     private func shown(cover: Bool) -> Binding<Bool> {
         Binding(get: { editNote?.flow.isPresented == true && coversScreen == cover },
                 set: { if !$0, coversScreen == cover, let flow = editNote?.flow, flow.isPresented { Task { await flow.requestCancel() } } })
     }
     func body(content: Content) -> some View {
+        #if os(iOS)
         content
             .sheet(isPresented: shown(cover: false)) { editNote?.form }
             .fullScreenCover(isPresented: shown(cover: true)) { editNote?.form }
+        #else
+        content.sheet(isPresented: shown(cover: false)) {
+            editNote?.form
+                .environment(\.locale, locale)
+                .environment(\.timeZone, timeZone)
+                .environment(\.appClock, clock)
+        }
+        #endif
     }
 }
-#endif
 
 /// The session's progress as a thin grey bar: no text, no accent colour,
 /// and not a control (N16.1).

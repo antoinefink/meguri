@@ -20,18 +20,24 @@ textarea { display: block; box-sizing: border-box; width: 100%; min-height: 6em;
 #hint { margin: 8px 16px 0; font: -apple-system-footnote; color: GrayText; color: -apple-system-secondary-label; }
 #hint:empty { display: none; }
 [hidden] { display: none !important; }
-/* The Mac form: names in a leading column, right-aligned, beside their boxes. */
-html.mac { background: Canvas; }
-html.mac body { padding: 0 20px 12px; background: Canvas; }
-html.mac main { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 8px; row-gap: 10px; align-items: start; }
-html.mac section { display: contents; }
-html.mac header { grid-column: 1; text-align: end; }
-html.mac .label { display: inline-block; min-height: 0; padding: 5px 0; font: -apple-system-body; font-weight: 400; text-align: end; color: CanvasText; }
-html.mac .fieldBoundary, html.mac textarea { grid-column: 2; min-height: 28px; padding: 4px 7px; border-radius: 6px;
-    border: 1px solid GrayText; border-color: -apple-system-separator; background: Canvas; background: -apple-system-text-background; }
-html.mac .fieldBoundary:focus-within, html.mac textarea:focus { outline: 3px solid Highlight; outline-color: -webkit-focus-ring-color; outline-offset: -1px; }
-html.mac textarea { min-height: 6em; resize: vertical; }
-html.mac #hint { grid-column: 2; margin: 0; }
+/* The Mac form (2026-11-24, option A): one grouped box, as in System
+   Settings. Each field's name sits above it in the small secondary style,
+   a hairline between fields; a field shows a box only while it has focus.
+   The page paints no background: the sheet's or panel's shows through. */
+html.mac, html.mac body { background: transparent; }
+html.mac body { padding: 0 20px 16px; }
+html.mac main { display: block; border: 1px solid GrayText; border-color: -apple-system-separator; border-radius: 10px; overflow: hidden;
+    background: Canvas; background: -apple-system-text-background; }
+html.mac section { display: block; padding: 8px 12px 10px; }
+html.mac section:not([hidden]) ~ section:not([hidden]) { border-top: 1px solid GrayText; border-top-color: -apple-system-separator; }
+html.mac header { text-align: start; }
+html.mac .label { display: block; width: 100%; min-height: 0; padding: 0 0 3px; font: 11px -apple-system; font-weight: 600; text-align: start;
+    overflow-wrap: anywhere; color: GrayText; color: -apple-system-secondary-label; }
+html.mac .fieldBoundary { min-height: 0; padding: 2px 4px; margin: 0 -4px; border: 0; border-radius: 5px; background: transparent; }
+html.mac .fieldBoundary:focus-within, html.mac textarea:focus { outline: 3px solid Highlight; outline-color: -webkit-focus-ring-color; outline-offset: 0; }
+html.mac textarea { min-height: 6em; padding: 4px; margin: 0 -4px; width: calc(100% + 8px); border: 0; border-radius: 5px; resize: vertical;
+    font: 12px ui-monospace, monospace; color: CanvasText; background: -apple-system-control-background; }
+html.mac #hint { margin: 8px 4px 0; }
 /* Browse's inspector (Option A): a plain list. Each field's name on its own
    line in the small secondary style, its text at the system body size under
    it, no box until it is edited, a hairline between fields. The page never

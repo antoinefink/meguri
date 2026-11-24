@@ -14,12 +14,14 @@ import WebKit
 @Suite(.serialized) struct BrowseInspectorPageTests {
     private static let stored = "say [sound:kip wurl.mp3] then <b>tem</b> [sound:a&amp;b.ogg]<img src=\"zant.png\">"
 
-    @Test func soundChipsKeepTheFieldsBytesThroughTheSourceAndAnEdit() async throws {
+    /// Edit Note's page (option A, 2026-11-24) shows the same chips: `browsing` false.
+    @Test(arguments: [true, false])
+    func soundChipsKeepTheFieldsBytesThroughTheSourceAndAnEdit(browsing: Bool) async throws {
         let note = NoteRecord(id: 5, notetypeId: 42, fields: [Self.stored, "plain"], tags: [], guid: "g")
         let draft = try NoteEditorDraft(editing: note, notetype: Self.type(), deck: DeckNameEntry(id: 1, fullName: "D", filtered: false),
                                         generation: 1)
         let host = try FieldEditorHost(draft: draft, isCurrent: { true })
-        host.browsing = true
+        host.browsing = browsing
         host.webView.frame = CGRect(x: 0, y: 0, width: 320, height: 400)
         defer { host.shutDown() }
         try await host.start()
@@ -42,6 +44,7 @@ import WebKit
         let again = try await host.webView.callAsyncJavaScript("return document.querySelectorAll('textarea')[0].value;",
                                                                contentWorld: .page) as? String
         #expect(again == edited)
+        guard browsing else { return }
         // The page reports its height for the pane's scroll view.
         for _ in 0..<200 where host.contentHeight == 0 { try await Task.sleep(for: .milliseconds(10)) }
         #expect(host.contentHeight > 0 && host.contentHeight < 400, "the page reports its fields' height, not its frame's")

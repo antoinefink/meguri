@@ -17,7 +17,7 @@ public struct EditNoteView: View {
     public var body: some View {
         NoteFormChrome(title: Text("Edit Note", bundle: .module), subtitle: subtitle,
                        subtitleIdentifier: "review.editCurrent.subtitle", identifier: "review.editCurrent",
-                       host: host, decisions: EditNoteDecisions(flow: flow), attemptClose: cancel) {
+                       host: host, decisions: EditNoteDecisions(flow: flow), attemptClose: cancel, sheet: true) {
             cancelButton
         } confirm: {
             doneButton
@@ -111,6 +111,11 @@ extension ReviewCollection {
     /// Every Edit Note entry calls this: the pencil now, Card › Edit Note,
     /// the context menu and E with them (N4).
     @discardableResult public func openEditNote() async -> Bool {
-        await editNoteFlow.open { draft, current in try FieldEditorHost(draft: draft, isCurrent: current) }
+        await editNoteFlow.open { [media] draft, current in
+            let host = try FieldEditorHost(draft: draft, isCurrent: current)
+            // Option A (2026-11-24): the fields' thumbnails and sound chips, as in Browse.
+            host.show(media: media)
+            return host
+        }
     }
 }
