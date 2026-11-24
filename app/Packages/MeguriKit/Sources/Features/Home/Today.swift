@@ -36,7 +36,13 @@ public nonisolated struct TodayDecks: Sendable {
         }
         for node in nodes { visit(node, ancestors: []) }
         entries = found
-        totals = nodes.reduce(ReviewCounts(new: 0, learning: 0, review: 0)) {
+        totals = Self.totals(nodes: nodes)
+    }
+
+    /// Totals need only the roots: their counts already include descendants and
+    /// daily limits. Do not build waiting-deck entries for a heading or badge.
+    public static func totals(nodes: [CountedDeckNode]) -> ReviewCounts {
+        nodes.reduce(ReviewCounts(new: 0, learning: 0, review: 0)) {
             ReviewCounts(new: $0.new + $1.counts.new, learning: $0.learning + $1.counts.learning,
                          review: $0.review + $1.counts.review)
         }
@@ -106,7 +112,7 @@ public struct TodayView: View {
                 .modifier(TodayTitle(enabled: besideDeckList))
         } else {
             let decks = collection.homeDecks
-            let totals = TodayDecks(nodes: decks).totals
+            let totals = TodayDecks.totals(nodes: decks)
             TodaySummaryContent(
                 summary: TodaySummary(nodes: decks, studied: collection.homeStudiedToday, previous: previous),
                 nextLearningReadyAt: collection.homeNextLearningReadyAt, totals: totals,

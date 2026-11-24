@@ -835,6 +835,9 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete-content PUBLIC review: s-20261124T142356Z-950aa36a, 2026-11-24.
+    'app/Packages/MeguriKit/Sources/Features/Stats/Charts/StatsChartFormat.swift':
+        '1cf8eb49077cdd24dcc2303c5063cdc326376f8dff8a98ccc33cc7c56acb52fa',
     # Complete-content PUBLIC review: Mac heatmap history, 2026-11-24.
     'app/Packages/MeguriKit/Sources/HeatmapKit/ActivityGrid.swift':
         '06bdb1cf1bb568541feedda2187a1a67d37bfe33353c25b1672419edf06da417',
@@ -1361,7 +1364,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'cf1988b435f58576bedcb431520f9d98a1161aa2c075a1c8d6b59ffebb207429',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '125a87c0294d5e6535bcc729ed24d21034d4a58615f60747d4765b21ac3c8578',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',

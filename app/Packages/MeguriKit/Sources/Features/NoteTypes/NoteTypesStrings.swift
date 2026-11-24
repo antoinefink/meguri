@@ -131,6 +131,11 @@ public enum NoteTypesStrings {
         }
     }
 
+    /// The help of + in the card types column's bar: what it duplicates.
+    public static func duplicateNamed(_ name: String, locale: Locale) -> String {
+        String(localized: "noteTypes.cards.duplicateNamed", defaultValue: "Duplicate “\(name)”", bundle: .module, locale: locale)
+    }
+
     /// W7's line: where ("Recognition · Front, line 3."), what, and for a
     /// yellow issue the reason when one field decides it.
     public static func issue(_ issue: NoteTypeLiveIssue, locale: Locale) -> (location: String, message: String, reason: String?) {

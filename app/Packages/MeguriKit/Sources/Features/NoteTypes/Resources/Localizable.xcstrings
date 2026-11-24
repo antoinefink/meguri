@@ -161,16 +161,6 @@
         }
       }
     },
-    "noteTypes.cards.deleteSelected": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Delete Card Type"
-          }
-        }
-      }
-    },
     "noteTypes.cards.deleted": {
       "localizations": {
         "en": {
@@ -187,6 +177,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Duplicate"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.duplicateNamed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Duplicate “%@”"
           }
         }
       }
@@ -217,6 +217,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Move Down"
+          }
+        }
+      }
+    },
+    "noteTypes.cards.more": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More"
           }
         }
       }

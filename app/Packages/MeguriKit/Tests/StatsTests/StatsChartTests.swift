@@ -88,6 +88,26 @@ import Testing
         #expect(Self.stack([[nil, nil, nil]]).isSparse)
     }
 
+    /// S8.5 counts bins with positive data, not segments or non-nil values. The plot shares
+    /// this decision across all its marks, and must renew it when a new data value arrives.
+    @MainActor @Test func barWidthsFollowPositiveBinsAcrossSeriesAndDataChanges() {
+        func plot(_ data: StatsChartData, phase: StatsPlotPhase = .ready) -> StatsChartPlot {
+            StatsChartPlot(box: "reviewsOverTime", data: data, phase: phase, size: .lead, summary: "",
+                           selection: .constant(.none), showInBrowse: nil, separatesSeries: nil)
+        }
+        let sparse = Self.stack([[nil, 4, 0], [0, 2, 3]])
+        let dense = Self.stack([[1, 4, 0], [0, 2, 3]])
+        #expect(plot(sparse).barWidthIsFixed, "Three segments in only two positive bins keep fixed-width bars")
+        #expect(!plot(dense).barWidthIsFixed, "The third positive bin restores proportional bars")
+        #expect(plot(Self.stack([[nil, 0, -1]])).barWidthIsFixed, "Zeros, nils and negatives do not fill a bin")
+        var single = sparse
+        single.series = [StatsSeries(id: "s", name: "S", color: .measure, mark: .bar, values: [1, 2, 3])]
+        #expect(!plot(single).barWidthIsFixed, "Single bars use the same threshold")
+        single.series[0].values[2] = nil
+        #expect(plot(single).barWidthIsFixed, "New data can become sparse again")
+        #expect(!plot(sparse, phase: .loading(nil)).barWidthIsFixed, "A placeholder has no bars to size")
+    }
+
     @Test func aChartKeepsToOneColourFamily() {
         #expect(StatsSeriesColor.keepsOneFamily([.mature, .young, .relearning, .learning, .filtered]))
         #expect(StatsSeriesColor.keepsOneFamily([.again, .hard, .good, .easy]))
@@ -117,6 +137,35 @@ import Testing
     }
 
     // MARK: Names and labels (S8.7)
+
+    @Test func ephemeralAndBackgroundFormatsShareUntilSystemPreferencesChange() async {
+        for notification in [NSLocale.currentLocaleDidChangeNotification, .NSSystemTimeZoneDidChange] {
+            let before = Self.format
+            let date = before.dateFormatter(template: "dMMM")
+            let duration = before.durationFormatter(.second)
+            #expect(Self.format.dateFormatter(template: "dMMM") === date)
+            #expect(Self.format.durationFormatter(.second) === duration)
+            let background = await Task.detached { [locale = Self.locale, calendar = Self.calendar, now = Self.now] in
+                StatsChartFormat(locale: locale, calendar: calendar, now: now)
+            }.value
+            #expect(background.dateFormatter(template: "dMMM") === date)
+            #expect(background.durationFormatter(.second) === duration)
+
+            // Identical fixed inputs still need fresh immutable formatters after a system
+            // format override; no preference mutation or elapsed-time assertion is needed.
+            NotificationCenter.default.post(name: notification, object: nil)
+            let after = Self.format
+            #expect(after.dateFormatter(template: "dMMM") !== date)
+            #expect(after.durationFormatter(.second) !== duration)
+            // A superseded background render may create a formatter only after the change.
+            let lateDate = background.dateFormatter(template: "yMMMM")
+            let lateDuration = background.durationFormatter([.hour, .minute])
+            #expect(after.dateFormatter(template: "yMMMM") !== lateDate)
+            #expect(after.durationFormatter([.hour, .minute]) !== lateDuration)
+            #expect(Self.format.dateFormatter(template: "yMMMM") === after.dateFormatter(template: "yMMMM"))
+            #expect(Self.format.durationFormatter([.hour, .minute]) === after.durationFormatter([.hour, .minute]))
+        }
+    }
 
     @Test func periodsAreNamedWithTheSystemsShortStyles() {
         let format = Self.format

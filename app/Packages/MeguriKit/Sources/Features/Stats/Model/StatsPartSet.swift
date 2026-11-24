@@ -19,6 +19,23 @@ nonisolated public struct StatsPartSet: Sendable, Hashable, Codable {
     let refresh: UInt64
     /// This set, among every window's and every launch's.
     let id: UUID
+    /// In-memory presentation version. Replacing an already received part also changes it;
+    /// counting parts alone cannot distinguish that update. Not part of the kept file format.
+    var revision: UInt64 { presentation.revision }
+    /// Each disk load gets its own presentation identity too: a saved partial set can have
+    /// gained parts since an earlier load, while still carrying the same request id.
+    var presentationID: UUID { presentation.id }
+    private var presentation = Presentation()
+
+    /// Bookkeeping has no part in the set's public value semantics. Keeping it in one
+    /// ignored member preserves synthesized equality/hashing for every pre-existing field.
+    private struct Presentation: Sendable, Hashable {
+        let id = UUID()
+        var revision: UInt64 = 0
+
+        static func == (_ lhs: Self, _ rhs: Self) -> Bool { true }
+        func hash(into hasher: inout Hasher) {}
+    }
     /// The order this launch made it in; 0 for a set read from the device. Sets of this launch
     /// are newer than kept files whatever the clock says, so a clock set back never hides a
     /// new result behind an old one.
@@ -49,6 +66,7 @@ nonisolated public struct StatsPartSet: Sendable, Hashable, Codable {
         if let header, header != result.header { return false }
         header = result.header
         parts[result.part] = result.outcome
+        presentation.revision &+= 1
         return true
     }
 
