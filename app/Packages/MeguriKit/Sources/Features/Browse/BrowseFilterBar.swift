@@ -17,9 +17,9 @@ import SwiftUI
 struct BrowseFilterBar: View {
     let model: BrowseModel
 
-    /// Filter's kinds, in the suggestions' order (T12.1).
-    private static let kinds: [FilterSection] = [.cardState, .flag, .due, .added, .edited, .studied, .decks, .tags, .notetypes,
-                                                 .cardTypes, .fields]
+    /// Filter's kinds, in Filter By's order (T12.1).
+    private static let kinds: [FilterSection] = [.decks, .tags, .notetypes, .cardTypes, .cardState, .flag, .due, .added, .edited,
+                                                 .studied, .fields]
 
     var body: some View {
         if !model.query.tokens.isEmpty {

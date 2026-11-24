@@ -81,6 +81,9 @@ public struct BrowseSidebar<Header: View>: View {
         }
         .onDisappear { model.disappear() }
         .onChange(of: selection) { _, rows in selectionChanged(rows) }
+        // The rows shown changed: Return and Space never act on a row out of sight.
+        .onChange(of: model.filter) { forgetKeyRow() }
+        .onChange(of: model.folded) { forgetKeyRow() }
     }
 
     /// V6: a user saved search's Rename… and Delete (T13; not the built-ins),
@@ -123,8 +126,13 @@ public struct BrowseSidebar<Header: View>: View {
             keyRow = row
             return
         }
+        // The row the keys stood on is still in the list's selection after a
+        // ⌘-click on another row; it was not clicked.
+        var rows = rows
+        if let keyRow, rows.count > 1 { rows.remove(keyRow) }
+        let clicked = rows.filter { if case .section = $0 { false } else { true } }
         keyRow = nil
-        clickedRow = filters.count == 1 ? filters.first : nil
+        clickedRow = clicked.count == 1 ? clicked.first : nil
         if let section = model.listSelectionChanged(to: rows, click: Self.click()) {
             navigate(section)
             return
@@ -132,6 +140,12 @@ public struct BrowseSidebar<Header: View>: View {
         Task { @MainActor in
             if keyRow == nil, selection != model.listSelection { selection = model.listSelection }
         }
+    }
+
+    private func forgetKeyRow() {
+        keyRow = nil
+        clickedRow = nil
+        if selection != model.listSelection { selection = model.listSelection }
     }
 
     /// T9: Return or Space on the row the keys stand on is a click on it;
