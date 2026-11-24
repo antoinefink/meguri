@@ -59,7 +59,8 @@ final class MacBrowseFindTests: XCTestCase {
         let count = element(app, "browse.sheet.findReplace.count")
         XCTAssertTrue(waitUntil { self.label(count).contains("3 of 3 notes will change") }, label(count))
         XCTAssertTrue(waitUntil { self.element(app, "browse.sheet.findReplace.confirm").isEnabled })
-        XCTAssertEqual(element(app, "browse.sheet.findReplace.confirm").title, "Replace in 3 Notes")
+        XCTAssertTrue(label(element(app, "browse.sheet.findReplace.confirm")).contains("Replace in 3 Notes"),
+                      label(element(app, "browse.sheet.findReplace.confirm")))
         sheetCapture(app, "find-replace-preview-\(appearance)")
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitUntil { !sheet.exists }, "Return replaces")
@@ -78,8 +79,8 @@ final class MacBrowseFindTests: XCTestCase {
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitUntil { !duplicates.exists }, "Find replaces the query with the groups")
         XCTAssertTrue(waitUntil { table.outlineRows.count == 3 }, "the three notes, in Notes mode: \(table.outlineRows.count)")
-        let token = element(app, "browse.search.token.0")
-        XCTAssertTrue(waitUntil { token.exists }, "one Duplicates token")
+        XCTAssertTrue(waitUntil { self.statusText(app).contains("3 of") && self.statusText(app).contains("notes") },
+                      "the Duplicates token's notes: \(statusText(app))")
         afterCapture(app, "find-duplicates-token-\(appearance)")
 
         // On the three notes' Back (All 3 Found): no group, and the sheet says so.

@@ -281,7 +281,8 @@ private struct BrowseFindReplacePreviewView: View {
             Text("browse.findReplace.counting", bundle: .module).foregroundStyle(.secondary)
         case .ready(let preview):
             if preview.changed == 0 {
-                Text("browse.findReplace.noMatches", bundle: .module).foregroundStyle(.secondary)
+                // "No Matches" shows once, in the empty list.
+                Text(verbatim: " ").accessibilityHidden(true)
             } else {
                 Text(verbatim: BrowseFindText.willChange(preview.changed, of: preview.considered, locale: locale))
             }
