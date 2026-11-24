@@ -779,6 +779,8 @@ public final class StatsPageModel {
     private func statusText(_ format: StatsChartFormat) -> String? {
         let shown = StatsBoxID.allCases.compactMap { boxes[$0]?.source }
         if running != nil || !unpublished.isEmpty, !shown.isEmpty { return text.updating }
+        // Nothing shown yet and the read boxes still being written: no status until they publish.
+        if !unpublished.isEmpty { return nil }
         if ended == .completed, let completedAt, timers.now().timeIntervalSince(completedAt) < Self.justNowSpan {
             return text.updatedJustNow
         }
