@@ -466,8 +466,15 @@ struct NoteTypeTemplateEditorColumn: View {
             .labelsHidden()
             .fixedSize()
             .accessibilityIdentifier("noteTypes.cards.part")
+            #if os(macOS)
             .help(partHelp)
             .accessibilityHint(partHelp)
+            #else
+            if part == .styling {
+                Text("noteTypes.editor.shared", bundle: .module)
+                    .foregroundStyle(.secondary)
+            }
+            #endif
             Spacer(minLength: Spacing.xSmall)
             insertMenu
         }
@@ -485,9 +492,11 @@ struct NoteTypeTemplateEditorColumn: View {
         }
     }
 
+    #if os(macOS)
     private var partHelp: Text {
         part == .styling ? Text("noteTypes.editor.shared", bundle: .module) : Text(verbatim: "")
     }
+    #endif
 
     /// N22.7: the card type as a menu in the bar while the lists step aside.
     private var cardTypePicker: some View {
