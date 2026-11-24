@@ -23,10 +23,13 @@ public struct ActivityDays: Sendable, Hashable {
     public let today: Day
     /// Reviews per day; index = days ago, 0 (today) to 370.
     public let counts: [UInt32]
+    /// All studied days when requested by Mac Home. Missing days are zero only
+    /// when this is non-nil; a bounded result does not claim older coverage.
+    public let history: [Int: UInt32]?
 
-    public init(generation: UInt64, schedulerDay: UInt32, nextDayAt: Int64, today: Day, counts: [UInt32]) {
+    public init(generation: UInt64, schedulerDay: UInt32, nextDayAt: Int64, today: Day, counts: [UInt32], history: [Int: UInt32]? = nil) {
         self.generation = generation; self.schedulerDay = schedulerDay; self.nextDayAt = nextDayAt
-        self.today = today; self.counts = counts
+        self.today = today; self.counts = counts; self.history = history
     }
 
     init(_ raw: MeguriCoreBindings.ActivityCounts) {
@@ -35,11 +38,28 @@ public struct ActivityDays: Sendable, Hashable {
                              weekday: Int(raw.dayZeroWeekday) + 1),
                   counts: raw.perDay)
     }
+
+    init(_ raw: MeguriCoreBindings.ActivityHistoryCounts) {
+        let window = ActivityDays(raw.window)
+        let history = Dictionary(raw.history.compactMap { day in
+            Int(exactly: day.daysAgo).map { ($0, day.count) }
+        }, uniquingKeysWith: { _, last in last })
+        self.init(generation: window.generation, schedulerDay: window.schedulerDay, nextDayAt: window.nextDayAt,
+                  today: window.today, counts: window.counts, history: history)
+    }
 }
 
 public protocol ActivityService: Sendable {
     /// The whole collection (`deckID` nil) or a deck and its subdecks.
     func heatmap(deckID: Int64?) async throws(BridgeError) -> ActivityDays
+    /// Optional all-history capability for Mac Home. Older conformers remain bounded.
+    func heatmapHistory(deckID: Int64?) async throws(BridgeError) -> ActivityDays
+}
+
+extension ActivityService {
+    public func heatmapHistory(deckID: Int64?) async throws(BridgeError) -> ActivityDays {
+        try await heatmap(deckID: deckID)
+    }
 }
 
 /// Reads on the query lane and the core's query reader, never the interactive lane or the
@@ -53,6 +73,13 @@ public struct CoreActivityService: ActivityService {
         return try await QueryLane.shared.call(.activityHeatmap) {
             if Task.isCancelled { throw BridgeError.cancelled }
             return ActivityDays(try activityHeatmap(deckId: deckID))
+        }
+    }
+    public func heatmapHistory(deckID: Int64?) async throws(BridgeError) -> ActivityDays {
+        if Task.isCancelled { throw .cancelled }
+        return try await QueryLane.shared.call(.activityHeatmapHistory) {
+            if Task.isCancelled { throw BridgeError.cancelled }
+            return ActivityDays(try activityHeatmapHistory(deckId: deckID))
         }
     }
 }
