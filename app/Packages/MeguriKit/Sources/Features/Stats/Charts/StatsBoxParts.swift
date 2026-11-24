@@ -184,7 +184,9 @@ struct StatsBoxFootnote: View {
         Text(verbatim: ready ? footnote ?? " " : " ")
             .font(.footnote)
             .foregroundStyle(.secondary)
-            .lineLimit(dynamicTypeSize.isAccessibilitySize ? lines * 3 : lines, reservesSpace: true)
+            // Its lines kept from the first frame; at a phone's width a longer one wraps onto a
+            // further line rather than being cut.
+            .lineLimit(lines...(dynamicTypeSize.isAccessibilitySize ? lines * 3 : lines + 1))
     }
 }
 

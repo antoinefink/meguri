@@ -14,8 +14,8 @@ extension TestHooks.StatsRoutes {
     ///   Due and the Memory boxes filled, the others with their progress); `cold`: nothing back.
     /// - `empty`: no review yet (S12.3); `failed`: the section's parts fail alone (S12.8).
     /// - `pinned`: a pinned selection in every box of the section, with its callout.
-    /// By Deck's sorting and a row's click are real clicks (`stats.box.byDeck.sort.<column>`,
-    /// `stats.box.byDeck.row.<id>`), not routes.
+    /// By Deck's sorting and a row's click are real clicks (`stats.byDeck.sort.<column>`,
+    /// `stats.byDeck.row.<id>`), not routes.
     static func registerSections(in registry: inout TestHooks.RouteRegistry) {
         registry.registerShell("stats/chart/cards-over-time/1m") { _ in section(.cardsOverTime, period: .oneMonth) }
         registry.registerShell("stats/chart/cards-over-time/3m") { _ in section(.cardsOverTime, period: .threeMonths) }

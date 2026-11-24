@@ -5,7 +5,7 @@ import SwiftUI
 /// What a box's data is doing (S8.5, S10.3, S12.8). The box draws every phase
 /// at the same size: the title, the legend and the figure labels stay; only the
 /// plot area and the values change.
-public enum StatsBoxPhase: Hashable, Sendable {
+nonisolated public enum StatsBoxPhase: Hashable, Sendable {
     case ready
     /// Not read yet: the system's small progress indicator in the plot area,
     /// determinate when the core reports a fraction (S10.3).
@@ -18,7 +18,7 @@ public enum StatsBoxPhase: Hashable, Sendable {
 }
 
 /// The large figure and its sentence (N25.4 part 2).
-public struct StatsBoxFigure: Hashable, Sendable {
+nonisolated public struct StatsBoxFigure: Hashable, Sendable {
     public var value: String
     public var sentence: String
 
@@ -30,7 +30,7 @@ public struct StatsBoxFigure: Hashable, Sendable {
 
 /// One of the two to four small figures (N25.4 part 5). Its label shows in every
 /// phase; its value only when the box is ready.
-public struct StatsSmallFigure: Identifiable, Hashable, Sendable {
+nonisolated public struct StatsSmallFigure: Identifiable, Hashable, Sendable {
     public var id: String { label }
     public var label: String
     public var value: String?

@@ -5,7 +5,7 @@ import Foundation
 /// the series, the figure and its sentence, the small figures and the footnote. Pure: the same
 /// set, period, switches and decks give the same content, so the model can rebuild a box at any
 /// time with no core call (S3.2).
-struct StatsPresenter {
+nonisolated struct StatsPresenter {
     /// What a box is when its set gives no value for the period yet (All's `allTime` ranges in a
     /// `last12Months` set): the model shows its progress.
     enum Outcome {
@@ -749,7 +749,7 @@ struct StatsPresenter {
 }
 
 /// The streaks of S7.5 from `activity_days` (H11).
-struct StatsStreaks {
+nonisolated struct StatsStreaks {
     /// Day (folded at 0) → reviews, only studied days.
     let counts: [Int: Int]
     let current: Int
@@ -778,7 +778,7 @@ struct StatsStreaks {
 }
 
 /// `stats/graph-presentation` P4.5's interpolated quantile over a count map.
-enum StatsQuantile {
+nonisolated enum StatsQuantile {
     static func interpolated(_ map: StatsSparseMap<Int>, _ p: Double) -> Double? {
         let entries = zip(map.keys, map.values).filter { $0.1 > 0 }
         let n = entries.reduce(0) { $0 + $1.1 }
@@ -801,7 +801,7 @@ enum StatsQuantile {
 }
 
 /// The series of each box, with or without values: a box not ready keeps its legend (S10.3).
-struct StatsSeriesKit {
+nonisolated struct StatsSeriesKit {
     let text: StatsText
 
     func knowledgeData(axis: StatsTimeAxis?, known: [Double?], studied: [Double?], gapTexts: [String?]? = nil) -> StatsChartData {
@@ -971,7 +971,7 @@ struct StatsSeriesKit {
 
 // MARK: - The strip (S6)
 
-extension StatsPresenter {
+nonisolated extension StatsPresenter {
     /// One strip figure from this set; nil when the set lacks its part.
     func strip(_ id: StatsStripID) -> StatsStripFigure? {
         switch id {

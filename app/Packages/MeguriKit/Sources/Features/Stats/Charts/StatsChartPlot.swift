@@ -10,7 +10,7 @@ import UIKit
 /// whether a click, a touch or the keyboard pinned it. A caller that shares one
 /// selection between plots (Time of Day's two panels) or clears it (a switch, the
 /// period, a click outside) holds it; otherwise the plot keeps its own.
-public struct StatsChartSelection: Hashable, Sendable {
+nonisolated public struct StatsChartSelection: Hashable, Sendable {
     public var bin: Int?
     public var pinned: Bool
 
@@ -20,12 +20,6 @@ public struct StatsChartSelection: Hashable, Sendable {
     }
 
     public static let none = StatsChartSelection()
-
-    /// Whether losing the plot's focus unpins: only a ready plot that lost it
-    /// to a click elsewhere (S8.3), never one a loading phase made unfocusable.
-    public static func unpinsOnFocusLoss(focused: Bool, pinned: Bool, ready: Bool) -> Bool {
-        !focused && pinned && ready
-    }
 
     /// The selection carried from the last ready bins to new ones (S10.2):
     /// kept while the selected period is still there (at its new index),
@@ -180,6 +174,12 @@ struct StatsChartPlot: View {
     @FocusState private var focused: Bool
     /// The bins of the last ready data, kept across a loading phase.
     @State private var lastReadyBins: [StatsPeriod] = []
+    #if os(iOS)
+    /// A hold under way, and when the last one ended: the tap that the same lift ends, whenever
+    /// SwiftUI delivers it, must not clear what the hold chose.
+    @State private var holding = false
+    @State private var holdEnded: Date?
+    #endif
 
     private var format: StatsChartFormat { StatsChartFormat(locale: locale, calendar: calendar, now: clock.now()) }
     private var separated: Bool { separatesSeries ?? differentiateWithoutColor }
@@ -225,15 +225,10 @@ struct StatsChartPlot: View {
                 lastReadyBins = new
             }
             .onAppear { if !data.bins.isEmpty { lastReadyBins = data.bins } }
-            #if os(macOS)
-            .onChange(of: focused) {
-                // A click elsewhere that takes the focus unpins (S8.3); a
-                // loading phase, which makes the plot unfocusable, does not.
-                if StatsChartSelection.unpinsOnFocusLoss(focused: focused, pinned: selection.pinned, ready: isReady) {
-                    selection = .none
-                }
-            }
-            #endif
+            // Losing the focus never unpins (Tab moves on and the pin stays, 2026-11-24): a click
+            // on another chart pins there and unpins this one, a click on the page outside every
+            // chart unpins all, Esc clears: this plot's pin here, a pin focus has left from the
+            // page (S8.3).
             .accessibilityElement(children: .contain)
             .accessibilityLabel(summary)
             // The pinned period (S8.3), as the callout names it.
@@ -628,9 +623,17 @@ struct StatsChartPlot: View {
             // The selection stays after the finger lifts, so the callout's
             // button can be tapped; a short tap clears it.
             .gesture(StatsHoldGesture { location in
+                holding = true
                 selection = StatsChartSelection(bin: bin(at: location.x + plot.minX, proxy: proxy, plot: plot), pinned: true)
+            } ended: {
+                if holding { holdEnded = Date() }
+                holding = false
             })
-            .simultaneousGesture(TapGesture().onEnded { selection = .none })
+            // A tap ends on lift however long the finger stayed: only one with no hold clears.
+            .simultaneousGesture(TapGesture().onEnded {
+                let afterHold = holding || holdEnded.map { Date().timeIntervalSince($0) < 0.5 } == true
+                if !afterHold { selection = .none }
+            })
             #endif
             .accessibilityHidden(true)
     }
@@ -698,6 +701,7 @@ struct StatsChartPlot: View {
 /// a still finger and beats on a swipe.
 struct StatsHoldGesture: UIGestureRecognizerRepresentable {
     let changed: (CGPoint) -> Void
+    var ended: () -> Void = {}
 
     func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
         let recognizer = UILongPressGestureRecognizer()
@@ -708,6 +712,7 @@ struct StatsHoldGesture: UIGestureRecognizerRepresentable {
     func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
         switch recognizer.state {
         case .began, .changed: changed(context.converter.localLocation)
+        case .ended, .cancelled, .failed: ended()
         default: break
         }
     }

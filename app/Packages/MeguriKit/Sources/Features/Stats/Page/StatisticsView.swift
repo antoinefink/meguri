@@ -42,7 +42,8 @@ public struct StatisticsView: View {
     public var body: some View {
         content
             .navigationTitle(Text("stats.title", bundle: .module))
-            .navigationSubtitle(Text(verbatim: model.subtitle ?? ""))
+            // The narrow page's shorter line never truncates ("· Update…" on the iPhone, N25.6).
+            .navigationSubtitle(Text(verbatim: (narrow ? model.compactSubtitle : model.subtitle) ?? ""))
             .toolbar {
                 #if os(macOS)
                 // N25.2: after the title, before the trailing sync button.
@@ -245,27 +246,29 @@ private struct StatsPageScroll: View {
                 // gesture and wins over this one, and buttons and controls keep theirs.
                 .contentShape(Rectangle())
                 .onTapGesture { model.unpinAll() }
+                // Esc from wherever focus is on the page clears a pin focus has left (Tab keeps
+                // it): a plot's own Esc handles its own selection first.
+                .onKeyPress(.escape) {
+                    guard model.hasPin else { return .ignored }
+                    model.unpinAll()
+                    return .handled
+                }
                 #endif
                 .scrollTargetLayout()
             }
             .modifier(StatsScrollPosition(navigation: navigation))
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport.height = $0 }
             .environment(\.statsScrolling, scrolling)
-            .environment(\.statsKeepInPlace, StatsKeepInPlace { id, onScreenY, change in
+            .environment(\.statsKeepInPlace, StatsKeepInPlace { id, place, change in
                 // The change lays out, then the page scrolls so the view `id` (the control that
                 // made it) is back where it was on the screen: what is under it stays put and
-                // the grid grows or shrinks above it.
+                // the grid grows or shrinks above it. An anchor u puts the point u down the view
+                // at u down the visible area, so its top lands at u × (visible − its height).
                 change()
                 Task { @MainActor in
                     await Task.yield()
-                    var y = onScreenY()
-                    if y == nil {
-                        // The tap's own gesture may end just after the button acts.
-                        try? await Task.sleep(for: .milliseconds(30))
-                        y = onScreenY()
-                    }
-                    let height = viewport.height
-                    let unit = y.map { height > 0 ? min(max($0 / height, 0), 1) : 0.5 } ?? 0.5
+                    let room = viewport.height - (place?.height ?? 0)
+                    let unit = place.map { room > 0 ? min(max($0.minY / room, 0), 1) : 0.5 } ?? 0.5
                     proxy.scrollTo(id, anchor: UnitPoint(x: 0.5, y: unit))
                 }
             })

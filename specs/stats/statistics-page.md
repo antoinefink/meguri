@@ -264,7 +264,7 @@ No chart has a second y axis. A running total is in the callout (Reviews Due's "
 
 ### S8.3 Selection
 
-- Mac: the pointer over a chart shows a vertical rule and a callout; a click pins it; Esc, or a click outside, unpins. Changed 2026-11-23 (as built in PR #148): "a click outside" is a click on another chart, which pins there and unpins every other box, or a click on the page outside every chart, which unpins all. A click outside every chart moves no keyboard focus, so it unpins by this rule, not by taking the focus; a click on a plot pins and focuses that plot. As built, a pinned plot that loses the keyboard focus to another control (Tab) also unpins.
+- Mac: the pointer over a chart shows a vertical rule and a callout; a click pins it; Esc, or a click outside, unpins. Changed 2026-11-23 (as built in PR #148): "a click outside" is a click on another chart, which pins there and unpins every other box, or a click on the page outside every chart, which unpins all. A click outside every chart moves no keyboard focus, so it unpins by this rule, not by taking the focus; a click on a plot pins and focuses that plot. As built, a pinned plot that loses the keyboard focus to another control (Tab) also unpins. Changed 2026-11-24 (decided by Claude (coordinator) under Antoine's delegation; the Statistics follow-up PR #192): losing the focus no longer unpins: Tab moves on and the pin stays; a click on another chart, a click on the page outside every chart and Esc unpin.
 - Touch: touch and hold, then drag along the chart; a plain vertical swipe still scrolls the page.
 - The callout names the period (the date, "Week of <date>", or the month and year), lists every series with its swatch, name and value, and ends with Show in Browse when the item can be listed (S8.4). Changing a switch or the period clears the selection.
 - Keyboard: S14.
@@ -328,7 +328,7 @@ On a first open, a deck or period never viewed, or after the collection was repl
 
 ### S10.4 The status in the subtitle
 
-The toolbar subtitle (Mac) or the navigation subtitle (touch) reads "<n> cards in <m> decks" (S3.1), followed while a refresh runs over a shown result by " · Updating…". After a refresh completes it reads " · Updated just now" for one minute, then nothing. When the shown numbers are kept ones and the refresh could not finish (an error, or the page left), it reads " · Updated <time>", the time the shown result was read (the short time today, else the date). Never a blocking overlay.
+The toolbar subtitle (Mac) or the navigation subtitle (touch) reads "<n> cards in <m> decks" (S3.1) (on the narrow page, N25.6, "<n> cards", so that with its status it never truncates under the inline title; Changed 2026-11-24 (decided by Claude (coordinator) under Antoine's delegation; the Statistics follow-up PR #192)), followed while a refresh runs over a shown result by " · Updating…". After a refresh completes it reads " · Updated just now" for one minute, then nothing. When the shown numbers are kept ones and the refresh could not finish (an error, or the page left), it reads " · Updated <time>", the time the shown result was read (the short time today, else the date). Never a blocking overlay.
 
 ### S10.5 Cancellation
 

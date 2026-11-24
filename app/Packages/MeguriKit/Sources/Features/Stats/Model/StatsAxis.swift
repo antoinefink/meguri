@@ -2,7 +2,7 @@ import CoreBridge
 import Foundation
 
 /// One bar of a time axis: what it stands for and the days it sums (H1 day indexes, inclusive).
-public struct StatsAxisBin: Hashable, Sendable {
+nonisolated public struct StatsAxisBin: Hashable, Sendable {
     public let period: StatsPeriod
     public let first: Int
     public let last: Int
@@ -18,7 +18,7 @@ public struct StatsAxisBin: Hashable, Sendable {
 }
 
 /// A time axis of `stats/statistics-page` S4: the bars in order, and where a day's values go.
-public struct StatsTimeAxis: Hashable, Sendable {
+nonisolated public struct StatsTimeAxis: Hashable, Sendable {
     public let bins: [StatsAxisBin]
     /// All's first bar also takes every day before it (S4.1: counts dated before the first month).
     public let opensBefore: Bool
@@ -65,7 +65,7 @@ public struct StatsTimeAxis: Hashable, Sendable {
 }
 
 /// S4's axes.
-enum StatsAxes {
+nonisolated enum StatsAxes {
     /// S4.1: the bars of a chart of the past for `period`. `allFirstDay` is the day All's first
     /// month holds (H9's oldest day, or S4.1's fallback).
     static func past(_ period: StatsPagePeriod, days: StatsDays, allFirstDay: Int) -> StatsTimeAxis {
@@ -138,7 +138,7 @@ enum StatsAxes {
 
 /// Sums ahead: `future_due`'s keys are not folded (a key of 1 is tomorrow), so Reviews Due's
 /// axis looks bars up by key alone.
-extension StatsTimeAxis {
+nonisolated extension StatsTimeAxis {
     func aheadIndex(ofKey key: Int) -> Int? {
         bins.firstIndex { $0.first <= key && key <= $0.last }
     }

@@ -81,7 +81,8 @@ extension EnvironmentValues {
 
 /// See `EnvironmentValues.statsKeepInPlace`.
 struct StatsKeepInPlace: Sendable {
-    typealias Run = @MainActor @Sendable (_ id: String, _ onScreenY: @escaping @MainActor () -> CGFloat?,
+    /// `place`: the control's frame in the page's visible area before the change, nil to centre it.
+    typealias Run = @MainActor @Sendable (_ id: String, _ place: CGRect?,
                                          _ change: @escaping @MainActor () -> Void) -> Void
     let run: Run
 
@@ -89,20 +90,19 @@ struct StatsKeepInPlace: Sendable {
         self.run = run
     }
 
-    @MainActor func callAsFunction(id: String, onScreenY: @escaping @MainActor () -> CGFloat?,
-                                   _ change: @escaping @MainActor () -> Void) {
-        run(id, onScreenY, change)
+    @MainActor func callAsFunction(id: String, place: CGRect?, _ change: @escaping @MainActor () -> Void) {
+        run(id, place, change)
     }
 }
 
-/// The page's visible height and the last tap's height in it: plain references, not observed, so
-/// setting them redraws nothing (a resize, a tap).
+/// The page's visible height and a control's frame in it: plain references, not observed, so
+/// setting them redraws nothing (a resize, a scroll).
 final class StatsViewport {
     var height: CGFloat = 0
 }
 
 final class StatsTapPlace {
-    var y: CGFloat?
+    var frame: CGRect?
 }
 
 nonisolated extension StatsNarrowLayout {

@@ -111,6 +111,16 @@ final class StatisticsShellUITests: XCTestCase {
         let other = try after { retention.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click() }
         XCTAssertNotNil(Self.bin(other, "retention", pinned: true), "Another chart's click pins there: \(other)")
         XCTAssertFalse(other.contains("knowledgeOverTime:"), "and unpins the first: \(other)")
+        // Tab moves the keyboard focus on and the pin stays (2026-11-24: focus moving off a pinned
+        // plot no longer unpins it).
+        let tabbed = try after { app.typeKey("\t", modifierFlags: []) }
+        XCTAssertNotNil(Self.bin(tabbed, "retention", pinned: true), "Tab keeps the pin: \(tabbed)")
+        let tabbedTwice = try after { app.typeKey("\t", modifierFlags: []) }
+        XCTAssertNotNil(Self.bin(tabbedTwice, "retention", pinned: true), "A second Tab too: \(tabbedTwice)")
+        // Esc from where focus went clears the pin it left (the page's own Esc).
+        XCTAssertEqual(try after { app.typeKey(.escape, modifierFlags: []) }, "none", "Esc clears a pin focus has left")
+        let repinned = try after { retention.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click() }
+        XCTAssertNotNil(Self.bin(repinned, "retention", pinned: true), "A click pins again: \(repinned)")
         // The Knowledge box's figure, outside every plot.
         let outside = try after {
             element(app, "stats.box.knowledgeOverTime").coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.15)).click()
