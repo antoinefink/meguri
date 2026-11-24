@@ -7,14 +7,9 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 
-/// The inspector's Note tab (`browser/workspace` V12, N21.4; Option A, the
-/// owner's choice of 2026-11-23): one scroll view holds the card preview
-/// (folding with its header), Deck and Type as label and pop-up rows, the
-/// fields as a plain list (name small and secondary, text at the body size,
-/// no box until edited), the "<e> Empty Fields" row and a Tags section; the
-/// formatting bar stays at the pane's bottom edge. The fields' page grows
-/// with its content and never scrolls itself; the scroll view follows the
-/// caret.
+/// N21.4 (owner decision 2026-11-24): edit the visible note while keeping
+/// the desired card side in sight. The native vertical split resizes the card;
+/// fields scroll independently and the formatting bar stays at the bottom.
 struct BrowseNoteTab: View {
     let model: BrowseModel
     let note: BrowseInspectorNote
@@ -30,12 +25,26 @@ struct BrowseNoteTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // The preview's header stays; the card under it scrolls with the rest.
+            // Keep the header and editor identity through folding and resizing.
             BrowsePreviewSection(inspector: inspector, note: note, part: .header)
+            VSplitView {
+                BrowsePreviewSection(inspector: inspector, note: note, part: .card)
+                    .frame(minHeight: inspector.previewFolded ? 0 : BrowseInspectorMetrics.previewMinimum,
+                           idealHeight: inspector.previewFolded ? 0 : BrowseInspectorMetrics.previewHeight,
+                           maxHeight: inspector.previewFolded ? 0 : .infinity)
+                    .clipped()
+                editor
+                    .frame(minHeight: BrowseInspectorMetrics.editorMinimum)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("browse.inspector.note")
+    }
+
+    private var editor: some View {
+        VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    BrowsePreviewSection(inspector: inspector, note: note, part: .card)
-                    Divider()
                     if let error = note.error {
                         ContentUnavailableView {
                             Label { Text("browse.inspector.editorUnavailable", bundle: .module) } icon: { Image(systemName: "exclamationmark.triangle") }
@@ -52,18 +61,18 @@ struct BrowseNoteTab: View {
                 }
                 .coordinateSpace(.named(Self.content))
             }
+            .accessibilityIdentifier("browse.inspector.fields.scroll")
             .scrollPosition($position)
             .onScrollGeometryChange(for: CGRect.self) { $0.visibleRect } action: { _, rect in visible = rect }
             .onChange(of: host?.caret) { _, caret in follow(caret) }
             // A line typed at the end: the page grows after the caret moves there.
             .onChange(of: host?.contentHeight) { follow(host?.caret) }
+            .onChange(of: visible.height) { follow(host?.caret) }
             if note.error == nil {
                 Divider()
                 BrowseFormattingBar(host: host, cloze: note.isCloze)
             }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("browse.inspector.note")
     }
 
     nonisolated private static let content = "browse.inspector.content"
@@ -271,42 +280,69 @@ struct BrowsePreviewSection: View {
     }
 
     private var header: some View {
-        HStack {
-            Button { inspector.previewFolded.toggle() } label: {
-                Label {
-                    Text("browse.inspector.preview", bundle: .module)
-                } icon: {
-                    Image(systemName: "chevron.right").rotationEffect(.degrees(inspector.previewFolded ? 0 : 90)).imageScale(.small)
-                }
-                .contentShape(Rectangle())
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                disclosure
+                sidePicker
+                Spacer()
+                cardControls
             }
-            .buttonStyle(.plain)
-            .font(.headline)
-            .accessibilityValue(Text(verbatim: inspector.previewFolded ? "collapsed" : "expanded"))
-            .accessibilityIdentifier("browse.inspector.preview.header")
-            Spacer()
-            if inspector.preview.hasAudio {
-                Button { inspector.preview.replay() } label: {
-                    Label { Text("browse.inspector.preview.play", bundle: .module) } icon: { Image(systemName: "speaker.wave.2") }
-                }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .help(Text("browse.inspector.preview.play", bundle: .module))
-                .accessibilityIdentifier("browse.inspector.preview.play")
-            }
-            if note.cards.count > 1 {
-                Button { inspector.showCard((note.cardIndex + 1) % note.cards.count) } label: {
-                    HStack(spacing: Spacing.xxSmall) {
-                        Text(verbatim: BrowseInspectorText.card(note.cardIndex, of: note.cards.count, locale: locale))
-                        Image(systemName: "chevron.right").imageScale(.small)
-                    }
-                }
-                .buttonStyle(.borderless)
-                .accessibilityIdentifier("browse.inspector.preview.nextCard")
+            VStack(alignment: .leading) {
+                HStack { disclosure; Spacer(); cardControls }
+                sidePicker
             }
         }
         .padding(.horizontal)
         .padding(.vertical, Spacing.xSmall)
+    }
+
+    private var disclosure: some View {
+        Button { inspector.previewFolded.toggle() } label: {
+            Label {
+                Text("browse.inspector.preview", bundle: .module)
+            } icon: {
+                Image(systemName: "chevron.right").rotationEffect(.degrees(inspector.previewFolded ? 0 : 90)).imageScale(.small)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .font(.headline)
+        .accessibilityValue(Text(verbatim: inspector.previewFolded ? "collapsed" : "expanded"))
+        .accessibilityIdentifier("browse.inspector.preview.header")
+    }
+
+    private var sidePicker: some View {
+        Picker(selection: Binding(get: { inspector.preview.side }, set: { inspector.preview.selectSide($0) })) {
+            Text("browse.inspector.preview.front", bundle: .module).tag(CardRenderSide.question)
+            Text("browse.inspector.preview.back", bundle: .module).tag(CardRenderSide.answer)
+        } label: { Text("browse.inspector.preview.side", bundle: .module) }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .disabled(inspector.preview.card == nil)
+        .accessibilityIdentifier("browse.inspector.preview.side")
+    }
+
+    @ViewBuilder private var cardControls: some View {
+        if inspector.preview.hasAudio {
+            Button { inspector.preview.replay() } label: {
+                Label { Text("browse.inspector.preview.play", bundle: .module) } icon: { Image(systemName: "speaker.wave.2") }
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .help(Text("browse.inspector.preview.play", bundle: .module))
+            .accessibilityIdentifier("browse.inspector.preview.play")
+        }
+        if note.cards.count > 1 {
+            Button { inspector.showCard((note.cardIndex + 1) % note.cards.count) } label: {
+                HStack(spacing: Spacing.xxSmall) {
+                    Text(verbatim: BrowseInspectorText.card(note.cardIndex, of: note.cards.count, locale: locale))
+                    Image(systemName: "chevron.right").imageScale(.small)
+                }
+            }
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier("browse.inspector.preview.nextCard")
+        }
     }
 
     @ViewBuilder private var card: some View {
@@ -318,7 +354,7 @@ struct BrowsePreviewSection: View {
                     Color.clear
                 }
             }
-            .frame(height: BrowseInspectorMetrics.previewHeight)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("browse.inspector.preview")
         }
@@ -326,8 +362,11 @@ struct BrowsePreviewSection: View {
 }
 
 enum BrowseInspectorMetrics {
-    /// Option A: the preview's height, small enough that the fields below it stay in reach.
+    /// Initial card size; the native split divider provides cursor, keyboard and AX resizing.
     static let previewHeight: CGFloat = 160
+    /// Keep a useful card viewport and space for field editing plus its formatting bar.
+    static let previewMinimum: CGFloat = 96
+    static let editorMinimum: CGFloat = 180
     /// The fields' page before it reports its height.
     static let fieldsMinimum: CGFloat = 44
 }

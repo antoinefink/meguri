@@ -34,8 +34,12 @@ public final class BrowseCardPreview {
     @ObservationIgnored private var appearance: CardRuntime.Appearance = .light
     @ObservationIgnored private var loaded = false
     @ObservationIgnored private var token: UInt64 = 0
-    /// A flip's own count, so a flip never drops a card's render under way.
-    @ObservationIgnored private var flips: UInt64 = 0
+    /// Serialize page mutations: an answer reveal must finish before another
+    /// side or card prepares the same pair. The latest selection wins.
+    @ObservationIgnored private var presentation: Task<Void, Never>?
+    @ObservationIgnored private var displayedSide: CardRenderSide = .question
+    @ObservationIgnored private var requestedCard: Int64?
+    @ObservationIgnored private var committing: (CardUpdate, CheckedContinuation<Void, any Error>)?
     /// Shows not finished yet; a flip waits until there are none.
     @ObservationIgnored private(set) var showing = 0
     /// Raised by `close`: a load of a closed collection's pair lands nothing.
@@ -44,12 +48,18 @@ public final class BrowseCardPreview {
 
     init() {}
 
-    /// Shows `card`'s question; a newer call supersedes an older one.
+    /// A new card starts on Front; a save of the visible card keeps its side.
     func show(card id: Int64) {
+        cancelCommit()
         token &+= 1
         let token = token
+        if requestedCard != id { side = .question }
+        requestedCard = id
         showing += 1
-        Task {
+        let previous = presentation
+        presentation = Task {
+            await previous?.value
+            guard token == self.token else { showing -= 1; return }
             defer { showing -= 1 }
             do {
                 guard let pair = try await readyPair(), token == self.token else { return }
@@ -57,42 +67,56 @@ public final class BrowseCardPreview {
                 guard token == self.token else { return }
                 let update = try await pair.prepare(payload)
                 guard token == self.token else { return }
-                try pair.present(update)
+                try await present(pair, update: update)
                 self.payload = payload
                 hasAudio = !payload.questionAudio.isEmpty || !payload.answerAudio.isEmpty
-                side = .question
+                displayedSide = .question
                 card = id
-                failed = false
+                try await presentSelectedSide(token: token)
+                if token == self.token { failed = false }
             } catch {
                 if token == self.token { failed = true }
             }
         }
     }
 
-    /// V12: a click flips question and answer.
-    public func flip() {
-        // A card on its way to the page goes first: a flip's own prepare would
-        // supersede it and leave the preview on the previous row's card.
-        guard showing == 0, let pair, let payload, card != nil else { return }
-        flips &+= 1
-        let flip = flips, token = token
-        Task {
-            do {
-                if side == .question {
-                    try await pair.showAnswer()
-                    if flip == flips, token == self.token { side = .answer }
-                } else {
-                    let update = try await pair.prepare(payload)
-                    guard flip == flips, token == self.token else { return }
-                    try pair.present(update)
-                    side = .question
-                }
-            } catch {}
+    /// The segmented control sets its side directly, even during a render.
+    public func selectSide(_ value: CardRenderSide) {
+        guard requestedCard != nil, side != value else { return }
+        side = value
+        pair?.pauseAudio()
+        let token = token, previous = presentation
+        presentation = Task {
+            await previous?.value
+            do { try await presentSelectedSide(token: token) }
+            catch { if token == self.token { failed = true } }
+        }
+    }
+
+    /// V12: clicking the card uses the same selection as the native picker.
+    public func flip() { selectSide(side == .question ? .answer : .question) }
+
+    private func presentSelectedSide(token: UInt64) async throws {
+        guard let pair, let payload else { return }
+        while token == self.token, displayedSide != side {
+            let target = side
+            if target == .answer {
+                try await pair.showAnswer()
+            } else {
+                let update = try await pair.prepare(payload)
+                guard token == self.token else { return }
+                try await present(pair, update: update)
+            }
+            guard token == self.token else { return }
+            displayedSide = target
         }
     }
 
     /// The side shown's sounds, from the start (they never play by themselves).
-    public func replay() { pair?.replay() }
+    public func replay() {
+        guard showing == 0, displayedSide == side, !failed else { return }
+        pair?.replay()
+    }
 
     /// The system appearance the card is drawn in.
     public func setAppearance(_ value: CardRuntime.Appearance) {
@@ -104,22 +128,45 @@ public final class BrowseCardPreview {
 
     /// Nothing to show (no card, several rows).
     func clear() {
+        cancelCommit()
         token &+= 1
         card = nil
+        requestedCard = nil
+        side = .question
         hasAudio = false
         payload = nil
         pair?.pauseAudio()
     }
 
     func close() {
+        cancelCommit()
         token &+= 1
         generation &+= 1
         loading = nil
         pair?.close()
         pair = nil
         loaded = false
+        requestedCard = nil
+        side = .question
+        hasAudio = false
         card = nil
         payload = nil
+    }
+
+    /// Answer reveal requires the question's native presentation to commit.
+    /// Join the pair's acknowledgement instead of racing its CA completion.
+    private func present(_ pair: CardPagePair, update: CardUpdate) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            committing = (update, continuation)
+            do { try pair.present(update) }
+            catch { committing = nil; continuation.resume(throwing: error) }
+        }
+    }
+
+    private func cancelCommit() {
+        let pending = committing
+        committing = nil
+        pending?.1.resume(throwing: CancellationError())
     }
 
     /// The pair, made and loaded once; callers meanwhile wait for the same load.
@@ -132,6 +179,11 @@ public final class BrowseCardPreview {
                 guard let resolver = await resolver(), generation == self.generation else { return nil }
                 let made = CardPagePair(resolver: resolver, appearance: appearance)
                 made.configureLinks(preferExternalBrowser: true, approvals: CardSchemeApprovals())
+                made.onCommitted = { [weak self] update, _ in
+                    guard let self, let pending = committing, pending.0 == update else { return }
+                    committing = nil
+                    pending.1.resume()
+                }
                 pair = made
             }
             guard let pair else { return nil }

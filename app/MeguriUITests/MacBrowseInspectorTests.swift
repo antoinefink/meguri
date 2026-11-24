@@ -15,6 +15,99 @@ final class MacBrowseInspectorTests: XCTestCase {
     func testInspectorLight() throws { try inspector(appearance: "light") }
     func testInspectorDark() throws { try inspector(appearance: "dark") }
 
+    /// Synthetic typical-1 collection only; run in the Mac test VM.
+    func testPinnedPreviewInteractions() throws {
+        let (app, bundle) = try launch(appearance: "light")
+        try openBrowse(app, bundle)
+        try showDeck(app, bundle, containing: "Español")
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count > 1 })
+        press(table.outlineRows.element(boundBy: 0))
+        let page = element(app, "editor.fields"), fields = page.textViews
+        XCTAssertTrue(shows(fields, "palabra"))
+        let preview = element(app, "browse.inspector.preview")
+        let picker = element(app, "browse.inspector.preview.side")
+        XCTAssertTrue(preview.waitForExistence(timeout: 20) && picker.exists)
+        let front = picker.radioButtons["Front"], back = picker.radioButtons["Back"]
+        XCTAssertTrue(front.exists && back.exists, "native accessible segments")
+        back.click()
+        XCTAssertTrue(waitUntil { back.value as? Int == 1 })
+        // Click-to-flip updates the same segmented picker.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.9)).click()
+        XCTAssertTrue(waitUntil { front.value as? Int == 1 })
+        back.click()
+
+        let count = fields.count
+        let label = element(app, "editor.field.0.label")
+        XCTAssertTrue(label.exists, "a field's noninteractive name")
+        label.click()
+        page.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.1)).click()
+        XCTAssertEqual(fields.count, count, "label and nearby whitespace cannot collapse a field")
+        fields.element(boundBy: 0).click()
+        app.typeKey(.downArrow, modifierFlags: [.command])
+        app.typeText(" inspectionmarker")
+        app.typeKey(.leftArrow, modifierFlags: [.option, .shift])
+
+        let bar = element(app, "browse.inspector.formatting")
+        let initialHeight = preview.frame.height, barBottom = bar.frame.maxY
+        let divider = try XCTUnwrap(app.descendants(matching: .splitter).allElementsBoundByIndex.first {
+            abs($0.frame.midY - preview.frame.maxY) < 8 && $0.frame.width > $0.frame.height
+        }, "native horizontal divider directly below the card")
+        let handle = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        handle.press(forDuration: 0.1, thenDragTo: handle.withOffset(CGVector(dx: 0, dy: 70)))
+        XCTAssertTrue(waitUntil { preview.frame.height > initialHeight + 30 }, "dragging resizes the preview")
+        XCTAssertEqual(fields.count, count)
+        XCTAssertEqual(bar.frame.maxY, barBottom, accuracy: 2, "formatting stays pinned")
+        let bold = element(app, "browse.inspector.format.bold")
+        XCTAssertTrue(bold.isEnabled, "dragging retains the editing selection")
+        bold.click()
+        let html = element(app, "browse.inspector.format.html")
+        html.click()
+        XCTAssertTrue(waitUntil { (fields.element(boundBy: 0).value as? String ?? "").contains("<b>inspectionmarker</b>") },
+                      "formatting still acts on the selected text after the divider drag")
+        html.click()
+
+        let header = element(app, "browse.inspector.preview.header")
+        header.click()
+        XCTAssertTrue(waitUntil { !preview.exists })
+        XCTAssertEqual(fields.count, count, "folding keeps the editor")
+        header.click()
+        XCTAssertTrue(preview.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitUntil { back.value as? Int == 1 }, "folding and a blur-save preserve Back")
+        // Drag to both bounds: both regions remain useful.
+        for target in [header.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)),
+                       bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))] {
+            let edge = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)).withOffset(CGVector(dx: 0, dy: 1))
+            edge.press(forDuration: 0.1, thenDragTo: target)
+            XCTAssertGreaterThanOrEqual(preview.frame.height, 95)
+            XCTAssertGreaterThanOrEqual(bar.frame.maxY - preview.frame.maxY, 179)
+        }
+        let edge = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)).withOffset(CGVector(dx: 0, dy: 1))
+        edge.press(forDuration: 0.1, thenDragTo: edge.withOffset(CGVector(dx: 0, dy: initialHeight - preview.frame.height)))
+        capture(app, "browse-note-pinned-preview-synthetic")
+
+        // Empty Fields is still the separate disclosure; an opened empty field stays open on clicks.
+        fields.element(boundBy: 1).click()
+        app.typeKey("a", modifierFlags: [.command])
+        app.typeKey(.delete, modifierFlags: [])
+        press(table.outlineRows.element(boundBy: 1))
+        XCTAssertTrue(waitUntil { fields.count > 1 && !(fields.element(boundBy: 1).value as? String ?? "").isEmpty })
+        press(table.outlineRows.element(boundBy: 0))
+        let empty = element(app, "browse.inspector.emptyFields")
+        XCTAssertTrue(empty.waitForExistence(timeout: 10))
+        empty.click()
+        XCTAssertTrue(waitUntil { fields.count == count })
+        element(app, "editor.field.1.label").click()
+        fields.element(boundBy: 1).click()
+        XCTAssertEqual(fields.count, count)
+        // Narrow overlay: the picker and card navigation must remain separate and reachable.
+        try resize(app, bundle: bundle, to: "820x700")
+        table.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).doubleClick()
+        XCTAssertTrue(picker.waitForExistence(timeout: 10) && front.isHittable && back.isHittable)
+        XCTAssertFalse(picker.frame.intersects(header.frame), "Preview and side selection never overlap")
+        capture(app, "browse-note-pinned-preview-narrow-synthetic")
+    }
+
     private func inspector(appearance: String) throws {
         let (app, bundle) = try launch(appearance: appearance)
         try openBrowse(app, bundle)
