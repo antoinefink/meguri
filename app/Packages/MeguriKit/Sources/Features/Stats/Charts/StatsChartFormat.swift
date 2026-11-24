@@ -10,6 +10,7 @@ nonisolated public struct StatsChartFormat: Sendable {
     public var now: Date
 
     public init(locale: Locale = .autoupdatingCurrent, calendar: Calendar = .autoupdatingCurrent, now: Date) {
+        formatters = Self.currentFormatters()
         self.locale = locale
         var calendar = calendar
         calendar.locale = locale
@@ -28,29 +29,58 @@ nonisolated public struct StatsChartFormat: Sendable {
     /// once there is a minute.
     public func duration(seconds: Double) -> String {
         let seconds = max(0, seconds.rounded())
-        let formatter = Self.durationFormatter(seconds < 60 ? [.second] : [.hour, .minute], calendar: calendar)
+        let formatter = durationFormatter(seconds < 60 ? [.second] : [.hour, .minute])
         return formatter.string(from: seconds < 60 ? seconds : (seconds / 60).rounded() * 60) ?? ""
     }
 
-    // Formatters cost more to make than to use: the plot writes a label per
-    // bin on every redraw, so each kind is made once per locale.
-    // The page model writes its boxes off the main actor too, so the caches are shared under a
-    // lock; a made formatter is only read afterwards, which Foundation's formatters allow from
-    // any thread.
-    private nonisolated(unsafe) static var durationFormatters: [String: DateComponentsFormatter] = [:]
-    private nonisolated(unsafe) static var dateFormatters: [String: DateFormatter] = [:]
-    private static let formattersLock = NSLock()
+    // Ephemeral plot formats and background presenters share one cache generation. System
+    // notifications replace it even when region identifiers stay unchanged. An older render
+    // retains its own generation, so a late write cannot populate the fresh cache.
+    // Formatters are made only on use; counts need no per-value cache allocation.
+    private static let sharedLock = NSLock()
+    private nonisolated(unsafe) static var shared = Formatters()
+    private nonisolated(unsafe) static let preferenceObservers: [NSObjectProtocol] = [NSLocale.currentLocaleDidChangeNotification, .NSSystemTimeZoneDidChange].map { name in
+        NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { _ in
+            sharedLock.lock()
+            shared = Formatters()
+            sharedLock.unlock()
+        }
+    }
 
-    private static func durationFormatter(_ units: NSCalendar.Unit, calendar: Calendar) -> DateComponentsFormatter {
-        let key = "\(calendar.locale?.identifier ?? "")|\(units.rawValue)"
-        formattersLock.lock()
-        defer { formattersLock.unlock() }
-        if let formatter = durationFormatters[key] { return formatter }
+    private static func currentFormatters() -> Formatters {
+        _ = preferenceObservers
+        sharedLock.lock()
+        defer { sharedLock.unlock() }
+        return shared
+    }
+
+    // Full values keep explicit calendars/locales (including overrides) distinct too.
+    private final class Formatters: @unchecked Sendable {
+        struct DateKey: Hashable {
+            let locale: Locale
+            let calendar: Calendar
+            let template: String
+        }
+        struct DurationKey: Hashable {
+            let calendar: Calendar
+            let units: UInt
+        }
+        let lock = NSLock()
+        var durations: [DurationKey: DateComponentsFormatter] = [:]
+        var dates: [DateKey: DateFormatter] = [:]
+    }
+    private let formatters: Formatters
+
+    func durationFormatter(_ units: NSCalendar.Unit) -> DateComponentsFormatter {
+        let key = Formatters.DurationKey(calendar: calendar, units: units.rawValue)
+        formatters.lock.lock()
+        defer { formatters.lock.unlock() }
+        if let formatter = formatters.durations[key] { return formatter }
         let formatter = DateComponentsFormatter()
         formatter.unitsStyle = .short
         formatter.allowedUnits = units
         formatter.calendar = calendar
-        durationFormatters[key] = formatter
+        formatters.durations[key] = formatter
         return formatter
     }
 
@@ -92,10 +122,14 @@ nonisolated public struct StatsChartFormat: Sendable {
     /// A date written from a template of date fields ("dMMM": "17 Nov"), in
     /// the locale's own order.
     private func formatted(_ date: Date, template: String) -> String {
-        let key = "\(locale.identifier)|\(calendar.identifier)|\(calendar.timeZone.identifier)|\(template)"
+        dateFormatter(template: template).string(from: date)
+    }
+
+    func dateFormatter(template: String) -> DateFormatter {
+        let key = Formatters.DateKey(locale: locale, calendar: calendar, template: template)
         let formatter: DateFormatter
-        Self.formattersLock.lock()
-        if let cached = Self.dateFormatters[key] {
+        formatters.lock.lock()
+        if let cached = formatters.dates[key] {
             formatter = cached
         } else {
             formatter = DateFormatter()
@@ -103,10 +137,10 @@ nonisolated public struct StatsChartFormat: Sendable {
             formatter.calendar = calendar
             formatter.timeZone = calendar.timeZone
             formatter.setLocalizedDateFormatFromTemplate(template)
-            Self.dateFormatters[key] = formatter
+            formatters.dates[key] = formatter
         }
-        Self.formattersLock.unlock()
-        return formatter.string(from: date)
+        formatters.lock.unlock()
+        return formatter
     }
 
     /// A short date: "17 Nov", or "17 Nov 2025" outside the current year.

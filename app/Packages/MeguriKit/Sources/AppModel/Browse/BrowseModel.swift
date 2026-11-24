@@ -538,18 +538,22 @@ public final class BrowseModel {
     /// changes nothing. The list then draws the query's selection again.
     /// `shown` is the rows the list draws: a selected row it does not draw
     /// (folded, filtered out, under a collapsed parent) is not in `new`, and
-    /// is not taken as unselected.
+    /// is not taken as unselected. Only a command click on filters needs
+    /// those rows; navigation and single-row clicks do not build them.
     public func listSelectionChanged(to new: Set<BrowseSidebarTag>, click: Click,
-                                     shown: Set<BrowseSidebarTag>? = nil) -> AppSection? {
-        let old = shown.map { listSelection.intersection($0.union([.section(.browse)])) } ?? listSelection
+                                     shown: @autoclosure () -> Set<BrowseSidebarTag>? = nil) -> AppSection? {
         defer { selectionEcho &+= 1 }
-        if case .section(let section)? = new.subtracting(old).first(where: { if case .section = $0 { true } else { false } }),
-           section != .browse {
+        // The old selection only holds Browse and filter rows (V6). Any other
+        // section in the new selection navigates, even alongside filter rows.
+        if case .section(let section)? = new.first(where: {
+            if case .section(let section) = $0 { section != .browse } else { false }
+        }) {
             return section
         }
         let rows = new.filter { if case .section = $0 { false } else { true } }
         switch click {
         case .command:
+            let old = shown().map { listSelection.intersection($0.union([.section(.browse)])) } ?? listSelection
             for row in rows.symmetricDifference(old.filter { if case .section = $0 { false } else { true } }) {
                 activate(row, click: .command)
             }
