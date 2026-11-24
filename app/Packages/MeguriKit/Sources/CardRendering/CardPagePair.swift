@@ -306,6 +306,8 @@ public final class CardPagePair {
         guard !closed, !suspended, !lifecycleSuspended, idle.update == update, idle.settled else { throw CardPage.Failure.notPrepared }
         let old = current
         let next = idle
+        // A tap counts only for the card it was on: the next card needs its own.
+        lastTap = nil
         cancelPresentationWork()
         cancelRecovery()
         Self.raise(next.webView, in: container)

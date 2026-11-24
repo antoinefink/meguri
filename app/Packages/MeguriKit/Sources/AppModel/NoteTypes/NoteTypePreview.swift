@@ -390,8 +390,15 @@ public final class NoteTypePreview {
         guard let pair = try await readyPair(), token == self.token else { return false }
         let update = try await pair.prepare(payload)
         guard token == self.token else { return false }
+        let committed = AsyncStream<CardUpdate>.makeStream(bufferingPolicy: .bufferingNewest(4))
+        pair.onCommitted = { update, _ in committed.continuation.yield(update) }
+        defer { pair.onCommitted = nil; committed.continuation.finish() }
         try pair.present(update)
-        return true
+        // The card counts as on the page once its shown phase has run (at most 2 s).
+        let timeout = Task { try? await Task.sleep(for: .seconds(2)); committed.continuation.finish() }
+        defer { timeout.cancel() }
+        for await shown in committed.stream where shown == update { break }
+        return token == self.token
     }
 
     private func applyAppearance() {

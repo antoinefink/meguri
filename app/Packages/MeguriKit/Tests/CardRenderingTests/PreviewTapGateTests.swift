@@ -28,7 +28,8 @@ extension WebKitSuites {
     /// with no click or tap on the card, is dropped and recorded; the same
     /// command right after a tap goes to the audio controller.
     @Suite struct PreviewTapGatePairTests {
-        @Test func aScriptsReplayCommandWithoutATapPlaysNothing() async throws {
+        @Test(.disabled(if: runsInVirtualMachine(), "no audio route in a virtual machine"))
+        func aScriptsReplayCommandWithoutATapPlaysNothing() async throws {
             let fixture = MediaFixture()
             let configuration = CardWebConfiguration(store: .nonPersistent(), mediaNeedsGesture: true)
             let pair = CardPagePair(configuration: configuration, resolver: try await fixture.resolved(), platform: .mac)
