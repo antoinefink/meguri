@@ -2,8 +2,8 @@
 
 Current topology (2026-11-24): M5 is the sole MG scheduler and build
 coordinator. The dedicated headless `meguri-mac` VM lives on T9 attached to
-M3 Max, reached through private coordinator wrappers. T9 must be mounted on
-M3 Max; there is no coordinator-local guest fallback. See
+M3 Max. The private coordinator wrappers use the kit at `/Volumes/T9/Meguri VM`
+on the M3 Max. See
 [`new-machine.md`](new-machine.md#current-coordinator-and-remote-test-vm) for
 atomic installation, removal of old activation overrides and verification.
 The provisioning and dated results below describe the original installation.
@@ -20,7 +20,7 @@ Use `tools/mg doctor` to check readiness, then `tools/mg catch-up` for queued
 checks. Keep the VM running headlessly. This permission covers the Meguri test
 VM; it does not change the host-screen or other-project data rules.
 
-## The VM
+## Original VM provisioning (October 2026)
 
 - Tool: Tart 2.32.1 (Cirrus Labs, Developer ID signed and notarized), installed at `/Volumes/T9/meguri-vm/bin/tart-2.32.1/`. The wrapper `/Volumes/T9/meguri-vm/bin/tart` sets `TART_HOME=/Volumes/T9/meguri-vm/tart-home`, so every VM file lives on the external T9 drive (APFS, USB 10 Gb/s).
 - VM `meguri-mac`: macOS 27.0.1 (26A434), the same build as the host, made from Apple's restore image (SHA-1 checked against Apple's catalog). 6 CPUs, 12 GB memory, 1920×1200 display, 150 GB disk.

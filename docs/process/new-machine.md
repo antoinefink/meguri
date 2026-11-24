@@ -28,8 +28,7 @@ Install the same Python 3.8+ stdlib launcher twice, as executable files named
 `runtime` is the absolute kit root on the hosting Mac, normally
 `/Volumes/T9/Meguri VM`, with the existing wrappers under `bin/`.
 
-With coordinator jobs idle, retain the prior private `mac-vm.json` for rollback,
-then run this from the checkout on M5. It stages a complete private release,
+With coordinator jobs idle, run this from the checkout on M5. It stages a complete private release,
 publishes its stable `current` symlink atomically, then atomically replaces the
 default per-user `mac-vm.json`. Each publication uses a same-directory rename.
 Updates retain the earlier release; no worktree path enters the configuration.
@@ -64,6 +63,12 @@ remote = release / 'remote.json'
 remote.write_text(json.dumps({'host': host, 'runtime': runtime}) + '\n')
 remote.chmod(0o600)
 current = base / 'current'
+prior_config = settings / 'mac-vm.json'
+if prior_config.is_file():
+    shutil.copyfile(prior_config, release / 'previous-mac-vm.json')
+    (release / 'previous-mac-vm.json').chmod(0o600)
+if current.is_symlink():
+    (release / 'previous-target').write_text(os.readlink(current))
 config = {'tart': str(current / 'tart'), 'ssh': str(current / 'vm-ssh'),
           'vms': ['meguri-mac']}
 with tempfile.NamedTemporaryFile(mode='w', dir=settings, delete=False) as staged:
@@ -79,6 +84,16 @@ PY
 The stable private directory is
 `~/Library/Application Support/meguri/remote-vm/current/`. Keep its releases,
 JSON and hosting Mac logs private.
+
+To roll back an update, wait until coordinator jobs are idle. Open `current/`
+and locate its saved `previous-target` and `previous-mac-vm.json` before
+changing the link. Stage a symlink beside `current` with the exact target
+from `previous-target`. Stage a private copy of `previous-mac-vm.json` beside
+the per-user `mac-vm.json`. Use `os.replace` to publish the staged link as
+`current`, then the staged JSON as `mac-vm.json`. If the prior config pointed
+directly to local wrappers and there was no previous link, restore the JSON
+alone. An absent `previous-mac-vm.json` means there was no per-user config
+before installation.
 
 Remove the old `export MEGURI_MAC_VM_CONFIG=...` from every worktree's
 `.local/activate` and any shell startup file or scheduler environment that set
