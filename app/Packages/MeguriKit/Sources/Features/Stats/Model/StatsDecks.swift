@@ -4,7 +4,7 @@ import Foundation
 /// The decks the page knows (the deck list's tree with its counts, `sched/counts` C5): the deck
 /// pop-up's menu (S3.1), the subtitle's deck count, the deck names the page writes, By Deck's
 /// rows and Remaining Today (S6).
-public struct StatsDeckDirectory: Hashable, Sendable {
+nonisolated public struct StatsDeckDirectory: Hashable, Sendable {
     public struct Deck: Hashable, Sendable {
         public let id: Int64
         /// The deck's own name (the last part of its full name).

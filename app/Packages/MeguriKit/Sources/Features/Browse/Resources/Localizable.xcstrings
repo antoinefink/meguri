@@ -759,6 +759,36 @@
         }
       }
     },
+    "browse.command.unavailable.busy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available once the open sheet or command finishes."
+          }
+        }
+      }
+    },
+    "browse.command.unavailable.notReady": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available once the collection is open."
+          }
+        }
+      }
+    },
+    "browse.command.unavailable.searching": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available once the search shows its results."
+          }
+        }
+      }
+    },
     "browse.command.unbury": {
       "localizations": {
         "en": {
@@ -1233,6 +1263,38 @@
         }
       }
     },
+    "browse.done.notesChanged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@n@"
+          },
+          "substitutions": {
+            "n": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ note changed"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%2$@ notes changed"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "browse.done.rescheduled": {
       "localizations": {
         "en": {
@@ -1521,6 +1583,402 @@
           "stringUnit": {
             "state": "translated",
             "value": "Try Again"
+          }
+        }
+      }
+    },
+    "browse.findDuplicates.allNotes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All Notes"
+          }
+        }
+      }
+    },
+    "browse.findDuplicates.chooseField": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a Field"
+          }
+        }
+      }
+    },
+    "browse.findDuplicates.field": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Field"
+          }
+        }
+      }
+    },
+    "browse.findDuplicates.find": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find"
+          }
+        }
+      }
+    },
+    "browse.findDuplicates.none": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No duplicates found."
+          }
+        }
+      }
+    },
+    "browse.findDuplicates.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find Duplicates"
+          }
+        }
+      }
+    },
+    "browse.findReplace.counting": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Counting…"
+          }
+        }
+      }
+    },
+    "browse.findReplace.damaged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A note here is damaged, so nothing can be replaced. Check Database repairs it."
+          }
+        }
+      }
+    },
+    "browse.findReplace.error.invalidPattern": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not a valid regular expression: %@"
+          }
+        }
+      }
+    },
+    "browse.findReplace.error.patternTooLarge": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This find text is too large to search with. Make it shorter."
+          }
+        }
+      }
+    },
+    "browse.findReplace.error.tagSeparator": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags cannot contain spaces. Remove the spaces from Replace With."
+          }
+        }
+      }
+    },
+    "browse.findReplace.failed.countChanged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@n@"
+          },
+          "substitutions": {
+            "n": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Nothing was changed: %2$@ note would change now, more than the list showed. Check the list again."
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Nothing was changed: %2$@ notes would change now, more than the list showed. Check the list again."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.findReplace.find": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find"
+          }
+        }
+      }
+    },
+    "browse.findReplace.firstNotes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The list shows the first 100 notes that change."
+          }
+        }
+      }
+    },
+    "browse.findReplace.formattingOnly": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "formatting only"
+          }
+        }
+      }
+    },
+    "browse.findReplace.in": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In"
+          }
+        }
+      }
+    },
+    "browse.findReplace.in.allFields": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All Fields"
+          }
+        }
+      }
+    },
+    "browse.findReplace.in.tags": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags"
+          }
+        }
+      }
+    },
+    "browse.findReplace.matchCase": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Match Case"
+          }
+        }
+      }
+    },
+    "browse.findReplace.noMatches": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Matches"
+          }
+        }
+      }
+    },
+    "browse.findReplace.notes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notes"
+          }
+        }
+      }
+    },
+    "browse.findReplace.notes.allFound": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All %@ Found"
+          }
+        }
+      }
+    },
+    "browse.findReplace.notes.allFoundUnknown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All Found"
+          }
+        }
+      }
+    },
+    "browse.findReplace.notes.selected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ Selected"
+          }
+        }
+      }
+    },
+    "browse.findReplace.notes.selectedUnknown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected"
+          }
+        }
+      }
+    },
+    "browse.findReplace.regex": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Regular Expression"
+          }
+        }
+      }
+    },
+    "browse.findReplace.replace": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@n@"
+          },
+          "substitutions": {
+            "n": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Replace in %2$@ Note"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Replace in %2$@ Notes"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.findReplace.replaceUnknown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace"
+          }
+        }
+      }
+    },
+    "browse.findReplace.replaceWith": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace With"
+          }
+        }
+      }
+    },
+    "browse.findReplace.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find and Replace"
+          }
+        }
+      }
+    },
+    "browse.findReplace.undoNote": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undo restores every note."
+          }
+        }
+      }
+    },
+    "browse.findReplace.wholeWords": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whole Words"
+          }
+        }
+      }
+    },
+    "browse.findReplace.willChange": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@n@"
+          },
+          "substitutions": {
+            "n": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%3$@ of %4$@ note will change"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%3$@ of %4$@ notes will change"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3204,6 +3662,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "Contains…"
+          }
+        }
+      }
+    },
+    "browse.token.duplicates": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@n@"
+          },
+          "substitutions": {
+            "n": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Duplicates in %1$@: %3$@ group"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Duplicates in %1$@: %3$@ groups"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "browse.token.duplicatesValue": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@n@"
+          },
+          "substitutions": {
+            "n": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "in %1$@: %3$@ group"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "in %1$@: %3$@ groups"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

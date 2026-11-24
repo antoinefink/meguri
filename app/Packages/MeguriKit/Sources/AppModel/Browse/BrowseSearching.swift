@@ -53,6 +53,58 @@ public nonisolated protocol BrowseSearching: AnyObject, Sendable {
     /// V8.1: the tags the target notes store, each once, sorted (Remove
     /// Tags' field suggests only these).
     func tags(of target: BrowseTarget) async throws -> [String]
+
+    // Find and Replace and Find Duplicates (U277; `browser/workspace` V9,
+    // V10): the sheets' reads and the one write, each in the core.
+
+    /// V9's previews of one sheet: each newer one supersedes the older.
+    func findReplacePreviews() async throws -> any BrowseFindReplacePreviewing
+    /// V9, F11: the run on the target's notes, one undo step; `confirmed`
+    /// is the preview's count of notes that change.
+    func startFindReplace(_ request: FindReplaceRequest, on target: BrowseTarget, confirmed: UInt64) async throws
+        -> BrowseRunning<FindReplaceResult>
+    /// V10's Find among every note (nil) or the target's notes; it writes nothing.
+    func startFindDuplicates(field: String, on target: BrowseTarget?) async throws -> BrowseRunning<FindDuplicatesResult>
+}
+
+/// One Find and Replace sheet's previews (V9, F10): pure reads, each newer
+/// call superseding the older in the core. Cancelling the calling task
+/// cancels its preview.
+public nonisolated protocol BrowseFindReplacePreviewing: AnyObject, Sendable {
+    func preview(_ request: FindReplaceRequest, on target: BrowseTarget) async throws -> FindReplacePreview
+}
+
+/// A job under way (U277): its progress, its Cancel (honoured until its
+/// commit for a write), and its value once it ends. Cancel ends it with
+/// `BridgeError.cancelled`.
+public nonisolated struct BrowseRunning<Value: Sendable>: Sendable {
+    public let progress: AsyncStream<BrowseActionProgress>
+    public let cancel: @Sendable () async -> Void
+    public let result: @Sendable () async throws -> Value
+
+    public init(progress: AsyncStream<BrowseActionProgress>, cancel: @escaping @Sendable () async -> Void,
+                result: @escaping @Sendable () async throws -> Value) {
+        self.progress = progress
+        self.cancel = cancel
+        self.result = result
+    }
+
+    /// A job already running to its end with no progress and no Cancel.
+    public static func finishing(_ run: @escaping @Sendable () async throws -> Value) -> BrowseRunning<Value> {
+        BrowseRunning(progress: AsyncStream { $0.finish() }, cancel: {}, result: run)
+    }
+}
+
+/// A session without the find commands (the test hooks' samples): each fails.
+public extension BrowseSearching {
+    func findReplacePreviews() async throws -> any BrowseFindReplacePreviewing { throw BrowseCommandUnsupported() }
+    func startFindReplace(_ request: FindReplaceRequest, on target: BrowseTarget, confirmed: UInt64) async throws
+        -> BrowseRunning<FindReplaceResult> {
+        throw BrowseCommandUnsupported()
+    }
+    func startFindDuplicates(field: String, on target: BrowseTarget?) async throws -> BrowseRunning<FindDuplicatesResult> {
+        throw BrowseCommandUnsupported()
+    }
 }
 
 /// A bulk action under way (U276): its progress while it plans, its Cancel,
@@ -186,7 +238,7 @@ public nonisolated final class CoreBrowseSearch: BrowseSearching {
                                        targetRevision: targetRevision)
     }
 
-    private func selection(_ target: BrowseTarget) async throws -> BrowseSelection {
+    func selection(_ target: BrowseTarget) async throws -> BrowseSelection {
         try await session.selection(target.handle, revision: target.revision, ranges: target.ranges)
     }
 

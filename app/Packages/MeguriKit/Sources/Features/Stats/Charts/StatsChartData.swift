@@ -7,7 +7,7 @@ import Foundation
 
 /// What one bin of a chart stands for: the x category, named in the callout,
 /// on the axis and in the accessibility elements (S8.3, S8.7, P18.5).
-public enum StatsPeriod: Hashable, Sendable {
+nonisolated public enum StatsPeriod: Hashable, Sendable {
     /// One day, by the date of the day (`stats/history-reads` H1).
     case day(Date)
     /// Seven days from `start`, the system's first weekday (S4.1).
@@ -25,7 +25,7 @@ public enum StatsPeriod: Hashable, Sendable {
 }
 
 /// How a series is drawn.
-public enum StatsMark: Hashable, Sendable {
+nonisolated public enum StatsMark: Hashable, Sendable {
     /// A segment of a bar stacked from the baseline, in series order.
     case stackedBar
     /// A bar from zero, not stacked (a single measure).
@@ -39,7 +39,7 @@ public enum StatsMark: Hashable, Sendable {
 }
 
 /// The unit of a chart's values: how the axis, the callout and Copy Values write them.
-public enum StatsValueUnit: Hashable, Sendable {
+nonisolated public enum StatsValueUnit: Hashable, Sendable {
     /// A count of cards or reviews.
     case count
     /// A duration in seconds.
@@ -49,7 +49,7 @@ public enum StatsValueUnit: Hashable, Sendable {
 }
 
 /// Where the y axis starts.
-public enum StatsYScale: Hashable, Sendable {
+nonisolated public enum StatsYScale: Hashable, Sendable {
     /// From zero (bars, areas, counts).
     case zero
     /// Near the lowest value, so a slow change is visible; nothing is filled
@@ -61,7 +61,7 @@ public enum StatsYScale: Hashable, Sendable {
 }
 
 /// One series of a chart, aligned with its bins.
-public struct StatsSeries: Identifiable, Hashable, Sendable {
+nonisolated public struct StatsSeries: Identifiable, Hashable, Sendable {
     public var id: String
     /// The localized name the legend, the callout and VoiceOver read.
     public var name: String
@@ -105,7 +105,7 @@ public struct StatsSeries: Identifiable, Hashable, Sendable {
 
 /// A dashed horizontal rule across the plot, named in the legend (the desired
 /// retention, S7.2 and S7.12).
-public struct StatsRule: Identifiable, Hashable, Sendable {
+nonisolated public struct StatsRule: Identifiable, Hashable, Sendable {
     public var id: String
     public var name: String
     public var value: Double
@@ -122,7 +122,7 @@ public struct StatsRule: Identifiable, Hashable, Sendable {
 /// A dashed vertical rule at a place on the x axis that is not a bin, named in the legend:
 /// Retrievability's desired retention among its 5% bins (S7.12). Minimal: one value on the bins'
 /// own scale, drawn in the label colour like a horizontal rule.
-public struct StatsMarker: Identifiable, Hashable, Sendable {
+nonisolated public struct StatsMarker: Identifiable, Hashable, Sendable {
     public var id: String
     public var name: String
     /// Where it stands, in bins from the first bin's leading edge (0) to the last bin's trailing
@@ -159,7 +159,7 @@ public struct StatsMarker: Identifiable, Hashable, Sendable {
 /// forgotten cards between Studied and Known (S7.1). Drawn under the lines in a soft tint of
 /// its colour, only over bins where both lines have a value (a gap in either breaks it), with
 /// straight joins between bins like the lines'.
-public struct StatsBand: Identifiable, Hashable, Sendable {
+nonisolated public struct StatsBand: Identifiable, Hashable, Sendable {
     public var id: String
     public var name: String
     public var color: StatsSeriesColor
@@ -182,7 +182,7 @@ public struct StatsBand: Identifiable, Hashable, Sendable {
 /// A line of the callout that is not a drawn series, such as Reviews Due's
 /// "Total by then" (S7.9) or a stack's total (S7.4): the running total lives
 /// here, never on a second axis (S8.2).
-public struct StatsCalloutLine: Identifiable, Hashable, Sendable {
+nonisolated public struct StatsCalloutLine: Identifiable, Hashable, Sendable {
     public var id: String
     public var name: String
     public var values: [Double?]
@@ -214,7 +214,7 @@ public struct StatsCalloutLine: Identifiable, Hashable, Sendable {
 }
 
 /// Everything one plot draws. A chart with no bins draws nothing but its legend.
-public struct StatsChartData: Hashable, Sendable {
+nonisolated public struct StatsChartData: Hashable, Sendable {
     public var bins: [StatsPeriod]
     /// In stack order from the baseline; the legend follows this order, then the rules.
     public var series: [StatsSeries]
@@ -308,14 +308,14 @@ public struct StatsChartData: Hashable, Sendable {
 // MARK: - Stacking and the y domain
 
 /// One drawn piece of a stacked series: from `lower` to `upper` in data units.
-struct StatsSegment: Hashable, Sendable {
+nonisolated struct StatsSegment: Hashable, Sendable {
     var series: Int
     var bin: Int
     var lower: Double
     var upper: Double
 }
 
-extension StatsChartData {
+nonisolated extension StatsChartData {
     /// The stacked series' segments from the baseline, in series order. A nil
     /// value stacks as zero and draws nothing.
     func stackedSegments() -> [StatsSegment] {

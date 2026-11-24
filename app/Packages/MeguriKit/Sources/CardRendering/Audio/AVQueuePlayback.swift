@@ -128,6 +128,14 @@ public final class AVQueuePlayback: CardAudioBackend {
             guard !stopped else { throw Failure.unsupported }
             setDelegate(delegate)
             let startedAt = ProcessInfo.processInfo.systemUptime
+            #if os(iOS)
+            // Prepare before sampling the device clock so setup cannot consume the lead time.
+            guard player.prepareToPlay() else {
+                player.stop()
+                setDelegate(nil)
+                throw Failure.unsupported
+            }
+            #endif
             guard player.play(atTime: player.deviceCurrentTime + 0.005) else {
                 player.stop()
                 setDelegate(nil)

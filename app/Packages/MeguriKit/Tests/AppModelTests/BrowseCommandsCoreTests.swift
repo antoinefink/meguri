@@ -204,6 +204,112 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+    /// U277 on the real core: Find and Replace previews and runs on the rows
+    /// it opened on, one "Find and Replace" step with Undo and Redo; Match
+    /// Case and an invalid pattern; Find Duplicates' groups become the
+    /// Duplicates token, in Notes mode and sorted by the field, and removing
+    /// it restores the query; a list that moved on is refused with nothing
+    /// written.
+    @Test func browseFindSheetsRunOnTheRealCoreWithUndoAndRedo() async throws {
+        try await withBrowseOwner { owner, _ in
+            let browse = owner.browse, results = browse.results, commands = browse.commands, undo = owner.collectionUndo
+            @MainActor func row(_ index: Int) -> BrowseShownRow? { results.row(at: index) }
+            @MainActor func shows(_ index: Int, _ text: String) -> Bool {
+                row(index)?.cells.contains { if case .text(let cell) = $0 { cell == text } else { false } } ?? false
+            }
+            @MainActor func pick(_ rows: Set<Int>, sourceLocation: SourceLocation = #_sourceLocation) async {
+                results.select(rows)
+                await waitFor({ commands.factsRead != nil && commands.factsRead == results.target() && !commands.busy
+                                && commands.findReplaceSheet == nil && commands.findDuplicatesSheet == nil },
+                              sourceLocation: sourceLocation)
+            }
+            @MainActor func open(sourceLocation: SourceLocation = #_sourceLocation) async throws -> BrowseFindReplaceSheet {
+                commands.perform(.findReplace)
+                let sheet = try #require(commands.findReplaceSheet, sourceLocation: sourceLocation)
+                await waitFor({ sheet.allFound != nil && sheet.entries.contains { $0.kind == .field("Front") } },
+                              sourceLocation: sourceLocation)
+                sheet.inEntry = try #require(sheet.entries.first { $0.kind == .field("Front") }?.id)
+                return sheet
+            }
+
+            // The two one-card notes: their Front, previewed, then replaced in one step.
+            await pick([0, 1])
+            let sheet = try await open()
+            #expect(sheet.notes == .selected)
+            await waitFor { sheet.selectedNotes == 2 && sheet.foundNotes == 3 }
+            sheet.find = "plorvex"
+            sheet.replace = "qzvell"
+            await waitFor { sheet.confirmCount == 2 }
+            #expect(sheet.shownPreview?.entries.map(\.sortField) == ["plorvex a", "plorvex b"])
+            #expect(sheet.shownPreview?.considered == 2)
+            // Match Case: "PLORVEX" finds nothing; off again, both.
+            sheet.find = "PLORVEX"
+            sheet.matchCase = true
+            await waitFor { sheet.confirmCount == 0 }
+            #expect(!sheet.canConfirm)
+            sheet.matchCase = false
+            await waitFor { sheet.confirmCount == 2 }
+            // An invalid pattern: the core's reason, Replace disabled.
+            sheet.regex = true
+            sheet.find = "plorvex("
+            await waitFor { if case .invalid(.pattern) = sheet.preview { true } else { false } }
+            #expect(!sheet.canConfirm)
+            sheet.find = "plorvex"
+            await waitFor { sheet.confirmCount == 2 }
+            sheet.confirm()
+            await waitFor { commands.findReplaceSheet == nil }
+            await waitFor { shows(0, "qzvell a") && shows(1, "qzvell b") }
+            await waitFor { undo.undoName == "Find and Replace" && undo.canUndo }
+            #expect(commands.announcement?.kind == .notesChanged && commands.announcement?.count == 2)
+            #expect(results.list?.count == 4 && results.selection == [0, 1], "the rows stay, selected")
+            undo.undo(); await undo.waitForCompletion()
+            await waitFor { shows(0, "plorvex a") }
+            await waitFor { undo.redoName == "Find and Replace" }
+            undo.redo(); await undo.waitForCompletion()
+            await waitFor { shows(0, "qzvell a") }
+
+            // Both Fronts the same: Find Duplicates on Front groups them.
+            await pick([0, 1])
+            let same = try await open()
+            same.regex = true
+            same.find = "^.*$"
+            same.replace = "qzdupe"
+            await waitFor { same.confirmCount == 2 }
+            same.confirm()
+            await waitFor { commands.findReplaceSheet == nil && shows(0, "qzdupe") && shows(1, "qzdupe") }
+            let before = browse.query
+            await pick([0])
+            commands.perform(.findDuplicates)
+            let duplicates = try #require(commands.findDuplicatesSheet)
+            await waitFor { duplicates.field == "Front" }
+            duplicates.confirm()
+            await waitFor { browse.duplicates != nil && results.list?.count == 2 && results.list?.isComplete == true }
+            #expect(browse.duplicates != nil, "\(String(describing: duplicates.failure)) \(String(describing: duplicates.found)) \(duplicates.phase)")
+            #expect(browse.mode == .notes && browse.duplicates?.groups == 1 && browse.duplicates?.field == "Front")
+            #expect(results.list?.columns.first == "fld:Front" && results.list?.sort.key == "fld:Front")
+            // A list that moved on while the sheet was open: refused, nothing written.
+            await pick([0])
+            let stale = try await open()
+            stale.find = "qzdupe"
+            stale.replace = "qzother"
+            await waitFor { stale.confirmCount == 1 }
+            _ = try await CoreNoteService().startDeleteNotes(ids: [try #require(row(1)?.noteID)]).value()
+            await waitFor { results.list?.count == 1 }
+            let named = undo.undoName
+            stale.confirm()
+            await waitFor { stale.failure != nil }
+            #expect(stale.failure == .rowsChanged && commands.findReplaceSheet === stale)
+            #expect(undo.undoName == named, "no step recorded")
+            #expect(shows(0, "qzdupe"))
+            stale.cancel()
+
+            // Removing the Duplicates token restores the query before Find (now one note finds it).
+            browse.removeToken(0)
+            #expect(browse.query == before && browse.duplicates == nil && results.displayField == nil)
+            await waitFor { results.list?.count == 1 && results.list?.isComplete == true && shows(0, "plorvex c") }
+        }
+    }
+
     /// Waits, suspended, until `condition` holds (at most ten seconds: each
     /// command is a core job, then a change set and a read of its rows).
     private func waitFor(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async {

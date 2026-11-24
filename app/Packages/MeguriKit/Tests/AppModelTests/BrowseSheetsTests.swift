@@ -356,6 +356,15 @@ import Testing
     }
 
     func defaultDeckHasCards() async throws -> Bool { false }
+    /// U277: the note types' fields the field menus list.
+    var types: [Int64: BrowseNotetypeFields] = [
+        8: BrowseNotetypeFields(id: 8, name: "Basic", fields: ["Front", "Back"], sortField: 0),
+        7: BrowseNotetypeFields(id: 7, name: "Vocabulary", fields: ["Word", "Meaning", "Front"], sortField: 1),
+    ]
+    func notetypeFields(_ id: Int64) async throws -> BrowseNotetypeFields {
+        guard let fields = types[id] else { throw BridgeError.unavailable(reason: "sample") }
+        return fields
+    }
     var defaultsFail = false
     func sheetDefaults() async throws -> BrowseSheetDefaults {
         if defaultsFail { throw BridgeError.unavailable(reason: "sample") }

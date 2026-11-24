@@ -188,6 +188,8 @@ private struct CardInfoSnapshotView: View {
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
             // Each entry is one accessibility element; a cell takes its column's widest width.
+            // A pane narrower than the columns scrolls them sideways.
+            ScrollView(.horizontal) {
             VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
                     cell(0, Text("cardInfo.history.date", bundle: .module))
@@ -216,6 +218,8 @@ private struct CardInfoSnapshotView: View {
             }
             .font(.callout)
             .lineLimit(1)
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("cardInfo.history")
         }

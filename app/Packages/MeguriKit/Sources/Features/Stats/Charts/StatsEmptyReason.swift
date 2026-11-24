@@ -1,7 +1,7 @@
 import Foundation
 
 /// Why a box has no data: its one line in the plot area (S8.5, S16).
-public enum StatsEmptyReason: Hashable, Sendable {
+nonisolated public enum StatsEmptyReason: Hashable, Sendable {
     /// The span a chart of the past looks back over, for its empty line.
     public enum Span: Hashable, Sendable {
         case lastMonth, last3Months, last6Months, lastYear
@@ -38,7 +38,7 @@ public enum StatsEmptyReason: Hashable, Sendable {
     }
 }
 
-extension StatsEmptyReason.Span {
+nonisolated extension StatsEmptyReason.Span {
     /// "the last month", "the last 3 months", … (S8.5).
     public var text: String {
         switch self {

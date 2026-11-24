@@ -28,15 +28,16 @@ final class StatisticsCompactUITests: XCTestCase {
         let app = launch(route: "stats/page/typical")
         let tabBar = app.tabBars.firstMatch
         XCTAssertTrue(tabBar.waitForExistence(timeout: 20), "No tab bar")
-        let identifiers = ["decks", "stats", "settings"].map { "shell.root.tab.\($0)" }
-        XCTAssertTrue(waitUntil { tabBar.buttons.allElementsBoundByIndex.map(\.identifier) == identifiers },
-                      "Decks, Statistics, Settings (Browse has no compact layout): \(tabBar.buttons.allElementsBoundByIndex.map(\.identifier))")
-        XCTAssertEqual(tabBar.buttons.allElementsBoundByIndex.map(\.label), ["Decks", "Statistics", "Settings"])
+        // The order, by the tab buttons' titles (en_US). Their identifiers are the shell's
+        // (R1964, NavigationLayoutTests): on this route iOS 27 gave the buttons none.
+        let labels = { tabBar.buttons.allElementsBoundByIndex.map(\.label) }
+        XCTAssertTrue(waitUntil { labels() == ["Decks", "Statistics", "Settings"] },
+                      "Decks, Statistics, Settings (Browse has no compact layout): \(labels())")
         XCTAssertTrue(element(app, "stats.page.content").waitForExistence(timeout: 20), "The route reaches the page on the iPhone")
-        XCTAssertTrue(element(app, "shell.root.tab.stats").isSelected, "The Statistics tab is selected")
+        XCTAssertTrue(tabBar.buttons["Statistics"].isSelected, "The Statistics tab is selected")
         // A second tab and back keeps the page (its own stack).
-        element(app, "shell.root.tab.decks").tap()
-        element(app, "shell.root.tab.stats").tap()
+        tabBar.buttons["Decks"].tap()
+        tabBar.buttons["Statistics"].tap()
         XCTAssertTrue(element(app, "stats.page.content").waitForExistence(timeout: 10))
     }
 
@@ -67,11 +68,15 @@ final class StatisticsCompactUITests: XCTestCase {
         // The period stays under the bar while the page scrolls (N25.2).
         element(app, "stats.page.content").swipeUp(velocity: .fast)
         element(app, "stats.page.content").swipeUp(velocity: .fast)
-        XCTAssertTrue(period.isHittable, "The period control is still on screen after scrolling")
+        // Fast swipes leave the page gliding: the control is read once it has settled. Over the
+        // content that scrolls under the bar XCTest's isHittable says no; the tap on 1M below is
+        // what shows the control takes the touch.
+        settle(element(app, "stats.page.content").staticTexts.firstMatch)
+        XCTAssertTrue(period.exists, "The period control is still there after scrolling")
         XCTAssertEqual(period.frame.minY, top, accuracy: 2, "The period control is pinned")
         XCTAssertTrue(deck.isHittable, "The deck's name shows at every scroll position")
         // Choosing a period works from the pinned control.
-        element(app, "stats.toolbar.period.1m").tap()
+        element(app, "stats.toolbar.period.1m").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(waitUntil { self.element(app, "stats.toolbar.period.1m").isSelected }, "1M chosen")
     }
 
@@ -110,8 +115,12 @@ final class StatisticsCompactUITests: XCTestCase {
         XCTAssertTrue(element(app, "stats.boxSwitch.reviewsMode").exists, "By Type | By Answer stays in the header")
         XCTAssertEqual(menu.value as? String, "Count")
         menu.tap()
-        let time = element(app, "stats.boxSwitch.reviewsMeasure.time")
-        XCTAssertTrue(time.waitForExistence(timeout: 5), "Count and Time in the menu")
+        // A picker's options in a menu carry no identifier on iOS: the menu's items by their
+        // titles (the launch is en_US).
+        let items = app.collectionViews.buttons
+        let time = items["Time"]
+        XCTAssertTrue(time.waitForExistence(timeout: 5) && items["Count"].exists, "Count and Time in the menu")
+        XCTAssertTrue(items["Count"].isSelected, "Count is the chosen one")
         time.tap()
         XCTAssertTrue(waitUntil { (menu.value as? String) == "Time" }, "Time chosen from the menu")
     }
@@ -127,9 +136,19 @@ final class StatisticsCompactUITests: XCTestCase {
         plot.swipeUp(velocity: .slow)
         XCTAssertLessThan(plot.frame.minY, before - 40, "A swipe over the plot scrolls the page")
         XCTAssertEqual(plot.value as? String ?? "", "", "A swipe selects nothing")
-        plot.swipeDown(velocity: .slow)
+        // Back to Knowledge's heading under the bar, the plot whole below it; a touch on a page
+        // that still moves only stops it, so the press waits until it rests.
+        element(app, "stats.toolbar.jump").tap()
+        element(app, "stats.toolbar.jump.knowledge").tap()
+        settle(plot)
+        XCTAssertGreaterThan(plot.frame.minY, element(app, "stats.toolbar.period").frame.maxY, "The plot is below the bar")
         plot.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.6)
-        XCTAssertTrue(waitUntil { !((plot.value as? String) ?? "").isEmpty }, "A hold pins the bar under the finger")
+        let pinned = waitUntil { !((plot.value as? String) ?? "").isEmpty }
+        if !pinned {
+            add(XCTAttachment(screenshot: app.screenshot()))
+            add(XCTAttachment(string: app.debugDescription))
+        }
+        XCTAssertTrue(pinned, "A hold pins the bar under the finger: \(plot.frame)")
     }
 
     /// Activity's recent lines (the coordinator's decision of 2026-11-23): Show All Years grows the
@@ -144,9 +163,13 @@ final class StatisticsCompactUITests: XCTestCase {
         let toggle = element(app, "stats.box.activity.showAllYears")
         XCTAssertTrue(waitFor(toggle, NSPredicate(format: "exists == true AND label == 'Show All Years'"), 20),
                       "Three years of history: the recent lines and Show All Years")
-        // Bring the control to the middle of the screen, then expand.
-        app.swipeUp(velocity: .slow)
-        XCTAssertTrue(toggle.isHittable)
+        // Bring the control into the upper half of the screen, a short drag at a time, then expand.
+        let window = app.windows.firstMatch.frame
+        for _ in 0..<8 where !(toggle.isHittable && toggle.frame.maxY < window.midY) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+        }
+        XCTAssertTrue(toggle.isHittable, "Show All Years on screen: \(toggle.frame) in \(window)")
         let before = toggle.frame.minY
         let shortGrid = plot.frame.height
         toggle.tap()
@@ -214,6 +237,17 @@ final class StatisticsCompactUITests: XCTestCase {
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    /// Waits until `element` has stopped moving (two reads 0.3 s apart agree).
+    private func settle(_ element: XCUIElement) {
+        var last = element.frame
+        _ = waitUntil {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            let now = element.frame
+            defer { last = now }
+            return now == last
+        }
     }
 
     private func waitFor(_ target: XCUIElement, _ predicate: NSPredicate, _ timeout: TimeInterval) -> Bool {

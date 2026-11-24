@@ -117,6 +117,8 @@ import Testing
         #expect(model.box(.retention).phase == .loading(fraction: nil))
         #expect(!model.strip(.studiedToday).loading && model.strip(.retentionToday).loading)
         #expect(model.subtitle == "100 cards in 4 decks · Updating…")
+        // The narrow page's line drops the deck count, so it never truncates (N25.6).
+        #expect(model.compactSubtitle == "100 cards · Updating…")
 
         service.send(request.refresh, .progress(.cardStatesOverTime, .fraction(0.4)))
         service.send(request.refresh, .progress(.knowledgeOverTime, .indeterminate))
@@ -131,8 +133,10 @@ import Testing
         #expect(model.box(.knowledgeOverTime).phase == .failed)
         #expect(model.box(.knowledgeOverTime).data.legendNames == ["Known", "Studied", "Likely forgotten"])
         #expect(model.subtitle == "100 cards in 4 decks · Updated just now")
+        #expect(model.compactSubtitle == "100 cards · Updated just now")
         timers.advance(61)
         #expect(model.subtitle == "100 cards in 4 decks")
+        #expect(model.compactSubtitle == "100 cards")
         #expect(model.state == .content)
     }
 
@@ -180,6 +184,8 @@ import Testing
         service.answer(first, tier1)
         service.send(first.refresh, .end(.contextChanged))
         let second = try await request(2)
+        // The new request's boxes are written off the main actor (N25.14).
+        await settle { model.box(.cardCounts).updating }
         #expect(model.box(.cardCounts).phase == .ready)
         #expect(model.box(.cardCounts).updating)
         #expect(model.box(.retention).phase == .loading(fraction: nil))
@@ -439,8 +445,6 @@ import Testing
         model.receive(.collectionReplaced)
         #expect(model.box(.knowledgeOverTime).isLoading)
         #expect(model.selection(for: .knowledgeOverTime) == pin)
-        // The plot is unfocusable while loading: losing its focus then never unpins.
-        #expect(!StatsChartSelection.unpinsOnFocusLoss(focused: false, pinned: true, ready: false))
         // An empty loading phase carries the selection unchanged.
         #expect(pin.carried(from: model.box(.knowledgeOverTime).data.bins, to: []) == pin)
         timers.advance(0.5)

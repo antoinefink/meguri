@@ -432,7 +432,7 @@ struct AppCommands: Commands {
             Button("Find…") { context?.find() }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(context?.canFind != true)
-            // N21.8: their sheets come with U277; disabled until then.
+            // N21.8: their sheets (U277), also with no selection.
             browseItem(.findReplace, key: "f", [.command, .option])
             browseItem(.findDuplicates)
         }

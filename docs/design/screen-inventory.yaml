@@ -593,7 +593,8 @@ screens:
       Replace With, In (All Fields, fields grouped by note type, Tags), Notes (Selected or All
       Found), Match Case, Whole Words, Regular Expression; a live preview counting the notes
       that will change and listing the first 100 notes that change with removed text crossed out; the
-      button names the count; Undo restores every note. Identifiers browse.findReplace.*.
+      button names the count; Undo restores every note. Built (U277, Mac): identifiers
+      browse.sheet.findReplace.* like the other command sheets.
   - id: browse.findDuplicates
     title: Find Duplicates
     units: [U266, U277]
@@ -605,8 +606,8 @@ screens:
     purpose: >-
       Find Duplicates (round 8): browser/workspace V10 and N21.6. A Field menu and
       a Notes choice; Find shows the duplicate notes in the table as one Duplicates token,
-      sorted by that field; with none the sheet says "No duplicates found.". Identifiers
-      browse.findDuplicates.*.
+      sorted by that field; with none the sheet says "No duplicates found.". Built (U277,
+      Mac): identifiers browse.sheet.findDuplicates.* like the other command sheets.
   - id: browse.editField
     title: Edit Field
     units: [U220]
@@ -750,8 +751,10 @@ screens:
       stats/chart/<box>/<state> for cards-over-time, reviews-due, answers, retrievability and
       by-deck (1m 3m 6m 1y, deck, loading, empty, failed, pinned, contrast; cold, leaf and the
       card-counts, time-of-day and stability failures). Identifiers: stats.box.cardCounts.plot (the
-      pie), .table and .row.<state>; stats.box.byDeck.table, .sort.<column> (deck, cards,
-      reviews, retention, time) and .row.<deck id>-<own cards>. Box titles are plain headings
+      pie) and .table, stats.cardCounts.row.<state>; stats.box.byDeck.table,
+      stats.byDeck.sort.<column> (deck, cards, reviews, retention, time) and
+      stats.byDeck.row.<deck id>-<own cards> (four parts, R1964); Time of Day's upper panel
+      stats.box.timeOfDayRemembered.plot. Box titles are plain headings
       (stats.box.<box>.header, no chevron) until U302 gives a box its page.
   - id: stats.heatmapSettings
     title: Heatmap settings

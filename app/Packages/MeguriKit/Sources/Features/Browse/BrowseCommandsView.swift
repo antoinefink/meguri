@@ -52,6 +52,15 @@ public enum BrowseCommandText {
     /// The flags' colours (`tags/flags-and-marked` F1).
     public static func flagColor(_ flag: UInt8) -> Color { BrowseStrings.flagColor(flag) }
 
+    /// Why Find and Replace… or Find Duplicates… is disabled, as its help
+    /// (they need no selection, so the reason is not one); empty otherwise.
+    public static func disabledHelp(_ command: BrowseCommand, _ state: BrowseCommandState, commands: BrowseCommands?,
+                                    locale: Locale = .current) -> String {
+        guard command == .findReplace || command == .findDuplicates, !state.enabled,
+              let reason = commands?.unavailable else { return "" }
+        return BrowseFindText.unavailable(reason, locale: locale)
+    }
+
     public static func selectSiblings(locale: Locale = .current) -> String {
         BrowseStrings.text("browse.command.selectSiblings", locale: locale)
     }
@@ -98,6 +107,7 @@ public enum BrowseCommandText {
         case .moved: String(localized: "browse.done.moved", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
         case .tagsChanged: String(localized: "browse.done.tagsChanged", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
         case .rescheduled: String(localized: "browse.done.rescheduled", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
+        case .notesChanged: String(localized: "browse.done.notesChanged", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
         case .forgotten: String(localized: "browse.done.forgotten", defaultValue: "\(n) \(shown)", bundle: .module, locale: locale)
         }
     }
@@ -203,6 +213,7 @@ private struct BrowseRowMenuItems: View {
             }
             .keyboardShortcut(key.map { KeyboardShortcut($0, modifiers: modifiers) })
             .disabled(!state.enabled)
+            .help(BrowseCommandText.disabledHelp(command, state, commands: commands, locale: locale))
             .accessibilityIdentifier("browse.menu.\(Self.identifier(command))")
         }
     }
@@ -286,6 +297,14 @@ struct BrowseCommandFeedback: ViewModifier {
             // U276: the command sheet, on the rows it opened on.
             .sheet(item: Binding(get: { commands.sheet }, set: { if $0 == nil { commands.dismissSheet() } })) { sheet in
                 BrowseCommandSheetView(model: model, sheet: sheet)
+            }
+            // U277: Find and Replace… and Find Duplicates….
+            .sheet(item: Binding(get: { commands.findReplaceSheet }, set: { if $0 == nil { commands.dismissFindReplace() } })) {
+                sheet in BrowseFindReplaceSheetView(sheet: sheet)
+            }
+            .sheet(item: Binding(get: { commands.findDuplicatesSheet },
+                                 set: { if $0 == nil { commands.dismissFindDuplicates() } })) { sheet in
+                BrowseFindDuplicatesSheetView(sheet: sheet)
             }
             .onChange(of: commands.announcement) { _, result in
                 guard let result else { return }

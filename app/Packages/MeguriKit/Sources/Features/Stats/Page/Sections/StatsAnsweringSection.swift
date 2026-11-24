@@ -99,7 +99,7 @@ struct StatsTimeOfDayBox: View {
                 // highest, which otherwise ran into each other ("70%20K" in the captures).
                 VStack(alignment: .leading, spacing: Spacing.medium) {
                     StatsChartPlot(
-                        box: "\(slot.id.rawValue).remembered", data: ready ? upper : upper.skeleton(), phase: .ready,
+                        box: "\(slot.id.rawValue)Remembered", data: ready ? upper : upper.skeleton(), phase: .ready,
                         size: .panel, summary: summary, selection: slot.selection, showInBrowse: nil, separatesSeries: nil,
                         options: StatsPlotOptions(legend: false, xAxis: false, callout: false, focusable: false,
                                                   accessible: false, interactive: false, yLabelWidth: axisLabelWidth)

@@ -118,6 +118,10 @@ struct StatsCardCountsBox: View {
                         rows(table, highlighted: highlighted)
                     }
                 }
+                // Beside a taller box the row's height is more than the pie and table need: they
+                // sit in the middle of what is left under the header, not at its top with an
+                // empty band under them. Alone in its row the box keeps its own height.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contextMenu { if let table { exportMenu(table) } }
                 // The narrow page (N25.6), the Duo held tall included, whatever its size class.
                 if statsNarrow ?? (horizontalSizeClass == .compact) {
@@ -217,7 +221,7 @@ struct StatsCardCountsBox: View {
             selection.wrappedValue = selection.wrappedValue == pinned ? .none : pinned
         }
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("stats.box.cardCounts.row.\(label)")
+        .accessibilityIdentifier("stats.cardCounts.row.\(label)")
         if let row, let item = row.itemText, let showInBrowse {
             cells
                 .accessibilityAddTraits(.isButton)
@@ -270,13 +274,6 @@ struct StatsCardCountsPie: View {
         .onKeyPress(.leftArrow) { move(-1) }
         .onKeyPress(.rightArrow) { move(1) }
         .onKeyPress(.escape) { clear() }
-        #if os(macOS)
-        .onChange(of: focused) {
-            if StatsChartSelection.unpinsOnFocusLoss(focused: focused, pinned: selection.pinned, ready: table != nil) {
-                selection = .none
-            }
-        }
-        #endif
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: summary))
         .accessibilityIdentifier("stats.box.cardCounts.plot")

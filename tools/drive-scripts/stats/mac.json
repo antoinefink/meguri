@@ -1,0 +1,441 @@
+{
+ "name": "f2-mac",
+ "description": "Statistics follow-up captures",
+ "platforms": [
+  "mac"
+ ],
+ "steps": [
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/knowledge-over-time",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-knowledge-light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/card-counts",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-cards-light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/answers",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-answers-light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/retrievability",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-memory-light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/activity/1m",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-activity-1m-light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/activity/3m",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-activity-3m-light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/activity/6m",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-activity-6m-light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/activity/1y",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-activity-1y-light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/activity",
+    "arguments": [
+     "-MeguriAppearance",
+     "light"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-activity-all-light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/knowledge-over-time",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-knowledge-dark"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/card-counts",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-cards-dark"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/answers",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-answers-dark"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/retrievability",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-memory-dark"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/activity/1m",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-activity-1m-dark"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/activity/3m",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-activity-3m-dark"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/activity/6m",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-activity-6m-dark"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/activity/1y",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-activity-1y-dark"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "windowSize": "1250x1000",
+    "route": "stats/chart/activity",
+    "arguments": [
+     "-MeguriAppearance",
+     "dark"
+    ]
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "snapshot": "mac-activity-all-dark"
+  }
+ ]
+}

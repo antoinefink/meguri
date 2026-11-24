@@ -61,7 +61,10 @@ struct BrowseColumnMenu: Equatable {
         let standard = (listed + others).map(column)
         var items: [Item] = []
         if let id = input.notetype {
-            let fields = (input.fields[id] ?? []).map { column("fld:" + $0) }
+            let names = input.fields[id] ?? []
+            // A shown field column whose field was renamed or removed can still be unchecked.
+            let gone = input.columns.filter { $0.hasPrefix("fld:") && !names.contains(String($0.dropFirst(4))) }
+            let fields = (names.map { "fld:" + $0 } + gone).map(column)
             items += fields.prefix(Self.leadingFields)
             if fields.count > Self.leadingFields {
                 let more = fields.count - Self.leadingFields

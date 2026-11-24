@@ -15,15 +15,14 @@ public nonisolated enum BrowseCommand: Hashable, Sendable {
     /// N21.8's Note › Edit Note in Browse: the inspector's first field.
     case editNote
 
-    /// The commands that run now (U275) or open their sheet (U276). The
-    /// others open a sheet that a later unit builds (Find and Replace and
-    /// Find Duplicates: U277; Change Note Type: U284): until then they are
-    /// in their places, disabled.
+    /// The commands that run now (U275) or open their sheet (U276, U277).
+    /// Change Note Type opens a sheet U284 builds: until then it is in its
+    /// places, disabled.
     public var built: Bool {
         switch self {
         case .flag, .suspend, .unsuspend, .bury, .unbury, .delete, .editNoteType, .editNote: true
-        case .changeDeck, .addTags, .removeTags, .setDueDate, .forget: true
-        case .changeNoteType, .findReplace, .findDuplicates: false
+        case .changeDeck, .addTags, .removeTags, .setDueDate, .forget, .findReplace, .findDuplicates: true
+        case .changeNoteType: false
         }
     }
 
@@ -140,12 +139,24 @@ public nonisolated struct BrowseAnnouncement: Equatable, Sendable {
         /// U276's sheets: cards moved, notes changed (tags), cards given a
         /// due date, cards forgotten.
         case moved, tagsChanged, rescheduled, forgotten
+        /// U277: Find and Replace's notes changed (V9).
+        case notesChanged
     }
 
     public let kind: Kind
     public let count: UInt64
     /// Raised by every announcement, so two equal ones are both made.
     public let serial: UInt64
+}
+
+/// Why a command that needs no selection is disabled (its help).
+public nonisolated enum BrowseUnavailable: Sendable, Hashable {
+    /// The results are not shown yet, or their search went.
+    case searching
+    /// Another command, sheet or question is open.
+    case busy
+    /// The collection is not open for writes.
+    case notReady
 }
 
 /// V8.3's display names of Browse's undo steps, in Apple's style ("Undo
@@ -192,6 +203,9 @@ public final class BrowseCommands {
     public private(set) var failed: BrowseCommand?
     /// U276: the command sheet open, on the rows it opened on.
     public private(set) var sheet: BrowseSheet?
+    /// U277: Find and Replace… and Find Duplicates…, on the rows they opened on.
+    public private(set) var findReplaceSheet: BrowseFindReplaceSheet?
+    public private(set) var findDuplicatesSheet: BrowseFindDuplicatesSheet?
 
     @ObservationIgnored let results: BrowseResults
     /// The sheets' own reads (U276).
@@ -218,6 +232,15 @@ public final class BrowseCommands {
     @ObservationIgnored var editNote: @MainActor () -> Void = {}
     /// The collection is ready for writes.
     @ObservationIgnored public var ready: @MainActor () -> Bool = { true }
+    /// U277: what Find and Replace remembers on the device (F2), and its write.
+    @ObservationIgnored var findReplaceMemory: @MainActor () -> BrowseFindReplaceDevice? = { nil }
+    @ObservationIgnored var keepFindReplaceMemory: @MainActor (BrowseFindReplaceDevice) -> Void = { _ in }
+    /// The note types in A2's order (the field menus' groups).
+    @ObservationIgnored var notetypes: @MainActor () -> [NotetypeName] = { [] }
+    /// V10: Find Duplicates found groups: the query becomes their token.
+    @ObservationIgnored var duplicatesFound: @MainActor (FindDuplicatesResult, String) -> Void = { _, _ in }
+    /// F2: the last Replace's texts in this launch.
+    @ObservationIgnored private var lastReplace: (find: String, replace: String)?
 
     init(results: BrowseResults, sheetReads: any BrowseSheetReads) {
         self.results = results
@@ -249,7 +272,15 @@ public final class BrowseCommands {
     /// command running, no question open.
     private func available(_ rows: Set<Int>?) -> Bool {
         guard let list = results.list, !list.released, !results.isDimmed else { return false }
-        return !busy && deleteQuestion == nil && sheet == nil && ready()
+        return !busy && deleteQuestion == nil && sheet == nil && findReplaceSheet == nil && findDuplicatesSheet == nil && ready()
+    }
+
+    /// Why the rows cannot take a command now, for the help of a disabled
+    /// Find and Replace… or Find Duplicates…, which need no selection.
+    public var unavailable: BrowseUnavailable? {
+        guard let list = results.list, !list.released, !results.isDimmed else { return .searching }
+        if busy || deleteQuestion != nil || sheet != nil || findReplaceSheet != nil || findDuplicatesSheet != nil { return .busy }
+        return ready() ? nil : .notReady
     }
 
     /// The selection or the list changed: its facts are read again, the
@@ -405,6 +436,10 @@ public final class BrowseCommands {
         case .changeDeck, .addTags, .removeTags, .setDueDate, .forget:
             guard let kind = BrowseSheetKind(command), let target = menu ?? results.target() else { return }
             openSheet(kind, on: target)
+        case .findReplace:
+            openFindReplace(selected: menu ?? results.target())
+        case .findDuplicates:
+            openFindDuplicates()
         default:
             return
         }
@@ -682,6 +717,158 @@ public final class BrowseCommands {
         }
     }
 
+    // MARK: Find and Replace, Find Duplicates (U277)
+
+    /// V9: the sheet on the selected rows (Selected) and the whole results
+    /// (All Found), as they are now; it opens on Selected when there is a
+    /// selection.
+    private func openFindReplace(selected: BrowseTarget?) {
+        guard let session = results.commandSession else { return }
+        serial &+= 1
+        let memory = findReplaceMemory()
+        let sheet = BrowseFindReplaceSheet(id: serial, selected: selected, commands: self, reads: sheetReads, memory: memory,
+                                           prefill: lastReplace, typeOrder: notetypes().map(\.id))
+        findReplaceSheet = sheet
+        sheet.load(session: session, results: results, history: memory, waitFirst: factsTask?.task)
+    }
+
+    /// F2: Replace enters the texts in the histories and keeps the options
+    /// and the In choice, before the run (a refused run enters them too).
+    func rememberFindReplace(request: FindReplaceRequest, entry: BrowseFieldEntry?, sheet: BrowseFindReplaceSheet) {
+        var memory = findReplaceMemory() ?? BrowseFindReplaceDevice()
+        memory.matchCase = !request.ignoreCase
+        memory.wholeWords = request.wholeWords
+        memory.regex = request.regex
+        memory.inEntry = entry?.kind.memory
+        memory.inPosition = entry?.id
+        memory.finds = BrowseFindReplaceDevice.entering(request.find, into: memory.finds)
+        memory.replaces = BrowseFindReplaceDevice.entering(request.replace, into: memory.replaces)
+        keepFindReplaceMemory(memory)
+        lastReplace = (request.find, request.replace)
+    }
+
+    /// The run on the sheet's target: one "Find and Replace" step, the rows
+    /// updated in place. A list that moved on is refused, nothing written;
+    /// a count larger than the preview's is refused and shown again (F11).
+    func runFindReplace(_ sheet: BrowseFindReplaceSheet, request: FindReplaceRequest, target: BrowseTarget, confirmed: UInt64) {
+        guard let session = results.commandSession else { return sheet.failed(.failed) }
+        let generation = generation
+        // A list that already moved on is refused here, as the core would.
+        if let list = results.list, list.handle != target.handle || list.revision != target.revision || list.mode != target.mode {
+            return sheet.failed(.rowsChanged)
+        }
+        Task {
+            do {
+                // A Cancel before the job exists: nothing is started.
+                if sheet.phase == .cancelling { return closeFindReplace(sheet) }
+                let running = try await session.startFindReplace(request, on: target, confirmed: confirmed)
+                guard self.generation == generation else {
+                    await running.cancel()
+                    return
+                }
+                sheet.started(running)
+                let progress = Task { @MainActor in
+                    for await report in running.progress { sheet.progressed(report) }
+                }
+                defer { progress.cancel() }
+                let result = try await running.result()
+                guard self.generation == generation else { return }
+                closeFindReplace(sheet)
+                // V8.3: the command's own title, also for In Tags (whose step the core names Update Tag).
+                if result.summary.undoName != nil, let title = BrowseStepNames.display(.findReplace, count: nil) {
+                    stepRecorded(result.summary.seq, title)
+                }
+                serial &+= 1
+                announcement = BrowseAnnouncement(kind: .notesChanged, count: result.affected, serial: serial)
+            } catch {
+                guard self.generation == generation else { return }
+                if let failure = BrowseFindReplaceSheet.failure(error) {
+                    sheet.failed(failure)
+                } else {
+                    // Cancelled: nothing was written.
+                    closeFindReplace(sheet)
+                }
+            }
+        }
+    }
+
+    func closeFindReplace(_ sheet: BrowseFindReplaceSheet) {
+        sheet.closed()
+        guard findReplaceSheet === sheet else { return }
+        findReplaceSheet = nil
+        rowsChanged()
+    }
+
+    /// The sheet closed by the system (a window closing).
+    public func dismissFindReplace() {
+        guard let findReplaceSheet else { return }
+        if findReplaceSheet.isRunning { findReplaceSheet.cancel() } else { closeFindReplace(findReplaceSheet) }
+    }
+
+    /// V10: the sheet, its field menu starting on the Sort Field of the
+    /// current row's note type (else the first row's), All Found on the
+    /// whole results.
+    private func openFindDuplicates() {
+        guard let session = results.commandSession else { return }
+        serial &+= 1
+        let start = results.currentIndex.flatMap { results.target([$0]) } ?? results.target([0])
+        let sheet = BrowseFindDuplicatesSheet(id: serial, startRow: start, commands: self, reads: sheetReads,
+                                              notetypes: notetypes())
+        findDuplicatesSheet = sheet
+        sheet.load(session: session, results: results, waitFirst: factsTask?.task)
+    }
+
+    /// Find: the groups replace the query (V10); none keeps the sheet,
+    /// which says so. It writes nothing.
+    func runFindDuplicates(_ sheet: BrowseFindDuplicatesSheet, field: String, target: BrowseTarget?) {
+        guard let session = results.commandSession else { return sheet.failed(.failed) }
+        let generation = generation
+        if let target, let list = results.list, list.handle != target.handle || list.revision != target.revision {
+            return sheet.failed(.rowsChanged)
+        }
+        Task {
+            do {
+                let running = try await session.startFindDuplicates(field: field, on: target)
+                guard self.generation == generation else {
+                    await running.cancel()
+                    return
+                }
+                sheet.started(running)
+                let progress = Task { @MainActor in
+                    for await report in running.progress { sheet.progressed(report) }
+                }
+                defer { progress.cancel() }
+                let result = try await running.result()
+                guard self.generation == generation, findDuplicatesSheet === sheet else { return }
+                // Cancel was asked for: what the read found does not land.
+                if sheet.phase == .cancelling { return closeFindDuplicates(sheet) }
+                guard !result.groups.isEmpty else { return sheet.finished(result) }
+                closeFindDuplicates(sheet)
+                duplicatesFound(result, field)
+            } catch {
+                guard self.generation == generation else { return }
+                if let failure = BrowseSheet.failure(error) {
+                    sheet.failed(failure)
+                } else {
+                    // Cancelled: the sheet closes, as the other sheets' Cancel does.
+                    closeFindDuplicates(sheet)
+                }
+            }
+        }
+    }
+
+    func closeFindDuplicates(_ sheet: BrowseFindDuplicatesSheet) {
+        sheet.closed()
+        guard findDuplicatesSheet === sheet else { return }
+        findDuplicatesSheet = nil
+        rowsChanged()
+    }
+
+    public func dismissFindDuplicates() {
+        guard let findDuplicatesSheet else { return }
+        if findDuplicatesSheet.isRunning { findDuplicatesSheet.cancel() } else { closeFindDuplicates(findDuplicatesSheet) }
+    }
+
     /// The collection went: nothing started before lands.
     func reset() {
         generation &+= 1
@@ -695,6 +882,11 @@ public final class BrowseCommands {
         if let sheet, sheet.isRunning { sheet.cancel() }
         sheet?.closed()
         sheet = nil
+        if let findReplaceSheet, findReplaceSheet.isRunning { findReplaceSheet.cancel() }
+        findReplaceSheet?.closed()
+        findReplaceSheet = nil
+        findDuplicatesSheet?.closed()
+        findDuplicatesSheet = nil
         sheetDefaults = nil
     }
 }

@@ -4,7 +4,7 @@ import HeatmapKit
 
 /// The page's boxes (`stats/statistics-page` S5), in page order; the raw value is S15's
 /// `stats.box.<box>`.
-public enum StatsBoxID: String, CaseIterable, Hashable, Sendable {
+nonisolated public enum StatsBoxID: String, CaseIterable, Hashable, Sendable {
     case knowledgeOverTime, retention, forgotten
     case reviewsOverTime, activity
     case cardsOverTime, cardCounts, addedAndStarted
@@ -46,7 +46,7 @@ public enum StatsBoxID: String, CaseIterable, Hashable, Sendable {
 }
 
 /// The strip's figures (S6).
-public enum StatsStripID: String, CaseIterable, Hashable, Sendable {
+nonisolated public enum StatsStripID: String, CaseIterable, Hashable, Sendable {
     case studiedToday, retentionToday, remainingToday, streak, mature
 
     var parts: [StatsPart] {
@@ -62,14 +62,14 @@ public enum StatsStripID: String, CaseIterable, Hashable, Sendable {
 
 /// What a box's set was read for: the context Show in Browse passes back (H13) and the scope's
 /// browse text (Q2).
-public struct StatsBoxSource: Hashable, Sendable {
+nonisolated public struct StatsBoxSource: Hashable, Sendable {
     public let scope: StatsPageScope
     public let context: StatsContext
     public let browseScope: StatsBrowseScope
 }
 
 /// Everything one box shows (N25.4), written by the model; the box's view only lays it out.
-public struct StatsBoxContent: Hashable, Sendable {
+nonisolated public struct StatsBoxContent: Hashable, Sendable {
     /// Ready, loading (with the core's fraction), empty with its line, or failed (S8.5, S10.3,
     /// S12.8). A partial value (a `last12Months` result on All's axis) is `.loading` with its
     /// data kept in `data`: never shown as complete.
@@ -103,7 +103,7 @@ public struct StatsBoxContent: Hashable, Sendable {
 }
 
 /// A box's values beyond its chart.
-public enum StatsBoxDetail: Hashable, Sendable {
+nonisolated public enum StatsBoxDetail: Hashable, Sendable {
     case cardCounts(StatsCardCountsTable)
     case answers(StatsAnswersTable)
     /// Time of Day's upper panel, the share remembered per hour (S7.11); `data` is the lower.
@@ -118,7 +118,7 @@ public enum StatsBoxDetail: Hashable, Sendable {
 }
 
 /// Card Counts' table (S7.7).
-public struct StatsCardCountsTable: Hashable, Sendable {
+nonisolated public struct StatsCardCountsTable: Hashable, Sendable {
     public struct Row: Hashable, Sendable, Identifiable {
         public var id: StatsCountLabel { label }
         public let label: StatsCountLabel
@@ -139,7 +139,7 @@ public struct StatsCardCountsTable: Hashable, Sendable {
 }
 
 /// Answers' table (S7.10): one row per group, Again to Easy.
-public struct StatsAnswersTable: Hashable, Sendable {
+nonisolated public struct StatsAnswersTable: Hashable, Sendable {
     public struct Row: Hashable, Sendable, Identifiable {
         public var id: String { name }
         public let name: String
@@ -152,7 +152,7 @@ public struct StatsAnswersTable: Hashable, Sendable {
 }
 
 /// By Deck's table (S7.15).
-public struct StatsByDeckTable: Hashable, Sendable {
+nonisolated public struct StatsByDeckTable: Hashable, Sendable {
     public struct Row: Hashable, Sendable, Identifiable {
         public var id: String { "\(deckID)-\(ownCards)" }
         public let deckID: Int64
@@ -178,7 +178,7 @@ public struct StatsByDeckTable: Hashable, Sendable {
 /// The days Activity's grid runs over (S7.5): from the scope's first review to today, known
 /// from the header (H9) before the counts return, so the grid's size is final from the first
 /// frame (S10.3).
-public struct StatsActivitySpan: Hashable, Sendable {
+nonisolated public struct StatsActivitySpan: Hashable, Sendable {
     /// The first day drawn (H1, at most 0): the scope's oldest review.
     public let firstDay: Int
     /// Today's Gregorian date (day 0).
@@ -213,7 +213,7 @@ public struct StatsActivitySpan: Hashable, Sendable {
     }
 }
 
-extension StatsPagePeriod {
+nonisolated extension StatsPagePeriod {
     /// The days Activity's grid shows ending today, as the charts with no time axis read their
     /// window (S4.3, H1's 30, 90, 182 and 365 days); nil for All, every day back to the first
     /// review (Antoine, 2026-11-23: "with 3M selected it showed two years").
@@ -234,7 +234,7 @@ extension StatsPagePeriod {
 }
 
 /// Activity's grid, streaks and totals (S7.5).
-public struct StatsActivity: Hashable, Sendable {
+nonisolated public struct StatsActivity: Hashable, Sendable {
     /// A year's total, beside its label on the grid (the owner's Option B, 2026-11-23) and in
     /// its container's label for VoiceOver.
     nonisolated public struct Year: Hashable, Sendable, Identifiable {
@@ -286,7 +286,7 @@ public struct StatsActivity: Hashable, Sendable {
 
 /// One figure of the strip (S6): its value with a unit in small text and a detail, or the
 /// progress indicator while its part has not returned (S10.1).
-public struct StatsStripFigure: Hashable, Sendable {
+nonisolated public struct StatsStripFigure: Hashable, Sendable {
     public var value: String?
     public var unit: String?
     public var detail: String?
@@ -299,7 +299,7 @@ public struct StatsStripFigure: Hashable, Sendable {
 }
 
 /// What the page shows instead of its sections (S12).
-public enum StatsPageState: Hashable, Sendable {
+nonisolated public enum StatsPageState: Hashable, Sendable {
     /// S12.1: no collection open; the shell's state, controls disabled.
     case noCollection
     /// S12.2: no cards; controls disabled.

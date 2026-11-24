@@ -201,6 +201,7 @@ struct BrowseSelectionSummaryView: View {
         }
         .buttonStyle(.plain)
         .disabled(!state.enabled)
+        .help(BrowseCommandText.disabledHelp(command, state, commands: commands, locale: locale))
         .accessibilityIdentifier("browse.inspector.command.\(BrowseCommandIdentifier.of(command))")
     }
 

@@ -74,7 +74,7 @@ struct BrowseCommandSheetView: View {
         BrowseSheetFrame(title: title, confirm: confirmTitle, canConfirm: sheet.canConfirm, canCancel: sheet.canCancel,
                          identifier: "browse.sheet.\(identifier)", onConfirm: confirm, onCancel: { sheet.cancel() }) {
             content
-            BrowseSheetStatus(sheet: sheet)
+            BrowseSheetStatus(phase: sheet.phase, failure: sheet.failure)
         }
         // A command under way ends only by its own end or Cancel.
         .interactiveDismissDisabled(sheet.isRunning)
@@ -168,11 +168,12 @@ struct BrowseCommandSheetView: View {
 
 /// Under the content: the command's progress with its Cancel in the frame,
 /// or why it wrote nothing.
-private struct BrowseSheetStatus: View {
-    let sheet: BrowseSheet
+struct BrowseSheetStatus: View {
+    let phase: BrowseSheet.Phase
+    let failure: BrowseSheetFailure?
 
     var body: some View {
-        switch sheet.phase {
+        switch phase {
         case .running(let progress):
             if let progress, let total = progress.total, total > 0 {
                 ProgressView(value: Double(min(progress.completed, total)), total: Double(total)) {
@@ -189,7 +190,7 @@ private struct BrowseSheetStatus: View {
                 .progressViewStyle(.linear)
                 .accessibilityIdentifier("browse.sheet.progress")
         case .editing:
-            if let failure = sheet.failure {
+            if let failure {
                 Label { Text(verbatim: BrowseSheetText.failure(failure)) } icon: { Image(systemName: "exclamationmark.triangle") }
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -210,6 +211,12 @@ enum BrowseSheetText {
         case .deck(.filteredParent): return text("browse.changeDeck.failed.filteredParent")
         case .deck(.tooDeep): return text("browse.changeDeck.failed.tooDeep")
         case .invalidDays(let kind): return dueError(kind, locale: locale)
+        case .countChanged(let notes):
+            let n = Int(clamping: notes), shown = n.formatted(.number.locale(locale))
+            return String(localized: "browse.findReplace.failed.countChanged", defaultValue: "\(n) \(shown)", bundle: .module,
+                          locale: locale)
+        case .findReplace(let invalid): return BrowseFindText.invalid(invalid, locale: locale)
+        case .damaged: return text("browse.findReplace.damaged")
         case .deck, .failed: return text("browse.sheet.failed.other")
         }
     }
@@ -344,6 +351,8 @@ private struct BrowseDeckRowView: View {
 enum BrowseSheetMetrics {
     /// The deck list's height in the Change Deck sheet: about eight rows.
     static let listHeight: CGFloat = 260
+    /// Find and Replace's preview list: about five notes with two lines each.
+    static let previewHeight: CGFloat = 220
 }
 
 // MARK: Set Due Date

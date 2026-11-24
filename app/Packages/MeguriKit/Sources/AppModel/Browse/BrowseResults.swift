@@ -272,15 +272,20 @@ public final class BrowseResults {
                 columnSet = set
                 // The mode and a header click as they are now, not as they were when the run began.
                 let mode = lastMode
-                var sort = set.sort(mode)
+                var sort = shownSort(set, mode)
                 if let override = sortOverride, override.mode == mode {
                     // A header click made while the text was read sorts this query's set.
                     sort = override.sort
-                    writeSort(sort, set: set.set, mode: mode)
-                    columnSet = set.sorted(sort, mode: mode)
-                    columnSets[set.notetypeKey] = columnSet
+                    if displayField != nil {
+                        // V10: display only while the Duplicates field shows.
+                        displaySort = sort
+                    } else {
+                        writeSort(sort, set: set.set, mode: mode)
+                        columnSet = set.sorted(sort, mode: mode)
+                        columnSets[set.notetypeKey] = columnSet
+                    }
                 }
-                issue(Request(kind: .search, text: runText, mode: mode, sort: sort, columns: set.columns(mode),
+                issue(Request(kind: .search, text: runText, mode: mode, sort: sort, columns: shownColumns(set, mode),
                               queryIsEmpty: query.isEmpty))
             } catch {
                 guard revision == queryRevision, self.epoch == epoch else { return }
@@ -312,7 +317,7 @@ public final class BrowseResults {
             return run(query, mode: mode)
         }
         let kind: Request.Kind = list.isComplete && !list.released ? .toggle(list.handle) : .search
-        issue(Request(kind: kind, text: list.text, mode: mode, sort: set.sort(mode), columns: set.columns(mode),
+        issue(Request(kind: kind, text: list.text, mode: mode, sort: shownSort(set, mode), columns: shownColumns(set, mode),
                       queryIsEmpty: list.queryIsEmpty))
     }
 
@@ -333,7 +338,11 @@ public final class BrowseResults {
             sortOverride = (mode, sort)
             return
         }
-        if let set = columnSet {
+        // V10: while the Duplicates field shows, a click sorts the rows shown only: nothing is written,
+        // and the field's order gives way to the click until the token goes.
+        if displayField != nil {
+            displaySort = sort
+        } else if let set = columnSet {
             writeSort(sort, set: set.set, mode: mode)
             columnSet = set.sorted(sort, mode: mode)
             columnSets[set.notetypeKey] = columnSet
@@ -554,7 +563,7 @@ public final class BrowseResults {
             self.store = store
             list = next
             // A column shown or hidden while this request was on its way (a resort, Cards / Notes).
-            if !runPending, let set = columnSet, set.columns(next.mode) != next.columns { showColumns(set.columns(next.mode)) }
+            if !runPending, let set = columnSet, shownColumns(set, next.mode) != next.columns { showColumns(shownColumns(set, next.mode)) }
             keptCenter = nil
             fetching = []
             qaFetching = []
@@ -702,6 +711,14 @@ public final class BrowseResults {
         let rows = (indexes ?? selection).filter { $0 >= 0 && $0 < list.count }
         guard !rows.isEmpty else { return nil }
         return BrowseTarget(handle: list.handle, revision: list.revision, ranges: Self.ranges(rows), mode: list.mode)
+    }
+
+    /// V9's All Found and V10's All <m> Found: every row of the results at
+    /// this revision; nil while they stream (a part of them would leave rows
+    /// out), with none, or when the list cannot take a command.
+    public func allRowsTarget() -> BrowseTarget? {
+        guard let list, list.isComplete, !list.released, !isDimmed, list.count > 0 else { return nil }
+        return BrowseTarget(handle: list.handle, revision: list.revision, ranges: [0..<UInt64(list.count)], mode: list.mode)
     }
 
     /// The session commands run in, once one is open.
@@ -1101,6 +1118,29 @@ public final class BrowseResults {
         return nil
     }
 
+    /// V10: while a Duplicates token is in the query, the results sort by
+    /// its field and show the field's column first. Display only: nothing
+    /// is written to the column sets (V2.4).
+    public var displayField: String? {
+        didSet { if displayField != oldValue { displaySort = nil } }
+    }
+    /// A header click while the Duplicates field shows (display only).
+    private var displaySort: BrowseSort?
+
+    /// The set's columns, with the Duplicates field's first while it shows.
+    private func shownColumns(_ set: ColumnSetShown, _ mode: BrowseMode) -> [String] {
+        let columns = set.columns(mode)
+        guard let field = displayField else { return columns }
+        let key = "fld:" + field
+        return [key] + columns.filter { $0 != key }
+    }
+
+    /// The set's sort, or the Duplicates field's, ascending, while it shows.
+    private func shownSort(_ set: ColumnSetShown, _ mode: BrowseMode) -> BrowseSort {
+        guard let field = displayField else { return set.sort(mode) }
+        return displaySort ?? BrowseSort(key: "fld:" + field, direction: .ascending)
+    }
+
     private func columnSet(_ notetype: Int64?) async throws -> ColumnSetShown {
         if let set = columnSets[notetype] { return set }
         let epoch = epoch, columns = columnsRevision
@@ -1124,8 +1164,9 @@ public final class BrowseResults {
             }
             columnSet = set
             guard let shown = self.list, shown.token == list.token else { return }
-            if set.columns(shown.mode) != shown.columns { showColumns(set.columns(shown.mode)) }
-            if set.sort(shown.mode) != shown.sort, newest?.shown != false { sortAgain(set.sort(shown.mode)) }
+            if shownColumns(set, shown.mode) != shown.columns { showColumns(shownColumns(set, shown.mode)) }
+            // The field Find Duplicates sorts by stays until its token goes (V10).
+            if displayField == nil, set.sort(shown.mode) != shown.sort, newest?.shown != false { sortAgain(set.sort(shown.mode)) }
         }
     }
 
@@ -1168,6 +1209,10 @@ public final class BrowseResults {
         return columnSet?.columns(columnsMode) ?? []
     }
 
+    /// The set's own list in the mode shown: what the chooser edits (the
+    /// Duplicates field shown first, V10, is display only and never written).
+    private var editableColumns: [String] { columnSet?.columns(columnsMode) ?? shownColumns }
+
     /// The set's own name for its widths on this device (K11): per set and mode.
     public var widthsKey: String {
         // A note type's set that is not its own yet is the standard set, live (V2.2).
@@ -1180,26 +1225,27 @@ public final class BrowseResults {
 
     /// Checking a column in the header's menu adds it at the end (V2.3).
     public func showColumn(_ key: String) {
-        let columns = shownColumns
+        let columns = editableColumns
         guard !columns.contains(key), Self.offered(key) else { return }
         changeColumns(columns + [key], writes: [.show(key)])
     }
 
     /// Unchecking it removes it; the last column stays (R1133).
     public func hideColumn(_ key: String) {
-        let columns = shownColumns
+        let columns = editableColumns
         guard columns.contains(key), columns.count > 1 else { return }
         changeColumns(columns.filter { $0 != key }, writes: [.hide(key)])
     }
 
     /// The header's menu: checks or unchecks `key`.
     public func toggleColumn(_ key: String) {
-        shownColumns.contains(key) ? hideColumn(key) : showColumn(key)
+        editableColumns.contains(key) ? hideColumn(key) : showColumn(key)
     }
 
     /// Dragging a header reorders the list (V2.3, R1135): every column once.
     public func moveColumns(_ keys: [String]) {
-        let columns = shownColumns
+        let columns = editableColumns
+        let keys = keys.filter { columns.contains($0) }
         guard keys != columns, keys.count == columns.count, Set(keys) == Set(columns) else { return }
         changeColumns(keys, writes: [.reorder(keys)])
     }
@@ -1211,7 +1257,7 @@ public final class BrowseResults {
         guard let set = columnSet else { return false }
         if case .notetype = set.set { return set.own }
         _ = widthsEdits
-        return shownColumns != Self.defaultColumns(columnsMode) || !(columnWidths[widthsKey]?.isEmpty ?? true)
+        return editableColumns != Self.defaultColumns(columnsMode) || !(columnWidths[widthsKey]?.isEmpty ?? true)
     }
 
     /// The header's "Reset to Standard Columns": in a note type's own set,
@@ -1228,7 +1274,7 @@ public final class BrowseResults {
         storeWidths(columnWidths)
         widthsRevision &+= 1
         widthsEdits &+= 1
-        let columns = shownColumns, defaults = Self.defaultColumns(columnsMode)
+        let columns = editableColumns, defaults = Self.defaultColumns(columnsMode)
         guard columns != defaults else { return }
         // Shown first, then hidden, so the list never empties; then the order.
         var writes = defaults.filter { !columns.contains($0) }.map { ColumnSetChange.show($0) }
@@ -1254,11 +1300,15 @@ public final class BrowseResults {
         let next = set.with(columns, mode: mode)
         columnSet = next
         columnSets[Self.notetype(of: lastQuery)] = next
-        if let list, list.mode == mode { showColumns(columns) }
-        let backend = backend, target = set.set
+        if let list, list.mode == mode { showColumns(shownColumns(next, mode)) }
+        let backend = backend, target = set.set, epoch = epoch
         write {
             do {
-                for change in writes { try await backend.changeColumnSet(target, mode: mode, change: change) }
+                for change in writes {
+                    // A collection opened between two writes gets none of the rest.
+                    guard self.epoch == epoch else { return }
+                    try await backend.changeColumnSet(target, mode: mode, change: change)
+                }
             } catch {
                 // Not written: the set is read back, so the table shows what the collection holds.
                 self.refreshAfterColumnWrites = true
