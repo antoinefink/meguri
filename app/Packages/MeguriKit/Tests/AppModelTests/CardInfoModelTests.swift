@@ -99,6 +99,24 @@ import Testing
         #expect(model.content == .none && model.cardID == nil)
     }
 
+    @Test func aChangeWhileTheTabIsHiddenIsReadWhenItShowsAgain() async throws {
+        let reader = FakeCardInfoReader()
+        let model = CardInfoModel(reader: reader)
+        model.show(card: 1)
+        await model.settled()
+        model.active = false
+        model.changesCommitted(Self.changes(cards: [ChangeSet.Card(id: 1, noteID: 10, change: .updated, memoryStateOnly: false)]))
+        model.dayChanged()
+        await model.settled()
+        #expect(reader.reads == [1], "nothing read while hidden")
+        model.active = true
+        await model.settled()
+        #expect(reader.reads == [1, 1], "read once when shown again")
+        model.show(card: 1)
+        await model.settled()
+        #expect(reader.reads == [1, 1])
+    }
+
     // MARK: The inspector (V7, V13)
 
     @Test func theInspectorNamesTheOneRowsCardAndNoneForNoRowOrSeveralAndKeepsTheTab() async throws {

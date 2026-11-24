@@ -51,11 +51,13 @@ struct BrowseColumnMenu: Equatable {
             return .column(key: key, title: BrowseStrings.column(key, mode: input.mode, locale: locale), checked: checked,
                            enabled: !(checked && input.columns.count == 1))
         }
-        // The list's catalog columns first, in their order, then the others by label.
-        let listed = input.columns.filter { BrowseResults.catalog.contains($0) }
+        // The list's columns first, in their order (field columns too, so one whose
+        // note type went can still be unchecked), then the other catalog columns by label.
         let others = BrowseResults.catalog.filter { !shown.contains($0) }
             .sorted { BrowseStrings.column($0, mode: input.mode, locale: locale)
                 .localizedStandardCompare(BrowseStrings.column($1, mode: input.mode, locale: locale)) == .orderedAscending }
+        // An own set's Standard › holds the catalog's columns only: its fields lead the menu.
+        let listed = input.notetype == nil ? input.columns : input.columns.filter { BrowseResults.catalog.contains($0) }
         let standard = (listed + others).map(column)
         var items: [Item] = []
         if let id = input.notetype {

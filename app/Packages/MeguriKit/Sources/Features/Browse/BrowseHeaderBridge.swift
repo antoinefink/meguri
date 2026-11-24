@@ -54,10 +54,11 @@ struct BrowseHeaderBridge: NSViewRepresentable {
         private var observers: [NSObjectProtocol] = []
         private var monitor: Any?
         private let chooser = NSMenu()
-        /// Each table column's key, as the table drew them when it last held the model's order.
-        private var keys: [ObjectIdentifier: String] = [:]
-        /// A header is being dragged: the order is written once the mouse is up.
+        /// A header is being dragged by the person: the order is written once the mouse is up.
         private var dragging = false
+        /// The bridge's own moves (the state column put back first) are not the person's.
+        private var correcting = false
+        private var syncQueued = false
         private var widthsDue: [String: Double] = [:]
         private var widthsTimer: Timer?
 
@@ -82,7 +83,6 @@ struct BrowseHeaderBridge: NSViewRepresentable {
             monitor = nil
             if table?.headerView?.menu === chooser { table?.headerView?.menu = nil }
             table = nil
-            keys = [:]
         }
 
         func reattach() {
@@ -91,12 +91,14 @@ struct BrowseHeaderBridge: NSViewRepresentable {
             attach(tries: 100)
         }
 
-        /// The table view whose row count is the list's (SwiftUI swaps the
-        /// table when a list arrives); retried until SwiftUI has made it.
+        /// The results table on screen whose row count is the list's (SwiftUI
+        /// swaps the table when a list arrives, and the outgoing one can still be
+        /// in the window for a moment); retried until SwiftUI has made it.
         private func attach(tries: Int) {
             guard let window, table == nil, token != nil else { return }
-            table = window.contentView.flatMap { BrowseResponder.resultsTables(in: $0) }?
-                .first { $0.window != nil && rows > 0 && $0.numberOfRows == rows }
+            let tables = window.contentView.flatMap { BrowseResponder.resultsTables(in: $0) } ?? []
+            table = tables.last { $0.window != nil && $0.numberOfRows == rows && !$0.isHiddenOrHasHiddenAncestor
+                && $0.enclosingScrollView?.superview != nil }
             guard let table else {
                 if tries > 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.attach(tries: tries - 1) }
@@ -115,41 +117,60 @@ struct BrowseHeaderBridge: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
                 MainActor.assumeIsolated { self?.edgeDoubleClicked(event) == true } ? nil : event
             }
-            sync()
+            apply()
         }
 
-        /// After each SwiftUI update: the menu is the header's, the Sort Field
-        /// column takes the remaining width, and the columns are known by key.
+        /// After each SwiftUI update, once SwiftUI has laid the table's columns
+        /// out (the next turn of the main queue): the menu is the header's and
+        /// the Sort Field column takes the remaining width.
         func sync() {
+            guard !syncQueued else { return }
+            syncQueued = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.syncQueued = false
+                // The table went (another list's table took its place): look for it again.
+                if self.table?.window == nil { self.reattach() } else { self.apply() }
+            }
+        }
+
+        private func apply() {
             guard let table else { return }
             if table.headerView?.menu !== chooser { table.headerView?.menu = chooser }
             table.allowsColumnReordering = true
             table.allowsColumnResizing = true
             table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-            let drawn = table.tableColumns
-            guard !dragging, drawn.count == columns.count + 1 else { return trace() }
-            keys = [:]
-            for (index, column) in drawn.enumerated() {
-                guard index > 0 else {
-                    column.resizingMask = []
-                    continue
-                }
-                let key = columns[index - 1]
-                keys[ObjectIdentifier(column)] = key
-                column.resizingMask = key == "noteFld" ? [.autoresizingMask, .userResizingMask] : .userResizingMask
-                if let title = column.headerCell.stringValue.nilIfEmpty, title != BrowseStrings.column(key, mode: model.results.columnsMode,
-                                                                                                         locale: locale) {
-                    report("mismatch at \(index): \(title) for \(key)")
-                }
+            for (index, column) in table.tableColumns.enumerated() {
+                let key = index == 0 ? nil : self.key(of: column)
+                column.resizingMask = key == nil ? (index == 0 ? [] : .userResizingMask)
+                    : key == "noteFld" ? [.autoresizingMask, .userResizingMask] : .userResizingMask
             }
             trace()
         }
 
+        /// The key of a drawn column, by its header's title in the mode (field
+        /// columns by their field's name); by its place when two columns share a title.
+        private func key(of column: NSTableColumn) -> String? {
+            guard let table else { return nil }
+            let mode = model.results.columnsMode
+            let title = column.headerCell.stringValue
+            // The state column has no title.
+            guard !title.isEmpty else { return nil }
+            let matching = columns.filter { BrowseStrings.column($0, mode: mode, locale: locale) == title }
+            if matching.count == 1 { return matching[0] }
+            guard let index = table.tableColumns.firstIndex(where: { $0 === column }), index > 0, index - 1 < columns.count else {
+                return nil
+            }
+            return columns[index - 1]
+        }
+
         private func trace() {
+            #if DEBUG
             guard let table else { return }
-            let titles = table.tableColumns.dropFirst().map { $0.headerCell.stringValue.nilIfEmpty ?? keys[ObjectIdentifier($0)] ?? "?" }
+            let titles = table.tableColumns.dropFirst().map(\.headerCell.stringValue)
             let sort = model.results.list.map { " sort \($0.sort.key) \($0.sort.direction)" } ?? ""
             report("model \(columns.joined(separator: ","))\(sort) | table \(titles.joined(separator: ","))")
+            #endif
         }
 
         /// Out of the view update that called it.
@@ -159,19 +180,14 @@ struct BrowseHeaderBridge: NSViewRepresentable {
 
         // MARK: Order (R1135)
 
+        /// The table moves a dragged header past each column it crosses: the
+        /// order is written once, when the mouse is up. A move with no mouse
+        /// button down is SwiftUI laying out the model's order, not the person's.
         private func moved(from old: Int?, to new: Int?) {
-            guard let table, let old, let new, old != new else { return }
-            // The state column stays first (V2.5).
-            if old == 0 || new == 0 {
-                DispatchQueue.main.async { [weak table] in table?.moveColumn(new, toColumn: old) }
-                return
-            }
-            // The table moves a dragged header past each column it crosses: the order
-            // is written once, when the mouse is up.
+            guard !correcting, let old, let new, old != new, NSEvent.pressedMouseButtons & 1 != 0 else { return }
             guard !dragging else { return }
             dragging = true
             waitForMouseUp()
-            _ = table
         }
 
         private func waitForMouseUp() {
@@ -181,30 +197,39 @@ struct BrowseHeaderBridge: NSViewRepresentable {
             }
             dragging = false
             guard let table else { return }
-            let order = table.tableColumns.dropFirst().compactMap { keys[ObjectIdentifier($0)] }
-            if order.count == columns.count, order != columns {
-                model.results.moveColumns(order)
-            } else {
-                sync()
+            // The state column stays first (V2.5).
+            if let state = table.tableColumns.firstIndex(where: { key(of: $0) == nil }), state != 0 {
+                correcting = true
+                table.moveColumn(state, toColumn: 0)
+                correcting = false
             }
+            let order = table.tableColumns.dropFirst().compactMap { key(of: $0) }
+            if order.count == columns.count, Set(order) == Set(columns), order != columns {
+                model.results.moveColumns(order)
+            }
+            trace()
         }
 
         // MARK: Widths (V2.3, K11)
 
+        /// Only the column the person drags: the window's resizing and the Sort
+        /// Field column taking the rest are not widths the person set.
         private func resized(_ column: NSTableColumn?) {
-            // Only the person's drags: the window's own resizing moves the Sort Field column.
-            guard let column, let header = table?.headerView, header.resizedColumn >= 0,
-                  let key = keys[ObjectIdentifier(column)] else { return }
+            guard let column, let table, let header = table.headerView, header.resizedColumn > 0,
+                  header.resizedColumn < table.tableColumns.count, table.tableColumns[header.resizedColumn] === column,
+                  let key = key(of: column), key != "noteFld" else { return }
             widthsDue[key] = Double(column.width)
             scheduleWidths()
         }
 
         private func scheduleWidths() {
             widthsTimer?.invalidate()
+            // The set and mode the widths were set in, whatever shows when the timer fires.
+            let set = model.results.widthsKey
             widthsTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self, !self.widthsDue.isEmpty else { return }
-                    self.model.results.setWidths(self.widthsDue)
+                    self.model.results.setWidths(self.widthsDue, in: set)
                     self.widthsDue = [:]
                 }
             }
@@ -217,7 +242,7 @@ struct BrowseHeaderBridge: NSViewRepresentable {
             guard header.bounds.contains(point) else { return false }
             for (index, column) in table.tableColumns.enumerated() where index > 0 {
                 let edge = header.headerRect(ofColumn: index).maxX
-                guard abs(point.x - edge) <= 4, let key = keys[ObjectIdentifier(column)] else { continue }
+                guard abs(point.x - edge) <= BrowseMetrics.edgeSlop, let key = key(of: column) else { continue }
                 if key != "noteFld" { fit([column]) }
                 return true
             }
@@ -228,7 +253,7 @@ struct BrowseHeaderBridge: NSViewRepresentable {
         /// rest) as wide as its title and the rows on screen need.
         func sizeToFit() {
             guard let table else { return }
-            fit(table.tableColumns.dropFirst().filter { keys[ObjectIdentifier($0)] != "noteFld" })
+            fit(table.tableColumns.dropFirst().filter { key(of: $0).map { $0 != "noteFld" } ?? false })
         }
 
         private func fit(_ fitted: [NSTableColumn]) {
@@ -240,7 +265,7 @@ struct BrowseHeaderBridge: NSViewRepresentable {
             let headerFont = NSFont.preferredFont(forTextStyle: .subheadline)
             var widths: [String: Double] = [:]
             for column in fitted {
-                guard let key = keys[ObjectIdentifier(column)], let index = columns.firstIndex(of: key) else { continue }
+                guard let key = key(of: column), let index = columns.firstIndex(of: key) else { continue }
                 let title = BrowseStrings.column(key, mode: model.results.columnsMode, locale: locale)
                 // The title, with room for the sort indicator.
                 var width = (title as NSString).size(withAttributes: [.font: headerFont]).width + BrowseMetrics.headerSlack
@@ -323,7 +348,4 @@ struct BrowseHeaderBridge: NSViewRepresentable {
     }
 }
 
-private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
-}
 #endif

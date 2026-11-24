@@ -23,7 +23,8 @@ import Observation
 ///   it replaces it once read. A card named meanwhile drops the older read.
 /// - **Live** (C10, R1260): a change set that names what the snapshot read
 ///   (its card, note, note type, decks, preset, a review-log row) reads it
-///   again in place, and so does a new day for a day-number due (C10.2).
+///   again in place, and so does a new scheduler day or time zone. The
+///   local-midnight read of C10.2 is not wired yet.
 ///   The core's watch (`card_info_watch`, U103) is not built: until it is,
 ///   any added review-log row reads the shown card again, since a change set
 ///   does not say whose row it is.
@@ -54,6 +55,14 @@ public final class CardInfoModel {
         return curve.ranges.first { $0.kind == kind } ?? curve.ranges.last
     }
 
+    /// The host shows the snapshot now. While it does not (Browse's Note tab
+    /// is chosen), a change marks the snapshot stale and it is read again when
+    /// the host shows it.
+    public var active = true {
+        didSet { if active, stale { refresh() } }
+    }
+    @ObservationIgnored private var stale = false
+
     @ObservationIgnored private let reader: any CardInfoReading
     @ObservationIgnored private var serial: UInt64 = 0
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -64,7 +73,7 @@ public final class CardInfoModel {
 
     /// The host names a card, or none.
     public func show(card: Int64?) {
-        guard card != cardID || content == .failed else { return }
+        guard card != cardID || content == .failed || stale else { return }
         if card != cardID { range = nil }
         cardID = card
         guard let card else {
@@ -83,6 +92,7 @@ public final class CardInfoModel {
     }
 
     private func read(_ card: Int64) {
+        stale = false
         serial &+= 1
         let serial = serial, reader = reader
         // A first card shows nothing until it is read; another card's snapshot stays meanwhile.
@@ -109,7 +119,7 @@ public final class CardInfoModel {
     /// names something the snapshot read.
     public func changesCommitted(_ changes: ChangeSet) {
         guard cardID != nil, affects(changes) else { return }
-        refresh()
+        if active { refresh() } else { stale = true }
     }
 
     /// Whether a change set can change the snapshot shown.
@@ -132,10 +142,14 @@ public final class CardInfoModel {
     }
 
     /// A new scheduler day, a zone change or local midnight (C10.1, C10.2).
-    public func dayChanged() { refresh() }
+    public func dayChanged() {
+        guard cardID != nil else { return }
+        if active { refresh() } else { stale = true }
+    }
 
     /// The collection went: nothing of it stays.
     public func reset() {
+        stale = false
         serial &+= 1
         task?.cancel()
         cardID = nil
@@ -143,9 +157,8 @@ public final class CardInfoModel {
         content = .none
     }
 
-    /// C8: Copy Debug Info's JSON for the card shown.
-    public func debugJSON() async -> String? {
-        guard let cardID else { return nil }
-        return try? await reader.debugJSON(cardID)
+    /// C8: Copy Debug Info's JSON for the card whose snapshot shows.
+    public func debugJSON(_ cardID: Int64) async -> String? {
+        try? await reader.debugJSON(cardID)
     }
 }

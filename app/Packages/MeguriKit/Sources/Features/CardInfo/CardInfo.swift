@@ -128,6 +128,8 @@ private struct CardInfoSnapshotView: View {
     let snapshot: CardInfoSnapshot
     @Environment(\.locale) private var locale
     @State private var copied = false
+    /// The history's column widths: each its widest cell.
+    @State private var widths: [Int: CGFloat] = [:]
 
     var body: some View {
         ScrollView {
@@ -151,18 +153,21 @@ private struct CardInfoSnapshotView: View {
 
     // MARK: Stats rows (C4)
 
+    /// The label leading in the secondary style, the core's value trailing
+    /// (`cardInfo.card`); a long value wraps under its own edge.
     private var rows: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.small, verticalSpacing: Spacing.xSmall) {
+        VStack(alignment: .leading, spacing: Spacing.xSmall) {
             ForEach(snapshot.rows, id: \.key) { row in
                 let label = CardInfoStrings.label(row.key, locale: locale)
-                GridRow {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
                     Text(verbatim: label)
                         .foregroundStyle(.secondary)
-                        .gridColumnAlignment(.trailing)
+                        .fixedSize()
+                    Spacer(minLength: Spacing.small)
                     Text(verbatim: row.value)
+                        .multilineTextAlignment(.trailing)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 // One element: "Due, 2026-11-02".
                 .accessibilityElement(children: .ignore)
@@ -182,25 +187,27 @@ private struct CardInfoSnapshotView: View {
             Text("cardInfo.history", bundle: .module)
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.small, verticalSpacing: Spacing.xxSmall) {
-                GridRow {
-                    header("cardInfo.history.date")
-                    header("cardInfo.history.type")
-                    header("cardInfo.history.rating").gridColumnAlignment(.trailing)
-                    header("cardInfo.history.interval").gridColumnAlignment(.trailing)
-                    header("cardInfo.history.time").gridColumnAlignment(.trailing)
+            // Each entry is one accessibility element; a cell takes its column's widest width.
+            VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+                    cell(0, Text("cardInfo.history.date", bundle: .module))
+                    cell(1, Text("cardInfo.history.type", bundle: .module))
+                    cell(2, Text("cardInfo.history.rating", bundle: .module), trailing: true)
+                    cell(3, Text("cardInfo.history.interval", bundle: .module), trailing: true)
+                    cell(4, Text("cardInfo.history.time", bundle: .module), trailing: true)
                 }
+                .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
                 ForEach(snapshot.history) { entry in
-                    GridRow {
-                        Text(verbatim: entry.date)
-                        Text(verbatim: entry.kindText).foregroundStyle(Self.kindColor(entry.kind))
-                        Text(verbatim: entry.ratingText).foregroundStyle(entry.rating == 1 ? Color.token(.countLearn) : Color.primary)
-                        Text(verbatim: entry.interval)
-                        Text(verbatim: entry.time)
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+                        cell(0, Text(verbatim: entry.date))
+                        cell(1, Text(verbatim: entry.kindText).foregroundStyle(Self.kindColor(entry.kind)))
+                        cell(2, Text(verbatim: entry.ratingText)
+                            .foregroundStyle(entry.rating == 1 ? Color.token(.countLearn) : Color.primary), trailing: true)
+                        cell(3, Text(verbatim: entry.interval), trailing: true)
+                        cell(4, Text(verbatim: entry.time), trailing: true)
                     }
                     .monospacedDigit()
-                    .lineLimit(1)
                     .help(Text(verbatim: entry.dateTime))
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(Text(verbatim: CardInfoStrings.historyLabel(entry, locale: locale)))
@@ -208,6 +215,7 @@ private struct CardInfoSnapshotView: View {
                 }
             }
             .font(.callout)
+            .lineLimit(1)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("cardInfo.history")
         }
@@ -215,8 +223,14 @@ private struct CardInfoSnapshotView: View {
         .padding(.vertical, Spacing.small)
     }
 
-    private func header(_ key: LocalizedStringKey) -> some View {
-        Text(key, bundle: .module).foregroundStyle(.secondary)
+    /// A history cell as wide as its column's widest cell.
+    private func cell(_ column: Int, _ text: some View, trailing: Bool = false) -> some View {
+        text
+            .fixedSize()
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                if width > widths[column, default: 0] { widths[column] = width }
+            }
+            .frame(minWidth: widths[column], alignment: trailing ? .trailing : .leading)
     }
 
     /// C6.2's colours: Learn the New state's, Review the Review state's,
@@ -260,7 +274,7 @@ private struct CardInfoSnapshotView: View {
     private var copyDebugInfo: some View {
         Button {
             Task {
-                guard let json = await model.debugJSON() else { return }
+                guard let json = await model.debugJSON(snapshot.cardID) else { return }
                 #if os(macOS)
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(json, forType: .string)

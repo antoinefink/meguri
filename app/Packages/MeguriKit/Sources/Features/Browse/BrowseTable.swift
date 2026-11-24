@@ -185,6 +185,8 @@ enum BrowseMetrics {
     static let headerSlack: CGFloat = 24
     static let cellSlack: CGFloat = 12
     static let fittedMaximum: CGFloat = 360
+    /// How near a header's edge a double click fits that column.
+    static let edgeSlop: CGFloat = 4
     /// A media cell's symbols.
     static let mediaCell: CGFloat = 40
 

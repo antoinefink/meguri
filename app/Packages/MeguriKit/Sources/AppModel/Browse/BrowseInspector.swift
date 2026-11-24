@@ -66,6 +66,7 @@ public final class BrowseInspector {
             guard newValue != tab else { return }
             device.tab = newValue
             saveDevice()
+            cardInfo.active = newValue == .info
             followCardInfo()
         }
     }
@@ -171,6 +172,7 @@ public final class BrowseInspector {
         self.commands = commands
         self.device = device
         self.cardInfo = CardInfoModel(reader: cardInfo)
+        self.cardInfo.active = (device.tab ?? .note) == .info
     }
 
     /// V13: the Info tab reads the shown card while it shows; the Note tab
@@ -609,7 +611,7 @@ public final class BrowseInspector {
 
     /// Every committed change set, from `BrowseModel`.
     func changesCommitted(_ changes: ChangeSet, seq: UInt64) {
-        if tab == .info { cardInfo.changesCommitted(changes) }
+        cardInfo.changesCommitted(changes)
         if changes.wholeCollection || !changes.decks.isEmpty { decksRead = false; Task { await readDecksOnce() } }
         // A note being read now may be one of these: it reloads once it shows.
         if loop != nil {

@@ -100,6 +100,17 @@ import Testing
                       (.show("cardReps"), .notes)]))
     }
 
+    @Test func aColumnHiddenWhileAResortIsOnItsWayStaysHiddenInTheNewList() async throws {
+        let backend = FakeBrowseBackend()
+        let (results, session) = try await results(backend)
+        session.rowsDelay = .milliseconds(100)
+        results.sort(by: "cardDue")
+        results.hideColumn("deck")
+        try await pollUntil { results.list?.sort.key == "cardDue" }
+        #expect(results.list?.columns == ["noteFld", "template", "cardDue", "cardMod"])
+        try await pollUntil { results.row(at: 0)?.cells.count == 4 }
+    }
+
     // MARK: Sets (V2.2, V2.4)
 
     @Test func aNoteTypesSetBecomesItsOwnOnItsFirstChangeAndUseStandardColumnsResetsIt() async throws {
@@ -115,6 +126,7 @@ import Testing
         results.run(FilterQuery(tokens: [.value([.notetype(id: 7, name: "Vocabulary")], negated: false)]), mode: .cards)
         try await pollUntil { results.row(at: 1) != nil }
         #expect(results.columnSet?.own == false && !results.canResetColumns)
+        #expect(results.widthsKey == "std/cards", "a note type with no set of its own uses the standard set, live")
         results.showColumn("fld:Front")
         #expect(results.columnSet?.own == true && results.canResetColumns)
         #expect(results.widthsKey == "7/cards")

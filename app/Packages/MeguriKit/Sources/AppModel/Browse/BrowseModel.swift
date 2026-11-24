@@ -509,7 +509,7 @@ public final class BrowseModel {
     /// The scheduler day or the time zone changed: day values count again.
     public func dayChanged() {
         results.dayChanged()
-        if inspector.tab == .info { inspector.cardInfo.dayChanged() }
+        inspector.cardInfo.dayChanged()
         stale = true
         if visible, ready() { reload() }
     }

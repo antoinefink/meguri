@@ -553,6 +553,8 @@ public final class BrowseResults {
             rejected = false
             self.store = store
             list = next
+            // A column shown or hidden while this request was on its way (a resort, Cards / Notes).
+            if !runPending, let set = columnSet, set.columns(next.mode) != next.columns { showColumns(set.columns(next.mode)) }
             keptCenter = nil
             fetching = []
             qaFetching = []
@@ -1101,10 +1103,10 @@ public final class BrowseResults {
 
     private func columnSet(_ notetype: Int64?) async throws -> ColumnSetShown {
         if let set = columnSets[notetype] { return set }
-        let epoch = epoch
+        let epoch = epoch, columns = columnsRevision
         let set = try await backend.columnSet(notetype: notetype)
-        // A read that began before the collection went does not fill the new one's cache.
-        if self.epoch == epoch { columnSets[notetype] = set }
+        // A read that began before the collection went, or before a column change, does not fill the cache.
+        if self.epoch == epoch, columns == columnsRevision { columnSets[notetype] = set }
         return set
     }
 
@@ -1112,9 +1114,14 @@ public final class BrowseResults {
     /// shown list takes its columns and its sort.
     private func refreshColumnSet() {
         guard let list, ready() else { return }
-        let notetype = Self.notetype(of: lastQuery), epoch = epoch, revision = queryRevision
+        let notetype = Self.notetype(of: lastQuery), epoch = epoch, revision = queryRevision, columns = columnsRevision
         Task {
             guard let set = try? await columnSet(notetype), self.epoch == epoch, revision == queryRevision else { return }
+            // The person changed the columns while the set was read: their change shows, and is read back later.
+            guard columns == columnsRevision else {
+                if columnWritesPending > 0 { refreshAfterColumnWrites = true }
+                return
+            }
             columnSet = set
             guard let shown = self.list, shown.token == list.token else { return }
             if set.columns(shown.mode) != shown.columns { showColumns(set.columns(shown.mode)) }
@@ -1133,7 +1140,10 @@ public final class BrowseResults {
     public func useStandardColumns() {
         guard let set = columnSet, case .notetype(let id) = set.set, set.own else { return }
         let backend = backend
-        write { try? await backend.useStandardColumns(notetype: id) }
+        columnsRevision &+= 1
+        write {
+            do { try await backend.useStandardColumns(notetype: id) } catch { self.refreshAfterColumnWrites = true }
+        }
     }
 
     // MARK: Choosing columns (U272; V2.3, V2.4)
@@ -1159,8 +1169,9 @@ public final class BrowseResults {
     }
 
     /// The set's own name for its widths on this device (K11): per set and mode.
-    var widthsKey: String {
-        let set = switch columnSet?.set ?? .standard {
+    public var widthsKey: String {
+        // A note type's set that is not its own yet is the standard set, live (V2.2).
+        let set = switch columnSet.flatMap({ $0.own ? $0.set : nil }) ?? .standard {
         case .standard: "std"
         case .notetype(let id): String(id)
         }
@@ -1199,6 +1210,7 @@ public final class BrowseResults {
     public var canResetColumns: Bool {
         guard let set = columnSet else { return false }
         if case .notetype = set.set { return set.own }
+        _ = widthsEdits
         return shownColumns != Self.defaultColumns(columnsMode) || !(columnWidths[widthsKey]?.isEmpty ?? true)
     }
 
@@ -1215,6 +1227,7 @@ public final class BrowseResults {
         columnWidths[widthsKey] = nil
         storeWidths(columnWidths)
         widthsRevision &+= 1
+        widthsEdits &+= 1
         let columns = shownColumns, defaults = Self.defaultColumns(columnsMode)
         guard columns != defaults else { return }
         // Shown first, then hidden, so the list never empties; then the order.
@@ -1233,8 +1246,10 @@ public final class BrowseResults {
     /// column added draws nothing until its rows are read again) and writes
     /// the change to the set, with no undo step (V2.4).
     private func changeColumns(_ columns: [String], writes: [ColumnSetChange]) {
-        guard let set = columnSet, ready() else { return }
+        // While a query's run text is read, its set is not known yet: nothing is changed.
+        guard let set = columnSet, ready(), !runPending else { return }
         let mode = columnsMode
+        columnsRevision &+= 1
         // The first change to a note type's set makes it its own (V2.2).
         let next = set.with(columns, mode: mode)
         columnSet = next
@@ -1242,7 +1257,12 @@ public final class BrowseResults {
         if let list, list.mode == mode { showColumns(columns) }
         let backend = backend, target = set.set
         write {
-            for change in writes { try? await backend.changeColumnSet(target, mode: mode, change: change) }
+            do {
+                for change in writes { try await backend.changeColumnSet(target, mode: mode, change: change) }
+            } catch {
+                // Not written: the set is read back, so the table shows what the collection holds.
+                self.refreshAfterColumnWrites = true
+            }
         }
     }
 
@@ -1284,6 +1304,8 @@ public final class BrowseResults {
     @ObservationIgnored private var columnWrite: Task<Void, Never>?
     @ObservationIgnored private var columnWritesPending = 0
     @ObservationIgnored private var refreshAfterColumnWrites = false
+    /// Raised by every column change the person makes: a set read before it does not show.
+    @ObservationIgnored private var columnsRevision: UInt64 = 0
 
     // MARK: Widths (V2.3, K11: per device, per set and per mode)
 
@@ -1297,12 +1319,18 @@ public final class BrowseResults {
     /// The width the person gave `key` in the set and mode shown.
     public func width(of key: String) -> Double? { columnWidths[widthsKey]?[key] }
 
-    /// Dragging a header's edge (or Size Columns to Fit) set these widths.
-    public func setWidths(_ widths: [String: Double]) {
-        var current = columnWidths[widthsKey] ?? [:]
+    /// Raised when the person sets a width (Reset's enabled state follows it).
+    private var widthsEdits: UInt64 = 0
+
+    /// Dragging a header's edge (or Size Columns to Fit) set these widths, in
+    /// the set and mode shown, or in `set` (a `widthsKey`).
+    public func setWidths(_ widths: [String: Double], in set: String? = nil) {
+        let set = set ?? widthsKey
+        var current = columnWidths[set] ?? [:]
         for (key, width) in widths where width.isFinite && width > 0 { current[key] = (width * 2).rounded() / 2 }
-        guard current != columnWidths[widthsKey] else { return }
-        columnWidths[widthsKey] = current
+        guard current != columnWidths[set] else { return }
+        columnWidths[set] = current
+        widthsEdits &+= 1
         storeWidths(columnWidths)
     }
 

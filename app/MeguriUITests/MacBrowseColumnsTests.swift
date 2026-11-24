@@ -57,7 +57,7 @@ final class MacBrowseColumnsTests: XCTestCase {
 
         // V4.1: a click on a sortable header sorts by it, in its first direction.
         try app.bringToFront(bundleIdentifier: bundle)
-        header(app, "Due").click()
+        header(app, "Due").coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5)).click()
         XCTAssertTrue(waitUntil(timeout: 15) { self.columns(app).contains("sort cardDue descending") }, "sorted by Due: \(columns(app))")
         sleep(1)
         capture(app, "customised-columns-\(appearance)")
@@ -150,7 +150,8 @@ final class MacBrowseColumnsTests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
         let sortField = header(app, "Sort Field")
         if sortField.waitForExistence(timeout: 5) {
-            sortField.rightClick()
+            // XCTest reads a SwiftUI table's header buttons as not hittable: clicked at their point.
+            sortField.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).rightClick()
         } else {
             let row = table.outlineRows.element(boundBy: 0)
             row.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0)).withOffset(CGVector(dx: 0, dy: -12)).rightClick()
