@@ -2,13 +2,13 @@ import CoreGraphics
 import Foundation
 
 /// The activity heatmap's grid (contract N14.11, N24.6, `stats/activity-heatmap` AH7 to AH9):
-/// how many whole weeks of fixed squares fit a width, where each day sits, its level and the month labels.
+/// how many whole weeks fit a width, where each day sits, its level and the month labels.
 /// Pure values, so a width change only re-runs this, never the query.
 public nonisolated struct ActivityGrid: Sendable, Equatable {
     /// 52 full weeks and the current one: the 371 days the query returns.
     public static let maximumWeeks = 53
 
-    /// N14.11's square, in points, fixed whatever the width and the text size (it is not text).
+    /// N14.11's baseline square, in points. Mac Home can resize it to fill its row.
     public nonisolated struct Square: Sendable, Equatable {
         public let side: CGFloat
         /// The space between two squares, across and down.
@@ -24,9 +24,8 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
         public static let touch = Square(side: 16, gap: 3)
     }
 
-    /// How many weeks a width shows at a fixed square, and the grid's own size. The grid
-    /// never stretches: it keeps its natural width, leading-aligned, and a narrower
-    /// width drops the oldest weeks.
+    /// Whole weeks selected at the baseline size, and the grid's own size. By default
+    /// squares keep that size; Mac Home opts into filling the row with square cells.
     public nonisolated struct Geometry: Sendable, Equatable {
         public let weeks: Int
         public let square: Square
@@ -34,19 +33,28 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
         public var gap: CGFloat { square.gap }
         /// A column and the gap after it: column `n` starts at `n × pitch`.
         public var pitch: CGFloat { side + gap }
-        /// The grid's natural width: `weeks` columns and the gaps between them.
+        /// `weeks` columns and the gaps between them.
         public var width: CGFloat { weeks == 0 ? 0 : CGFloat(weeks) * pitch - gap }
-        /// Seven rows, known before the width is: the row keeps it from its first frame.
+        /// Seven rows; before measurement the baseline height is reserved.
         public var height: CGFloat { 7 * side + 6 * gap }
 
         /// The most recent whole weeks that fit `available`, at most 53: ⌊(available + gap) / pitch⌋,
-        /// and at least one once a width is known.
-        public init(width available: CGFloat, square: Square) {
-            self.square = square
-            guard available > 0, available.isFinite, square.side > 0 else { weeks = 0; return }
+        /// and at least one once a width is known. With `fillingWidth`, those weeks fill
+        /// the row by resizing the side alone, keeping the gap fixed even above 53 weeks'
+        /// baseline width. A positive width smaller than one baseline cell shows one
+        /// smaller cell; an unknown or invalid width keeps the baseline placeholder height.
+        public init(width available: CGFloat, square: Square, fillingWidth: Bool = false) {
+            guard available > 0, available.isFinite, square.side > 0 else {
+                weeks = 0
+                self.square = square
+                return
+            }
             // n columns need n·pitch − gap; the small allowance absorbs layout rounding.
-            let fitting = Int(((available + square.gap) / (square.side + square.gap) + 1e-6).rounded(.down))
-            weeks = min(ActivityGrid.maximumWeeks, max(1, fitting))
+            let fitting = ((available + square.gap) / (square.side + square.gap) + 1e-6).rounded(.down)
+            weeks = Int(min(CGFloat(ActivityGrid.maximumWeeks), max(1, fitting)))
+            self.square = fillingWidth
+                ? Square(side: (available - CGFloat(weeks - 1) * square.gap) / CGFloat(weeks), gap: square.gap)
+                : square
         }
     }
 

@@ -55,7 +55,7 @@ struct ActivityHeatmapSection: View {
     /// not resize the one that stays.
     @State private var measured: CGFloat?
 
-    /// N14.11's fixed square: it never grows with the width or the text size.
+    /// N14.11's baseline square; Mac Home fills the measured width, touch stays fixed.
     #if os(macOS)
     static let square = ActivityGrid.Square.mac
     #else
@@ -67,7 +67,11 @@ struct ActivityHeatmapSection: View {
         // this row's too: it shows again to measure, rather than judge by an old width.
         let shared = widths.row(page)
         let width = shared == 0 ? 0 : measured ?? shared
+        #if os(macOS)
+        let geometry = ActivityGrid.Geometry(width: width, square: Self.square, fillingWidth: true)
+        #else
         let geometry = ActivityGrid.Geometry(width: width, square: Self.square)
+        #endif
         let days = store.days(scope)
         let grid = days.map {
             ActivityGrid(counts: $0.counts, weeks: geometry.weeks, todayWeekday: $0.today.weekday,
@@ -101,7 +105,7 @@ struct ActivityHeatmapSection: View {
                             }
                         }
                     // Only this clear view sizes the row, and it reports the width offered.
-                    // The squares sit in its overlay at their natural width, leading-aligned,
+                    // The squares sit in its overlay at the geometry's width, leading-aligned,
                     // so an old width (taken before a fold or in another column) can never
                     // feed itself.
                     Color.clear
