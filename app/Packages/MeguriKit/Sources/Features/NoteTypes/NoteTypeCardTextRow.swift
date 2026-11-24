@@ -29,7 +29,9 @@ struct NoteTypeCardTextRow: View {
     private var editable: Bool { model.editable(id) }
 
     var body: some View {
-        Group {
+        // A stack, not a Group: a Group with nothing in it runs no task, and the
+        // row's content comes from that task.
+        VStack(spacing: .zero) {
             if let row, read == css {
                 content(row)
                     .padding(.horizontal, Spacing.small)
@@ -53,10 +55,22 @@ struct NoteTypeCardTextRow: View {
 
     @ViewBuilder private func content(_ row: CardTextRow) -> some View {
         // The title goes first where the column is narrow, then the font menu narrows.
+        // Narrower still, the controls take two lines: nothing clips.
         ViewThatFits(in: .horizontal) {
             controls(row, title: true, fontWidth: Self.fontMenuWidth)
             controls(row, title: false, fontWidth: Self.fontMenuWidth)
             controls(row, title: false, fontWidth: Self.fontMenuNarrow)
+            VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                HStack(spacing: Spacing.small) {
+                    fontMenu(row.font, width: Self.fontMenuNarrow)
+                    sizeField
+                }
+                HStack(spacing: Spacing.small) {
+                    alignment(row.alignment)
+                    colourControls(row)
+                }
+            }
+            .fixedSize()
         }
     }
 
@@ -70,12 +84,16 @@ struct NoteTypeCardTextRow: View {
             fontMenu(row.font, width: fontWidth)
             sizeField
             alignment(row.alignment)
-            colourWell(row.textColour, opacity: true, label: "noteTypes.cardText.textColour",
-                       identifier: "noteTypes.cards.cardText.textColour") { .textColour($0) }
-            colourWell(row.background, opacity: false, label: "noteTypes.cardText.background",
-                       identifier: "noteTypes.cards.cardText.background") { .background($0) }
+            colourControls(row)
         }
         .fixedSize()
+    }
+
+    @ViewBuilder private func colourControls(_ row: CardTextRow) -> some View {
+        colourWell(row.textColour, opacity: true, label: "noteTypes.cardText.textColour",
+                   identifier: "noteTypes.cards.cardText.textColour") { .textColour($0) }
+        colourWell(row.background, opacity: false, label: "noteTypes.cardText.background",
+                   identifier: "noteTypes.cards.cardText.background") { .background($0) }
     }
 
     private func change(_ change: CardTextChange) {
@@ -145,6 +163,7 @@ struct NoteTypeCardTextRow: View {
                 step(by: -1)
             }
             .labelsHidden()
+            .accessibilityIdentifier("noteTypes.cards.cardText.sizeStepper")
         }
         .help(Text("noteTypes.cardText.size", bundle: .module))
     }
@@ -174,12 +193,15 @@ struct NoteTypeCardTextRow: View {
             Label { Text("noteTypes.cardText.leading", bundle: .module) } icon: { Image(systemName: "text.alignleft") }
                 .labelStyle(.iconOnly)
                 .tag(Optional(CardTextAlignment.leading))
+                .accessibilityIdentifier("noteTypes.cards.cardText.alignLeading")
             Label { Text("noteTypes.cardText.centre", bundle: .module) } icon: { Image(systemName: "text.aligncenter") }
                 .labelStyle(.iconOnly)
                 .tag(Optional(CardTextAlignment.center))
+                .accessibilityIdentifier("noteTypes.cards.cardText.alignCentre")
             Label { Text("noteTypes.cardText.trailing", bundle: .module) } icon: { Image(systemName: "text.alignright") }
                 .labelStyle(.iconOnly)
                 .tag(Optional(CardTextAlignment.trailing))
+                .accessibilityIdentifier("noteTypes.cards.cardText.alignTrailing")
         } label: {
             Text("noteTypes.cardText.alignment", bundle: .module)
         }
@@ -192,7 +214,7 @@ struct NoteTypeCardTextRow: View {
 
     // MARK: Colours
 
-    /// A colour well; the system panel reports every step of a drag, so a
+    /// A colour control; the system panel reports every step of a drag, so a
     /// change is written once the colour rests for a moment, as one edit.
     private func colourWell(_ colour: CardTextColour?, opacity: Bool, label: LocalizedStringKey, identifier: String,
                             change make: @escaping (CardTextColour) -> CardTextChange) -> some View {
@@ -209,6 +231,8 @@ struct NoteTypeCardTextRow: View {
             Text(label, bundle: .module)
         }
         .labelsHidden()
+        // The row's colour controls at the size of its other controls.
+        .controlSize(.small)
         .help(Text(label, bundle: .module))
         .accessibilityIdentifier(identifier)
     }

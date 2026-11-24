@@ -51,8 +51,6 @@ public struct NoteTypesView: View {
             .modifier(SaveOutcomeAlerts(model: model))
             .task(id: model.progress?.notetypeId) { await SaveJobShown.follow(model.progress?.notetypeId, into: $jobShown) }
             .onAppear { model.appear() }
-            // One continuous toolbar in every state: the columns' separators never show through it.
-            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
             // N22.1: under about 1,100 points the sidebar steps aside while the Cards tab shows.
             .background { WindowWidthReader(width: $windowWidth) }
             .onChange(of: narrowCards, initial: true) { _, narrow in navigation?.setNarrowWorkspace(narrow) }

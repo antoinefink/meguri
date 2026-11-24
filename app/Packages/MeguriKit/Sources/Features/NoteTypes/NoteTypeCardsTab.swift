@@ -53,6 +53,8 @@ struct NoteTypeCardsTab: View {
                         .ignoresSafeArea(.container, edges: .bottom)
                     NoteTypePreviewPane(model: model, id: id)
                         .frame(maxWidth: .infinity)
+                        // The card runs to the bottom edge, under the home indicator.
+                        .ignoresSafeArea(.container, edges: .bottom)
                 } else {
                     NoteTypeCardsListColumn(model: model, id: id)
                         .frame(width: Self.columnIdeal)

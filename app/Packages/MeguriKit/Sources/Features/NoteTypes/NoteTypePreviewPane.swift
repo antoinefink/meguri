@@ -81,9 +81,11 @@ struct NoteTypePreviewPane: View {
             Label { Text("noteTypes.preview.light", bundle: .module) } icon: { Image(systemName: "sun.max") }
                 .labelStyle(iconsOnly ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon))
                 .tag(CardRuntime.Appearance.light)
+                .accessibilityIdentifier("noteTypes.cards.preview.light")
             Label { Text("noteTypes.preview.dark", bundle: .module) } icon: { Image(systemName: "moon") }
                 .labelStyle(iconsOnly ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon))
                 .tag(CardRuntime.Appearance.dark)
+                .accessibilityIdentifier("noteTypes.cards.preview.dark")
         } label: {
             Text("noteTypes.preview.appearance", bundle: .module)
         }
@@ -186,9 +188,18 @@ struct NoteTypePreviewPane: View {
                     // The card's background runs to the bottom edge, under the home indicator.
                     .ignoresSafeArea(.container, edges: .bottom)
                     #endif
-                    // Under an error the last card stays, faded, so the place keeps its shape.
-                    .opacity(drawn ? (covered ? 0.25 : 1) : 0)
-                    .allowsHitTesting(drawn && !covered)
+                    .opacity(drawn ? 1 : 0)
+                    // Under an error the last card stays, faded by a layer of the
+                    // pane's own background, so the place keeps its shape. The page
+                    // itself is never made translucent or untouchable: on the Mac
+                    // that took the window toolbar's background away.
+                    .overlay {
+                        if covered {
+                            Rectangle()
+                                .fill(.background.opacity(0.75))
+                                .accessibilityHidden(true)
+                        }
+                    }
                     .accessibilityElement(children: .contain)
                     // Tests and captures wait for the drawn card's identifier.
                     .accessibilityIdentifier(drawn ? "noteTypes.cards.preview.page" : "noteTypes.cards.preview.loading")
@@ -229,12 +240,26 @@ struct NoteTypePreviewPane: View {
         .accessibilityIdentifier("noteTypes.cards.preview.error")
     }
 
+    /// The preview's message over (or in place of) the card, laid out as
+    /// the system's content-unavailable view is. Not that view itself: on
+    /// the Mac it took the window toolbar's background away (the columns'
+    /// separators then ran up through the toolbar).
     private func message(_ title: Text, detail: Text?, symbol: String) -> some View {
-        ContentUnavailableView {
-            Label { title } icon: { Image(systemName: symbol) }
-        } description: {
-            if let detail { detail }
+        VStack(spacing: Spacing.small) {
+            Image(systemName: symbol)
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            title
+                .font(.headline)
+            if let detail {
+                detail
+                    .foregroundStyle(.secondary)
+            }
         }
+        .multilineTextAlignment(.center)
+        .padding(Spacing.large)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
