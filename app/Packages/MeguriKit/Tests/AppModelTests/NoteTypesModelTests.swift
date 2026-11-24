@@ -1204,7 +1204,7 @@ extension NoteTypesModelTests {
         let again = NoteTypePreview(backend: FakePreviewBackend())
         again.defaults = defaults
         #expect(!again.requested)
-        let enough = NoteTypePreviewLayout.listWidth + NoteTypePreviewLayout.editorMinimum + NoteTypePreviewLayout.previewMinimum
+        let enough = NoteTypePreviewLayout.listMinimum + NoteTypePreviewLayout.editorMinimum + NoteTypePreviewLayout.previewMinimum
         #expect(NoteTypePreviewLayout.macShows(requested: true, width: enough))
         #expect(!NoteTypePreviewLayout.macShows(requested: true, width: enough - 1))
         #expect(!NoteTypePreviewLayout.macShows(requested: false, width: 2_000))

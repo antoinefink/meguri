@@ -390,8 +390,15 @@ public final class NoteTypePreview {
         guard let pair = try await readyPair(), token == self.token else { return false }
         let update = try await pair.prepare(payload)
         guard token == self.token else { return false }
+        let committed = AsyncStream<CardUpdate>.makeStream(bufferingPolicy: .bufferingNewest(4))
+        pair.onCommitted = { update, _ in committed.continuation.yield(update) }
+        defer { pair.onCommitted = nil; committed.continuation.finish() }
         try pair.present(update)
-        return true
+        // The card counts as on the page once its shown phase has run (at most 2 s).
+        let timeout = Task { try? await Task.sleep(for: .seconds(2)); committed.continuation.finish() }
+        defer { timeout.cancel() }
+        for await shown in committed.stream where shown == update { break }
+        return token == self.token
     }
 
     private func applyAppearance() {
@@ -435,6 +442,8 @@ public final class NoteTypePreview {
                 // Card media never starts without a tap here (V12); links leave as in review.
                 let made = CardPagePair(configuration: .preview, resolver: resolver, appearance: appearance)
                 made.configureLinks(preferExternalBrowser: true, approvals: CardSchemeApprovals())
+                // Audio plays only from a click or tap on the card (V12, W9).
+                made.playNeedsTap = true
                 pair = made
             }
             guard let pair else { return nil }
@@ -458,10 +467,13 @@ public final class NoteTypePreview {
 
 /// Where the Cards tab puts its preview (N22.3, N22.7).
 public nonisolated enum NoteTypePreviewLayout {
-    /// The card types column's width on the Mac (its ideal).
+    /// The card types column's ideal width on the Mac.
     public static let listWidth: CGFloat = 240
+    /// The card types column's narrowest, which the threshold counts: the
+    /// column gives way before the preview hides.
+    public static let listMinimum: CGFloat = 200
     /// The narrowest the code editor stays usable beside the preview.
-    public static let editorMinimum: CGFloat = 360
+    public static let editorMinimum: CGFloat = 320
     /// The preview's narrowest: its bar's controls and a card at its own size.
     public static let previewMinimum: CGFloat = 300
     public static let previewIdeal: CGFloat = 380
@@ -470,6 +482,6 @@ public nonisolated enum NoteTypePreviewLayout {
     /// is wide enough for the lists, a usable editor and the preview;
     /// narrower, it hides by itself and comes back when there is room.
     public static func macShows(requested: Bool, width: CGFloat) -> Bool {
-        requested && width >= listWidth + editorMinimum + previewMinimum
+        requested && width >= listMinimum + editorMinimum + previewMinimum
     }
 }

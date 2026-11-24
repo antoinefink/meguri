@@ -25,7 +25,9 @@ struct NoteTypeCardsTab: View {
                 NoteTypeCardsListColumn(model: model, id: id)
                     .frame(minWidth: Self.columnMinimum, idealWidth: Self.columnIdeal, maxWidth: Self.columnMaximum)
                 NoteTypeTemplateEditorColumn(model: model, id: id)
-                    .frame(minWidth: NoteTypePreviewLayout.editorMinimum, maxWidth: .infinity, maxHeight: .infinity)
+                    // The split's own minimum stays the editor's narrowest; the preview
+                    // asks for a wider one (NoteTypePreviewLayout) before it shows.
+                    .frame(minWidth: ContentWidth.primaryAction, maxWidth: .infinity, maxHeight: .infinity)
                 if shows {
                     NoteTypePreviewPane(model: model, id: id)
                         .frame(minWidth: NoteTypePreviewLayout.previewMinimum, idealWidth: NoteTypePreviewLayout.previewIdeal,
@@ -64,13 +66,18 @@ struct NoteTypeCardsTab: View {
         #endif
     }
 
-    private static let columnMinimum: CGFloat = 200
+    private static let columnMinimum: CGFloat = NoteTypePreviewLayout.listMinimum
     #if os(macOS)
     private static let columnIdeal: CGFloat = NoteTypePreviewLayout.listWidth
     #else
     private static let columnIdeal: CGFloat = 280
     #endif
+    #if os(macOS)
+    /// Narrow enough that the editor and the preview share the rest.
+    private static let columnMaximum: CGFloat = 260
+    #else
     private static let columnMaximum: CGFloat = 320
+    #endif
 }
 
 /// The bar at the top of each column of the Cards tab: the card types
