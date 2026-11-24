@@ -264,9 +264,11 @@ struct StatsPieBesideTable: Layout {
     let limit: CGFloat
     let spacing: CGFloat
 
-    /// The pie's side in a given height, with `room` the width the table leaves it.
-    static func pieSide(side: CGFloat, limit: CGFloat, height: CGFloat, room: CGFloat) -> CGFloat {
-        max(side, min(limit, height, room))
+    /// The pie's side in a given height, with `own` the height the pair asks for itself and
+    /// `room` the width the table leaves the pie. Only height beyond the pair's own grows it:
+    /// a table taller than the pie (large text) leaves the pie at its side.
+    static func pieSide(side: CGFloat, limit: CGFloat, own: CGFloat, height: CGFloat, room: CGFloat) -> CGFloat {
+        height > own ? max(side, min(limit, height, room)) : side
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -280,7 +282,8 @@ struct StatsPieBesideTable: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard subviews.count == 2 else { return }
         let table = subviews[1].sizeThatFits(.unspecified)
-        let pie = Self.pieSide(side: side, limit: limit, height: bounds.height, room: bounds.width - spacing - table.width)
+        let pie = Self.pieSide(side: side, limit: limit, own: max(side, table.height), height: bounds.height,
+                               room: bounds.width - spacing - table.width)
         subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
                           proposal: ProposedViewSize(width: pie, height: pie))
         subviews[1].place(at: CGPoint(x: bounds.minX + pie + spacing, y: bounds.midY), anchor: .leading,
