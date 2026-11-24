@@ -193,9 +193,10 @@ import Testing
                 try await Task.sleep(for: .milliseconds(10))
             }
             try #require(await gate.entered)
+            listener.requestStop()
+            await gate.release()
             await listener.stop()
             #expect(states.withLock { $0.last } == .off)
-            await gate.release()
             let (data, response) = try await reply.value
             #expect((response as? HTTPURLResponse)?.statusCode == 200)
             #expect((try JSONSerialization.jsonObject(with: data) as? [String: Bool])?["finished"] == true)

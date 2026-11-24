@@ -133,7 +133,7 @@ nonisolated struct MiningWebSocket {
                 let code = UInt16(control[0]) << 8 | UInt16(control[1])
                 guard (1000...1003).contains(code) || (1007...1014).contains(code) || (3000...4999).contains(code),
                       String(data: control.dropFirst(2), encoding: .utf8) != nil else { return failure(1002) }
-                return events + [.close(Self.frame(8, control))]
+                return events + [.close(Self.close(code))]
             case 9: events.append(.send(Self.frame(10, control)))
             case 10: break
             default:

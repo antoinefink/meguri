@@ -1379,8 +1379,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         switch event.kind {
         case .lifecycle(let value):
             receiveLifecycle(value)
+        case .available:
             #if os(macOS)
-            miningOwner?.collectionChanged()
+            if event.generation == generation, !closing { miningOwner?.collectionAvailable() }
             #endif
         case .nextDayAtChanged(let instant):
             if !opening { day?.event(nextDayAt: instant) }
@@ -1495,6 +1496,11 @@ public final class ReviewCollection: ChangeFanoutSink {
         sync.receiveLifecycle(value)
         let wasReady: Bool = { if case .ready = lifecycle { true } else { false } }()
         lifecycle = value
+        #if os(macOS)
+        if case .ready = value, !closed, !closing, state != .creationRecovery {
+            miningOwner?.collectionAvailable()
+        }
+        #endif
         // Late create events may update observed lifecycle, but cannot restore
         // Retry against the retained Host. Recovery ends with an explicit close.
         if state == .creationRecovery { return }

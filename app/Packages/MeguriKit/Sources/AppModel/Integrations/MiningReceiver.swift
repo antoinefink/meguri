@@ -18,13 +18,15 @@ nonisolated struct MiningDestination: Sendable, Equatable {
 nonisolated final class MiningAdmission: Sendable {
     private nonisolated struct State: Sendable {
         var token = UUID()
+        var listenerEpoch = UUID()
         var enabled = false
     }
     private let state = Mutex(State())
 
-    func update(enabled: Bool) -> UUID {
+    func update(enabled: Bool, retiringListener: Bool = true) -> UUID {
         state.withLock {
             $0.token = UUID()
+            if retiringListener { $0.listenerEpoch = UUID() }
             $0.enabled = enabled
             return $0.token
         }
@@ -36,6 +38,12 @@ nonisolated final class MiningAdmission: Sendable {
 
     func current() -> UUID? {
         state.withLock { $0.enabled ? $0.token : nil }
+    }
+
+    var listenerEpoch: UUID { state.withLock { $0.listenerEpoch } }
+
+    func current(for listenerEpoch: UUID) -> UUID? {
+        state.withLock { $0.enabled && $0.listenerEpoch == listenerEpoch ? $0.token : nil }
     }
 }
 
@@ -65,22 +73,51 @@ actor MiningCoreCollection {
 actor MiningReceiver {
     let collection: MiningCoreCollection
     private var enabled = false
-    private var epoch = UUID()
     private var destination: MiningDestination?
     nonisolated let admission = MiningAdmission()
     private nonisolated struct Pending: Sendable {
         let request: MiningHTTPRequest
-        let token: UUID
         let admissionToken: UUID
         let selected: MiningDestination?
-        let reply: CheckedContinuation<MiningHTTPResponse, Never>
+        let reply: @Sendable (MiningHTTPResponse) -> Void
     }
+    private nonisolated struct Incoming: Sendable {
+        let request: MiningHTTPRequest
+        let token: UUID?
+        let reply: @Sendable (MiningHTTPResponse) -> Void
+    }
+    private nonisolated let incoming: AsyncStream<Incoming>.Continuation
     private var pending: [Pending] = []
     private var executing: Task<Void, Never>?
     private var queuedBytes = 0
     private var configuredAdmissionToken: UUID?
     private var writing = false
-    init(collection: MiningCoreCollection = MiningCoreCollection()) { self.collection = collection }
+    init(collection: MiningCoreCollection = MiningCoreCollection()) {
+        self.collection = collection
+        let channel = AsyncStream<Incoming>.makeStream()
+        incoming = channel.continuation
+        Task { [weak self] in
+            for await work in channel.stream {
+                guard let self else { work.reply(.error(503, "Sentence mining is off.")); continue }
+                await self.enqueue(work)
+            }
+        }
+    }
+    deinit { incoming.finish() }
+
+    /// Synchronous registration preserves the listener's body-completion order.
+    /// The consumer only admits work; it never waits for a collection write.
+    nonisolated func launch(_ request: MiningHTTPRequest, admissionToken: UUID? = nil) -> Task<MiningHTTPResponse, Never> {
+        let response = AsyncStream<MiningHTTPResponse>.makeStream()
+        incoming.yield(Incoming(request: request, token: admissionToken, reply: {
+            response.continuation.yield($0)
+            response.continuation.finish()
+        }))
+        return Task {
+            for await value in response.stream { return value }
+            return .error(503, "Sentence mining is off.")
+        }
+    }
     func configure(enabled: Bool, destination: MiningDestination?, admissionToken: UUID? = nil) {
         let currentToken: UUID
         if let admissionToken {
@@ -92,7 +129,6 @@ actor MiningReceiver {
             currentToken = admission.update(enabled: enabled)
         }
         if configuredAdmissionToken != currentToken {
-            epoch = UUID()
             retirePending()
             if !writing { executing?.cancel() }
         }
@@ -106,7 +142,7 @@ actor MiningReceiver {
         pending.removeAll()
         queuedBytes = 0
         for work in retired {
-            work.reply.resume(returning: .error(503, "Mining settings changed. Send the card again."))
+            work.reply(.error(503, "Mining settings changed. Send the card again."))
         }
     }
 
@@ -121,44 +157,47 @@ actor MiningReceiver {
         let work = pending.removeFirst()
         queuedBytes -= work.request.body.count
         executing = Task {
-            let response = await process(work.request, token: work.token,
-                admissionToken: work.admissionToken, selected: work.selected)
-            work.reply.resume(returning: response)
+            let response = await process(work.request, admissionToken: work.admissionToken, selected: work.selected)
+            work.reply(response)
             executing = nil
             startNext()
         }
     }
 
-    func handle(_ request: MiningHTTPRequest, admissionToken suppliedToken: UUID? = nil) async -> MiningHTTPResponse {
-        guard enabled, let admissionToken = suppliedToken ?? admission.current(),
+    func handle(_ request: MiningHTTPRequest, admissionToken: UUID? = nil) async -> MiningHTTPResponse {
+        await launch(request, admissionToken: admissionToken).value
+    }
+
+    private func enqueue(_ work: Incoming) {
+        let request = work.request
+        guard enabled, let admissionToken = work.token ?? admission.current(),
               admission.matches(admissionToken), configuredAdmissionToken == admissionToken else {
-            return .error(503, "Sentence mining is off.")
+            work.reply(.error(503, "Sentence mining is off."))
+            return
         }
         switch request.path {
-        case "/srs-check": return .json(200, ["ok": await collection.available() != nil, "version": "4"])
-        case "/anki-hello": return .json(200, ["status": "connect", "port": Int(request.localPort)])
-        case "/srs-import", "/srs-import-info", "/srs-sample-card": return .error(501, "Importing into Migaku Memory is not supported by Meguri.")
+        case "/srs-check":
+            Task { work.reply(.json(200, ["ok": await collection.available() != nil, "version": "4"])) }
+        case "/anki-hello": work.reply(.json(200, ["status": "connect", "port": Int(request.localPort)]))
+        case "/srs-import", "/srs-import-info", "/srs-sample-card": work.reply(.error(501, "Importing into Migaku Memory is not supported by Meguri."))
         case "/receive", "/":
-            // Actor reentrancy does not serialize an awaited collection write.
-            // Chain requests explicitly; keep read-only routes off this FIFO.
             guard pending.count < 32, queuedBytes + request.body.count <= 268_435_456 else {
-                return .error(503, "Too many pending mining requests. Try again.")
+                work.reply(.error(503, "Too many pending mining requests. Try again."))
+                return
             }
-            return await withCheckedContinuation { reply in
-                pending.append(Pending(request: request, token: epoch, admissionToken: admissionToken,
-                    selected: destination, reply: reply))
-                queuedBytes += request.body.count
-                startNext()
-            }
-        default: return .error(404, "Not found.")
+            pending.append(Pending(request: request, admissionToken: admissionToken,
+                selected: destination, reply: work.reply))
+            queuedBytes += request.body.count
+            startNext()
+        default: work.reply(.error(404, "Not found."))
         }
     }
 
-    private func process(_ request: MiningHTTPRequest, token: UUID, admissionToken: UUID, selected: MiningDestination?) async -> MiningHTTPResponse {
+    private func process(_ request: MiningHTTPRequest, admissionToken: UUID, selected: MiningDestination?) async -> MiningHTTPResponse {
         let root = request.path == "/"
         var version = 6
         do {
-            guard enabled, epoch == token, admission.matches(admissionToken), !Task.isCancelled else {
+            guard enabled, admission.matches(admissionToken), !Task.isCancelled else {
                 throw MiningFailure("Mining settings changed. Send the card again.")
             }
             if root {
@@ -193,7 +232,7 @@ actor MiningReceiver {
                     guard let note = params["note"] as? [String: Any] else {
                         throw MiningFailure("note must be an object")
                     }
-                    let result = try await addRoot(note, token: token, admissionToken: admissionToken, selected: selected)
+                    let result = try await addRoot(note, admissionToken: admissionToken, selected: selected)
                     return envelope(result.id, version: version)
                 default: throw MiningFailure("unsupported action")
                 }
@@ -202,7 +241,7 @@ actor MiningReceiver {
             let (destination, type) = try await resolve(selected)
             let (fields, media) = try payload.fields(for: type)
             let result = try await commit(destination, type: type, fields: fields, media: media,
-                key: payload.retryKey, digest: payload.digest, token: token, admissionToken: admissionToken)
+                key: payload.retryKey, digest: payload.digest, admissionToken: admissionToken)
             return .json(200, ["success": true, "created": true, "id": result.id])
         } catch {
             let message = (error as? MiningFailure)?.message ?? error.localizedDescription
@@ -235,8 +274,8 @@ actor MiningReceiver {
     }
 
     private func commit(_ selected: MiningDestination, type: NotetypeRecord, fields: [String], media: [MiningAttachment],
-                        key: String, digest: String, token: UUID, admissionToken: UUID, tags: [String] = []) async throws -> NoteMutation {
-        guard enabled, epoch == token, admission.matches(admissionToken), destination == selected, !Task.isCancelled else {
+                        key: String, digest: String, admissionToken: UUID, tags: [String] = []) async throws -> NoteMutation {
+        guard enabled, admission.matches(admissionToken), destination == selected, !Task.isCancelled else {
             throw MiningFailure("Mining settings changed. Send the card again.")
         }
         writing = true
@@ -245,7 +284,7 @@ actor MiningReceiver {
             tags: tags, deckId: selected.deck), key: key, digest: digest, attachments: media)
     }
 
-    private func addRoot(_ note: [String: Any], token: UUID, admissionToken: UUID, selected: MiningDestination?) async throws -> NoteMutation {
+    private func addRoot(_ note: [String: Any], admissionToken: UUID, selected: MiningDestination?) async throws -> NoteMutation {
         let (selected, type) = try await resolve(selected)
         let catalog = try await collection.catalog()
         guard note["deckName"] as? String == catalog.decks.first(where: { $0.id == selected.deck })?.fullName,
@@ -272,7 +311,7 @@ actor MiningReceiver {
         let digest = MiningPayload.hash(try JSONSerialization.data(withJSONObject: note, options: [.sortedKeys]))
         let identity = try JSONEncoder().encode([String(selected.type), String(selected.deck), fields.first ?? ""])
         return try await commit(selected, type: type, fields: fields, media: [], key: MiningPayload.hash(identity), digest: digest,
-            token: token, admissionToken: admissionToken, tags: note["tags"] as? [String] ?? [])
+            admissionToken: admissionToken, tags: note["tags"] as? [String] ?? [])
     }
 }
 #endif

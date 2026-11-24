@@ -7,6 +7,12 @@ nonisolated struct MiningHTTPRequest: Sendable {
     var target: String
     var headers: [(String, String)]
     var body: Data
+    var version = "HTTP/1.1"
+    var absoluteAuthority: String?
+    var keepsAlive: Bool {
+        let tokens = values("connection").flatMap { $0.lowercased().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }
+        return !tokens.contains("close") && (version == "HTTP/1.1" || tokens.contains("keep-alive"))
+    }
     /// Filled by the listener, never taken from a client header.
     var localPort: UInt16 = 44432
     func values(_ name: String) -> [String] { headers.filter { $0.0 == name.lowercased() }.map(\.1) }
@@ -23,17 +29,24 @@ nonisolated struct MiningHTTPResponse: Sendable {
               body: (try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys])) ?? Data())
     }
     static func error(_ status: Int, _ message: String) -> Self { json(status, ["success": false, "error": message]) }
-    var bytes: Data {
+    var bytes: Data { bytes(closing: true) }
+    func bytes(closing: Bool) -> Data {
         let reason = [101: "Switching Protocols", 200: "OK", 204: "No Content", 400: "Bad Request", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed", 431: "Request Header Fields Too Large", 501: "Not Implemented", 503: "Service Unavailable", 505: "HTTP Version Not Supported"][status] ?? "Error"
         var head = "HTTP/1.1 \(status) \(reason)\r\n"
         for (name, value) in headers { head += "\(name): \(value)\r\n" }
-        if !upgrade { head += "Content-Length: \(body.count)\r\nConnection: close\r\n" }
-        return Data((head + "\r\n").utf8) + body
+        if !upgrade {
+            if status != 204 { head += "Content-Length: \(body.count)\r\n" }
+            if closing { head += "Connection: close\r\n" }
+        }
+        return Data((head + "\r\n").utf8) + (status == 204 ? Data() : body)
     }
 }
 
 nonisolated enum MiningHTTP {
     static let bodyLimit = 134_217_728
+    static func isHeaderToken(_ byte: UInt8) -> Bool {
+        "!#$%&'*+-.^_`|~".utf8.contains(byte) || (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
+    }
     nonisolated enum ParseError: Error { case status(Int) }
     /// Head-only validation is performed as soon as CRLFCRLF arrives, before
     /// allocating a declared body, sending Continue, or dispatching anything.
@@ -49,19 +62,21 @@ nonisolated enum MiningHTTP {
         guard first[2] == "HTTP/1.1" || first[2] == "HTTP/1.0" else { throw ParseError.status(505) }
         guard lines.count <= 101 else { throw ParseError.status(431) }
         var headers: [(String, String)] = []
-        let token = Set("!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".utf8)
         for line in lines.dropFirst() {
             guard let colon = line.firstIndex(of: ":"), colon != line.startIndex else { throw ParseError.status(400) }
             let name = String(line[..<colon]); let raw = line[line.index(after: colon)...]
-            guard name.utf8.allSatisfy({ token.contains($0) }),
+            guard name.utf8.allSatisfy(isHeaderToken),
                   raw.utf8.allSatisfy({ $0 == 9 || (32...126).contains($0) }) else { throw ParseError.status(400) }
             headers.append((name.lowercased(), raw.trimmingCharacters(in: .whitespaces)))
         }
-        var request = MiningHTTPRequest(method: String(first[0]), target: String(first[1]), headers: headers, body: Data())
-        if request.target.hasPrefix("http://") || request.target.hasPrefix("https://") {
-            guard let url = URLComponents(string: request.target), url.scheme == "http", let host = url.host,
-                  url.user == nil, url.password == nil, let port = url.port else { throw ParseError.status(403) }
-            request.headers.append(("absolute-host", "\(host.contains(":") ? "[\(host)]" : host):\(port)"))
+        var request = MiningHTTPRequest(method: String(first[0]), target: String(first[1]), headers: headers, body: Data(), version: String(first[2]))
+        if request.target.lowercased().hasPrefix("http://") || request.target.lowercased().hasPrefix("https://") {
+            guard let url = URLComponents(string: request.target), url.scheme?.lowercased() == "http",
+                  url.host != nil, url.user == nil, url.password == nil, url.port != nil else { throw ParseError.status(403) }
+            // Compare the authority as written, with IPv6's single bracket pair
+            // intact. Rebuilding from URLComponents.host can double its brackets
+            // and would erase a noncanonical port spelling.
+            request.absoluteAuthority = String(request.target.dropFirst(7).prefix { !"/?#".contains($0) })
             request.target = (url.percentEncodedPath.isEmpty ? "/" : url.percentEncodedPath) + (url.percentEncodedQuery.map { "?" + $0 } ?? "")
         }
         let lengths = request.values("content-length")
@@ -74,35 +89,9 @@ nonisolated enum MiningHTTP {
         return (request, end.upperBound)
     }
     static func body(_ data: Data, request: MiningHTTPRequest) throws -> Data? {
-        if let length = request.header("content-length").flatMap(UInt64.init) {
-            guard length <= bodyLimit else { throw ParseError.status(413) }
-            return data.count >= Int(length) ? Data(data.prefix(Int(length))) : nil
-        }
-        guard request.header("transfer-encoding") != nil else { return Data() }
-        var offset = data.startIndex, decoded = Data()
-        while true {
-            guard let line = data[offset...].range(of: Data("\r\n".utf8)) else {
-                if data.count - offset > 8192 { throw ParseError.status(400) }; return nil
-            }
-            guard line.lowerBound - offset <= 8192,
-                  let sizeText = String(data: data[offset..<line.lowerBound], encoding: .ascii),
-                  let digits = sizeText.split(separator: ";", maxSplits: 1).first,
-                  !digits.isEmpty, digits.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }),
-                  let count = UInt64(digits, radix: 16) else { throw ParseError.status(400) }
-            guard count <= bodyLimit - decoded.count else { throw ParseError.status(413) }
-            offset = line.upperBound
-            if count == 0 {
-                if data.count >= offset + 2 && data[offset..<offset+2] == Data("\r\n".utf8) { return decoded }
-                guard let trailers = data[offset...].range(of: Data("\r\n\r\n".utf8)) else {
-                    if data.count - offset > 65_536 { throw ParseError.status(431) }; return nil
-                }
-                guard trailers.upperBound - offset <= 65_536 else { throw ParseError.status(431) }
-                return decoded
-            }
-            guard data.count >= offset + Int(count) + 2 else { return nil }
-            guard data[offset+Int(count)..<offset+Int(count)+2] == Data("\r\n".utf8) else { throw ParseError.status(400) }
-            decoded.append(data[offset..<offset+Int(count)]); offset += Int(count) + 2
-        }
+        var decoder = try MiningHTTPBody(request: request)
+        _ = try decoder.consume(data)
+        return decoder.complete ? decoder.body : nil
     }
     static func allowedOrigin(_ origin: String) -> Bool {
         guard !origin.isEmpty, origin.utf8.allSatisfy({ (33...126).contains($0) }) else { return false }
@@ -123,7 +112,7 @@ nonisolated enum MiningHTTP {
             ["127.0.0.1", "localhost", "[::1]", "host.docker.internal"].contains { host.lowercased() == "\($0):\(port)" }
         }
         guard request.values("host").count <= 1, request.values("host").allSatisfy(validHost),
-              request.values("absolute-host").allSatisfy(validHost), request.values("origin").count <= 1,
+              (request.absoluteAuthority.map(validHost) ?? true), request.values("origin").count <= 1,
               request.values("origin").allSatisfy(allowedOrigin) else { return .init(status: 403) }
         // The compatible root API is callable by local tools and extensions.
         // Migaku web origins only receive the narrowly scoped mining API.
@@ -168,6 +157,91 @@ nonisolated enum MiningHTTP {
             return reply(.init(status: 101, headers: [("Upgrade", "websocket"), ("Connection", "Upgrade"), ("Sec-WebSocket-Accept", accept)], upgrade: true))
         }
         return nil
+    }
+}
+/// Consumes each wire byte once. Only decoded content and one bounded framing
+/// line survive a receive; consumed chunk framing is never retained or decoded again.
+nonisolated struct MiningHTTPBody {
+    private enum State { case fixed(Int), size, chunk(Int), chunkCR, chunkLF, trailers, complete }
+    private var state: State
+    private var line = Data()
+    private var lineCR = false
+    private var trailerBytes = 0
+    private var trailerLines = 0
+    private let limit: Int
+    private(set) var body = Data()
+    var complete: Bool { if case .complete = state { true } else { false } }
+    var retainedBytes: Int { body.count + line.count + (lineCR ? 1 : 0) }
+
+    init(request: MiningHTTPRequest, limit: Int = MiningHTTP.bodyLimit) throws {
+        self.limit = limit
+        if let length = request.header("content-length").flatMap(UInt64.init) {
+            guard length <= limit else { throw MiningHTTP.ParseError.status(413) }
+            state = length == 0 ? .complete : .fixed(Int(length))
+        } else { state = request.header("transfer-encoding") == nil ? .complete : .size }
+    }
+
+    /// Returns the consumed wire length, leaving a buffered next request alone.
+    mutating func consume(_ bytes: Data) throws -> Int {
+        var cursor = bytes.startIndex
+        while cursor < bytes.endIndex, !complete {
+            switch state {
+            case .fixed(let remaining), .chunk(let remaining):
+                let count = min(remaining, bytes.endIndex - cursor)
+                body.append(bytes[cursor..<(cursor + count)])
+                cursor += count
+                if case .fixed = state { state = remaining == count ? .complete : .fixed(remaining - count) }
+                else { state = remaining == count ? .chunkCR : .chunk(remaining - count) }
+            case .chunkCR:
+                guard bytes[cursor] == 13 else { throw MiningHTTP.ParseError.status(400) }
+                cursor += 1
+                state = .chunkLF
+            case .chunkLF:
+                guard bytes[cursor] == 10 else { throw MiningHTTP.ParseError.status(400) }
+                cursor += 1
+                state = .size
+            case .size, .trailers:
+                let trailers: Bool = { if case .trailers = state { true } else { false } }()
+                let byte = bytes[cursor]
+                cursor += 1
+                if trailers {
+                    trailerBytes += 1
+                    guard trailerBytes <= 65_536 else { throw MiningHTTP.ParseError.status(431) }
+                }
+                if lineCR {
+                    guard byte == 10 else { throw MiningHTTP.ParseError.status(400) }
+                    lineCR = false
+                    if trailers {
+                        if line.isEmpty { state = .complete }
+                        else {
+                            trailerLines += 1
+                            guard trailerLines <= 100 else { throw MiningHTTP.ParseError.status(431) }
+                            guard let text = String(data: line, encoding: .ascii),
+                                  let colon = text.firstIndex(of: ":"), colon != text.startIndex,
+                                  text[..<colon].utf8.allSatisfy(MiningHTTP.isHeaderToken),
+                                  text[text.index(after: colon)...].utf8.allSatisfy({ $0 == 9 || (32...126).contains($0) }) else {
+                                throw MiningHTTP.ParseError.status(400)
+                            }
+                        }
+                    } else {
+                        guard let text = String(data: line, encoding: .ascii),
+                              let digits = text.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false).first,
+                              !digits.isEmpty, digits.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }),
+                              let count = UInt64(digits, radix: 16) else { throw MiningHTTP.ParseError.status(400) }
+                        guard count <= limit - body.count else { throw MiningHTTP.ParseError.status(413) }
+                        state = count == 0 ? .trailers : .chunk(Int(count))
+                    }
+                    line.removeAll(keepingCapacity: false)
+                } else if byte == 13 { lineCR = true }
+                else {
+                    guard byte != 10, byte == 9 || (32...126).contains(byte) else { throw MiningHTTP.ParseError.status(400) }
+                    guard line.count < 8192 else { throw MiningHTTP.ParseError.status(400) }
+                    line.append(byte)
+                }
+            case .complete: break
+            }
+        }
+        return cursor - bytes.startIndex
     }
 }
 #endif

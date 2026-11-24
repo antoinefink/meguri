@@ -21,8 +21,11 @@ import Observation
     @ObservationIgnored private let prefix: String
     @ObservationIgnored private let receiver: MiningReceiver
     @ObservationIgnored private var listener: MiningListener?
+    @ObservationIgnored private var listenerStatus: Task<Void, Never>?
     @ObservationIgnored private var inert = false
     @ObservationIgnored private var began = false
+    @ObservationIgnored private var suspended = false
+    @ObservationIgnored private var shutdownTask: Task<Void, Never>?
     @ObservationIgnored private var generation: UInt64?
     @ObservationIgnored private var appliedEnabled: Bool?
     @ObservationIgnored private var appliedPort: UInt16?
@@ -115,8 +118,13 @@ import Observation
         if began { refresh() }
     }
 
+    func collectionAvailable() {
+        guard began, !suspended else { return }
+        refresh()
+    }
+
     public func refresh() {
-        guard !inert else {
+        guard !inert, !suspended else {
             return
         }
         refreshTask?.cancel()
@@ -168,7 +176,7 @@ import Observation
     }
 
     private func apply() {
-        guard !inert else {
+        guard !inert, !suspended else {
             updateStatus()
             return
         }
@@ -186,17 +194,20 @@ import Observation
         appliedEnabled = value
         appliedPort = requestedPort
         appliedDestination = destination
-        // This synchronous fence stops admission even while an older control
-        // task is suspended in an actor call or a collection write is running.
-        let admissionToken = receiver.admission.update(enabled: value)
+        // Fence the old settings snapshot before any actor hop. Destination
+        // edits retain the socket; port/off changes retire its fixed epoch.
+        let retiring = !value || portChanged
+        let admissionToken = receiver.admission.update(enabled: value,
+            retiringListener: retiring || listener == nil)
         let token = UUID()
         controlToken = token
         let previous = control
         let retired: MiningListener?
-        if !value || portChanged {
+        if retiring {
             retired = listener
             listener = nil
             listenerToken = UUID()
+            listenerStatus?.cancel()
             state = .off
             retired?.requestStop()
         } else {
@@ -205,10 +216,15 @@ import Observation
         updateStatus()
         control = Task { [weak self] in
             _ = await previous?.value
-            guard let self, controlToken == token else {
+            guard let self else {
                 return
             }
-            await receiver.configure(enabled: value, destination: destination, admissionToken: admissionToken)
+            // Even a superseded control owns the listener it retired. Join its
+            // replies before allowing the next control to bind a replacement.
+            if controlToken == token {
+                await receiver.configure(enabled: value, destination: destination, admissionToken: admissionToken)
+            }
+            await receiver.drain()
             await retired?.stop()
             guard controlToken == token else {
                 return
@@ -218,18 +234,18 @@ import Observation
                     let receiver = self.receiver
                     let listenerID = UUID()
                     listenerToken = listenerID
+                    let events = AsyncStream<MiningListener.State>.makeStream()
+                    listenerStatus = Task { @MainActor [weak self] in
+                        for await state in events.stream {
+                            guard let self, listenerToken == listenerID, enabled else { return }
+                            self.state = state
+                            if case .listening(let bound) = state { port = bound }
+                            updateStatus()
+                        }
+                    }
                     listener = MiningListener(port: requestedPort, admission: receiver.admission,
-                        handler: { await receiver.handle($0, admissionToken: $1) },
-                        changed: { [weak self] state in
-                            Task { @MainActor [weak self] in
-                                guard let self, listenerToken == listenerID, enabled else {
-                                    return
-                                }
-                                self.state = state
-                                if case .listening(let bound) = state { port = bound }
-                                updateStatus()
-                            }
-                        })
+                        launch: { receiver.launch($0, admissionToken: $1) },
+                        changed: { events.continuation.yield($0) })
                 }
                 listener?.start()
             }
@@ -249,7 +265,7 @@ import Observation
     }
 
     private func updateStatus() {
-        guard enabled else {
+        guard enabled, !suspended else {
             status = "Off · Port \(port)"
             return
         }
@@ -262,25 +278,37 @@ import Observation
     }
 
     func resumeAfterRefusedQuit() {
+        guard shutdownTask == nil else { return }
+        suspended = false
         apply()
         refresh()
     }
 
     func shutdown() async {
+        if let shutdownTask { await shutdownTask.value; return }
+        suspended = true
         refreshTask?.cancel()
+        refreshToken = UUID()
         appliedEnabled = nil
         _ = receiver.admission.update(enabled: false)
         controlToken = UUID()
         listenerToken = UUID()
+        listenerStatus?.cancel()
         let retired = listener
         listener = nil
         retired?.requestStop()
-        _ = await control?.value
-        await receiver.configure(enabled: false, destination: nil)
-        await retired?.stop()
-        await receiver.drain()
-        state = .off
-        updateStatus()
+        let previous = control
+        let task = Task {
+            _ = await previous?.value
+            await receiver.configure(enabled: false, destination: nil)
+            await retired?.stop()
+            await receiver.drain()
+            state = .off
+            shutdownTask = nil
+            updateStatus()
+        }
+        shutdownTask = task
+        await task.value
     }
     /// No listener, defaults or collection is accessed by this synthetic
     /// production-pane fixture. The coordinator captures it in the test VM.

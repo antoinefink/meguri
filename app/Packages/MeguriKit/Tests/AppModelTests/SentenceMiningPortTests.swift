@@ -2,8 +2,8 @@
 @testable import AppModel
 import Darwin
 import Foundation
-import Observation
 import Testing
+import Synchronization
 
 @MainActor @Suite struct SentenceMiningPortTests {
     @Test func devicePreferencePersistsAndRejectsInvalidEntries() throws {
@@ -49,6 +49,8 @@ import Testing
         let model = SentenceMining(defaults: defaults, collectionKey: "synthetic-wire")
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
+        configuration.timeoutIntervalForRequest = 5
+        configuration.timeoutIntervalForResource = 5
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
         do {
@@ -62,28 +64,30 @@ import Testing
             stillFree.close()
             model.setEnabled(true)
             await model.settle()
-            await waitForStatus(model) { $0.hasPrefix("Listening") }
+            try await waitForStatus(model) { $0.hasPrefix("Listening") }
             #expect(model.port == first.port && model.status.contains(String(first.port)))
             let socket = session.webSocketTask(with: URL(string: "ws://127.0.0.1:\(first.port)/anki-connect")!)
             socket.resume()
             defer { socket.cancel(with: .goingAway, reason: nil) }
-            try await socket.sendPing()
+            try await withSocketDeadline(socket) { try await socket.sendPing() }
             let initialStatus = model.status
             #expect(!model.applyPort(""))
             #expect(!model.applyPort("65536"))
             #expect(model.applyPort(String(first.port)))
             await model.settle()
             #expect(model.status == initialStatus)
-            try await socket.sendPing() // A no-op must preserve the listener.
+            try await withSocketDeadline(socket) { try await socket.sendPing() } // A no-op preserves the listener.
 
             // A real bind conflict retains the selected preference and retires
             // the previous listener, including its WebSocket and Host policy.
             #expect(model.applyPort(String(occupied.port)))
             await model.settle()
-            await waitForStatus(model) { $0.contains("is in use") }
+            try await waitForStatus(model) { $0.contains("is in use") }
             #expect(model.port == occupied.port && model.status.contains(String(occupied.port)))
             #expect(defaults.integer(forKey: "mining.port") == Int(occupied.port))
-            await #expect(throws: (any Error).self) { _ = try await socket.receive() }
+            await #expect(throws: (any Error).self) {
+                try await withSocketDeadline(socket) { _ = try await socket.receive() }
+            }
             try expectMiningPortClosed(first.port)
             #expect(!model.applyPort("12"))
             #expect(model.applyPort(String(occupied.port)))
@@ -92,7 +96,7 @@ import Testing
             next.close()
             #expect(model.applyPort(String(next.port)))
             await model.settle()
-            await waitForStatus(model) { $0.hasPrefix("Listening") }
+            try await waitForStatus(model) { $0.hasPrefix("Listening") }
             #expect(model.port == next.port && model.status.contains(String(next.port)))
             let hello = try await exchange(session, port: next.port, path: "/anki-hello")
             #expect(hello.status == 200 && hello.json?["port"] as? Int == Int(next.port))
@@ -124,72 +128,182 @@ import Testing
         let gate = MiningPortReplyGate()
         let admission = MiningAdmission()
         _ = admission.update(enabled: true)
-        let oldEvents = AsyncStream<MiningListener.State>.makeStream()
-        let newEvents = AsyncStream<MiningListener.State>.makeStream()
+        let oldEvents = Mutex<[MiningListener.State]>([])
+        let newEvents = Mutex<[MiningListener.State]>([])
         let old = MiningListener(port: 0, admission: admission, handler: { _, _ in
             await gate.hold()
             return .json(200, ["finished": true])
-        }, changed: { oldEvents.continuation.yield($0) })
-        let replacement = MiningListener(port: 0, admission: admission, handler: { _, _ in
-            .json(200, ["replacement": true])
-        }, changed: { newEvents.continuation.yield($0) })
+        }, changed: { state in oldEvents.withLock { $0.append(state) } })
+        var replacement: MiningListener?
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
+        configuration.timeoutIntervalForRequest = 5
+        configuration.timeoutIntervalForResource = 5
         let session = URLSession(configuration: configuration)
         defer {
             session.invalidateAndCancel()
-            oldEvents.continuation.finish()
-            newEvents.continuation.finish()
         }
         old.start()
         do {
-            let oldPort = try await listeningPort(oldEvents.stream)
+            let oldPort = try await listeningPort(oldEvents)
             let url = URL(string: "http://127.0.0.1:\(oldPort)/anki-hello")!
             let pending = Task { try await session.data(from: url) }
-            await gate.waitUntilEntered()
+            try await gate.waitUntilEntered()
             _ = admission.update(enabled: true)
+            replacement = MiningListener(port: 0, admission: admission, handler: { _, _ in
+                .json(200, ["replacement": true])
+            }, changed: { state in newEvents.withLock { $0.append(state) } })
             old.requestStop()
-            await old.stop()
-            replacement.start()
-            let newPort = try await listeningPort(newEvents.stream)
+            let stopped = Task { await old.stop() }
+            replacement?.start()
+            let newPort = try await listeningPort(newEvents)
             #expect(newPort != oldPort)
             try expectMiningPortClosed(oldPort)
             // Join a late start callback; a retired listener remains closed.
             old.start()
-            await old.stop()
             try expectMiningPortClosed(oldPort)
             await gate.release()
+            await stopped.value
             let (data, response) = try await pending.value
             #expect((response as? HTTPURLResponse)?.statusCode == 200)
             #expect((try JSONSerialization.jsonObject(with: data) as? [String: Bool])?["finished"] == true)
             let active = try await exchange(session, port: newPort, path: "/anki-hello")
             #expect(active.status == 200 && active.json?["replacement"] as? Bool == true)
-            await replacement.stop()
+            await replacement?.stop()
         } catch {
             await gate.release()
             await old.stop()
-            await replacement.stop()
+            await replacement?.stop()
             throw error
         }
     }
 
-    private func listeningPort(_ events: AsyncStream<MiningListener.State>) async throws -> UInt16 {
-        for await state in events {
-            if case .listening(let port) = state { return port }
+    @Test(.timeLimit(.minutes(1))) func oldListenerCannotBorrowTheReplacementAdmissionEpoch() async throws {
+        let admission = MiningAdmission()
+        _ = admission.update(enabled: true)
+        let calls = Mutex(0)
+        let events = Mutex<[MiningListener.State]>([])
+        let old = MiningListener(port: 0, admission: admission, handler: { _, _ in
+            calls.withLock { $0 += 1 }
+            return .json(200, ["unexpected": true])
+        }, changed: { state in events.withLock { $0.append(state) } })
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        configuration.timeoutIntervalForResource = 2
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        old.start()
+        do {
+            let port = try await listeningPort(events)
+            // Deliberately delay requestStop: the synchronous admission fence
+            // alone must refuse dispatch from this listener's old epoch.
+            _ = admission.update(enabled: true)
+            await #expect(throws: (any Error).self) {
+                _ = try await exchange(session, port: port, path: "/anki-hello")
+            }
+            #expect(calls.withLock { $0 } == 0)
+            await old.stop()
+        } catch {
+            await old.stop()
+            throw error
         }
-        throw CancellationError()
     }
 
-    /// Observation wakes on the real reducer's status publication. Register
-    /// and inspect on MainActor so a state change cannot fall between them.
-    private func waitForStatus(_ model: SentenceMining, matching predicate: (String) -> Bool) async {
-        while !predicate(model.status) {
-            let changes = AsyncStream<Void>.makeStream()
-            withObservationTracking { _ = model.status } onChange: {
-                changes.continuation.yield(())
+    @Test(.timeLimit(.minutes(1))) func cancellingTestWaitsNeedsNoGateReleaseOrStatusChange() async throws {
+        let gate = MiningPortReplyGate()
+        let observer = Task { try await gate.waitUntilEntered() }
+        observer.cancel()
+        await #expect(throws: CancellationError.self) { try await observer.value }
+        let held = Task { await gate.hold() }
+        try await gate.waitUntilEntered()
+        held.cancel()
+        await held.value
+        let model = SentenceMining(defaults: nil, collectionKey: "synthetic-cancellation")
+        let status = Task { try await waitForStatus(model) { $0.hasPrefix("Listening") } }
+        status.cancel()
+        await #expect(throws: CancellationError.self) { try await status.value }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func transientIPv6ConflictRecoversWithoutReplacingIPv4() async throws {
+        let reservation = try MiningPortReservation()
+        defer { reservation.close() }
+        let ipv6 = Darwin.socket(AF_INET6, SOCK_STREAM, 0)
+        try #require(ipv6 >= 0)
+        var ipv6Open = true
+        defer { if ipv6Open { Darwin.close(ipv6) } }
+        var address = sockaddr_in6()
+        address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+        address.sin6_family = sa_family_t(AF_INET6)
+        address.sin6_port = reservation.port.bigEndian
+        address.sin6_addr = in6addr_loopback
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(ipv6, $0, socklen_t(MemoryLayout<sockaddr_in6>.size))
             }
-            for await _ in changes.stream { break }
-            changes.continuation.finish()
+        }
+        try #require(bound == 0 && Darwin.listen(ipv6, 8) == 0)
+        let events = Mutex<[MiningListener.State]>([])
+        let listener = MiningListener(port: reservation.port, handler: { _, _ in
+            .json(200, ["sameListener": true])
+        }, changed: { state in events.withLock { $0.append(state) } })
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        configuration.timeoutIntervalForResource = 1
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        reservation.close()
+        listener.start()
+        do {
+            let port = try await listeningPort(events)
+            #expect(port == reservation.port)
+            #expect(try await exchange(session, port: port, path: "/anki-hello").status == 200)
+            var request = URLRequest(url: URL(string: "http://[::1]:\(port)/anki-hello")!)
+            request.timeoutInterval = 0.25
+            // The foreign socket accepts TCP but cannot produce our reply.
+            await #expect(throws: (any Error).self) { _ = try await session.data(for: request) }
+            Darwin.close(ipv6)
+            ipv6Open = false
+            let deadline = ContinuousClock.now + .seconds(15)
+            var recovered = false
+            while !recovered, ContinuousClock.now < deadline {
+                try Task.checkCancellation()
+                if let (_, reply) = try? await session.data(for: request) {
+                    recovered = (reply as? HTTPURLResponse)?.statusCode == 200
+                }
+                if !recovered { try await Task.sleep(for: .milliseconds(50)) }
+            }
+            #expect(recovered)
+            #expect(try await exchange(session, port: port, path: "/anki-hello").status == 200)
+            #expect(events.withLock { $0 } == [.starting, .listening(port)])
+            await listener.stop()
+        } catch {
+            await listener.stop()
+            throw error
+        }
+    }
+
+    private func listeningPort(_ events: borrowing Mutex<[MiningListener.State]>) async throws -> UInt16 {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
+            try Task.checkCancellation()
+            if let port = events.withLock({ $0.compactMap { state -> UInt16? in
+                if case .listening(let port) = state { return port }
+                return nil
+            }.last }) {
+                try #require(port != 0)
+                return port
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw MiningFailure("Mining listener did not become ready.")
+    }
+
+    private func waitForStatus(_ model: SentenceMining, matching predicate: (String) -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !predicate(model.status) {
+            try Task.checkCancellation()
+            guard ContinuousClock.now < deadline else { throw MiningFailure("Mining status did not settle: \(model.status)") }
+            try await Task.sleep(for: .milliseconds(10))
         }
     }
 
@@ -206,28 +320,49 @@ import Testing
         return (try #require((response as? HTTPURLResponse)?.statusCode),
                 (try? JSONSerialization.jsonObject(with: data)) as? [String: Any])
     }
+
+    private func withSocketDeadline(_ socket: URLSessionWebSocketTask,
+                                    operation: () async throws -> Void) async throws {
+        let deadline = Task {
+            try await Task.sleep(for: .seconds(5))
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+        defer { deadline.cancel() }
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try await operation()
+        } onCancel: {
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+    }
 }
 
 private actor MiningPortReplyGate {
     private var entered = false
-    private var observers: [CheckedContinuation<Void, Never>] = []
-    private var reply: CheckedContinuation<Void, Never>?
+    private var released = false
 
+    // No stored continuations: both sides terminate on cancellation and have
+    // their own deadline, including cleanup after an earlier assertion fails.
     func hold() async {
         entered = true
-        observers.forEach { $0.resume() }
-        observers.removeAll()
-        await withCheckedContinuation { reply = $0 }
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !released, ContinuousClock.now < deadline {
+            do { try await Task.sleep(for: .milliseconds(10)) }
+            catch { return }
+        }
+        if !released { Issue.record("Held mining reply exceeded its deadline") }
     }
 
-    func waitUntilEntered() async {
-        if !entered { await withCheckedContinuation { observers.append($0) } }
+    func waitUntilEntered() async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !entered {
+            guard ContinuousClock.now < deadline else { throw MiningFailure("Reply gate was not entered.") }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try Task.checkCancellation()
     }
 
-    func release() {
-        reply?.resume()
-        reply = nil
-    }
+    func release() { released = true }
 }
 
 /// Synthetic loopback sockets reserve OS-assigned ports without a listener
@@ -254,7 +389,7 @@ private actor MiningPortReplyGate {
         let named = withUnsafeMutablePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(descriptor, $0, &size) }
         }
-        guard named == 0 else {
+        guard named == 0, address.sin_port != 0 else {
             Darwin.close(descriptor)
             throw POSIXError(.EIO)
         }
