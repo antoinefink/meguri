@@ -1,0 +1,12 @@
+# Receive mined sentences on macOS
+
+The user wants to choose Anki in Migaku and save a sentence to the open Meguri collection. They approved limiting the first release to mining. The published Chrome extension (1.32.2.0) names localhost port 44432, the availability check, the connection WebSocket and the receive route documented in `specs/servers/migaku-protocol.md`. A JSON action listener alone cannot serve this client.
+
+## Deliver the mining path
+
+1. Add a Mac-only Integrations section in the native Settings sidebar. A persistent, initially off switch starts or stops the listener. Show the actual listening state, the local port and an actionable port-conflict error. Let the user select the destination deck and note type for incoming cards. Use ordinary Form controls.
+2. Implement the mining subset of the public Meguri contracts in `specs/servers/{host-security,migaku-protocol,migaku-receive,migaku-routing}.md`. Serve the extension handshake, availability check, preflight and receive on loopback. Validate Host and origin before dispatch, bound requests and close connections when disabled. Use actual collection availability. Support the AnkiConnect root envelope for version, destination discovery and adding a note as a compatible subset on the same port.
+3. Use existing collection operations to add a note and generate its cards. Use the selected destination, infer fields for imported note types, support ordinary front/back fields, and preserve the sentence, translation and mapped audio or image attachments. Errors must reach the caller and must not create partial notes or silently drop mapped media. Respect collection switches, duplicate retries and synchronization. Advanced routing, import into Migaku Memory and general collection management are outside this first version.
+4. Exercise the extension's wire exchange using a synthetic collection, including a mined note with media, duplicate delivery, an unavailable collection, disabling the listener and an untrusted origin. Inspect the built Settings screen with the VM snapshot job. Include the resulting screenshot and the exact scope of verified behavior in the pull request.
+
+Implementation and independent review run in the filtered project cleanroom. The coordinator applies the resulting patches, runs focused MG jobs, and records their receipts and the hosted checks on the open PR.
