@@ -176,6 +176,7 @@ extension NoteTypesModel {
 struct NoteTypeCardTypesList: View {
     @Bindable var model: NoteTypesModel
     let id: Int64
+    @Environment(\.locale) private var locale
     /// W5's keys act on the list only while it has focus: in the editor
     /// ⌘⌫ and ⌥⌘↑ stay the text view's.
     @FocusState private var listFocused: Bool
@@ -270,6 +271,8 @@ struct NoteTypeCardTypesList: View {
             Button(role: .destructive) { model.deleteCardType(id, row: line.id) } label: { Text("noteTypes.cards.delete", bundle: .module) }
                 .keyboardShortcut(shortcuts ? KeyboardShortcut(.delete, modifiers: .command) : nil)
                 .disabled(draft?.cardDeleteBlock(line.id) != nil)
+                // W5: disabled with the reason.
+                .help(draft?.cardDeleteBlock(line.id).map { NoteTypesStrings.cardTypeBlock($0, locale: locale) } ?? "")
         }
     }
 

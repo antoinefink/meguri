@@ -51,9 +51,9 @@ The inspector beside the table holds, for the selected field:
 
 ## W5. Card types (the Cards tab's list)
 
-- A list of the draft's card types in order, each with the number of cards that exist for it (by base ordinal; 0 for a new one) and a red dot when an issue (W7) names it. + at the trailing end of the list's title bar; a More button on each row, shown on the row under the pointer and on the selected row on the Mac and on every row on iPad, opens the context menu's commands; there is no − (changed 2026-11-24, Antoine's decision in chat, `docs/design/decisions.md` the `noteTypes.templates` row of that date; before, + and − sat under the list); double click or Return renames in place (the template-name rule of `notetypes/records` N4); dragging reorders.
-- **Add** (+) duplicates the selected card type as `notetypes/editor-actions` A6 does (its name `Card <n>`, A6's texts), in rename mode. Its help says which: `Duplicate “<name>”`. It asks nothing now; the Save sheet says how many cards it creates (`notetypes/draft-save` D2).
-- **Delete** (the More and context menus, ⌫) crosses the card type out in the draft; it asks nothing now (A7's question moves to the Save sheet, D2). Disabled, with the reason, while one card type remains.
+- A list of the draft's card types in order, each with the number of cards that exist for it (by base ordinal; 0 for a new one) and a red dot when an issue (W7) names it. + and − under it; double click or Return renames in place (the template-name rule of `notetypes/records` N4); dragging reorders.
+- **Add** (+) duplicates the selected card type as `notetypes/editor-actions` A6 does (its name `Card <n>`, A6's texts), in rename mode. It asks nothing now; the Save sheet says how many cards it creates (`notetypes/draft-save` D2).
+- **Delete** (−, ⌫) crosses the card type out in the draft; it asks nothing now (A7's question moves to the Save sheet, D2). Disabled, with the reason, while one card type remains.
 - Context menu: Rename (↩), Duplicate (⌘D while the card types list has focus), Deck for New Cards… (A11, with N20.1's deck search; standard note types only), Move Up (⌥⌘↑), Move Down (⌥⌘↓), Delete (⌘⌫).
 - Cloze and Image Occlusion note types have one card type: Add, Duplicate and Delete are disabled with the reason, and the preview gains a Cloze Number menu (W9).
 - Browser Appearance (A12) is not offered in this version; its stored values are kept.
