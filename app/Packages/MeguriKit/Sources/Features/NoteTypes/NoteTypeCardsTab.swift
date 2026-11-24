@@ -469,10 +469,13 @@ struct NoteTypeTemplateEditorColumn: View {
             #if os(macOS)
             .help(partHelp)
             .accessibilityHint(partHelp)
-            #else
+            #endif
+            #if !os(macOS)
             if part == .styling {
                 Text("noteTypes.editor.shared", bundle: .module)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("noteTypes.cards.shared")
             }
             #endif
             Spacer(minLength: Spacing.xSmall)
