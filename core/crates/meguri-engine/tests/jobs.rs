@@ -2,7 +2,7 @@
 
 mod common;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -106,7 +106,33 @@ fn every_job_ends_with_exactly_one_job_finished() {
         .unwrap();
     thread::sleep(Duration::from_millis(20));
     assert!(h.engine.jobs().cancel(cancelled.id));
-    let events = drain(&subscription, Duration::from_millis(300));
+    // A quiet stream does not mean every worker has published its completion.
+    let mut remaining: BTreeSet<_> = [ok.id, failed.id, panicked.id, cancelled.id].into_iter().collect();
+    let deadline = monotonic::now() + Duration::from_secs(10);
+    let mut events = Vec::new();
+    while !remaining.is_empty() {
+        let now = monotonic::now();
+        assert!(now < deadline, "missing JobFinished for {remaining:?}");
+        let event = subscription
+            .recv_timeout(deadline - now)
+            .unwrap_or_else(|| panic!("missing JobFinished for {remaining:?}"));
+        if let EventKind::JobFinished { id, .. } = &event.kind {
+            remaining.remove(id);
+        }
+        events.push(event);
+    }
+    // Keep every event until 300 ms of quiet, within the same total deadline.
+    loop {
+        let now = monotonic::now();
+        assert!(now < deadline, "JobFinished tail exceeded the total deadline");
+        match subscription.recv_timeout((deadline - now).min(Duration::from_millis(300))) {
+            Some(event) => events.push(event),
+            None => {
+                assert!(monotonic::now() < deadline, "JobFinished tail exceeded the total deadline");
+                break;
+            }
+        }
+    }
     let outcomes = finished(&events);
     assert_eq!(outcomes[&ok.id], [JobOutcome::Succeeded]);
     assert_eq!(
