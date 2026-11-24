@@ -1,3 +1,4 @@
+import AppModel
 import Foundation
 import UniformTypeIdentifiers
 import WebKit
@@ -49,7 +50,8 @@ final class EditorDocument: NSObject, WKURLSchemeHandler {
     private func serveMedia(_ url: URL, _ task: any WKURLSchemeTask) {
         guard let directory = mediaDirectory, url.host == "editor",
               let name = MediaName.plain(String(url.path.dropFirst())),
-              let data = try? Data(contentsOf: directory.appending(path: name, directoryHint: .notDirectory)) else {
+              let file = MediaFolder.file(name, in: directory),
+              let data = try? Data(contentsOf: file) else {
             task.didFailWithError(URLError(.fileDoesNotExist)); return
         }
         let type = UTType(filenameExtension: (name as NSString).pathExtension)?.preferredMIMEType ?? "application/octet-stream"

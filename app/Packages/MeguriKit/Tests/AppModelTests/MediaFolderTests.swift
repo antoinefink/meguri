@@ -19,6 +19,8 @@ import Testing
         #expect(media.file("sound.mp3") != nil)
         #expect(media.file("missing.png") == nil)
         #expect(media.file("link.png") == nil)
+        #expect(MediaFolder.file("link.png", in: folder) == nil)
+        #expect(MediaFolder.file("picture.png", in: folder) != nil)
         #expect(media.image("picture.png") != nil)
         #expect(media.image("sound.mp3") == nil)
         #expect(MediaFolder(directory: nil).file("picture.png") == nil)

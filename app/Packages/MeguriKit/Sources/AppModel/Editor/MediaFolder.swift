@@ -23,7 +23,13 @@ public final class MediaFolder {
     /// The file a field names (the page host passes plain names only), when it
     /// exists inside the folder once links are resolved.
     public func file(_ name: String) -> URL? {
-        guard let directory else { return nil }
+        directory.flatMap { Self.file(name, in: $0) }
+    }
+
+    /// `name` in `directory` when, once links are resolved, it is an existing
+    /// file directly inside it. Every media read (thumbnail, sound, open) goes
+    /// through this check.
+    public nonisolated static func file(_ name: String, in directory: URL) -> URL? {
         let root = directory.resolvingSymlinksInPath().standardizedFileURL
         let url = directory.appending(path: name, directoryHint: .notDirectory)
             .resolvingSymlinksInPath().standardizedFileURL
