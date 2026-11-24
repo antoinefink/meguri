@@ -624,6 +624,9 @@ public final class NoteTypesModel {
             return nil
         }
         guard let origin = row.origin else { return 0 }
+        // A cloze note type's one card type has every card: their ordinals
+        // are cloze numbers, not card types (W5).
+        if draft(id)?.isCloze == true { return counts.reduce(0, +) }
         return counts[safe: Int(origin)] ?? 0
     }
 
@@ -698,7 +701,7 @@ public final class NoteTypesModel {
         // draft before another request takes the slot, so no half is lost.
         if let pending = editorRequest {
             switch pending.command {
-            case .replaceAll(let text):
+            case .replaceAll(let text), .replaceHighlighting(let text, _):
                 edit(pending.notetype) { $0.setText(pending.card, pending.part, text) }
             case .append(let suffix):
                 if let text = draft(pending.notetype)?.text(pending.card, pending.part) {

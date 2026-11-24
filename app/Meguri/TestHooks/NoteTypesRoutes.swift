@@ -44,6 +44,9 @@ extension TestHooks {
     /// - `notetypes/cards/preview-error`: Production's card, then its front
     ///   edited to name a field that does not exist: the card stays, faded,
     ///   under the issue's words.
+    /// - `notetypes/cards/card-text`: the Styling part's Card Text row, then
+    ///   its Size set to 26 and its Alignment to leading through the row:
+    ///   the styling's values change in place and the preview follows.
     /// - `notetypes/cards/preview-edited`: Recognition's card, then the
     ///   styling edited (the word larger and purple): the preview shows the
     ///   unsaved styling, the Styling part open.
@@ -69,6 +72,7 @@ extension TestHooks {
             registry.registerShell("notetypes/cards/preview-back") { _ in launch(.cards(.previewBack)) }
             registry.registerShell("notetypes/cards/preview-error") { _ in launch(.cards(.previewError)) }
             registry.registerShell("notetypes/cards/preview-edited") { _ in launch(.cards(.previewEdited)) }
+            registry.registerShell("notetypes/cards/card-text") { _ in launch(.cards(.cardText)) }
             registry.registerShell("notetypes/cards/preview-empty") { _ in launch(.cards(.previewEmpty)) }
             registry.registerShell("notetypes/cards/preview-cloze") { _ in launch(.cards(.previewCloze)) }
             registry.registerShell("notetypes/cards/preview-hidden") { _ in launch(.cards(.previewHidden)) }
@@ -112,7 +116,7 @@ extension TestHooks {
             case cards(Cards)
         }
 
-        enum Cards { case typical, issues, styling, previewBack, previewError, previewEdited, previewEmpty, previewCloze, previewHidden }
+        enum Cards { case typical, issues, styling, previewBack, previewError, previewEdited, cardText, previewEmpty, previewCloze, previewHidden }
 
         /// Waits until the preview has put a card on the page (at most 20 s).
         @MainActor static func previewDrawn(_ model: NoteTypesModel) async {
@@ -146,7 +150,7 @@ extension TestHooks {
             #endif
             let placeholder = features.sectionRoot
             features.sectionRoot = { section, navigation in
-                section == .noteTypes ? AnyView(NoteTypesView(model: model)) : placeholder(section, navigation)
+                section == .noteTypes ? AnyView(NoteTypesView(model: model, navigation: navigation)) : placeholder(section, navigation)
             }
             #if os(iOS)
             features.noteType = { id, _ in AnyView(NoteTypePage(model: model, id: id)) }
@@ -193,6 +197,12 @@ extension TestHooks {
                             model.stage(id) { draft in
                                 draft.setText(1, .front, "<div class=\"meaning\">{{Meaning}}</div>\n<div class=\"pos\">{{Part of Speech}}</div>\n{{Wrod}}")
                             }
+                        case .cardText:
+                            model.cardPart = .styling
+                            await previewDrawn(model)
+                            await model.changeCardText(id, card: 0, .size(26), rightToLeft: false)
+                            try? await Task.sleep(for: .milliseconds(300))
+                            await model.changeCardText(id, card: 0, .alignment(.leading), rightToLeft: false)
                         case .previewEdited:
                             model.cardPart = .styling
                             await previewDrawn(model)
@@ -258,7 +268,7 @@ extension TestHooks {
         static let phrases: Int64 = 1_700_000_100_007
         private static let names: [(String, UInt64)] = [
             ("Basic", 1204), ("Basic (and reversed card)", 86), ("Basic (type in the answer)", 12), ("Cloze", 318),
-            ("Image Occlusion", 24), ("Glyphs", 2136), ("Phrases", 640), ("Verb Forms", 96), ("Vocabulary", 412),
+            ("Image Occlusion", 24), ("Glyphs", 2136), ("Phrases", 0), ("Verb Forms", 96), ("Vocabulary", 412),
         ]
         /// Vocabulary's fields: name and notes with content.
         private static let fields: [(String, UInt64)] = [
@@ -316,7 +326,14 @@ extension TestHooks {
                 })
         }
         func typeCounts(_ id: Int64) async throws -> NotetypeRemovalCounts {
-            id == Self.vocabulary ? NotetypeRemovalCounts(notes: 412, cards: 786) : NotetypeRemovalCounts(notes: 0, cards: 0)
+            switch id {
+            case Self.vocabulary: NotetypeRemovalCounts(notes: 412, cards: 786)
+            case Self.cloze: NotetypeRemovalCounts(notes: 318, cards: 592)
+            default:
+                // As many cards as notes: one card type each.
+                Self.names[safe: Int(id - 1_700_000_100_001)].map { NotetypeRemovalCounts(notes: $0.1, cards: $0.1) }
+                    ?? NotetypeRemovalCounts(notes: 0, cards: 0)
+            }
         }
         func fieldContentCounts(_ id: Int64) async throws -> NotetypeFieldContentCounts {
             id == Self.vocabulary ? NotetypeFieldContentCounts(notes: 412, fields: Self.fields.map(\.1))
@@ -341,7 +358,14 @@ extension TestHooks {
             let name = typed.replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespaces)
             return name.isEmpty ? .ignored : .accepted(name)
         }
-        func templateCardCounts(_ id: Int64) async throws -> [UInt64] { id == Self.vocabulary ? [412, 374] : [0] }
+        /// Per stored card ordinal; a cloze type's ordinals are its cloze numbers.
+        func templateCardCounts(_ id: Int64) async throws -> [UInt64] {
+            switch id {
+            case Self.vocabulary: [412, 374]
+            case Self.cloze: [318, 210, 64]
+            default: [UInt64((try? await typeCounts(id))?.cards ?? 0)]
+            }
+        }
         /// V4 for the sample's texts: a name that is no field, and a section left open.
         func templateIssues(_ draft: NotetypeStructureDraft) async throws -> [NotetypeTemplateIssue] {
             let fields = draft.fields.map(\.name)
@@ -380,6 +404,13 @@ extension TestHooks {
         }
         func replaceFieldReferences(_ text: String, from: String, to: String) async throws -> String {
             try await core.notetypeReplaceFieldReferences(text, from: from, to: to)
+        }
+        /// The core's own Card Text row and edits: pure functions of the CSS.
+        func cardText(css: String, rightToLeft: Bool) async throws -> CardTextRow? {
+            try await core.cardText(css: css, rightToLeft: rightToLeft)
+        }
+        func editCardText(css: String, change: CardTextChange, rightToLeft: Bool) async throws -> CardTextEdited {
+            try await core.editCardText(css: css, change: change, rightToLeft: rightToLeft)
         }
         /// The core's own colouring: a pure read of the text.
         func syntax(_ text: String, styling: Bool) async throws -> [NotetypeSyntaxSpan] {

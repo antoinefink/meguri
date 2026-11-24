@@ -83,6 +83,24 @@ import Testing
         text.replacingOccurrences(of: "{{\(from)}}", with: "{{\(to)}}")
     }
     func syntax(_ text: String, styling: Bool) async throws -> [NotetypeSyntaxSpan] { [] }
+    /// W10: the row reads the size in `font-size: <n>px`; an edit writes the
+    /// new size there (or refuses when there is none).
+    func cardText(css: String, rightToLeft: Bool) async throws -> CardTextRow? {
+        guard css.contains(".card") else { return nil }
+        let size = css.firstMatch(of: /font-size: (\d+)px/).flatMap { Double($0.1) }
+        return CardTextRow(font: .system, size: size, alignment: .center, textColour: nil, background: nil)
+    }
+    private(set) var cardTextEdits: [CardTextChange] = []
+    func editCardText(css: String, change: CardTextChange, rightToLeft: Bool) async throws -> CardTextEdited {
+        cardTextEdits.append(change)
+        guard case .size(let points) = change, let match = css.firstMatch(of: /font-size: (\d+)px/) else {
+            throw BridgeError.invalidArgument("no size")
+        }
+        let edited = css.replacingCharacters(in: match.1.startIndex..<match.1.endIndex, with: String(Int(points)))
+        let start = edited.index(edited.startIndex, offsetBy: css.distance(from: css.startIndex, to: match.1.startIndex))
+        let end = edited.index(start, offsetBy: String(Int(points)).count)
+        return CardTextEdited(css: edited, value: start..<end)
+    }
 }
 
 /// `notetypes/workspace` W2, W3, W13 and `notetypes/draft-save` D1, D3, D5, D8 through the section's model.
@@ -1208,5 +1226,78 @@ extension NoteTypesModelTests {
         #expect(NoteTypePreviewLayout.macShows(requested: true, width: enough))
         #expect(!NoteTypePreviewLayout.macShows(requested: true, width: enough - 1))
         #expect(!NoteTypePreviewLayout.macShows(requested: false, width: 2_000))
+    }
+}
+
+/// W10's Card Text row and W5's cloze count through the section's model.
+@MainActor @Suite struct NoteTypeCardTextTests {
+    private func record(css: String, kind: Int32 = 0) -> NotetypeRecord {
+        let base = NoteTypeDraftTests.record()
+        return NotetypeRecord(id: base.id, name: base.name, kind: kind, sortField: base.sortField, css: css, base: base.base,
+                              fields: base.fields, templates: base.templates)
+    }
+
+    private func open(_ record: NotetypeRecord) async -> (NoteTypesModel, FakeNoteTypesBackend) {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = record
+        let model = NoteTypesModel(backend: backend)
+        model.summaryDelay = .zero
+        model.appear()
+        await model.settle()
+        model.tab = .cards
+        model.cardPart = .styling
+        return (model, backend)
+    }
+
+    @Test func theRowReadsTheStylingAndAChangeGoesThroughTheStylingsTextView() async throws {
+        let (model, backend) = await open(record(css: ".card { font-size: 20px; }"))
+        let css = try #require(model.draft(7)?.css)
+        let row = await model.cardTextRow(css, rightToLeft: false)
+        #expect(row?.size == 20)
+        await model.changeCardText(7, card: 0, .size(24), rightToLeft: false)
+        // The text view applies it (its own undo takes it back); the value written is highlighted.
+        let request = try #require(model.editorRequest)
+        #expect(request.part == .styling && backend.cardTextEdits == [.size(24)])
+        guard case .replaceHighlighting(let text, let highlight) = request.command else {
+            Issue.record("expected a highlighted replace, got \(request.command)")
+            return
+        }
+        #expect(text == ".card { font-size: 24px; }")
+        #expect((text as NSString).substring(with: NSRange(location: highlight.lowerBound, length: highlight.count)) == "24")
+        // Nothing is written in the draft before the text view applies it.
+        #expect(model.draft(7)?.css == css)
+    }
+
+    @Test func aSecondChangeBuildsOnTheFirstStillWaitingForTheTextView() async throws {
+        let (model, _) = await open(record(css: ".card { font-size: 20px; }"))
+        await model.changeCardText(7, card: 0, .size(24), rightToLeft: false)
+        // The text view has not applied it yet; the next change starts from it.
+        await model.changeCardText(7, card: 0, .size(25), rightToLeft: false)
+        let request = try #require(model.editorRequest)
+        guard case .replaceHighlighting(let text, _) = request.command else {
+            Issue.record("expected a highlighted replace, got \(request.command)")
+            return
+        }
+        #expect(text == ".card { font-size: 25px; }")
+        #expect(model.draft(7)?.css == ".card { font-size: 24px; }", "the first change landed in the draft when the second took the slot")
+    }
+
+    @Test func aRefusedChangeOrAStylingWithoutTheRuleWritesNothing() async {
+        let (model, _) = await open(record(css: ".card { color: red; }"))
+        await model.changeCardText(7, card: 0, .size(24), rightToLeft: false)
+        #expect(model.editorRequest == nil)
+        #expect(await model.cardTextRow("p { }", rightToLeft: false) == nil)
+    }
+
+    @Test func aClozeCardTypeCountsEveryCardOfTheType() async {
+        let backend = FakeNoteTypesBackend()
+        backend.records[7] = record(css: ".card {}", kind: 1)
+        backend.cardCounts = [20, 11, 5]
+        let model = NoteTypesModel(backend: backend)
+        model.summaryDelay = .zero
+        model.appear()
+        await model.settle()
+        let row = model.draft(7)!.cardRows[0]
+        #expect(model.cardCount(7, row: row) == 36, "cloze cards' ordinals are cloze numbers, not card types")
     }
 }

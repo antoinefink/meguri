@@ -1,6 +1,6 @@
 {
  "name": "preview-mac",
- "description": "U283 preview captures, Mac light and dark",
+ "description": "Note Types Cards tab captures, Mac light and dark",
  "platforms": [
   "mac"
  ],
@@ -64,7 +64,7 @@
   },
   {
    "wait": {
-    "id": "noteTypes.cards.preview.page",
+    "id": "noteTypes.cards.cardText",
     "timeout": 40
    }
   },
@@ -76,7 +76,7 @@
   },
   {
    "launch": {
-    "route": "notetypes/cards/preview-edited",
+    "route": "notetypes/cards/card-text",
     "animations": false,
     "windowSize": "1440x900",
     "arguments": [
@@ -95,7 +95,7 @@
    "do": "sleep:1"
   },
   {
-   "snapshot": "mac-light-edited"
+   "snapshot": "mac-light-card-text"
   },
   {
    "launch": {
@@ -248,7 +248,7 @@
   },
   {
    "wait": {
-    "id": "noteTypes.cards.preview.page",
+    "id": "noteTypes.cards.cardText",
     "timeout": 40
    }
   },
@@ -260,7 +260,7 @@
   },
   {
    "launch": {
-    "route": "notetypes/cards/preview-edited",
+    "route": "notetypes/cards/card-text",
     "animations": false,
     "windowSize": "1440x900",
     "arguments": [
@@ -279,7 +279,7 @@
    "do": "sleep:1"
   },
   {
-   "snapshot": "mac-dark-edited"
+   "snapshot": "mac-dark-card-text"
   },
   {
    "launch": {

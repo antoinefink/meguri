@@ -1,6 +1,6 @@
 {
  "name": "preview-ipad",
- "description": "U283 preview captures, iPad",
+ "description": "Note Types Cards tab captures, iPad",
  "platforms": [
   "ios"
  ],
@@ -25,13 +25,13 @@
   },
   {
    "launch": {
-    "route": "notetypes/cards/preview-error",
+    "route": "notetypes/cards/card-text",
     "animations": false
    }
   },
   {
    "wait": {
-    "id": "noteTypes.cards.preview.error",
+    "id": "noteTypes.cards.preview.page",
     "timeout": 40
    }
   },
@@ -39,7 +39,7 @@
    "do": "sleep:1"
   },
   {
-   "snapshot": "ipad-light-error"
+   "snapshot": "ipad-light-card-text"
   },
   {
    "launch": {
@@ -64,7 +64,7 @@
   },
   {
    "launch": {
-    "route": "notetypes/cards/preview-error",
+    "route": "notetypes/cards/card-text",
     "animations": false
    }
   },
@@ -73,7 +73,7 @@
   },
   {
    "wait": {
-    "id": "noteTypes.cards.preview.error",
+    "id": "noteTypes.cards.preview.page",
     "timeout": 40
    }
   },
@@ -81,7 +81,7 @@
    "do": "sleep:1"
   },
   {
-   "snapshot": "ipad-dark-error"
+   "snapshot": "ipad-dark-card-text"
   }
  ]
 }

@@ -275,6 +275,9 @@ public nonisolated struct NoteTypeEditorRequest: Sendable, Hashable {
         case toggleComment
         /// The whole part's text becomes this (W7's "Use “<name>”").
         case replaceAll(String)
+        /// W10's Card Text row: the styling becomes this, and the value it
+        /// wrote (UTF-16 offsets in the new text) is highlighted briefly.
+        case replaceHighlighting(String, highlight: Range<Int>)
         /// Appended at the end of the part (W7's "Add {{/<x>}}").
         case append(String)
         /// The caret goes to the start of this 1-based line (W7).

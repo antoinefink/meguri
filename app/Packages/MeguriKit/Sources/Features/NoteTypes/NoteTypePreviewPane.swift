@@ -37,22 +37,24 @@ struct NoteTypePreviewPane: View {
 
     // MARK: The bar
 
-    /// The bar's controls. Where the column is too narrow for all of them,
-    /// Light | Dark and then the Cloze Number move into the note menu, so
-    /// the bar never runs past its column.
+    /// The bar's controls, each at its own size. Where the column is too
+    /// narrow for all of them, the Cloze Number moves into the note menu,
+    /// then the note menu shows only its symbol, then Light | Dark moves
+    /// into it: the bar never touches the column's edges or clips.
     private var bar: some View {
         ViewThatFits(in: .horizontal) {
-            barLine(appearanceInMenu: false, clozeInMenu: false)
-            barLine(appearanceInMenu: true, clozeInMenu: false)
-            barLine(appearanceInMenu: true, clozeInMenu: true)
+            barLine(noteLabel: true, appearanceInMenu: false, clozeInMenu: false)
+            barLine(noteLabel: true, appearanceInMenu: false, clozeInMenu: true)
+            barLine(noteLabel: false, appearanceInMenu: false, clozeInMenu: true)
+            barLine(noteLabel: false, appearanceInMenu: true, clozeInMenu: true)
         }
     }
 
     private var cloze: Bool { model.draft(id)?.isCloze == true }
 
-    private func barLine(appearanceInMenu: Bool, clozeInMenu: Bool) -> some View {
+    private func barLine(noteLabel: Bool, appearanceInMenu: Bool, clozeInMenu: Bool) -> some View {
         HStack(spacing: Spacing.small) {
-            noteMenu(appearanceInMenu: appearanceInMenu, clozeInMenu: clozeInMenu && cloze)
+            noteMenu(label: noteLabel, appearanceInMenu: appearanceInMenu, clozeInMenu: clozeInMenu && cloze)
             if cloze && !clozeInMenu { clozeMenu }
             Spacer(minLength: Spacing.xSmall)
             sidePicker
@@ -79,9 +81,11 @@ struct NoteTypePreviewPane: View {
             Label { Text("noteTypes.preview.light", bundle: .module) } icon: { Image(systemName: "sun.max") }
                 .labelStyle(iconsOnly ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon))
                 .tag(CardRuntime.Appearance.light)
+                .accessibilityIdentifier("noteTypes.cards.preview.light")
             Label { Text("noteTypes.preview.dark", bundle: .module) } icon: { Image(systemName: "moon") }
                 .labelStyle(iconsOnly ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon))
                 .tag(CardRuntime.Appearance.dark)
+                .accessibilityIdentifier("noteTypes.cards.preview.dark")
         } label: {
             Text("noteTypes.preview.appearance", bundle: .module)
         }
@@ -95,7 +99,7 @@ struct NoteTypePreviewPane: View {
             .fixedSize()
     }
 
-    private func noteMenu(appearanceInMenu: Bool, clozeInMenu: Bool) -> some View {
+    private func noteMenu(label: Bool, appearanceInMenu: Bool, clozeInMenu: Bool) -> some View {
         Menu {
             Button { preview.step(by: -1) } label: { Text("noteTypes.preview.previous", bundle: .module) }
                 .disabled(!preview.canStep.previous)
@@ -114,13 +118,17 @@ struct NoteTypePreviewPane: View {
                 appearanceChoices(iconsOnly: false).pickerStyle(.inline)
             }
         } label: {
-            if let position = preview.notePosition {
+            if !label {
+                Label { Text("noteTypes.preview.note", bundle: .module) } icon: { Image(systemName: "doc.text") }
+                    .labelStyle(.iconOnly)
+            } else if let position = preview.notePosition {
                 Text(verbatim: NoteTypesStrings.previewPosition(position.index, of: position.count, locale: locale))
                     .monospacedDigit()
             } else {
                 Text("noteTypes.preview.noNotes", bundle: .module)
             }
         }
+        .help(notePositionText ?? "")
         #if os(iOS)
         .menuStyle(.button)
         .buttonStyle(.borderless)
@@ -128,6 +136,11 @@ struct NoteTypePreviewPane: View {
         .fixedSize()
         .accessibilityLabel(Text("noteTypes.preview.note", bundle: .module))
         .accessibilityIdentifier("noteTypes.cards.preview.note")
+    }
+
+    /// "3 of 12" (the note menu's help where it shows only its symbol).
+    private var notePositionText: String? {
+        preview.notePosition.map { NoteTypesStrings.previewPosition($0.index, of: $0.count, locale: locale) }
     }
 
     private var clozeChoices: some View {
@@ -171,9 +184,22 @@ struct NoteTypePreviewPane: View {
                 // first card would never be ready. Until it is, nothing shows.
                 let drawn = preview.shown != nil
                 CardWebView(pair: pair)
-                    // Under an error the last card stays, faded, so the place keeps its shape.
-                    .opacity(drawn ? (covered ? 0.25 : 1) : 0)
-                    .allowsHitTesting(drawn && !covered)
+                    #if os(iOS)
+                    // The card's background runs to the bottom edge, under the home indicator.
+                    .ignoresSafeArea(.container, edges: .bottom)
+                    #endif
+                    .opacity(drawn ? 1 : 0)
+                    // Under an error the last card stays, faded by a layer of the
+                    // pane's own background, so the place keeps its shape. The page
+                    // itself is never made translucent or untouchable: on the Mac
+                    // that took the window toolbar's background away.
+                    .overlay {
+                        if covered {
+                            Rectangle()
+                                .fill(.background.opacity(0.75))
+                                .accessibilityHidden(true)
+                        }
+                    }
                     .accessibilityElement(children: .contain)
                     // Tests and captures wait for the drawn card's identifier.
                     .accessibilityIdentifier(drawn ? "noteTypes.cards.preview.page" : "noteTypes.cards.preview.loading")
@@ -214,12 +240,26 @@ struct NoteTypePreviewPane: View {
         .accessibilityIdentifier("noteTypes.cards.preview.error")
     }
 
+    /// The preview's message over (or in place of) the card, laid out as
+    /// the system's content-unavailable view is. Not that view itself: on
+    /// the Mac it took the window toolbar's background away (the columns'
+    /// separators then ran up through the toolbar).
     private func message(_ title: Text, detail: Text?, symbol: String) -> some View {
-        ContentUnavailableView {
-            Label { title } icon: { Image(systemName: symbol) }
-        } description: {
-            if let detail { detail }
+        VStack(spacing: Spacing.small) {
+            Image(systemName: symbol)
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            title
+                .font(.headline)
+            if let detail {
+                detail
+                    .foregroundStyle(.secondary)
+            }
         }
+        .multilineTextAlignment(.center)
+        .padding(Spacing.large)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

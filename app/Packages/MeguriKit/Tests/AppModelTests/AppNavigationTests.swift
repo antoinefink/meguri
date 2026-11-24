@@ -249,6 +249,34 @@ import AppModel
         #expect(navigation.columnVisibility == .all)
     }
 
+    /// N22.1: the Note Types Cards tab hides the sidebar under about 1,100
+    /// points and puts it back as it was; the person's own choice wins.
+    @Test func aNarrowWorkspaceHidesTheSidebarAndPutsItBack() {
+        let navigation = AppNavigation()
+        navigation.setNarrowWorkspace(true)
+        #expect(navigation.columnVisibility == .detailOnly)
+        navigation.setNarrowWorkspace(true)
+        navigation.setNarrowWorkspace(false)
+        #expect(navigation.columnVisibility == .all)
+        // Already hidden by the person: nothing to put back.
+        navigation.columnVisibility = .detailOnly
+        navigation.setNarrowWorkspace(true)
+        navigation.setNarrowWorkspace(false)
+        #expect(navigation.columnVisibility == .detailOnly)
+        // Opened again by the person while narrow: it stays open.
+        navigation.columnVisibility = .all
+        navigation.setNarrowWorkspace(true)
+        navigation.columnVisibility = .all
+        navigation.setNarrowWorkspace(false)
+        #expect(navigation.columnVisibility == .all)
+        // Opened, then closed again by the person while narrow: it stays closed.
+        navigation.setNarrowWorkspace(true)
+        navigation.columnVisibility = .all
+        navigation.columnVisibility = .detailOnly
+        navigation.setNarrowWorkspace(false)
+        #expect(navigation.columnVisibility == .detailOnly)
+    }
+
     @Test func aReviewEndRestoresAHiddenSidebarHidden() {
         let navigation = AppNavigation()
         navigation.columnVisibility = .detailOnly

@@ -109,6 +109,10 @@ public struct CardTextEdited: Sendable, Hashable {
     public let css: String
     /// The value written, in `css`.
     public let value: Range<String.Index>
+    public init(css: String, value: Range<String.Index>) {
+        self.css = css
+        self.value = value
+    }
     init(_ raw: MeguriCoreBindings.CardTextEdited) throws(BridgeError) {
         let utf8 = raw.css.utf8
         guard let start = utf8.index(utf8.startIndex, offsetBy: Int(raw.valueStart), limitedBy: utf8.endIndex),

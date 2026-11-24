@@ -53,6 +53,8 @@ struct NoteTypeCardsTab: View {
                         .ignoresSafeArea(.container, edges: .bottom)
                     NoteTypePreviewPane(model: model, id: id)
                         .frame(maxWidth: .infinity)
+                        // The card runs to the bottom edge, under the home indicator.
+                        .ignoresSafeArea(.container, edges: .bottom)
                 } else {
                     NoteTypeCardsListColumn(model: model, id: id)
                         .frame(width: Self.columnIdeal)
@@ -430,6 +432,10 @@ struct NoteTypeTemplateEditorColumn: View {
         VStack(spacing: .zero) {
             bar
             Divider()
+            // W10, N22.4: the Card Text row above the styling, when it has one plain `.card` rule.
+            if part == .styling, let card, let css = draft?.css {
+                NoteTypeCardTextRow(model: model, id: id, card: card, css: css)
+            }
             editor
             Divider()
             NoteTypeIssuesList(model: model, id: id)
