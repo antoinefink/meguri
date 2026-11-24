@@ -132,6 +132,59 @@ import Testing
         #expect(model.query == after)
     }
 
+    @Test(arguments: [BrowseModel.Click.plain, .command, .option], [false, true])
+    func sectionNavigationDoesNotReadVisibleRowsOrChangeFilters(_ click: BrowseModel.Click, mixed: Bool) async {
+        let (model, _) = await makeModel()
+        model.activate(.deck(10))
+        model.activate(.tag("brask::oddly"))
+        let query = model.query, selection = model.listSelection, echo = model.selectionEcho
+        var shownReads = 0
+        func shown() -> Set<BrowseSidebarTag> {
+            shownReads += 1
+            return []
+        }
+        let rows: Set<BrowseSidebarTag> = mixed
+            ? [.section(.home), .section(.browse), .deck(20), .tag("brask"), .showAllTags]
+            : [.section(.home)]
+        #expect(model.listSelectionChanged(to: rows, click: click, shown: shown()) == .home)
+        #expect(shownReads == 0)
+        #expect(model.query == query && model.listSelection == selection)
+        #expect(!model.showsAllTags && model.selectionEcho == echo &+ 1)
+    }
+
+    @Test(arguments: [BrowseModel.Click.plain, .option])
+    func aSingleFilterClickDoesNotReadVisibleRows(_ click: BrowseModel.Click) async {
+        let (model, _) = await makeModel()
+        model.activate(.deck(10))
+        var shownReads = 0
+        func shown() -> Set<BrowseSidebarTag> {
+            shownReads += 1
+            return []
+        }
+        #expect(model.listSelectionChanged(to: [.section(.browse), .tag("brask")], click: click, shown: shown()) == nil)
+        #expect(shownReads == 0)
+        #expect(model.query.tokens == [token(Self.spanish), token(.tag("brask"), negated: click == .option)])
+    }
+
+    @Test func aCommandClickReadsVisibilityOnceAndKeepsHiddenDeckAndTagSelections() async {
+        let (model, _) = await makeModel()
+        model.activate(.deck(10))
+        model.activate(.tag("brask"))
+        model.activate(.tag("brask::oddly"), click: .command)
+        model.activate(.state(.new))
+        var shownReads = 0
+        func shown() -> Set<BrowseSidebarTag> {
+            shownReads += 1
+            // Selected deck 10 is filtered out; the selected child tag is under
+            // a collapsed parent. Only the visible parent tag was deselected.
+            return [.deck(20), .tag("brask"), .state(.new)]
+        }
+        #expect(model.listSelectionChanged(to: [.section(.browse), .deck(20), .state(.new)],
+                                           click: .command, shown: shown()) == nil)
+        #expect(shownReads == 1)
+        #expect(model.selectedRows == [.deck(10), .deck(20), .tag("brask::oddly"), .state(.new)])
+    }
+
     /// Decided 2026-11-23 (T9): a click on the row that is its kind's whole
     /// token removes it; on a saved search the query holds, it clears it.
     @Test func aSecondClickOnASelectedRowRemovesItsFilter() async {
@@ -326,7 +379,7 @@ import Testing
         await until { model.shownTopLevelTags.tags.map(\.fullName) != Array(names.prefix(8)) }
         #expect(model.shownTopLevelTags.tags.map(\.fullName) == ["t01", "t02", "t05", "t07", "t09", "t11", "t13", "t14"])
         #expect(model.shownTopLevelTags.showAll == 14)
-        model.activate(.showAllTags)
+        #expect(model.listSelectionChanged(to: [.showAllTags], click: .plain) == nil)
         #expect(model.shownTopLevelTags.tags.count == 14 && model.shownTopLevelTags.showAll == nil)
     }
 

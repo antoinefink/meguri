@@ -151,7 +151,7 @@ private struct TodayPreviewHost: View {
 
     var body: some View {
         let now = clock.now()
-        let totals = TodayDecks(nodes: HomeTodayPreview.nodes(state)).totals
+        let totals = TodayDecks.totals(nodes: HomeTodayPreview.nodes(state))
         PreviewActivityHost { activity, navigation in
             TodaySummaryContent(summary: HomeTodayPreview.summary(state, now: now),
                 nextLearningReadyAt: state == .nothingWaiting ? now.addingTimeInterval(2 * 3_600) : nil,

@@ -185,7 +185,7 @@ public struct HomeView: View {
     private var todayRow: HomeTodayRow? {
         guard todayBesideDeckList else { return nil }
         let navigation = collection.navigation
-        return HomeTodayRow(waiting: TodayDecks(nodes: collection.homeDecks).totals.waiting,
+        return HomeTodayRow(waiting: TodayDecks.totals(nodes: collection.homeDecks).waiting,
             selection: DeckListSelection(homeDeckPage: navigation.homeDeckPage),
             countsHeld: collection.homeCountsHeld) { navigation.openHome() }
     }
@@ -226,7 +226,7 @@ public struct HomeView: View {
             return HomeHeading.deckSubtitle(waiting, locale: locale)
         }
         guard deckID == nil, showsRootDeckList else { return "" }
-        return HomeHeading.todaySubtitle(TodayDecks(nodes: collection.homeDecks).totals, locale: locale)
+        return HomeHeading.todaySubtitle(TodayDecks.totals(nodes: collection.homeDecks), locale: locale)
     }
     #endif
     /// N14.3: a regular deck with nothing waiting says so and offers Add Note in Study's place.
