@@ -6,7 +6,7 @@ import SwiftUI
 /// The deck package import sheet over fixed values (`settings.importExport`),
 /// for the snapshot matrix and the capture routes: no core, no file.
 public enum DeckImportSheetPreview: PreviewStates {
-    public static let previewID = "settings.importExport.deck"
+    public static let previewID = "settings.deckImport"
 
     /// Every named fixture the capture routes draw.
     public static let fixtures = [

@@ -6,7 +6,7 @@ import XCTest
 /// never confirms a loss, Esc cancels). Run in the VM through
 /// `tools/mg ui-test --platform mac|ipad --suite DeckImportUITests`.
 @MainActor final class DeckImportUITests: XCTestCase {
-    private let id = "settings.importExport.deck"
+    private let id = "settings.deckImport"
 
     private func launch(_ route: String) throws -> (XCUIApplication, String) {
         continueAfterFailure = false

@@ -188,7 +188,10 @@ struct DeckImportPresentation {
         guard let counts = result?.counts else { return [] }
         var rows: [(id: String, label: String, value: String)] = []
         func add(_ label: String, _ value: UInt64) {
-            if value > 0 { rows.append((label.replacingOccurrences(of: " ", with: ""), label, value.formatted())) }
+            guard value > 0 else { return }
+            let words = label.split(separator: " ").map(String.init)
+            let id = (words.first?.lowercased() ?? "") + words.dropFirst().map(\.capitalized).joined()
+            rows.append((id, label, value.formatted()))
         }
         add("Cards added", counts.cardsAdded)
         add("Reviews added", counts.revlogAdded)
@@ -267,7 +270,7 @@ struct DeckImportContent: View {
         _expanded = State(initialValue: initiallyExpanded)
     }
 
-    private static let id = "settings.importExport.deck"
+    private static let id = "settings.deckImport"
 
     var body: some View {
         NavigationStack {
@@ -363,13 +366,15 @@ struct DeckImportContent: View {
             }
         }
         Section {
-            Toggle(isOn: $options.withScheduling) {
+            Toggle(isOn: Binding(get: { options.withScheduling && facts?.hasScheduling != false },
+                                 set: { options.withScheduling = $0 })) {
                 Text("import.apkg.withScheduling", bundle: .module)
                 Text(verbatim: DeckImportText.schedulingHelp(facts))
             }
             .disabled(facts?.hasScheduling == false)
             .accessibilityIdentifier("\(Self.id).withScheduling")
-            Toggle(isOn: $options.withDeckConfigs) {
+            Toggle(isOn: Binding(get: { options.withDeckConfigs && facts?.hasPresets != false },
+                                 set: { options.withDeckConfigs = $0 })) {
                 Text("import.apkg.withDeckConfigs", bundle: .module)
                 Text(verbatim: DeckImportText.presetsHelp(facts))
             }
@@ -494,6 +499,7 @@ struct DeckImportContent: View {
         } label: {
             HStack {
                 Text(verbatim: line.text)
+                    .accessibilityIdentifier("\(Self.id).line.\(line.id)")
                 Spacer()
                 if line.showable, presentation.canShowInBrowse {
                     Button { actions.showLine(line.categories) } label: { Text(verbatim: "Show in Browse") }
@@ -502,7 +508,6 @@ struct DeckImportContent: View {
                 }
             }
         }
-        .accessibilityIdentifier("\(Self.id).line.\(line.id)")
         .onChange(of: expanded.contains(line.id), initial: true) { _, open in
             if open { line.categories.forEach(actions.loadLog) }
         }
@@ -530,7 +535,7 @@ struct DeckImportContent: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("\(Self.id).entry.\(line).\(index)")
+        .accessibilityIdentifier("\(Self.id).entry.\(line)\(index)")
     }
 
     // MARK: X2.6
@@ -577,15 +582,13 @@ struct DeckImportContent: View {
 
     // MARK: Buttons
 
-    /// X2.3, D3: the confirmation's button is never the default. On the Mac a
-    /// confirmation-placed button is drawn and keyed as the default, so it
-    /// goes beside Cancel instead, as a plain button.
-    private var confirmPlacement: ToolbarItemPlacement {
-        #if os(macOS)
-        .cancellationAction
-        #else
-        .confirmationAction
-        #endif
+    /// X2.3, D3: the confirmation's button is never the default, and
+    /// destructive only with losses.
+    private var confirmButton: some View {
+        Button(role: presentation.hasLosses ? .destructive : nil, action: actions.confirm) {
+            Text(verbatim: presentation.syncParagraph == .replaces ? "Import and Upload" : "Import")
+        }
+        .accessibilityIdentifier("\(Self.id).confirm")
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
@@ -615,17 +618,21 @@ struct DeckImportContent: View {
                     .accessibilityIdentifier("\(Self.id).import")
             }
         case .confirming:
-            ToolbarItem(placement: .cancellationAction) {
+            #if os(macOS)
+            // One group beside Cancel: a confirmation-placed button would be the default.
+            ToolbarItemGroup(placement: .cancellationAction) {
                 Button(action: actions.cancelConfirmation) { Text(verbatim: "Cancel") }
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("\(Self.id).cancel")
+                confirmButton
             }
-            ToolbarItem(placement: confirmPlacement) {
-                Button(role: presentation.hasLosses ? .destructive : nil, action: actions.confirm) {
-                    Text(verbatim: presentation.syncParagraph == .replaces ? "Import and Upload" : "Import")
-                }
-                .accessibilityIdentifier("\(Self.id).confirm")
+            #else
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: actions.cancelConfirmation) { Text(verbatim: "Cancel") }
+                    .accessibilityIdentifier("\(Self.id).cancel")
             }
+            ToolbarItem(placement: .confirmationAction) { confirmButton }
+            #endif
         case .result:
             if presentation.canUndo, !presentation.undone {
                 ToolbarItem(placement: .cancellationAction) {

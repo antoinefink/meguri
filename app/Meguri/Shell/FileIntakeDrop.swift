@@ -42,7 +42,6 @@ struct FileDropOutline: View {
     var body: some View {
         Radius.rounded(Radius.medium)
             .strokeBorder(.tint, lineWidth: ControlMetrics.dropOutline)
-            .background(Radius.rounded(Radius.medium).fill(.tint.quinary))
             .padding(Spacing.xxSmall)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
