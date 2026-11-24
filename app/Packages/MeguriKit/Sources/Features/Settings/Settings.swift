@@ -106,6 +106,7 @@ struct SettingsPageLabel: View {
         switch page {
         case .accountSync: Label(SyncText.value("sync.settings.sync.section"), systemImage: "icloud")
         case .collection: Label { Text("Collection", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
+        case .integrations: Label("Integrations", systemImage: "puzzlepiece.extension")
         case .ankiServer: Label { Text("Anki Server", bundle: .module) } icon: { Image(systemName: "network") }
         }
     }
@@ -256,6 +257,8 @@ public struct MacSettingsView: View {
                     // The pane's title bar names it; the touch page keeps its section headers.
                     AccountSyncView(collection: collection, host: .settings, showsHeading: false)
                 }
+            } else if section == "integrations" {
+                SentenceMiningPane(model: collection.sentenceMining).detailColumnChrome()
             } else {
               Form {
                 if section == "collection" {
@@ -308,6 +311,7 @@ public struct MacSettingsView: View {
         let terms: String = switch page {
         case .accountSync: SyncText.value("sync.settings.sync.section") + " iCloud " + SyncText.value("sync.service.meguri")
         case .collection: String(localized: "Collection", bundle: .module) + " Import Export"
+        case .integrations: "Integrations Migaku Sentence Mining AnkiConnect"
         case .ankiServer: String(localized: "Anki Server", bundle: .module) + " Connection"
         }
         return terms.localizedStandardContains(query)

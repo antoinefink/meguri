@@ -59,11 +59,17 @@ pub fn add_note_for_screen(request: AddScreenNoteRequest) -> Result<NoteMutation
             current: collection.generation(),
         }.into());
     }
+    let result = notes::add_for_screen(&collection, screen_input(request)?)?;
+    Ok(NoteMutation::with_cards(
+        MutationSummary::of(&result), result.value.id, result.value.cards, true,
+    ))
+}
+fn screen_input(request: AddScreenNoteRequest) -> Result<notes::AddScreenNote, CoreError> {
     let base: [u8; 32] = request.notetype_base.try_into().map_err(|_| CoreError::InvalidArgument {
         message: "expected note type aggregate digest must contain 32 bytes".into(),
     })?;
-    let result = notes::add_for_screen(&collection, notes::AddScreenNote {
-        expected_generation,
+    Ok(notes::AddScreenNote {
+        expected_generation: meguri_engine::Generation(request.expected_generation),
         notetype_id: NotetypeId(request.notetype_id),
         kind: request.kind,
         field_layout: request.field_layout.into_iter().map(|field| notes::AddFieldIdentity {
@@ -75,11 +81,60 @@ pub fn add_note_for_screen(request: AddScreenNoteRequest) -> Result<NoteMutation
         fields: request.fields,
         tags: request.tags,
         deck_id: DeckId(request.deck_id),
-    })?;
-    Ok(NoteMutation::with_cards(
-        MutationSummary::of(&result), result.value.id, result.value.cards, true,
-    ))
+    })
 }
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct MiningAttachment { pub name: String, pub bytes: Vec<u8> }
+
+/// Each attachment's reference in fields is __meguri_mining_attachment_N__.
+/// Resolve and stage on one retained host, then submit one LocalApi op. The
+/// writer rechecks generation, destination and the entire note type aggregate.
+#[uniffi::export]
+pub fn add_mined_note(
+    request: AddScreenNoteRequest, retry_key: String, payload_digest: String,
+    attachments: Vec<MiningAttachment>,
+) -> Result<NoteMutation, CoreError> {
+    callback::enter("add_mined_note");
+    if cfg!(target_os = "ios") {
+        return Err(CoreError::Unsupported { feature: "sentence mining".into() });
+    }
+    let host = runtime::host()?;
+    let collection = host.collection()?;
+    let mut input = screen_input(request)?;
+    if input.expected_generation != collection.generation() {
+        return Err(meguri_engine::EngineError::StaleGeneration {
+            planned: input.expected_generation, current: collection.generation(),
+        }.into());
+    }
+    let media = host.media()?;
+    media.check_generation(input.expected_generation.0)?;
+    // A previous reply may have been lost after the note committed. Publish
+    // its witnessed stage before acknowledging its receipt on the retry.
+    media.recover()?;
+    let total = attachments.iter().try_fold(0usize, |n, a| n.checked_add(a.bytes.len()));
+    if total.is_none_or(|n| n > 134_217_728) || attachments.len() > 256 {
+        return Err(CoreError::InvalidArgument { message: "mining attachments are too large".into() });
+    }
+    let mut stage = if attachments.is_empty() { None } else { Some(media.begin_staging()?) };
+    for (index, attachment) in attachments.iter().enumerate() {
+        if attachment.bytes.is_empty() || attachment.name.len() > 100
+            || !attachment.name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
+            return Err(CoreError::InvalidArgument { message: "invalid mining attachment".into() });
+        }
+        let marker = format!("__meguri_mining_attachment_{index}__");
+        if !input.fields.iter().any(|f| f.contains(&marker)) {
+            return Err(CoreError::InvalidArgument { message: "unmapped mining attachment".into() });
+        }
+        let name = stage.as_mut().expect("attachment stage").add(&attachment.name, &attachment.bytes)
+            .map_err(meguri_engine::EngineError::Media)?;
+        for field in &mut input.fields { *field = field.replace(&marker, &name); }
+    }
+    let result = notes::mining::add(&collection, input, retry_key, payload_digest, stage)?;
+    Ok(NoteMutation::with_cards(MutationSummary::of(&result), result.value.note.id,
+        result.value.note.cards, result.value.written))
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct UpdateNoteRequest {
     pub id: i64,

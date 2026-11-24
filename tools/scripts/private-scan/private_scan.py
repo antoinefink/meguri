@@ -835,6 +835,19 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete-content PUBLIC review: cleanroom 20261124T133218Z-2230.
+    'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningHTTP.swift':
+        'f67a2676af411161273fefdb3e42075a06439e127ca36fbd1c63a822386de3bc',
+    'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningListener.swift':
+        '9b93221c1302a8c41f62ed865a6653a24b5525d49074bcc96479f1b0a3b44178',
+    'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningWebSocket.swift':
+        'e0733054b01f3c5c65ccd07bce6419c44ec4dfe6847b50ca04e120887313a7a9',
+    'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':
+        'a87b8a6ba027d2066f09caf6c4d0ff6bd2091b4817c0cd1ae0239ed6cdc1de5d',
+    'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningTests.swift':
+        '4ab28ab490b4cc43cb1fd08eb02a7e31eedea32a2603f9c7ac7275e05c7ffdc1',
+    'core/crates/meguri-ffi/src/notes.rs':
+        'e9fdf9804387494879a07f43a8cf21fa59343f0a7f41d1759512aee5315d61ae',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',

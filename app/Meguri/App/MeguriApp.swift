@@ -109,6 +109,10 @@ struct MeguriApp: App {
             // The performance tests drive the page through the hooks' commands (U296).
             TestHooks.StatsHooks.shared.attach(features.statsPage, sample: false)
             #endif
+            #if os(macOS)
+            collection.sentenceMining.enabledChanged = { AppDelegate.keepsRunningWithoutWindow = $0 }
+            AppDelegate.keepsRunningWithoutWindow = collection.sentenceMining.enabled
+            #endif
             // Preserve navigation/window restoration while unavailable areas stay absent.
             navigation.show(.home)
             #if os(macOS)

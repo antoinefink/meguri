@@ -36,6 +36,14 @@ extension TestHooks {
         }
 
         static func register(in registry: inout RouteRegistry) {
+            #if os(macOS)
+            registry.register("settings/integrations/listening") { _ in
+                .screen { NavigationStack { SentenceMiningPane(model: .renderFixture()) } }
+            }
+            registry.register("settings/integrations/port-conflict") { _ in
+                .screen { NavigationStack { SentenceMiningPane(model: .renderFixture(portConflict: true)) } }
+            }
+            #endif
             registry.register("settings/sync/off") { settings(.off, $0) }
             registry.register("settings/sync/meguri-connected") { settings(.meguriConnected, $0) }
             registry.register("settings/sync/meguri-sign-in") { settings(.meguriSignIn, $0) }

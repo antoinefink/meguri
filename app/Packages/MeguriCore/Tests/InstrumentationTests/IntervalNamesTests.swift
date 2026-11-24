@@ -114,7 +114,7 @@ import Testing
             "compare_typed_answer", "card_excerpts",
             "DeckDeletionJob.result", "add_deck", "start_rename_deck", "start_move_decks",
             "start_collapse_decks", "select_deck", "deck_deletion_summary", "start_delete_decks",
-            "NoteDeletionJob.result", "add_note", "add_note_for_screen", "update_note", "patch_note", "card_deck", "note_cards", "read_note",
+            "NoteDeletionJob.result", "add_note", "add_note_for_screen", "add_mined_note", "update_note", "patch_note", "card_deck", "note_cards", "read_note",
             "check_note_fields", "add_defaults", "add_notetype_selection", "notetype_last_deck", "tag_complete", "editor_field_html", "start_delete_notes", "notetype_names", "read_notetype",
             "add_notetype", "add_stock_notetype", "clone_notetype", "ensure_image_occlusion_notetype",
             "rename_notetype", "set_notetype_css", "set_notetype_field_options", "set_notetype_template_options", "notetype_card_text", "notetype_card_text_edit",

@@ -833,6 +833,17 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
     }
 
+    #if os(macOS)
+    @ObservationIgnored private var miningOwner: SentenceMining?
+    public var sentenceMining: SentenceMining {
+        if let miningOwner { return miningOwner }
+        let value = SentenceMining(defaults: configuration.deviceDefaults,
+            collectionKey: configuration.collectionLocation.directory.path)
+        miningOwner = value
+        return value
+    }
+    #endif
+
     public func start() async {
         guard state == .unopened || state == .noFile || isFailed, !opening else { return }
         #if DEBUG
@@ -954,7 +965,12 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func openCollection() async {
         opening = true; state = .loading; error = nil; closed = false; releasedManualHostState = nil
         recordDropsApplied = false
-        defer { opening = false }
+        defer {
+            opening = false
+            #if os(macOS)
+            sentenceMining.firstOpenAttemptEnded()
+            #endif
+        }
         configuration.recordDiagnostic(.init(component: .startup, operation: .open, stage: .requested, outcome: .observed))
         #if DEBUG
         var openPhase = OpenFailureDiagnostic.Phase.platformPreparation
@@ -1022,6 +1038,9 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     /// Called only after the FFI job retains the host, for open AND first import.
     private func completeOpenedHost(loadRecord: Bool) async throws {
+        #if os(macOS)
+        defer { sentenceMining.firstOpenAttemptEnded() }
+        #endif
         lifecycle = try await collection.lifecycle()
         guard case .ready(let value) = lifecycle else { state = .unavailable; return }
         let changed = generation != value
@@ -1360,6 +1379,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         switch event.kind {
         case .lifecycle(let value):
             receiveLifecycle(value)
+            #if os(macOS)
+            miningOwner?.collectionChanged()
+            #endif
         case .nextDayAtChanged(let instant):
             if !opening { day?.event(nextDayAt: instant) }
             studyWarmup.invalidate()
@@ -1382,6 +1404,9 @@ public final class ReviewCollection: ChangeFanoutSink {
             if event.generation == generation { deckOptionsOwner?.changesCommitted(changes, generation: event.generation) }
             if event.generation == generation { browseOwner?.changesCommitted(changes, seq: event.seq) }
             if event.generation == generation { noteTypesOwner?.changesCommitted(changes) }
+            #if os(macOS)
+            if changes.wholeCollection || !changes.notetypes.isEmpty || !changes.decks.isEmpty { miningOwner?.collectionChanged() }
+            #endif
             // MP7 step 6: undoing a structure save withdraws its waiting upload.
             if event.generation == generation, changes.wholeCollection || !changes.notetypes.isEmpty { sync.notetypesChanged() }
             if event.generation == generation,
@@ -1402,6 +1427,9 @@ public final class ReviewCollection: ChangeFanoutSink {
             scheduleMediaRefresh(names: names, generation: event.generation)
             studyWarmup.mediaChanged()
         case .collectionReplaced(let next):
+            #if os(macOS)
+            miningOwner?.collectionChanged(replaced: true)
+            #endif
             sync.collectionReplaced(next)
             guard preparedGeneration != next else { return }
             exportOwner?.generationChanged()
@@ -2510,7 +2538,16 @@ public final class ReviewCollection: ChangeFanoutSink {
         Task { await day?.checkNow() }
     }
     @discardableResult public func close() async -> Bool { await close(quitting: false) }
-    @discardableResult public func closeForQuit() async -> Bool { await close(quitting: true) }
+    @discardableResult public func closeForQuit() async -> Bool {
+        #if os(macOS)
+        await miningOwner?.shutdown()
+        #endif
+        let closed = await close(quitting: true)
+        #if os(macOS)
+        if !closed { miningOwner?.resumeAfterRefusedQuit() }
+        #endif
+        return closed
+    }
     private func close(quitting: Bool) async -> Bool {
         syncPresentation.cancelStatusHandoff()
         if let closeTask { return await closeTask.value }
