@@ -23,7 +23,7 @@ import XCTest
     func testTheMainPathImportsShowsTheLogAndCloses() throws {
         let (app, bundle) = try launch("collection/deck-import/live")
         XCTAssertTrue(element(app, "\(id).import").waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertTrue(text(app, "Import “Spanish Verbs.apkg”").exists, app.debugDescription)
+        XCTAssertTrue(text(app, "Import “Spanish Verbs.apkg”").waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(element(app, "\(id).withScheduling").exists)
         XCTAssertTrue(element(app, "\(id).updateNotes").exists)
         capture(app, "deck-import-options")
@@ -51,7 +51,7 @@ import XCTest
         try click(importButton, app, bundle)
         let confirm = element(app, "\(id).confirm")
         XCTAssertTrue(confirm.waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertTrue(text(app, "Import “Spanish Verbs.apkg”?").exists, app.debugDescription)
+        XCTAssertTrue(text(app, "Import “Spanish Verbs.apkg”?").waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(element(app, "\(id).loss.emptied0").exists)
         XCTAssertTrue(element(app, "\(id).backup").exists)
         capture(app, "deck-import-confirmation")
@@ -107,7 +107,12 @@ import XCTest
     }
     /// A title: the Mac's title bar gives it as the value, iOS as the label.
     private func text(_ app: XCUIApplication, _ text: String) -> XCUIElement {
+        #if os(macOS)
+        // The Mac's title leads the form (`SheetTitle`), with its own identifier.
+        app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "\(id).title", text)).firstMatch
+        #else
         app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch
+        #endif
     }
     private func click(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
         XCTAssertTrue(target.waitForExistence(timeout: 10), app.debugDescription)
