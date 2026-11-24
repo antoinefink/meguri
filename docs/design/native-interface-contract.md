@@ -1114,7 +1114,7 @@ Changed 2026-11-22 (Antoine's annotations on the captures of PR #114; decided by
 
 ### N22.4 Styling (6B)
 
-The Styling part shows "Shared by All Card Types" in its bar, and above the CSS one Card Text row: Font, Size, Alignment (a three-segment control), Text Colour and Background (colour controls). The row is absent when the CSS has no single plain `.card` rule (`notetypes/workspace` W10).
+Only while Styling is selected, the part picker's native help and accessibility hint say "Shared by All Card Types", localized; there is no inline caption in the bar. Above the CSS is one Card Text row: Font, Size, Alignment (a three-segment control), Text Colour and Background (colour controls). The row is absent when the CSS has no single plain `.card` rule (`notetypes/workspace` W10).
 - Built 2026-11-24 (U283; the implementer's reading, pending the coordinator): the row sits under the editor's bar while Styling shows, with a hairline under it: "Card Text" in secondary text, Font (a pull-down: System, then the system's font families), Size (a number field with a stepper; a step from no size starts at 16), Alignment (a three-segment control of the system's text alignment symbols), Text Colour and Background (system colour controls, small; a colour is written once it rests for a quarter second, so a drag in the colour panel is one edit). Where the editor column is narrow the title goes first, then the font menu narrows, then the controls take two lines. A change goes through the styling's text view as one edit of its own undo, the value written shown with the system's find indicator on the Mac. The core's pure reads write the CSS (U268): only the one value changes.
 
 ### N22.5 Save (3C)
