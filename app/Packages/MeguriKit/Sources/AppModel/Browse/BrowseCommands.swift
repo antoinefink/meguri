@@ -754,7 +754,7 @@ public final class BrowseCommands {
         guard let session = results.commandSession else { return sheet.failed(.failed) }
         let generation = generation
         // A list that already moved on is refused here, as the core would.
-        if let list = results.list, list.handle != target.handle || list.revision != target.revision {
+        if let list = results.list, list.handle != target.handle || list.revision != target.revision || list.mode != target.mode {
             return sheet.failed(.rowsChanged)
         }
         Task {
@@ -839,6 +839,8 @@ public final class BrowseCommands {
                 defer { progress.cancel() }
                 let result = try await running.result()
                 guard self.generation == generation, findDuplicatesSheet === sheet else { return }
+                // Cancel was asked for: what the read found does not land.
+                if sheet.phase == .cancelling { return closeFindDuplicates(sheet) }
                 guard !result.groups.isEmpty else { return sheet.finished(result) }
                 closeFindDuplicates(sheet)
                 duplicatesFound(result, field)

@@ -171,6 +171,8 @@ public final class BrowseFindReplaceSheet: Identifiable {
     @ObservationIgnored private var inTouched = false
     @ObservationIgnored private var running: BrowseRunning<FindReplaceResult>?
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
+    /// The sheet went: nothing more is read for it.
+    @ObservationIgnored private var isClosed = false
 
     init(id: UInt64, selected: BrowseTarget?, commands: BrowseCommands, reads: any BrowseSheetReads,
          memory: BrowseFindReplaceDevice?, prefill: (find: String, replace: String)?, typeOrder: [Int64]) {
@@ -249,7 +251,8 @@ public final class BrowseFindReplaceSheet: Identifiable {
     // MARK: The In menu
 
     private func updateEntries() {
-        let ids = (notes == .selected ? selectedTypes : foundTypes) ?? []
+        // Until the chosen notes' note types are read, the menu and its choice stay as they are.
+        guard let ids = notes == .selected ? selectedTypes : foundTypes else { return }
         let ordered = ids.sorted { (typeOrder.firstIndex(of: $0) ?? .max, $0) < (typeOrder.firstIndex(of: $1) ?? .max, $1) }
         let next = BrowseFieldEntry.menu(ordered.compactMap { types[$0] }, ends: true)
         let chosen = chosenEntry?.kind
@@ -303,15 +306,18 @@ public final class BrowseFindReplaceSheet: Identifiable {
                 await readTypes(counts.notetypes)
             }
             // All Found once the results are whole (they may still stream).
-            while !Task.isCancelled, self?.allFound == nil {
+            while !Task.isCancelled, let self, allFound == nil {
                 if let all = results.allRowsTarget(), all.handle == opened {
-                    self?.allFound = all
+                    allFound = all
+                    // Its preview runs now, whatever its counts read gives.
+                    if notes == .allFound { refreshPreview() }
                     break
                 }
-                if results.list?.handle != opened || (results.list?.isComplete == true && results.list?.count == 0) { break }
+                if results.list?.handle != opened || results.list?.released != false
+                    || (results.list?.isComplete == true && results.list?.count == 0) { break }
                 try? await Task.sleep(for: .milliseconds(100))
             }
-            guard let self, let all = allFound, let counts = try? await Self.counts(session, all) else { return }
+            guard !Task.isCancelled, let self, let all = allFound, let counts = try? await Self.counts(session, all) else { return }
             foundNotes = counts.notes
             foundTypes = counts.notetypes
             await readTypes(counts.notetypes)
@@ -319,10 +325,17 @@ public final class BrowseFindReplaceSheet: Identifiable {
         })
     }
 
+    /// A newer counts read of the session cancels the older one in the core
+    /// (Browse's own reads after a change): read again, a few times, until
+    /// the caller itself is cancelled.
     static func counts(_ session: any BrowseSearching, _ target: BrowseTarget) async throws -> BrowseSelectionCounts {
-        do { return try await session.counts(of: target) } catch BridgeError.cancelled {
-            // A newer counts read cancelled this one: once more.
-            return try await session.counts(of: target)
+        var attempt = 0
+        while true {
+            do { return try await session.counts(of: target) } catch BridgeError.cancelled {
+                attempt += 1
+                guard attempt < 5, !Task.isCancelled else { throw BridgeError.cancelled }
+                try? await Task.sleep(for: .milliseconds(50 * attempt))
+            }
         }
     }
 
@@ -340,7 +353,7 @@ public final class BrowseFindReplaceSheet: Identifiable {
     func refreshPreview() {
         previewToken &+= 1
         previewTask?.cancel()
-        guard phase == .editing else { return }
+        guard phase == .editing, !isClosed else { return }
         preview = .counting
         guard let target, let previews else { return }
         let token = previewToken, request = request, previous = previewTask
@@ -428,6 +441,7 @@ public final class BrowseFindReplaceSheet: Identifiable {
     }
 
     func closed() {
+        isClosed = true
         previewTask?.cancel()
         for task in tasks { task.cancel() }
     }
@@ -520,7 +534,8 @@ public final class BrowseFindDuplicatesSheet: Identifiable {
                     allFound = all
                     break
                 }
-                if results.list?.handle != opened || (results.list?.isComplete == true && results.list?.count == 0) { break }
+                if results.list?.handle != opened || results.list?.released != false
+                    || (results.list?.isComplete == true && results.list?.count == 0) { break }
                 try? await Task.sleep(for: .milliseconds(100))
             }
             if let all = allFound, let counts = try? await BrowseFindReplaceSheet.counts(session, all) {

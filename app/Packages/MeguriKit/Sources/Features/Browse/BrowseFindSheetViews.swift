@@ -143,6 +143,9 @@ struct BrowseFindReplaceSheetView: View {
             TextField(text: $sheet.find) { Text("browse.findReplace.find", bundle: .module) }
                 .focused($findFocused)
                 .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
                 .textInputSuggestions { suggestions(sheet.findHistory, typed: sheet.find) }
                 .accessibilityIdentifier("browse.sheet.findReplace.find")
             if case .invalid(let invalid) = sheet.preview {
@@ -154,6 +157,9 @@ struct BrowseFindReplaceSheetView: View {
             }
             TextField(text: $sheet.replace) { Text("browse.findReplace.replaceWith", bundle: .module) }
                 .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
                 .textInputSuggestions { suggestions(sheet.replaceHistory, typed: sheet.replace) }
                 .accessibilityIdentifier("browse.sheet.findReplace.replace")
             Picker(selection: $sheet.inEntry) {
@@ -280,7 +286,8 @@ private struct BrowseFindReplacePreviewView: View {
                 Text(verbatim: BrowseFindText.willChange(preview.changed, of: preview.considered, locale: locale))
             }
         case .invalid:
-            Text("browse.findReplace.noMatches", bundle: .module).foregroundStyle(.secondary)
+            // The error shows under Find; the count line stays empty.
+            Text(verbatim: " ").accessibilityHidden(true)
         case .damaged:
             Text("browse.findReplace.damaged", bundle: .module).foregroundStyle(.secondary)
         case .rowsChanged:

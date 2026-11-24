@@ -222,7 +222,8 @@ public final class BrowseModel {
     /// there (display only).
     func showDuplicates(_ found: FindDuplicatesResult, field: String) {
         // Found again from its own token: the query before the first Find stays the one to restore.
-        let previous = duplicates.flatMap { query.tokens.contains($0.token) ? $0.previous : nil } ?? query
+        // A Duplicates query whose previous one was dropped restores nothing (its label facts would be gone).
+        let previous: FilterQuery? = if let shown = duplicates, query.tokens.contains(shown.token) { shown.previous } else { query }
         let info = Duplicates(noteIDs: found.noteIds, field: field, groups: found.groups.count, previous: previous)
         if mode != .notes { setMode(.notes, run: false) }
         setQuery(FilterQuery(tokens: [info.token]), duplicates: info)

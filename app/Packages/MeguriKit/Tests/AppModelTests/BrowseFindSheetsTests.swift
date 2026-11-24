@@ -259,6 +259,12 @@ import Testing
         await waitUntil { session.starts.last?.mode == .notes && session.starts.last?.sort.key == "fld:Meaning" }
         #expect(model.results.displayField == "Meaning")
         await waitUntil { model.results.list?.columns.first == "fld:Meaning" }
+        // A header click meanwhile sorts the rows shown and writes nothing to the column sets (V10).
+        let backend = try #require(model.backend as? FakeBrowseBackend)
+        let written = backend.columnChanges.count
+        model.results.sort(by: "noteCrt")
+        await waitUntil { model.results.list?.sort.key == "noteCrt" }
+        #expect(backend.columnChanges.count == written)
         // Removing the token restores the query before Find.
         model.removeToken(0)
         #expect(model.query == previous && model.duplicates == nil && model.results.displayField == nil)
