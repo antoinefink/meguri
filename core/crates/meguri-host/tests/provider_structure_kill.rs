@@ -8,7 +8,10 @@
 #[path = "support/meguri_round_script.rs"] mod round;
 #[allow(dead_code)]
 #[path = "support/meguri_structure.rs"] mod structure;
+#[allow(dead_code)]
+#[path = "support/meguri_import.rs"] mod import;
 use bootstrap as b;
+use import as i;
 use round as r;
 use structure as s;
 use meguri_engine::UndoScope;
@@ -219,5 +222,104 @@ fn structure_job_killed_during_its_media_step_is_uploaded_and_finishes_as_setup(
     let quiet = r::Script::new(s::quiet_round(&k.host));
     let result = r::complete(&k.host, &r::started(k.host.start_meguri_collection(r::access(&k.connection, &quiet))));
     assert_eq!(result.collection.as_ref().unwrap().state, MeguriCollectionState::NoChanges);
+    k.host.close().unwrap();
+}
+
+/// MP7.1: the import as the job's write step, killed around its commit.
+/// The child reopens the device, confirms the plan's structural reason and
+/// runs the job with that confirmation.
+fn import_child(point: &str) {
+    let Ok(root) = std::env::var(ROOT) else { return };
+    let root = std::path::PathBuf::from(root);
+    let var = |name: &str| std::env::var(format!("MEGURI_STRUCTURE_KILL_{name}")).unwrap();
+    let host = CoreHost::open(s::config(&root.join("local"), s::LATER)).unwrap();
+    b::settle(&host);
+    let connection = MeguriConnection { reference: var("REFERENCE"), revision: var("REVISION").parse().unwrap(),
+        endpoint: b::ENDPOINT.into() };
+    let session = i::inspect(&host, &root.join("sorting.apkg"));
+    let asked = meguri_package::apkg::apply_confirming(host.engine(), &session, i::OFF, None, true,
+        &meguri_engine::CancelToken::new(), &meguri_engine::ProgressSink::new());
+    let Err(meguri_package::apkg::ApkgImportError::ConfirmationRequired { token, .. }) = asked else {
+        panic!("the structural plan asks first")
+    };
+    let col = s::col(&host);
+    let mut steps = s::quiet_round(&host);
+    steps.extend(s::upload_steps(&root, &col));
+    let script = r::Script::new(steps);
+    let (import, _) = host.deck_import_work(session, i::OFF, Some(*token));
+    let work: MeguriStructureWork = match point {
+        "before-import" => { let root = root.clone(); Box::new(move |_, _| die_at(&root)) }
+        _ => { let root = root.clone(); Box::new(move |collection, job| { import(collection, job)?; die_at(&root) }) }
+    };
+    let task = host.start_meguri_structure_save(s::source(&connection, &script), work, true).unwrap();
+    let _ = s::drive(&host, &task);
+    panic!("the job must die at {point}");
+}
+/// [`kill`] for a device that holds the import's target note type, with
+/// the package beside it.
+fn kill_import(test: &str, staged: usize) -> Killed {
+    let root = tempfile::tempdir().unwrap();
+    let rig = s::rig_with(root.path(), 1, i::target_setup);
+    i::sorting_package(root.path());
+    let before = s::col(&rig.host);
+    let config: HostConfig = rig.config.clone();
+    let Ok(host) = Arc::try_unwrap(rig.host) else { panic!("the rig owns its host") };
+    host.close().unwrap();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test, "--nocapture"])
+        .env(ROOT, root.path())
+        .env("MEGURI_STRUCTURE_KILL_REFERENCE", &rig.connection.reference)
+        .env("MEGURI_STRUCTURE_KILL_REVISION", rig.connection.revision.to_string())
+        .status().unwrap();
+    assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(6), "SIGABRT");
+    assert!(root.path().join(REACHED).exists(), "the child reached the named point before it died");
+    // What the dead process left of its session's staging, before the open below sweeps.
+    let left = std::fs::read_dir(config.collection_directory.clone()).unwrap()
+        .filter(|entry| entry.as_ref().unwrap().file_name().to_string_lossy().starts_with(".meguri-stage-")).count();
+    assert_eq!(left, staged, "the session's staging directories at the kill");
+    let host = CoreHost::open(config).unwrap();
+    b::settle(&host);
+    Killed { path: root.path().to_owned(), _root: root, host, connection: rig.connection, notetype: rig.notetype,
+        ls: before.last_sync.0, scm: before.schema_modified.0, before }
+}
+/// Killed after the record and before the import began: nothing imported,
+/// the record withdrawn at open, the binding ready, no staging left, and the
+/// next round a normal one.
+#[test]
+fn import_job_killed_before_its_import_imported_nothing() {
+    import_child("before-import");
+    let _lane = b::LANE.lock().unwrap();
+    let k = kill_import("import_job_killed_before_its_import_imported_nothing", 1);
+    assert_eq!((i::guids(&k.host), i::sort_field(&k.host)), (vec!["g-two".to_owned()], 0));
+    assert!(!k.host.meguri_structure_upload_pending().unwrap() && !record(&k.host) && ready(&k.host));
+    assert!(!meguri_engine::schema_gate::is_modified(&s::col(&k.host)));
+    assert_eq!(i::staging(&k.host), 0, "the launch sweep removed the dead session's staging");
+    let quiet = r::Script::new(s::quiet_round(&k.host));
+    let result = r::complete(&k.host, &r::started(k.host.start_meguri_collection(r::access(&k.connection, &quiet))));
+    assert_eq!(result.collection.as_ref().unwrap().state, MeguriCollectionState::NoChanges);
+    k.host.close().unwrap();
+}
+/// Killed between the import's commit and the upload (MP7 step 5): the
+/// import is whole, the upload is pending with its record, no round runs,
+/// nothing was sent, and Upload… finishes it with no further question.
+#[test]
+fn import_job_killed_after_its_commit_leaves_the_upload_pending() {
+    import_child("after-import");
+    let _lane = b::LANE.lock().unwrap();
+    let k = kill_import("import_job_killed_after_its_commit_leaves_the_upload_pending", 0);
+    assert_eq!((i::guids(&k.host), i::sort_field(&k.host)), (vec!["g-one".to_owned(), "g-two".into()], 1));
+    assert!(record(&k.host) && k.host.meguri_structure_upload_pending().unwrap());
+    assert!(meguri_engine::schema_gate::is_modified(&s::col(&k.host)));
+    assert!(ready(&k.host), "the binding is held only once the upload runs");
+    let silent = r::Script::new(vec![]);
+    assert!(matches!(k.host.start_meguri_collection(r::access(&k.connection, &silent)), MeguriRoundStart::Refused(_)));
+    // The relaunch dropped the undo step; the import's safety backup stays.
+    assert_eq!(k.host.collection().unwrap().peek_undo(UndoScope::Global).unwrap().name(), None);
+    assert!(std::fs::read_dir(k.path.join("local").join("backups")).unwrap().count() > 0);
+    let (outcome, script) = upload(&k, s::upload_steps(&k.path, &k.before));
+    assert!(matches!(*outcome, O::Saved(U::Uploaded { media_complete: true })));
+    script.assert_done();
+    assert!(ready(&k.host) && !record(&k.host) && !k.host.meguri_structure_upload_pending().unwrap());
+    assert!(!meguri_engine::schema_gate::is_modified(&s::col(&k.host)));
     k.host.close().unwrap();
 }

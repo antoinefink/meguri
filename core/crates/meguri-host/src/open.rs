@@ -722,6 +722,16 @@ impl CoreHost {
     pub fn collection(&self) -> Result<Collection, EngineError> {
         self.engine.collection()
     }
+    /// The staging directory, clock, randomness and space an import session
+    /// of this host's collection uses (`package/apkg-import` I2, I15).
+    pub fn deck_package_context(&self) -> meguri_package::apkg::ApkgContext {
+        meguri_package::apkg::ApkgContext {
+            collection_directory: self.provider_collection_path.parent().expect("composed collection directory").to_owned(),
+            clock: self.clock.clone(),
+            random: self.initial_open.random.clone(),
+            space: self.initial_open.disk_space_provider.clone(),
+        }
+    }
     pub(crate) fn meguri_round_sources(&self) -> (Arc<dyn Clock>, Arc<dyn meguri_model::rng::RandomSource>) {
         (self.clock.clone(), self.initial_open.random.clone())
     }

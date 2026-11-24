@@ -196,6 +196,10 @@ fn bootstrap_pending(error: &MeguriBootstrapError) -> MeguriUploadPending {
         _ => MeguriUploadPending::Failed,
     }
 }
+/// An op's error that reports a failure after its commit: its rows are written.
+fn committed(error: &EngineError) -> bool {
+    matches!(error, EngineError::CommitCompleted { .. } | EngineError::MediaCommitPending { .. })
+}
 /// A retained operation that sent nothing and replaced nothing.
 fn unsent(op: &Operation) -> bool {
     matches!(op.acceptance, Acceptance::NotSent | Acceptance::Refused)
@@ -452,8 +456,8 @@ impl CoreHost {
             // Unreadable: the record stays, and the next settle decides. A
             // refusal is still reported as the refusal it is.
             _ => return match result {
-                Some(Err(error)) => Next::Done(O::NotSaved(MeguriStructureStop::Refused(error))),
-                Some(Ok(())) => pending(MeguriUploadPending::Storage),
+                Some(Err(error)) if !committed(&error) => Next::Done(O::NotSaved(MeguriStructureStop::Refused(error))),
+                Some(_) => pending(MeguriUploadPending::Storage),
                 None => Next::Done(O::NotSaved(MeguriStructureStop::Cancelled)),
             },
         };
@@ -464,6 +468,9 @@ impl CoreHost {
             if let Some(record) = &record { let _ = self.clear_structure_record(record); }
             return Next::Done(match result {
                 Some(Ok(())) => O::Saved(U::NotNeeded),
+                // Committed without a structural change: an ordinary round
+                // sends it, and it is never reported as not saved.
+                Some(Err(error)) if committed(&error) => O::Saved(U::NotNeeded),
                 Some(Err(error)) => O::NotSaved(MeguriStructureStop::Refused(error)),
                 None => O::NotSaved(MeguriStructureStop::Cancelled),
             });

@@ -143,7 +143,8 @@ public actor CoreMeguriRoundService {
     private var attempt: (id: UInt64, task: Task<MeguriRoundReport, any Error>)?
     private var nextID: UInt64 = 0
     /// A structure save job that runs on this facade; retirement joins it.
-    var structureWork: Task<MeguriStructureOutcome, any Error>?
+    /// The running structure job (a note type save or a deck package import), joined by a drain.
+    var structureWork: Task<Void, Never>?
     /// Raised by every drain: a structure job admitted before it does not start after it.
     var drains: UInt64 = 0
     init(raw: MeguriCoreBindings.ProviderConnection, connection: MeguriProviderConnection,

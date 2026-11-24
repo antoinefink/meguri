@@ -215,6 +215,17 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let providerStructureCancel = BridgeCall("ProviderStructureJob.cancel")
     public static let providerStructureSaved = BridgeCall("ProviderStructureJob.saved")
     public static let providerStructureUploadPending = BridgeCall("ProviderOwner.structure_upload_pending")
+    public static let providerStructureImportOutcome = BridgeCall("ProviderStructureJob.import_outcome")
+    public static let packageFileClassOfName = BridgeCall("package_file_class_of_name")
+    public static let packageFileClass = BridgeCall("package_file_class")
+    public static let deckImportStoredOptions = BridgeCall("deck_import_stored_options")
+    public static let startDeckImportInspect = BridgeCall("start_deck_import_inspect")
+    public static let deckImportInspectJobOutcome = BridgeCall("DeckImportInspectJob.outcome")
+    public static let deckImportSessionStartApply = BridgeCall("DeckImportSession.start_apply")
+    public static let deckImportApplyJobOutcome = BridgeCall("DeckImportApplyJob.outcome")
+    public static let deckImportSessionResult = BridgeCall("DeckImportSession.result")
+    public static let deckImportSessionLogPage = BridgeCall("DeckImportSession.log_page")
+    public static let deckImportSessionClose = BridgeCall("DeckImportSession.close")
     public static let providerBootstrapPendingPreparation = BridgeCall("ProviderConnection.pending_bootstrap_preparation")
     public static let providerBootstrapDiscardPreview = BridgeCall("ProviderConnection.discard_bootstrap_preview")
     public static let providerBootstrapDiscardOperation = BridgeCall("ProviderConnection.discard_bootstrap_operation")
@@ -740,6 +751,9 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         providerStartCollectionRound, providerStartMediaRound, providerRoundOutcome, providerRoundRetryFinalization,
         providerStartStructureSave, providerStartStructureUpload, providerStructureAdvance, providerStructureCancel,
         providerStructureSaved, providerStructureUploadPending,
+        providerStructureImportOutcome, packageFileClassOfName, packageFileClass, deckImportStoredOptions,
+        startDeckImportInspect, deckImportInspectJobOutcome, deckImportSessionStartApply, deckImportApplyJobOutcome,
+        deckImportSessionResult, deckImportSessionLogPage, deckImportSessionClose,
         providerBootstrapPendingPreparation, providerBootstrapDiscardPreview, providerBootstrapDiscardOperation, providerBootstrapRecovery,
         testCloudZoneDeletionFixture, testCloudZoneDeletionRows,
         cloudPolicyExecutionBeginCleanupPass, cloudCleanupPassSubmitInventory, cloudCleanupPassCompleteInventory, cloudCleanupPassFinish,

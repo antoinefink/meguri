@@ -1374,3 +1374,31 @@ pub fn test_cloud_restored_control(
         required_scan_complete,
     })
 }
+
+/// Writes the open collection, without media, as a latest-format package at
+/// `path`. Under a deck package's name it is a deck package of every note:
+/// the Swift tests import it into another collection.
+#[uniffi::export]
+pub fn test_write_deck_package(path: String) -> Result<(), CoreError> {
+    callback::enter("test_write_deck_package");
+    use meguri_package::{CollectionPackageWriteContext, Finalisation, write_collection_package_from_live};
+    let host = runtime::host()?;
+    let context = host.deck_package_context();
+    let collection = host.collection()?;
+    let lease = collection.reader(meguri_storage::ReaderRole::Maintenance)?;
+    write_collection_package_from_live(
+        &lease,
+        std::path::Path::new(&path),
+        &CollectionPackageWriteContext {
+            collection_directory: &context.collection_directory,
+            purpose: meguri_storage::atomic_file::Purpose::Export,
+            finalisation: Finalisation::Replace,
+            clock: context.clock.as_ref(),
+            random: context.random.as_ref(),
+            space: context.space.as_ref(),
+            is_cancelled: &|| false,
+        },
+    )
+    .map_err(|error| CoreError::Internal { message: format!("test package: {error}") })?;
+    Ok(())
+}

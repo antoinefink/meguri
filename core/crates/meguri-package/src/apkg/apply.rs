@@ -19,7 +19,8 @@ use super::gather;
 use super::plan::{self, ImportPlan};
 use super::session::ImportSession;
 use super::{
-    ApkgImportError, ConfirmationToken, ImportOptions, ImportOutcome, ImportResult, StructureSummary, UpdateCondition,
+    ApkgImportError, ConfirmationToken, ImportOptions, ImportOutcome, ImportResult, StructuralReason, StructureSummary,
+    UpdateCondition,
 };
 
 /// The committed write phase's value and its safety backup's name, kept
@@ -80,6 +81,42 @@ pub fn apply(
     cancel: &Arc<CancelToken>,
     progress: &ProgressSink,
 ) -> ImportOutcome<ImportResult> {
+    apply_confirming(engine, session, options, token, false, cancel, progress)
+}
+
+/// [`apply`], and with `confirm_structure` I8's test also covers the plan's
+/// structural reasons (I14.4): a plan that carries one the token does not
+/// cover returns `ConfirmationRequired` with them, its preview possibly
+/// empty, and writes nothing. A caller asks when a ready Meguri Sync
+/// binding would upload the collection after the import
+/// (`sync/meguri-provider` MP7.1); the engine cannot know the binding.
+pub fn apply_confirming(
+    engine: &Engine,
+    session: &ImportSession,
+    options: ImportOptions,
+    token: Option<&ConfirmationToken>,
+    confirm_structure: bool,
+    cancel: &Arc<CancelToken>,
+    progress: &ProgressSink,
+) -> ImportOutcome<ImportResult> {
+    apply_on(engine, session, options, token, confirm_structure, None, cancel, progress)
+}
+
+/// [`apply_confirming`] for a caller admitted on one collection generation
+/// (`sync/meguri-provider` MP7.1's job): when the collection the slot is
+/// taken on is another one, the apply refuses with `StaleGeneration` and
+/// writes nothing.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_on(
+    engine: &Engine,
+    session: &ImportSession,
+    options: ImportOptions,
+    token: Option<&ConfirmationToken>,
+    confirm_structure: bool,
+    admitted: Option<meguri_engine::Generation>,
+    cancel: &Arc<CancelToken>,
+    progress: &ProgressSink,
+) -> ImportOutcome<ImportResult> {
     {
         let state = session.lock();
         if state.closed || state.result.is_some() {
@@ -90,6 +127,15 @@ pub fn apply(
     // The handle of the collection the slot was taken on, never one opened
     // since; and the session's state again, now that no other apply runs.
     let collection = slot.collection()?;
+    if let Some(planned) = admitted
+        && collection.generation() != planned
+    {
+        return Err(EngineError::StaleGeneration {
+            planned,
+            current: collection.generation(),
+        }
+        .into());
+    }
     // I2: a session belongs to the engine whose collection directory holds
     // its staging; it never applies to another engine's collection.
     if collection.path().parent() != Some(session.context.collection_directory.as_path()) {
@@ -150,21 +196,34 @@ pub fn apply(
                 progress,
             )
             .map_err(|error| stash(&fault, error))?;
-            // I8: a preview needs a confirmation that names this session,
-            // these options and this preview.
-            if !built.stage.preview.is_empty() {
+            // I8: a preview, and for a caller that asked the plan's
+            // structural reasons, need a confirmation that names this
+            // session, these options, this preview and those reasons.
+            let reasons = StructuralReason::of(&built.stage.reasons);
+            let structural = confirm_structure && !reasons.is_empty();
+            if !built.stage.preview.is_empty() || structural {
                 let digest = built.stage.preview.digest();
-                let confirmed = token
-                    .is_some_and(|token| token.session == session.id && token.options == options && token.digest == digest);
+                let confirmed = token.is_some_and(|token| {
+                    token.session == session.id
+                        && token.options == options
+                        && token.digest == digest
+                        && (!structural
+                            || token
+                                .structure
+                                .as_ref()
+                                .is_some_and(|shown| reasons.iter().all(|reason| shown.contains(reason))))
+                });
                 if !confirmed {
                     return Err(stash(
                         &fault,
                         ApkgImportError::ConfirmationRequired {
                             preview: Box::new(built.stage.preview.clone()),
+                            reasons: if confirm_structure { reasons.clone() } else { Vec::new() },
                             token: Box::new(ConfirmationToken {
                                 session: session.id,
                                 options,
                                 digest,
+                                structure: confirm_structure.then_some(reasons),
                                 snapshot_seq: planning.seq().0,
                             }),
                         },
@@ -256,7 +315,7 @@ pub fn apply(
     match outcome {
         Ok(op) => finish(op.seq.0, op.generation.0, op.undo.map(|undo| undo.name), false).ok_or_else(|| {
             ApkgImportError::Io {
-                detail: "the import committed without a result".into(),
+                detail: super::COMMITTED_WITHOUT_RESULT.into(),
             }
         }),
         Err(EngineError::CommitCompleted { seq, message }) => {

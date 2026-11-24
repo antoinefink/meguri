@@ -763,6 +763,56 @@ fn the_safety_backup_is_written_before_the_import_commits() {
     assert!(inspected.facts().modified < target.collection.reader(ReaderRole::Query).unwrap().col().unwrap().modified.0);
 }
 
+/// I8 as `sync/meguri-provider` MP7.1 needs it: a caller that asks to
+/// confirm structure gets a plan's structural reason before anything is
+/// written, even with no merge and no preview, and the token covers it.
+#[test]
+fn a_caller_that_asks_gets_the_structural_reason_before_anything_is_written() {
+    use meguri_package::apkg::{StructuralReason, apply_confirming};
+    let run = |target: &Fixture, session: &_, token: Option<&_>, ask: bool| {
+        apply_confirming(target.host.engine(), session, ALL_OFF, token, ask, &meguri_engine::CancelToken::new(),
+            &meguri_engine::ProgressSink::new())
+    };
+    let (_source, package, target) = sort_field_case();
+    let (before, old, stores) = (dump(&target), scm(&target), backup_count(&target));
+    let session = inspect(&target, &package).unwrap();
+    let refusal = run(&target, &session, None, true).unwrap_err();
+    let ApkgImportError::ConfirmationRequired { preview, reasons, token } = refusal else {
+        panic!("the reason to confirm, not {refusal:?}");
+    };
+    assert!(preview.is_empty());
+    assert_eq!(reasons, [StructuralReason::SortFieldChanged]);
+    // Nothing was written, staged or backed up, and the session is open.
+    assert_eq!((dump(&target), scm(&target), backup_count(&target)), (before, old, stores));
+    assert!(crate::apkg_import::media_files(&target).is_empty());
+    // A token for other options covers nothing.
+    let other = ImportOptions { with_deck_configs: true, ..ALL_OFF };
+    let again = apply_confirming(target.host.engine(), &session, other, Some(&*token), true,
+        &meguri_engine::CancelToken::new(), &meguri_engine::ProgressSink::new());
+    assert!(matches!(again, Err(ApkgImportError::ConfirmationRequired { .. })));
+    assert_eq!(scm(&target), old);
+    // The token of this confirmation covers the reason.
+    let result = run(&target, &session, Some(&*token), true).unwrap();
+    assert_eq!(result.structure.reasons, [3, 8]);
+    assert!(scm(&target) > old && result.safety_backup.is_some());
+
+    // A caller that does not ask (iCloud, Off, no ready binding) is asked
+    // nothing for an empty preview, as before.
+    let (_source, package, target) = sort_field_case();
+    let session = inspect(&target, &package).unwrap();
+    assert_eq!(run(&target, &session, None, false).unwrap().structure.reasons, [3, 8]);
+
+    // A plan without a structural reason is never asked about structure.
+    let source = Fixture::new(1);
+    source.clock.step_ms(1000);
+    crate::apkg_import::add_note(&source, source.notetype, &["fresh", "back"]);
+    let target = Fixture::new(1);
+    let old = scm(&target);
+    let session = inspect(&target, &export(&source, "deck.apkg")).unwrap();
+    assert_eq!(run(&target, &session, None, true).unwrap().structure.reasons, [8]);
+    assert_eq!(scm(&target), old);
+}
+
 #[test]
 fn a_cancel_at_the_backup_stage_writes_nothing() {
     let (_source, package, target) = sort_field_case();

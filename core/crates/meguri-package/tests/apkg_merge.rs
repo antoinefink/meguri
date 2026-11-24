@@ -205,7 +205,7 @@ fn a_dropped_field_needs_a_confirmation_that_survives_other_writes() {
     let (before, old, stores) = (dump(&target), scm(&target), backups(&target));
     let session = inspect(&target, &package).unwrap();
     let refusal = apply(&target, &session, MERGE).unwrap_err();
-    let ApkgImportError::ConfirmationRequired { preview, token } = refusal else {
+    let ApkgImportError::ConfirmationRequired { preview, token, .. } = refusal else {
         panic!("a preview to confirm, not {refusal:?}");
     };
     assert_eq!(preview.emptied_fields.len(), 1);
@@ -257,7 +257,7 @@ fn an_earlier_copy_is_merged_back_removed_and_undo_restores_it() {
     let types = notetype_count(&target);
     // With a merge: a removed note type is in the preview.
     let session = inspect(&target, &package).unwrap();
-    let ApkgImportError::ConfirmationRequired { preview, token } = apply(&target, &session, MERGE).unwrap_err() else {
+    let ApkgImportError::ConfirmationRequired { preview, token, .. } = apply(&target, &session, MERGE).unwrap_err() else {
         panic!("the removal needs a confirmation");
     };
     assert_eq!(preview.removed_notetypes.len(), 1);
@@ -305,7 +305,7 @@ fn a_note_held_under_another_note_type_brings_both_together() {
         ..MERGE
     };
     let session = inspect(&target, &package).unwrap();
-    let ApkgImportError::ConfirmationRequired { preview, token } = apply(&target, &session, options).unwrap_err() else {
+    let ApkgImportError::ConfirmationRequired { preview, token, .. } = apply(&target, &session, options).unwrap_err() else {
         panic!("removing the emptied note type needs a confirmation");
     };
     assert_eq!(preview.removed_notetypes[0].notetype, 7000);
@@ -385,7 +385,7 @@ fn the_preview_counts_the_notes_the_import_really_updates_after_a_layout_change(
     put_notetype(&target, notetype(5000, "Pair", 100, &local, &one_template()));
     let held = add(&target, 5000, "g-shared", &["sun", "local", "my own words"], 1);
     let session = inspect(&target, &package).unwrap();
-    let ApkgImportError::ConfirmationRequired { preview, token } = apply(&target, &session, MERGE).unwrap_err() else {
+    let ApkgImportError::ConfirmationRequired { preview, token, .. } = apply(&target, &session, MERGE).unwrap_err() else {
         panic!("the update empties a field: it needs a confirmation");
     };
     assert_eq!(preview.emptied_fields.len(), 1);
@@ -396,4 +396,45 @@ fn the_preview_counts_the_notes_the_import_really_updates_after_a_layout_change(
     assert_eq!(result.log.updated.len(), 1);
     assert_eq!(names(&target, 5000).0, ["Front", "Back", "Notes", "Extra"]);
     assert_eq!(note(&target, held).fields, "sun\u{1f}soleil\u{1f}\u{1f}more");
+}
+
+/// I8 with MP7.1's structure question: a confirmation given for a preview
+/// alone does not cover a structural reason once the caller asks, and the
+/// new confirmation names the same preview and the reason.
+#[test]
+fn a_preview_confirmation_does_not_cover_a_reason_the_caller_then_asks_about() {
+    use meguri_package::apkg::{StructuralReason, apply_confirming};
+    let source = Fixture::new(0);
+    let wider = [("Front", Some(11)), ("Back", Some(12)), ("Extra", Some(13))];
+    put_notetype(&source, notetype(5000, "Pair", 200, &wider, &one_template()));
+    add(&source, 5000, "g-new", &["star", "etoile", "extra"], 1);
+    let package = export(&source, "deck.apkg");
+    let target = Fixture::new(0);
+    put_notetype(&target, notetype(5000, "Pair", 100, &two_fields(), &one_template()));
+    add(&target, 5000, "g-other", &["moon", "lune"], 1);
+    // The copy `Pair+`, which a merge then removes: a preview with an effect.
+    import(&target, &package, ALL_OFF).unwrap();
+    target.clock.step_ms(700_000);
+    let (before, stores) = (dump(&target), backups(&target));
+    let session = inspect(&target, &package).unwrap();
+    let run = |token: Option<&_>, ask: bool| {
+        apply_confirming(target.host.engine(), &session, MERGE, token, ask, &CancelToken::new(), &ProgressSink::new())
+    };
+    // Asked without the structure question: the preview, and no reasons.
+    let ApkgImportError::ConfirmationRequired { preview, reasons, token: unasked } = run(None, false).unwrap_err() else {
+        panic!("the removal needs a confirmation");
+    };
+    assert_eq!(preview.removed_notetypes.len(), 1);
+    assert!(reasons.is_empty());
+    // The binding became ready before the confirmation was accepted.
+    let ApkgImportError::ConfirmationRequired { preview: shown, reasons, token } = run(Some(&*unasked), true).unwrap_err()
+    else {
+        panic!("the reason needs a confirmation of its own");
+    };
+    assert_eq!((shown, reasons), (preview, vec![StructuralReason::NotetypesMerged]));
+    assert_eq!((dump(&target), backups(&target)), (before, stores), "nothing was written or backed up");
+    // That confirmation covers both.
+    let result = run(Some(&*token), true).unwrap();
+    assert_eq!(result.structure.reasons, [8, 9]);
+    assert_eq!(backups(&target), stores + 1);
 }

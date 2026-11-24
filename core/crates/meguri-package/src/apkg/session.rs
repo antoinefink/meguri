@@ -68,6 +68,19 @@ impl ImportSession {
         self.lock().closed = true;
     }
 
+    /// Ends a shared session (I2): every later apply is refused with
+    /// `SessionClosed`, and the staging directory goes when the last holder
+    /// drops the session. An apply already past its admission finishes.
+    pub fn end(&self) {
+        self.lock().closed = true;
+    }
+
+    /// A page of one category of the committed import's log (I13), copied
+    /// without the rest of the result. `None` before a commit.
+    pub fn log_page(&self, category: super::LogCategory, offset: usize, count: usize) -> Option<Vec<super::LogEntry>> {
+        self.lock().result.as_ref().map(|result| result.log.page(category, offset, count).to_vec())
+    }
+
     pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, SessionState> {
         self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }

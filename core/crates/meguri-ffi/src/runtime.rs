@@ -201,6 +201,8 @@ pub(crate) fn close() -> Result<(), CoreError> {
     }
     let _restore = Restore(runtime);
     host.close()?;
+    // `package/apkg-import` I2: a session whose engine closed is closed.
+    crate::deck_import::close_sessions();
     *runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Empty;
     Ok(())
 }

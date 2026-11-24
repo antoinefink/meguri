@@ -25,7 +25,7 @@ use meguri_model::clock::Clock;
 use meguri_model::rng::RandomSource;
 use meguri_storage::space::SpaceProvider;
 
-pub use apply::{apply, read_options};
+pub use apply::{apply, apply_confirming, apply_on, read_options};
 pub use archive::PackageFormat;
 pub use classify::{PackageClass, classify, classify_name};
 pub use session::{ImportSession, inspect};
@@ -53,6 +53,11 @@ pub const LIMITS: meguri_storage::deck_package::DeckCandidateLimits = meguri_sto
     notetype_parts: 5000,
     structure_bytes: 64 * 1024 * 1024,
 };
+
+/// The detail of the `Io` error an apply returns when its op committed and
+/// its result was lost: the rows are written, and the import is never
+/// repeated (`package/transfer-sheets` X2.6).
+pub const COMMITTED_WITHOUT_RESULT: &str = "the import committed without a result";
 
 /// What an import needs from its host besides the engine.
 #[derive(Clone)]
@@ -328,14 +333,60 @@ impl MergePreview {
     }
 }
 
-/// I8: proof that the caller saw a merge preview. Opaque to callers.
+/// I14.4: a reason that makes an import a schema change. A plan that
+/// carries one sets `scm`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum StructuralReason {
+    /// An update that makes another field the sort field (I7).
+    SortFieldChanged,
+    /// A merge with an effect (`package/notetype-merge` J9).
+    NotetypesMerged,
+}
+
+impl StructuralReason {
+    /// The plan's reasons, sorted, each once.
+    pub(crate) fn of(reasons: &[meguri_engine::schema_gate::SchemaReason]) -> Vec<StructuralReason> {
+        use meguri_engine::schema_gate::SchemaReason;
+        let mut found: Vec<StructuralReason> = reasons
+            .iter()
+            .filter_map(|reason| match reason {
+                SchemaReason::SortFieldChanged => Some(StructuralReason::SortFieldChanged),
+                SchemaReason::NotetypesMerged => Some(StructuralReason::NotetypesMerged),
+                _ => None,
+            })
+            .collect();
+        found.sort();
+        found.dedup();
+        found
+    }
+}
+
+/// I8: proof that the caller saw a merge preview and, when it asked for
+/// them, the plan's structural reasons. Opaque to callers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfirmationToken {
     pub(crate) session: u64,
     pub(crate) options: ImportOptions,
     pub(crate) digest: [u8; 32],
+    /// The structural reasons the confirmation showed; `None` when the
+    /// caller did not ask to confirm structure.
+    pub(crate) structure: Option<Vec<StructuralReason>>,
     /// Diagnostics only; never checked.
     pub(crate) snapshot_seq: u64,
+}
+
+impl ConfirmationToken {
+    /// This confirmation as it covers the preview alone. An apply that asks
+    /// to confirm structure then answers `ConfirmationRequired` for every
+    /// plan with a structural reason: the caller that runs such a plan
+    /// elsewhere (`sync/meguri-provider` MP7.1's job) uses it for an apply
+    /// that must not commit one.
+    pub fn without_structure(&self) -> ConfirmationToken {
+        ConfirmationToken {
+            structure: None,
+            ..self.clone()
+        }
+    }
 }
 
 /// I16.
@@ -357,8 +408,12 @@ pub enum ApkgImportError {
     DiskFull,
     /// After three replans (I14.2).
     Stale,
+    /// I8. `reasons` is filled only for a caller that asked to confirm
+    /// structure (`sync/meguri-provider` MP7.1); the preview can then be
+    /// empty.
     ConfirmationRequired {
         preview: Box<MergePreview>,
+        reasons: Vec<StructuralReason>,
         token: Box<ConfirmationToken>,
     },
     /// A standard and a cloze note type would merge (R1606).

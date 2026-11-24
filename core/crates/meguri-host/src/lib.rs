@@ -4,6 +4,8 @@
 mod cloud_media;
 mod cloud_policy;
 mod collection_export;
+mod deck_import;
+pub use deck_import::DeckImportAnswer;
 mod manual_transfers;
 mod provider;
 mod provider_bootstrap;
