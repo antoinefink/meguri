@@ -356,6 +356,14 @@ public nonisolated struct BrowseShownRow: Sendable, Hashable {
     /// V2.5: a suspended or buried row's text is secondary.
     public var isDimmed: Bool { status != .row || state?.suspended == true || state?.buried == true }
 
+    /// The same row for another column list: `map` gives each new column's
+    /// index in this row's cells, or nil for a column not read yet.
+    public func remapped(_ map: [Int?]) -> BrowseShownRow {
+        BrowseShownRow(status: status, id: id, noteID: noteID, state: state, font: font,
+                       sortFieldRightToLeft: sortFieldRightToLeft,
+                       cells: map.map { index in index.flatMap { cells.indices.contains($0) ? cells[$0] : nil } ?? .pending })
+    }
+
     /// The same row with Question and Answer filled in.
     public func filling(_ cells: [Int: BrowseShownCell]) -> BrowseShownRow {
         var next = self.cells

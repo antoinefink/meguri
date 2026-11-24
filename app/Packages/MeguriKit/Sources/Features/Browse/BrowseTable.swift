@@ -42,6 +42,7 @@ nonisolated struct BrowseColumn: Identifiable, Hashable {
 struct BrowseTable: View {
     let model: BrowseModel
     @FocusState private var focused: Bool
+    @Environment(\.locale) private var locale
 
     private var results: BrowseResults { model.results }
 
@@ -76,9 +77,15 @@ struct BrowseTable: View {
             // N21.3: Return shows the inspector too (the primary action answers a double click).
             .onKeyPress(.return) { model.inspector.show(); return .handled }
             .background { BrowseScrollReporter(results: results, token: list?.token) }
+            // U272: the header's column chooser, order and widths.
+            .background {
+                BrowseHeaderBridge(model: model, columns: list?.columns ?? [], token: list?.token, rows: list?.count ?? 0,
+                                   locale: locale)
+            }
             #endif
             // Another handle shown is another table: no diff of its rows with the last list's.
-            .id(list?.token ?? 0)
+            // Widths reset (Reset to Standard Columns) lay the columns out again.
+            .id(BrowseTableIdentity(token: list?.token ?? 0, widths: results.widthsRevision))
             .accessibilityIdentifier("browse.results.table")
             .onChange(of: results.scrollTarget) {
                 guard let target = results.scrollTarget, target.token == list?.token else { return }
@@ -127,16 +134,21 @@ struct BrowseTable: View {
             TableColumn(title, sortUsing: BrowseSortComparator(key: column.key, order: first == .ascending ? .forward : .reverse)) { line in
                 BrowseCellView(results: results, index: line.id, column: column)
             }
-            .width(min: BrowseMetrics.minimum(column.key), ideal: BrowseMetrics.ideal(column.key))
+            .width(min: BrowseMetrics.minimum(column.key), ideal: ideal(column.key))
             .alignment(alignment)
         }
         if first == nil {
             TableColumn(title) { line in
                 BrowseCellView(results: results, index: line.id, column: column)
             }
-            .width(min: BrowseMetrics.minimum(column.key), ideal: BrowseMetrics.ideal(column.key))
+            .width(min: BrowseMetrics.minimum(column.key), ideal: ideal(column.key))
             .alignment(alignment)
         }
+    }
+
+    /// V2.3: the width the person gave the column on this device, else its own.
+    private func ideal(_ key: String) -> CGFloat {
+        results.width(of: key).map { CGFloat($0) } ?? BrowseMetrics.ideal(key)
     }
 
     private var selection: Binding<Set<Int>> {
@@ -160,8 +172,23 @@ struct BrowseTable: View {
 
 /// Column widths and alignment (N21.3: text leading, numbers and dates
 /// trailing). Widths are the system table's own until U272 keeps them.
+/// The table's identity: its list, and the widths' layout.
+nonisolated struct BrowseTableIdentity: Hashable {
+    let token: UInt64
+    let widths: UInt64
+}
+
 enum BrowseMetrics {
     static let stateColumn: CGFloat = 22
+    /// Size Columns to Fit: room beside a title for the sort indicator,
+    /// beside a cell for its insets, and the widest a column is fitted to.
+    static let headerSlack: CGFloat = 24
+    static let cellSlack: CGFloat = 12
+    static let fittedMaximum: CGFloat = 360
+    /// How near a header's edge a double click fits that column.
+    static let edgeSlop: CGFloat = 4
+    /// A media cell's symbols.
+    static let mediaCell: CGFloat = 40
 
     static func trailing(_ key: String, mode: BrowseMode) -> Bool {
         // Notes mode's Cards column is a count (C8).

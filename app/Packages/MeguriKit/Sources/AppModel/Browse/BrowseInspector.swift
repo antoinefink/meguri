@@ -56,6 +56,26 @@ public final class BrowseInspector {
     /// W5.4's notice: the shown note was deleted with unsaved text in it.
     public private(set) var notice: String?
     public let preview = BrowseCardPreview()
+    /// The Info tab's snapshot (U274, V13): the shown card's Card Info.
+    public let cardInfo: CardInfoModel
+
+    /// N21.4: the tab the pane shows for one row (kept on the device).
+    public var tab: BrowseInspectorTab {
+        get { device.tab ?? .note }
+        set {
+            guard newValue != tab else { return }
+            device.tab = newValue
+            saveDevice()
+            cardInfo.active = newValue == .info
+            followCardInfo()
+        }
+    }
+
+    /// V7, V13: the card the Info tab shows: the one row's card, the one the
+    /// Note tab's preview shows (in Notes mode the note's card with the lowest
+    /// ordinal, or the one "Card <i> of <k>" chose); none for no row or
+    /// several rows, which show as the Note tab shows them.
+    public var infoCard: Int64? { content == .note ? note?.card?.id : nil }
 
     /// N21.3, I8: the person shows or hides the pane (kept on the device).
     public var presented: Bool {
@@ -145,11 +165,32 @@ public final class BrowseInspector {
     @ObservationIgnored private var decksRead = false
     @ObservationIgnored private var loadingTask: Task<Void, Never>?
 
-    init(backend: any BrowseInspectorBackend, results: BrowseResults, commands: BrowseCommands, device: BrowseInspectorDevice) {
+    init(backend: any BrowseInspectorBackend, results: BrowseResults, commands: BrowseCommands, device: BrowseInspectorDevice,
+         cardInfo: any CardInfoReading = CoreCardInfoReader()) {
         self.backend = backend
         self.results = results
         self.commands = commands
         self.device = device
+        self.cardInfo = CardInfoModel(reader: cardInfo)
+        self.cardInfo.active = (device.tab ?? .note) == .info
+    }
+
+    /// V13: the Info tab reads the shown card while it shows; the Note tab
+    /// leaves the last snapshot alone (no read for a tab not shown).
+    public func followCardInfo() {
+        guard tab == .info else { return }
+        cardInfo.show(card: infoCard)
+    }
+
+    /// View › Card Info (⌥⌘I, V13): the pane shows with Info selected; with
+    /// Info already showing, the pane hides.
+    public func toggleCardInfo() {
+        if shown, tab == .info {
+            toggle()
+        } else {
+            show()
+            tab = .info
+        }
     }
 
     // MARK: Showing the pane (N21.3)
@@ -239,6 +280,7 @@ public final class BrowseInspector {
         endLoading()
         if next != .note { preview.clear() }
         if content != next { content = next }
+        followCardInfo()
     }
 
     /// The one row's note: read by id while the note shown stays; then, if
@@ -553,6 +595,7 @@ public final class BrowseInspector {
         guard let note, note.cards.indices.contains(index), index != note.cardIndex else { return }
         note.cardIndex = index
         showPreview()
+        followCardInfo()
     }
 
     /// The tags the person left in the token field (`editor/tag-editor`):
@@ -568,6 +611,7 @@ public final class BrowseInspector {
 
     /// Every committed change set, from `BrowseModel`.
     func changesCommitted(_ changes: ChangeSet, seq: UInt64) {
+        cardInfo.changesCommitted(changes)
         if changes.wholeCollection || !changes.decks.isEmpty { decksRead = false; Task { await readDecksOnce() } }
         // A note being read now may be one of these: it reloads once it shows.
         if loop != nil {
@@ -690,6 +734,7 @@ public final class BrowseInspector {
         let wanted = chosen != before ? chosen : card ?? chosen
         note.cards = cards
         note.cardIndex = wanted.flatMap { id in cards.firstIndex { $0.id == id } } ?? 0
+        followCardInfo()
     }
 
     // MARK: Decks
@@ -742,6 +787,7 @@ public final class BrowseInspector {
         shownFor = nil
         notice = nil
         preview.close()
+        cardInfo.reset()
         if !results.selection.isEmpty { selectionChanged() }
     }
 
@@ -759,7 +805,14 @@ nonisolated public struct BrowseInspectorDevice: Codable, Equatable, Sendable {
     public var presented = true
     public var previewFolded = false
     public var emptyFieldsOpen: Set<Int64> = []
+    /// The tab chosen last (U274); nil before, the Note tab.
+    public var tab: BrowseInspectorTab?
     public init() {}
+}
+
+/// N21.4's Note | Info.
+public nonisolated enum BrowseInspectorTab: String, Codable, Sendable, CaseIterable {
+    case note, info
 }
 
 extension NoteEditorDraft {

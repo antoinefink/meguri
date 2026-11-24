@@ -208,6 +208,19 @@ struct NativeCommandContext {
         browse.setMode(browse.mode == .cards ? .notes : .cards)
     }
 
+    /// U272: View › Columns lists Browse's columns for the mode shown, while
+    /// Browse shows its table.
+    var browseColumns: BrowseModel? {
+        canToggleBrowseMode && collection.browse.results.columnSet != nil ? collection.browse : nil
+    }
+
+    /// V13: View › Card Info (⌥⌘I) shows the inspector with Info selected.
+    var canShowCardInfo: Bool { browseInspector != nil }
+    func toggleCardInfo() {
+        guard canShowCardInfo else { return }
+        browseInspector?.toggleCardInfo()
+    }
+
     /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review,
     /// with no sheet over the window, and once a collection exists.
     var canShowNoteTypes: Bool {
@@ -397,10 +410,15 @@ struct AppCommands: Commands {
             }
                 .keyboardShortcut("i", modifiers: [.command, .control])
                 .disabled(context?.browseInspector == nil)
-            // The inspector's Info tab comes with U273 and U274: disabled until then.
-            Button("Card Info") {}
+            // U272: the columns of the mode shown, with checks (V2.3).
+            Menu("Columns") {
+                if let browse = context?.browseColumns { BrowseColumnsMenuContent(model: browse) }
+            }
+                .disabled(context?.browseColumns == nil)
+            // V13: the inspector with its Info tab (U274).
+            Button("Card Info") { context?.toggleCardInfo() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
-                .disabled(true)
+                .disabled(context?.canShowCardInfo != true)
             #endif
             Divider()
         }

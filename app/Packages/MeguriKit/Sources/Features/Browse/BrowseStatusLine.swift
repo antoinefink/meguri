@@ -28,26 +28,35 @@ struct BrowseStatusLine: View {
         .padding(.vertical, Spacing.xxSmall)
     }
 
-    /// V2.2: the set's name; in a note type's own set, its menu.
+    /// V2.2, V11: the set's name with a chevron, as a menu: in a note
+    /// type's own set Use Standard Columns and Edit Note Type…; in the
+    /// standard set Reset to Standard Columns (U272), enabled once the set
+    /// differs from V2.3's default columns.
     @ViewBuilder private var columnSet: some View {
         let set = model.results.columnSet
-        if let set, case .notetype(let id) = set.set, set.own {
-            let name = model.notetypes.first { $0.id == id }?.name ?? ""
-            Menu {
+        let own: Int64? = if let set, case .notetype(let id) = set.set, set.own { id } else { nil }
+        Menu {
+            if let own {
                 Button { model.results.useStandardColumns() } label: { Text("browse.columns.useStandard", bundle: .module) }
                     .accessibilityIdentifier("browse.status.useStandard")
-                Button { editNoteType(id) } label: { Text("browse.columns.editNoteType", bundle: .module) }
+                Button { editNoteType(own) } label: { Text("browse.columns.editNoteType", bundle: .module) }
                     .accessibilityIdentifier("browse.status.editNoteType")
-            } label: {
-                Text(BrowseStrings.ownColumns(name, locale: locale))
+            } else {
+                Button { model.results.resetColumns() } label: { Text("browse.columns.reset", bundle: .module) }
+                    .disabled(!model.results.canResetColumns)
+                    .accessibilityIdentifier("browse.status.resetColumns")
             }
-            .menuStyle(.button)
-            .buttonStyle(.borderless)
-            .fixedSize()
-            .accessibilityIdentifier("browse.status.columnSet")
-        } else {
-            Text("browse.columns.standard", bundle: .module)
-                .accessibilityIdentifier("browse.status.columnSet")
+        } label: {
+            if let own {
+                Text(BrowseStrings.ownColumns(model.notetypes.first { $0.id == own }?.name ?? "", locale: locale))
+            } else {
+                Text("browse.columns.standard", bundle: .module)
+            }
         }
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
+        .fixedSize()
+        .disabled(set == nil)
+        .accessibilityIdentifier("browse.status.columnSet")
     }
 }

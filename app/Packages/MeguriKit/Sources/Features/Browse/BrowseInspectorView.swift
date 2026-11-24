@@ -1,4 +1,5 @@
 import AppModel
+import CardInfo
 import CoreBridge
 import DesignSystem
 import SwiftUI
@@ -53,16 +54,44 @@ enum BrowseInspectorText {
 }
 
 #if os(macOS)
-/// The trailing pane (N21.4, N21.5; `browser/workspace` V7): "No Selection",
-/// the summary of several rows with their commands, or the one row's note.
-/// The plan gives U273 the Note tab only: the Info tab and its Note | Info
-/// control come with U274.
+/// The trailing pane (N21.4, N21.5; `browser/workspace` V7, V13): the Note |
+/// Info control at its top, then "No Selection", the summary of several rows
+/// with their commands, or the one row's Note tab or Info tab. The two tabs
+/// show no row and several rows alike; the tab chosen is kept on the device.
 struct BrowseInspectorPane: View {
     let model: BrowseModel
 
     private var inspector: BrowseInspector { model.inspector }
 
     var body: some View {
+        VStack(spacing: 0) {
+            tabs
+            content
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: inspector.infoCard, initial: true) { inspector.followCardInfo() }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("browse.inspector")
+    }
+
+    /// N21.4: Note | Info, centred at the pane's top.
+    private var tabs: some View {
+        Picker(selection: Binding(get: { inspector.tab }, set: { inspector.tab = $0 })) {
+            Text("browse.inspector.tab.note", bundle: .module).tag(BrowseInspectorTab.note)
+            Text("browse.inspector.tab.info", bundle: .module).tag(BrowseInspectorTab.info)
+        } label: {
+            Text("browse.inspector.tab.label", bundle: .module)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal)
+        .padding(.vertical, Spacing.xSmall)
+        .accessibilityIdentifier("browse.inspector.tabs")
+    }
+
+    @ViewBuilder private var content: some View {
         Group {
             switch inspector.content {
             case .noSelection:
@@ -76,14 +105,18 @@ struct BrowseInspectorPane: View {
                     Color.clear
                 }
             case .note:
-                if let note = inspector.note { BrowseNoteTab(model: model, note: note) }
-                else if inspector.loading { loadingView }
-                else { unavailable(Text("browse.inspector.noSelection", bundle: .module)) }
+                if inspector.tab == .info {
+                    CardInfoView(model: inspector.cardInfo)
+                } else if let note = inspector.note {
+                    BrowseNoteTab(model: model, note: note)
+                } else if inspector.loading {
+                    loadingView
+                } else {
+                    unavailable(Text("browse.inspector.noSelection", bundle: .module))
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("browse.inspector")
     }
 
     private var loadingView: some View {
