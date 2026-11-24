@@ -36,7 +36,7 @@ public struct ReviewView: View {
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
             reveal: model.reveal, rate: model.rate,
             redoDescription: redoDescription, status: status,
-            actions: moreActions, leech: model.leechNotice) {
+            actions: moreActions, leech: model.leechNotice, editingNote: model.editingNote) {
             ZStack {
                 if let pair = model.pair {
                     // A walk's next deck brings its own pages: a new host for them, while
@@ -270,6 +270,8 @@ struct ReviewLayout<Card: View>: View {
     var actions = ReviewMoreActions()
     /// N16.11: the leech notice, as one icon first in the top controls.
     var leech: ReviewLeechNotice? = nil
+    /// N20.8: an open Edit Note holds Back to Decks (the Mac toolbar's).
+    var editingNote = false
     @State private var noticeContentHeight: CGFloat?
     @State private var answerAreaTop: CGFloat?
     @State private var bottomInset: CGFloat = 0
@@ -298,7 +300,7 @@ struct ReviewLayout<Card: View>: View {
                 .help(Text("Back to Decks", bundle: .module))
                 // N20.8: never ends the review under an open Edit Note; its
                 // sheet holds the window, and this states it as well.
-                .disabled(model.editingNote)
+                .disabled(editingNote)
                 .accessibilityIdentifier("review.session.close")
             }
             ToolbarSpacer()
