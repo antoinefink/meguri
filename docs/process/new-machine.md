@@ -85,15 +85,16 @@ The stable private directory is
 `~/Library/Application Support/meguri/remote-vm/current/`. Keep its releases,
 JSON and hosting Mac logs private.
 
-To roll back an update, wait until coordinator jobs are idle. Open `current/`
-and locate its saved `previous-target` and `previous-mac-vm.json` before
-changing the link. Stage a symlink beside `current` with the exact target
-from `previous-target`. Stage a private copy of `previous-mac-vm.json` beside
-the per-user `mac-vm.json`. Use `os.replace` to publish the staged link as
-`current`, then the staged JSON as `mac-vm.json`. If the prior config pointed
-directly to local wrappers and there was no previous link, restore the JSON
-alone. An absent `previous-mac-vm.json` means there was no per-user config
-before installation.
+To roll back, wait until coordinator jobs are idle. Resolve `current` to its
+release directory so the saved files stay accessible after changing the link.
+Restore each entry to its state before installation:
+
+- If the release contains `previous-target`, stage a symlink beside `current`
+  using that exact target and publish it with `os.replace`. Otherwise, unlink
+  the newly installed `current` symlink. Keep the release directory.
+- If the release contains `previous-mac-vm.json`, stage a private copy beside
+  the per-user `mac-vm.json` and publish it with `os.replace`. Otherwise,
+  remove the newly installed per-user `mac-vm.json`.
 
 Remove the old `export MEGURI_MAC_VM_CONFIG=...` from every worktree's
 `.local/activate` and any shell startup file or scheduler environment that set
