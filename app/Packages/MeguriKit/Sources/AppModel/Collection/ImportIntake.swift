@@ -194,6 +194,8 @@ public final class ImportIntake {
     }
 
     private func createCollection(then url: URL, owner: ReviewCollection, release: (@MainActor () -> Void)?) {
+        // A file Welcome still asks about is replaced by this one (K6.1).
+        if pendingCreation != nil { cancelCreation() }
         creating = true
         Task {
             defer { creating = false }
