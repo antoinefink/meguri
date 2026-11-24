@@ -17,11 +17,21 @@ import AppKit
         let preview = BrowseCardPreview()
         defer { preview.close(); Task { await resolver.close(); try? FileManager.default.removeItem(at: root) } }
         preview.resolver = { resolver }
-        preview.render = { id in
-            CardPayload(cardID: id, question: "Front \(id)", answer: "Back \(id)",
-                        audioPolicy: .init(autoplay: false, interrupt: true, replayQuestion: false))
+        var renders = 0
+        var restoreCommit: (() -> Void)?
+        preview.render = { [weak preview] id in
+            renders += 1
+            if renders == 1 {
+                let committed = preview?.pair?.onCommitted
+                preview?.pair?.onCommitted = nil
+                restoreCommit = { [weak preview] in preview?.pair?.onCommitted = committed }
+            }
+            return CardPayload(cardID: id, question: "Front \(id)", answer: "Back \(id)",
+                               audioPolicy: .init(autoplay: false, interrupt: true, replayQuestion: false))
         }
+        #expect(!preview.hasRequestedCard)
         preview.show(card: 7)
+        #expect(preview.hasRequestedCard)
         // Set Back before the first question finishes preparing.
         preview.selectSide(.answer)
         #if os(macOS)
@@ -34,7 +44,16 @@ import AppKit
         window.contentView = pair.container
         defer { window.contentView = nil; window.close() }
         #endif
+        // The first presentation can lose its callback before any card/payload
+        // commits. It must stop, then recover on the picker's explicit selection.
+        try await until { preview.failed && preview.showing == 0 }
+        #expect(preview.card == nil && preview.side == .question && preview.hasRequestedCard)
+        #expect(renders == 1)
+        let restore = try #require(restoreCommit)
+        restore()
+        preview.selectSide(.answer)
         try await shown(preview, card: 7, side: .answer)
+        #expect(renders == 2)
         preview.selectSide(.answer) // direct selection is idempotent
         preview.flip()
         try await shown(preview, card: 7, side: .question)
@@ -81,6 +100,7 @@ import AppKit
         #expect(preview.card == nil && !preview.hasAudio)
         preview.clear()
         #expect(preview.card == nil && preview.side == .question && !preview.hasAudio)
+        #expect(!preview.hasRequestedCard)
     }
 
     private func shown(_ preview: BrowseCardPreview, card: Int64, side: CardRenderSide) async throws {

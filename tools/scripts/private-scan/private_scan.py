@@ -835,9 +835,9 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
-    # Whole-file PUBLIC review in cleanroom 20261124T133316Z-9439.
+    # Whole-file PUBLIC review in cleanroom 20261124T134742Z-51864.
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseCardPreviewTests.swift':
-        'b41edbe534f97065d7067095059cff40026cc7131e61163354003a9d9eb983c7',
+        '3f4a38387508e0eac8d713d51603ed2c1e7540ad1cbce8fb50622c895310d848',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',

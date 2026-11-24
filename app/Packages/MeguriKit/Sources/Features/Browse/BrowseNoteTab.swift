@@ -319,7 +319,7 @@ struct BrowsePreviewSection: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .fixedSize()
-        .disabled(inspector.preview.card == nil)
+        .disabled(!inspector.preview.hasRequestedCard)
         .accessibilityIdentifier("browse.inspector.preview.side")
     }
 

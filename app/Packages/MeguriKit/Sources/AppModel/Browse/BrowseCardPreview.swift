@@ -15,6 +15,8 @@ public final class BrowseCardPreview {
     public private(set) var side: CardRenderSide = .question
     /// The card shown, once its question is on screen.
     public private(set) var card: Int64?
+    /// A selected card can be retried even before its first presentation commits.
+    public var hasRequestedCard: Bool { requestedCard != nil }
     /// The last render failed (a template error, a missing card).
     public private(set) var failed = false
     /// The card shown has sounds: the preview's header offers to play them.
@@ -38,7 +40,7 @@ public final class BrowseCardPreview {
     /// side or card prepares the same pair. The latest selection wins.
     @ObservationIgnored private var presentation: Task<Void, Never>?
     @ObservationIgnored private var displayedSide: CardRenderSide = .question
-    @ObservationIgnored private var requestedCard: Int64?
+    private var requestedCard: Int64?
     @ObservationIgnored private var committing: (CardUpdate, AsyncStream<CardUpdate>.Continuation)?
     /// Shows not finished yet; a flip waits until there are none.
     @ObservationIgnored private(set) var showing = 0
@@ -84,9 +86,15 @@ public final class BrowseCardPreview {
 
     /// The segmented control sets its side directly, even during a render.
     public func selectSide(_ value: CardRenderSide) {
-        guard requestedCard != nil, side != value || failed else { return }
+        guard let requestedCard, side != value || failed else { return }
         side = value
         pair?.pauseAudio()
+        if failed && (card != requestedCard || payload == nil) {
+            // Only an explicit selection retries a card without committed data.
+            // The same request keeps the chosen side through the fresh render.
+            show(card: requestedCard)
+            return
+        }
         let token = token, previous = presentation
         presentation = Task {
             await previous?.value
