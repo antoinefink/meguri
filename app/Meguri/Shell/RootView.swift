@@ -114,6 +114,7 @@ struct RootView: View {
         #if os(iOS)
         .onPreferenceChange(DeckNameBesideListKey.self) { deckNameBesideList = $0 }
         #endif
+        .modifier(FileIntakeDrop(collection: collection))
         .modifier(PresentationHost(
             navigation: navigation, features: features, configuration: configuration,
             isActive: !(layout == .compact && navigation.review != nil),
@@ -137,6 +138,11 @@ struct RootView: View {
             linkRefusal.map(Self.message)
         }
         .onOpenURL { url in
+            // K1: a file opened with Meguri (Finder, the Dock, Open in Meguri) goes to the intake.
+            if url.isFileURL {
+                collection?.intake.receive([url], host: .main, release: FileIntakeInbox.release(url))
+                return
+            }
             Task { await open(url) }
         }
         .onAppear {
@@ -182,6 +188,7 @@ struct RootView: View {
         .onChange(of: navigation.sheet) { _, sheet in
             updateReviewObscuration()
             collection?.entry.presentationChanged()
+            collection?.deckImport.presentationChanged()
         }
         .onChange(of: launchSheet) { _, _ in updateReviewObscuration() }
         .onChange(of: launchAlert) { _, _ in updateReviewObscuration() }

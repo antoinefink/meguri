@@ -329,6 +329,27 @@ public final class ReviewCollection: ChangeFanoutSink {
         return value
     }
     private var exportOwner: CollectionExportCoordinator?
+    private var deckImportOwner: DeckImportModel?
+    private let deckImportService: any DeckPackageImportService
+    /// The deck package import sheet (U162, `package/transfer-sheets` X2).
+    public var deckImport: DeckImportModel {
+        if let deckImportOwner { return deckImportOwner }
+        let value = DeckImportModel(host: self, service: deckImportService)
+        deckImportOwner = value
+        return value
+    }
+    private var intakeOwner: ImportIntake?
+    /// U162's file intake (`package/file-intake`): pickers, drops and Open in Meguri.
+    public var intake: ImportIntake {
+        if let intakeOwner { return intakeOwner }
+        let value = ImportIntake(owner: self, service: deckImportService)
+        intakeOwner = value
+        return value
+    }
+    /// The window the deck import sheet shows on (K1).
+    var deckImportHost: AppNavigation.SheetHost = .main
+    /// Where Browse can be opened from the import result (X2.5's Show); set by the app's shell.
+    public var deckImportBrowseAvailable = false
     private var deckNamesOwner: DeckActionsModel?
     public var deckActions: DeckActionsModel {
         if let deckNamesOwner { return deckNamesOwner }
@@ -647,7 +668,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// How long a press on kept content waits for the first read before it is dropped (N27.4).
     @ObservationIgnored var firstReadWait: Duration = .seconds(3)
 
-    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil) {
+    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil, deckImportService: (any DeckPackageImportService)? = nil) {
+        self.deckImportService = deckImportService ?? CoreDeckPackageImportService()
         loadMediaIndex = { @MainActor in try await CoreMediaService().trackedNames() }
         loadDeckTree = { @MainActor in try await CoreDeckService().treeWithCounts() }
         saveSelectedDeck = { @MainActor id in try await CoreDeckService().selectDeck(id: id).generation }
@@ -2389,7 +2411,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             await previous?.value
             if !active {
                 await meguriSignInPreparationTask?.value
-                await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await noteTypesOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
+                await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await noteTypesOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain(); await deckImportOwner?.cancelAndDrain()
             }
             await openTask?.value
             guard !closed, state != .unopened else { resuming = false; return }
@@ -2527,6 +2549,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         await manualOwner?.cancelAndDrain()
         await entryOwner?.cancelAndDrain()
         await exportOwner?.cancelAndDrain()
+        await deckImportOwner?.collectionClosing()
         await openTask?.value
         _ = await cloudHostPreparationTask?.result
         for task in Array(cloudPreparationTasks.values) { _ = await task.result }

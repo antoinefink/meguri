@@ -20,7 +20,7 @@ struct NativeCommandContext {
 
     var fileActionsAvailable: Bool {
         collection.navigation.sheet == nil && !collection.deckActions.busy && !collection.manualTransfers.busy
-            && !collection.entry.pickerPresented && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
+            && !collection.entry.pickerPresented && !collection.intake.pickerPresented && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
     }
     func present(_ route: SheetRoute) {
         guard collection.navigation.sheet == nil else { return }
@@ -28,6 +28,11 @@ struct NativeCommandContext {
         case .collectionEntry:
             guard fileActionsAvailable, collection.entry.canPresent else { return }
             collection.entry.present()
+        case .deckImport:
+            // File › Import… (U162, `package/file-intake` K1): the picker of the intake.
+            guard fileActionsAvailable, collection.intake.canChoose else { return }
+            collection.intake.choose(host: host)
+            return
         case .collectionExport:
             guard fileActionsAvailable, collection.collectionExport.canPresent else { return }
             collection.collectionExport.start()
@@ -333,9 +338,10 @@ struct AppCommands: Commands {
                 .disabled(context?.canSaveNoteType != true)
         }
         CommandGroup(replacing: .importExport) {
-            Button("Import Collection…") { context?.present(.collectionEntry) }
+            // U162: one Import… for deck and collection packages; the file decides the flow.
+            Button("Import…") { context?.present(.deckImport) }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
-                .disabled(context?.fileActionsAvailable != true || context?.collection.entry.canPresent != true)
+                .disabled(context?.fileActionsAvailable != true || context?.collection.intake.canChoose != true)
             Button("Export Collection…") { context?.present(.collectionExport) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(context?.fileActionsAvailable != true || context?.collection.collectionExport.canPresent != true)

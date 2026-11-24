@@ -2,6 +2,7 @@ import CoreBridge
 import Foundation
 import Network
 import Observation
+import Synchronization
 #if canImport(CloudKit)
 import CloudKit
 #endif
@@ -5251,6 +5252,44 @@ extension SyncCoordinator {
 /// Collects a job's answer across the provider action that runs it.
 @MainActor private final class MeguriStructureAnswer {
     var value: Result<NoteTypeSyncSaveResult, any Error>?
+}
+
+/// A deck package import's own answer, kept across the structure job that runs it.
+nonisolated private final class MeguriDeckImportAnswer: Sendable {
+    let value = Mutex<MeguriDeckImportOutcome?>(nil)
+}
+
+extension SyncCoordinator: DeckImportMeguriSync {
+    /// MP7.1: the same readiness as a note type save's Save and Upload.
+    public var deckImportSyncReady: Bool { noteTypeSyncState == .ready }
+
+    public func deckImportSyncReachable() async -> Bool { await noteTypeSyncReachable() }
+
+    /// MP7.1's job, as the provider's one action, with what a structure job's
+    /// outcome does to the sync status afterwards.
+    public func importDeckPackage(_ session: DeckImportSession, options: DeckImportOptions,
+                                  confirmation: DeckImportConfirmation, reachable: Bool,
+                                  stage: @escaping @MainActor (NoteTypeSyncStage) -> Void) async throws
+        -> MeguriDeckImportOutcome {
+        let answer = MeguriDeckImportAnswer()
+        let saved = try await runMeguriStructure(progress: { shown, _, _ in stage(shown) }) { jobs, onStage in
+            let outcome = try await jobs.importDeckPackage(session, options: options, confirmation: confirmation,
+                                                           reachable: reachable, onStage: onStage)
+            answer.value.withLock { $0 = outcome }
+            return outcome.structureOutcome
+        }
+        if let outcome = answer.value.withLock({ $0 }) { return outcome }
+        switch saved {
+        // The job did not run: another one, or a round, held the provider.
+        case .notSaved: return .notStarted(.busy)
+        case .cancelled: return .cancelled
+        case .syncStopped: return .unavailable
+        // The job ended with an error after a commit, or without saying whether it committed.
+        case .saved, .unconfirmed: return .importedWithoutResult(upload: nil)
+        }
+    }
+
+    public func cancelDeckImport() { cancelNotetypeStructureSave() }
 }
 
 extension SyncCoordinator: NoteTypesMeguriSync {

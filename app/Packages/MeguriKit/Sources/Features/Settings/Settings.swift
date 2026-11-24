@@ -151,10 +151,11 @@ struct SettingsCollectionFilesSection: View {
         return collection.navigation.sheet == nil && !collection.manualTransfers.busy
             && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
     }
-    private var canImport: Bool { fileActionsAvailable && collection?.entry.canPresent == true }
+    private var canImport: Bool { fileActionsAvailable && collection?.intake.canChoose == true }
     private var canExport: Bool { fileActionsAvailable && collection?.collectionExport.canPresent == true }
     private func importCollection() {
-        if let present { present(.collectionEntry) } else { collection?.entry.present() }
+        // U162: one Import for deck and collection packages (`package/file-intake` K1).
+        if let present { present(.deckImport) } else { collection?.intake.choose() }
     }
     private func exportCollection() {
         if let present { present(.collectionExport) } else { collection?.collectionExport.start() }
@@ -163,7 +164,7 @@ struct SettingsCollectionFilesSection: View {
         Section {
             #if os(macOS)
             CollectionActionRow {
-                Button(action: importCollection) { Text("Import Collection", bundle: .module) }
+                Button(action: importCollection) { Text("Import…", bundle: .module) }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
                     .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
@@ -186,7 +187,7 @@ struct SettingsCollectionFilesSection: View {
             }
             #else
             // N15.1: plain rows, as the system's Settings has for an action that opens a sheet.
-            Button(action: importCollection) { Text("Import Collection…", bundle: .module) }
+            Button(action: importCollection) { Text("Import…", bundle: .module) }
                 .disabled(!canImport)
                 .accessibilityIdentifier("settings.root.importCollection")
             Button(action: exportCollection) { Text("Export Collection…", bundle: .module) }

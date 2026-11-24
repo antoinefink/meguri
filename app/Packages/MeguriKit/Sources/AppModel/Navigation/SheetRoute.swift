@@ -6,6 +6,8 @@ nonisolated public enum SheetRoute: Hashable, Identifiable, Sendable {
     /// Add (U195), with `deck` preselected when given (R48).
     case add(deck: DeckID?)
     case collectionEntry
+    /// The deck package import sheet (U162, `package/transfer-sheets` X2).
+    case deckImport
     case collectionExport
     case deckName(DeckActionsModel.Action)
     /// Explicit server-transfer preparation, decisions and retained history.

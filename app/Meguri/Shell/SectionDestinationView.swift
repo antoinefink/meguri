@@ -78,6 +78,8 @@ struct ShellFeatures {
     var addPanel: () -> AnyView = { AnyView(EmptyView()) }
     /// N17.2: Import opens the file picker on the presenting window, before any sheet.
     var collectionEntry: CollectionEntryCoordinator?
+    /// U162: the file intake whose picker the window shows (File › Import…, Settings).
+    var importIntake: ImportIntake?
     var sectionRoot: (AppSection, AppNavigation) -> AnyView
     var deckPage: (DeckID, AppNavigation) -> AnyView
     /// The rows of the sidebar's "Decks" group, each tagged
@@ -108,6 +110,7 @@ struct ShellFeatures {
         var features = standard
         features.addPanel = { AnyView(AddNoteView(collection: collection)) }
         features.collectionEntry = collection.entry
+        features.importIntake = collection.intake
         features.todayRoot = true
         features.today = { _ in AnyView(TodayView(collection: collection, besideDeckList: true)) }
         #if os(macOS)
@@ -117,6 +120,8 @@ struct ShellFeatures {
         // (N22.1). The iPad's Browse row waits for its own layout; W14: Note Types has a sidebar
         // row at regular width, and the tab layout reaches it from Settings (U286).
         features.availableSections = AppSection.productSidebar(on: .current, statistics: StatsRollout.enabled)
+        // X2.5's Show opens Browse where Browse is shown.
+        collection.deckImportBrowseAvailable = features.availableSections.contains(.browse)
         let statsPage: StatsPage?
         if StatsRollout.enabled {
             let host = StatsCollectionHost(collection: collection)
@@ -188,6 +193,7 @@ struct ShellFeatures {
         features.sheet = { route, navigation in
             switch route {
             case .collectionEntry: AnyView(CollectionEntryView(coordinator: collection.entry))
+            case .deckImport: AnyView(DeckImportSheet(model: collection.deckImport))
             case .deckName: AnyView(DeckNameForm(model: collection.deckActions))
             case .collectionExport: AnyView(CollectionExportDestination(coordinator: collection.collectionExport))
             case .manualTransfer:

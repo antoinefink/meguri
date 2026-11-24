@@ -48,7 +48,8 @@ struct PresentationHost: ViewModifier {
             #if os(iOS)
             .fullScreenCover(item: binding(cover: true)) { sheet in presented(sheet) }
             #endif
-            .modifier(CollectionImportPicker(coordinator: features.collectionEntry, hosts: isActive && navigation.sheetHost == host))
+            .modifier(CollectionImportPicker(coordinator: features.collectionEntry, intake: features.importIntake,
+                hosts: isActive && navigation.sheetHost == host))
     }
 
     private func presented(_ sheet: SheetRoute) -> some View {

@@ -23,24 +23,38 @@ public struct CollectionEntryView: View {
 
 /// N17.2: Import opens the system file picker directly, on the window that
 /// asked. While the import sheet shows (a refused file, "Choose Another
-/// File"), the sheet presents the picker instead.
+/// File"), the sheet presents the picker instead. The window's picker is also
+/// the intake's (`package/file-intake` K1, K2.2): File › Import… and Settings'
+/// Import offer deck packages, collection packages and zip files, and the
+/// intake routes the chosen file.
 public struct CollectionImportPicker: ViewModifier {
     private let coordinator: CollectionEntryCoordinator?
+    private let intake: ImportIntake?
     private let hosts: Bool
-    public init(coordinator: CollectionEntryCoordinator?, hosts: Bool) {
+    public init(coordinator: CollectionEntryCoordinator?, intake: ImportIntake? = nil, hosts: Bool) {
         self.coordinator = coordinator
+        self.intake = intake
         self.hosts = hosts && coordinator?.pickerInSheet == false
     }
     init(coordinator: CollectionEntryCoordinator, inSheet: Bool) {
         self.coordinator = coordinator
+        intake = nil
         hosts = coordinator.pickerInSheet == inSheet
     }
+    private var intakePicks: Bool { intake?.pickerPresented == true }
     public func body(content: Content) -> some View {
         content.fileImporter(
-            isPresented: Binding(get: { hosts && coordinator?.pickerPresented == true },
-                                 set: { if !$0, hosts { coordinator?.pickerPresented = false } }),
-            allowedContentTypes: [UTType(importedAs: "com.antoinefink.meguri.collection-package")],
-            allowsMultipleSelection: false) { coordinator?.selection($0) }
+            isPresented: Binding(get: { hosts && (coordinator?.pickerPresented == true || intakePicks) },
+                                 set: {
+                                     guard !$0, hosts else { return }
+                                     coordinator?.pickerPresented = false
+                                     intake?.pickerPresented = false
+                                 }),
+            allowedContentTypes: intakePicks ? ImportIntake.pickerTypes
+                : [UTType(importedAs: "com.antoinefink.meguri.collection-package")],
+            allowsMultipleSelection: false) { result in
+                if intakePicks { intake?.selection(result) } else { coordinator?.selection(result) }
+            }
     }
 }
 
