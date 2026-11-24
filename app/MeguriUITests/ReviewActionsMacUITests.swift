@@ -54,13 +54,12 @@ final class ReviewActionsMacUITests: XCTestCase {
         XCTAssertTrue(edit.waitForExistence(timeout: 10))
         let commands = items.allElementsBoundByIndex
         XCTAssertEqual(commands.map(\.identifier),
-                       ["review.menu.editNote", "review.menu.buryCard", "review.menu.suspendCard"])
-        let titles = ["Edit Note", "Bury Card", "Suspend Card"]
+                       ["review.menu.editNote", "", "review.menu.buryCard", "review.menu.suspendCard"])
+        let titles = ["Edit Note", "", "Bury Card", "Suspend Card"]
         XCTAssertEqual(commands.map(\.title), titles,
-                       "The complete native command set, in order (excluding separators)")
-        for item in commands {
-            XCTAssertTrue(item.isEnabled, item.identifier)
-        }
+                       "The complete native menu, in order (including the separator)")
+        XCTAssertEqual(commands.map(\.isEnabled), [true, false, true, true],
+                       "The separator is disabled and all three commands are enabled")
 
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(edit.waitForNonExistence(timeout: 10))
