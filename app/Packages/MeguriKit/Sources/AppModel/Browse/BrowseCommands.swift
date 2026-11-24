@@ -759,6 +759,8 @@ public final class BrowseCommands {
         }
         Task {
             do {
+                // A Cancel before the job exists: nothing is started.
+                if sheet.phase == .cancelling { return closeFindReplace(sheet) }
                 let running = try await session.startFindReplace(request, on: target, confirmed: confirmed)
                 guard self.generation == generation else {
                     await running.cancel()
@@ -778,7 +780,6 @@ public final class BrowseCommands {
                 }
                 serial &+= 1
                 announcement = BrowseAnnouncement(kind: .notesChanged, count: result.affected, serial: serial)
-                rowsChanged()
             } catch {
                 guard self.generation == generation else { return }
                 if let failure = BrowseFindReplaceSheet.failure(error) {

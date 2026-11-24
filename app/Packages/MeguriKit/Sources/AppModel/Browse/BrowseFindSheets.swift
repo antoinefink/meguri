@@ -125,8 +125,9 @@ public final class BrowseFindReplaceSheet: Identifiable {
     public private(set) var selectedNotes: UInt64?
     public private(set) var foundNotes: UInt64?
 
-    public var find: String { didSet { if find != oldValue { inputChanged() } } }
-    public var replace: String { didSet { if replace != oldValue { inputChanged() } } }
+    /// Compared scalar by scalar: `é` and `e` + U+0301 are different inputs to the core.
+    public var find: String { didSet { if !Self.same(find, oldValue) { inputChanged() } } }
+    public var replace: String { didSet { if !Self.same(replace, oldValue) { inputChanged() } } }
     public var matchCase: Bool { didSet { if matchCase != oldValue { inputChanged() } } }
     public var wholeWords: Bool { didSet { if wholeWords != oldValue { inputChanged() } } }
     public var regex: Bool { didSet { if regex != oldValue { inputChanged() } } }
@@ -218,8 +219,12 @@ public final class BrowseFindReplaceSheet: Identifiable {
     /// The preview shown is the one read for these inputs and this target.
     private var previewIsCurrent: Bool {
         guard let previewed, let target else { return false }
-        return previewed.request == request && previewed.target == target
+        let request = request
+        return previewed.request == request && Self.same(previewed.request.find, request.find)
+            && Self.same(previewed.request.replace, request.replace) && previewed.target == target
     }
+
+    static func same(_ a: String, _ b: String) -> Bool { a.unicodeScalars.elementsEqual(b.unicodeScalars) }
 
     /// The count the button names and the run confirms (V9's c).
     public var confirmCount: UInt64? {
@@ -292,9 +297,17 @@ public final class BrowseFindReplaceSheet: Identifiable {
         findHistory = history?.finds ?? []
         replaceHistory = history?.replaces ?? []
         let opened = results.list?.handle
+        // All Found as the results are now, when they are whole: a later prune is then refused (K1).
+        allFound = results.allRowsTarget()
         tasks.append(Task { [weak self] in
-            self?.previews = try? await session.findReplacePreviews()
-            self?.refreshPreview()
+            let previews = try? await session.findReplacePreviews()
+            guard let self, !Task.isCancelled else { return }
+            self.previews = previews
+            guard previews != nil else {
+                preview = .failed
+                return
+            }
+            refreshPreview()
         })
         tasks.append(Task { [weak self, selected] in
             // Two counts reads of a session at once cancel the older one: one after the other.
@@ -314,7 +327,11 @@ public final class BrowseFindReplaceSheet: Identifiable {
                     break
                 }
                 if results.list?.handle != opened || results.list?.released != false
-                    || (results.list?.isComplete == true && results.list?.count == 0) { break }
+                    || (results.list?.isComplete == true && results.list?.count == 0) {
+                    // No rows to find in: with no selection either, nothing can change.
+                    if target == nil { preview = .ready(FindReplacePreview(changed: 0, considered: 0, entries: [])) }
+                    break
+                }
                 try? await Task.sleep(for: .milliseconds(100))
             }
             guard !Task.isCancelled, let self, let all = allFound, let counts = try? await Self.counts(session, all) else { return }
@@ -513,6 +530,7 @@ public final class BrowseFindDuplicatesSheet: Identifiable {
     /// note type and All Found's count.
     func load(session: any BrowseSearching, results: BrowseResults, waitFirst: Task<BrowseTargetFacts?, Never>?) {
         let opened = results.list?.handle
+        allFound = results.allRowsTarget()
         tasks.append(Task { [weak self, reads, notetypes, startRow] in
             var types: [BrowseNotetypeFields] = []
             for name in notetypes {
@@ -520,6 +538,8 @@ public final class BrowseFindDuplicatesSheet: Identifiable {
             }
             guard let self else { return }
             entries = BrowseFieldEntry.menu(types, ends: false)
+            // No field could be read: Find cannot run, and the sheet says so.
+            if types.isEmpty, !notetypes.isEmpty { failure = .failed }
             // The Sort Field of the start row's note type (V10).
             _ = await waitFirst?.value
             if let startRow, !touched, let type = try? await BrowseFindReplaceSheet.counts(session, startRow).notetypes.first,

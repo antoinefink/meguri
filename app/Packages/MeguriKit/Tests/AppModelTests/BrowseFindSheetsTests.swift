@@ -151,11 +151,15 @@ import Testing
         await waitUntil { sheet.confirmCount == 2 }
         // F11: the run counts more notes than the preview showed: refused, nothing written, shown again.
         session.replaceError = .findReplaceRefused(.countChanged(notes: 3))
+        // The core now counts three notes: the preview read again shows them.
+        session.previewing = { _, notes in FindReplacePreview(changed: 3, considered: UInt64(notes.count), entries: []) }
         sheet.confirm()
         await waitUntil { sheet.failure != nil }
         #expect(sheet.failure == .countChanged(3) && sheet.phase == .editing && model.commands.findReplaceSheet === sheet)
-        await waitUntil { sheet.confirmCount == 2 }
+        #expect(session.replaceCalls.last?.confirmed == 2, "the run confirmed the count the preview showed")
+        await waitUntil { sheet.confirmCount == 3 }
         session.replaceError = nil
+        session.previewing = Self.changingAll
         // The core's list moved on: the preview says so and Replace is refused before the core.
         session.revisions[handle.rawValue] = 1
         sheet.find = "xy"
