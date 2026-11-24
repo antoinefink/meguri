@@ -26,10 +26,7 @@ struct BrowseSheetFrame<Content: View>: View {
     var body: some View {
         #if os(macOS)
         VStack(alignment: .leading, spacing: Spacing.medium) {
-            title
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("\(identifier).title")
+            SheetTitle(title, identifier: identifier)
             content()
         }
         .padding()

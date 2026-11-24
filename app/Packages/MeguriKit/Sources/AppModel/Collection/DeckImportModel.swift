@@ -140,6 +140,8 @@ public final class DeckImportModel {
     public private(set) var canUndo = false
     public private(set) var undoing = false
     public private(set) var undone = false
+    /// Undo Import was refused: another step came after the import.
+    public private(set) var undoRefused = false
     /// X2.5's table, read in pages (I13).
     public private(set) var log: [DeckImportLogCategory: [DeckImportLogEntry]] = [:]
     public private(set) var logLoading: Set<DeckImportLogCategory> = []
@@ -252,7 +254,7 @@ public final class DeckImportModel {
     private func resetForInspect() {
         facts = nil; confirmation = nil; syncParagraph = nil; notetypeNames = [:]; cancelledNotice = false
         result = nil; upload = nil; refusal = nil; refusalSource = nil
-        canUndo = false; undoing = false; undone = false; log = [:]; logLoading = []
+        canUndo = false; undoing = false; undone = false; undoRefused = false; log = [:]; logLoading = []
         progressVisible = false; cancelling = false; cancellable = true
         progressCompleted = 0; progressTotal = nil
     }
@@ -509,6 +511,7 @@ public final class DeckImportModel {
             undoing = false
             canUndo = false
             undone = done
+            undoRefused = !done
         }
     }
 

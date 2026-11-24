@@ -1719,6 +1719,23 @@ impl ReviewService {
             Ok(HistoryRestore::Global(result))
         }
     }
+    /// Undoes the collection's top global step only while it is `expected`
+    /// (the step a caller showed, `submit_undo_step`). Refused while a review
+    /// session is open: its restores are session-aware.
+    pub fn restore_step_controlled(
+        &self,
+        expected: crate::EntryId,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Result<crate::OpResult<crate::StepInfo>, EngineError> {
+        cancel.check()?;
+        let _control = self.control.try_acquire()?;
+        let (c, _) = self.bound()?;
+        if self.active_session().is_some() {
+            return Err(EngineError::SessionActive);
+        }
+        c.submit_undo_step(UndoScope::Global, expected, cancel, progress).wait()
+    }
     pub fn undo(&self, scope: UndoScope) -> Result<Head, EngineError> {
         let _control = self.control.acquire();
         self.undo_inner(scope, false, None)?.ok_or_else(no_session)

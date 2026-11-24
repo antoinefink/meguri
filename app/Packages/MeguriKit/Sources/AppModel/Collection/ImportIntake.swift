@@ -84,7 +84,7 @@ public final class ImportIntake {
     public func selection(_ result: Result<[URL], any Error>) {
         pickerPresented = false; pickerActive = false
         switch result {
-        case .success(let urls): receive(urls, host: pickerHost)
+        case .success(let urls): receive(urls, host: pickerHost, fromPicker: true)
         case .failure(let error):
             if (error as NSError).code != NSUserCancelledError { message = .unreadable(fileName: "") }
         }
@@ -92,7 +92,8 @@ public final class ImportIntake {
 
     /// K3 and K4 for the URLs a source gave. `release` ends a hold on them
     /// (a dropped file's copy) once the flow ends or they are refused.
-    public func receive(_ urls: [URL], host: AppNavigation.SheetHost = .main, release: (@MainActor () -> Void)? = nil) {
+    public func receive(_ urls: [URL], host: AppNavigation.SheetHost = .main, fromPicker: Bool = false,
+                        release: (@MainActor () -> Void)? = nil) {
         guard let owner else { release?(); return }
         // A drop whose files could not be loaded still says so.
         guard !urls.isEmpty else { message = .unreadable(fileName: ""); release?(); return }
@@ -123,12 +124,12 @@ public final class ImportIntake {
                 release?()
                 return
             }
-            route(url, kind: kind, owner: owner, others: urls.count > 1, release: release)
+            route(url, kind: kind, owner: owner, others: urls.count > 1, fromPicker: fromPicker, release: release)
         }
     }
 
     private func route(_ url: URL, kind: PackageFileClass, owner: ReviewCollection, others: Bool,
-                       release: (@MainActor () -> Void)?) {
+                       fromPicker: Bool = false, release: (@MainActor () -> Void)?) {
         if owner.navigation.sheet != nil, owner.navigation.sheet != .deckImport {
             message = .alreadyOpen; release?(); return
         }
@@ -141,7 +142,15 @@ public final class ImportIntake {
             owner.entry.adoptRelease(release)
             owner.entry.selection(.success([url]))
         case .deckPackage:
-            // K6: a deck package needs an open collection (K6.1's creation is not built).
+            // K6.1: no collection yet. From a picker the person chose to
+            // import: an empty collection is created at once. From any other
+            // source Welcome asks first.
+            if owner.state == .noFile, owner.acceptsImports {
+                if fromPicker { createCollection(then: url, owner: owner, release: release) }
+                else { askToCreate(url, release: release) }
+                return
+            }
+            // K6: a deck package needs an open collection.
             guard owner.state == .ready, owner.hasCollection, owner.acceptsImports else {
                 message = .needsCollection; release?(); return
             }
@@ -153,6 +162,46 @@ public final class ImportIntake {
     }
 
     public func clearMessage() { message = nil }
+
+    // MARK: K6.1
+
+    /// The file Welcome asks about: create a collection and import it.
+    public private(set) var pendingCreation: URL?
+    @ObservationIgnored private var pendingRelease: (@MainActor () -> Void)?
+
+    /// A second file replaces the first (K6.1).
+    private func askToCreate(_ url: URL, release: (@MainActor () -> Void)?) {
+        pendingRelease?()
+        pendingCreation = url
+        pendingRelease = release
+    }
+
+    /// Welcome's Import: Start Empty's creation, then the sheet for the file.
+    public func confirmCreation() {
+        guard let url = pendingCreation, let owner else { return }
+        let release = pendingRelease
+        pendingCreation = nil; pendingRelease = nil
+        createCollection(then: url, owner: owner, release: release)
+    }
+
+    /// Welcome's Cancel: the file is dropped and Welcome stays as it was.
+    public func cancelCreation() {
+        let release = pendingRelease
+        pendingCreation = nil; pendingRelease = nil
+        release?()
+    }
+
+    private func createCollection(then url: URL, owner: ReviewCollection, release: (@MainActor () -> Void)?) {
+        classifying = true
+        Task {
+            defer { classifying = false }
+            await owner.startEmptyFromPress()
+            // A creation failure shows its error on Welcome and drops the file.
+            guard owner.state == .ready, owner.hasCollection else { release?(); return }
+            owner.deckImportHost = .main
+            if !owner.deckImport.begin(url, release: release) { message = .alreadyOpen }
+        }
+    }
 
     /// K5: the deck sheet's inspect found a whole collection by its content.
     func routeCollection(_ url: URL, release: (@MainActor () -> Void)?) {

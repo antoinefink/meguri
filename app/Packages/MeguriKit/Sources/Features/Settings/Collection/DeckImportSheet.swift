@@ -81,6 +81,7 @@ struct DeckImportPresentation {
     var canUndo = false
     var undoing = false
     var undone = false
+    var undoRefused = false
     var log: [DeckImportLogCategory: [DeckImportLogEntry]] = [:]
     var moreLog: Set<DeckImportLogCategory> = []
     var canShowInBrowse = false
@@ -104,7 +105,7 @@ struct DeckImportPresentation {
         cancelledNotice = model.cancelledNotice
         result = model.result; upload = model.upload
         refusal = model.refusal; refusalSource = model.refusalSource
-        canUndo = model.canUndo; undoing = model.undoing; undone = model.undone
+        canUndo = model.canUndo; undoing = model.undoing; undone = model.undone; undoRefused = model.undoRefused
         log = model.log
         moreLog = Set(DeckImportLogCategory.allCases.filter { model.moreLog($0) })
         canShowInBrowse = model.canShowInBrowse
@@ -272,19 +273,52 @@ struct DeckImportContent: View {
 
     private static let id = "settings.deckImport"
 
+    /// Where keyboard focus rests when a step shows: never on a button that
+    /// changes the collection (X2.3).
+    private enum Focus: Hashable { case cancel, done }
+    @FocusState private var focus: Focus?
+
     var body: some View {
+        #if os(macOS)
+        // No title bar: the title leads the form, aligned with its rows (N21.6, `SheetTitle`).
+        form
+        #else
         NavigationStack {
-            Form { content }
-                .formStyle(.grouped)
-                .accessibilityIdentifier("\(Self.id).content")
+            form
                 .navigationTitle(Text(verbatim: presentation.title))
                 .navigationSubtitle(Text(verbatim: presentation.subtitle ?? ""))
-                #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
-                #endif
-                .toolbar { toolbar }
-                .disabled(presentation.undoing)
         }
+        #endif
+    }
+
+    private var form: some View {
+        Form { content }
+            .formStyle(.grouped)
+            .accessibilityIdentifier("\(Self.id).content")
+            .toolbar { toolbar }
+            .disabled(presentation.undoing)
+            .defaultFocus($focus, presentation.step == .result || presentation.step == .importedWithoutResult ? .done : .cancel)
+            .onChange(of: presentation.step) { _, step in
+                focus = step == .result || step == .importedWithoutResult ? .done : .cancel
+            }
+            .modifier(Sizing(presentation: presentation, announce: announce, escape: escape))
+    }
+
+    /// The sheet's title on the Mac: the first section's header.
+    @ViewBuilder private var sheetTitle: some View {
+        #if os(macOS)
+        SheetTitle(Text(verbatim: presentation.title), subtitle: presentation.subtitle.map { Text(verbatim: $0) },
+                   identifier: Self.id)
+        #endif
+    }
+
+    private struct Sizing: ViewModifier {
+        let presentation: DeckImportPresentation
+        let announce: (DeckImportModel.Step) -> Void
+        let escape: () -> Void
+        func body(content: Content) -> some View {
+            content
         #if os(macOS)
         // The sheet is as tall as what it shows, up to the window's room.
         .presentationSizing(.form.fitted(horizontal: false, vertical: true))
@@ -297,6 +331,7 @@ struct DeckImportContent: View {
         #if os(macOS)
         .onExitCommand { escape() }
         #endif
+        }
     }
 
     // MARK: Content per step
@@ -334,6 +369,8 @@ struct DeckImportContent: View {
             .accessibilityValue(Text(verbatim: presentation.progressFraction.map { "\($0.0.formatted()) of \($0.1.formatted())" }
                 ?? "In progress"))
             .accessibilityIdentifier("\(Self.id).progress")
+        } header: {
+            sheetTitle
         } footer: {
             if presentation.busy, !presentation.cancellable { Text(verbatim: DeckImportText.finishing) }
         }
@@ -362,6 +399,8 @@ struct DeckImportContent: View {
                 LabeledContent { Text(verbatim: DeckImportText.media(facts)) } label: { Text(verbatim: "Media") }
                     .accessibilityIdentifier("\(Self.id).media")
             }
+        } header: {
+            sheetTitle
         } footer: {
             let notes = [facts.flatMap { DeckImportText.repairs($0.repaired) },
                          presentation.otherFilesGiven ? DeckImportText.otherFiles(presentation.fileName) : nil,
@@ -370,23 +409,28 @@ struct DeckImportContent: View {
                 Text(verbatim: notes.joined(separator: " ")).accessibilityIdentifier("\(Self.id).notes")
             }
         }
-        Section {
-            Toggle(isOn: Binding(get: { options.withScheduling && facts?.hasScheduling != false },
-                                 set: { options.withScheduling = $0 })) {
-                Text("import.apkg.withScheduling", bundle: .module)
-                Text(verbatim: DeckImportText.schedulingHelp(facts))
+        // Only what the package can bring: a package without learning progress
+        // or presets shows no switch for them.
+        let scheduling = facts?.hasScheduling == true, presets = facts?.hasPresets == true
+        if scheduling || presets {
+            Section {
+                if scheduling {
+                    Toggle(isOn: $options.withScheduling) {
+                        Text("import.apkg.withScheduling", bundle: .module)
+                        Text(verbatim: DeckImportText.schedulingHelp(facts))
+                    }
+                    .accessibilityIdentifier("\(Self.id).withScheduling")
+                }
+                if presets {
+                    Toggle(isOn: $options.withDeckConfigs) {
+                        Text("import.apkg.withDeckConfigs", bundle: .module)
+                        Text(verbatim: DeckImportText.presetsHelp(facts))
+                    }
+                    .accessibilityIdentifier("\(Self.id).withDeckConfigs")
+                }
             }
-            .disabled(facts?.hasScheduling == false)
-            .accessibilityIdentifier("\(Self.id).withScheduling")
-            Toggle(isOn: Binding(get: { options.withDeckConfigs && facts?.hasPresets != false },
-                                 set: { options.withDeckConfigs = $0 })) {
-                Text("import.apkg.withDeckConfigs", bundle: .module)
-                Text(verbatim: DeckImportText.presetsHelp(facts))
-            }
-            .disabled(facts?.hasPresets == false)
-            .accessibilityIdentifier("\(Self.id).withDeckConfigs")
+            .disabled(presentation.busy)
         }
-        .disabled(presentation.busy)
         Section {
             Toggle(isOn: $options.mergeNotetypes) {
                 Text("import.apkg.mergeNotetypes", bundle: .module)
@@ -421,17 +465,20 @@ struct DeckImportContent: View {
         if !rows.isEmpty {
             Section {
                 ForEach(rows, id: \.id) { row in
+                    // The badge says loss; the text stays readable, and the button carries the weight.
                     Label {
                         Text(verbatim: row.text)
                     } icon: {
-                        Image(systemName: "minus.circle.fill").symbolRenderingMode(.multicolor).foregroundStyle(.red)
+                        Image(systemName: "minus.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.white, .red)
                     }
-                    .foregroundStyle(.red)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("\(Self.id).loss.\(row.id)")
                 }
             } header: {
-                Text(verbatim: "Deleted by This Import")
+                VStack(alignment: .leading, spacing: Spacing.medium) {
+                    sheetTitle
+                    Text(verbatim: "Deleted by This Import")
+                }
             } footer: {
                 if presentation.syncParagraph == nil {
                     Text(verbatim: DeckImportText.backupLine).accessibilityIdentifier("\(Self.id).backup")
@@ -446,6 +493,8 @@ struct DeckImportContent: View {
                     .accessibilityIdentifier("\(Self.id).sync")
                 Text(verbatim: DeckImportText.syncOtherDevices)
                     .accessibilityIdentifier("\(Self.id).syncOtherDevices")
+            } header: {
+                if rows.isEmpty { sheetTitle }
             } footer: {
                 Text(verbatim: DeckImportText.backupLine).accessibilityIdentifier("\(Self.id).backup")
             }
@@ -459,15 +508,20 @@ struct DeckImportContent: View {
             if presentation.undone {
                 Section {
                     Text(verbatim: DeckImportText.undone).accessibilityIdentifier("\(Self.id).undone")
+                } header: {
+                    sheetTitle
                 }
             } else {
                 Section {
                     ForEach(presentation.lines) { line in logLine(line) }
+                } header: {
+                    sheetTitle
                 } footer: {
                     let notes = [result.counts.mediaSkipped > 0 ? DeckImportText.mediaSkipped(result.counts.mediaSkipped) : nil,
                                  result.log.fieldsOmitted > 0 ? DeckImportText.fieldsOmitted : nil,
                                  result.mediaPending ? DeckImportText.mediaPending : nil,
-                                 presentation.uploadPending ? DeckImportText.uploadPending : nil].compactMap { $0 }
+                                 presentation.uploadPending ? DeckImportText.uploadPending : nil,
+                                 presentation.undoRefused ? DeckImportText.undoRefused : nil].compactMap { $0 }
                     if !notes.isEmpty {
                         Text(verbatim: notes.joined(separator: " ")).accessibilityIdentifier("\(Self.id).resultNotes")
                     }
@@ -527,7 +581,8 @@ struct DeckImportContent: View {
                 if let first = entry.fields.first(where: { !$0.isEmpty }) ?? entry.fields.first {
                     Text(verbatim: first).lineLimit(2)
                 } else {
-                    Text(verbatim: DeckImportText.textNotShown).foregroundStyle(.secondary)
+                    Text(verbatim: entry.fields.isEmpty ? DeckImportText.textNotShown : DeckImportText.noText)
+                        .foregroundStyle(.secondary)
                 }
                 Text(verbatim: DeckImportText.reason(category)).font(.caption).foregroundStyle(.secondary)
             }
@@ -564,6 +619,8 @@ struct DeckImportContent: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("\(Self.id).refusal")
+            } header: {
+                sheetTitle
             }
             let offers = DeckImportOffer.offers(refusal, source: presentation.refusalSource, withScheduling: refusalScheduling)
             if offers.count > 1 {
@@ -586,10 +643,20 @@ struct DeckImportContent: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("\(Self.id).committedWithoutResult")
+        } header: {
+            sheetTitle
         }
     }
 
     // MARK: Buttons
+
+    private var undoPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        .destructiveAction
+        #else
+        .cancellationAction
+        #endif
+    }
 
     /// X2.3, D3: the confirmation's button is never the default, and
     /// destructive only with losses.
@@ -634,6 +701,7 @@ struct DeckImportContent: View {
             ToolbarItem(placement: .cancellationAction) {
                 Button(action: actions.cancelConfirmation) { Text(verbatim: "Cancel") }
                     .keyboardShortcut(.cancelAction)
+                    .focused($focus, equals: .cancel)
                     .accessibilityIdentifier("\(Self.id).cancel")
             }
             // A confirmation-placed button is the Mac's default button; this one
@@ -648,7 +716,8 @@ struct DeckImportContent: View {
             #endif
         case .result:
             if presentation.canUndo, !presentation.undone {
-                ToolbarItem(placement: .cancellationAction) {
+                // The other action, at the leading edge; Done trails.
+                ToolbarItem(placement: undoPlacement) {
                     Button(action: actions.undo) { Text(verbatim: "Undo Import") }
                         .accessibilityIdentifier("\(Self.id).undo")
                 }
@@ -656,6 +725,7 @@ struct DeckImportContent: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button(action: actions.close) { Text(verbatim: "Done") }
                     .keyboardShortcut(.defaultAction)
+                    .focused($focus, equals: .done)
                     .accessibilityIdentifier("\(Self.id).done")
             }
         case .refused:

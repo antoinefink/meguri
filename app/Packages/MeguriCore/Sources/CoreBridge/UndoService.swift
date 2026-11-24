@@ -45,6 +45,18 @@ public protocol UndoService: Sendable {
     func peekRedo(scope: ReviewUndoScope) async throws(BridgeError) -> ReviewUndoStatus
     func startUndo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoStart
     func startRedo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoStart
+    /// Undoes the newest global step only while it is `step` (its op's seq),
+    /// compared by the core's writer as it takes the op: a step recorded
+    /// after the caller looked refuses with `undoUnavailable` and nothing is
+    /// undone. Refused while a review session is open.
+    func startUndo(step: UInt64) async throws(BridgeError) -> CoreUndoStart
+}
+
+extension UndoService {
+    /// Services that cannot name a step undo nothing.
+    public func startUndo(step: UInt64) async throws(BridgeError) -> CoreUndoStart {
+        throw .unavailable(reason: "Undo of a named step is not available")
+    }
 }
 public actor CoreUndoService: UndoService {
     public init() {}
@@ -61,6 +73,13 @@ public actor CoreUndoService: UndoService {
         try await CoreEventStream.shared.start()
         return try await MaintenanceLane.shared.call(.startUndo) {
             let raw = try MeguriCoreBindings.startUndo(scope: scope.raw)
+            return .job(CoreUndoJob(job: try Jobs.track(raw.handle), raw: raw.result))
+        }
+    }
+    public func startUndo(step: UInt64) async throws(BridgeError) -> CoreUndoStart {
+        try await CoreEventStream.shared.start()
+        return try await MaintenanceLane.shared.call(.startUndoStep) {
+            let raw = try MeguriCoreBindings.startUndoStep(expected: step)
             return .job(CoreUndoJob(job: try Jobs.track(raw.handle), raw: raw.result))
         }
     }

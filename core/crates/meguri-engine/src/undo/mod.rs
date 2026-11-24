@@ -529,6 +529,20 @@ impl Collection {
         cancel: Arc<crate::CancelToken>,
         progress: crate::ProgressSink,
     ) -> Pending<OpResult<StepInfo>> {
+        self.submit_undo_step(scope, expected, cancel, progress)
+    }
+
+    /// Undoes the top step of `scope` only while it is `expected`, the step
+    /// the caller showed (M4.1): the writer compares it as it takes the op,
+    /// so a step recorded after the caller looked is never the one undone.
+    /// Another step on top refuses with `ChangedExternally` and writes nothing.
+    pub fn submit_undo_step(
+        &self,
+        scope: UndoScope,
+        expected: EntryId,
+        cancel: Arc<crate::CancelToken>,
+        progress: crate::ProgressSink,
+    ) -> Pending<OpResult<StepInfo>> {
         let action = UndoAction::Undo(scope);
         let mut spec = OpSpec::new(action.def(false), OpSource::UserUndoable)
             .stamp(StampMode::CallerSupplied)

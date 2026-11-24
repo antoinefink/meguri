@@ -386,6 +386,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let deckMoveJobResult = BridgeCall("DeckMoveJob.result")
     public static let deckCollapseJobResult = BridgeCall("DeckCollapseJob.result")
     public static let startUndo = BridgeCall("start_undo")
+    public static let startUndoStep = BridgeCall("start_undo_step")
     public static let startRedo = BridgeCall("start_redo")
 
 
@@ -795,7 +796,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         unmarkNotes, startUnmarkNotes, toggleNoteMark, startToggleNoteMark, startRenameTag,
         startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, trackedMediaNames, flushForBackground,
         suspend, resume, checkRollover, fsrsPolicyStatus, enableFsrs, undoJobResult, peekUndo, peekRedo,
-        tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startRedo, startAddNotes, noteAdditionJobResult,
+        tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startUndoStep, startRedo, startAddNotes, noteAdditionJobResult,
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
         notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
