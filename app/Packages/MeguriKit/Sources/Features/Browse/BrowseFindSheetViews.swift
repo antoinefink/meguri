@@ -146,7 +146,9 @@ struct BrowseFindReplaceSheetView: View {
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 #endif
+                #if os(macOS)
                 .textInputSuggestions { suggestions(sheet.findHistory, typed: sheet.find) }
+                #endif
                 .accessibilityIdentifier("browse.sheet.findReplace.find")
             if case .invalid(let invalid) = sheet.preview {
                 Text(verbatim: BrowseFindText.invalid(invalid, locale: locale))
@@ -160,7 +162,9 @@ struct BrowseFindReplaceSheetView: View {
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 #endif
+                #if os(macOS)
                 .textInputSuggestions { suggestions(sheet.replaceHistory, typed: sheet.replace) }
+                #endif
                 .accessibilityIdentifier("browse.sheet.findReplace.replace")
             Picker(selection: $sheet.inEntry) {
                 ForEach(BrowseFieldMenu.sections(sheet.entries), id: \.self) { section in
@@ -203,12 +207,15 @@ struct BrowseFindReplaceSheetView: View {
     }
 
     /// F2's history entries that continue the typed text (all of them while
-    /// it is empty), the typed text itself left out.
+    /// it is empty), the typed text itself left out. The system offers text
+    /// input suggestions on the Mac only.
+    #if os(macOS)
     @ViewBuilder private func suggestions(_ history: [String], typed: String) -> some View {
         ForEach(history.filter { $0 != typed && (typed.isEmpty || $0.hasPrefix(typed)) }.prefix(10), id: \.self) { entry in
             Text(verbatim: entry).textInputCompletion(entry)
         }
     }
+    #endif
 
     private func entryLabel(_ entry: BrowseFieldEntry) -> Text {
         switch entry.kind {
