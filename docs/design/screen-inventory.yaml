@@ -750,8 +750,10 @@ screens:
       stats/chart/<box>/<state> for cards-over-time, reviews-due, answers, retrievability and
       by-deck (1m 3m 6m 1y, deck, loading, empty, failed, pinned, contrast; cold, leaf and the
       card-counts, time-of-day and stability failures). Identifiers: stats.box.cardCounts.plot (the
-      pie), .table and .row.<state>; stats.box.byDeck.table, .sort.<column> (deck, cards,
-      reviews, retention, time) and .row.<deck id>-<own cards>. Box titles are plain headings
+      pie) and .table, stats.cardCounts.row.<state>; stats.box.byDeck.table,
+      stats.byDeck.sort.<column> (deck, cards, reviews, retention, time) and
+      stats.byDeck.row.<deck id>-<own cards> (four parts, R1964); Time of Day's upper panel
+      stats.box.timeOfDayRemembered.plot. Box titles are plain headings
       (stats.box.<box>.header, no chevron) until U302 gives a box its page.
   - id: stats.heatmapSettings
     title: Heatmap settings
