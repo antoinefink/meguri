@@ -431,7 +431,9 @@ public final class StatsPageModel {
             // A stream left before its end (the window went away) cancels its request.
             if !ended { await stream.cancel() }
         }
-        rebuild()
+        // Off the main actor: a refresh starts while the page may be scrolling, and a change of
+        // the user's has already written its boxes in its own frame (S19).
+        rebuild(offMain: true)
     }
 
     private func cancelRunning() {
@@ -477,14 +479,15 @@ public final class StatsPageModel {
             justNow?.cancel()
             justNow = timers.schedule(after: .seconds(Self.justNowSpan)) { [weak self] in
                 self?.justNow = nil
-                self?.rebuild()
+                // Only the status line changes: no box is written again.
+                self?.updateSubtitles()
             }
         case .contextChanged:
             // The parts that returned hold for their context; the page reads again (G10).
             kept.keep(set)
             kept.persist(current.scope)
             ended = .interrupted
-            rebuild()
+            rebuild(offMain: true)
             if live == nil, visible { self.refresh() }
             return
         case .cancelled:

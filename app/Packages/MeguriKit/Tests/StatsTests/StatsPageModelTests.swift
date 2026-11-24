@@ -184,6 +184,8 @@ import Testing
         service.answer(first, tier1)
         service.send(first.refresh, .end(.contextChanged))
         let second = try await request(2)
+        // The new request's boxes are written off the main actor (N25.14).
+        await settle { model.box(.cardCounts).updating }
         #expect(model.box(.cardCounts).phase == .ready)
         #expect(model.box(.cardCounts).updating)
         #expect(model.box(.retention).phase == .loading(fraction: nil))
