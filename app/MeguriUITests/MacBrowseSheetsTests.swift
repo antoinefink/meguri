@@ -40,7 +40,7 @@ final class MacBrowseSheetsTests: XCTestCase {
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitUntil { !changeDeck.exists }, "Return moves the cards")
         afterCapture(app, "change-deck-after-\(appearance)")
-        XCTAssertTrue(undoTitle(app).hasSuffix("Change Deck"), undoTitle(app))
+        XCTAssertTrue(waitUntil { self.undoTitle(app).hasSuffix("Change Deck") }, undoTitle(app))
 
         // Set Due Date… ⇧⌘D: the remembered text, a range's preview, an error.
         let firstRow = table.outlineRows.element(boundBy: 0)
@@ -64,7 +64,7 @@ final class MacBrowseSheetsTests: XCTestCase {
         XCTAssertTrue(waitUntil { !due.exists })
         XCTAssertTrue(waitUntil { self.rowText(firstRow) != rowBefore }, "the row's Due cell changes in place: \(rowBefore)")
         afterCapture(app, "set-due-date-after-\(appearance)")
-        XCTAssertTrue(undoTitle(app).hasSuffix("Set Due Date"), undoTitle(app))
+        XCTAssertTrue(waitUntil { self.undoTitle(app).hasSuffix("Set Due Date") }, undoTitle(app))
 
         // Forget… ⌥⌘N: the two options and "Review history is kept.".
         app.typeKey("n", modifierFlags: [.command, .option])
@@ -77,7 +77,7 @@ final class MacBrowseSheetsTests: XCTestCase {
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitUntil { !forget.exists })
         afterCapture(app, "forget-after-\(appearance)")
-        XCTAssertTrue(undoTitle(app).hasSuffix("Forget"), undoTitle(app))
+        XCTAssertTrue(waitUntil { self.undoTitle(app).hasSuffix("Forget") }, undoTitle(app))
 
         // Add Tags… ⇧⌘A: the token field; Return makes the typed text a token and adds it.
         app.typeKey("a", modifierFlags: [.command, .shift])
@@ -91,7 +91,7 @@ final class MacBrowseSheetsTests: XCTestCase {
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitUntil { !add.exists })
         afterCapture(app, "add-tags-after-\(appearance)")
-        XCTAssertTrue(undoTitle(app).hasSuffix("Add Tags"), undoTitle(app))
+        XCTAssertTrue(waitUntil { self.undoTitle(app).hasSuffix("Add Tags") }, undoTitle(app))
 
         // Remove Tags… ⌥⇧⌘A: completion from the notes' own tags.
         app.typeKey("a", modifierFlags: [.command, .option, .shift])
@@ -105,7 +105,7 @@ final class MacBrowseSheetsTests: XCTestCase {
             app.typeText("ter")
             app.typeKey(.return, modifierFlags: [])
             XCTAssertTrue(waitUntil { !remove.exists })
-            XCTAssertTrue(undoTitle(app).hasSuffix("Remove Tags"), undoTitle(app))
+            XCTAssertTrue(waitUntil { self.undoTitle(app).hasSuffix("Remove Tags") }, undoTitle(app))
             afterCapture(app, "remove-tags-after-\(appearance)")
         }
 
