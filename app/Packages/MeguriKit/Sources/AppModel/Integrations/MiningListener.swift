@@ -1,4 +1,5 @@
 #if os(macOS)
+import Darwin
 import Foundation
 import Network
 import Synchronization
@@ -18,9 +19,12 @@ nonisolated final class MiningListener: @unchecked Sendable {
     private let admission: MiningAdmission?
     private let admissionEpoch: UUID?
     private let port: UInt16
-    private var listener: NWListener?
-    private var ipv6Listener: NWListener?
+    private var listener: (any DispatchSourceRead)?
+    private var boundPort: UInt16?
+    private var closingSockets = 0
+    private var ipv6Listener: (any DispatchSourceRead)?
     private var probe: NWConnection?
+    private var ipv6Probe: NWConnection?
     private var peers: [UUID: Peer] = [:]
     private var running = false
     private var epoch = UUID()
@@ -28,7 +32,7 @@ nonisolated final class MiningListener: @unchecked Sendable {
     private var ipv6Retry: DispatchWorkItem?
     private var stopWaiters: [AsyncStream<Void>.Continuation] = []
     private nonisolated final class Peer: @unchecked Sendable {
-        let connection: NWConnection
+        let connection: MiningSocketStream
         var data = Data()
         var head: MiningHTTPRequest?
         var body: MiningHTTPBody?
@@ -46,7 +50,7 @@ nonisolated final class MiningListener: @unchecked Sendable {
         var retainedBytes: Int {
             data.count + headBytes + (body?.retainedBytes ?? 0) + (websocket?.retainedBytes ?? 0) + requestBytes + outgoingBytes
         }
-        init(_ connection: NWConnection) { self.connection = connection }
+        init(_ connection: MiningSocketStream) { self.connection = connection }
     }
 
     convenience init(
@@ -111,8 +115,11 @@ nonisolated final class MiningListener: @unchecked Sendable {
         ipv6Retry = nil
         probe?.cancel()
         probe = nil
+        ipv6Probe?.cancel()
+        ipv6Probe = nil
         listener?.cancel()
         listener = nil
+        boundPort = nil
         ipv6Listener?.cancel()
         ipv6Listener = nil
         for (id, peer) in peers {
@@ -129,7 +136,7 @@ nonisolated final class MiningListener: @unchecked Sendable {
     }
 
     private func finishStop() {
-        guard !running, peers.isEmpty else { return }
+        guard !running, peers.isEmpty, closingSockets == 0 else { return }
         let waiters = stopWaiters
         stopWaiters.removeAll()
         waiters.forEach { $0.finish() }
@@ -173,95 +180,95 @@ nonisolated final class MiningListener: @unchecked Sendable {
     }
 
     private func listen() {
-        guard running, isAdmitting else {
-            return
-        }
+        guard running, isAdmitting else { return }
         do {
-            let parameters = NWParameters.tcp
-            // Set the IP policy explicitly as well as the literal bind address.
-            // Keep reuse disabled: a foreign service must never share our port.
-            (parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options)?.version = .v4
-            parameters.requiredInterfaceType = .loopback
-            parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1",
-                port: port == 0 ? NWEndpoint.Port.any : NWEndpoint.Port(rawValue: port)!)
-            parameters.allowLocalEndpointReuse = false
-            let value = try NWListener(using: parameters)
-            listener = value
-            value.stateUpdateHandler = { [weak self, weak value] state in
-                guard let self, let value, self.listener === value else {
-                    return
-                }
-                switch state {
-                case .ready:
-                    guard let boundPort = value.port?.rawValue, boundPort != 0 else {
-                        value.cancel()
-                        self.listener = nil
-                        self.conflict()
-                        return
-                    }
-                    // H22 ephemeral tests bind IPv4 only.
-                    if self.port != 0 { self.listenIPv6(port: boundPort) }
-                    self.changed(.listening(boundPort))
-                case .waiting, .failed:
-                    value.cancel()
-                    self.listener = nil
-                    self.ipv6Listener?.cancel()
-                    self.ipv6Listener = nil
-                    self.ipv6Retry?.cancel()
-                    self.ipv6Retry = nil
-                    self.conflict()
-                default: break
-                }
-            }
-            value.newConnectionHandler = { [weak self, weak value] connection in
-                guard let self, let value, self.listener === value else {
-                    connection.cancel()
-                    return
-                }
-                self.accept(connection)
-            }
-            value.start(queue: queue)
+            let socket = try MiningSocket.listen(port: port, ipv6: false)
+            boundPort = socket.port
+            listener = watchListener(socket.fd, ipv6: false)
+            // Ephemeral package tests bind IPv4 only.
+            if port != 0 { listenIPv6(port: socket.port) }
+            changed(.listening(socket.port))
         } catch { conflict() }
     }
 
-    /// A separate, explicitly loopback-only bind keeps IPv4 usable when the
-    /// host has no IPv6 support or another process already owns ::1's port.
+    /// Failure of the IPv6 companion never retires the authoritative IPv4 FD.
     private func listenIPv6(port: UInt16) {
-        guard running, isAdmitting, listener?.port?.rawValue == port, ipv6Listener == nil else {
-            return
+        guard running, isAdmitting, boundPort == port, ipv6Listener == nil, ipv6Probe == nil else { return }
+        let attempt = epoch
+        let connection = NWConnection(host: "::1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        ipv6Probe = connection
+        // Same Darwin wildcard guard as IPv4; a companion conflict never
+        // delays publishing or accepting on the IPv4 listening socket.
+        let finish: @Sendable (Bool) -> Void = { [weak self, weak connection] free in
+            guard let self, let connection, self.ipv6Probe === connection, self.epoch == attempt else { return }
+            self.ipv6Probe = nil
+            connection.cancel()
+            guard self.running, self.isAdmitting, self.boundPort == port else { return }
+            guard free else { self.retryIPv6(port: port); return }
+            do {
+                let socket = try MiningSocket.listen(port: port, ipv6: true)
+                self.ipv6Listener = self.watchListener(socket.fd, ipv6: true)
+            } catch { self.retryIPv6(port: port) }
         }
-        do {
-            let parameters = NWParameters.tcp
-            (parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options)?.version = .v6
-            parameters.requiredInterfaceType = .loopback
-            parameters.requiredLocalEndpoint = .hostPort(host: "::1", port: NWEndpoint.Port(rawValue: port)!)
-            parameters.allowLocalEndpointReuse = false
-            let value = try NWListener(using: parameters)
-            ipv6Listener = value
-            value.stateUpdateHandler = { [weak self, weak value] state in
-                guard let self, let value, self.ipv6Listener === value else {
-                    return
-                }
-                switch state {
-                case .waiting, .failed:
-                    value.cancel()
-                    self.ipv6Listener = nil
-                    self.retryIPv6(port: port)
-                default: break
-                }
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready: finish(false)
+            case .waiting(let error), .failed(let error):
+                if case .posix(.ECONNREFUSED) = error { finish(true) } else { finish(false) }
+            default: break
             }
-            value.newConnectionHandler = { [weak self, weak value] connection in
-                guard let self, let value, self.ipv6Listener === value else {
-                    connection.cancel()
+        }
+        connection.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + .milliseconds(500)) { finish(false) }
+    }
+
+    private func watchListener(_ fd: Int32, ipv6: Bool) -> any DispatchSourceRead {
+        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+        closingSockets += 1
+        source.setCancelHandler { [self] in
+            Darwin.close(fd)
+            closingSockets -= 1
+            finishStop()
+        }
+        source.setEventHandler { [weak self] in
+            guard let self, self.running, self.isAdmitting else { return }
+            // Bound each accept turn to preserve responsiveness under load.
+            for _ in 0..<32 {
+                let accepted = Darwin.accept(fd, nil, nil)
+                guard accepted >= 0 else {
+                    if errno == EINTR { continue }
+                    if errno == EAGAIN || errno == EWOULDBLOCK { return }
+                    if ipv6 {
+                        self.ipv6Listener?.cancel()
+                        self.ipv6Listener = nil
+                        if let port = self.boundPort { self.retryIPv6(port: port) }
+                    } else {
+                        self.listener?.cancel()
+                        self.listener = nil
+                        self.boundPort = nil
+                        self.ipv6Listener?.cancel()
+                        self.ipv6Listener = nil
+                        self.ipv6Probe?.cancel()
+                        self.ipv6Probe = nil
+                        self.ipv6Retry?.cancel()
+                        self.ipv6Retry = nil
+                        self.conflict()
+                    }
                     return
+                }
+                guard self.httpCount < 128, MiningSocket.isLoopbackPeer(accepted) else { Darwin.close(accepted); continue }
+                do { try MiningSocket.configure(accepted) }
+                catch { Darwin.close(accepted); continue }
+                self.closingSockets += 1
+                let connection = MiningSocketStream(fd: accepted, queue: self.queue) { [self] in
+                    closingSockets -= 1
+                    finishStop()
                 }
                 self.accept(connection)
             }
-            value.start(queue: queue)
-        } catch {
-            // IPv6 is best effort. The IPv4 listener remains authoritative.
-            retryIPv6(port: port)
         }
+        source.resume()
+        return source
     }
 
     private func retryIPv6(port: UInt16) {
@@ -286,19 +293,10 @@ nonisolated final class MiningListener: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + .seconds(10), execute: work)
     }
 
-    private func accept(_ connection: NWConnection) {
-        guard running, isAdmitting, httpCount < 128, case .hostPort(let host, _) = connection.endpoint,
-              (host == .ipv4(.loopback) || host == .ipv6(.loopback)) else {
-            connection.cancel()
-            return
-        }
+    private func accept(_ connection: MiningSocketStream) {
+        guard running, isAdmitting, httpCount < 128 else { connection.cancel(); return }
         let id = UUID()
         peers[id] = Peer(connection)
-        connection.stateUpdateHandler = { [weak self] state in
-            if case .failed = state { self?.remove(id) }
-            if case .cancelled = state { self?.remove(id) }
-        }
-        connection.start(queue: queue)
         timeout(id, seconds: 5)
         receive(id)
     }
@@ -343,29 +341,29 @@ nonisolated final class MiningListener: @unchecked Sendable {
             peer.body = nil
         }
         timeout(id, seconds: 30)
-        peer.connection.send(content: bytes, completion: .contentProcessed { [self] error in
+        peer.connection.send(bytes) { [self] error in
             guard peers[id] === peer else { return }
             peer.outgoingBytes -= bytes.count
-            if close || error != nil { remove(id); return }
+            if close || error != nil || (peer.inputEnded && peer.outgoingBytes == 0) { remove(id); return }
             if peer.websocket != nil {
                 // A pong completion must not disarm a later pending close/pong.
                 if peer.outgoingBytes == 0 { peer.timer?.cancel() }
                 else { timeout(id, seconds: 30) }
             }
             completion?()
-        })
+        }
     }
 
     private func receive(_ id: UUID) {
         guard let peer = peers[id], !peer.closing, !peer.busy, !peer.receiving,
               !peer.inputEnded, running, isAdmitting else { return }
         peer.receiving = true
-        peer.connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, complete, error in
+        peer.connection.receive { [weak self] data, complete, error in
             guard let self, self.peers[id] === peer else { return }
             peer.receiving = false
             peer.inputEnded = complete
             if error != nil { self.remove(id); return }
-            if let data, !data.isEmpty { self.consume(data, id: id) }
+            if !data.isEmpty { self.consume(data, id: id) }
             guard self.peers[id] === peer else { return }
             if complete, !peer.busy, peer.outgoingBytes == 0 { self.remove(id); return }
             self.receive(id)
@@ -406,7 +404,7 @@ nonisolated final class MiningListener: @unchecked Sendable {
                 peer.head = head
                 peer.headBytes = offset
                 peer.data = Data(peer.data.dropFirst(offset))
-                if let response = MiningHTTP.preliminary(head, port: listener?.port?.rawValue ?? port, sockets: socketCount) {
+                if let response = MiningHTTP.preliminary(head, port: boundPort ?? port, sockets: socketCount) {
                     if response.upgrade {
                         peer.websocket = MiningWebSocket()
                         peer.head = nil
@@ -442,7 +440,7 @@ nonisolated final class MiningListener: @unchecked Sendable {
             }
             var completedRequest = head
             completedRequest.body = decoder.body
-            completedRequest.localPort = listener?.port?.rawValue ?? port
+            completedRequest.localPort = boundPort ?? port
             let request = completedRequest
             peer.head = nil
             peer.requestBytes = request.body.count + peer.headBytes

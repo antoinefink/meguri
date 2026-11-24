@@ -1,7 +1,6 @@
 #if os(macOS)
 @testable import AppModel
 import Foundation
-import Network
 import Synchronization
 import Testing
 
@@ -214,34 +213,14 @@ import Testing
 /// cancels its own connection, so a failing test cannot leave a receive hung.
 private nonisolated enum MiningHTTPTestClient {
     static func exchange(port: UInt16, bytes: Data, followup: Data? = nil) async throws -> Data {
-        let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
-        let queue = DispatchQueue(label: "mining.http.test")
-        let ready = AsyncStream<Bool>.makeStream()
-        connection.stateUpdateHandler = { state in
-            switch state {
-            case .ready: ready.continuation.yield(true); ready.continuation.finish()
-            case .failed, .cancelled: ready.continuation.yield(false); ready.continuation.finish()
-            default: break
-            }
-        }
-        let watchdog = DispatchWorkItem { connection.cancel() }
-        queue.asyncAfter(deadline: .now() + .seconds(5), execute: watchdog)
-        defer { watchdog.cancel(); connection.cancel() }
-        connection.start(queue: queue)
-        for await started in ready.stream {
-            guard started else { throw MiningFailure("Synthetic HTTP connection did not start.") }
-            break
-        }
-        try await send(bytes, on: connection)
+        let client = MiningWireTestClient(port: port)
+        defer { client.close() }
+        try await client.start()
+        try await client.send(bytes)
         var followup = followup
         var received = Data()
         while true {
-            let part: (Data, Bool) = try await withCheckedThrowingContinuation { reply in
-                connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, complete, error in
-                    if let error { reply.resume(throwing: error) }
-                    else { reply.resume(returning: (data ?? Data(), complete)) }
-                }
-            }
+            let part = try await client.receive()
             received.append(part.0)
             if let next = followup, let boundary = received.range(of: Data("\r\n\r\n".utf8)) {
                 let head = String(decoding: received[..<boundary.lowerBound], as: UTF8.self)
@@ -251,18 +230,10 @@ private nonisolated enum MiningHTTPTestClient {
                 }.first ?? 0
                 if received.count >= boundary.upperBound + length {
                     followup = nil
-                    try await send(next, on: connection)
+                    try await client.send(next)
                 }
             }
             if part.1 { return received }
-        }
-    }
-
-    private static func send(_ bytes: Data, on connection: NWConnection) async throws {
-        try await withCheckedThrowingContinuation { (reply: CheckedContinuation<Void, any Error>) in
-            connection.send(content: bytes, completion: .contentProcessed { error in
-                if let error { reply.resume(throwing: error) } else { reply.resume() }
-            })
         }
     }
 

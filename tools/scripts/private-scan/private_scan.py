@@ -835,13 +835,15 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/MeguriSnapshotTests/SentenceMiningPaneTests.swift':
+        'c02f81d122141fe6089596b171a96e45e858b2d7a16ce39650c983fb0f37b1ec',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningPortTests.swift':
-        'eefe2339326522354c7051875c0589f607543ceae6eaf904cc9e41c709276a50',
+        '685c4dfdfbf0bf3865604d8fd3aa6c1185729b2fdeaad129c11bbe5c7c9c2ac8',
     # Complete-content PUBLIC review: cleanroom 20261124T133218Z-2230.
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningHTTP.swift':
         '18e72c0d652f3b438b3c5811cbfe83fbbfb7aff0c9ef5db68c880a534b1d8317',
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningListener.swift':
-        '95b972371bbc552b7a73a755f99ea75620be0f9c0cefb22b9a0ccaf9f1490f27',
+        '3e0f592427b061e8129a627c5b3f3f31c470de2e0574e0ebcda82767e594fd78',
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningWebSocket.swift':
         'bb35c52f2d96a87117c374f9cab80da43ce9c22c430883fc508f305a77cdaa46',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':

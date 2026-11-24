@@ -68,17 +68,15 @@ import Synchronization
             try await waitForStatus(model) { $0.hasPrefix("Listening") }
             #expect(model.port == first.port && model.status.contains(String(first.port)))
             stage = "WebSocket hello"
-            var request = URLRequest(url: URL(string: "ws://127.0.0.1:\(first.port)/anki-connect")!)
-            request.timeoutInterval = 5
-            request.setValue("chrome-extension://abcdefghijklmnopabcdefghijklmnop", forHTTPHeaderField: "Origin")
-            let socket = session.webSocketTask(with: request)
-            socket.resume()
-            defer { socket.cancel(with: .goingAway, reason: nil) }
-            try await withSocketDeadline(socket, stage: stage) {
-                try await socket.send(.string(#"{"id":1,"msg":"hello","data":{}}"#))
-            }
+            let socket = MiningWireTestClient(port: first.port)
+            defer { socket.close() }
+            try await socket.start()
+            try await socket.upgrade(port: first.port)
+            try await socket.frame(1, payload: Data(#"{"id":1,"msg":"hello","data":{}}"#.utf8))
             stage = "first ping"
-            try await miningSendPing(socket, stage: stage)
+            let firstPing = Data("before-settings".utf8)
+            try await socket.frame(9, payload: firstPing)
+            try await socket.expectFrame(10, payload: firstPing)
             let initialStatus = model.status
             stage = "no-op preserves connection"
             #expect(!model.applyPort(""))
@@ -86,7 +84,9 @@ import Synchronization
             #expect(model.applyPort(String(first.port)))
             await model.settle()
             #expect(model.status == initialStatus)
-            try await miningSendPing(socket, stage: stage) // A no-op preserves the listener.
+            let secondPing = Data("after-no-op-settings".utf8)
+            try await socket.frame(9, payload: secondPing)
+            try await socket.expectFrame(10, payload: secondPing)
 
             // A real bind conflict retains the selected preference and retires
             // the previous listener, including its WebSocket and Host policy.
@@ -96,14 +96,8 @@ import Synchronization
             try await waitForStatus(model) { $0.contains("is in use") }
             #expect(model.port == occupied.port && model.status.contains(String(occupied.port)))
             #expect(defaults.integer(forKey: "mining.port") == Int(occupied.port))
-            await #expect(throws: (any Error).self) {
-                do {
-                    try await withSocketDeadline(socket, stage: "retired WebSocket receive") { _ = try await socket.receive() }
-                } catch {
-                    #expect(!(error is MiningSocketDeadlineExceeded))
-                    throw error
-                }
-            }
+            try await socket.expectFrame(8, payload: Data([3, 233])) // Going away, 1001.
+            try await socket.expectEnd()
             try expectMiningPortClosed(first.port)
             #expect(!model.applyPort("12"))
             #expect(model.applyPort(String(occupied.port)))
@@ -250,6 +244,8 @@ import Synchronization
         try #require(ipv6 >= 0)
         var ipv6Open = true
         defer { if ipv6Open { Darwin.close(ipv6) } }
+        var yes: Int32 = 1
+        try #require(setsockopt(ipv6, Int32(IPPROTO_IPV6), IPV6_V6ONLY, &yes, socklen_t(MemoryLayout.size(ofValue: yes))) == 0)
         var address = sockaddr_in6()
         address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
         address.sin6_family = sa_family_t(AF_INET6)
