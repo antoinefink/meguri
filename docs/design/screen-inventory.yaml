@@ -546,7 +546,7 @@ screens:
 
   - id: browse.browser
     title: Browser
-    units: [U264, U264a, U270, U270a, U271, U272, U273, U275, U278, U279, U280]
+    units: [U264, U264a, U270, U270a, U271, U272, U273, U275, U276, U278, U279, U280]
     signature: true
     platforms: [iphone, ipad, mac]
     states: [empty, typical, overflow, error, loading]
@@ -568,7 +568,9 @@ screens:
       Try Again; never a syntax error), loading (previous results stay; Searching… in the status
       line). Speed: V17. Commands (U275, Mac): the row's context menu (N21.5), the Note and Card
       menus' Browse items and Edit's Select Sibling Cards (N21.8), the Delete question (V8.2),
-      undo titles after the command (V8.3); identifiers browse.menu.<command>. The inspector
+      undo titles after the command (V8.3); identifiers browse.menu.<command>. The command sheets
+      (U276, Mac; N21.6): Change Deck, Add Tags, Remove Tags, Set Due Date, Forget, each on the
+      rows it opened on; identifiers browse.sheet.<command>.*. The inspector
       (U273, Mac; Option A, 2026-11-23): no selection, one row's Note tab in one scroll view
       (preview, Deck and Type, the fields as a plain list with sound chips and thumbnails,
       empty fields, a Tags section; the formatting bar pinned at the bottom; identifiers
