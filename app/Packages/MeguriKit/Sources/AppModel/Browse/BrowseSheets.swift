@@ -45,18 +45,33 @@ public nonisolated enum BrowseSheetKind: Sendable, Hashable {
     /// `sched/set-due-date` S2, S9: the days text read, or its refusal
     /// (`BridgeError.schedOpRefused(.invalidDays)`).
     func parseDueDays(_ text: String) async throws -> DueDays
+    /// U277: a note type's name, fields in order and Sort Field, for Find
+    /// and Replace's In menu and Find Duplicates' Field menu.
+    func notetypeFields(_ id: Int64) async throws -> BrowseNotetypeFields
+}
+
+/// Reads without the note types' fields (the test hooks' samples): the
+/// menus then offer All Fields and Tags only.
+public extension BrowseSheetReads {
+    func notetypeFields(_ id: Int64) async throws -> BrowseNotetypeFields { throw BrowseCommandUnsupported() }
 }
 
 /// The sheets' reads over CoreBridge.
 @MainActor public final class CoreBrowseSheetReads: BrowseSheetReads {
     private let decks = CoreDeckService()
     private let sched = CoreSchedOpsService()
+    private let notetypes = CoreNotetypeService()
     public init() {}
     public func deckNames() async throws -> DeckNameSnapshot { try await decks.allDeckNames() }
     public func matchDeckName(_ name: String) async throws -> DeckNameMatch { try await decks.matchDeckName(name: name) }
     public func defaultDeckHasCards() async throws -> Bool { !(try await decks.studyState(deckID: 1).empty) }
     public func sheetDefaults() async throws -> BrowseSheetDefaults { try await CoreBrowseQuery.sheetDefaults() }
     public func parseDueDays(_ text: String) async throws -> DueDays { try await sched.parseDueDays(text) }
+    public func notetypeFields(_ id: Int64) async throws -> BrowseNotetypeFields {
+        let record = try await notetypes.readNotetype(id: id)
+        return BrowseNotetypeFields(id: record.id, name: record.name, fields: record.fields.sorted { $0.ord < $1.ord }.map(\.name),
+                                    sortField: Int(record.sortField))
+    }
 }
 
 /// A deck the Change Deck sheet lists: N20.1's two lines, its last name
@@ -96,6 +111,13 @@ public nonisolated enum BrowseSheetFailure: Hashable, Sendable {
     /// B7.2's refusals of the target deck.
     case deck(DeckRefusal)
     case invalidDays(InvalidDaysKind)
+    /// U277: Find and Replace would now change more notes than its preview
+    /// showed (F11); the preview shows the new count.
+    case countChanged(UInt64)
+    /// U277: the inputs cannot run (F10).
+    case findReplace(BrowseFindReplaceInvalid)
+    /// U277: a target note is damaged (F6 step 7).
+    case damaged
     /// Anything else: nothing was changed.
     case failed
 }

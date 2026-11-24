@@ -27,21 +27,23 @@ import Testing
         let every: [BrowseCommand] = [.changeDeck, .addTags, .removeTags, .flag(0), .flag(3), .suspend, .unsuspend, .bury, .unbury,
                                       .setDueDate, .forget, .changeNoteType, .editNoteType, .findReplace, .findDuplicates, .delete,
                                       .editNote]
-        // No selection: everything is disabled (Find and Replace and Find Duplicates need none, but wait for U277).
-        for command in every { #expect(!state(command, nil).enabled, "\(command) with no selection") }
+        // No selection: everything is disabled but Find and Replace and Find Duplicates, which need none (U277).
+        for command in every {
+            #expect(state(command, nil).enabled == [.findReplace, .findDuplicates].contains(command), "\(command) with no selection")
+        }
+        // Rows that cannot take a command (no list, another sheet open) disable them too.
+        #expect(!state(.findReplace, nil, available: false).enabled && !state(.findDuplicates, nil, available: false).enabled)
         // Three cards, none suspended or buried, one note type.
         let plain = facts(rows: 3)
         let built: Set<BrowseCommand> = [.flag(0), .flag(3), .suspend, .bury, .delete, .editNoteType, .changeDeck, .addTags,
-                                         .removeTags, .setDueDate, .forget]
+                                         .removeTags, .setDueDate, .forget, .findReplace, .findDuplicates]
         for command in every {
             #expect(state(command, plain).enabled == built.contains(command), "\(command) on three plain cards")
         }
         #expect(!state(.unsuspend, plain).shown && !state(.unbury, plain).shown)
         #expect(state(.suspend, plain).shown && state(.bury, plain).shown && state(.suspend, plain).count == 3)
-        // Their sheets come later: shown, disabled.
-        for later: BrowseCommand in [.changeNoteType, .findReplace, .findDuplicates] {
-            #expect(state(later, plain).shown && !state(later, plain).enabled, "\(later) waits for its sheet")
-        }
+        // Its sheet comes later (U284): shown, disabled.
+        #expect(state(.changeNoteType, plain).shown && !state(.changeNoteType, plain).enabled, "Change Note Type waits for its sheet")
         // Edit Note shows one row's note in the inspector (U273): one row only.
         #expect(state(.editNote, plain).shown && !state(.editNote, plain).enabled)
         #expect(state(.editNote, facts(rows: 1)).enabled)

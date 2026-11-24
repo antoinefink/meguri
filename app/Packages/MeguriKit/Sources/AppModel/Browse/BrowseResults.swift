@@ -272,15 +272,20 @@ public final class BrowseResults {
                 columnSet = set
                 // The mode and a header click as they are now, not as they were when the run began.
                 let mode = lastMode
-                var sort = set.sort(mode)
+                var sort = shownSort(set, mode)
                 if let override = sortOverride, override.mode == mode {
                     // A header click made while the text was read sorts this query's set.
                     sort = override.sort
-                    writeSort(sort, set: set.set, mode: mode)
-                    columnSet = set.sorted(sort, mode: mode)
-                    columnSets[set.notetypeKey] = columnSet
+                    if displayField != nil {
+                        // V10: display only while the Duplicates field shows.
+                        displaySort = sort
+                    } else {
+                        writeSort(sort, set: set.set, mode: mode)
+                        columnSet = set.sorted(sort, mode: mode)
+                        columnSets[set.notetypeKey] = columnSet
+                    }
                 }
-                issue(Request(kind: .search, text: runText, mode: mode, sort: sort, columns: set.columns(mode),
+                issue(Request(kind: .search, text: runText, mode: mode, sort: sort, columns: shownColumns(set, mode),
                               queryIsEmpty: query.isEmpty))
             } catch {
                 guard revision == queryRevision, self.epoch == epoch else { return }
@@ -312,7 +317,7 @@ public final class BrowseResults {
             return run(query, mode: mode)
         }
         let kind: Request.Kind = list.isComplete && !list.released ? .toggle(list.handle) : .search
-        issue(Request(kind: kind, text: list.text, mode: mode, sort: set.sort(mode), columns: set.columns(mode),
+        issue(Request(kind: kind, text: list.text, mode: mode, sort: shownSort(set, mode), columns: shownColumns(set, mode),
                       queryIsEmpty: list.queryIsEmpty))
     }
 
@@ -333,7 +338,11 @@ public final class BrowseResults {
             sortOverride = (mode, sort)
             return
         }
-        if let set = columnSet {
+        // V10: while the Duplicates field shows, a click sorts the rows shown only: nothing is written,
+        // and the field's order gives way to the click until the token goes.
+        if displayField != nil {
+            displaySort = sort
+        } else if let set = columnSet {
             writeSort(sort, set: set.set, mode: mode)
             columnSet = set.sorted(sort, mode: mode)
             columnSets[set.notetypeKey] = columnSet
@@ -700,6 +709,14 @@ public final class BrowseResults {
         let rows = (indexes ?? selection).filter { $0 >= 0 && $0 < list.count }
         guard !rows.isEmpty else { return nil }
         return BrowseTarget(handle: list.handle, revision: list.revision, ranges: Self.ranges(rows), mode: list.mode)
+    }
+
+    /// V9's All Found and V10's All <m> Found: every row of the results at
+    /// this revision; nil while they stream (a part of them would leave rows
+    /// out), with none, or when the list cannot take a command.
+    public func allRowsTarget() -> BrowseTarget? {
+        guard let list, list.isComplete, !list.released, !isDimmed, list.count > 0 else { return nil }
+        return BrowseTarget(handle: list.handle, revision: list.revision, ranges: [0..<UInt64(list.count)], mode: list.mode)
     }
 
     /// The session commands run in, once one is open.
@@ -1086,6 +1103,29 @@ public final class BrowseResults {
         return nil
     }
 
+    /// V10: while a Duplicates token is in the query, the results sort by
+    /// its field and show the field's column first. Display only: nothing
+    /// is written to the column sets (V2.4).
+    public var displayField: String? {
+        didSet { if displayField != oldValue { displaySort = nil } }
+    }
+    /// A header click while the Duplicates field shows (display only).
+    private var displaySort: BrowseSort?
+
+    /// The set's columns, with the Duplicates field's first while it shows.
+    private func shownColumns(_ set: ColumnSetShown, _ mode: BrowseMode) -> [String] {
+        let columns = set.columns(mode)
+        guard let field = displayField else { return columns }
+        let key = "fld:" + field
+        return [key] + columns.filter { $0 != key }
+    }
+
+    /// The set's sort, or the Duplicates field's, ascending, while it shows.
+    private func shownSort(_ set: ColumnSetShown, _ mode: BrowseMode) -> BrowseSort {
+        guard let field = displayField else { return set.sort(mode) }
+        return displaySort ?? BrowseSort(key: "fld:" + field, direction: .ascending)
+    }
+
     private func columnSet(_ notetype: Int64?) async throws -> ColumnSetShown {
         if let set = columnSets[notetype] { return set }
         let epoch = epoch
@@ -1104,8 +1144,8 @@ public final class BrowseResults {
             guard let set = try? await columnSet(notetype), self.epoch == epoch, revision == queryRevision else { return }
             columnSet = set
             guard var shown = self.list, shown.token == list.token else { return }
-            if set.columns(shown.mode) != shown.columns {
-                shown.columns = set.columns(shown.mode)
+            if shownColumns(set, shown.mode) != shown.columns {
+                shown.columns = shownColumns(set, shown.mode)
                 self.list = shown
                 store = BrowseRowStore()
                 keptCenter = nil
@@ -1113,7 +1153,8 @@ public final class BrowseResults {
                 qaFetching = []
                 readNearRows()
             }
-            if set.sort(shown.mode) != shown.sort, newest?.shown != false { sortAgain(set.sort(shown.mode)) }
+            // The field Find Duplicates sorts by stays until its token goes (V10).
+            if displayField == nil, set.sort(shown.mode) != shown.sort, newest?.shown != false { sortAgain(set.sort(shown.mode)) }
         }
     }
 

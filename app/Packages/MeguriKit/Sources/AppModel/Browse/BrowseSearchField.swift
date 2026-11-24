@@ -196,6 +196,8 @@ extension BrowseModel {
         pendingSearch = nil
         queryRevision &+= 1
         query.text = text
+        // V10: any change of the query but the Duplicates token's removal drops the previous query.
+        duplicates?.previous = nil
         suggestionScope = nil
         suggestedField = nil
         if fieldFocused { refreshSuggestions() }

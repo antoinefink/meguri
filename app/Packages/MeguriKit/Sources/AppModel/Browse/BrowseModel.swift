@@ -188,6 +188,64 @@ public final class BrowseModel {
             self.device.inspector = state
             self.saveDevice()
         }
+        // U277: Find and Replace's memory (F2), the field menus' note types, Find Duplicates' token.
+        commands.findReplaceMemory = { [weak self] in self?.device.findReplace }
+        commands.keepFindReplaceMemory = { [weak self] memory in
+            guard let self else { return }
+            self.device.findReplace = memory
+            self.saveDevice()
+        }
+        commands.notetypes = { [weak self] in self?.notetypes ?? [] }
+        commands.duplicatesFound = { [weak self] found, field in self?.showDuplicates(found, field: field) }
+    }
+
+    // MARK: Find Duplicates' token (V10)
+
+    /// The Duplicates token Find Duplicates made, its label's field and
+    /// group count, and the query it replaced.
+    public nonisolated struct Duplicates: Equatable, Sendable {
+        public let noteIDs: [Int64]
+        public let field: String
+        public let groups: Int
+        /// V10's previous query: removing the token restores it; any other
+        /// change of the query drops it.
+        public internal(set) var previous: FilterQuery?
+
+        var token: FilterToken { .value([.duplicates(noteIDs: noteIDs)], negated: false) }
+    }
+
+    /// The Duplicates token's facts while it is in the query.
+    public internal(set) var duplicates: Duplicates?
+
+    /// V10: the groups replace the query with one Duplicates token, in Notes
+    /// mode, sorted by the field with its column shown while the token is
+    /// there (display only).
+    func showDuplicates(_ found: FindDuplicatesResult, field: String) {
+        // Found again from its own token: the query before the first Find stays the one to restore.
+        // A Duplicates query whose previous one was dropped restores nothing (its label facts would be gone).
+        let previous: FilterQuery? = if let shown = duplicates, query.tokens.contains(shown.token) { shown.previous } else { query }
+        let info = Duplicates(noteIDs: found.noteIds, field: field, groups: found.groups.count, previous: previous)
+        if mode != .notes { setMode(.notes, run: false) }
+        setQuery(FilterQuery(tokens: [info.token]), duplicates: info)
+    }
+
+    /// The Duplicates token's facts as the query changes: removing the
+    /// token alone restores the previous query.
+    private func duplicatesRule(_ next: FilterQuery) -> FilterQuery {
+        guard let info = duplicates else { return next }
+        let had = query.tokens.contains(info.token), has = next.tokens.contains(info.token)
+        if had, !has {
+            duplicates = nil
+            let rest = FilterQuery(tokens: query.tokens.filter { $0 != info.token }, text: query.text)
+            if let previous = info.previous, next == rest { return previous }
+            return next
+        }
+        if !has {
+            duplicates = nil
+        } else if next != query {
+            duplicates?.previous = nil
+        }
+        return next
     }
 
     // MARK: Showing
@@ -266,7 +324,15 @@ public final class BrowseModel {
 
     // MARK: The query
 
-    func setQuery(_ next: FilterQuery) {
+    func setQuery(_ nextQuery: FilterQuery, duplicates arriving: Duplicates? = nil) {
+        let next: FilterQuery
+        if let arriving {
+            duplicates = arriving
+            next = FilterQuery(tokens: [arriving.token])
+        } else {
+            next = duplicatesRule(nextQuery)
+        }
+        results.displayField = duplicates.flatMap { next.tokens.contains($0.token) ? $0.field : nil }
         queryRevision &+= 1
         liveRun?.cancel()
         let tokensChanged = next.tokens != query.tokens
@@ -286,13 +352,18 @@ public final class BrowseModel {
     /// The no-results state's Clear Search: the empty query.
     public func clearQuery() {
         pendingSearch = nil
+        // Clear Search empties the query; it does not restore the one before Find Duplicates.
+        duplicates?.previous = nil
         setQuery(FilterQuery())
     }
 
     /// V2.1: the Cards / Notes control. The query stays (T11); the rows
     /// toggle (H11), the counts are of the new mode, and the mode is written
     /// to the collection (K6.1) and kept on the device (T14).
-    public func setMode(_ next: BrowseMode) {
+    public func setMode(_ next: BrowseMode) { setMode(next, run: true) }
+
+    /// `run` false: the caller sets a new query, which runs in the mode.
+    private func setMode(_ next: BrowseMode, run: Bool) {
         guard next != mode else { return }
         mode = next
         device.notesMode = next == .notes
@@ -300,7 +371,7 @@ public final class BrowseModel {
         counts = [:]
         valueCounts = [:]
         refreshCounts()
-        results.setMode(next, query: query)
+        if run { results.setMode(next, query: query) }
         writeMode(next)
     }
 
@@ -541,6 +612,8 @@ public final class BrowseModel {
         unwrittenMode = nil
         replacements &+= 1
         query = FilterQuery()
+        duplicates = nil
+        results.displayField = nil
         queryRevision &+= 1
         savedSearches = []; savedReadings = [:]; deckValues = [:]; notetypes = []; tags = []; flagNames = []
         counts = [:]; tagNotes = [:]; tagExpansion = [:]; tagWrites = [:]; filter = ""

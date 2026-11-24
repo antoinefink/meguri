@@ -746,7 +746,9 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
             BrowseSelectionCounts(cards: UInt64(cards.count), notes: UInt64(notes(ids, target.mode).count),
                                   suspended: UInt64(cards.filter(_suspended.contains).count),
                                   buried: UInt64(cards.filter(_buried.contains).count), decks: UInt64(_deckIDs.count),
-                                  deck: _deckIDs.count == 1 ? _deckIDs.first : nil, deckIDs: _deckIDs, notetypes: [8])
+                                  deck: _deckIDs.count == 1 ? _deckIDs.first : nil, deckIDs: _deckIDs,
+                                  notetypes: _notetypesOfNote.isEmpty ? [8]
+                                      : Array(Set(notes(ids, target.mode).compactMap { _notetypesOfNote[$0] })).sorted())
         }
     }
 
@@ -784,6 +786,80 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
         return noteTags
     }
 
+    // U277: Find and Replace and Find Duplicates over a script. A preview
+    // and a run get the target's note ids; each call is recorded.
+    struct FindReplaceCall: Equatable { let request: FindReplaceRequest; let notes: [Int64]; let confirmed: UInt64? }
+    /// Note → its note type (default: every note is note type 8).
+    var notetypesOfNote: [Int64: Int64] { get { locked { _notetypesOfNote } } set { locked { _notetypesOfNote = newValue } } }
+    private var _notetypesOfNote: [Int64: Int64] = [:]
+    /// The preview of a request on the target's notes (default: no match).
+    var previewing: @Sendable (FindReplaceRequest, [Int64]) throws -> FindReplacePreview {
+        get { locked { _previewing } } set { locked { _previewing = newValue } }
+    }
+    private var _previewing: @Sendable (FindReplaceRequest, [Int64]) throws -> FindReplacePreview = { _, notes in
+        FindReplacePreview(changed: 0, considered: UInt64(notes.count), entries: [])
+    }
+    private(set) var previewCalls: [FindReplaceCall] { get { locked { _previewCalls } } set { locked { _previewCalls = newValue } } }
+    private var _previewCalls: [FindReplaceCall] = []
+    private(set) var replaceCalls: [FindReplaceCall] { get { locked { _replaceCalls } } set { locked { _replaceCalls = newValue } } }
+    private var _replaceCalls: [FindReplaceCall] = []
+    /// The run's refusal, else it writes the preview's count of notes.
+    var replaceError: BridgeError? { get { locked { _replaceError } } set { locked { _replaceError = newValue } } }
+    private var _replaceError: BridgeError?
+    /// A run waits until `heldAction` is released or cancelled.
+    var holdsReplace = false
+    var duplicates = FindDuplicatesResult(groups: [], noteIds: [], considered: 0)
+    struct DuplicatesCall: Equatable { let field: String; let notes: [Int64]? }
+    private(set) var duplicatesCalls: [DuplicatesCall] {
+        get { locked { _duplicatesCalls } } set { locked { _duplicatesCalls = newValue } }
+    }
+    private var _duplicatesCalls: [DuplicatesCall] = []
+
+    func findReplacePreviews() async throws -> any BrowseFindReplacePreviewing { FakePreviews(session: self) }
+
+    nonisolated final class FakePreviews: BrowseFindReplacePreviewing {
+        let session: FakeSearchSession
+        init(session: FakeSearchSession) { self.session = session }
+        func preview(_ request: FindReplaceRequest, on target: BrowseTarget) async throws -> FindReplacePreview {
+            try await session.preview(request, on: target)
+        }
+    }
+
+    func preview(_ request: FindReplaceRequest, on target: BrowseTarget) async throws -> FindReplacePreview {
+        let notes = notes(try check(target), target.mode)
+        locked { _previewCalls.append(FindReplaceCall(request: request, notes: notes, confirmed: nil)) }
+        return try previewing(request, notes)
+    }
+
+    func startFindReplace(_ request: FindReplaceRequest, on target: BrowseTarget, confirmed: UInt64) async throws
+        -> BrowseRunning<FindReplaceResult> {
+        let notes = notes(try check(target), target.mode)
+        let run: @Sendable () async throws -> FindReplaceResult = {
+            self.locked { self._replaceCalls.append(FindReplaceCall(request: request, notes: notes, confirmed: confirmed)) }
+            if let error = self.replaceError { throw error }
+            let changed = try self.previewing(request, notes).changed
+            let summary = Self.result(affected: 0, considered: 0, undo: changed > 0 ? "Find and Replace" : nil).summary
+            return FindReplaceResult(affected: changed, considered: UInt64(notes.count), summary: summary)
+        }
+        guard holdsReplace else { return .finishing(run) }
+        let held = heldAction.running {
+            let affected = Int(try await run().affected)
+            return Self.result(affected: affected, considered: 0, undo: nil)
+        }
+        return BrowseRunning(progress: held.progress, cancel: held.cancel, result: {
+            let done = try await held.result()
+            return FindReplaceResult(affected: done.affected, considered: UInt64(notes.count),
+                                     summary: Self.result(affected: 0, considered: 0, undo: "Find and Replace").summary)
+        })
+    }
+
+    func startFindDuplicates(field: String, on target: BrowseTarget?) async throws -> BrowseRunning<FindDuplicatesResult> {
+        let notes = try target.map { notes(try check($0), $0.mode) }
+        locked { _duplicatesCalls.append(DuplicatesCall(field: field, notes: notes)) }
+        let found = duplicates
+        return .finishing { found }
+    }
+
     func start(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BrowseRunningAction {
         guard holdsActions else { return .finishing { try await self.run(action, on: target) } }
         _ = try check(target)
@@ -803,7 +879,7 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
         return Self.result(affected: notes.count, considered: notes.count, undo: "Delete Note")
     }
 
-    private static func result(affected: Int, considered: Int, undo: String?) -> BulkActionResult {
+    static func result(affected: Int, considered: Int, undo: String?) -> BulkActionResult {
         BulkActionResult(affected: UInt64(affected), considered: UInt64(considered), cardsRemoved: nil,
                          summary: MutationSummary(seq: 500, generation: 1, undoName: undo,
                                                   changes: ChangeSet(wholeCollection: false, source: .userUndoable, cards: [], notes: [],
