@@ -120,6 +120,9 @@ public final class StatsPageModel {
     /// Counts each box's writes, so a box written off the main actor is published only when no
     /// newer write came first.
     @ObservationIgnored private var writes: [StatsBoxID: UInt64] = [:]
+    /// The boxes whose latest write runs off the main actor and has not published yet: the
+    /// status stays Updating until they show what the request read.
+    @ObservationIgnored private var unpublished: Set<StatsBoxID> = []
     /// The presenters of the sets shown, kept while the inputs they were made for hold: a set's
     /// axis, formatters and streaks are made once, not on every part.
     @ObservationIgnored private var presenters: [PresenterKey: StatsPresenter] = [:]
@@ -357,6 +360,9 @@ public final class StatsPageModel {
     }
 
     /// A click outside every chart: no box keeps a pinned bar (S8.3).
+    /// Whether any box has a pinned selection (Esc on the page clears it, S8.3).
+    public var hasPin: Bool { selections.values.contains { $0.pinned } }
+
     public func unpinAll() {
         let next = selections.filter { !$0.value.pinned }
         if next != selections { selections = next }
@@ -661,11 +667,14 @@ public final class StatsPageModel {
             writes[id, default: 0] &+= 1
             switch plan(id) {
             case let .done(content):
+                unpublished.remove(id)
                 next[id] = content
                 carrySelection(id, to: content)
             case let .job(job) where offMain:
+                unpublished.insert(id)
                 jobs.append(job)
             case let .job(job):
+                unpublished.remove(id)
                 let content = job.run()
                 next[id] = content
                 carrySelection(id, to: content)
@@ -692,7 +701,14 @@ public final class StatsPageModel {
 
     private func publish(_ written: [(StatsBoxID, StatsBoxContent)], stamps: [StatsBoxID: UInt64]) {
         var next = boxes
-        for (id, content) in written where writes[id, default: 0] == stamps[id] {
+        for (id, written) in written where writes[id, default: 0] == stamps[id] {
+            unpublished.remove(id)
+            var content = written
+            // Progress that arrived while the box was written stays: a loading box never goes
+            // back to the fraction it had when the write began.
+            if case .loading = content.phase, case let .loading(shown)? = boxes[id]?.phase {
+                content.phase = .loading(fraction: shown)
+            }
             next[id] = content
             carrySelection(id, to: content)
         }
@@ -759,7 +775,7 @@ public final class StatsPageModel {
 
     private func statusText(_ format: StatsChartFormat) -> String? {
         let shown = StatsBoxID.allCases.compactMap { boxes[$0]?.source }
-        if running != nil, !shown.isEmpty { return text.updating }
+        if running != nil || !unpublished.isEmpty, !shown.isEmpty { return text.updating }
         if ended == .completed, let completedAt, timers.now().timeIntervalSince(completedAt) < Self.justNowSpan {
             return text.updatedJustNow
         }

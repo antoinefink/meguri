@@ -226,7 +226,8 @@ struct StatsChartPlot: View {
             .onAppear { if !data.bins.isEmpty { lastReadyBins = data.bins } }
             // Losing the focus never unpins (Tab moves on and the pin stays, 2026-11-24): a click
             // on another chart pins there and unpins this one, a click on the page outside every
-            // chart unpins all, Esc clears (S8.3).
+            // chart unpins all, Esc clears: this plot's pin here, a pin focus has left from the
+            // page (S8.3).
             .accessibilityElement(children: .contain)
             .accessibilityLabel(summary)
             // The pinned period (S8.3), as the callout names it.

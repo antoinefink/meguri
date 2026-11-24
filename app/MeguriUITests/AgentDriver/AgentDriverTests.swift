@@ -671,8 +671,9 @@ final class AgentDriver {
             return
         }
         #endif
-        // A swipe moves the finger in its direction; a scroll moves the
-        // content in its direction, so the finger goes the other way.
+        // A swipe moves the finger in its direction; a scroll moves the view
+        // through the content in its direction (down shows what is below), so
+        // the finger goes the other way.
         let dx = element.frame.width * 0.3, dy = element.frame.height * 0.3
         var vector: CGVector
         switch direction {

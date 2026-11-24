@@ -246,6 +246,13 @@ private struct StatsPageScroll: View {
                 // gesture and wins over this one, and buttons and controls keep theirs.
                 .contentShape(Rectangle())
                 .onTapGesture { model.unpinAll() }
+                // Esc from wherever focus is on the page clears a pin focus has left (Tab keeps
+                // it): a plot's own Esc handles its own selection first.
+                .onKeyPress(.escape) {
+                    guard model.hasPin else { return .ignored }
+                    model.unpinAll()
+                    return .handled
+                }
                 #endif
                 .scrollTargetLayout()
             }

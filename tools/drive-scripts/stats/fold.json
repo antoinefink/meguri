@@ -45,7 +45,7 @@
   {
    "scroll": {
     "id": "stats.page.content",
-    "direction": "up"
+    "direction": "down"
    }
   },
   {
@@ -112,7 +112,7 @@
   {
    "scroll": {
     "id": "stats.page.content",
-    "direction": "up"
+    "direction": "down"
    }
   },
   {
@@ -364,7 +364,7 @@
   {
    "scroll": {
     "id": "stats.page.content",
-    "direction": "up"
+    "direction": "down"
    }
   },
   {
@@ -431,7 +431,7 @@
   {
    "scroll": {
     "id": "stats.page.content",
-    "direction": "up"
+    "direction": "down"
    }
   },
   {
