@@ -1,0 +1,462 @@
+{
+ "name": "f2-fold",
+ "description": "Statistics follow-up captures",
+ "platforms": [
+  "ios"
+ ],
+ "steps": [
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "route": "stats/chart/knowledge-over-time"
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-knowledge-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-knowledge-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "scroll": {
+    "id": "stats.page.content",
+    "direction": "up"
+   }
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-knowledge-below-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-knowledge-below-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "route": "stats/chart/card-counts"
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-cards-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-cards-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "scroll": {
+    "id": "stats.page.content",
+    "direction": "up"
+   }
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-cards-below-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-cards-below-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "route": "stats/chart/answers"
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-answers-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-answers-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "route": "stats/chart/retrievability"
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-memory-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-memory-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "route": "stats/chart/activity/1m"
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-1m-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-1m-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "route": "stats/chart/activity/3m"
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-3m-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-3m-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "route": "stats/chart/activity/6m"
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-6m-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-6m-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "route": "stats/chart/activity/1y"
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-1y-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-1y-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "scroll": {
+    "id": "stats.page.content",
+    "direction": "up"
+   }
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-1y-below-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-1y-below-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "launch": {
+    "locale": "en_US",
+    "animations": false,
+    "route": "stats/chart/activity"
+   }
+  },
+  {
+   "wait": {
+    "id": "stats.page.content",
+    "timeout": 40
+   }
+  },
+  {
+   "do": "sleep:3"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-all-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-all-dark"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "scroll": {
+    "id": "stats.page.content",
+    "direction": "up"
+   }
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "do": "appearance:light"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-all-below-light"
+  },
+  {
+   "do": "appearance:dark"
+  },
+  {
+   "do": "sleep:1.5"
+  },
+  {
+   "snapshot": "fold-activity-all-below-dark"
+  },
+  {
+   "do": "appearance:light"
+  }
+ ]
+}

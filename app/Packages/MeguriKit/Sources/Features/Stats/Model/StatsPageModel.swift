@@ -678,10 +678,7 @@ public final class StatsPageModel {
             figures[id] = stripFigure(id)
         }
         if figures != strip { strip = figures }
-        let line = subtitleText()
-        if line != subtitle { subtitle = line }
-        let short = subtitleText(compact: true)
-        if short != compactSubtitle { compactSubtitle = short }
+        updateSubtitles()
     }
 
     /// Writes the jobs' boxes off the main actor, then publishes those no newer write superseded.
@@ -700,6 +697,15 @@ public final class StatsPageModel {
             carrySelection(id, to: content)
         }
         if next != boxes { boxes = next }
+        // The subtitle's status reads what the boxes show (S10.4's "Updating…").
+        updateSubtitles()
+    }
+
+    private func updateSubtitles() {
+        let line = subtitleText()
+        if line != subtitle { subtitle = line }
+        let short = subtitleText(compact: true)
+        if short != compactSubtitle { compactSubtitle = short }
     }
 
     private func carrySelection(_ id: StatsBoxID, to content: StatsBoxContent) {
