@@ -497,16 +497,16 @@ struct DeckImportContent: View {
                 .accessibilityIdentifier("\(Self.id).more.\(line.id)")
             }
         } label: {
+            // The Mac merges a disclosure label's children: one identifier for the row.
             HStack {
                 Text(verbatim: line.text)
-                    .accessibilityIdentifier("\(Self.id).line.\(line.id)")
                 Spacer()
                 if line.showable, presentation.canShowInBrowse {
                     Button { actions.showLine(line.categories) } label: { Text(verbatim: "Show in Browse") }
                         .buttonStyle(.borderless)
-                        .accessibilityIdentifier("\(Self.id).show.\(line.id)")
                 }
             }
+            .accessibilityIdentifier("\(Self.id).line.\(line.id)")
         }
         .onChange(of: expanded.contains(line.id), initial: true) { _, open in
             if open { line.categories.forEach(actions.loadLog) }
