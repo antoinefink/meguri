@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Review actions": {
+      "comment": "Help and accessibility label of the icon-only macOS review toolbar menu (N20.8).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review actions"
+          }
+        }
+      }
+    },
     "Again": {
       "localizations": {
         "en": {

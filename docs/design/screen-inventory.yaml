@@ -287,7 +287,8 @@ screens:
     references: [progress-header, floating-controls]
     purpose: >-
       The card's question side in quiet corners (native-interface-contract N3, N11.1, N11.2, N16): Back
-      to Decks at the upper left, touch Undo and More (N20.8) at the upper right with the sync status icon only
+      to Decks at the upper left, touch Undo and More or the Mac's icon-only ellipsis Review actions
+      menu (N20.8, user-approved 2026-11-24) at the upper right, with the sync status icon only
       while sync needs the person, the card scrolling between them, a reserved bottom action region
       holding the centred Show Answer button, floating over the card, which runs on under it (N16.9), and the
       thin grey progress bar on the screen's bottom edge.
@@ -320,9 +321,13 @@ screens:
     variants: pairwise
     references: [toolbar]
     purpose: >-
-      The review's More menu (native-interface-contract N20.8; touch: the ellipsis button labelled
-      More beside Undo; Mac: the Card menu and the card's context menu, no toolbar control), in
-      groups with system symbols: Edit Note | Bury Card, Suspend Card. Later card actions slot into
+      The review's native menu (native-interface-contract N20.8; touch: the ellipsis button labelled
+      More beside Undo; Mac: a visible icon-only ellipsis toolbar Menu at the upper right, with localized
+      Review actions help and accessibility label, user-approved 2026-11-24), in shared
+      groups with system symbols and shared enablement: Edit Note | Bury Card, Suspend Card.
+      The Mac Card menu and card context menu remain, with Edit Note ⌘E, Bury Card ⌘J and Suspend Card
+      ⇧⌘J. The toolbar menu shows keys only where supported without duplicate shortcut handlers;
+      SwiftUI currently omits them there to preserve keyboard ownership (N4). Later card actions slot into
       groups. Bury Card and Suspend Card act on the card on screen, the next card appears, no banner
       or toast; VoiceOver announces Card Buried or Card Suspended, and Undo names the step (Undo
       Bury Card). No way to unsuspend a card yet.
@@ -356,8 +361,8 @@ screens:
       Edit the note of the card under review without leaving the session (native-interface-contract
       N20.8, review/edit-current; decided 2026-11-20): round 5's Add Note form titled "Edit Note",
       with Cancel and Done and the subtitle "<deck> · <note type>", which cannot be changed here.
-      Opened from the touch review's More menu (N20.8), Card › Edit Note (⌘E) and the card's
-      context menu on Mac, and E. iPhone and the Duo folded or held tall: a sheet; the Duo held
+      Opened from the touch review's More menu or Mac Review actions toolbar menu (N20.8),
+      Card › Edit Note (⌘E) and the card's context menu on Mac, and E. iPhone and the Duo folded or held tall: a sheet; the Duo held
       wide: the whole screen with a centred column; iPad: a page sheet; Mac: a panel over the card.
       Changes are a draft: Done saves them in one note update and returns to the same card,
       re-rendered; Cancel asks "Discard changes?" when there is a change. Error: a failed save keeps
