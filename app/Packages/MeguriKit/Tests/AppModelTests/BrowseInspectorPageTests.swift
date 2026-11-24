@@ -87,7 +87,8 @@ import WebKit
             #expect(try await host.webView.callAsyncJavaScript(
                 "return document.querySelectorAll('section')[1].hidden;", contentWorld: .page) as? Bool == true)
         }
-        #expect(draft.notetype.fields.allSatisfy(\.collapsed), "the note type's setting is never rewritten")
+        let allFieldsCollapsed: Bool = draft.notetype.fields.allSatisfy(\.collapsed)
+        #expect(allFieldsCollapsed, "the note type's setting is never rewritten")
     }
 
     @Test func mediaNamesArePlainFileNamesOnly() throws {
