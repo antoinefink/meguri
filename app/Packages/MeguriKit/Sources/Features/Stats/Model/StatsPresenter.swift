@@ -8,7 +8,7 @@ import Foundation
 nonisolated struct StatsPresenter {
     /// What a box is when its set gives no value for the period yet (All's `allTime` ranges in a
     /// `last12Months` set): the model shows its progress.
-    enum Outcome {
+    enum Outcome: Sendable {
         case content(StatsBoxContent)
         case unavailable
     }
