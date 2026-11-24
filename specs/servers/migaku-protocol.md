@@ -15,12 +15,18 @@ This file owns the route table, the origin policy, the CORS headers, preflight, 
 
 ## P1. Terms
 
-- **Migaku server**: the listener set of `servers/host-security` for the Migaku integration. Its port is always 44432; no setting changes it (R1675).
+- **Migaku server**: the listener set of `servers/host-security` for the Migaku integration. Its default port is 44432. P1.1 covers changing it in the macOS integration.
 - **Origin value**: the value of the request's `Origin` header, exactly as sent (no trimming). A request has **no Origin** when it has no `Origin` header at all.
 - **Path**: the path part of the request target, before any `?`, compared byte for byte: no percent-decoding, no case folding, no removal of a trailing `/`. An absolute-form target (`http://127.0.0.1:44432/srs-check`) has the path of its URL. The query is ignored everywhere in this file.
 - **Available**: the collection is available as `engine/lifecycle` L6 defines it for the local servers: the lifecycle state is `Ready` and the long-operation slot is free, or held only by a `CloudAdopt` that has not entered its exclusive phase. Every other case is unavailable: any other lifecycle state (`NoCollection`, `Opening`, `Upgrading`, `ExclusiveBusy`, `Failed{reason}`, `Failed{Corrupt}`) and a slot held by anything else, Check Database included. This is the same test that `servers/migaku-receive` P14 uses for a busy collection.
 - **JSON reply**: a reply whose body is one JSON value encoded in UTF-8, with `Content-Type: application/json; charset=UTF-8`. Meguri writes compact JSON (no white space between tokens), members in the order this file lists them. Clients and transcripts compare JSON values, not bytes.
 - **Error shape**: the JSON reply body `{"success":false,"error":<message>}`. The message strings of this file are interface strings (P8.2).
+
+### P1.1 Port setting for the Mac mining integration
+
+The Mac mining integration serves its Migaku routes and its supported AnkiConnect actions on one loopback port. The default is 44432, the address used by the published Migaku extension. A person using a client with a configurable address can save another port from 1024 through 65535, including 8765. This user decision on 2026-11-24 supersedes the fixed Migaku port in R1675 and the separate-port reservation of `servers/host-security` H4.4 for this listener.
+
+Settings keeps this value on the Mac across restarts. An invalid edit leaves the saved port and the running listener in place. Applying a different valid port while receiving is enabled retires the old listener, finishes admitted writes and starts listening on the new port. The Host check uses the active port. A bind failure shows the selected port and permits another edit. Applying a port while disabled keeps the integration off.
 
 ## P2. Requests in order
 
