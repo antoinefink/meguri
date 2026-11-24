@@ -69,24 +69,28 @@ extension ReviewCollectionStartupTests {
             webSocket = socket; socket.resume()
             try await socket.send(.string(#"{"id":1,"msg":"hello","data":{}}"#))
             try await socket.sendPing()
-            let raw = #"{"sentence":"A synthetic sentence.","translation":"Une phrase synthétique.","sentenceAudio":[{"id":"mining-audio","input":"data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}],"images":[{"id":"mining-image","src":"data:image/png;base64,iVBORw0KGgo="}]}"#
+            let sentence = "<span title='Study > draft' class='term emphasis' lang='en' dir='ltr'><strong>A synthetic sentence.</strong> H<sub>2</sub>O</span>"
+            // Complete self-contained media: eight silent PCM samples and a gray pixel.
+            let audio = "data:audio/wav;base64,UklGRiwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQgAAACAgICAgICAgA=="
+            let raw = #"{"sentence":"\#(sentence)","translation":"Une phrase synthétique.","sentenceAudio":[{"id":"mining-audio","input":"\#(audio)"}],"images":[{"id":"mining-image","src":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNoaGgAAAMEAYFL09IQAAAAAElFTkSuQmCC"}]}"#
             let created = try await miningExchange(port: bound, method: "POST", path: "/receive", body: Data(raw.utf8))
             #expect(created.status == 200)
             let id = try #require((created.json?["id"] as? NSNumber)?.int64Value)
             let note = try await CoreNoteService().readNote(id: id)
-            #expect(note.notetypeId == imported.id && note.fields[0] == "A synthetic sentence." && note.fields[1] == "Une phrase synthétique.")
-            #expect(note.fields[2].contains("[sound:") && note.fields[2].contains(".m4a]") && note.fields[3].contains(".png\">"))
+            #expect(note.notetypeId == imported.id && note.fields[1] == "Une phrase synthétique.")
+            #expect(Array(note.fields[0].utf8) == Array(sentence.utf8))
+            #expect(note.fields[2].contains("[sound:") && note.fields[2].contains(".wav]") && note.fields[3].contains(".png\">"))
             let cards = try await CoreNoteService().noteCards(noteId: id)
             #expect(cards.count == 1 && cards.first?.deckId == deck.id)
             let names = try await CoreMediaService().trackedNames()
-            #expect(names.names.contains { $0.name.hasSuffix(".m4a") } && names.names.contains { $0.name.hasSuffix(".png") })
+            #expect(names.names.contains { $0.name.hasSuffix(".wav") } && names.names.contains { $0.name.hasSuffix(".png") })
             let retry = try await miningExchange(port: bound, method: "POST", path: "/receive", body: Data(raw.utf8))
             #expect((retry.json?["id"] as? NSNumber)?.int64Value == id)
             let conflict = try await miningExchange(port: bound, method: "POST", path: "/receive", body: Data(raw.replacingOccurrences(of: "Une phrase synthétique.", with: "Different translation.").utf8))
             #expect(conflict.status == 400 && (conflict.json?["error"] as? String)?.contains("Conflicting retry") == true)
             let untrusted = try await miningExchange(port: bound, method: "POST", path: "/receive", body: Data(raw.utf8), origin: "https://evil.example")
             #expect(untrusted.status == 403)
-            let unsupported = try await miningExchange(port: bound, method: "POST", path: "/receive", body: Data(raw.replacingOccurrences(of: "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t", with: "http://127.0.0.1/never-fetch").utf8))
+            let unsupported = try await miningExchange(port: bound, method: "POST", path: "/receive", body: Data(raw.replacingOccurrences(of: audio, with: "http://127.0.0.1/never-fetch").utf8))
             #expect(unsupported.status == 400 && (unsupported.json?["error"] as? String)?.contains("remote URLs are not fetched") == true)
             // Compatibility envelope uses selected destination, never a
             // general collection-management or unrestricted write API.

@@ -55,11 +55,12 @@ import Testing
         #expect(MiningFieldMap.defaults(typeName: "Migaku Japanese Custom", fields: ["Is Vocabulary Card", "Is Audio Card"]) == ["", "x"])
         #expect(MiningFieldMap.defaults(typeName: "Migaku German Custom", fields: ["Is Vocabulary Card", "Is Audio Card"]) == ["x", "x"])
         #expect(MiningFieldMap.defaults(typeName: "Unspecified", fields: ["Is Vocabulary Card", "Is Audio Card"]) == ["", ""])
-        let raw = #"{"sentence":"A synthetic sentence.","translation":"A translation.","sentenceAudio":[{"id":"a","input":"data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}],"images":[{"id":"i","src":"data:image/png;base64,iVBORw0KGgo="}]}"#
+        // Complete synthetic media: eight silent PCM samples and one gray pixel.
+        let raw = #"{"sentence":"A synthetic sentence.","translation":"A translation.","sentenceAudio":[{"id":"a","input":"data:audio/wav;base64,UklGRiwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQgAAACAgICAgICAgA=="}],"images":[{"id":"i","src":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNoaGgAAAMEAYFL09IQAAAAAElFTkSuQmCC"}]}"#
         let payload = try MiningPayload(Data(raw.utf8))
         let type = Self.type(["Front", "Back"])
         let (fields, media) = try payload.fields(for: type)
-        #expect(media.count == 2 && media[0].name.hasSuffix(".m4a") && media[1].name.hasSuffix(".png"))
+        #expect(media.count == 2 && media[0].name.hasSuffix(".wav") && media[1].name.hasSuffix(".png"))
         #expect(fields[0].contains("[sound:__meguri_mining_attachment_0__]") && fields[0].contains("<img src=\"__meguri_mining_attachment_1__\">"))
         #expect(fields[1] == "A translation.")
         for source in ["http://127.0.0.1/private", "https://example.org/audio.mp3", "file:///secret", "data:audio/mp4;base64,!"] {
@@ -70,6 +71,11 @@ import Testing
         for sentence in [
             "CSS vocabulary: url(), @import, src= and background=.",
             "A comparison: 2 < 3 and 5 > 4.",
+            #"<span title="study">word</span>"#,
+            #"<SPAN title = "Study > draft < final; url(), @import, src=" CLASS='term emphasis' lang=ja dir="auto">語</SPAN>"#,
+            "<p lang='en'><strong class='focus'>Useful</strong> <em title='a phrase'>formatting</em><br />H<sub>2</sub>O</p>",
+            "<span\nclass=term\tlang='fr' dir=auto title=''>café &amp; thé</span>",
+            "<abbr title='for example'>e.g.</abbr> <kbd>Return</kbd> <bdi lang=ar>كلمة</bdi>",
             "<p>A <strong>useful</strong> <em>sentence</em>.<br>H<sub>2</sub>O</p>",
             "<ruby>語<rt>ご</rt></ruby><ul><li><code>url()</code></li></ul>"
         ] {
@@ -77,10 +83,14 @@ import Testing
             let payload = try MiningPayload(data)
             let (fields, media) = try payload.fields(for: Self.type(["Front", "Back"]))
             #expect(fields == [sentence, ""])
+            #expect(Array(fields[0].utf8) == Array(sentence.utf8))
             #expect(media.isEmpty)
         }
-        // Benign unsupported markup exercises the attribute/resource boundary.
-        for sentence in ["<span title=\"study\">word</span>", "<img>"] {
+        // Empty unsupported elements/attributes and incomplete tags exercise
+        // refusal without executable content or an external resource.
+        for sentence in ["<img>", "<audio></audio>", "<script></script>", "<style></style>",
+                         "<span style=''>word</span>", "<span src=''>word</span>",
+                         "<span title='study>word</span>", "<span title=study", "</span title='study'>"] {
             let data = try JSONSerialization.data(withJSONObject: ["sentence": sentence])
             #expect(throws: MiningFailure.self) { try MiningPayload(data) }
         }

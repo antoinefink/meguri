@@ -36,7 +36,7 @@ nonisolated struct MiningPayload: Sendable {
                 throw MiningFailure("Reserved media reference in field text.")
             }
             guard !Self.hasUnsafeMarkup(string) else {
-                throw MiningFailure("Unsupported card HTML. Use formatting without attributes and send embedded media separately.")
+                throw MiningFailure("Unsupported card HTML. Use inert study formatting and send embedded media separately.")
             }
             text[key] = string
         }
@@ -65,15 +65,37 @@ nonisolated struct MiningPayload: Sendable {
 
     static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
     static func hasUnsafeMarkup(_ text: String) -> Bool {
-        // An attribute-free subset of HTML text formatting, lists and ruby.
-        // Validate whole tags, rather than interpreting attributes or CSS.
-        // Prose (including CSS vocabulary) is never scanned for resource words.
-        let allowed = #"(?i)^</?(?:b|strong|i|em|u|s|strike|sub|sup|mark|small|span|div|p|ul|ol|li|blockquote|pre|code|ruby|rt|rp|br)\s*/?>$"#
-        var remaining = text[...]
-        while let start = remaining.range(of: #"<[A-Za-z/!?]"#, options: .regularExpression) {
-            remaining = remaining[start.lowerBound...]
-            guard let end = remaining.firstIndex(of: ">") else { return true }
-            let tag = String(remaining[...end])
+        // Recognize inert formatting only; never rewrite accepted field text (P7).
+        // Attribute values are opaque text, including CSS vocabulary and quoted
+        // angle brackets. No style, event or resource-bearing attributes enter.
+        let names = "b|strong|i|em|u|s|strike|sub|sup|mark|small|span|div|p|ul|ol|li|blockquote|pre|code|ruby|rt|rp|br|abbr|bdi|bdo|cite|del|dfn|ins|kbd|q|samp|var|wbr"
+        let space = #"[\t\n\f\r ]"#
+        let value = #"(?:"[^"\x00]*"|'[^'\x00]*'|[^\t\n\f\r "'`=<>\x00]+)"#
+        let attribute = space + "+(?:title|class|lang|dir)" + space + "*=" + space + "*" + value
+        let allowed = "(?i)^(?:<(?:" + names + ")(?:" + attribute + ")*" + space
+            + "*/?>|</(?:" + names + ")" + space + "*>)$"
+        var remaining = text.utf8[...]
+        while let start = remaining.firstIndex(of: 60) { // <
+            remaining = remaining[start...]
+            let next = remaining.dropFirst().first
+            guard let next else { break }
+            guard (65...90).contains(next) || (97...122).contains(next) || [47, 33, 63].contains(next) else {
+                remaining = remaining.dropFirst()
+                continue // Comparisons and other ordinary prose.
+            }
+            // A tag ends only at an unquoted >. Scan UTF-8 once so markup
+            // punctuation is recognized even beside combining characters.
+            var quote: UInt8?
+            var end: String.UTF8View.Index?
+            for index in remaining.indices {
+                let byte = remaining[index]
+                if let delimiter = quote {
+                    if byte == delimiter { quote = nil }
+                } else if byte == 34 || byte == 39 { quote = byte }
+                else if byte == 62 { end = index; break }
+            }
+            guard let end else { return true }
+            let tag = String(decoding: remaining[...end], as: UTF8.self)
             guard tag.range(of: allowed, options: .regularExpression) != nil else { return true }
             remaining = remaining[remaining.index(after: end)...]
         }

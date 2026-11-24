@@ -845,9 +845,9 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningWebSocket.swift':
         'bb35c52f2d96a87117c374f9cab80da43ce9c22c430883fc508f305a77cdaa46',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':
-        '5a6cb94839c6a2f9fe72b2a13b1790d6c47af69605d8d79b1b680c3dc92b32dd',
+        'e5196ad44e477a7515a3254570adf33c2a517731c89ac895fd9ac3c9855fe46c',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningTests.swift':
-        'c0cb5294af208482f0e4b1b89a060b2de3dced6492941addca24818d96c897b7',
+        'd06b00f0f3c4e00b36c9c56719695771bfaad50052dbebdd7133f569d9f8841b',
     'core/crates/meguri-ffi/src/notes.rs':
         'e9fdf9804387494879a07f43a8cf21fa59343f0a7f41d1759512aee5315d61ae',
     # Complete-content PUBLIC review: Mac heatmap history, 2026-11-24.
