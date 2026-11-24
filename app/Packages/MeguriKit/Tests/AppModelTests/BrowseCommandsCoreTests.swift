@@ -284,20 +284,17 @@ extension ReviewCollectionStartupTests {
             await waitFor { duplicates.field == "Front" }
             duplicates.confirm()
             await waitFor { browse.duplicates != nil && results.list?.count == 2 && results.list?.isComplete == true }
+            #expect(browse.duplicates != nil, "\(String(describing: duplicates.failure)) \(String(describing: duplicates.found)) \(duplicates.phase)")
             #expect(browse.mode == .notes && browse.duplicates?.groups == 1 && browse.duplicates?.field == "Front")
             #expect(results.list?.columns.first == "fld:Front" && results.list?.sort.key == "fld:Front")
-            browse.removeToken(0)
-            #expect(browse.query == before && browse.duplicates == nil)
-            await waitFor { results.list?.count == 3 && results.list?.isComplete == true && row(2) != nil }
-
             // A list that moved on while the sheet was open: refused, nothing written.
             await pick([0])
             let stale = try await open()
             stale.find = "qzdupe"
             stale.replace = "qzother"
             await waitFor { stale.confirmCount == 1 }
-            _ = try await CoreNoteService().startDeleteNotes(ids: [try #require(row(2)?.noteID)]).value()
-            await waitFor { results.list?.count == 2 }
+            _ = try await CoreNoteService().startDeleteNotes(ids: [try #require(row(1)?.noteID)]).value()
+            await waitFor { results.list?.count == 1 }
             let named = undo.undoName
             stale.confirm()
             await waitFor { stale.failure != nil }
@@ -305,6 +302,11 @@ extension ReviewCollectionStartupTests {
             #expect(undo.undoName == named, "no step recorded")
             #expect(shows(0, "qzdupe"))
             stale.cancel()
+
+            // Removing the Duplicates token restores the query before Find (now one note finds it).
+            browse.removeToken(0)
+            #expect(browse.query == before && browse.duplicates == nil && results.displayField == nil)
+            await waitFor { results.list?.count == 1 && results.list?.isComplete == true && shows(0, "plorvex c") }
         }
     }
 

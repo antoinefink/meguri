@@ -343,8 +343,12 @@ public final class BrowseFindReplaceSheet: Identifiable {
         guard phase == .editing else { return }
         preview = .counting
         guard let target, let previews else { return }
-        let token = previewToken, request = request
+        let token = previewToken, request = request, previous = previewTask
         previewTask = Task { [weak self] in
+            // One preview at a time, in order: the core supersedes by the order starts reach it, so a
+            // start overtaken by an older one would be cancelled by it and leave nothing shown.
+            await previous?.value
+            guard !Task.isCancelled, let self, previewToken == token else { return }
             let state: BrowseFindReplacePreviewState
             do {
                 state = .ready(try await previews.preview(request, on: target))
@@ -352,7 +356,7 @@ public final class BrowseFindReplaceSheet: Identifiable {
                 guard let next = Self.state(error) else { return }
                 state = next
             }
-            guard let self, previewToken == token, !Task.isCancelled else { return }
+            guard previewToken == token, !Task.isCancelled else { return }
             if case .ready(let read) = state {
                 previewed = (request, target)
                 shownPreview = read
