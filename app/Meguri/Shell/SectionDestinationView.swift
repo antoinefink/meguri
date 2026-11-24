@@ -1,5 +1,6 @@
 import AppModel
 import Browse
+import CoreBridge
 import DeckOptions
 import DesignSystem
 import Editor
