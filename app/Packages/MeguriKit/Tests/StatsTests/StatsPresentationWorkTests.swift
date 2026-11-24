@@ -25,6 +25,79 @@ import Testing
         return table.total
     }
 
+    @Test func preferenceNotificationsRefreshWindowsAndPendingReadsWhileWarmNavigationDoesNoWork() async throws {
+        let center = NotificationCenter()
+        var calendar = Fixture.calendar()
+        var locale = Fixture.locale
+        var preferenceReads = 0
+        base.kept.open(collection: "collection-a")
+        base.kept.keep(Fixture.set(history: .allHistory,
+                                  values: [.cardCounts: .cardCounts(Fixture.cardCounts(new: 12_345))]))
+        func make(fixed: Bool = false) -> StatsPageModel {
+            let model = StatsPageModel(
+                service: base.service, kept: base.kept, store: StatsSelectionStore(defaults: base.defaults),
+                selection: StatsPageSelection(deck: nil, period: .oneYear), timers: base.timers,
+                calendar: fixed ? Fixture.calendar() : .autoupdatingCurrent,
+                locale: fixed ? Fixture.locale : .autoupdatingCurrent, notificationCenter: center,
+                currentFormatting: {
+                    preferenceReads += 1
+                    return (calendar, locale)
+                })
+            model.decksChanged(Fixture.nodes())
+            model.collectionOpened(identity: "collection-a")
+            return model
+        }
+        let model = make()
+        let hiddenWindow = make()
+        let fixed = make(fixed: true)
+        var temporary: StatsPageModel? = make()
+        weak var released = temporary
+        temporary = nil
+        #expect(released == nil, "notification observers never retain a closed window")
+        let page = StatsPage(model: model)
+        let builds = model.boxBuilds
+        let fixedBoxes = fixed.boxes
+        let weeks = model.box(.reviewsOverTime).data.bins
+        let reads = preferenceReads
+        #expect(cardTotal(model) == "12,435")
+
+        page.appear()
+        _ = try await base.request(1)
+        page.disappear()
+        #expect(model.boxBuilds == builds && preferenceReads == reads)
+        page.appear()
+        let pending = try await base.request(2)
+        #expect(model.boxBuilds == builds, "unchanged visits still read, but never render again")
+
+        // A foreground change reaches every window, including a hidden one. A different
+        // first weekday is significant even though the calendar identifier is unchanged.
+        calendar = Fixture.calendar(firstWeekday: 1)
+        locale = Locale(identifier: "de_DE")
+        center.post(name: NSLocale.currentLocaleDidChangeNotification, object: nil)
+        await settle({ preferenceReads == reads + 2 }, "both live system-following windows observed the change")
+        #expect(cardTotal(model) == "12.435" && cardTotal(hiddenWindow) == "12.435")
+        #expect(model.box(.reviewsOverTime).data.bins != weeks)
+        #expect(model.boxBuilds == builds * 2 && hiddenWindow.boxBuilds == builds * 2)
+        #expect(fixed.boxes == fixedBoxes && fixed.boxBuilds == builds)
+
+        // The read already in flight uses the new formatting when its parts arrive.
+        base.service.answer(pending, [.cardCounts],
+                            values: [.cardCounts: .cardCounts(Fixture.cardCounts(new: 23_456))])
+        await settle({ cardTotal(model) == "23.546" }, "the pending read publishes with the new locale")
+        page.disappear()
+        let beforeZone = model.box(.reviewsOverTime).data.bins
+        calendar = Fixture.calendar(firstWeekday: 1, zone: "Pacific/Honolulu")
+        center.post(name: .NSSystemTimeZoneDidChange, object: nil)
+        await settle({ preferenceReads == reads + 4 }, "hidden callbacks observe the time-zone change")
+        #expect(model.box(.reviewsOverTime).data.bins != beforeZone)
+        #expect(fixed.boxes == fixedBoxes && fixed.boxBuilds == builds)
+        let changedBuilds = model.boxBuilds
+        page.appear()
+        _ = try await base.request(3)
+        page.disappear()
+        #expect(model.boxBuilds == changedBuilds, "returning after a hidden change is warm again")
+    }
+
     @Test(arguments: [AppSection.home, .browse])
     func warmNavigationReusesEveryBoxAndStillRefreshesEveryVisit(via section: AppSection) async throws {
         let model = keptModel()

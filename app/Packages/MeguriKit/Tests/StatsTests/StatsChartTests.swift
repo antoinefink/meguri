@@ -138,6 +138,35 @@ import Testing
 
     // MARK: Names and labels (S8.7)
 
+    @Test func ephemeralAndBackgroundFormatsShareUntilSystemPreferencesChange() async {
+        for notification in [NSLocale.currentLocaleDidChangeNotification, .NSSystemTimeZoneDidChange] {
+            let before = Self.format
+            let date = before.dateFormatter(template: "dMMM")
+            let duration = before.durationFormatter(.second)
+            #expect(Self.format.dateFormatter(template: "dMMM") === date)
+            #expect(Self.format.durationFormatter(.second) === duration)
+            let background = await Task.detached { [locale = Self.locale, calendar = Self.calendar, now = Self.now] in
+                StatsChartFormat(locale: locale, calendar: calendar, now: now)
+            }.value
+            #expect(background.dateFormatter(template: "dMMM") === date)
+            #expect(background.durationFormatter(.second) === duration)
+
+            // Identical fixed inputs still need fresh immutable formatters after a system
+            // format override; no preference mutation or elapsed-time assertion is needed.
+            NotificationCenter.default.post(name: notification, object: nil)
+            let after = Self.format
+            #expect(after.dateFormatter(template: "dMMM") !== date)
+            #expect(after.durationFormatter(.second) !== duration)
+            // A superseded background render may create a formatter only after the change.
+            let lateDate = background.dateFormatter(template: "yMMMM")
+            let lateDuration = background.durationFormatter([.hour, .minute])
+            #expect(after.dateFormatter(template: "yMMMM") !== lateDate)
+            #expect(after.durationFormatter([.hour, .minute]) !== lateDuration)
+            #expect(Self.format.dateFormatter(template: "yMMMM") === after.dateFormatter(template: "yMMMM"))
+            #expect(Self.format.durationFormatter([.hour, .minute]) === after.durationFormatter([.hour, .minute]))
+        }
+    }
+
     @Test func periodsAreNamedWithTheSystemsShortStyles() {
         let format = Self.format
         #expect(format.name(.day(Self.date(2026, 11, 17))) == "17 Nov")

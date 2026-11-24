@@ -145,8 +145,13 @@ public final class StatsPageModel {
     @ObservationIgnored public let kept: StatsKeptResults
     @ObservationIgnored private let store: StatsSelectionStore
     @ObservationIgnored private let timers: any StatsTimers
-    @ObservationIgnored private let calendar: Calendar
-    @ObservationIgnored private let locale: Locale
+    @ObservationIgnored private var calendar: Calendar
+    @ObservationIgnored private var locale: Locale
+    @ObservationIgnored private let followsCalendar: Bool
+    @ObservationIgnored private let followsLocale: Bool
+    @ObservationIgnored private let notificationCenter: NotificationCenter
+    @ObservationIgnored private var preferenceObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private let currentFormatting: @MainActor () -> (calendar: Calendar, locale: Locale)
     @ObservationIgnored private var text: StatsText { StatsText(locale: locale) }
 
     /// S11: a visible page refreshes this long after the last change.
@@ -158,25 +163,62 @@ public final class StatsPageModel {
     ///   - selection: the window's restored selection (scene state); nil starts from the
     ///     device's last one (S3.3).
     ///   - kept: the kept results, shared by every window.
-    public init(service: any StatsService, kept: StatsKeptResults, store: StatsSelectionStore,
+    public convenience init(service: any StatsService, kept: StatsKeptResults, store: StatsSelectionStore,
                 selection: StatsPageSelection? = nil, timers: any StatsTimers = StatsSystemTimers(),
                 calendar: Calendar = .autoupdatingCurrent, locale: Locale = .autoupdatingCurrent) {
+        self.init(service: service, kept: kept, store: store, selection: selection, timers: timers,
+                  calendar: calendar, locale: locale, notificationCenter: .default,
+                  currentFormatting: { (.current, .current) })
+    }
+
+    /// Isolated notification and preference sources let tests change formatting without
+    /// changing system preferences. Explicit, fixed inputs never follow these sources.
+    init(service: any StatsService, kept: StatsKeptResults, store: StatsSelectionStore,
+         selection: StatsPageSelection? = nil, timers: any StatsTimers = StatsSystemTimers(),
+         calendar: Calendar = .autoupdatingCurrent, locale: Locale = .autoupdatingCurrent,
+         notificationCenter: NotificationCenter,
+         currentFormatting: @escaping @MainActor () -> (calendar: Calendar, locale: Locale)) {
         self.service = service
         self.kept = kept
         self.store = store
         self.timers = timers
-        self.calendar = calendar
-        self.locale = locale
+        followsCalendar = calendar == .autoupdatingCurrent
+        followsLocale = locale == .autoupdatingCurrent
+        let current = currentFormatting()
+        self.calendar = followsCalendar ? current.calendar : calendar
+        self.locale = followsLocale ? current.locale : locale
+        self.notificationCenter = notificationCenter
+        self.currentFormatting = currentFormatting
         self.selection = selection ?? store.load()
         activityShowsAllYears = store.loadActivityAllYears()
         rebuild()
+        if followsCalendar || followsLocale {
+            for name in [NSLocale.currentLocaleDidChangeNotification, .NSSystemTimeZoneDidChange] {
+                preferenceObservers.append(notificationCenter.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                    Task { @MainActor [weak self] in self?.formattingChanged() }
+                })
+            }
+        }
     }
 
     isolated deinit {
+        for observer in preferenceObservers { notificationCenter.removeObserver(observer) }
         kept.show(nil, by: ObjectIdentifier(self))
         // A window that goes away without leaving the page still ends its request.
         running?.task?.cancel()
         if let stream = running?.stream { Task.detached { await stream.cancel() } }
+    }
+
+    private func formattingChanged() {
+        let current = currentFormatting()
+        if followsCalendar { calendar = current.calendar }
+        if followsLocale { locale = current.locale }
+        // Notifications also cover format overrides that keep the same locale identifier.
+        // Rebuild every box, including hidden ones, so all pending writes are superseded.
+        inputs &+= 1
+        presenters = [:]
+        rendered = [:]
+        rebuild()
     }
 
     // MARK: Inputs from the shell
