@@ -68,7 +68,7 @@ extension ReviewCollectionStartupTests {
             let socket = webSession.webSocketTask(with: wsRequest)
             webSocket = socket; socket.resume()
             try await socket.send(.string(#"{"id":1,"msg":"hello","data":{}}"#))
-            try await socket.sendPing()
+            try await withSocketDeadline(socket) { try await miningSendPing(socket) }
             let sentence = "<span title='Study > draft' class='term emphasis' lang='en' dir='ltr'><strong>A synthetic sentence.</strong> H<sub>2</sub>O</span>"
             // Complete self-contained media: eight silent PCM samples and a gray pixel.
             let audio = "data:audio/wav;base64,UklGRiwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQgAAACAgICAgICAgA=="

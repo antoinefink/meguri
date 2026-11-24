@@ -69,14 +69,14 @@ import Synchronization
             let socket = session.webSocketTask(with: URL(string: "ws://127.0.0.1:\(first.port)/anki-connect")!)
             socket.resume()
             defer { socket.cancel(with: .goingAway, reason: nil) }
-            try await withSocketDeadline(socket) { try await socket.sendPing() }
+            try await withSocketDeadline(socket) { try await miningSendPing(socket) }
             let initialStatus = model.status
             #expect(!model.applyPort(""))
             #expect(!model.applyPort("65536"))
             #expect(model.applyPort(String(first.port)))
             await model.settle()
             #expect(model.status == initialStatus)
-            try await withSocketDeadline(socket) { try await socket.sendPing() } // A no-op preserves the listener.
+            try await withSocketDeadline(socket) { try await miningSendPing(socket) } // A no-op preserves the listener.
 
             // A real bind conflict retains the selected preference and retires
             // the previous listener, including its WebSocket and Host policy.
@@ -321,19 +321,32 @@ import Synchronization
                 (try? JSONSerialization.jsonObject(with: data)) as? [String: Any])
     }
 
-    private func withSocketDeadline(_ socket: URLSessionWebSocketTask,
-                                    operation: () async throws -> Void) async throws {
-        let deadline = Task {
-            try await Task.sleep(for: .seconds(5))
-            socket.cancel(with: .goingAway, reason: nil)
-        }
-        defer { deadline.cancel() }
-        try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            try await operation()
-        } onCancel: {
-            socket.cancel(with: .goingAway, reason: nil)
-        }
+}
+
+func miningSendPing(_ socket: URLSessionWebSocketTask) async throws {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+        socket.sendPing(pongReceiveHandler: { error in
+            if let error {
+                continuation.resume(throwing: error)
+            } else {
+                continuation.resume(returning: ())
+            }
+        })
+    }
+}
+
+func withSocketDeadline(_ socket: URLSessionWebSocketTask,
+                        operation: () async throws -> Void) async throws {
+    let deadline = Task {
+        try await Task.sleep(for: .seconds(5))
+        socket.cancel(with: .goingAway, reason: nil)
+    }
+    defer { deadline.cancel() }
+    try await withTaskCancellationHandler {
+        try Task.checkCancellation()
+        try await operation()
+    } onCancel: {
+        socket.cancel(with: .goingAway, reason: nil)
     }
 }
 
