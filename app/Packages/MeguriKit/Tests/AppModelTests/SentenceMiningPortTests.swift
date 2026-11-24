@@ -6,132 +6,134 @@ import Testing
 import Synchronization
 
 @MainActor @Suite struct SentenceMiningPortTests {
-    @Test func devicePreferencePersistsAndRejectsInvalidEntries() throws {
+    @Test func independentDevicePreferencesPersistAcrossRestarts() throws {
         let suite = "SentenceMiningPortTests." + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let model = SentenceMining(defaults: defaults, collectionKey: "synthetic-first")
-        #expect(model.configuredPort == 44432 && model.port == 44432 && !model.enabled)
-        for port in [1024, 8765, 65535, 44432] {
-            #expect(model.applyPort(String(port)))
-            #expect(defaults.integer(forKey: "mining.port") == port)
-            // The preference belongs to the device, not a collection.
-            let reopened = SentenceMining(defaults: defaults, collectionKey: "synthetic-other")
-            #expect(reopened.configuredPort == UInt16(port) && reopened.port == UInt16(port))
-            #expect(!reopened.enabled && reopened.status == "Off · Port \(port)")
+        let fresh = SentenceMining(defaults: defaults, collectionKey: "synthetic-first")
+        #expect(!fresh.migaku.enabled && !fresh.ankiConnect.enabled && !fresh.enabled)
+        #expect(fresh.migaku.port == 44432 && fresh.ankiConnect.port == 8765)
+        for migaku in [false, true] {
+            for ankiConnect in [false, true] {
+                fresh.setEnabled(migaku, for: .migaku)
+                fresh.setEnabled(ankiConnect, for: .ankiConnect)
+                let reopened = SentenceMining(defaults: defaults, collectionKey: "synthetic-other")
+                #expect(reopened.migaku.enabled == migaku && reopened.ankiConnect.enabled == ankiConnect)
+                #expect(reopened.enabled == (migaku || ankiConnect))
+                #expect(defaults.bool(forKey: "mining.migaku.enabled") == migaku)
+                #expect(defaults.bool(forKey: "mining.ankiConnect.enabled") == ankiConnect)
+            }
         }
-        for entry in ["", "4", "1023", "0", "65536", "999999999999999999999", "44x", "44432.0", "-1234", "+1234", " 44432", "４４４３２"] {
-            #expect(!model.applyPort(entry))
-            #expect(model.configuredPort == 44432 && model.port == 44432 && model.status == "Off · Port 44432")
-            #expect(defaults.integer(forKey: "mining.port") == 44432)
-        }
-        let invalidValues: [Any] = [0, 1023, 65536, "partial", 44432.5, true]
-        for invalid in invalidValues {
-            defaults.set(invalid, forKey: "mining.port")
-            #expect(SentenceMining(defaults: defaults, collectionKey: "synthetic").configuredPort == 44432)
-        }
-        let ephemeral = SentenceMining(defaults: defaults, collectionKey: "synthetic", port: 0)
-        #expect(ephemeral.configuredPort == 0) // Explicit test seam only.
-        #expect(!ephemeral.applyPort("0"))
+        // Test overrides affect bound ports only, never saved enable choices.
+        let ephemeral = SentenceMining(defaults: defaults, collectionKey: "synthetic", ports: (0, 0))
+        #expect(ephemeral.migaku.port == 0 && ephemeral.ankiConnect.port == 0)
+        #expect(ephemeral.migaku.enabled && ephemeral.ankiConnect.enabled)
     }
 
-    @Test(.timeLimit(.minutes(1))) func productionReducerRebindsOnlyOnCommittedChanges() async throws {
-        let suite = "SentenceMiningPortTests." + UUID().uuidString
+    @Test func legacyKnownPortsMigrateOnceAndUnknownPortsStayOff() throws {
+        let suite = "SentenceMiningLegacyTests." + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        // Keep each endpoint reserved until its turn. No fixed socket ports,
-        // sleeps or competition with another test's ephemeral listener.
+        let ports: [Any?] = [nil, 44432, 8765, 12345, "partial", 44432.5, true]
+        for enabled in [false, true] {
+            for port in ports {
+                defaults.removePersistentDomain(forName: suite)
+                defaults.set(enabled, forKey: "mining.enabled")
+                if let port { defaults.set(port, forKey: "mining.port") }
+                let known = port.map { String(describing: $0) } ?? "44432"
+                let model = SentenceMining(defaults: defaults, collectionKey: "synthetic")
+                #expect(model.migaku.enabled == (enabled && known == "44432"))
+                #expect(model.ankiConnect.enabled == (enabled && known == "8765"))
+                #expect(defaults.object(forKey: "mining.enabled") == nil)
+                #expect(defaults.object(forKey: "mining.port") == nil)
+                model.setEnabled(true, for: .migaku)
+                model.setEnabled(true, for: .ankiConnect)
+                // A stale legacy value cannot override the independent bits.
+                defaults.set(true, forKey: "mining.enabled")
+                defaults.set(12345, forKey: "mining.port")
+                let reopened = SentenceMining(defaults: defaults, collectionKey: "synthetic")
+                #expect(reopened.migaku.enabled && reopened.ankiConnect.enabled)
+            }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func independentEndpointsRetainPeersThroughNoOpDisableAndConflict() async throws {
         let first = try MiningPortReservation()
         let occupied = try MiningPortReservation()
-        let next = try MiningPortReservation()
-        let disabled = try MiningPortReservation()
-        defer { first.close(); occupied.close(); next.close(); disabled.close() }
-        let model = SentenceMining(defaults: defaults, collectionKey: "synthetic-wire")
+        defer { first.close(); occupied.close() }
+        let model = SentenceMining(defaults: nil, collectionKey: "synthetic-wire", ports: (first.port, occupied.port))
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
         configuration.timeoutIntervalForRequest = 5
         configuration.timeoutIntervalForResource = 5
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
-        var stage = "first endpoint"
+        let socket = MiningWireTestClient(port: first.port)
+        defer { socket.close() }
         do {
             model.firstOpenAttemptEnded()
-            #expect(model.applyPort(String(first.port)))
             await model.settle()
-            #expect(!model.enabled && model.status == "Off · Port \(first.port)")
+            #expect(!model.enabled)
             first.close()
-            // The disabled preference change left this port free to bind.
             let stillFree = try MiningPortReservation(port: first.port)
             stillFree.close()
-            model.setEnabled(true)
+            model.setEnabled(true, for: .migaku)
             await model.settle()
-            try await waitForStatus(model) { $0.hasPrefix("Listening") }
-            #expect(model.port == first.port && model.status.contains(String(first.port)))
-            stage = "WebSocket hello"
-            let socket = MiningWireTestClient(port: first.port)
-            defer { socket.close() }
+            try await waitForStatus(model.migaku) { $0.hasPrefix("Listening") }
+            #expect(!model.ankiConnect.enabled)
             try await socket.start()
             try await socket.upgrade(port: first.port)
             try await socket.frame(1, payload: Data(#"{"id":1,"msg":"hello","data":{}}"#.utf8))
-            stage = "first ping"
-            let firstPing = Data("before-settings".utf8)
-            try await socket.frame(9, payload: firstPing)
-            try await socket.expectFrame(10, payload: firstPing)
-            let initialStatus = model.status
-            stage = "no-op preserves connection"
-            #expect(!model.applyPort(""))
-            #expect(!model.applyPort("65536"))
-            #expect(model.applyPort(String(first.port)))
+            let ping = Data("retained-peer".utf8)
+            model.setEnabled(true, for: .migaku) // No-op retains the same FD.
             await model.settle()
-            #expect(model.status == initialStatus)
-            let secondPing = Data("after-no-op-settings".utf8)
-            try await socket.frame(9, payload: secondPing)
-            try await socket.expectFrame(10, payload: secondPing)
+            try await socket.frame(9, payload: ping)
+            try await socket.expectFrame(10, payload: ping)
+            let initialStatus = model.migaku.status
 
-            // A real bind conflict retains the selected preference and retires
-            // the previous listener, including its WebSocket and Host policy.
-            stage = "occupied endpoint retires old connection"
-            #expect(model.applyPort(String(occupied.port)))
+            model.setEnabled(true, for: .ankiConnect)
             await model.settle()
-            try await waitForStatus(model) { $0.contains("is in use") }
-            #expect(model.port == occupied.port && model.status.contains(String(occupied.port)))
-            #expect(defaults.integer(forKey: "mining.port") == Int(occupied.port))
-            try await socket.expectFrame(8, payload: Data([3, 233])) // Going away, 1001.
+            try await waitForStatus(model.ankiConnect) { $0.contains("is in use") }
+            #expect(model.enabled && model.migaku.status == initialStatus)
+            try await socket.frame(9, payload: ping)
+            try await socket.expectFrame(10, payload: ping)
+            #expect(try await exchange(session, port: first.port, path: "/anki-hello").status == 200)
+            // Automatic retry is per endpoint and cannot replace its sibling.
+            occupied.close()
+            try await waitForStatus(model.ankiConnect, timeout: .seconds(15)) { $0.hasPrefix("Listening") }
+            #expect(model.migaku.port == first.port && model.ankiConnect.port == occupied.port)
+            for port in [first.port, occupied.port] {
+                let hello = try await exchange(session, port: port, path: "/anki-hello")
+                #expect(hello.status == 200 && hello.json?["port"] as? Int == Int(port))
+                let wrongPort = port == first.port ? occupied.port : first.port
+                #expect(try await exchange(session, port: port, path: "/anki-hello", hostPort: wrongPort).status == 403)
+                let version = try await exchange(session, port: port, path: "/", body: Data(#"{"action":"version","version":6}"#.utf8))
+                #expect(version.status == 200 && version.json?["result"] as? Int == 6)
+            }
+            let sibling = MiningWireTestClient(port: occupied.port)
+            defer { sibling.close() }
+            try await sibling.start()
+            try await sibling.upgrade(port: occupied.port)
+            model.setEnabled(false, for: .migaku)
+            await model.settle()
+            try await socket.expectFrame(8, payload: Data([3, 233]))
             try await socket.expectEnd()
             try expectMiningPortClosed(first.port)
-            #expect(!model.applyPort("12"))
-            #expect(model.applyPort(String(occupied.port)))
-            #expect(model.status.contains("Port \(occupied.port) is in use"))
-
-            stage = "replacement endpoint and Host policy"
-            next.close()
-            #expect(model.applyPort(String(next.port)))
+            try await sibling.frame(9, payload: ping)
+            try await sibling.expectFrame(10, payload: ping)
+            #expect(model.enabled && model.ankiConnect.status.hasPrefix("Listening"))
+            model.setEnabled(true, for: .migaku)
             await model.settle()
-            try await waitForStatus(model) { $0.hasPrefix("Listening") }
-            #expect(model.port == next.port && model.status.contains(String(next.port)))
-            let hello = try await exchange(session, port: next.port, path: "/anki-hello")
-            #expect(hello.status == 200 && hello.json?["port"] as? Int == Int(next.port))
-            let rejectedHost = try await exchange(session, port: next.port, path: "/anki-hello", hostPort: first.port)
-            #expect(rejectedHost.status == 403)
-            let version = try await exchange(session, port: next.port, path: "/", body: Data(#"{"action":"version","version":6}"#.utf8))
-            #expect(version.status == 200 && version.json?["result"] as? Int == 6)
-            try expectMiningPortClosed(first.port)
-            let restored = SentenceMining(defaults: defaults, collectionKey: "synthetic-new-collection")
-            #expect(restored.enabled && restored.configuredPort == next.port)
-
-            stage = "disabled preference change"
-            model.setEnabled(false)
-            #expect(model.applyPort(String(disabled.port)))
+            try await waitForStatus(model.migaku) { $0.hasPrefix("Listening") }
+            model.setEnabled(false, for: .ankiConnect)
             await model.settle()
-            #expect(!model.enabled && model.status == "Off · Port \(disabled.port)" && model.port == disabled.port)
-            try expectMiningPortClosed(first.port)
-            try expectMiningPortClosed(next.port)
-            disabled.close()
-            let offPort = try MiningPortReservation(port: disabled.port)
-            offPort.close()
+            try await sibling.expectFrame(8, payload: Data([3, 233]))
+            try await sibling.expectEnd()
+            #expect(try await exchange(session, port: first.port, path: "/anki-hello").status == 200)
             await model.shutdown()
+            try expectMiningPortClosed(first.port)
+            try expectMiningPortClosed(occupied.port)
         } catch {
-            print("SentenceMiningPortTests [\(stage)]: \(error); status=\(model.status)")
             await model.shutdown()
             throw error
         }
@@ -166,6 +168,10 @@ import Synchronization
             replacement = MiningListener(port: 0, admission: admission, handler: { _, _ in
                 .json(200, ["replacement": true])
             }, changed: { state in newEvents.withLock { $0.append(state) } })
+            await #expect(throws: (any Error).self) {
+                _ = try await exchange(session, port: oldPort, path: "/anki-hello")
+            }
+            #expect(oldEvents.withLock { $0.contains(.off) })
             old.requestStop()
             let stopped = Task { await old.stop() }
             replacement?.start()
@@ -215,6 +221,11 @@ import Synchronization
                 _ = try await exchange(session, port: port, path: "/anki-hello")
             }
             #expect(calls.withLock { $0 } == 0)
+            // Readability after retirement must cancel accepting sources,
+            // rather than spinning until a later explicit shutdown.
+            #expect(events.withLock { $0.contains(.off) })
+            let released = try MiningPortReservation(port: port)
+            released.close()
             await old.stop()
         } catch {
             await old.stop()
@@ -232,7 +243,7 @@ import Synchronization
         held.cancel()
         await held.value
         let model = SentenceMining(defaults: nil, collectionKey: "synthetic-cancellation")
-        let status = Task { try await waitForStatus(model) { $0.hasPrefix("Listening") } }
+        let status = Task { try await waitForStatus(model.migaku) { $0.hasPrefix("Listening") } }
         status.cancel()
         await #expect(throws: CancellationError.self) { try await status.value }
     }
@@ -349,8 +360,8 @@ import Synchronization
         throw MiningFailure("Mining listener did not become ready.")
     }
 
-    private func waitForStatus(_ model: SentenceMining, matching predicate: (String) -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(5)
+    private func waitForStatus(_ model: SentenceMining.Endpoint, timeout: Duration = .seconds(5), matching predicate: (String) -> Bool) async throws {
+        let deadline = ContinuousClock.now + timeout
         while !predicate(model.status) {
             try Task.checkCancellation()
             guard ContinuousClock.now < deadline else { throw MiningFailure("Mining status did not settle: \(model.status)") }

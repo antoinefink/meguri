@@ -17,10 +17,10 @@ extension ReviewCollectionStartupTests {
         var configuration = LaunchConfiguration()
         let suite = "SentenceMiningEntryTests." + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.set(false, forKey: "mining.enabled")
         defer { defaults.removePersistentDomain(forName: suite) }
         configuration.deviceDefaults = defaults
         configuration.migakuPort = 0
+        configuration.ankiConnectPort = 0
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory, backupsDirectory: backups)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
             sync: SyncCoordinator(directory: directory, configuration: nil, defaults: nil),
@@ -34,15 +34,15 @@ extension ReviewCollectionStartupTests {
         do {
             await owner.start()
             try #require(owner.state == .noFile)
-            #expect(!mining.enabled && mining.status == "Off · Port 0" && mining.port == 0)
+            #expect(!mining.enabled && mining.migaku.status == "Off · Port 0" && mining.migaku.port == 0)
             // Invoke the same production action as SentenceMiningPane's Toggle;
             // neither a substitute listener nor a separately configured receiver.
-            mining.setEnabled(true)
+            mining.setEnabled(true, for: .migaku)
             await mining.settle()
-            let initialPort = try await miningListeningPort(mining)
+            let initialPort = try await miningListeningPort(mining.migaku)
             let unavailable = try await miningExchange(port: initialPort, method: "GET", path: "/srs-check")
             #expect(unavailable.json?["ok"] as? Bool == false)
-            #expect(defaults.bool(forKey: "mining.enabled"))
+            #expect(defaults.bool(forKey: "mining.migaku.enabled"))
             await owner.startEmpty()
             try #require(owner.state == .ready)
             let deck = try await CoreDeckService().addDeck(name: "Synthetic Mining")
@@ -54,10 +54,14 @@ extension ReviewCollectionStartupTests {
             mining.selectDeck(deck.id)
             mining.selectType(imported.id)
             await mining.settle()
-            let bound = try await miningListeningPort(mining)
+            let bound = try await miningListeningPort(mining.migaku)
             #expect(bound == initialPort)
-            let restored = SentenceMining(defaults: defaults, collectionKey: directory.path, port: 0)
-            #expect(restored.enabled && restored.selectedDeck == deck.id && restored.selectedType == imported.id)
+            mining.setEnabled(true, for: .ankiConnect)
+            await mining.settle()
+            let siblingPort = try await miningListeningPort(mining.ankiConnect)
+            #expect(siblingPort != bound)
+            let restored = SentenceMining(defaults: defaults, collectionKey: directory.path, ports: (0, 0))
+            #expect(restored.migaku.enabled && restored.ankiConnect.enabled && restored.selectedDeck == deck.id && restored.selectedType == imported.id)
             let check = try await miningExchange(port: bound, method: "GET", path: "/srs-check")
             #expect(check.status == 200 && check.json?["ok"] as? Bool == true && check.json?["version"] as? String == "4")
             let preflight = try await miningExchange(port: bound, method: "OPTIONS", path: "/receive")
@@ -86,7 +90,7 @@ extension ReviewCollectionStartupTests {
             #expect(cards.count == 1 && cards.first?.deckId == deck.id)
             let names = try await CoreMediaService().trackedNames()
             #expect(names.names.contains { $0.name.hasSuffix(".wav") } && names.names.contains { $0.name.hasSuffix(".png") })
-            let retry = try await miningExchange(port: bound, method: "POST", path: "/receive", body: Data(raw.utf8))
+            let retry = try await miningExchange(port: siblingPort, method: "POST", path: "/receive", body: Data(raw.utf8))
             #expect((retry.json?["id"] as? NSNumber)?.int64Value == id)
             let conflict = try await miningExchange(port: bound, method: "POST", path: "/receive", body: Data(raw.replacingOccurrences(of: "Une phrase synthétique.", with: "Different translation.").utf8))
             #expect(conflict.status == 400 && (conflict.json?["error"] as? String)?.contains("Conflicting retry") == true)
@@ -110,9 +114,11 @@ extension ReviewCollectionStartupTests {
             let ordinaryNote = try await CoreNoteService().readNote(id: ordinaryID)
             #expect(ordinaryNote.fields[0].contains("An ordinary front.") && ordinaryNote.fields[0].contains("[sound:") && ordinaryNote.fields[0].contains("<img src="))
             let rootNote = #"{"action":"addNote","version":6,"params":{"note":{"deckName":"Synthetic Mining","modelName":"Ordinary Front Back","fields":{"Front":"From a local tool","Back":"Saved through the compatibility subset"},"tags":["Synthetic"]}}}"#
-            let rootAdded = try await miningExchange(port: bound, method: "POST", path: "/", body: Data(rootNote.utf8))
+            let rootAdded = try await miningExchange(port: siblingPort, method: "POST", path: "/", body: Data(rootNote.utf8))
             let rootID = try #require((rootAdded.json?["result"] as? NSNumber)?.int64Value)
             #expect(try await CoreNoteService().readNote(id: rootID).fields == ["From a local tool", "Saved through the compatibility subset"])
+            let rootRetry = try await miningExchange(port: bound, method: "POST", path: "/", body: Data(rootNote.utf8))
+            #expect((rootRetry.json?["result"] as? NSNumber)?.int64Value == rootID)
             let comparison = "The inequality x<y holds."
             let comparisonHTML = "The inequality x&lt;y holds."
             let comparisonBody = try JSONSerialization.data(withJSONObject: ["sentence": comparison])
@@ -127,8 +133,8 @@ extension ReviewCollectionStartupTests {
             #expect((discovery.json?["result"] as? [String])?.contains("Synthetic Mining") == true)
             // Turning off uses the production owner, closes its WebSocket and
             // persists the switch. Re-enabling creates a fresh listener.
-            mining.setEnabled(false)
-            #expect(mining.status == "Off · Port \(bound)" && !defaults.bool(forKey: "mining.enabled"))
+            mining.setEnabled(false, for: .migaku)
+            #expect(mining.migaku.status == "Off · Port \(bound)" && !defaults.bool(forKey: "mining.migaku.enabled"))
             await mining.settle()
             await #expect(throws: (any Error).self) {
                 do {
@@ -140,12 +146,17 @@ extension ReviewCollectionStartupTests {
             }
             #expect(webSocket?.closeCode == .goingAway)
             try expectMiningPortClosed(bound)
-            mining.setEnabled(true)
+            #expect(mining.ankiConnect.status.hasPrefix("Listening"))
+            let siblingRetry = try await miningExchange(port: siblingPort, method: "POST", path: "/receive", body: Data(basicPayload.utf8))
+            #expect((siblingRetry.json?["id"] as? NSNumber)?.int64Value == ordinaryID)
+            mining.setEnabled(true, for: .migaku)
             await mining.settle()
-            let rebound = try await miningListeningPort(mining)
+            let rebound = try await miningListeningPort(mining.migaku)
             let retriedAfterEnable = try await miningExchange(port: rebound, method: "POST", path: "/receive", body: Data(basicPayload.utf8))
             #expect((retriedAfterEnable.json?["id"] as? NSNumber)?.int64Value == ordinaryID)
             try #require(await owner.closeForQuit())
+            try expectMiningPortClosed(rebound)
+            try expectMiningPortClosed(siblingPort)
 
             // A different real synthetic collection shares the device switch,
             // but must never inherit the first collection's destination IDs.
@@ -162,11 +173,14 @@ extension ReviewCollectionStartupTests {
                 let nextMining = other.sentenceMining
                 await nextMining.settle()
                 #expect(nextMining.enabled && nextMining.selectedDeck == 0 && nextMining.selectedType == 0)
-                let nextPort = try await miningListeningPort(nextMining)
+                let nextPort = try await miningListeningPort(nextMining.migaku)
                 let needsDestination = try await miningExchange(port: nextPort, method: "POST", path: "/receive", body: Data(raw.utf8))
                 #expect(needsDestination.status == 400)
                 #expect((needsDestination.json?["error"] as? String)?.contains("Choose a destination") == true)
+                let nextSiblingPort = try await miningListeningPort(nextMining.ankiConnect)
                 #expect(await other.closeForQuit())
+                try expectMiningPortClosed(nextPort)
+                try expectMiningPortClosed(nextSiblingPort)
             } catch {
                 _ = await other.closeForQuit()
                 throw error
@@ -179,7 +193,7 @@ extension ReviewCollectionStartupTests {
 }
 
 @MainActor
-private func miningListeningPort(_ model: SentenceMining) async throws -> UInt16 {
+private func miningListeningPort(_ model: SentenceMining.Endpoint) async throws -> UInt16 {
     let clock = ContinuousClock()
     let deadline = clock.now + .seconds(5)
     while clock.now < deadline {

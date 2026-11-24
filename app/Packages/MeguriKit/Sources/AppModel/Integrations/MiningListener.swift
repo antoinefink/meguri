@@ -231,9 +231,16 @@ nonisolated final class MiningListener: @unchecked Sendable {
             finishStop()
         }
         source.setEventHandler { [weak self] in
-            guard let self, self.running, self.isAdmitting else { return }
+            guard let self else { return }
+            guard self.running, self.isAdmitting else {
+                // A retired admission can leave a readable accept FD. Cancel
+                // its sources on this queue instead of repeatedly waking it.
+                self.stopOnQueue()
+                return
+            }
             // Bound each accept turn to preserve responsiveness under load.
             for _ in 0..<32 {
+                guard self.isAdmitting else { self.stopOnQueue(); return }
                 let accepted = Darwin.accept(fd, nil, nil)
                 guard accepted >= 0 else {
                     if errno == EINTR { continue }

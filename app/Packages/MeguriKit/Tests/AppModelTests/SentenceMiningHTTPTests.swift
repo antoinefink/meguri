@@ -178,21 +178,36 @@ import Testing
         #expect(off.status == 503)
     }
 
+    @Test func retiredEndpointCannotDispatchIntoTheSharedReceiver() async throws {
+        let receiver = MiningReceiver()
+        await receiver.configure(enabled: true, destination: nil)
+        let first = MiningAdmission(), sibling = MiningAdmission()
+        let firstToken = first.update(enabled: true)
+        let siblingToken = sibling.update(enabled: true)
+        _ = first.update(enabled: false)
+        let request = MiningHTTPRequest(method: "POST", target: "/", headers: [],
+            body: Data(#"{"action":"version","version":6}"#.utf8))
+        let stale = await receiver.launch(request, isCurrent: { first.matches(firstToken) }).value
+        let active = await receiver.launch(request, isCurrent: { sibling.matches(siblingToken) }).value
+        #expect(stale.status == 503 && active.status == 200)
+        await receiver.configure(enabled: false, destination: nil)
+    }
+
     @Test(.timeLimit(.minutes(1))) func shutdownStaysSuspendedUntilRefusedQuitResumesIt() async throws {
-        let model = SentenceMining(defaults: nil, collectionKey: "synthetic-shutdown", port: 0)
-        model.setEnabled(true)
+        let model = SentenceMining(defaults: nil, collectionKey: "synthetic-shutdown", ports: (0, 0))
+        model.setEnabled(true, for: .migaku)
         model.firstOpenAttemptEnded()
         await model.settle()
         await model.shutdown()
         model.collectionAvailable()
         model.selectDeck(1)
-        model.setEnabled(false)
-        model.setEnabled(true)
+        model.setEnabled(false, for: .migaku)
+        model.setEnabled(true, for: .migaku)
         await model.settle()
-        #expect(model.status.hasPrefix("Off"))
+        #expect(model.migaku.status.hasPrefix("Off"))
         model.resumeAfterRefusedQuit()
         await model.settle()
-        #expect(!model.status.hasPrefix("Off"))
+        #expect(!model.migaku.status.hasPrefix("Off"))
         await model.shutdown()
     }
 

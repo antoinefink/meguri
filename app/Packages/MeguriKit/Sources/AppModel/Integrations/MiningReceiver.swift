@@ -80,6 +80,7 @@ actor MiningReceiver {
         let admissionToken: UUID
         let selected: MiningDestination?
         let root: Result<RootAction, MiningFailure>?
+        let isCurrent: @Sendable () -> Bool
         let reply: @Sendable (MiningHTTPResponse) -> Void
     }
     // JSONSerialization supplies immutable values; the parsed envelope is
@@ -111,6 +112,7 @@ actor MiningReceiver {
     private nonisolated struct Incoming: Sendable {
         let request: MiningHTTPRequest
         let token: UUID?
+        let isCurrent: @Sendable () -> Bool
         let reply: @Sendable (MiningHTTPResponse) -> Void
     }
     private nonisolated let incoming: AsyncStream<Incoming>.Continuation
@@ -136,9 +138,10 @@ actor MiningReceiver {
 
     /// Synchronous registration preserves the listener's body-completion order.
     /// The consumer only admits work; it never waits for a collection write.
-    nonisolated func launch(_ request: MiningHTTPRequest, admissionToken: UUID? = nil) -> Task<MiningHTTPResponse, Never> {
+    nonisolated func launch(_ request: MiningHTTPRequest, admissionToken: UUID? = nil,
+        isCurrent: @escaping @Sendable () -> Bool = { true }) -> Task<MiningHTTPResponse, Never> {
         let response = AsyncStream<MiningHTTPResponse>.makeStream()
-        incoming.yield(Incoming(request: request, token: admissionToken, reply: {
+        incoming.yield(Incoming(request: request, token: admissionToken, isCurrent: isCurrent, reply: {
             response.continuation.yield($0)
             response.continuation.finish()
         }))
@@ -147,23 +150,26 @@ actor MiningReceiver {
             return .error(503, "Sentence mining is off.")
         }
     }
-    func configure(enabled: Bool, destination: MiningDestination?, admissionToken: UUID? = nil) {
+    @discardableResult
+    func configure(enabled: Bool, destination: MiningDestination?, admissionToken: UUID? = nil) -> Bool {
         let currentToken: UUID
         if let admissionToken {
             guard admission.matches(admissionToken, requiringEnabled: false) else {
-                return
+                return false
             }
             currentToken = admissionToken
         } else {
             currentToken = admission.update(enabled: enabled)
         }
-        if configuredAdmissionToken != currentToken {
+        let changed = configuredAdmissionToken != currentToken
+        if changed {
             retirePending()
             if !writing { executing?.cancel() }
         }
         configuredAdmissionToken = currentToken
         self.enabled = enabled
         self.destination = destination
+        return changed
     }
 
     private func retirePending() {
@@ -186,7 +192,7 @@ actor MiningReceiver {
         let work = pending.removeFirst()
         queuedBytes -= work.request.body.count
         executing = Task {
-            let response = await process(work.request, root: work.root, admissionToken: work.admissionToken, selected: work.selected)
+            let response = await process(work.request, root: work.root, admissionToken: work.admissionToken, selected: work.selected, isCurrent: work.isCurrent)
             work.reply(response)
             executing = nil
             startNext()
@@ -199,7 +205,7 @@ actor MiningReceiver {
 
     private func enqueue(_ work: Incoming) {
         let request = work.request
-        guard enabled, let admissionToken = work.token ?? admission.current(),
+        guard enabled, work.isCurrent(), let admissionToken = work.token ?? admission.current(),
               admission.matches(admissionToken), configuredAdmissionToken == admissionToken else {
             work.reply(.error(503, "Sentence mining is off."))
             return
@@ -222,17 +228,17 @@ actor MiningReceiver {
                 return
             }
             pending.append(Pending(request: request, admissionToken: admissionToken,
-                selected: destination, root: root, reply: work.reply))
+                selected: destination, root: root, isCurrent: work.isCurrent, reply: work.reply))
             queuedBytes += request.body.count
             startNext()
         default: work.reply(.error(404, "Not found."))
         }
     }
 
-    private func process(_ request: MiningHTTPRequest, root parsedRoot: Result<RootAction, MiningFailure>?, admissionToken: UUID, selected: MiningDestination?) async -> MiningHTTPResponse {
+    private func process(_ request: MiningHTTPRequest, root parsedRoot: Result<RootAction, MiningFailure>?, admissionToken: UUID, selected: MiningDestination?, isCurrent: @Sendable () -> Bool) async -> MiningHTTPResponse {
         let root = request.path == "/"
         do {
-            guard enabled, admission.matches(admissionToken), !Task.isCancelled else {
+            guard enabled, isCurrent(), admission.matches(admissionToken), !Task.isCancelled else {
                 throw MiningFailure("Mining settings changed. Send the card again.")
             }
             if let parsedRoot {
@@ -256,7 +262,7 @@ actor MiningReceiver {
                     guard let note = params["note"] as? [String: Any] else {
                         throw MiningFailure("note must be an object")
                     }
-                    let result = try await addRoot(note, admissionToken: admissionToken, selected: selected)
+                    let result = try await addRoot(note, admissionToken: admissionToken, selected: selected, isCurrent: isCurrent)
                     return envelope(result.id, version: version)
                 default: throw MiningFailure("unsupported action")
                 }
@@ -265,7 +271,7 @@ actor MiningReceiver {
             let (destination, type) = try await resolve(selected)
             let (fields, media) = try payload.fields(for: type)
             let result = try await commit(destination, type: type, fields: fields, media: media,
-                key: payload.retryKey, digest: payload.digest, admissionToken: admissionToken)
+                key: payload.retryKey, digest: payload.digest, admissionToken: admissionToken, isCurrent: isCurrent)
             return .json(200, ["success": true, "created": true, "id": result.id])
         } catch {
             let message: String
@@ -306,8 +312,8 @@ actor MiningReceiver {
     }
 
     private func commit(_ selected: MiningDestination, type: NotetypeRecord, fields: [String], media: [MiningAttachment],
-                        key: String, digest: String, admissionToken: UUID, tags: [String] = []) async throws -> NoteMutation {
-        guard enabled, admission.matches(admissionToken), destination == selected, !Task.isCancelled else {
+                        key: String, digest: String, admissionToken: UUID, isCurrent: @Sendable () -> Bool, tags: [String] = []) async throws -> NoteMutation {
+        guard enabled, isCurrent(), admission.matches(admissionToken), destination == selected, !Task.isCancelled else {
             throw MiningFailure("Mining settings changed. Send the card again.")
         }
         writing = true
@@ -316,7 +322,7 @@ actor MiningReceiver {
             tags: tags, deckId: selected.deck), key: key, digest: digest, attachments: media)
     }
 
-    private func addRoot(_ note: [String: Any], admissionToken: UUID, selected: MiningDestination?) async throws -> NoteMutation {
+    private func addRoot(_ note: [String: Any], admissionToken: UUID, selected: MiningDestination?, isCurrent: @Sendable () -> Bool) async throws -> NoteMutation {
         let (selected, type) = try await resolve(selected)
         let catalog = try await collection.catalog()
         guard note["deckName"] as? String == catalog.decks.first(where: { $0.id == selected.deck })?.fullName,
@@ -348,7 +354,7 @@ actor MiningReceiver {
         let digest = MiningPayload.hash(try JSONSerialization.data(withJSONObject: note, options: [.sortedKeys]))
         let identity = try JSONEncoder().encode([String(selected.type), String(selected.deck), fields.first ?? ""])
         return try await commit(selected, type: type, fields: fields, media: [], key: MiningPayload.hash(identity), digest: digest,
-            admissionToken: admissionToken, tags: note["tags"] as? [String] ?? [])
+            admissionToken: admissionToken, isCurrent: isCurrent, tags: note["tags"] as? [String] ?? [])
     }
 }
 #endif

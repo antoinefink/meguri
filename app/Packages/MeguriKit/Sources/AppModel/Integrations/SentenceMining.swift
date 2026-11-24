@@ -6,8 +6,27 @@ import Observation
 /// Device-local Settings owner. Construction never listens; the collection
 /// entry path calls firstOpenAttemptEnded after launch has produced its UI.
 @Observable public final class SentenceMining {
-    public private(set) var enabled: Bool
-    public private(set) var status = "Off"
+    public enum EndpointID: CaseIterable { case migaku, ankiConnect }
+
+    @Observable public final class Endpoint {
+        public fileprivate(set) var enabled: Bool
+        public fileprivate(set) var status = ""
+        public fileprivate(set) var port: UInt16
+        fileprivate let configuredPort: UInt16
+        @ObservationIgnored fileprivate let admission = MiningAdmission()
+        @ObservationIgnored fileprivate var listener: MiningListener?
+        @ObservationIgnored fileprivate var listenerStatus: Task<Void, Never>?
+        @ObservationIgnored fileprivate var listenerToken = UUID()
+        @ObservationIgnored fileprivate var state: MiningListener.State = .off
+        fileprivate init(enabled: Bool, port: UInt16) {
+            self.enabled = enabled
+            self.port = port
+            configuredPort = port
+        }
+    }
+    public let migaku: Endpoint
+    public let ankiConnect: Endpoint
+    public var enabled: Bool { migaku.enabled || ankiConnect.enabled }
     public private(set) var available = false
     public private(set) var decks: [DeckNameEntry] = []
     public private(set) var types: [NotetypeName] = []
@@ -15,68 +34,58 @@ import Observation
     public private(set) var selectedType: Int64
     public private(set) var fieldMapping: [String] = []
     public private(set) var error: String?
-    public private(set) var port: UInt16
-    public private(set) var configuredPort: UInt16
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored private let prefix: String
-    @ObservationIgnored private let receiver: MiningReceiver
-    @ObservationIgnored private var listener: MiningListener?
-    @ObservationIgnored private var listenerStatus: Task<Void, Never>?
+    @ObservationIgnored private let receiver = MiningReceiver()
     @ObservationIgnored private var inert = false
     @ObservationIgnored private var began = false
     @ObservationIgnored private var suspended = false
     @ObservationIgnored private var shutdownTask: Task<Void, Never>?
     @ObservationIgnored private var generation: UInt64?
     @ObservationIgnored private var appliedEnabled: Bool?
-    @ObservationIgnored private var appliedPort: UInt16?
     @ObservationIgnored private var appliedDestination: MiningDestination?
     @ObservationIgnored private var controlToken = UUID()
-    @ObservationIgnored private var listenerToken = UUID()
     @ObservationIgnored private var control: Task<Void, Never>?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var refreshToken = UUID()
-    @ObservationIgnored private var state: MiningListener.State = .off
     @ObservationIgnored public var enabledChanged: ((Bool) -> Void)?
-    /// An explicit port is a launch/test override; only tests use zero.
-    public init(defaults: UserDefaults?, collectionKey: String, port: UInt16? = nil) {
+
+    /// The override pair is only for isolated synthetic wire tests.
+    public init(defaults: UserDefaults?, collectionKey: String,
+                ports: (migaku: UInt16, ankiConnect: UInt16)? = nil) {
         self.defaults = defaults
-        let selectedPort = port ?? Self.validPort(defaults?.string(forKey: "mining.port") ?? "") ?? 44432
-        self.port = selectedPort
-        configuredPort = selectedPort
+        // Migrate once. Missing legacy ports meant 44432; unknown ports must
+        // never silently enable a different service. New bits take precedence.
+        if defaults?.object(forKey: "mining.migaku.enabled") == nil,
+           defaults?.object(forKey: "mining.ankiConnect.enabled") == nil {
+            let legacyPort = defaults?.object(forKey: "mining.port") == nil
+                ? "44432" : defaults?.string(forKey: "mining.port")
+            let legacyEnabled = defaults?.bool(forKey: "mining.enabled") == true
+            defaults?.set(legacyEnabled && legacyPort == "44432", forKey: "mining.migaku.enabled")
+            defaults?.set(legacyEnabled && legacyPort == "8765", forKey: "mining.ankiConnect.enabled")
+        }
+        defaults?.removeObject(forKey: "mining.enabled")
+        defaults?.removeObject(forKey: "mining.port")
+        migaku = Endpoint(enabled: defaults?.bool(forKey: "mining.migaku.enabled") ?? false,
+            port: ports?.migaku ?? 44432)
+        ankiConnect = Endpoint(enabled: defaults?.bool(forKey: "mining.ankiConnect.enabled") ?? false,
+            port: ports?.ankiConnect ?? 8765)
         prefix = "mining.destination." + MiningPayload.hash(Data(collectionKey.utf8))
-        receiver = MiningReceiver()
-        enabled = defaults?.bool(forKey: "mining.enabled") ?? false
         selectedDeck = Int64(defaults?.string(forKey: prefix + ".deck") ?? "") ?? 0
         selectedType = Int64(defaults?.string(forKey: prefix + ".type") ?? "") ?? 0
         updateStatus()
     }
 
-    private static func validPort(_ text: String) -> UInt16? {
-        guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }),
-              let value = UInt16(text), value >= 1024 else { return nil }
-        return value
+    public func endpoint(_ id: EndpointID) -> Endpoint {
+        switch id { case .migaku: migaku; case .ankiConnect: ankiConnect }
     }
 
-    /// Drafts never affect admission. A committed change uses the same
-    /// synchronous fence and serialized control path as the receiving toggle.
-    @discardableResult public func applyPort(_ text: String) -> Bool {
-        guard let value = Self.validPort(text) else { return false }
-        guard value != configuredPort else { return true }
-        configuredPort = value
-        port = value
-        defaults?.set(Int(value), forKey: "mining.port")
-        apply()
-        return true
-    }
-
-    public func setEnabled(_ value: Bool) {
-        guard value != enabled else {
-            return
-        }
-        enabled = value
-        defaults?.set(value, forKey: "mining.enabled")
-        enabledChanged?(value)
-        updateStatus()
+    public func setEnabled(_ value: Bool, for id: EndpointID) {
+        let endpoint = self.endpoint(id)
+        guard value != endpoint.enabled else { return }
+        endpoint.enabled = value
+        defaults?.set(value, forKey: id == .migaku ? "mining.migaku.enabled" : "mining.ankiConnect.enabled")
+        enabledChanged?(enabled)
         apply()
     }
 
@@ -175,79 +184,75 @@ import Observation
         }
     }
 
+    private func retire(_ endpoint: Endpoint) -> MiningListener? {
+        _ = endpoint.admission.update(enabled: false)
+        let retired = endpoint.listener
+        endpoint.listener = nil
+        endpoint.listenerToken = UUID()
+        endpoint.listenerStatus?.cancel()
+        endpoint.listenerStatus = nil
+        endpoint.state = .off
+        retired?.requestStop()
+        return retired
+    }
+
     private func apply() {
-        guard !inert, !suspended else {
-            updateStatus()
-            return
-        }
+        guard !inert, !suspended else { updateStatus(); return }
         let value = enabled && began
-        let requestedPort = configuredPort
-        let portChanged = appliedPort != requestedPort
         let destination = generation.flatMap { generation in
             selectedDeck != 0 && selectedType != 0
                 ? MiningDestination(generation: generation, deck: selectedDeck, type: selectedType) : nil
         }
-        guard appliedEnabled != value || appliedDestination != destination || portChanged else {
-            updateStatus()
-            return
-        }
+        let configure = appliedEnabled != value || appliedDestination != destination
         appliedEnabled = value
-        appliedPort = requestedPort
         appliedDestination = destination
-        // Fence the old settings snapshot before any actor hop. Destination
-        // edits retain the socket; port/off changes retire its fixed epoch.
-        let retiring = !value || portChanged
-        let admissionToken = receiver.admission.update(enabled: value,
-            retiringListener: retiring || listener == nil)
+        // Only destination/aggregate changes fence the shared receiver. A
+        // sibling toggle must leave this endpoint's queued work and peers live.
+        let admissionToken = configure
+            ? receiver.admission.update(enabled: value, retiringListener: false)
+            : receiver.admission.current()
+        let retired = EndpointID.allCases.compactMap { id -> MiningListener? in
+            let endpoint = self.endpoint(id)
+            return !endpoint.enabled || !began ? retire(endpoint) : nil
+        }
         let token = UUID()
         controlToken = token
         let previous = control
-        let retired: MiningListener?
-        if retiring {
-            retired = listener
-            listener = nil
-            listenerToken = UUID()
-            listenerStatus?.cancel()
-            state = .off
-            retired?.requestStop()
-        } else {
-            retired = nil
-        }
         updateStatus()
         control = Task { [weak self] in
             _ = await previous?.value
-            guard let self else {
-                return
-            }
-            // Even a superseded control owns the listener it retired. Join its
-            // replies before allowing the next control to bind a replacement.
+            guard let self else { return }
             if controlToken == token {
-                await receiver.configure(enabled: value, destination: destination, admissionToken: admissionToken)
+                let changed = await receiver.configure(enabled: value, destination: destination, admissionToken: admissionToken)
+                // A sibling toggle must not wait for unrelated ongoing writes.
+                if changed { await receiver.drain() }
             }
-            await receiver.drain()
-            await retired?.stop()
-            guard controlToken == token else {
-                return
-            }
-            if value {
-                if listener == nil {
-                    let receiver = self.receiver
-                    let listenerID = UUID()
-                    listenerToken = listenerID
-                    let events = AsyncStream<MiningListener.State>.makeStream()
-                    listenerStatus = Task { @MainActor [weak self] in
-                        for await state in events.stream {
-                            guard let self, listenerToken == listenerID, enabled else { return }
-                            self.state = state
-                            if case .listening(let bound) = state { port = bound }
-                            updateStatus()
-                        }
+            // Superseded controls still join every listener they retired.
+            for listener in retired { await listener.stop() }
+            guard controlToken == token else { return }
+            for id in EndpointID.allCases {
+                let endpoint = self.endpoint(id)
+                guard endpoint.enabled, began, endpoint.listener == nil else { continue }
+                _ = endpoint.admission.update(enabled: true)
+                let receiver = self.receiver
+                let admission = endpoint.admission
+                let listenerID = UUID()
+                endpoint.listenerToken = listenerID
+                let events = AsyncStream<MiningListener.State>.makeStream()
+                endpoint.listenerStatus = Task { @MainActor [weak self, weak endpoint] in
+                    for await state in events.stream {
+                        guard let self, let endpoint, endpoint.listenerToken == listenerID, endpoint.enabled else { return }
+                        endpoint.state = state
+                        if case .listening(let port) = state { endpoint.port = port }
+                        updateStatus()
                     }
-                    listener = MiningListener(port: requestedPort, admission: receiver.admission,
-                        launch: { receiver.launch($0, admissionToken: $1) },
-                        changed: { events.continuation.yield($0) })
                 }
-                listener?.start()
+                endpoint.listener = MiningListener(port: endpoint.configuredPort, admission: admission,
+                    launch: { request, token in
+                        receiver.launch(request, admissionToken: receiver.admission.current(),
+                            isCurrent: { token.map { admission.matches($0) } == true })
+                    }, changed: { events.continuation.yield($0) })
+                endpoint.listener?.start()
             }
             updateStatus()
         }
@@ -265,15 +270,19 @@ import Observation
     }
 
     private func updateStatus() {
-        guard enabled, !suspended else {
-            status = "Off · Port \(port)"
-            return
-        }
-        switch state {
-        case .off: status = began ? "Starting on 127.0.0.1:\(port)…" : "Waiting for collection · Port \(port)"
-        case .starting: status = "Starting on 127.0.0.1:\(port)…"
-        case .listening: status = "Listening on 127.0.0.1:\(port)" + (available ? "" : " · Collection unavailable")
-        case .portInUse: status = "Port \(port) is in use. Quit Anki or the other app using this port. Meguri retries automatically."
+        for id in EndpointID.allCases {
+            let endpoint = self.endpoint(id)
+            let port = endpoint.port
+            guard endpoint.enabled, !suspended else {
+                endpoint.status = "Off · Port \(port)"
+                continue
+            }
+            switch endpoint.state {
+            case .off: endpoint.status = began ? "Starting on 127.0.0.1:\(port)…" : "Waiting for collection · Port \(port)"
+            case .starting: endpoint.status = "Starting on 127.0.0.1:\(port)…"
+            case .listening: endpoint.status = "Listening on 127.0.0.1:\(port)" + (available ? "" : " · Collection unavailable")
+            case .portInUse: endpoint.status = "Port \(port) is in use. Quit the app using it. Meguri retries automatically."
+            }
         }
     }
 
@@ -292,18 +301,13 @@ import Observation
         appliedEnabled = nil
         _ = receiver.admission.update(enabled: false)
         controlToken = UUID()
-        listenerToken = UUID()
-        listenerStatus?.cancel()
-        let retired = listener
-        listener = nil
-        retired?.requestStop()
+        let retired = EndpointID.allCases.compactMap { retire(endpoint($0)) }
         let previous = control
         let task = Task {
             _ = await previous?.value
             await receiver.configure(enabled: false, destination: nil)
-            await retired?.stop()
+            for listener in retired { await listener.stop() }
             await receiver.drain()
-            state = .off
             shutdownTask = nil
             updateStatus()
         }
@@ -315,7 +319,8 @@ import Observation
     public static func renderFixture(portConflict: Bool = false) -> SentenceMining {
         let model = SentenceMining(defaults: nil, collectionKey: "synthetic")
         model.inert = true
-        model.enabled = true
+        model.migaku.enabled = true
+        model.ankiConnect.enabled = true
         model.began = true
         model.available = true
         model.decks = [.init(id: 1, fullName: "Japanese::Sentences", filtered: false)]
@@ -323,7 +328,8 @@ import Observation
         model.selectedDeck = 1
         model.selectedType = 2
         model.fieldMapping = ["Sentence ← sentence", "Translation ← translation", "Sentence Audio ← sentenceAudio", "Screenshot ← firstImage"]
-        model.state = portConflict ? .portInUse : .listening(44432)
+        model.migaku.state = .listening(44432)
+        model.ankiConnect.state = portConflict ? .portInUse : .listening(8765)
         model.updateStatus()
         return model
     }

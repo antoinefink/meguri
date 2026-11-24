@@ -24,44 +24,42 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func nativeToggleControlsTheProductionReceiver() async throws {
         let suite = "SentenceMiningPaneTests." + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.set(false, forKey: "mining.enabled")
         defer { defaults.removePersistentDomain(forName: suite) }
-        let model = SentenceMining(defaults: defaults, collectionKey: "synthetic-toggle", port: 0)
+        let model = SentenceMining(defaults: defaults, collectionKey: "synthetic-toggle", ports: (0, 0))
         model.firstOpenAttemptEnded()
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 600),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentViewController = NSHostingController(rootView: NavigationStack {
-            SentenceMiningPane(model: model)
-        })
-        defer {
-            window.contentViewController = nil
-            window.close()
-        }
+        window.contentViewController = NSHostingController(rootView: NavigationStack { SentenceMiningPane(model: model) })
+        defer { window.contentViewController = nil; window.close() }
         window.orderFront(nil)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        configuration.timeoutIntervalForResource = 2
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
         do {
             await model.settle()
-            #expect(!model.enabled && model.status == "Off · Port 0")
-            try await pressMiningToggle(in: window)
-            await model.settle()
-            let deadline = ContinuousClock.now + .seconds(5)
-            while !model.status.hasPrefix("Listening"), ContinuousClock.now < deadline {
-                try await Task.sleep(for: .milliseconds(10))
+            #expect(!model.enabled)
+            // All four combinations, driven through actual native checkboxes.
+            for id in [SentenceMining.EndpointID.migaku, .ankiConnect, .migaku, .ankiConnect] {
+                try await pressMiningToggle(in: window, id: id)
+                await model.settle()
+                for endpointID in SentenceMining.EndpointID.allCases {
+                    let endpoint = model.endpoint(endpointID)
+                    if endpoint.enabled {
+                        try await waitUntilListening(endpoint)
+                        let url = URL(string: "http://127.0.0.1:\(endpoint.port)/srs-check")!
+                        let (data, response) = try await session.data(from: url)
+                        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+                        #expect((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["version"] as? String == "4")
+                    } else { #expect(endpoint.status.hasPrefix("Off")) }
+                }
+                let restarted = SentenceMining(defaults: defaults, collectionKey: "synthetic-other")
+                #expect(restarted.migaku.enabled == model.migaku.enabled)
+                #expect(restarted.ankiConnect.enabled == model.ankiConnect.enabled)
             }
-            try #require(model.status.hasPrefix("Listening") && model.port != 0)
-            #expect(defaults.bool(forKey: "mining.enabled"))
-            let configuration = URLSessionConfiguration.ephemeral
-            configuration.connectionProxyDictionary = [:]
-            let session = URLSession(configuration: configuration)
-            defer { session.invalidateAndCancel() }
-            let url = try #require(URL(string: "http://127.0.0.1:\(model.port)/srs-check"))
-            let (data, response) = try await session.data(from: url)
-            #expect((response as? HTTPURLResponse)?.statusCode == 200)
-            #expect((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["version"] as? String == "4")
-            try await pressMiningToggle(in: window)
-            await model.settle()
-            #expect(!model.enabled && model.status == "Off · Port \(model.port)" && !defaults.bool(forKey: "mining.enabled"))
-            await #expect(throws: (any Error).self) { _ = try await session.data(from: url) }
+            #expect(!model.enabled)
             await model.shutdown()
         } catch {
             await model.shutdown()
@@ -74,11 +72,7 @@ import Testing
     @Test(.timeLimit(.minutes(1))) func exactFixedPortsUseTheProductionReceiverAndRelease() async throws {
         let reservations = try [FixedMiningPort(44432), FixedMiningPort(8765)]
         defer { reservations.forEach { $0.close() } }
-        let suite = "SentenceMiningFixedPorts." + UUID().uuidString
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.set(false, forKey: "mining.enabled")
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let model = SentenceMining(defaults: defaults, collectionKey: "synthetic-fixed-ports")
+        let model = SentenceMining(defaults: nil, collectionKey: "synthetic-fixed-ports")
         model.firstOpenAttemptEnded()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
@@ -87,55 +81,96 @@ import Testing
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
         do {
-            for reservation in reservations {
-                let port = reservation.port
-                try #require(model.applyPort(String(port)))
-                reservation.close()
-                model.setEnabled(true)
-                await model.settle()
-                let deadline = ContinuousClock.now + .seconds(5)
-                while !model.status.hasPrefix("Listening"), ContinuousClock.now < deadline {
-                    try await Task.sleep(for: .milliseconds(10))
-                }
-                try #require(model.status.hasPrefix("Listening") && model.port == port)
-                let url = URL(string: "http://127.0.0.1:\(port)/srs-check")!
-                let (data, response) = try await session.data(from: url)
+            reservations.forEach { $0.close() }
+            model.setEnabled(true, for: .migaku)
+            model.setEnabled(true, for: .ankiConnect)
+            await model.settle()
+            try await waitUntilListening(model.migaku)
+            try await waitUntilListening(model.ankiConnect)
+            #expect(model.migaku.port == 44432 && model.ankiConnect.port == 8765)
+            for port in [UInt16(44432), 8765] {
+                let (data, response) = try await session.data(from: URL(string: "http://127.0.0.1:\(port)/srs-check")!)
                 #expect((response as? HTTPURLResponse)?.statusCode == 200)
                 let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
                 #expect(object["version"] as? String == "4" && object["ok"] as? Bool == false)
-                var version = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!)
-                version.httpMethod = "POST"
-                version.httpBody = Data(#"{"action":"version","version":6}"#.utf8)
-                version.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                let (body, reply) = try await session.data(for: version)
-                #expect((reply as? HTTPURLResponse)?.statusCode == 200)
-                #expect((try JSONSerialization.jsonObject(with: body) as? [String: Any])?["result"] as? Int == 6)
-                // A second listener cannot share the active IPv4 endpoint.
+                let (hello, _) = try await session.data(from: URL(string: "http://127.0.0.1:\(port)/anki-hello")!)
+                #expect((try JSONSerialization.jsonObject(with: hello) as? [String: Any])?["port"] as? Int == Int(port))
+                try await checkHandshake(session, port: port)
+                try await checkVersion(session, port: port)
                 do {
                     let duplicate = try MiningSocket.listen(port: port, ipv6: false)
                     Darwin.close(duplicate.fd)
                     Issue.record("A second listener shared the active mining endpoint")
-                } catch let error as POSIXError {
-                    #expect(error.code == .EADDRINUSE)
-                }
-                model.setEnabled(false)
-                await model.settle()
-                #expect(!model.enabled && model.status == "Off · Port \(port)")
-                // Reclaim both listening addresses after stop, including any
-                // TIME_WAIT left by this test's real HTTP conversations.
+                } catch let error as POSIXError { #expect(error.code == .EADDRINUSE) }
+            }
+            model.setEnabled(false, for: .migaku)
+            await model.settle()
+            #expect(!model.migaku.enabled && model.ankiConnect.status.hasPrefix("Listening"))
+            let releasedMigaku = try FixedMiningPort(44432)
+            releasedMigaku.close()
+            try await checkVersion(session, port: 8765)
+            await model.shutdown()
+            #expect(model.migaku.status.hasPrefix("Off") && model.ankiConnect.status.hasPrefix("Off"))
+            for port in [UInt16(44432), 8765] {
                 let released = try FixedMiningPort(port)
                 released.close()
             }
-            await model.shutdown()
         } catch {
             await model.shutdown()
             throw error
         }
     }
 
+    private func waitUntilListening(_ endpoint: SentenceMining.Endpoint) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !endpoint.status.hasPrefix("Listening"), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(endpoint.status.hasPrefix("Listening") && endpoint.port != 0)
+    }
+
+    private func checkHandshake(_ session: URLSession, port: UInt16) async throws {
+        var request = URLRequest(url: URL(string: "ws://127.0.0.1:\(port)/anki-connect")!)
+        request.setValue("chrome-extension://abcdefghijklmnopabcdefghijklmnop", forHTTPHeaderField: "Origin")
+        let socket = session.webSocketTask(with: request)
+        let reply = AsyncThrowingStream<Void, any Error>.makeStream()
+        socket.resume()
+        let worker = Task {
+            do {
+                try await socket.send(.string(#"{"id":1,"msg":"hello","data":{}}"#))
+                socket.sendPing { error in
+                    if let error { reply.continuation.finish(throwing: error) }
+                    else { reply.continuation.yield(()); reply.continuation.finish() }
+                }
+            } catch { reply.continuation.finish(throwing: error) }
+        }
+        let deadline = Task {
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            reply.continuation.finish(throwing: URLError(.timedOut))
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+        defer {
+            worker.cancel(); deadline.cancel(); reply.continuation.finish()
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+        for try await _ in reply.stream { return }
+        throw URLError(.cannotConnectToHost)
+    }
+
+    private func checkVersion(_ session: URLSession, port: UInt16) async throws {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data(#"{"action":"version","version":6}"#.utf8)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: request)
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        #expect((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["result"] as? Int == 6)
+    }
+
     /// Press the actual SwiftUI Toggle through its native accessibility action;
     /// no cursor, keyboard, global window lookup or production app launch.
-    private func pressMiningToggle(in window: NSWindow) async throws {
+    private func pressMiningToggle(in window: NSWindow, id: SentenceMining.EndpointID) async throws {
+        let identifier = id == .migaku ? "settings.integrations.migaku.enabled" : "settings.integrations.ankiConnect.enabled"
         let deadline = ContinuousClock.now + .seconds(5)
         while ContinuousClock.now < deadline {
             window.layoutIfNeeded()
@@ -149,9 +184,9 @@ import Testing
                 let identifierSelector = #selector(NSAccessibilityProtocol.accessibilityIdentifier)
                 let roleSelector = #selector(NSAccessibilityProtocol.accessibilityRole)
                 if object.responds(to: identifierSelector), object.responds(to: roleSelector),
-                   object.perform(identifierSelector)?.takeUnretainedValue() as? String == "settings.integrations.enabled",
+                   object.perform(identifierSelector)?.takeUnretainedValue() as? String == identifier,
                    let role = object.perform(roleSelector)?.takeUnretainedValue() as? String,
-                   ["AXCheckBox", "AXSwitch"].contains(role) {
+                   role == "AXCheckBox" {
                     matches.append(object)
                 }
                 let childrenSelector = #selector(NSAccessibilityProtocol.accessibilityChildren)
