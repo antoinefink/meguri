@@ -51,7 +51,7 @@ import Testing
         let hiddenWindow = make()
         let fixed = make(fixed: true)
         var temporary: StatsPageModel? = make()
-        weak var released = temporary
+        weak let released = temporary
         temporary = nil
         #expect(released == nil, "notification observers never retain a closed window")
         let page = StatsPage(model: model)
