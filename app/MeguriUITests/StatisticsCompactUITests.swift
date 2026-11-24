@@ -28,21 +28,16 @@ final class StatisticsCompactUITests: XCTestCase {
         let app = launch(route: "stats/page/typical")
         let tabBar = app.tabBars.firstMatch
         XCTAssertTrue(tabBar.waitForExistence(timeout: 20), "No tab bar")
-        // The tab bar's own buttons carry no identifier on iOS 27; the elements that do are read
-        // in their order across the bar.
-        let tabs = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'shell.root.tab.'"))
-        func ordered() -> [XCUIElement] { tabs.allElementsBoundByIndex.sorted { $0.frame.minX < $1.frame.minX } }
-        let identifiers = ["decks", "stats", "settings"].map { "shell.root.tab.\($0)" }
-        let found = waitUntil { ordered().map(\.identifier) == identifiers }
-        if !found { add(XCTAttachment(string: app.debugDescription)) }
-        XCTAssertTrue(found,
-                      "Decks, Statistics, Settings (Browse has no compact layout): \(ordered().map(\.identifier))")
-        XCTAssertEqual(ordered().map(\.label), ["Decks", "Statistics", "Settings"])
+        // The order, by the tab buttons' titles (en_US). Their identifiers are the shell's
+        // (R1964, NavigationLayoutTests): on this route iOS 27 gave the buttons none.
+        let labels = { tabBar.buttons.allElementsBoundByIndex.map(\.label) }
+        XCTAssertTrue(waitUntil { labels() == ["Decks", "Statistics", "Settings"] },
+                      "Decks, Statistics, Settings (Browse has no compact layout): \(labels())")
         XCTAssertTrue(element(app, "stats.page.content").waitForExistence(timeout: 20), "The route reaches the page on the iPhone")
-        XCTAssertTrue(element(app, "shell.root.tab.stats").isSelected, "The Statistics tab is selected")
+        XCTAssertTrue(tabBar.buttons["Statistics"].isSelected, "The Statistics tab is selected")
         // A second tab and back keeps the page (its own stack).
-        element(app, "shell.root.tab.decks").tap()
-        element(app, "shell.root.tab.stats").tap()
+        tabBar.buttons["Decks"].tap()
+        tabBar.buttons["Statistics"].tap()
         XCTAssertTrue(element(app, "stats.page.content").waitForExistence(timeout: 10))
     }
 
@@ -73,7 +68,8 @@ final class StatisticsCompactUITests: XCTestCase {
         // The period stays under the bar while the page scrolls (N25.2).
         element(app, "stats.page.content").swipeUp(velocity: .fast)
         element(app, "stats.page.content").swipeUp(velocity: .fast)
-        XCTAssertTrue(period.isHittable, "The period control is still on screen after scrolling")
+        // Fast swipes leave the page gliding: the control is read once it has settled.
+        XCTAssertTrue(waitUntil { period.isHittable }, "The period control is still on screen after scrolling")
         XCTAssertEqual(period.frame.minY, top, accuracy: 2, "The period control is pinned")
         XCTAssertTrue(deck.isHittable, "The deck's name shows at every scroll position")
         // Choosing a period works from the pinned control.

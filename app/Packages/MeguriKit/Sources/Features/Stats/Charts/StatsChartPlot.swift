@@ -175,9 +175,10 @@ struct StatsChartPlot: View {
     /// The bins of the last ready data, kept across a loading phase.
     @State private var lastReadyBins: [StatsPeriod] = []
     #if os(iOS)
-    /// A hold has selected since the finger went down: the tap the lift also ends must not
-    /// clear what the hold chose.
-    @State private var held = false
+    /// A hold under way, and when the last one ended: the tap that the same lift ends, whenever
+    /// SwiftUI delivers it, must not clear what the hold chose.
+    @State private var holding = false
+    @State private var holdEnded: Date?
     #endif
 
     private var format: StatsChartFormat { StatsChartFormat(locale: locale, calendar: calendar, now: clock.now()) }
@@ -622,14 +623,17 @@ struct StatsChartPlot: View {
             // The selection stays after the finger lifts, so the callout's
             // button can be tapped; a short tap clears it.
             .gesture(StatsHoldGesture { location in
-                held = true
+                holding = true
                 selection = StatsChartSelection(bin: bin(at: location.x + plot.minX, proxy: proxy, plot: plot), pinned: true)
             } ended: {
-                // After any tap the same lift ends.
-                Task { @MainActor in held = false }
+                if holding { holdEnded = Date() }
+                holding = false
             })
             // A tap ends on lift however long the finger stayed: only one with no hold clears.
-            .simultaneousGesture(TapGesture().onEnded { if !held { selection = .none } })
+            .simultaneousGesture(TapGesture().onEnded {
+                let afterHold = holding || holdEnded.map { Date().timeIntervalSince($0) < 0.5 } == true
+                if !afterHold { selection = .none }
+            })
             #endif
             .accessibilityHidden(true)
     }
