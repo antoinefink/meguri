@@ -27,21 +27,27 @@ extension ReviewCollection: DeckImportHost {
     }
 
     public func deckImportCanUndo(step: UInt64) async -> Bool {
-        guard case .available(let top)? = try? await collectionUndo.service.peekUndo(scope: .global) else { return false }
+        // A review's undo is session-aware: Undo Import waits for it to end.
+        guard review == nil, navigation.review == nil,
+              case .available(let top)? = try? await collectionUndo.service.peekUndo(scope: .global) else { return false }
         return top.id == step
     }
 
+    /// The core undoes the step only while it is still the newest one (its
+    /// writer compares the step as it takes the op), so a write that lands
+    /// after the sheet looked is never undone in its place.
     public func undoDeckImport(step: UInt64) async -> Bool {
         let service = collectionUndo.service
-        guard case .available(let top)? = try? await service.peekUndo(scope: .global), top.id == step else { return false }
+        let undone: Bool
         do {
-            _ = try await service.startUndo(scope: .global).value()
+            guard case .global(_, let restored) = try await service.startUndo(step: step).value() else { return false }
+            undone = restored.id == step
         } catch {
             return false
         }
         collectionUndo.scheduleRefresh()
         await collectionUndoFinished(intent: navigation.intentRevision)
-        return true
+        return undone
     }
 
     public var deckImportShowInBrowse: (([Int64]) -> Void)? {

@@ -951,3 +951,41 @@ fn a_tag_whose_letter_case_the_step_changed_is_restored() {
     h.collection.redo(UndoScope::Global).unwrap();
     assert_eq!(steps::dump(&h.collection)["tags"], after["tags"]);
 }
+
+#[test]
+fn an_undo_of_a_named_step_refuses_when_another_step_is_on_top() {
+    // M4.1: the caller's step is compared on the writer as it takes the op.
+    let h = Harness::open();
+    let (nid, cid) = note_with_card(&h, "front");
+    h.clock.step_ms(5_000);
+    let answered = steps::answer(&h.collection, None, cid).unwrap();
+    let shown = match peek(&h) {
+        UndoStatus::Available(info) => info.id,
+        other => panic!("expected a step, got {other:?}"),
+    };
+    assert_eq!(shown.seq(), answered.seq);
+    // A later step lands between the caller's look and its undo.
+    h.clock.step_ms(5_000);
+    steps::edit(&h.collection, None, nid, "edited").unwrap();
+    let after_edit = steps::dump(&h.collection);
+    let refusal = h
+        .collection
+        .submit_undo_step(UndoScope::Global, shown, meguri_engine::CancelToken::new(), meguri_engine::ProgressSink::new())
+        .wait();
+    assert_eq!(refused(refusal), DisabledReason::ChangedExternally);
+    assert_eq!(steps::dump(&h.collection), after_edit, "nothing was undone");
+    assert_eq!(peek_name(&h), Some(UPDATE_NOTE), "the later step stays on top");
+
+    // The step on top, named: undone.
+    let top = match peek(&h) {
+        UndoStatus::Available(info) => info.id,
+        other => panic!("expected a step, got {other:?}"),
+    };
+    let undone = h
+        .collection
+        .submit_undo_step(UndoScope::Global, top, meguri_engine::CancelToken::new(), meguri_engine::ProgressSink::new())
+        .wait()
+        .unwrap();
+    assert_eq!(undone.value.name, UPDATE_NOTE);
+    assert_eq!(peek_name(&h), Some(ANSWER_CARD));
+}

@@ -81,6 +81,13 @@ extension ComponentGallery {
             GalleryEntry("countColumns", "empty") { CountColumns(new: 0, learn: 0, due: 0) },
             GalleryEntry("countColumns", "overflow") { CountColumns(new: 12_345, learn: 678, due: 99_999) },
 
+            GalleryEntry("sheetTitle", "typical") {
+                SheetTitle(Text(verbatim: "Import “Sample.apkg”"), subtitle: Text(verbatim: "42 notes · 84 cards"))
+            },
+            GalleryEntry("sheetTitle", "overflow") {
+                SheetTitle(Text(verbatim: "Import “A shared deck with a very long name that wraps onto a second line.apkg”"))
+            },
+
             GalleryEntry("sectionHeader", "typical") {
                 SectionHeader(Text(verbatim: "Today"), subtitle: Text(verbatim: "Studied 42 cards in 12 minutes")) {
                     Button { } label: { Image(systemName: "ellipsis.circle") }

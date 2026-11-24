@@ -143,7 +143,11 @@ enum DeckImportText {
     static func mediaSkipped(_ value: UInt64) -> String { "\(count(value, "media file was", "media files were")) not added" }
     static let mediaPending = "The notes were imported. Some media files are still being put in place; this finishes on its own."
     static let fieldsOmitted = "Some notes are listed without their text."
-    static let textNotShown = "Text not shown here"
+    /// X2.5: an entry listed without its text (the log's text budget).
+    static let textNotShown = "The note’s text isn’t shown here"
+    /// An entry whose fields are all empty.
+    static let noText = "No text"
+    static let undoRefused = "The import couldn’t be undone: the collection changed after it."
     static let uploadPending = "Meguri Sync doesn’t have this import yet. Upload it from the sync status."
     static let undone = "The import was undone. Your collection is as it was before."
 

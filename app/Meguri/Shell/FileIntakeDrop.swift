@@ -3,6 +3,9 @@ import CoreBridge
 import DesignSystem
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(iOS)
+import UIKit
+#endif
 
 /// `package/file-intake` K1: a file dropped on a main window (Mac, iPad), and a
 /// file opened with Meguri (Finder, the Dock, Open in Meguri), go to the one
@@ -18,6 +21,8 @@ struct FileIntakeDrop: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // K3 step 6: copies a past run left are removed at launch.
+            .task { ImportStagingSweep.sweepAtLaunch() }
             .onDrop(of: Self.dropTypes, isTargeted: $targeted) { providers in
                 guard let collection, !providers.isEmpty else { return false }
                 Task { @MainActor in
@@ -27,6 +32,16 @@ struct FileIntakeDrop: ViewModifier {
                 return true
             }
             .overlay { if targeted { FileDropOutline() } }
+            // K6.1: a deck package while there is no collection: Welcome asks first.
+            .alert(Text(verbatim: collection?.intake.pendingCreation.map { "Create a Collection for “\($0.lastPathComponent)”?" } ?? ""),
+                   isPresented: Binding(get: { collection?.intake.pendingCreation != nil },
+                                        set: { if !$0, collection?.intake.pendingCreation != nil { collection?.intake.cancelCreation() } })) {
+                Button("Cancel", role: .cancel) { collection?.intake.cancelCreation() }
+                Button("Import") { collection?.intake.confirmCreation() }
+                    .keyboardShortcut(.defaultAction)
+            } message: {
+                Text(verbatim: FileIntakeText.createCollection)
+            }
             .alert(Text(verbatim: collection?.intake.message.map(FileIntakeText.title) ?? ""),
                    isPresented: Binding(get: { collection?.intake.message != nil },
                                         set: { if !$0 { collection?.intake.clearMessage() } })) {
@@ -51,6 +66,14 @@ struct FileDropOutline: View {
 
 /// The intake's messages (Meguri's wording, `package/transfer-strings` S4).
 enum FileIntakeText {
+    static var createCollection: String {
+        #if os(macOS)
+        let device = "Mac"
+        #else
+        let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        #endif
+        return "A deck package is imported into a collection. Meguri creates a new collection on this \(device) and imports the file into it."
+    }
     static func title(_ message: ImportIntake.Message) -> String {
         switch message {
         case .unsupported: "Can’t Import This File"
@@ -124,7 +147,7 @@ enum FileIntakeText {
                 guard let url else { continuation.resume(returning: nil); return }
                 if inPlace { continuation.resume(returning: (url, false)); return }
                 // The system removes its copy when this returns.
-                let folder = FileManager.default.temporaryDirectory.appending(path: "Drops/\(UUID().uuidString)", directoryHint: .isDirectory)
+                let folder = ImportStagingSweep.dropsFolder.appending(path: UUID().uuidString, directoryHint: .isDirectory)
                 // The name the source gave, with the copy's extension when it has none.
                 // Only a name, never a path: the copy stays in its own folder.
                 let suggested = name.map { ($0 as NSString).lastPathComponent }

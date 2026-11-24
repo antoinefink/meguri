@@ -85,6 +85,36 @@ pub fn start_redo(scope: ReviewUndoScope) -> Result<UndoJobStart, CoreError> {
     start(scope, true)
 }
 
+/// Undoes the collection's newest global step only while its id is
+/// `expected` (a step's id is its op's seq), as the writer takes the op: a
+/// step recorded after the caller looked refuses with `UndoUnavailable`
+/// (`changed_externally`) and nothing is undone. Refused while a review
+/// session is open. The deck package import's Undo Import uses it.
+#[uniffi::export]
+pub fn start_undo_step(expected: u64) -> Result<UndoJobStart, CoreError> {
+    callback::enter("start_undo_step");
+    let host = runtime::host()?;
+    let result = Arc::new(Mutex::new(None));
+    let out = result.clone();
+    let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |j| {
+        j.cancel.check()?;
+        let r = host.review().restore_step_controlled(
+            meguri_engine::EntryId(expected),
+            j.cancel.clone(),
+            j.progress.clone(),
+        )?;
+        *out.lock().unwrap() = Some(UndoResult::Global {
+            summary: Box::new(MutationSummary::of(&r)),
+            step: r.value.into(),
+        });
+        Ok(())
+    })?;
+    Ok(UndoJobStart {
+        handle: crate::jobs::wrap(handle),
+        result: Arc::new(UndoJob { result }),
+    })
+}
+
 /// Admission and pending restoration are one service operation. None means
 /// use a history job; this export never falls through into a collection write.
 #[uniffi::export]
