@@ -5,6 +5,8 @@ import Foundation
 /// X2, `package/file-intake` K1 and K6).
 extension ReviewCollection: DeckImportHost {
     public var deckImportSheetShown: Bool { navigation.sheet == .deckImport }
+    /// No new import starts once the collection begins to close.
+    var acceptsImports: Bool { !isClosingForImports }
 
     public func presentDeckImport() {
         guard navigation.sheet != .deckImport else { return }

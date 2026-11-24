@@ -158,6 +158,7 @@ public final class DeckImportModel {
     @ObservationIgnored private var release: (@MainActor () -> Void)?
     @ObservationIgnored private var session: DeckImportSession?
     @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var undoTask: Task<Void, Never>?
     @ObservationIgnored private var inspection: DeckImportTask<DeckImportSession>?
     @ObservationIgnored private var application: DeckImportTask<DeckImportApplyOutcome>?
     @ObservationIgnored private var syncJob: (any DeckImportMeguriSync)?
@@ -205,6 +206,12 @@ public final class DeckImportModel {
             catch let refusal as DeckImportRefusal { outcome = .failure(refusal) }
             catch { outcome = .failure(.unreadableFile) }
             let options = await stored
+            // Cancel pressed while the options were still being read: the work has ended.
+            if cancelling, expected == revision, case .success(let session) = outcome {
+                await service.close(session)
+                finish(message: nil)
+                return
+            }
             guard expected == revision else {
                 if case .success(let session) = outcome { await service.close(session) }
                 return
@@ -495,7 +502,8 @@ public final class DeckImportModel {
         guard step == .result, canUndo, !undoing, let result, let host else { return }
         undoing = true
         let expected = revision
-        Task {
+        undoTask = Task {
+            defer { undoTask = nil }
             let done = await host.undoDeckImport(step: result.sequence)
             guard expected == revision else { return }
             undoing = false
@@ -582,19 +590,22 @@ public final class DeckImportModel {
             await task.value
             if self.task == task { break }
         }
+        await undoTask?.value
     }
 
     /// The app goes to the background: running work stops where it may; the
     /// session stays for the sheet.
     public func cancelAndDrain() async {
         if busy, cancellable { cancelWork() }
-        await task?.value
+        await waitForWork()
     }
 
     /// The collection closes: every session ends with it.
     public func collectionClosing() async {
         if busy, cancellable { cancelWork() }
-        await task?.value
+        // A replacement apply (`.notReady`'s) is joined too.
+        await waitForWork()
+        if busy, cancellable { cancelWork(); await waitForWork() }
         if let session { self.session = nil; await service.close(session) }
         finish(message: nil)
     }

@@ -126,14 +126,22 @@ enum FileIntakeText {
                 // The system removes its copy when this returns.
                 let folder = FileManager.default.temporaryDirectory.appending(path: "Drops/\(UUID().uuidString)", directoryHint: .isDirectory)
                 // The name the source gave, with the copy's extension when it has none.
-                var base = name ?? url.lastPathComponent
+                // Only a name, never a path: the copy stays in its own folder.
+                let suggested = name.map { ($0 as NSString).lastPathComponent }
+                var base = suggested.flatMap { $0.isEmpty || $0 == ".." || $0 == "." ? nil : $0 } ?? url.lastPathComponent
                 if (base as NSString).pathExtension.isEmpty, !url.pathExtension.isEmpty { base += "." + url.pathExtension }
                 let file = folder.appending(path: base)
                 do {
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                    try FileManager.default.copyItem(at: url, to: file)
+                    // A provider's file is read under a coordinated read (K3 step 2).
+                    var coordination: NSError?, copyError: (any Error)?
+                    NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordination) { readable in
+                        do { try FileManager.default.copyItem(at: readable, to: file) } catch { copyError = error }
+                    }
+                    if let failure = coordination ?? copyError { throw failure }
                     continuation.resume(returning: (file, true))
                 } catch {
+                    try? FileManager.default.removeItem(at: folder)
                     continuation.resume(returning: nil)
                 }
             }

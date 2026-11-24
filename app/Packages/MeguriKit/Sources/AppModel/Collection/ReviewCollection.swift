@@ -635,6 +635,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     @ObservationIgnored private var studySyncFacts: StudyPreparationSyncFacts?
     private var closed = false
     private var closing = false
+    var isClosingForImports: Bool { closed || closing }
     private var closeTask: Task<Bool, Never>?
     private var day: ReviewDayMonitor?
     /// The activity heatmap's cache (N14.11), kept above the layouts so a revisited page draws at once.

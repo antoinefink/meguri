@@ -23,7 +23,7 @@ import XCTest
     func testTheMainPathImportsShowsTheLogAndCloses() throws {
         let (app, bundle) = try launch("collection/deck-import/live")
         XCTAssertTrue(element(app, "\(id).import").waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Import “Spanish Verbs.apkg”"].exists, app.debugDescription)
+        XCTAssertTrue(text(app, "Import “Spanish Verbs.apkg”").exists, app.debugDescription)
         XCTAssertTrue(element(app, "\(id).withScheduling").exists)
         XCTAssertTrue(element(app, "\(id).updateNotes").exists)
         capture(app, "deck-import-options")
@@ -51,7 +51,7 @@ import XCTest
         try click(importButton, app, bundle)
         let confirm = element(app, "\(id).confirm")
         XCTAssertTrue(confirm.waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Import “Spanish Verbs.apkg”?"].exists, app.debugDescription)
+        XCTAssertTrue(text(app, "Import “Spanish Verbs.apkg”?").exists, app.debugDescription)
         XCTAssertTrue(element(app, "\(id).loss.emptied0").exists)
         XCTAssertTrue(element(app, "\(id).backup").exists)
         capture(app, "deck-import-confirmation")
@@ -103,7 +103,11 @@ import XCTest
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
     private func label(_ element: XCUIElement) -> String {
-        [element.label, element.value as? String ?? ""].joined(separator: " ")
+        [element.label, element.value as? String ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
+    }
+    /// A title: the Mac's title bar gives it as the value, iOS as the label.
+    private func text(_ app: XCUIApplication, _ text: String) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", text, text)).firstMatch
     }
     private func click(_ target: XCUIElement, _ app: XCUIApplication, _ bundle: String) throws {
         XCTAssertTrue(target.waitForExistence(timeout: 10), app.debugDescription)

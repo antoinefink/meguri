@@ -37,6 +37,8 @@ public final class ImportIntake {
     /// whose picker it was until then.
     public var pickerPresented = false
     public private(set) var pickerActive = false
+    /// The window of the open picker, apart from deliveries that arrive meanwhile.
+    private var pickerHost: AppNavigation.SheetHost = .main
     public private(set) var message: Message?
     /// The window the picker or the file belongs to.
     public private(set) var host: AppNavigation.SheetHost = .main
@@ -71,6 +73,7 @@ public final class ImportIntake {
         guard canChoose else { return }
         self.host = host
         if owner?.navigation.sheet == nil { owner?.navigation.sheetHost = host }
+        pickerHost = host
         pickerActive = true
         pickerPresented = true
     }
@@ -81,7 +84,7 @@ public final class ImportIntake {
     public func selection(_ result: Result<[URL], any Error>) {
         pickerPresented = false; pickerActive = false
         switch result {
-        case .success(let urls): receive(urls, host: host)
+        case .success(let urls): receive(urls, host: pickerHost)
         case .failure(let error):
             if (error as NSError).code != NSUserCancelledError { message = .unreadable(fileName: "") }
         }
@@ -90,7 +93,9 @@ public final class ImportIntake {
     /// K3 and K4 for the URLs a source gave. `release` ends a hold on them
     /// (a dropped file's copy) once the flow ends or they are refused.
     public func receive(_ urls: [URL], host: AppNavigation.SheetHost = .main, release: (@MainActor () -> Void)? = nil) {
-        guard let owner, !urls.isEmpty else { release?(); return }
+        guard let owner else { release?(); return }
+        // A drop whose files could not be loaded still says so.
+        guard !urls.isEmpty else { message = .unreadable(fileName: ""); release?(); return }
         guard !importOpen else { message = .alreadyOpen; release?(); return }
         self.host = host
         classifying = true
@@ -137,7 +142,9 @@ public final class ImportIntake {
             owner.entry.selection(.success([url]))
         case .deckPackage:
             // K6: a deck package needs an open collection (K6.1's creation is not built).
-            guard owner.state == .ready, owner.hasCollection else { message = .needsCollection; release?(); return }
+            guard owner.state == .ready, owner.hasCollection, owner.acceptsImports else {
+                message = .needsCollection; release?(); return
+            }
             owner.deckImportHost = host
             if !owner.deckImport.begin(url, otherFilesGiven: others, release: release) { message = .alreadyOpen }
         case .unsupported:

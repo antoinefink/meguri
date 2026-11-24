@@ -619,13 +619,14 @@ struct DeckImportContent: View {
             }
         case .confirming:
             #if os(macOS)
-            // One group beside Cancel: a confirmation-placed button would be the default.
-            ToolbarItemGroup(placement: .cancellationAction) {
+            ToolbarItem(placement: .cancellationAction) {
                 Button(action: actions.cancelConfirmation) { Text(verbatim: "Cancel") }
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("\(Self.id).cancel")
-                confirmButton
             }
+            // A confirmation-placed button is the Mac's default button; this one
+            // never is. It sits at the leading edge, as the Mac's "Don't Save" does.
+            ToolbarItem(placement: .destructiveAction) { confirmButton }
             #else
             ToolbarItem(placement: .cancellationAction) {
                 Button(action: actions.cancelConfirmation) { Text(verbatim: "Cancel") }

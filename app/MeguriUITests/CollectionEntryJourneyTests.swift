@@ -332,10 +332,22 @@ import notify
     /// packages too. The chosen `.apkg` opens the deck package sheet, never the
     /// collection confirmation, and its import adds its decks to the deck list.
     func testSettingsImportOpensTheDeckPackageSheet() throws {
-        try exercisePickedPackage(hasLocalCollection: false)
+        continueAfterFailure = false
         let build = try BuildUnderTest.current()
         let bundle = try build.bundleIdentifier
+        guard build.hasHooks, bundle.hasSuffix(".dev") else { throw XCTSkip("Requires development source setup") }
         let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "app/Fixtures/CollectionEntry/EmptyCollection"),
+            now: "2030-01-15T10:00:00Z", timeZone: "UTC", locale: "en_US", animations: false).arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+        // An empty collection first: a deck package needs one (K6.1).
+        let startEmpty = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "home.collection.startEmpty")),
+                                       app.debugDescription)
+        try click(startEmpty, app, bundle)
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: startEmpty)], timeout: 30), .completed)
         try openCollectionSettings(app, bundle)
         let importButton = app.buttons["settings.root.importCollection"].firstMatch
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -347,7 +359,9 @@ import notify
         let sheet = element(app, "settings.deckImport.content")
         XCTAssertTrue(sheet.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(element(app, "onboarding.collectionImport.content").exists)
-        XCTAssertTrue(app.staticTexts["Import “shared-deck.apkg”"].waitForExistence(timeout: 10), app.debugDescription)
+        let title = "Import “shared-deck.apkg”"
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", title, title)).firstMatch
+            .waitForExistence(timeout: 10), app.debugDescription)
         capture(app, "deck-import-picked")
         try click(element(app, "settings.deckImport.import"), app, bundle)
         let done = element(app, "settings.deckImport.done")
