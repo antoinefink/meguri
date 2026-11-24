@@ -47,7 +47,7 @@ public struct SettingsView: View {
         // iPhone held wide. A phone in landscape has a compact height and stays flat.
         GeometryReader { proxy in
             if shellLayout == .compact, sizeClass == .regular, verticalSizeClass == .regular, wide {
-                HStack(spacing: 0) {
+                HStack {
                     List(selection: Binding<String?>(get: { section }, set: { if let value = $0 { selectedSection = value } })) {
                         ForEach([SettingsPage.accountSync, .collection], id: \.self) { page in
                             SettingsPageLabel(page: page)
@@ -64,6 +64,7 @@ public struct SettingsView: View {
                         .formStyle(.grouped)
                     }
                 }
+                .background(Color(uiColor: .systemGroupedBackground))
             } else { flat }
         }
         #endif
