@@ -210,6 +210,28 @@ import Testing
         #expect(sheet.dueText == "4")
     }
 
+    @Test func aFailedDefaultsReadFillsTheKeysOwnDefaults() async throws {
+        let (model, _, reads) = try await browse()
+        reads.defaultsFail = true
+        await select(model, [0])
+        let sheet = try await open(.setDueDate, model)
+        await until { sheet.dueText == "0" }
+        await until { sheet.canConfirm }
+    }
+
+    @Test func aResetWhileACommandRunsCancelsIt() async throws {
+        let (model, session, _) = try await browse()
+        session.holdsActions = true
+        await select(model, [0])
+        let sheet = try await open(.forget, model)
+        sheet.confirm()
+        await until { session.heldAction.started == 1 }
+        try await Task.sleep(for: .milliseconds(20))
+        model.commands.reset()
+        await until { session.heldAction.cancelled }
+        #expect(model.commands.sheet == nil && session.actions.isEmpty)
+    }
+
     @Test func defaultsReadBeforeTheCollectionWentAreDropped() async throws {
         let (model, _, reads) = try await browse()
         reads.holdDefaults = true
@@ -334,7 +356,9 @@ import Testing
     }
 
     func defaultDeckHasCards() async throws -> Bool { false }
+    var defaultsFail = false
     func sheetDefaults() async throws -> BrowseSheetDefaults {
+        if defaultsFail { throw BridgeError.unavailable(reason: "sample") }
         if holdDefaults { await withCheckedContinuation { heldDefaults.append($0) } }
         return defaults
     }

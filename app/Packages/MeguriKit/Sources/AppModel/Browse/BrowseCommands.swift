@@ -604,9 +604,12 @@ public final class BrowseCommands {
         if sheetDefaults == nil, kind == .setDueDate || kind == .forget {
             let generation = generation
             Task { [weak sheet] in
-                guard let defaults = try? await sheetReads.sheetDefaults(), self.generation == generation else { return }
-                sheetDefaults = defaults
-                sheet?.prefill(defaults)
+                let read = try? await sheetReads.sheetDefaults()
+                guard self.generation == generation else { return }
+                if let read { sheetDefaults = read }
+                // A failed read fills the keys' own defaults (`sched/set-due-date` S6,
+                // `sched/manual-ops` M6.4), so the sheet never waits for nothing.
+                sheet?.prefill(read ?? BrowseSheetDefaults(setDueDays: "0", restorePosition: true, resetCounts: false))
             }
         }
     }
@@ -652,7 +655,11 @@ public final class BrowseCommands {
                 case .card(let action): try await session.start(action, on: target)
                 case .note(let action): try await session.start(action, on: target)
                 }
-                guard self.generation == generation else { return }
+                guard self.generation == generation else {
+                    // The collection went while the action started: it must not commit unseen.
+                    await running.cancel()
+                    return
+                }
                 sheet.started(running)
                 let progress = Task { @MainActor in
                     for await report in running.progress { sheet.progressed(report) }
@@ -684,6 +691,8 @@ public final class BrowseCommands {
         facts = nil
         deleteQuestion = nil
         failed = nil
+        // A command under way is asked to stop; its result lands nowhere.
+        if let sheet, sheet.isRunning { sheet.cancel() }
         sheet?.closed()
         sheet = nil
         sheetDefaults = nil
