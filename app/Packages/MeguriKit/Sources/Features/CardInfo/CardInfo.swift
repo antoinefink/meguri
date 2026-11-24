@@ -274,7 +274,9 @@ private struct CardInfoSnapshotView: View {
     private var copyDebugInfo: some View {
         Button {
             Task {
-                guard let json = await model.debugJSON(snapshot.cardID) else { return }
+                let card = snapshot.cardID
+                // A card shown since the copy began gets nothing.
+                guard let json = await model.debugJSON(card), model.cardID == card else { return }
                 #if os(macOS)
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(json, forType: .string)

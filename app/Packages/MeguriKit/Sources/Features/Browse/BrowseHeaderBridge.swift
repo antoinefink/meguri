@@ -59,6 +59,10 @@ struct BrowseHeaderBridge: NSViewRepresentable {
         /// The bridge's own moves (the state column put back first) are not the person's.
         private var correcting = false
         private var syncQueued = false
+        #if DEBUG
+        /// The column moves seen (the UI suites read them).
+        private var moves: [String] = []
+        #endif
         private var widthsDue: [String: Double] = [:]
         private var widthsTimer: Timer?
 
@@ -77,6 +81,10 @@ struct BrowseHeaderBridge: NSViewRepresentable {
         }
 
         func detach() {
+            // A width set just before the table goes is kept.
+            widthsTimer?.fire()
+            widthsTimer?.invalidate()
+            widthsTimer = nil
             observers.forEach(NotificationCenter.default.removeObserver)
             observers = []
             if let monitor { NSEvent.removeMonitor(monitor) }
@@ -169,7 +177,8 @@ struct BrowseHeaderBridge: NSViewRepresentable {
             guard let table else { return }
             let titles = table.tableColumns.dropFirst().map(\.headerCell.stringValue)
             let sort = model.results.list.map { " sort \($0.sort.key) \($0.sort.direction)" } ?? ""
-            report("model \(columns.joined(separator: ","))\(sort) | table \(titles.joined(separator: ","))")
+            report("model \(columns.joined(separator: ","))\(sort) | table \(titles.joined(separator: ","))"
+                + " | reorder \(table.allowsColumnReordering) moves \(moves.suffix(4).joined(separator: " "))")
             #endif
         }
 
@@ -184,14 +193,18 @@ struct BrowseHeaderBridge: NSViewRepresentable {
         /// order is written once, when the mouse is up. A move with no mouse
         /// button down is SwiftUI laying out the model's order, not the person's.
         private func moved(from old: Int?, to new: Int?) {
-            guard !correcting, let old, let new, old != new, NSEvent.pressedMouseButtons & 1 != 0 else { return }
+            let dragged = table?.headerView?.draggedColumn ?? -1
+            #if DEBUG
+            moves.append("\(old ?? -1)>\(new ?? -1) d\(dragged) p\(NSEvent.pressedMouseButtons)")
+            #endif
+            guard !correcting, let old, let new, old != new, dragged >= 0 || NSEvent.pressedMouseButtons & 1 != 0 else { return }
             guard !dragging else { return }
             dragging = true
             waitForMouseUp()
         }
 
         private func waitForMouseUp() {
-            guard NSEvent.pressedMouseButtons & 1 == 0 else {
+            guard NSEvent.pressedMouseButtons & 1 == 0, (table?.headerView?.draggedColumn ?? -1) < 0 else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.waitForMouseUp() }
                 return
             }

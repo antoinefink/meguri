@@ -1287,7 +1287,8 @@ public final class BrowseResults {
         let previous = columnWrite, epoch = epoch
         columnWrite = Task {
             await previous?.value
-            await body()
+            // A write queued before the collection went never reaches the next one.
+            if self.epoch == epoch { await body() }
             guard self.epoch == epoch else { return }
             columnWritesPending -= 1
             if columnWritesPending == 0, refreshAfterColumnWrites {

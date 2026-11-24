@@ -42,7 +42,8 @@ final class MacBrowseColumnsTests: XCTestCase {
         let source = header(app, "Interval"), target = header(app, "Card Type")
         XCTAssertTrue(source.waitForExistence(timeout: 10) && target.exists, "the headers")
         source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .click(forDuration: 0.6, thenDragTo: target.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)))
+            .click(forDuration: 0.6, thenDragTo: target.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)),
+                   withVelocity: .slow, thenHoldForDuration: 0.4)
         XCTAssertTrue(waitUntil(timeout: 15) { self.columns(app).hasPrefix("model noteFld,cardIvl,template,cardDue,cardMod") },
                       "Interval moved before Card Type: \(columns(app))")
 

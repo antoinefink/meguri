@@ -129,6 +129,8 @@ public final class CardInfoModel {
             // An unavailable card may become available (Check Database, an undo).
             return content != .none
         }
+        // The snapshot shown is another card's while the named card is read.
+        guard snapshot.cardID == cardID else { return true }
         let deps = snapshot.dependencies
         if changes.cards.contains(where: { $0.id == deps.card }) || changes.notes.contains(where: { $0.id == deps.note }) {
             return true

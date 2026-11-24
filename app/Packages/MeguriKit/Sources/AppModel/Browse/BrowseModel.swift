@@ -518,6 +518,8 @@ public final class BrowseModel {
     /// counts are read again.
     public func collectionReady() {
         epoch &+= 1
+        // A field read cut short by the new generation is made again.
+        fieldsStale = true
         // A save on its way went with the old epoch: Save can be tried again.
         if savingSearch?.saving == true { savingSearch?.markFailed() }
         commands.reset()
