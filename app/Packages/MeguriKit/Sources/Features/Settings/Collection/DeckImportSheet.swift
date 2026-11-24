@@ -285,8 +285,13 @@ struct DeckImportContent: View {
                 .toolbar { toolbar }
                 .disabled(presentation.undoing)
         }
+        #if os(macOS)
         // The sheet is as tall as what it shows, up to the window's room.
         .presentationSizing(.form.fitted(horizontal: false, vertical: true))
+        #else
+        // A form has no ideal height on iOS: the system's form sheet.
+        .presentationSizing(.form)
+        #endif
         .interactiveDismissDisabled(presentation.busy || presentation.step == .confirming || presentation.undoing)
         .onChange(of: presentation.step) { _, step in announce(step) }
         #if os(macOS)
@@ -422,6 +427,7 @@ struct DeckImportContent: View {
                         Image(systemName: "minus.circle.fill").symbolRenderingMode(.multicolor).foregroundStyle(.red)
                     }
                     .foregroundStyle(.red)
+                    .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("\(Self.id).loss.\(row.id)")
                 }
             } header: {
@@ -506,6 +512,7 @@ struct DeckImportContent: View {
                         .buttonStyle(.borderless)
                 }
             }
+            .accessibilityElement(children: .combine)
             .accessibilityIdentifier("\(Self.id).line.\(line.id)")
         }
         .onChange(of: expanded.contains(line.id), initial: true) { _, open in
@@ -576,6 +583,7 @@ struct DeckImportContent: View {
             } icon: {
                 Image(systemName: "checkmark.circle.fill").symbolRenderingMode(.multicolor)
             }
+            .accessibilityElement(children: .combine)
             .accessibilityIdentifier("\(Self.id).committedWithoutResult")
         }
     }
