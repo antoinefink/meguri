@@ -74,7 +74,11 @@ public enum DeckImportSheetPreview: PreviewStates {
             value.syncParagraph = .unreachable
         case "result", "result-log", "result-undone":
             value.step = .result; value.result = result; value.canUndo = name != "result-undone"
-            value.undone = name == "result-undone"; value.canShowInBrowse = true
+            value.undone = name == "result-undone"
+            #if os(macOS)
+            // Browse is the Mac's only (N21.1).
+            value.canShowInBrowse = true
+            #endif
             value.log = [.duplicate: [.init(noteId: 11, fields: ["zorvel", "a made-up word"]), .init(noteId: 12, fields: [])],
                          .new: [.init(noteId: 13, fields: ["quandle", "another made-up word"])]]
         case "refused-too-new":

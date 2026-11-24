@@ -539,6 +539,7 @@ struct DeckImportContent: View {
                 }
                 .buttonStyle(.borderless)
                 .help(Text(verbatim: "Show in Browse"))
+                .accessibilityIdentifier("\(Self.id).entryShow.\(line)\(index)")
             }
         }
         .accessibilityElement(children: .combine)
@@ -622,6 +623,9 @@ struct DeckImportContent: View {
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button(action: actions.importPackage) { Text(verbatim: "Import") }
+                    #if os(iOS)
+                    .buttonStyle(.borderedProminent)
+                    #endif
                     .keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier("\(Self.id).import")
             }
