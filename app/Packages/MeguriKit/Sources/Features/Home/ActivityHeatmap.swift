@@ -55,40 +55,68 @@ struct ActivityHeatmapSection: View {
     /// not resize the one that stays.
     @State private var measured: CGFloat?
 
-    /// N14.11's baseline square; Mac Home fills the measured width, touch stays fixed.
+    /// N14.11's fixed squares; Mac Home reveals older weeks as its row grows.
     #if os(macOS)
     static let square = ActivityGrid.Square.mac
+    static let gridAlignment = Alignment.trailing
     #else
     static let square = ActivityGrid.Square.touch
+    static let gridAlignment = Alignment.leading
     #endif
+
+    /// Shared by the view and focused resize checks, including a hidden section's
+    /// remeasurement and bounded legacy service coverage.
+    struct Presentation {
+        let geometry: ActivityGrid.Geometry
+        let grid: ActivityGrid?
+        let shown: Bool
+        let visible: Bool
+
+        init(days: ActivityDays?, width: CGFloat, firstWeekday: Int) {
+            let geometry: ActivityGrid.Geometry
+            #if os(macOS)
+            // A legacy injected service can still return only the bounded window.
+            let limit: Int? = days == nil || days?.history != nil ? nil : ActivityGrid.maximumWeeks
+            geometry = ActivityGrid.Geometry(width: width, square: ActivityHeatmapSection.square, maximumWeeks: limit)
+            #else
+            geometry = ActivityGrid.Geometry(width: width, square: ActivityHeatmapSection.square)
+            #endif
+            self.geometry = geometry
+            let grid = days.map {
+                if let history = $0.history {
+                    ActivityGrid(history: history, weeks: geometry.weeks, todayWeekday: $0.today.weekday,
+                                 firstWeekday: firstWeekday)
+                } else {
+                    ActivityGrid(counts: $0.counts, weeks: geometry.weeks, todayWeekday: $0.today.weekday,
+                                 firstWeekday: firstWeekday)
+                }
+            }
+            self.grid = grid
+            shown = grid != nil && geometry.weeks > 0
+            // Hidden once a result says the days shown hold no review (AH8); until the first
+            // result the group keeps its height, so nothing moves when the squares arrive.
+            // Before its width is known the row shows only to measure it, and only when the
+            // scope has a review anywhere in the queried history: a scope known to be empty never
+            // flashes its header.
+            visible = if width == 0 {
+                days.map { $0.history?.values.contains { $0 > 0 } ?? $0.counts.contains { $0 > 0 } } ?? true
+            } else {
+                grid?.total != 0
+            }
+        }
+    }
 
     var body: some View {
         // A shared width cleared by a resize while no row showed (hidden or away) clears
         // this row's too: it shows again to measure, rather than judge by an old width.
         let shared = widths.row(page)
         let width = shared == 0 ? 0 : measured ?? shared
-        #if os(macOS)
-        let geometry = ActivityGrid.Geometry(width: width, square: Self.square, fillingWidth: true)
-        #else
-        let geometry = ActivityGrid.Geometry(width: width, square: Self.square)
-        #endif
         let days = store.days(scope)
-        let grid = days.map {
-            ActivityGrid(counts: $0.counts, weeks: geometry.weeks, todayWeekday: $0.today.weekday,
-                         firstWeekday: calendar.firstWeekday)
-        }
-        let shown = grid != nil && geometry.weeks > 0
-        // Hidden once a result says the days shown hold no review (AH8); until the first
-        // result the group keeps its height, so nothing moves when the squares arrive.
-        // Before its width is known the row shows only to measure it, and only when the
-        // scope has a review in any of the 53 weeks: a scope known to be empty never
-        // flashes its header.
-        let visible = if width == 0 {
-            days.map { $0.counts.contains { $0 > 0 } } ?? true
-        } else {
-            grid?.total != 0
-        }
-        if visible {
+        let presentation = Presentation(days: days, width: width, firstWeekday: calendar.firstWeekday)
+        let geometry = presentation.geometry
+        let grid = presentation.grid
+        let shown = presentation.shown
+        if presentation.visible {
             Section {
                 VStack(alignment: .leading, spacing: Spacing.xSmall) {
                     // AH9: the months' row. A caption line's height, kept from the first frame
@@ -97,7 +125,7 @@ struct ActivityHeatmapSection: View {
                         .font(.caption)
                         .hidden()
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay(alignment: .leading) {
+                        .overlay(alignment: Self.gridAlignment) {
                             if let grid, let days, geometry.weeks > 0 {
                                 // The labels run over the grid's own width, not the row's.
                                 MonthLabelsView(grid: grid, geometry: geometry, today: days.today)
@@ -105,7 +133,7 @@ struct ActivityHeatmapSection: View {
                             }
                         }
                     // Only this clear view sizes the row, and it reports the width offered.
-                    // The squares sit in its overlay at the geometry's width, leading-aligned,
+                    // The squares sit in its overlay at the geometry's natural width,
                     // so an old width (taken before a fold or in another column) can never
                     // feed itself.
                     Color.clear
@@ -115,7 +143,7 @@ struct ActivityHeatmapSection: View {
                             measured = $0
                             widths.measuredRow(page, $0)
                         }
-                        .overlay(alignment: .leading) {
+                        .overlay(alignment: Self.gridAlignment) {
                             if let grid, let days {
                                 ActivityGridView(grid: grid, geometry: geometry, today: days.today)
                             }
@@ -196,9 +224,11 @@ private struct ActivityGridView: View {
             .fill(Self.style(level: level, increasedContrast: increased, dark: colorScheme == .dark))
             // N24.6: with Increase Contrast the steps lie over the empty day's own fill.
             .background { if increased && level > 0 { shape.fill(.fill.secondary) } }
+            #if !os(macOS)
             .overlay {
                 if daysAgo == 0 { shape.strokeBorder(.primary, lineWidth: 1) }
             }
+            #endif
             .frame(width: geometry.side, height: geometry.side)
     }
 

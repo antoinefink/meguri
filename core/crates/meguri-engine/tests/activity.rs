@@ -7,7 +7,7 @@ mod common;
 use std::sync::Arc;
 
 use common::day::{self, Timing};
-use meguri_engine::activity::{CivilDate, activity_heatmap};
+use meguri_engine::activity::{CivilDate, activity_heatmap, activity_heatmap_history};
 use meguri_engine::{Collection, Ports};
 use meguri_model::clock::{StepClock, UtcOffset};
 use meguri_model::ids::DeckId;
@@ -70,6 +70,14 @@ fn days_scopes_and_today_follow_the_collection() {
         (4, 4, 2, 0, N - 4 * DAY - 3_600),
         (5, 1, 0, 4, N - 3_600),
         (6, 99, 3, 1, N - 3_600),
+        (7, 1, 3, 1, N - 371 * DAY),
+        (8, 2, 1, 2, N - 500 * DAY),
+        (9, 4, 2, 0, N - 400 * DAY),
+        (10, 3, 4, 1, N - 600 * DAY),
+        (11, 99, 3, 1, N - 700 * DAY),
+        (12, 1, 0, 4, N - 800 * DAY),
+        // A malformed ancient timestamp still occupies just one bucket.
+        (13, 1, 3, 1, -9_000_000_000_000_000),
     ] {
         sql.push(format!(
             "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES ({}, {cid}, 0, {ease}, 1, 1, 2500, 1000, {kind})",
@@ -91,6 +99,22 @@ fn days_scopes_and_today_follow_the_collection() {
     assert_eq!(nonzero(&activity_heatmap(&collection, Some(sub)).unwrap().counts), [(2, 1)]);
     assert_eq!(nonzero(&activity_heatmap(&collection, Some(other)).unwrap().counts), [(3, 1)]);
     assert!(nonzero(&activity_heatmap(&collection, Some(DeckId(424_242))).unwrap().counts).is_empty());
+
+    let history = activity_heatmap_history(&collection, None).unwrap();
+    assert_eq!(history.window.counts, all.counts);
+    assert_eq!(history.window.today_date, all.today_date);
+    assert_eq!(history.window.next_day_at, all.next_day_at);
+    let ancient = (N + 9_000_000_000_000_000 - 1) / DAY;
+    assert_eq!(
+        history.history,
+        vec![(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (371, 1), (400, 1), (500, 1), (600, 1), (700, 1), (ancient, 1)]
+    );
+    let scoped = activity_heatmap_history(&collection, Some(lang)).unwrap();
+    assert_eq!(scoped.window.counts, lang_counts.counts);
+    assert_eq!(scoped.history, vec![(1, 1), (2, 1), (4, 1), (371, 1), (400, 1), (500, 1), (ancient, 1)]);
+    assert_eq!(activity_heatmap_history(&collection, Some(sub)).unwrap().history, vec![(2, 1), (500, 1)]);
+    assert_eq!(activity_heatmap_history(&collection, Some(other)).unwrap().history, vec![(3, 1), (600, 1)]);
+    assert!(activity_heatmap_history(&collection, Some(DeckId(424_242))).unwrap().history.is_empty());
 
     // Past the boundary the day clock moves N; every row is a day older.
     clock.set_now_ms((N + 60) * 1000);

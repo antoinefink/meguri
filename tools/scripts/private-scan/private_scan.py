@@ -838,6 +838,17 @@ PUBLIC_ARTIFACTS = {
     # Complete-content PUBLIC review: s-20261124T142356Z-950aa36a, 2026-11-24.
     'app/Packages/MeguriKit/Sources/Features/Stats/Charts/StatsChartFormat.swift':
         '1cf8eb49077cdd24dcc2303c5063cdc326376f8dff8a98ccc33cc7c56acb52fa',
+    # Complete-content PUBLIC review: Mac heatmap history, 2026-11-24.
+    'app/Packages/MeguriKit/Sources/HeatmapKit/ActivityGrid.swift':
+        '06bdb1cf1bb568541feedda2187a1a67d37bfe33353c25b1672419edf06da417',
+    'core/crates/meguri-engine/tests/activity.rs':
+        '37ad2a34372338cdac430f3b1d45299d433256d46cbbbc95032915ecb1fe3948',
+    'core/crates/meguri-ffi/src/activity.rs':
+        '1bf97e602e93e0809c259aae993be3b7328aab5ce181f192cfdf95cadc3bfa8d',
+    'core/crates/meguri-storage/tests/activity.rs':
+        'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
+    'docs/design/native-interface-contract.md':
+        '2ba0dc17770ff4254aa00063825bf2bc29a8f2996b816a8c7e9fbddaa65ff6fc',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
