@@ -120,6 +120,8 @@ public struct BrowseSidebar<Header: View>: View {
     private func selectionChanged(_ rows: Set<BrowseSidebarTag>) {
         guard rows != model.listSelection else { return keyRow = nil }
         if let keyRow, rows == [keyRow] { return }
+        // A ⌘-click on the row the keys stand on empties the list's selection.
+        if let keyRow, rows.isEmpty, !Self.byKey() { return clicked(keyRow) }
         let filters = rows.filter { if case .section = $0 { false } else { true } }
         // The arrow keys move through the rows without changing the query.
         if Self.byKey(), filters.count == 1, filters == rows, let row = filters.first {
@@ -140,6 +142,17 @@ public struct BrowseSidebar<Header: View>: View {
         Task { @MainActor in
             if keyRow == nil, selection != model.listSelection { selection = model.listSelection }
         }
+    }
+
+    /// A click on the row the arrow keys stand on. A plain or ⌥-click leaves
+    /// the list's selection as it is, so the list reports nothing and the
+    /// row's own tap does (`row`); it is T9's click on that row all the same.
+    private func clicked(_ row: BrowseSidebarTag) {
+        guard keyRow == row else { return }
+        keyRow = nil
+        clickedRow = row
+        model.activate(row, click: Self.click())
+        if selection != model.listSelection { selection = model.listSelection }
     }
 
     private func forgetKeyRow() {
@@ -373,8 +386,8 @@ public struct BrowseSidebar<Header: View>: View {
                 rowIcon(icon).accessibilityHidden(true)
             }
             .lineLimit(1)
+            Spacer(minLength: 0)
             if active {
-                Spacer(minLength: 0)
                 Image(systemName: "checkmark")
                     .imageScale(.small)
                     .fontWeight(.semibold)
@@ -382,6 +395,11 @@ public struct BrowseSidebar<Header: View>: View {
                     .accessibilityHidden(true)
             }
         }
+        // The whole row takes the click below, not the label alone.
+        .contentShape(Rectangle())
+        #if os(macOS)
+        .simultaneousGesture(TapGesture().onEnded { clicked(tag) })
+        #endif
         .help(help.map { Text(verbatim: $0) } ?? Text(verbatim: label))
         .badge(model.counts[tag].map { Text($0, format: .number) })
         .listRowBackground(active ? Radius.rounded(Radius.small).fill(.tint.quaternary).padding(.horizontal, Spacing.xSmall) : nil)
