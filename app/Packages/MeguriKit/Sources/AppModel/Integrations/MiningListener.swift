@@ -160,7 +160,10 @@ nonisolated final class MiningListener: @unchecked Sendable {
         connection.stateUpdateHandler = { state in
             switch state {
             case .ready: finish(false)
-            case .failed(let error):
+            case .waiting(let error), .failed(let error):
+                // Darwin may report a refused local connect as waiting
+                // instead of failed. Either is evidence of a free port;
+                // other errors remain conservative, as does the deadline.
                 if case .posix(.ECONNREFUSED) = error { finish(true) } else { finish(false) }
             default: break
             }

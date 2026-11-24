@@ -268,7 +268,15 @@ actor MiningReceiver {
                 key: payload.retryKey, digest: payload.digest, admissionToken: admissionToken)
             return .json(200, ["success": true, "created": true, "id": result.id])
         } catch {
-            let message = (error as? MiningFailure)?.message ?? error.localizedDescription
+            let message: String
+            if case BridgeError.invalidArgument(let detail) = error {
+                message = detail
+            } else {
+                // Deliberate public errors (including MiningFailure) expose
+                // their message through LocalizedError. Core internal errors
+                // and arbitrary NSError details must stay private.
+                message = (error as? any LocalizedError)?.errorDescription ?? "Meguri could not add the card."
+            }
             if root { return .json(200, ["result": NSNull(), "error": message]) }
             return .error(400, message)
         }

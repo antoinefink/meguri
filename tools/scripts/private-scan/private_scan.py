@@ -841,7 +841,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningHTTP.swift':
         '18e72c0d652f3b438b3c5811cbfe83fbbfb7aff0c9ef5db68c880a534b1d8317',
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningListener.swift':
-        '913259b0cadb00609a91f88d95c5973b6c024b6046d318d9ef5f4b869bd32fa5',
+        'a5f1b44b2e2a5ae45242bcd141ecad66a24a0a0d20225110523e7d26242150dc',
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningWebSocket.swift':
         'bb35c52f2d96a87117c374f9cab80da43ce9c22c430883fc508f305a77cdaa46',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':
