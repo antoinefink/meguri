@@ -246,6 +246,27 @@ if [ -n "${FAKE_VM_XCODEBUILD_UNTIL:-}" ]; then
 fi
 mkdir -p "$bundle"
 echo "{\"result\": \"Passed\", \"passedTests\": 12, \"failedTests\": 0, \"skippedTests\": 0}" >"$bundle/summary.json"
+if [ -n "${TEST_RUNNER_MEGURI_POSTURE_REQUEST:-}" ]; then
+  echo "posture-request $TEST_RUNNER_MEGURI_POSTURE_REQUEST" >>"$STUB_LOG"
+  att="$bundle/attachments"
+  mkdir -p "$att"
+  file=00000000-0000-4000-8000-000000000042.json
+  if [ "${FAKE_POSTURE_REPORT:-pass}" != absent ]; then
+    jq -nc --argjson r "$TEST_RUNNER_MEGURI_POSTURE_REQUEST" --arg s "${FAKE_POSTURE_REPORT:-pass}" "
+      {udid:\$r.udid,name:\$r.name,nonce:\$r.nonce,posture:\$r.posture,status:\$s,reason:\"fixture\",
+       control_verified:true,changed:false,diagnostics:{hubWindows:1,targetWindows:1}} |
+      if \$s == \"wrong-target\" then .status=\"pass\" | .udid=\"00000000-0000-4000-8000-999999999999\"
+      elif \$s == \"wrong-nonce\" then .status=\"pass\" | .nonce=\"another-run\"
+      elif \$s == \"ambiguous\" then .status=\"pass\" else . end" >"$att/$file"
+    jq -nc --arg f "$file" --arg s "${FAKE_POSTURE_REPORT:-pass}" "
+      [{testIdentifier:\"SimulatorPostureTests/testRequestedPosture()\",attachments:[
+        {suggestedHumanReadableName:\"mg-posture_0_00000000-0000-4000-8000-000000000042.json\",
+         exportedFileName:\$f,isAssociatedWithFailure:false}]}] |
+      if \$s == \"ambiguous\" then .[0].attachments += .[0].attachments else . end" >"$att/manifest.json"
+  else
+    echo "[]" >"$att/manifest.json"
+  fi
+fi
 if [ -n "${TEST_RUNNER_MEGURI_SNAPSHOT_OUT:-}" ]; then
   out="$TEST_RUNNER_MEGURI_SNAPSHOT_OUT"
   if [ "${TEST_RUNNER_MEGURI_SNAPSHOT_MODE:-}" != plan ] &&
@@ -389,6 +410,144 @@ wait_log() {
 
 # lease_in_sandbox <kind>: a VM pool device leased from the sandbox checkout.
 lease_in_sandbox() { (cd "$SB" && "$SB/tools/scripts/sim-pool.sh" acquire "$1" --holder test 2>/dev/null); }
+
+# Keep normal guest xcodebuild/result-bundle transport. Only Hub discovery
+# and pixel reduction use fixtures; no report is written into MG's workspace.
+posture_runner_fixture() {
+  cat >"$SB/tools/mg.d/zzz-posture-fixture.sh" <<'EOF'
+mg_posture_hub() { echo com.apple.dt.Devices; }
+EOF
+  stub "$FAKE_VM_BIN/osascript" '
+[ "$1 $2" = "-l JavaScript" ] || exit 97
+jq -nc --arg p "${FAKE_POSTURE_DISPLAY:-open}" \
+  "[{id:1,width:100,height:200,lit:(\$p == \"closed\")},{id:3,width:200,height:200,lit:(\$p == \"open\")}]"'
+}
+
+posture_lease_fixture() {
+  export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
+  posture_runner_fixture
+  lease_in_sandbox foldable
+}
+
+@test "sim-posture validates arguments before any VM or GUI work" {
+  local args
+  for args in '' 'booted open' 'not-a-uuid open' '00000000-0000-4000-8000-000000000001 half' '00000000-0000-4000-8000-000000000001 open extra'; do
+    # shellcheck disable=SC2086
+    mg sim-posture $args
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = usage ]
+  done
+  not_called '^(ssh|tart|host-xcrun|host-xcodebuild) '
+}
+
+@test "sim-posture never falls back to the workstation and never starts a stopped VM" {
+  rm "$MEGURI_MAC_VM_CONFIG"
+  MEGURI_SIM_ALLOW_HOST=1 MEGURI_MAC_UI_ALLOW_HOST=1 mg sim-posture 00000000-0000-4000-8000-000000000001 open
+  [ "$(field .details.queued)" = true ]
+  write_config meguri-mac
+  echo stopped >"$FAKE_VM_DIR/meguri-mac/state"
+  mg sim-posture 00000000-0000-4000-8000-000000000001 closed
+  [ "$(field .details.queued)" = true ]
+  not_called '^tart (run|stop) '
+  not_called '^ssh '
+  assert_host_untouched
+  validate "$result"
+}
+
+@test "sim-posture rejects ordinary phones, foreign or expired leases before GUI work" {
+  export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
+  local u original
+  u="$(lease_in_sandbox iphone)"
+  mg sim-posture "$u" open
+  [ "$(field '.failures[0].id')" = posture-target ]
+  u="$(posture_lease_fixture)"
+  [ -n "$u" ]
+  original="$(cat "$(vm_lease "$u")")"
+  jq '.worktree="/another-checkout"' <<<"$original" >"$(vm_lease "$u")"
+  mg sim-posture "$u" open
+  [ "$(field '.failures[0].id')" = posture-target ]
+  jq '.expires_epoch=1' <<<"$original" >"$(vm_lease "$u")"
+  mg sim-posture "$u" closed
+  [ "$(field '.failures[0].id')" = posture-target ]
+  jq '.vm="another-vm"' <<<"$original" >"$(vm_lease "$u")"
+  mg sim-posture "$u" open
+  [ "$(field '.failures[0].id')" = posture-target ]
+  not_called '^posture-request '
+  not_called '^vm-xcodebuild '
+  assert_host_untouched
+}
+
+@test "sim-posture checks the pinned runtime build before Hub input" {
+  export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
+  local u
+  u="$(posture_lease_fixture)"
+  FAKE_SIM_RT271_BUILD=wrong-build mg sim-posture "$u" open
+  [ "$(field '.failures[0].id')" = runtime-mismatch ]
+  not_called '^posture-request '
+  assert_host_untouched
+}
+
+@test "sim-posture rejects duplicate simulator names before Hub input" {
+  export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
+  local u
+  u="$(posture_lease_fixture)"
+  vm_sim meguri-mac __add Meguri-Pool-foldable-1 Booted com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4 >/dev/null
+  mg sim-posture "$u" open
+  [ "$(field '.failures[0].id')" = posture-target ]
+  not_called '^posture-request '
+  assert_host_untouched
+}
+
+@test "sim-posture passes only the named leased Duo to the guest runner and keeps its lease" {
+  # Environment must be set in this shell as command substitutions isolate it.
+  export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
+  local u original
+  u="$(posture_lease_fixture)"
+  original="$(cat "$(vm_lease "$u")")"
+  mg sim-posture "$u" open
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.sim_runner)" = vm ]
+  [ "$(field .details.posture.udid)" = "$u" ]
+  [ "$(field .details.posture.changed)" = false ]
+  sed -n 's/^posture-request //p' "$STUB_LOG" | jq -e 'has("root") == false and has("pool") == false and has("report") == false' >/dev/null
+  [ "$(cat "$(vm_lease "$u")")" = "$original" ]
+  called '^vm-xcodebuild test-without-building .* -destination platform=macOS,arch=arm64 .* -only-testing:MeguriUITests/SimulatorPostureTests/testRequestedPosture'
+  [ "$(sed -n 's/^posture-request //p' "$STUB_LOG" | jq -r .udid)" = "$u" ]
+  called '^fake build mac Debug$'
+  [ -f "$(dirname "$result")/posture.xcresult/attachments/manifest.json" ]
+  [ "$(field .details.display_verified)" = true ]
+  not_called 'tar .*outer.png'
+  not_called 'tar .*inner.png'
+  not_called '^vm-overlap'
+  assert_host_untouched
+  validate "$result"
+}
+
+@test "sim-posture cannot accept a missing, wrong-target, stale or ambiguous attachment" {
+  export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
+  local u kind
+  u="$(posture_lease_fixture)"
+  for kind in absent wrong-target ambiguous wrong-nonce; do
+    FAKE_POSTURE_REPORT="$kind" mg sim-posture "$u" open
+    [ "$(field .status)" != pass ]
+    [ "$(field '.failures | length')" -gt 0 ]
+  done
+  assert_host_untouched
+}
+
+@test "sim-posture queues unavailable Hub controls but fails an actual display mismatch" {
+  export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
+  local u
+  u="$(posture_lease_fixture)"
+  FAKE_POSTURE_REPORT=unavailable mg sim-posture "$u" open
+  [ "$(field .details.queued)" = true ]
+  [ "$(field .status)" = warn ]
+  [ "$(field '.failures | length')" = 0 ]
+  FAKE_POSTURE_DISPLAY=closed mg sim-posture "$u" open
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = posture-proof ]
+  assert_host_untouched
+}
 
 # No simulator call, test run or lease on this Mac.
 assert_host_untouched() {

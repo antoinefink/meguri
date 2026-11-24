@@ -134,6 +134,54 @@ Verified on 2026-10-17 from the U8d worktree, with a watcher that polled `lsappi
 
 ## Fold positions (2026-11-01)
 
+### Automated leased Duo posture
+
+`tools/mg sim-posture <leased-udid> open|closed` requests Device Hub's native
+posture control in the already-running dedicated pool VM. MG prepares Mac
+Debug UI products before taking the VM lease; no build runs inside XCTest.
+It never starts a VM/simulator or uses workstation fallbacks, VNC or trust setup.
+
+MG checks the checkout-owned simulator lease, pinned runtime **build**, unique
+simulator name, booted inventory and iPhone Duo type. After product delivery it
+requires more than 120 seconds on the unchanged simulator lease. The request
+allows input for at most 90 seconds, with five seconds reserved at the click;
+XCTest has a 30-second execution allowance. MG's normal login admission and
+runner's hypervisor/`meguri` account checks remain in effect. The caller retains
+and releases the simulator lease.
+
+The sandboxed runner uses only supported `XCUIApplication` queries and native
+clicks to interact with Device Hub. It tries a uniquely named simulator display
+window, then a unique row in a Simulators outline/group and matching details in
+the same library window. Inspector need not display a UUID. Ambiguous targets
+or missing controls queue with fixed diagnostic counts (Hub/target windows,
+simulator rows, detail panes and named controls); no arbitrary UI labels are
+exported. No physical-device row is selected. Closed, Partially Open and Open
+must be distinct controls with an exclusive selected state. An already-selected
+posture needs no click. A posture click is never retried.
+
+The runner attaches `mg-posture.json` with `.keepAlways`. MG receives the normal
+result bundle and selectively exports exactly one matching method attachment,
+checking its target and per-run nonce. The runner reads no checkout or lease
+files, launches no subprocesses, writes no report path and needs no direct AX
+trust. MG checks the lease again after the receipt. Outside XCTest, MG uses its
+guest simctl helper to capture displays 1 and 3 twice and a small guest AppKit
+script to reduce pixels to dimensions/content flags; PNGs are removed in the
+guest without transferring them. Closed requires outer content and black inner;
+Open requires the reverse. Both lit/blank or a mismatch fails verification.
+The UI's exclusive selection also distinguishes Open from Partially Open.
+
+Require `.status == "pass"` and `.details.display_verified == true` before
+`drive --platform foldable --device <udid>`; queued jobs also exit zero. Focused
+checks: `tools/mg selftest tools/tests/sim_posture.bats tools/tests/sim_vm.bats
+--filter sim-posture`. The action skips in ordinary UI runs without MG's request.
+
+The supplied initial native guest invocation reached XCTest but failed writing
+`posture.json` in MG's workspace with `NSCocoaErrorDomain 513`. This is evidence
+of the blocked file transport, not live posture acceptance. This revision has
+no native build or live acceptance result from the filtered runner. The
+integrator must check compact and expanded Hub windows, Closed → Open → Closed,
+repeated requests and a Partially Open start on the selected guest Xcode.
+
 Only Device Hub's buttons change the iPhone Duo's fold position. `tools/vm/duo-fold.sh` reaches them from the headless VM over Tart's VNC server: `start`, then `tools/mg sim acquire foldable`, `hub <udid>`, `fold closed|half|open`, `shot <udid> <display> <file>` and `stop`. Display 1 is outer and 3 is inner. `tools/mg` jobs still work during the session.
 
 Keep one VNC connection. Reconnecting for each click crashed Tart twice (an assertion in `_VZVirtualMachineAccessor addAccessorObserver`) and took down what ran in the VM; `tools/vm/vnc-holder.py` holds the connection for the whole session. A restart shuts the simulators down and voids their leases.
