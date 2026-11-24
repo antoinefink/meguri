@@ -79,7 +79,7 @@ struct StatsAddedAndStartedBox: View {
 ///
 /// Beside a taller box (Antoine, 2026-11-24: "there is just too much vertical height") the pie
 /// and the table take the row's height instead of floating in its middle: the pie grows up to
-/// a lead plot's height, the rows share the pie's height and a hairline parts them.
+/// a chart page's plot height, the rows share the pie's height and a hairline parts them.
 struct StatsCardCountsBox: View {
     let slot: StatsBoxSlot
     /// Show in Browse for a state's row, given its label and Q4.1's search text; nil offers none.
@@ -95,7 +95,7 @@ struct StatsCardCountsBox: View {
     /// that lets it stay beside the table; and the most it grows to beside a taller box.
     static let side = StatsPlotSize.regular.height
     static let smallSide = StatsPlotSize.panel.height + Spacing.large
-    static let largeSide = StatsPlotSize.lead.height
+    static let largeSide = StatsPlotSize.page.height
 
     var body: some View {
         let content = slot.content
