@@ -422,6 +422,10 @@ struct DeckImportContent: View {
                         Text("import.apkg.withScheduling", bundle: .module)
                         Text(verbatim: DeckImportText.schedulingHelp(facts))
                     }
+                    #if os(iOS)
+                    // One element per row: the cell and its switch.
+                    .accessibilityElement(children: .combine)
+                    #endif
                     .accessibilityIdentifier("\(Self.id).withScheduling")
                 }
                 if presets {
@@ -429,6 +433,10 @@ struct DeckImportContent: View {
                         Text("import.apkg.withDeckConfigs", bundle: .module)
                         Text(verbatim: DeckImportText.presetsHelp(facts))
                     }
+                    #if os(iOS)
+                    // One element per row: the cell and its switch.
+                    .accessibilityElement(children: .combine)
+                    #endif
                     .accessibilityIdentifier("\(Self.id).withDeckConfigs")
                 }
             }
@@ -439,6 +447,10 @@ struct DeckImportContent: View {
                 Text("import.apkg.mergeNotetypes", bundle: .module)
                 Text(verbatim: DeckImportText.mergeHelp)
             }
+            #if os(iOS)
+            // One element per row: the cell and its switch.
+            .accessibilityElement(children: .combine)
+            #endif
             .accessibilityIdentifier("\(Self.id).mergeNotetypes")
             updatePicker("import.apkg.updateNotes", selection: $options.updateNotes, id: "updateNotes")
             updatePicker("import.apkg.updateNotetypes", selection: $options.updateNotetypes, id: "updateNotetypes")
