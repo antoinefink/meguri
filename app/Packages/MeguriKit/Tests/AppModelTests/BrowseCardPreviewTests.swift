@@ -17,19 +17,16 @@ import AppKit
         let preview = BrowseCardPreview()
         defer { preview.close(); Task { await resolver.close(); try? FileManager.default.removeItem(at: root) } }
         preview.resolver = { resolver }
-        var renders = 0
-        var fieldContents = ""
-        var renderFails = false
-        var restoreCommit: (() -> Void)?
+        let state = PreviewRenderState()
         preview.render = { [weak preview] id in
-            renders += 1
-            if renderFails { throw CardPage.Failure.updateFailed }
-            if renders == 1 {
+            state.renders += 1
+            if state.renderFails { throw CardPage.Failure.updateFailed }
+            if state.renders == 1 {
                 let committed = preview?.pair?.onCommitted
                 preview?.pair?.onCommitted = nil
-                restoreCommit = { [weak preview] in preview?.pair?.onCommitted = committed }
+                state.restoreCommit = { [weak preview] in preview?.pair?.onCommitted = committed }
             }
-            return CardPayload(cardID: id, question: "Front \(id)\(fieldContents)", answer: "Back \(id)\(fieldContents)",
+            return CardPayload(cardID: id, question: "Front \(id)\(state.fieldContents)", answer: "Back \(id)\(state.fieldContents)",
                                audioPolicy: .init(autoplay: false, interrupt: true, replayQuestion: false))
         }
         #expect(!preview.hasRequestedCard)
@@ -51,12 +48,12 @@ import AppKit
         // commits. It must stop, then recover on the picker's explicit selection.
         try await until { preview.failed && preview.showing == 0 }
         #expect(preview.card == nil && preview.side == .question && preview.hasRequestedCard)
-        #expect(renders == 1)
-        let restore = try #require(restoreCommit)
+        #expect(state.renders == 1)
+        let restore = try #require(state.restoreCommit)
         restore()
         preview.selectSide(.answer)
         try await shown(preview, card: 7, side: .answer)
-        #expect(renders == 2)
+        #expect(state.renders == 2)
         preview.selectSide(.answer) // direct selection is idempotent
         preview.flip()
         try await shown(preview, card: 7, side: .question)
@@ -71,20 +68,20 @@ import AppKit
 
         // A failed render after saving must not rebuild the old fields when
         // the user explicitly selects a side, even for the same card and side.
-        fieldContents = " saved"
-        renderFails = true
-        let beforeSave = renders
+        state.fieldContents = " saved"
+        state.renderFails = true
+        let beforeSave = state.renders
         preview.show(card: 7)
         try await until { preview.failed && preview.showing == 0 }
-        renderFails = false
+        state.renderFails = false
         preview.selectSide(.question)
         preview.selectSide(.answer)
-        try await shown(preview, card: 7, side: .answer, contents: fieldContents)
-        #expect(renders == beforeSave + 2)
+        try await shown(preview, card: 7, side: .answer, contents: state.fieldContents)
+        #expect(state.renders == beforeSave + 2)
         preview.selectSide(.question)
-        try await shown(preview, card: 7, side: .question, contents: fieldContents)
+        try await shown(preview, card: 7, side: .question, contents: state.fieldContents)
 
-        fieldContents = ""
+        state.fieldContents = ""
         preview.show(card: 8) // another card starts on Front
         try await shown(preview, card: 8, side: .question)
 
@@ -102,17 +99,17 @@ import AppKit
         // A save whose native completion is lost must also discard old fields.
         let committed = preview.pair?.onCommitted
         preview.pair?.onCommitted = nil
-        fieldContents = " saved again"
-        let beforeLostCommit = renders
+        state.fieldContents = " saved again"
+        let beforeLostCommit = state.renders
         preview.show(card: 8)
         try await until { preview.failed && preview.showing == 0 }
         #expect(preview.side == .question)
         preview.pair?.onCommitted = committed
         preview.selectSide(.question)
-        try await shown(preview, card: 8, side: .question, contents: fieldContents)
-        #expect(renders == beforeLostCommit + 2)
+        try await shown(preview, card: 8, side: .question, contents: state.fieldContents)
+        #expect(state.renders == beforeLostCommit + 2)
         preview.selectSide(.answer)
-        try await shown(preview, card: 8, side: .answer, contents: fieldContents)
+        try await shown(preview, card: 8, side: .answer, contents: state.fieldContents)
 
         // Supersede a question at the exact callback/await boundary. Its old
         // task must not publish card 9 after clear has invalidated the request.
@@ -147,6 +144,13 @@ import AppKit
         }
         try #require(try await condition(), "preview completed within its bounded wait")
     }
+}
+
+@MainActor private final class PreviewRenderState {
+    var renders = 0
+    var fieldContents = ""
+    var renderFails = false
+    var restoreCommit: (() -> Void)?
 }
 
 #if os(macOS)

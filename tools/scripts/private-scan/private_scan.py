@@ -850,9 +850,9 @@ PUBLIC_ARTIFACTS = {
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
-    # Whole-file PUBLIC review in cleanroom 20261124T140533Z-6841.
+    # Whole-file PUBLIC review in cleanroom 20261124T154119Z-15087.
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseCardPreviewTests.swift':
-        '3335b107a76c02c3a83ac42b74a2e82cbac004e55ea686abb924a24046a9609d',
+        'f5b4994c338dd6d93d99cadbf15c90761a44269fe7d6dc7f0fe1030d6ee11c95',
     'docs/process/review-log/mcp-note-attachments-20261122.md':
         '9ab4f1074eba351094ed1660f1a69fea51d46097a917c040eac6e1fbd7bf4ea8',
     'docs/process/review-log/meguri-collection-mcp-20261119.md':
