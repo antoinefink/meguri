@@ -845,7 +845,7 @@ PUBLIC_ARTIFACTS = {
     'core/crates/meguri-storage/tests/activity.rs':
         'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
     'docs/design/native-interface-contract.md':
-        'a1307b9b035f8494659e8e4dd4bd57d2c7f434aa2a8904f52356b41b90776ef7',
+        '9e42d4395978b4efcd090467cbb16170edb31d3eedc9a20673ac58a77dbc756f',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',

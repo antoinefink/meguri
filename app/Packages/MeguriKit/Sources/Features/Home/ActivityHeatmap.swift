@@ -224,9 +224,11 @@ private struct ActivityGridView: View {
             .fill(Self.style(level: level, increasedContrast: increased, dark: colorScheme == .dark))
             // N24.6: with Increase Contrast the steps lie over the empty day's own fill.
             .background { if increased && level > 0 { shape.fill(.fill.secondary) } }
+            #if !os(macOS)
             .overlay {
                 if daysAgo == 0 { shape.strokeBorder(.primary, lineWidth: 1) }
             }
+            #endif
             .frame(width: geometry.side, height: geometry.side)
     }
 
