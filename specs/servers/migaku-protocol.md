@@ -24,9 +24,9 @@ This file owns the route table, the origin policy, the CORS headers, preflight, 
 
 ### P1.1 Port setting for the Mac mining integration
 
-The Mac mining integration serves its Migaku routes and its supported AnkiConnect actions on one loopback port. The default is 44432, the address used by the published Migaku extension. A person using a client with a configurable address can save another port from 1024 through 65535, including 8765. This user decision on 2026-11-24 supersedes the fixed Migaku port in R1675 and the separate-port reservation of `servers/host-security` H4.4 for this listener.
+Mac Settings offers two independent loopback endpoints, Migaku on 44432 and AnkiConnect on 8765. Both start off. The user can enable either endpoint or both. The two selections persist on this Mac. Both ports serve the same supported mining routes and AnkiConnect actions and write through the same collection receiver, destination and duplicate checks. This user decision on 2026-11-24 replaces the earlier single editable port for the first Mac integration.
 
-Settings keeps this value on the Mac across restarts. An invalid edit leaves the saved port and the running listener in place. Applying a different valid port while receiving is enabled retires the old listener, finishes admitted writes and starts listening on the new port. The Host check uses the active port. A bind failure shows the selected port and permits another edit. Applying a port while disabled keeps the integration off.
+Each endpoint reports its own listening or conflict state. Enabling or disabling one leaves the other endpoint and its established connections working. Turning an endpoint off closes its listener and rejects stale work, while an admitted collection write finishes under the existing transaction rules. Each request's Host check uses the port that actually accepted it. The app keeps receiving while either endpoint is enabled. After restart, a previously enabled single-port preference for 44432 or 8765 restores only its matching endpoint. An unrecognized legacy port leaves both endpoints off.
 
 ## P2. Requests in order
 
