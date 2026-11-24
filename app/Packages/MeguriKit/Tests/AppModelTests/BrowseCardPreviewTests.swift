@@ -18,15 +18,18 @@ import AppKit
         defer { preview.close(); Task { await resolver.close(); try? FileManager.default.removeItem(at: root) } }
         preview.resolver = { resolver }
         var renders = 0
+        var fieldContents = ""
+        var renderFails = false
         var restoreCommit: (() -> Void)?
         preview.render = { [weak preview] id in
             renders += 1
+            if renderFails { throw CardPage.Failure.updateFailed }
             if renders == 1 {
                 let committed = preview?.pair?.onCommitted
                 preview?.pair?.onCommitted = nil
                 restoreCommit = { [weak preview] in preview?.pair?.onCommitted = committed }
             }
-            return CardPayload(cardID: id, question: "Front \(id)", answer: "Back \(id)",
+            return CardPayload(cardID: id, question: "Front \(id)\(fieldContents)", answer: "Back \(id)\(fieldContents)",
                                audioPolicy: .init(autoplay: false, interrupt: true, replayQuestion: false))
         }
         #expect(!preview.hasRequestedCard)
@@ -65,6 +68,23 @@ import AppKit
         preview.selectSide(.answer)
         preview.selectSide(.question)
         try await shown(preview, card: 7, side: .question)
+
+        // A failed render after saving must not rebuild the old fields when
+        // the user explicitly selects a side, even for the same card and side.
+        fieldContents = " saved"
+        renderFails = true
+        let beforeSave = renders
+        preview.show(card: 7)
+        try await until { preview.failed && preview.showing == 0 }
+        renderFails = false
+        preview.selectSide(.question)
+        preview.selectSide(.answer)
+        try await shown(preview, card: 7, side: .answer, contents: fieldContents)
+        #expect(renders == beforeSave + 2)
+        preview.selectSide(.question)
+        try await shown(preview, card: 7, side: .question, contents: fieldContents)
+
+        fieldContents = ""
         preview.show(card: 8) // another card starts on Front
         try await shown(preview, card: 8, side: .question)
 
@@ -79,15 +99,20 @@ import AppKit
         preview.selectSide(.answer)
         try await shown(preview, card: 8, side: .answer)
 
-        // Losing native completion cannot strand all subsequent presentations.
+        // A save whose native completion is lost must also discard old fields.
         let committed = preview.pair?.onCommitted
         preview.pair?.onCommitted = nil
-        preview.selectSide(.question)
-        try await until { preview.failed }
+        fieldContents = " saved again"
+        let beforeLostCommit = renders
+        preview.show(card: 8)
+        try await until { preview.failed && preview.showing == 0 }
         #expect(preview.side == .question)
         preview.pair?.onCommitted = committed
         preview.selectSide(.question)
-        try await shown(preview, card: 8, side: .question)
+        try await shown(preview, card: 8, side: .question, contents: fieldContents)
+        #expect(renders == beforeLostCommit + 2)
+        preview.selectSide(.answer)
+        try await shown(preview, card: 8, side: .answer, contents: fieldContents)
 
         // Supersede a question at the exact callback/await boundary. Its old
         // task must not publish card 9 after clear has invalidated the request.
@@ -103,13 +128,13 @@ import AppKit
         #expect(!preview.hasRequestedCard)
     }
 
-    private func shown(_ preview: BrowseCardPreview, card: Int64, side: CardRenderSide) async throws {
+    private func shown(_ preview: BrowseCardPreview, card: Int64, side: CardRenderSide, contents: String = "") async throws {
         try await until {
             guard preview.showing == 0, preview.card == card, preview.side == side,
                   let page = preview.pair?.current, page.update?.side == side, page.presented, !preview.failed else { return false }
             let rendered = try await page.webView.callAsyncJavaScript("return document.getElementById('qa')?.textContent.trim();",
                                                                     arguments: [:], in: nil, contentWorld: .page) as? String
-            return rendered == "\(side == .question ? "Front" : "Back") \(card)"
+            return rendered == "\(side == .question ? "Front" : "Back") \(card)\(contents)"
         }
         #expect(!preview.failed && preview.showing == 0 && preview.card == card && preview.side == side)
         #expect(preview.pair?.current.update?.card == card && preview.pair?.current.update?.side == side)

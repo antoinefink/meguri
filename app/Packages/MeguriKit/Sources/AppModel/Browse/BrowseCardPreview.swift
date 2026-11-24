@@ -53,6 +53,10 @@ public final class BrowseCardPreview {
     /// A new card starts on Front; a save of the visible card keeps its side.
     func show(card id: Int64) {
         cancelCommit()
+        // A save invalidates the old fields even when this render fails.
+        // Only this show's successful commit may supply side recovery.
+        payload = nil
+        failed = false
         token &+= 1
         let token = token
         if requestedCard != id { side = .question; hasAudio = false; pair?.pauseAudio() }
@@ -214,7 +218,7 @@ public final class BrowseCardPreview {
         if let pair, loaded { return pair }
         if let loading { return try await loading.value }
         let generation = generation
-        let work = Task { () throws -> CardPagePair? in
+        let work = Task { [self] () throws -> CardPagePair? in
             if pair == nil {
                 guard let resolver = await resolver(), generation == self.generation else { return nil }
                 let made = CardPagePair(resolver: resolver, appearance: appearance)
