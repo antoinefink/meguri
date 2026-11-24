@@ -10,7 +10,7 @@ import UIKit
 /// whether a click, a touch or the keyboard pinned it. A caller that shares one
 /// selection between plots (Time of Day's two panels) or clears it (a switch, the
 /// period, a click outside) holds it; otherwise the plot keeps its own.
-public struct StatsChartSelection: Hashable, Sendable {
+nonisolated public struct StatsChartSelection: Hashable, Sendable {
     public var bin: Int?
     public var pinned: Bool
 
@@ -20,12 +20,6 @@ public struct StatsChartSelection: Hashable, Sendable {
     }
 
     public static let none = StatsChartSelection()
-
-    /// Whether losing the plot's focus unpins: only a ready plot that lost it
-    /// to a click elsewhere (S8.3), never one a loading phase made unfocusable.
-    public static func unpinsOnFocusLoss(focused: Bool, pinned: Bool, ready: Bool) -> Bool {
-        !focused && pinned && ready
-    }
 
     /// The selection carried from the last ready bins to new ones (S10.2):
     /// kept while the selected period is still there (at its new index),
@@ -225,15 +219,9 @@ struct StatsChartPlot: View {
                 lastReadyBins = new
             }
             .onAppear { if !data.bins.isEmpty { lastReadyBins = data.bins } }
-            #if os(macOS)
-            .onChange(of: focused) {
-                // A click elsewhere that takes the focus unpins (S8.3); a
-                // loading phase, which makes the plot unfocusable, does not.
-                if StatsChartSelection.unpinsOnFocusLoss(focused: focused, pinned: selection.pinned, ready: isReady) {
-                    selection = .none
-                }
-            }
-            #endif
+            // Losing the focus never unpins (Tab moves on and the pin stays, 2026-11-24): a click
+            // on another chart pins there and unpins this one, a click on the page outside every
+            // chart unpins all, Esc clears (S8.3).
             .accessibilityElement(children: .contain)
             .accessibilityLabel(summary)
             // The pinned period (S8.3), as the callout names it.

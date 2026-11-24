@@ -42,7 +42,8 @@ public struct StatisticsView: View {
     public var body: some View {
         content
             .navigationTitle(Text("stats.title", bundle: .module))
-            .navigationSubtitle(Text(verbatim: model.subtitle ?? ""))
+            // The narrow page's shorter line never truncates ("· Update…" on the iPhone, N25.6).
+            .navigationSubtitle(Text(verbatim: (narrow ? model.compactSubtitle : model.subtitle) ?? ""))
             .toolbar {
                 #if os(macOS)
                 // N25.2: after the title, before the trailing sync button.

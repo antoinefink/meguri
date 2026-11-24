@@ -149,7 +149,7 @@ struct StatsByDeckBox: View {
                 .accessibilityLabel(Text(verbatim: title))
                 .accessibilityValue(Text(verbatim: sorted ? (shownSort.ascending ? text.ascending : text.descending) : ""))
                 .accessibilityAddTraits(sorted ? [.isHeader, .isSelected] : .isHeader)
-                .accessibilityIdentifier("stats.box.byDeck.sort.\(column.rawValue)")
+                .accessibilityIdentifier("stats.byDeck.sort.\(column.rawValue)")
             }
         }
         .padding(.vertical, Spacing.xxSmall)
@@ -184,7 +184,7 @@ struct StatsByDeckBox: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: spoken(row)))
-        .accessibilityIdentifier("stats.box.byDeck.row.\(row.id)")
+        .accessibilityIdentifier("stats.byDeck.row.\(row.id)")
         if row.ownCards {
             // The deck shown: its own cards do not filter (S7.15).
             cells

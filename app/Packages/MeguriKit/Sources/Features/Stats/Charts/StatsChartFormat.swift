@@ -3,7 +3,7 @@ import Foundation
 /// How the chart system writes numbers, dates and bin names (S8.7): the system's
 /// formatters in the app's locale. Pure values, so tests pin a locale, a calendar
 /// and today.
-public struct StatsChartFormat: Sendable {
+nonisolated public struct StatsChartFormat: Sendable {
     public var locale: Locale
     public var calendar: Calendar
     /// Today, for "17 Nov" against "17 Nov 2025" (S8.7: the year outside the current one).
@@ -34,11 +34,17 @@ public struct StatsChartFormat: Sendable {
 
     // Formatters cost more to make than to use: the plot writes a label per
     // bin on every redraw, so each kind is made once per locale.
-    private static var durationFormatters: [String: DateComponentsFormatter] = [:]
-    private static var dateFormatters: [String: DateFormatter] = [:]
+    // The page model writes its boxes off the main actor too, so the caches are shared under a
+    // lock; a made formatter is only read afterwards, which Foundation's formatters allow from
+    // any thread.
+    private nonisolated(unsafe) static var durationFormatters: [String: DateComponentsFormatter] = [:]
+    private nonisolated(unsafe) static var dateFormatters: [String: DateFormatter] = [:]
+    private static let formattersLock = NSLock()
 
     private static func durationFormatter(_ units: NSCalendar.Unit, calendar: Calendar) -> DateComponentsFormatter {
         let key = "\(calendar.locale?.identifier ?? "")|\(units.rawValue)"
+        formattersLock.lock()
+        defer { formattersLock.unlock() }
         if let formatter = durationFormatters[key] { return formatter }
         let formatter = DateComponentsFormatter()
         formatter.unitsStyle = .short
@@ -88,6 +94,7 @@ public struct StatsChartFormat: Sendable {
     private func formatted(_ date: Date, template: String) -> String {
         let key = "\(locale.identifier)|\(calendar.identifier)|\(calendar.timeZone.identifier)|\(template)"
         let formatter: DateFormatter
+        Self.formattersLock.lock()
         if let cached = Self.dateFormatters[key] {
             formatter = cached
         } else {
@@ -98,6 +105,7 @@ public struct StatsChartFormat: Sendable {
             formatter.setLocalizedDateFormatFromTemplate(template)
             Self.dateFormatters[key] = formatter
         }
+        Self.formattersLock.unlock()
         return formatter.string(from: date)
     }
 

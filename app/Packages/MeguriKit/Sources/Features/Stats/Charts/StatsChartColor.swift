@@ -7,7 +7,7 @@ import SwiftUI
 /// series colours (`ChartColors` in the spec), not the deck count colours of the
 /// rubric's `color-meaning` rule, which keep their own meaning where they apply
 /// (S8.1's recorded exception).
-public enum StatsSeriesColor: String, CaseIterable, Hashable, Sendable {
+nonisolated public enum StatsSeriesColor: String, CaseIterable, Hashable, Sendable {
     // The card state family.
     case new, learning, relearning, young, mature, suspended, buried
     /// Filtered reviews: only in Reviews Over Time › By Type.

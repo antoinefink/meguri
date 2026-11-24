@@ -217,7 +217,7 @@ struct StatsCardCountsBox: View {
             selection.wrappedValue = selection.wrappedValue == pinned ? .none : pinned
         }
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("stats.box.cardCounts.row.\(label)")
+        .accessibilityIdentifier("stats.cardCounts.row.\(label)")
         if let row, let item = row.itemText, let showInBrowse {
             cells
                 .accessibilityAddTraits(.isButton)
@@ -270,13 +270,6 @@ struct StatsCardCountsPie: View {
         .onKeyPress(.leftArrow) { move(-1) }
         .onKeyPress(.rightArrow) { move(1) }
         .onKeyPress(.escape) { clear() }
-        #if os(macOS)
-        .onChange(of: focused) {
-            if StatsChartSelection.unpinsOnFocusLoss(focused: focused, pinned: selection.pinned, ready: table != nil) {
-                selection = .none
-            }
-        }
-        #endif
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: summary))
         .accessibilityIdentifier("stats.box.cardCounts.plot")

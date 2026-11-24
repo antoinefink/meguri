@@ -43,6 +43,9 @@ public final class StatsPageModel {
     public private(set) var strip: [StatsStripID: StatsStripFigure] = [:]
     /// "<n> cards in <m> decks" with S10.4's status; nil while the count is unknown.
     public private(set) var subtitle: String?
+    /// The narrow page's subtitle (N25.6): "<n> cards" with the status, without the deck count, so
+    /// it never truncates under the inline title, the folded Duo's included.
+    public private(set) var compactSubtitle: String?
     /// S12.6's line under the strip for a filtered deck.
     public private(set) var filteredDeckNote: String?
     /// Each box's selection, carried across a refresh and cleared by a switch or the period (S8.3).
@@ -114,6 +117,9 @@ public final class StatsPageModel {
     @ObservationIgnored private var live: StatsTimerToken?
     @ObservationIgnored private var justNow: StatsTimerToken?
     @ObservationIgnored private var lastBins: [StatsBoxID: [StatsPeriod]] = [:]
+    /// Counts each box's writes, so a box written off the main actor is published only when no
+    /// newer write came first.
+    @ObservationIgnored private var writes: [StatsBoxID: UInt64] = [:]
     /// The presenters of the sets shown, kept while the inputs they were made for hold: a set's
     /// axis, formatters and streaks are made once, not on every part.
     @ObservationIgnored private var presenters: [PresenterKey: StatsPresenter] = [:]
@@ -437,7 +443,7 @@ public final class StatsPageModel {
         kept.keep(current.set)
         // A part returned: the scope reads again (a repaired row, a restored deck).
         if pageEnd?.scope == current.scope { pageEnd = nil }
-        rebuild(after: result.part)
+        rebuild(after: result.part, offMain: true)
     }
 
     private func progressed(_ part: StatsPart, _ progress: StatsProgress, refresh: UInt64) {
@@ -487,7 +493,9 @@ public final class StatsPageModel {
             kept.keep(set)
             ended = .failed
         }
-        rebuild()
+        // The request's end: a set complete now may change every box's phase, written off the
+        // main actor as the parts were.
+        rebuild(offMain: true)
     }
 
     private func prepareKept() {
@@ -563,35 +571,42 @@ public final class StatsPageModel {
                                  days: StatsDays(context: header.context, calendar: calendar))
     }
 
+    /// A box's content, written now on the main actor.
     private func content(_ id: StatsBoxID) -> StatsBoxContent {
+        switch plan(id) {
+        case let .done(content): content
+        case let .job(job): job.run()
+        }
+    }
+
+    /// What a box shows: decided on the main actor where that is cheap (its progress, a failed
+    /// part, the skeleton), or a job that writes its values from a set, which can run off it.
+    private enum Plan {
+        case done(StatsBoxContent)
+        case job(StatsBoxJob)
+    }
+
+    private func plan(_ id: StatsBoxID) -> Plan {
         let parts = id.parts(reviewsMode: selection.reviewsMode)
-        guard collectionOpen, let set = chosenSet(parts), let presenter = presenter(set) else {
+        guard collectionOpen, let set = chosenSet(parts), let header = set.header else {
             // Nothing for this box yet: its progress while a request runs, else S12.8's line
             // after a request that failed.
             let phase: StatsBoxPhase = running == nil && ended == .failed ? .failed : .loading(fraction: fraction(parts))
-            return skeletonContent(id, phase: phase)
+            return .done(skeletonContent(id, phase: phase))
         }
         let updating = running.map { $0.set.id != set.id } ?? false
         if parts.contains(where: { if case .failed = set.parts[$0] { true } else { false } }) {
             var failed = skeletonContent(id, phase: .failed)
             failed.updating = updating
-            failed.source = presenter.source
-            return failed
+            failed.source = StatsBoxSource(scope: set.scope, context: header.context, browseScope: header.browseScope)
+            return .done(failed)
         }
-        switch presenter.box(id) {
-        case .unavailable:
-            var loading = skeletonContent(id, phase: unfinished(parts))
-            loading.updating = updating
-            return loading
-        case var .content(content):
-            if !isComplete(set, parts) {
-                // Partial (S10.3's first refresh of All): the values stay in `data`, the box
-                // shows its progress, never the year as all history.
-                content.phase = unfinished(parts)
-            }
-            content.updating = updating
-            return content
-        }
+        var unavailable = skeletonContent(id, phase: unfinished(parts))
+        unavailable.updating = updating
+        let extras = [StatsPart.retentionByDay, .activityDays].compactMap { set.value($0) == nil ? extra($0) : nil }
+        return .job(StatsBoxJob(id: id, set: set, extras: extras, period: selection.period, selection: selection, decks: decks,
+                                calendar: calendar, locale: locale, complete: isComplete(set, parts),
+                                unfinished: unfinished(parts), updating: updating, unavailable: unavailable))
     }
 
     /// A box whose value is not complete yet: its progress while a request runs, S12.8's line
@@ -621,7 +636,13 @@ public final class StatsPageModel {
     /// Writes every value from the sets, the period, the switches and the decks; after a part,
     /// only the boxes and figures that read it (their "updating" mark aside, which a part never
     /// changes for another box).
-    private func rebuild(after part: StatsPart? = nil) {
+    ///
+    /// With `offMain` (the core's parts and ends, which arrive while the page may be scrolling),
+    /// the boxes' values are written off the main actor and published together once written: a
+    /// box keeps what it shows until then (S10.2), and the main actor only decides and applies
+    /// (R2078; 2026-11-24, scrolling while the page reads). The user's own changes (a switch, the
+    /// period) write at once, in the frame they cause (S19).
+    private func rebuild(after part: StatsPart? = nil, offMain: Bool = false) {
         let scope = selection.scope
         let nextState = pageState(scope)
         if nextState != state { state = nextState }
@@ -631,15 +652,27 @@ public final class StatsPageModel {
         }()
         if note != filteredDeckNote { filteredDeckNote = note }
         var next = boxes
+        var jobs: [StatsBoxJob] = []
         // Activity while it is not ready: each part's header sizes its grid (S10.3), so a span
         // kept from an earlier header follows the running request's.
         for id in StatsBoxID.allCases where part.map({ id.reads($0, reviewsMode: selection.reviewsMode) }) ?? true
             || (id == .activity && boxes[id]?.phase != .ready) {
-            let content = content(id)
-            next[id] = content
-            carrySelection(id, to: content)
+            // Any newer write of the box supersedes a job still running for it.
+            writes[id, default: 0] &+= 1
+            switch plan(id) {
+            case let .done(content):
+                next[id] = content
+                carrySelection(id, to: content)
+            case let .job(job) where offMain:
+                jobs.append(job)
+            case let .job(job):
+                let content = job.run()
+                next[id] = content
+                carrySelection(id, to: content)
+            }
         }
         if next != boxes { boxes = next }
+        if !jobs.isEmpty { write(jobs) }
         var figures = strip
         for id in StatsStripID.allCases where part.map({ id.parts.contains($0) || $0 == .futureDue }) ?? true {
             figures[id] = stripFigure(id)
@@ -647,6 +680,26 @@ public final class StatsPageModel {
         if figures != strip { strip = figures }
         let line = subtitleText()
         if line != subtitle { subtitle = line }
+        let short = subtitleText(compact: true)
+        if short != compactSubtitle { compactSubtitle = short }
+    }
+
+    /// Writes the jobs' boxes off the main actor, then publishes those no newer write superseded.
+    private func write(_ jobs: [StatsBoxJob]) {
+        let stamps = Dictionary(uniqueKeysWithValues: jobs.map { ($0.id, writes[$0.id, default: 0]) })
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let written = jobs.map { ($0.id, $0.run()) }
+            await self?.publish(written, stamps: stamps)
+        }
+    }
+
+    private func publish(_ written: [(StatsBoxID, StatsBoxContent)], stamps: [StatsBoxID: UInt64]) {
+        var next = boxes
+        for (id, content) in written where writes[id, default: 0] == stamps[id] {
+            next[id] = content
+            carrySelection(id, to: content)
+        }
+        if next != boxes { boxes = next }
     }
 
     private func carrySelection(_ id: StatsBoxID, to content: StatsBoxContent) {
@@ -687,11 +740,13 @@ public final class StatsPageModel {
 
     // MARK: Subtitle (S3.1, S10.4)
 
-    private func subtitleText() -> String? {
+    private func subtitleText(compact: Bool = false) -> String? {
         guard collectionOpen, let set = chosenSet([.cardCounts]), let presenter = presenter(set),
               let cards = presenter.cardTotal, let decks = decks.deckCount(selection.scope) else { return nil }
         let format = StatsChartFormat(locale: locale, calendar: calendar, now: timers.now())
-        let line = text.cardsInDecks(cards, format.count(Double(cards)), decks, format.count(Double(decks)))
+        let line = compact
+            ? text.cards(cards, format.count(Double(cards)))
+            : text.cardsInDecks(cards, format.count(Double(cards)), decks, format.count(Double(decks)))
         guard let status = statusText(format) else { return line }
         return text.withStatus(line, status)
     }
@@ -729,5 +784,42 @@ extension StatsBoxContent {
     var isLoading: Bool {
         if case .loading = phase { return true }
         return false
+    }
+}
+
+/// One box's values to write from a set (`StatsPresenter.box`), with what the main actor decided
+/// about it: Sendable, so the page model can write it off the main actor while the page scrolls.
+nonisolated struct StatsBoxJob: Sendable {
+    let id: StatsBoxID
+    let set: StatsPartSet
+    let extras: [StatsPartSet]
+    let period: StatsPagePeriod
+    let selection: StatsPageSelection
+    let decks: StatsDeckDirectory
+    let calendar: Calendar
+    let locale: Locale
+    /// The set holds the box's values for the period (not All's first year alone, S10.3).
+    let complete: Bool
+    /// The phase of a box whose values are not complete yet.
+    let unfinished: StatsBoxPhase
+    let updating: Bool
+    /// What the box shows when the set has no value for the period yet.
+    let unavailable: StatsBoxContent
+
+    func run() -> StatsBoxContent {
+        guard let presenter = StatsPresenter(set: set, period: period, selection: selection, decks: decks, calendar: calendar,
+                                             locale: locale, extras: extras) else { return unavailable }
+        switch presenter.box(id) {
+        case .unavailable:
+            return unavailable
+        case var .content(content):
+            if !complete {
+                // Partial (S10.3's first refresh of All): the values stay in `data`, the box
+                // shows its progress, never the year as all history.
+                content.phase = unfinished
+            }
+            content.updating = updating
+            return content
+        }
     }
 }

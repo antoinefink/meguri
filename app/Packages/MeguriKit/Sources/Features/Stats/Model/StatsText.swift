@@ -3,7 +3,7 @@ import Foundation
 /// Every text the page model writes (`stats/statistics-page` S8.7, S16, S7's figures), from
 /// the String Catalog. Numbers arrive already written by the system's formatters (`StatsChartFormat`);
 /// a count that picks a plural form is passed beside its text.
-struct StatsText {
+nonisolated struct StatsText {
     let locale: Locale
 
     private func text(_ value: String.LocalizationValue) -> String {

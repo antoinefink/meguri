@@ -110,15 +110,8 @@ struct StatsActivityBox: View {
             .onKeyPress(.downArrow) { move(.down, activity: activity) }
             .onKeyPress(.escape) { clear() }
             .onKeyPress(.return) { browseSelected(activity) }
-            #if os(macOS)
-            .onChange(of: focused) {
-                // A click elsewhere that takes the focus unpins (S8.3).
-                let selection = slot.selection
-                if StatsChartSelection.unpinsOnFocusLoss(focused: focused, pinned: selection.wrappedValue.pinned, ready: true) {
-                    selection.wrappedValue = .none
-                }
-            }
-            #endif
+            // Losing the focus never unpins (Tab moves on and the pin stays); a click elsewhere
+            // does, as on every chart (S8.3).
             .accessibilityElement(children: .contain)
             .accessibilityLabel(slot.title(locale: locale))
             .accessibilityValue(summary(activity))
