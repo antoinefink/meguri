@@ -1,6 +1,5 @@
 #if MEGURI_TEST_HOOKS && os(macOS)
 @testable import AppModel
-import AppKit
 import Darwin
 import DesignSystem
 import Foundation
@@ -8,9 +7,9 @@ import Settings
 import SwiftUI
 import Testing
 
-/// VM-runnable production pane captures and an isolated native toggle test.
-/// The toggle uses synthetic defaults, no collection and an ephemeral port. `tools/mg snapshots --platform mac --record
-/// 'settings.integrations/*'` retains the actual images for review.
+/// VM-runnable production pane captures and non-UI model/wire tests.
+/// `tools/mg snapshots --platform mac --record 'settings.integrations/*'`
+/// retains the actual images for review. Native clicks live in SentenceMiningSettingsTests.
 @MainActor @Suite(.serialized) struct SentenceMiningPaneTests {
     @Test(arguments: [false, true]) func actualPane(portConflict: Bool) async {
         let state = portConflict ? "port-conflict" : "listening"
@@ -21,18 +20,12 @@ import Testing
         }
     }
 
-    @Test(.timeLimit(.minutes(1))) func nativeToggleControlsTheProductionReceiver() async throws {
+    @Test(.timeLimit(.minutes(1))) func modelTogglesPersistIndependentReceiverPreferences() async throws {
         let suite = "SentenceMiningPaneTests." + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let model = SentenceMining(defaults: defaults, collectionKey: "synthetic-toggle", ports: (0, 0))
         model.firstOpenAttemptEnded()
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 600),
-            styleMask: [.titled], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentViewController = NSHostingController(rootView: NavigationStack { SentenceMiningPane(model: model) })
-        defer { window.contentViewController = nil; window.close() }
-        window.orderFront(nil)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
         configuration.timeoutIntervalForResource = 2
@@ -41,10 +34,15 @@ import Testing
         do {
             await model.settle()
             #expect(!model.enabled)
-            // All four combinations, driven through actual native checkboxes.
-            for id in [SentenceMining.EndpointID.migaku, .ankiConnect, .migaku, .ankiConnect] {
-                try await pressMiningToggle(in: window, id: id)
+            #expect(!model.migaku.enabled && !model.ankiConnect.enabled)
+            // Non-UI coverage: independent model controls, real wire and saved bits.
+            for (id, migakuOn, ankiConnectOn) in [
+                (SentenceMining.EndpointID.migaku, true, false), (.ankiConnect, true, true),
+                (.migaku, false, true), (.ankiConnect, false, false)
+            ] {
+                model.setEnabled(!model.endpoint(id).enabled, for: id)
                 await model.settle()
+                #expect(model.migaku.enabled == migakuOn && model.ankiConnect.enabled == ankiConnectOn)
                 for endpointID in SentenceMining.EndpointID.allCases {
                     let endpoint = model.endpoint(endpointID)
                     if endpoint.enabled {
@@ -55,7 +53,11 @@ import Testing
                         #expect((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["version"] as? String == "4")
                     } else { #expect(endpoint.status.hasPrefix("Off")) }
                 }
-                let restarted = SentenceMining(defaults: defaults, collectionKey: "synthetic-other")
+                let reloadedDefaults = try #require(UserDefaults(suiteName: suite))
+                let saved = try #require(reloadedDefaults.persistentDomain(forName: suite))
+                #expect(saved["mining.migaku.enabled"] as? Bool == model.migaku.enabled)
+                #expect(saved["mining.ankiConnect.enabled"] as? Bool == model.ankiConnect.enabled)
+                let restarted = SentenceMining(defaults: reloadedDefaults, collectionKey: "synthetic-other")
                 #expect(restarted.migaku.enabled == model.migaku.enabled)
                 #expect(restarted.ankiConnect.enabled == model.ankiConnect.enabled)
             }
@@ -165,50 +167,6 @@ import Testing
         let (data, response) = try await session.data(for: request)
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         #expect((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["result"] as? Int == 6)
-    }
-
-    /// Press the actual SwiftUI Toggle through its native accessibility action;
-    /// no cursor, keyboard, global window lookup or production app launch.
-    private func pressMiningToggle(in window: NSWindow, id: SentenceMining.EndpointID) async throws {
-        let identifier = id == .migaku ? "settings.integrations.migaku.enabled" : "settings.integrations.ankiConnect.enabled"
-        let deadline = ContinuousClock.now + .seconds(5)
-        while ContinuousClock.now < deadline {
-            window.layoutIfNeeded()
-            window.contentView?.layoutSubtreeIfNeeded()
-            var pending: [NSObject] = window.contentView.map { [$0] } ?? []
-            var visited = Set<ObjectIdentifier>()
-            var matches: [NSObject] = []
-            while let object = pending.popLast(), visited.count < 512 {
-                guard visited.insert(ObjectIdentifier(object)).inserted else { continue }
-                if let view = object as? NSView { pending.append(contentsOf: view.subviews) }
-                let identifierSelector = #selector(NSAccessibilityProtocol.accessibilityIdentifier)
-                let roleSelector = #selector(NSAccessibilityProtocol.accessibilityRole)
-                if object.responds(to: identifierSelector), object.responds(to: roleSelector),
-                   object.perform(identifierSelector)?.takeUnretainedValue() as? String == identifier,
-                   let role = object.perform(roleSelector)?.takeUnretainedValue() as? String,
-                   role == "AXCheckBox" {
-                    matches.append(object)
-                }
-                let childrenSelector = #selector(NSAccessibilityProtocol.accessibilityChildren)
-                if object.responds(to: childrenSelector),
-                   let children = object.perform(childrenSelector)?.takeUnretainedValue() as? [NSObject] {
-                    pending.append(contentsOf: children)
-                }
-            }
-            if matches.count == 1, let toggle = matches.first {
-                if let control = toggle as? any NSAccessibilityProtocol {
-                    try #require(control.accessibilityPerformPress())
-                    return
-                }
-                if let control = toggle as? any NSAccessibilityButton {
-                    try #require(control.accessibilityPerformPress())
-                    return
-                }
-            }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        Issue.record("The production mining Toggle was not exposed as one native control")
-        throw CocoaError(.featureUnsupported)
     }
 }
 /// Each reservation owns only synthetic loopback listening FDs. It never

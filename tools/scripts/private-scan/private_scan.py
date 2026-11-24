@@ -836,7 +836,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'app/MeguriSnapshotTests/SentenceMiningPaneTests.swift':
-        'a1242e956f97a147ebd54c2cb85c061a6d9e6f2314a2bf3048cb4862da92eaf7',
+        '3a36cc9a416d05baeca475a15c39b7c8a68a452a1967e31de47235eed1be50e7',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningPortTests.swift':
         '2bc3bbd00214138cf7527948d56498abb57407e002a60b705579296f6d0f2739',
     # Complete-content PUBLIC review: cleanroom 20261124T133218Z-2230.
