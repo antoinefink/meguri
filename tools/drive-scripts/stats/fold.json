@@ -13,6 +13,9 @@
    }
   },
   {
+   "do": "orientation:portrait"
+  },
+  {
    "wait": {
     "id": "stats.page.content",
     "timeout": 40
@@ -78,6 +81,9 @@
     "animations": false,
     "route": "stats/chart/card-counts"
    }
+  },
+  {
+   "do": "orientation:portrait"
   },
   {
    "wait": {
@@ -147,6 +153,9 @@
    }
   },
   {
+   "do": "orientation:portrait"
+  },
+  {
    "wait": {
     "id": "stats.page.content",
     "timeout": 40
@@ -182,6 +191,9 @@
     "animations": false,
     "route": "stats/chart/retrievability"
    }
+  },
+  {
+   "do": "orientation:portrait"
   },
   {
    "wait": {
@@ -221,6 +233,9 @@
    }
   },
   {
+   "do": "orientation:portrait"
+  },
+  {
    "wait": {
     "id": "stats.page.content",
     "timeout": 40
@@ -256,6 +271,9 @@
     "animations": false,
     "route": "stats/chart/activity/3m"
    }
+  },
+  {
+   "do": "orientation:portrait"
   },
   {
    "wait": {
@@ -295,6 +313,9 @@
    }
   },
   {
+   "do": "orientation:portrait"
+  },
+  {
    "wait": {
     "id": "stats.page.content",
     "timeout": 40
@@ -330,6 +351,9 @@
     "animations": false,
     "route": "stats/chart/activity/1y"
    }
+  },
+  {
+   "do": "orientation:portrait"
   },
   {
    "wait": {
@@ -397,6 +421,9 @@
     "animations": false,
     "route": "stats/chart/activity"
    }
+  },
+  {
+   "do": "orientation:portrait"
   },
   {
    "wait": {
