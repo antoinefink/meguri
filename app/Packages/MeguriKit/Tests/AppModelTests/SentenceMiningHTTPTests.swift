@@ -113,6 +113,72 @@ import Testing
         }
     }
 
+    @Test(.timeLimit(.minutes(1))) func bodylessPreliminaryRepliesKeepAliveAndRetainPipelinedBytes() async throws {
+        let states = Mutex<[MiningListener.State]>([])
+        let calls = Mutex(0)
+        let listener = MiningListener(port: 0, handler: { _, _ in
+            calls.withLock { $0 += 1 }
+            return .json(200, ["next": true])
+        }, changed: { state in states.withLock { $0.append(state) } })
+        listener.start()
+        do {
+            let port = try await listeningPort(states)
+            let next = "GET /anki-hello HTTP/1.1\r\nConnection: close\r\n\r\n"
+            for (line, status) in [("GET /missing", 404), ("OPTIONS /receive", 204), ("PUT /receive", 405)] {
+                let first = line + " HTTP/1.1\r\nContent-Length: 0\r\n\r\n"
+                let wire = try await MiningHTTPTestClient.exchange(port: port, bytes: Data((first + next).utf8))
+                let replies = String(decoding: wire, as: UTF8.self).components(separatedBy: "HTTP/1.1 ")
+                try #require(replies.count == 3)
+                #expect(replies[1].hasPrefix(String(status)))
+                #expect(!replies[1].contains("Connection: close"))
+                #expect(replies[2].hasPrefix("200 OK") && replies[2].contains("Connection: close"))
+            }
+            let ordinary = try await MiningHTTPTestClient.exchange(port: port,
+                bytes: Data("GET /missing HTTP/1.1\r\n\r\n".utf8), followup: Data(next.utf8))
+            let ordinaryReplies = String(decoding: ordinary, as: UTF8.self).components(separatedBy: "HTTP/1.1 ")
+            try #require(ordinaryReplies.count == 3)
+            #expect(ordinaryReplies[1].hasPrefix("404") && !ordinaryReplies[1].contains("Connection: close"))
+            #expect(ordinaryReplies[2].hasPrefix("200 OK"))
+            #expect(calls.withLock { $0 } == 4)
+            for framing in ["Content-Length: 1", "Transfer-Encoding: chunked"] {
+                let first = "GET /missing HTTP/1.1\r\n" + framing + "\r\n\r\n"
+                let wire = try await MiningHTTPTestClient.exchange(port: port, bytes: Data((first + next).utf8))
+                let reply = String(decoding: wire, as: UTF8.self)
+                #expect(reply.hasPrefix("HTTP/1.1 404") && reply.contains("Connection: close"))
+                #expect(!reply.contains("HTTP/1.1 200"))
+            }
+            #expect(calls.withLock { $0 } == 4)
+            await listener.stop()
+        } catch {
+            await listener.stop()
+            throw error
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func versionBypassesFullWriteQueueAfterAdmission() async throws {
+        let receiver = MiningReceiver(pendingLimit: 0)
+        await receiver.configure(enabled: true, destination: nil)
+        func root(_ body: String) -> MiningHTTPRequest {
+            .init(method: "POST", target: "/", headers: [], body: Data(body.utf8))
+        }
+        let queued = await receiver.handle(root(#"{"action":"deckNames","version":6}"#))
+        #expect(queued.status == 503)
+        let version = await receiver.handle(root(#"{"action":"version","version":6}"#))
+        let envelope = try #require(try JSONSerialization.jsonObject(with: version.body) as? [String: Any])
+        #expect(version.status == 200 && envelope["result"] as? Int == 6 && envelope["error"] is NSNull)
+        let legacy = await receiver.handle(root(#"{"action":"version"}"#))
+        #expect(legacy.status == 200 && String(decoding: legacy.body, as: UTF8.self) == "6")
+        let invalid = await receiver.handle(root(#"{"action":"version","params":[]}"#))
+        #expect(invalid.status == 503)
+        let oldToken = receiver.admission.current()
+        await receiver.configure(enabled: true, destination: nil)
+        let stale = await receiver.handle(root(#"{"action":"version"}"#), admissionToken: oldToken)
+        #expect(stale.status == 503)
+        await receiver.configure(enabled: false, destination: nil)
+        let off = await receiver.handle(root(#"{"action":"version"}"#))
+        #expect(off.status == 503)
+    }
+
     @Test(.timeLimit(.minutes(1))) func shutdownStaysSuspendedUntilRefusedQuitResumesIt() async throws {
         let model = SentenceMining(defaults: nil, collectionKey: "synthetic-shutdown", port: 0)
         model.setEnabled(true)
@@ -147,7 +213,7 @@ import Testing
 /// Each exchange has one client and a terminal close request. The watchdog
 /// cancels its own connection, so a failing test cannot leave a receive hung.
 private nonisolated enum MiningHTTPTestClient {
-    static func exchange(port: UInt16, bytes: Data) async throws -> Data {
+    static func exchange(port: UInt16, bytes: Data, followup: Data? = nil) async throws -> Data {
         let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
         let queue = DispatchQueue(label: "mining.http.test")
         let ready = AsyncStream<Bool>.makeStream()
@@ -166,11 +232,8 @@ private nonisolated enum MiningHTTPTestClient {
             guard started else { throw MiningFailure("Synthetic HTTP connection did not start.") }
             break
         }
-        try await withCheckedThrowingContinuation { (reply: CheckedContinuation<Void, any Error>) in
-            connection.send(content: bytes, completion: .contentProcessed { error in
-                if let error { reply.resume(throwing: error) } else { reply.resume() }
-            })
-        }
+        try await send(bytes, on: connection)
+        var followup = followup
         var received = Data()
         while true {
             let part: (Data, Bool) = try await withCheckedThrowingContinuation { reply in
@@ -180,8 +243,28 @@ private nonisolated enum MiningHTTPTestClient {
                 }
             }
             received.append(part.0)
+            if let next = followup, let boundary = received.range(of: Data("\r\n\r\n".utf8)) {
+                let head = String(decoding: received[..<boundary.lowerBound], as: UTF8.self)
+                let length = head.components(separatedBy: "\r\n").compactMap { line -> Int? in
+                    guard line.hasPrefix("Content-Length: ") else { return nil }
+                    return Int(line.dropFirst("Content-Length: ".count))
+                }.first ?? 0
+                if received.count >= boundary.upperBound + length {
+                    followup = nil
+                    try await send(next, on: connection)
+                }
+            }
             if part.1 { return received }
         }
     }
+
+    private static func send(_ bytes: Data, on connection: NWConnection) async throws {
+        try await withCheckedThrowingContinuation { (reply: CheckedContinuation<Void, any Error>) in
+            connection.send(content: bytes, completion: .contentProcessed { error in
+                if let error { reply.resume(throwing: error) } else { reply.resume() }
+            })
+        }
+    }
+
 }
 #endif

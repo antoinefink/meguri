@@ -167,7 +167,6 @@ nonisolated final class MiningListener: @unchecked Sendable {
         }
         connection.start(queue: queue)
         queue.asyncAfter(deadline: .now() + .milliseconds(500)) { finish(false) }
-        // The identity check above consumes completion exactly once.
     }
 
     private func listen() {
@@ -407,6 +406,12 @@ nonisolated final class MiningListener: @unchecked Sendable {
                         peer.data = Data()
                         send(response.bytes, id: id, close: false)
                         if !extra.isEmpty { consume(extra, id: id) }
+                    } else if [204, 404, 405].contains(response.status),
+                              (try? MiningHTTPBody(request: head).complete) == true {
+                        peer.head = nil
+                        peer.headBytes = 0
+                        peer.busy = true
+                        finishHTTP(response, request: head, id: id)
                     } else { send(response.bytes, id: id, close: true) }
                     return
                 }
@@ -444,19 +449,7 @@ nonisolated final class MiningListener: @unchecked Sendable {
                 let value = await response.value
                 queue.async { [self] in
                     guard peers[id] === peer else { return }
-                    peer.requestBytes = 0
-                    let closing = !request.keepsAlive || (peer.inputEnded && peer.data.isEmpty) || !running || !isAdmitting
-                    send(MiningHTTP.cors(value, request: request).bytes(closing: closing), id: id, close: closing) { [self] in
-                        guard peers[id] === peer else { return }
-                        peer.task = nil
-                        peer.busy = false
-                        peer.headStarted = false
-                        guard running, isAdmitting else { remove(id); return }
-                        timeout(id, seconds: 5)
-                        // Only the completed send unlocks the next request.
-                        if !peer.data.isEmpty { processHTTP(id) }
-                        receive(id)
-                    }
+                    finishHTTP(MiningHTTP.cors(value, request: request), request: request, id: id)
                 }
             }
         } catch MiningHTTP.ParseError.status(let status) {
@@ -465,6 +458,22 @@ nonisolated final class MiningListener: @unchecked Sendable {
             else { response = .init(status: status) }
             send(response.bytes, id: id, close: true)
         } catch { send(MiningHTTPResponse(status: 400).bytes, id: id, close: true) }
+    }
+
+    private func finishHTTP(_ response: MiningHTTPResponse, request: MiningHTTPRequest, id: UUID) {
+        guard let peer = peers[id] else { return }
+        peer.requestBytes = 0
+        let closing = !request.keepsAlive || (peer.inputEnded && peer.data.isEmpty) || !running || !isAdmitting
+        send(response.bytes(closing: closing), id: id, close: closing) { [self] in
+            guard peers[id] === peer else { return }
+            peer.task = nil
+            peer.busy = false
+            peer.headStarted = false
+            guard running, isAdmitting else { remove(id); return }
+            timeout(id, seconds: 5)
+            if !peer.data.isEmpty { processHTTP(id) }
+            receive(id)
+        }
     }
 }
 #endif

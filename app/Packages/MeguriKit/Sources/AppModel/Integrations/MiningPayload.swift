@@ -35,10 +35,10 @@ nonisolated struct MiningPayload: Sendable {
             guard !string.contains("__meguri_mining_attachment_") else {
                 throw MiningFailure("Reserved media reference in field text.")
             }
-            guard !Self.hasUnsafeMarkup(string) else {
+            guard let html = Self.studyHTML(string) else {
                 throw MiningFailure("Unsupported card HTML. Use inert study formatting and send embedded media separately.")
             }
-            text[key] = string
+            text[key] = html
         }
         for key in ["sentenceAudio", "wordAudio", "images"] {
             let value = object[key]
@@ -58,14 +58,15 @@ nonisolated struct MiningPayload: Sendable {
         }
         digest = Self.hash(try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]))
         let ids = ["sentenceAudio", "wordAudio", "images"].flatMap { items[$0, default: []].map(\.id) }
-        let identity = [text["targetWord", default: ""], text["sentence", default: ""]] + ids.sorted()
+        let identity = [object["targetWord"] as? String ?? "", object["sentence"] as? String ?? ""] + ids.sorted()
         if ids.contains("") || (ids.isEmpty && identity.allSatisfy(\.isEmpty)) { retryKey = Self.hash(Data(UUID().uuidString.utf8)) }
         else { retryKey = Self.hash(try JSONEncoder().encode(identity)) }
     }
 
     static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
-    static func hasUnsafeMarkup(_ text: String) -> Bool {
-        // Recognize inert formatting only; never rewrite accepted field text (P7).
+    static func studyHTML(_ text: String) -> String? {
+        // Preserve accepted tags byte for byte (P7). Escape ambiguous literal
+        // comparisons so the HTML parser cannot swallow their visible text.
         // Attribute values are opaque text, including CSS vocabulary and quoted
         // angle brackets. No style, event or resource-bearing attributes enter.
         let names = "b|strong|i|em|u|s|strike|sub|sup|mark|small|span|div|p|ul|ol|li|blockquote|pre|code|ruby|rt|rp|br|abbr|bdi|bdo|cite|del|dfn|ins|kbd|q|samp|var|wbr"
@@ -74,32 +75,51 @@ nonisolated struct MiningPayload: Sendable {
         let attribute = space + "+(?:title|class|lang|dir)" + space + "*=" + space + "*" + value
         let allowed = "(?i)^(?:<(?:" + names + ")(?:" + attribute + ")*" + space
             + "*/?>|</(?:" + names + ")" + space + "*>)$"
-        var remaining = text.utf8[...]
-        while let start = remaining.firstIndex(of: 60) { // <
-            remaining = remaining[start...]
-            let next = remaining.dropFirst().first
-            guard let next else { break }
-            guard (65...90).contains(next) || (97...122).contains(next) || [47, 33, 63].contains(next) else {
-                remaining = remaining.dropFirst()
-                continue // Comparisons and other ordinary prose.
+        let bytes = Array(text.utf8)
+        var output: [UInt8] = []
+        var cursor = 0
+        func letter(_ byte: UInt8) -> Bool { (65...90).contains(byte) || (97...122).contains(byte) }
+        func operand(_ byte: UInt8) -> Bool { letter(byte) || (48...57).contains(byte) || byte == 95 }
+        while cursor < bytes.count {
+            guard bytes[cursor] == 60, cursor + 1 < bytes.count else {
+                output.append(bytes[cursor]); cursor += 1
+                continue
             }
-            // A tag ends only at an unquoted >. Scan UTF-8 once so markup
-            // punctuation is recognized even beside combining characters.
+            let next = bytes[cursor + 1]
+            guard letter(next) || [47, 33, 63].contains(next) else {
+                output.append(bytes[cursor]); cursor += 1
+                continue
+            }
+            // A tag ends only at an unquoted >. A new unquoted < belongs
+            // to a later token and cannot complete this one.
             var quote: UInt8?
-            var end: String.UTF8View.Index?
-            for index in remaining.indices {
-                let byte = remaining[index]
+            var end: Int?
+            for index in (cursor + 1)..<bytes.count {
+                let byte = bytes[index]
                 if let delimiter = quote {
                     if byte == delimiter { quote = nil }
                 } else if byte == 34 || byte == 39 { quote = byte }
+                else if byte == 60 { break }
                 else if byte == 62 { end = index; break }
             }
-            guard let end else { return true }
-            let tag = String(decoding: remaining[...end], as: UTF8.self)
-            guard tag.range(of: allowed, options: .regularExpression) != nil else { return true }
-            remaining = remaining[remaining.index(after: end)...]
+            if let end {
+                let tag = String(decoding: bytes[cursor...end], as: UTF8.self)
+                guard tag.range(of: allowed, options: .regularExpression) != nil else { return nil }
+                output.append(contentsOf: bytes[cursor...end])
+                cursor = end + 1
+            } else {
+                // Only isolated variable operands make an unfinished alphabetic
+                // token a comparison. Recognized tag names still require valid markup.
+                let name = String(decoding: [next], as: UTF8.self).lowercased()
+                guard letter(next), !names.components(separatedBy: "|").contains(name),
+                      cursor > 0, operand(bytes[cursor - 1]),
+                      (cursor < 2 || !operand(bytes[cursor - 2])),
+                      (cursor + 2 == bytes.count || !operand(bytes[cursor + 2])) else { return nil }
+                output.append(contentsOf: "&lt;".utf8)
+                cursor += 1
+            }
         }
-        return false
+        return String(decoding: output, as: UTF8.self)
     }
 
     func fields(for type: NotetypeRecord) throws -> ([String], [MiningAttachment]) {

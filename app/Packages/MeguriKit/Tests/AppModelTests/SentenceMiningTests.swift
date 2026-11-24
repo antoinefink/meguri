@@ -96,6 +96,16 @@ import Testing
         }
     }
 
+    @Test func unspacedComparisonsRemainVisibleBesideStudyMarkup() throws {
+        for sentence in ["The inequality x<y holds.", "x<y", "<b>x<y</b>", "x<y <span title='Study > draft'>holds</span>."] {
+            let expected = sentence.replacingOccurrences(of: "x<y", with: "x&lt;y")
+            let payload = try MiningPayload(JSONSerialization.data(withJSONObject: ["sentence": sentence]))
+            let (fields, media) = try payload.fields(for: Self.type(["Front", "Back"]))
+            #expect(fields == [expected, ""])
+            #expect(media.isEmpty)
+        }
+    }
+
     @Test func embeddedMediaAliasesAndGenericSignatures() throws {
         let aliases = [
             "audio/mpeg3": "mp3", "audio/x-mpeg": "mp3", "audio/x-mp3": "mp3",

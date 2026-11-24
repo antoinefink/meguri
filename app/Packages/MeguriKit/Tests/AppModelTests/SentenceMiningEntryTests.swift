@@ -111,6 +111,16 @@ extension ReviewCollectionStartupTests {
             let rootAdded = try await miningExchange(port: bound, method: "POST", path: "/", body: Data(rootNote.utf8))
             let rootID = try #require((rootAdded.json?["result"] as? NSNumber)?.int64Value)
             #expect(try await CoreNoteService().readNote(id: rootID).fields == ["From a local tool", "Saved through the compatibility subset"])
+            let comparison = "The inequality x<y holds."
+            let comparisonHTML = "The inequality x&lt;y holds."
+            let comparisonBody = try JSONSerialization.data(withJSONObject: ["sentence": comparison])
+            let comparisonAdded = try await miningExchange(port: bound, method: "POST", path: "/receive", body: comparisonBody)
+            let comparisonID = try #require((comparisonAdded.json?["id"] as? NSNumber)?.int64Value)
+            #expect(try await CoreNoteService().readNote(id: comparisonID).fields[0] == comparisonHTML)
+            let rootComparison = rootNote.replacingOccurrences(of: "From a local tool", with: comparison)
+            let rootComparisonAdded = try await miningExchange(port: bound, method: "POST", path: "/", body: Data(rootComparison.utf8))
+            let rootComparisonID = try #require((rootComparisonAdded.json?["result"] as? NSNumber)?.int64Value)
+            #expect(try await CoreNoteService().readNote(id: rootComparisonID).fields[0] == comparisonHTML)
             let discovery = try await miningExchange(port: bound, method: "POST", path: "/", body: Data(#"{"action":"deckNames","version":6}"#.utf8))
             #expect((discovery.json?["result"] as? [String])?.contains("Synthetic Mining") == true)
             // Turning off uses the production owner, closes its WebSocket and
@@ -120,9 +130,7 @@ extension ReviewCollectionStartupTests {
             await mining.settle()
             await #expect(throws: (any Error).self) { _ = try await socket.receive() }
             #expect(webSocket?.closeCode == .goingAway)
-            await #expect(throws: (any Error).self) {
-                _ = try await miningExchange(port: bound, method: "GET", path: "/srs-check")
-            }
+            try expectMiningPortClosed(bound)
             mining.setEnabled(true)
             await mining.settle()
             let rebound = try await miningListeningPort(mining)

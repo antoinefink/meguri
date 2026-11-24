@@ -411,7 +411,7 @@ private func miningLoopbackAddress(_ port: UInt16) -> sockaddr_in {
     return address
 }
 
-private func expectMiningPortClosed(_ port: UInt16) throws {
+func expectMiningPortClosed(_ port: UInt16) throws {
     let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
     try #require(descriptor >= 0)
     defer { Darwin.close(descriptor) }

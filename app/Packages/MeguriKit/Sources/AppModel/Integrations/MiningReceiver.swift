@@ -79,7 +79,34 @@ actor MiningReceiver {
         let request: MiningHTTPRequest
         let admissionToken: UUID
         let selected: MiningDestination?
+        let root: Result<RootAction, MiningFailure>?
         let reply: @Sendable (MiningHTTPResponse) -> Void
+    }
+    // JSONSerialization supplies immutable values; the parsed envelope is
+    // retained once and only read by the receiver's sequential worker.
+    private nonisolated struct RootAction: @unchecked Sendable {
+        let name: String
+        let version: Int
+        let params: [String: Any]
+
+        init(_ data: Data) throws {
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let action = object["action"] as? String else {
+                throw MiningFailure("invalid request: action must be a string")
+            }
+            name = action
+            if let number = object["version"] {
+                guard let integer = number as? NSNumber, CFGetTypeID(integer) != CFBooleanGetTypeID(),
+                      integer.doubleValue.rounded() == integer.doubleValue else {
+                    throw MiningFailure("invalid request: version must be an integer")
+                }
+                version = integer.intValue
+            } else { version = 4 }
+            guard object["params"] == nil || object["params"] is [String: Any] else {
+                throw MiningFailure("invalid request: params must be an object")
+            }
+            params = object["params"] as? [String: Any] ?? [:]
+        }
     }
     private nonisolated struct Incoming: Sendable {
         let request: MiningHTTPRequest
@@ -88,12 +115,14 @@ actor MiningReceiver {
     }
     private nonisolated let incoming: AsyncStream<Incoming>.Continuation
     private var pending: [Pending] = []
+    private let pendingLimit: Int // Zero capacity exercises saturation without a Core write.
     private var executing: Task<Void, Never>?
     private var queuedBytes = 0
     private var configuredAdmissionToken: UUID?
     private var writing = false
-    init(collection: MiningCoreCollection = MiningCoreCollection()) {
+    init(collection: MiningCoreCollection = MiningCoreCollection(), pendingLimit: Int = 32) {
         self.collection = collection
+        self.pendingLimit = pendingLimit
         let channel = AsyncStream<Incoming>.makeStream()
         incoming = channel.continuation
         Task { [weak self] in
@@ -157,7 +186,7 @@ actor MiningReceiver {
         let work = pending.removeFirst()
         queuedBytes -= work.request.body.count
         executing = Task {
-            let response = await process(work.request, admissionToken: work.admissionToken, selected: work.selected)
+            let response = await process(work.request, root: work.root, admissionToken: work.admissionToken, selected: work.selected)
             work.reply(response)
             executing = nil
             startNext()
@@ -181,41 +210,36 @@ actor MiningReceiver {
         case "/anki-hello": work.reply(.json(200, ["status": "connect", "port": Int(request.localPort)]))
         case "/srs-import", "/srs-import-info", "/srs-sample-card": work.reply(.error(501, "Importing into Migaku Memory is not supported by Meguri."))
         case "/receive", "/":
-            guard pending.count < 32, queuedBytes + request.body.count <= 268_435_456 else {
+            let root: Result<RootAction, MiningFailure>? = request.path == "/" ? Result { try RootAction(request.body) }.mapError {
+                ($0 as? MiningFailure) ?? MiningFailure($0.localizedDescription)
+            } : nil
+            if case .success(let action)? = root, action.name == "version" {
+                work.reply(envelope(6, version: action.version))
+                return
+            }
+            guard pending.count < pendingLimit, queuedBytes + request.body.count <= 268_435_456 else {
                 work.reply(.error(503, "Too many pending mining requests. Try again."))
                 return
             }
             pending.append(Pending(request: request, admissionToken: admissionToken,
-                selected: destination, reply: work.reply))
+                selected: destination, root: root, reply: work.reply))
             queuedBytes += request.body.count
             startNext()
         default: work.reply(.error(404, "Not found."))
         }
     }
 
-    private func process(_ request: MiningHTTPRequest, admissionToken: UUID, selected: MiningDestination?) async -> MiningHTTPResponse {
+    private func process(_ request: MiningHTTPRequest, root parsedRoot: Result<RootAction, MiningFailure>?, admissionToken: UUID, selected: MiningDestination?) async -> MiningHTTPResponse {
         let root = request.path == "/"
-        var version = 6
         do {
             guard enabled, admission.matches(admissionToken), !Task.isCancelled else {
                 throw MiningFailure("Mining settings changed. Send the card again.")
             }
-            if root {
-                guard let object = try JSONSerialization.jsonObject(with: request.body) as? [String: Any], let action = object["action"] as? String else {
-                    throw MiningFailure("invalid request: action must be a string")
-                }
-                if let number = object["version"] {
-                    guard let integer = number as? NSNumber, CFGetTypeID(integer) != CFBooleanGetTypeID(), integer.doubleValue.rounded() == integer.doubleValue else {
-                        throw MiningFailure("invalid request: version must be an integer")
-                    }
-                    version = integer.intValue
-                } else { version = 4 }
-                guard object["params"] == nil || object["params"] is [String: Any] else {
-                    throw MiningFailure("invalid request: params must be an object")
-                }
-                let params = object["params"] as? [String: Any] ?? [:]
-                switch action {
-                case "version": return envelope(6, version: version)
+            if let parsedRoot {
+                let action = try parsedRoot.get()
+                let version = action.version
+                let params = action.params
+                switch action.name {
                 case "deckNames": return envelope(try await collection.catalog().decks.map(\.fullName), version: version)
                 case "modelNames": return envelope(try await collection.catalog().types.map(\.name), version: version)
                 case "modelFieldNames":
@@ -293,7 +317,7 @@ actor MiningReceiver {
         }
         guard let supplied = note["fields"] as? [String: String], !supplied.isEmpty,
               Set(supplied.keys).isSubset(of: Set(type.fields.map(\.name))),
-              !supplied.values.contains(where: { MiningPayload.hasUnsafeMarkup($0) || $0.contains("__meguri_mining_attachment_") }) else {
+              !supplied.values.contains(where: { $0.contains("__meguri_mining_attachment_") }) else {
             throw MiningFailure("invalid or unsupported note fields")
         }
         for key in ["audio", "picture", "video"] where note[key] != nil {
@@ -304,7 +328,12 @@ actor MiningReceiver {
         guard note["tags"] == nil || note["tags"] is [String] else {
             throw MiningFailure("tags must be strings")
         }
-        let fields = type.fields.map { supplied[$0.name, default: ""] }
+        let fields = try type.fields.map { field in
+            guard let html = MiningPayload.studyHTML(supplied[field.name, default: ""]) else {
+                throw MiningFailure("invalid or unsupported note fields")
+            }
+            return html
+        }
         guard fields.contains(where: { !$0.isEmpty }), type.kind == 0, type.originalStockKind != 6 else {
             throw MiningFailure("Choose a standard note type and supply nonempty fields.")
         }

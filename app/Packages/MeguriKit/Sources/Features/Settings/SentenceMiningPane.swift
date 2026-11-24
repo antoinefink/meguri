@@ -2,8 +2,6 @@
 import AppModel
 import SwiftUI
 
-/// Main task: enable local sentence capture and choose where cards go.
-/// Native grouped Form; actual listener state stays visible beside setup.
 public struct SentenceMiningPane: View {
     @Bindable private var model: SentenceMining
     @State private var portEntry: String
