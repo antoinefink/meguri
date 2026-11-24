@@ -88,6 +88,64 @@ fn rows_land_on_anki_days_back_from_the_boundary_and_only_rated_rows_count() {
 }
 
 #[test]
+fn sparse_history_uses_the_same_day_bounds_without_dense_ancient_padding() {
+    let (_dir, path) = empty_collection();
+    {
+        let conn = plain(&path);
+        insert_card(&conn, 1, 10, 0);
+        insert_card(&conn, 2, 99, 10);
+        insert_card(&conn, 3, 10, 20);
+        insert_review(&conn, window_start(N), 1, 3, 1);
+        insert_review(&conn, window_start(N) - 1, 1, 3, 1);
+        insert_review(&conn, (N - 500 * DAY) * 1000, 2, 2, 0);
+        insert_review(&conn, (N - 500 * DAY) * 1000 + 1, 3, 2, 0);
+        insert_review(&conn, (N - 700 * DAY) * 1000, 999, 4, 1);
+        insert_review(&conn, (N - 800 * DAY) * 1000, 1, 0, 4);
+        insert_review(&conn, (N + DAY) * 1000, 1, 3, 1);
+        insert_review(&conn, i64::MIN, 1, 3, 1);
+    }
+    let collection = open(&path).unwrap();
+    let reader = collection.reader_factory().open(ReaderRole::Query).unwrap();
+    let ancient = (N - i64::MIN.div_euclid(1000)) / DAY;
+    let all = reader.activity_history_counts(ActivityScope::Collection, N).unwrap();
+    assert_eq!(all, vec![(0, 1), (370, 1), (371, 1), (500, 2), (700, 1), (ancient, 1)]);
+    let scoped = reader.activity_history_counts(ActivityScope::HomeDecks(&[DeckId(10)]), N).unwrap();
+    assert_eq!(scoped, vec![(0, 1), (370, 1), (371, 1), (500, 1), (ancient, 1)]);
+    assert!(reader.activity_history_counts(ActivityScope::HomeDecks(&[]), N).unwrap().is_empty());
+    assert_eq!(days(&reader.activity_day_counts(ActivityScope::Collection, N).unwrap()), vec![(0, 1), (370, 1)]);
+}
+
+#[test]
+fn negative_milliseconds_floor_to_seconds_at_distinguishing_day_boundaries() {
+    let (_dir, path) = empty_collection();
+    {
+        let conn = plain(&path);
+        insert_card(&conn, 1, 10, 0);
+        insert_card(&conn, 2, 99, 10);
+        for (index, id) in [i64::MIN, -1001, -1000, -999, -1, 0, 999, 1000].into_iter().enumerate() {
+            insert_review(&conn, id, 1 + (index % 2) as i64, 3, 1);
+        }
+    }
+    let collection = open(&path).unwrap();
+    let reader = collection.reader_factory().open(ReaderRole::Query).unwrap();
+    let oldest_second = i64::MIN.div_euclid(1000);
+    for scope in [ActivityScope::Collection, ActivityScope::HomeDecks(&[DeckId(10)])] {
+        // At N = 86399, -1 ms floors to -1 s and belongs to day 1, not day 0.
+        let boundary = DAY - 1;
+        let ancient = (boundary - oldest_second) / DAY;
+        assert_eq!(reader.activity_history_counts(scope, boundary).unwrap(), [(0, 3), (1, 4), (ancient, 1)]);
+        assert_eq!(days(&reader.activity_day_counts(scope, boundary).unwrap()), [(0, 3), (1, 4)]);
+
+        // Put i64::MIN itself exactly a whole number of days before N. Truncating
+        // its fractional second would put it one day later; subtracting 999 overflows.
+        let boundary = oldest_second.rem_euclid(DAY);
+        let ancient = (boundary - oldest_second) / DAY;
+        assert_eq!(reader.activity_history_counts(scope, boundary).unwrap(), [(0, 7), (ancient, 1)]);
+        assert_eq!(days(&reader.activity_day_counts(scope, boundary).unwrap()), [(0, 7)]);
+    }
+}
+
+#[test]
 fn deck_scope_follows_the_home_deck_of_cards_as_they_are_now() {
     let (_dir, path) = empty_collection();
     {
@@ -208,6 +266,9 @@ fn a_million_reviews_count_correctly_and_quickly() {
     let mut expected_all = vec![0u32; ACTIVITY_DAYS as usize];
     let mut expected_large = vec![0u32; ACTIVITY_DAYS as usize];
     let mut expected_small = vec![0u32; ACTIVITY_DAYS as usize];
+    let mut history_all = std::collections::BTreeMap::new();
+    let mut history_large = std::collections::BTreeMap::new();
+    let mut history_small = std::collections::BTreeMap::new();
     let built = Stopwatch::start();
     {
         let mut conn = plain(&path);
@@ -243,15 +304,29 @@ fn a_million_reviews_count_correctly_and_quickly() {
                 let ease = if below(&mix, 20) == 0 { 0 } else { 1 + below(&mix, 4) as i64 };
                 let kind = if ease == 0 { 4 } else { below(&mix, 3) as i64 };
                 reviews.execute(params![id, card, ease, kind]).unwrap();
-                if ease == 0 || id < window_start(N) {
+                if ease == 0 {
                     continue;
                 }
                 let k = ((N - id / 1000) / DAY).max(0) as usize;
-                expected_all[k] += 1;
+                let in_window = id >= window_start(N);
+                *history_all.entry(k as i64).or_insert(0u32) += 1;
+                if in_window {
+                    expected_all[k] += 1;
+                }
                 if card <= CARDS {
                     match home_and_current(card).0 {
-                        LARGE => expected_large[k] += 1,
-                        SMALL => expected_small[k] += 1,
+                        LARGE => {
+                            *history_large.entry(k as i64).or_insert(0u32) += 1;
+                            if in_window {
+                                expected_large[k] += 1;
+                            }
+                        }
+                        SMALL => {
+                            *history_small.entry(k as i64).or_insert(0u32) += 1;
+                            if in_window {
+                                expected_small[k] += 1;
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -263,35 +338,42 @@ fn a_million_reviews_count_correctly_and_quickly() {
 
     let collection = open(&path).unwrap();
     let reader = collection.reader_factory().open(ReaderRole::Query).unwrap();
-    let timed = |scope: ActivityScope<'_>| {
+    fn timed<T: std::fmt::Debug + PartialEq>(read: impl Fn() -> T) -> (T, Duration, Duration) {
         // The first run reads the pages in; report the warm one too.
         let cold = Stopwatch::start();
-        let first = reader.activity_day_counts(scope, N).unwrap();
+        let first = read();
         let cold = cold.elapsed();
         let warm = Stopwatch::start();
-        let second = reader.activity_day_counts(scope, N).unwrap();
+        let second = read();
         let warm = warm.elapsed();
         assert_eq!(first, second);
         (first, cold, warm)
-    };
-    let (all, all_cold, all_warm) = timed(ActivityScope::Collection);
-    let (large, large_cold, large_warm) = timed(ActivityScope::HomeDecks(&[DeckId(LARGE)]));
-    let (small, small_cold, small_warm) = timed(ActivityScope::HomeDecks(&[DeckId(SMALL)]));
-    let window = expected_all.iter().map(|n| u64::from(*n)).sum::<u64>();
-    eprintln!(
-        "activity heatmap, {REVIEWS} reviews ({window} counted in the window): collection {all_cold:?} cold / {all_warm:?} warm; \
-         large deck ({} rows) {large_cold:?} / {large_warm:?}; small deck ({} rows) {small_cold:?} / {small_warm:?}",
-        expected_large.iter().sum::<u32>(),
-        expected_small.iter().sum::<u32>(),
-    );
-    assert_eq!(all, expected_all);
-    assert_eq!(large, expected_large);
-    assert_eq!(small, expected_small);
-    // Generous: a loaded CI machine must not fail this; a full scan or a
-    // query per day would still be caught by the plan test above.
-    let bound = Duration::from_secs(5);
-    for (name, took) in [("collection", all_cold), ("large deck", large_cold), ("small deck", small_cold)] {
-        assert!(took < bound, "{name} took {took:?}");
+    }
+    // stats/history-reads H19: year-window log reads under 300 ms; all history
+    // under 1 s. The nextest reservation runs this test alone. Time each query
+    // sequentially, including its sparse decoding, with both cold and warm checks.
+    for (name, scope, expected, history) in [
+        ("collection", ActivityScope::Collection, &expected_all, &history_all),
+        ("large deck", ActivityScope::HomeDecks(&[DeckId(LARGE)]), &expected_large, &history_large),
+        ("small deck", ActivityScope::HomeDecks(&[DeckId(SMALL)]), &expected_small, &history_small),
+    ] {
+        let (bounded, cold, warm) = timed(|| reader.activity_day_counts(scope, N).unwrap());
+        eprintln!("activity bounded, {name}, {} reviews: {cold:?} cold / {warm:?} warm", expected.iter().sum::<u32>());
+        assert_eq!(&bounded, expected, "{name} bounded counts");
+        for (run, took) in [("cold", cold), ("warm", warm)] {
+            assert!(took < Duration::from_millis(300), "{name} bounded {run} took {took:?}");
+        }
+
+        let (sparse, cold, warm) = timed(|| reader.activity_history_counts(scope, N).unwrap());
+        let expected: Vec<_> = history.iter().map(|(&k, &n)| (k, n)).collect();
+        eprintln!(
+            "activity all history, {name}, {} reviews: {cold:?} cold / {warm:?} warm",
+            history.values().sum::<u32>()
+        );
+        assert_eq!(sparse, expected, "{name} all-history counts");
+        for (run, took) in [("cold", cold), ("warm", warm)] {
+            assert!(took < Duration::from_secs(1), "{name} all-history {run} took {took:?}");
+        }
     }
 
     // With Anki's statistics in the file the plans stay bounded.

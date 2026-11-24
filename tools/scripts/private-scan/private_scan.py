@@ -835,6 +835,18 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete-content PUBLIC review: Mac heatmap history, 2026-11-24.
+    'app/Packages/MeguriKit/Sources/HeatmapKit/ActivityGrid.swift':
+        '06bdb1cf1bb568541feedda2187a1a67d37bfe33353c25b1672419edf06da417',
+    'core/crates/meguri-engine/tests/activity.rs':
+        '37ad2a34372338cdac430f3b1d45299d433256d46cbbbc95032915ecb1fe3948',
+    'core/crates/meguri-ffi/src/activity.rs':
+        '1bf97e602e93e0809c259aae993be3b7328aab5ce181f192cfdf95cadc3bfa8d',
+    'core/crates/meguri-storage/tests/activity.rs':
+        'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
+    # Complete-content PUBLIC review: s-20261124T065111Z-cc535ede, 20261124T151622Z-59160.
+    'docs/design/native-interface-contract.md':
+        '2ba0dc17770ff4254aa00063825bf2bc29a8f2996b816a8c7e9fbddaa65ff6fc',
     # Complete-file privacy reviews for the remote Duo tooling, 2026-11-24.
     'docs/process/review-log/duo-simulator-posture-20261124.md':
         '678c5d137d1b74876d52382f3c27e53a0a3eef2d70fcae355f4d404f1eabb0c1',

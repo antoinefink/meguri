@@ -308,6 +308,7 @@ struct ReviewLayout<Card: View>: View {
             if let leech {
                 ToolbarItem(placement: .primaryAction) { ReviewLeechButton(notice: leech) }
             }
+            ToolbarItem(placement: .primaryAction) { ReviewActionsMenu(actions: actions) }
             if let status {
                 ToolbarItem(placement: .primaryAction) { status }
             }
@@ -826,9 +827,6 @@ struct ReviewMoreActions {
     var canActOnCard: Bool { cardActionsEnabled() }
 }
 
-/// N20.8: the touch review's More button (`ellipsis`, "More"), a pull-down
-/// menu in groups, each item with its system symbol. Later card actions slot
-/// into these groups or new ones after them.
 /// N16.11: the leech notice (`review/reviewer-strings#S3`) as one yellow
 /// warning icon in the top controls, in place of a banner above the card; a
 /// press shows what it means.
@@ -879,6 +877,7 @@ struct ReviewLeechDetails: View {
     }
 }
 
+/// N20.8: the touch review's More button and its grouped card actions.
 struct ReviewMoreMenu: View {
     let actions: ReviewMoreActions
     var body: some View {
@@ -892,30 +891,67 @@ struct ReviewMoreMenu: View {
     }
 }
 
-/// The items of the More menu and the Mac card's context menu, in groups:
+#if os(macOS)
+/// N20.8: the approved visible Mac entry to the shared review actions.
+struct ReviewActionsMenu: View {
+    let actions: ReviewMoreActions
+    var body: some View {
+        Menu {
+            // SwiftUI has no display-only key equivalents. Registering them
+            // here would bypass the menu bar's input-ownership guards (N4).
+            // The menu bar and native card context menu still show their keys.
+            ReviewCardActionItems(actions: actions)
+        } label: {
+            Label { Text("Review actions", bundle: .module) } icon: { Image(systemName: "ellipsis") }
+                .labelStyle(.iconOnly)
+        }
+        .menuIndicator(.hidden)
+        .help(Text("Review actions", bundle: .module))
+        .accessibilityLabel(Text("Review actions", bundle: .module))
+        .accessibilityIdentifier("review.session.actions")
+    }
+}
+#endif
+
+/// The items of the touch More menu and Mac toolbar menu, in groups:
 /// Edit Note | Bury Card, Suspend Card.
 struct ReviewCardActionItems: View {
     let actions: ReviewMoreActions
     var body: some View {
-        Section {
-            Button(action: actions.editNote) {
-                Label { Text("Edit Note", bundle: .module) } icon: { Image(systemName: "pencil") }
-            }
-            .disabled(!actions.canEditNote)
-            .accessibilityIdentifier("review.menu.editNote")
-        }
-        Section {
-            Button { actions.act(.bury) } label: {
-                Label { Text("Bury Card", bundle: .module) } icon: { Image(systemName: "moon") }
-            }
-            .disabled(!actions.canActOnCard)
-            .accessibilityIdentifier("review.menu.buryCard")
-            Button { actions.act(.suspend) } label: {
-                Label { Text("Suspend Card", bundle: .module) } icon: { Image(systemName: "pause.circle") }
-            }
-            .disabled(!actions.canActOnCard)
-            .accessibilityIdentifier("review.menu.suspendCard")
+        #if os(macOS)
+        // A native separator preserves each command's AX identifier; Mac
+        // Section header items can take those identifiers (app/AGENTS.md).
+        Group {
+            editNote
+            Divider()
+            cardActions
         }
         .labelStyle(.titleAndIcon)
+        #else
+        Section { editNote }
+        Section { cardActions }
+            .labelStyle(.titleAndIcon)
+        #endif
+    }
+
+    private var editNote: some View {
+        Button(action: actions.editNote) {
+            Label { Text("Edit Note", bundle: .module) } icon: { Image(systemName: "pencil") }
+        }
+        .disabled(!actions.canEditNote)
+        .accessibilityIdentifier("review.menu.editNote")
+    }
+
+    @ViewBuilder private var cardActions: some View {
+        Button { actions.act(.bury) } label: {
+            Label { Text("Bury Card", bundle: .module) } icon: { Image(systemName: "moon") }
+        }
+        .disabled(!actions.canActOnCard)
+        .accessibilityIdentifier("review.menu.buryCard")
+        Button { actions.act(.suspend) } label: {
+            Label { Text("Suspend Card", bundle: .module) } icon: { Image(systemName: "pause.circle") }
+        }
+        .disabled(!actions.canActOnCard)
+        .accessibilityIdentifier("review.menu.suspendCard")
     }
 }
