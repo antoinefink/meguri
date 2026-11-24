@@ -1,7 +1,7 @@
 //! Real writer/card/media/receipt tests. No protocol or storage stand-ins.
 mod common;
 use common::{fresh, notes::kind};
-use meguri_engine::{Collection, EngineError, OpSource, OpSpec, UndoScope, notes, notetypes, media::MediaService};
+use meguri_engine::{Collection, EngineError, OpSource, OpSpec, Qos, ThreadRegistry, UndoScope, notes, notetypes, media::MediaService};
 use meguri_model::ids::{DeckId, NotetypeId};
 use meguri_storage::{ReadRows, ReaderRole, Table};
 
@@ -98,14 +98,15 @@ fn concurrent_deliveries_share_the_writer_receipt_and_generate_only_one_card() {
     settle(&h.collection);
     let seq = h.collection.last_seq();
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+    let threads = ThreadRegistry::default();
     let workers: Vec<_> = (0..8).map(|_| {
         let collection = h.collection.clone();
         let input = input.clone();
         let barrier = barrier.clone();
-        std::thread::spawn(move || {
+        threads.spawn("mining-duplicate-producer", Qos::Default, move |_| {
             barrier.wait();
             notes::mining::add(&collection, input, "a".repeat(64), "b".repeat(64), None).unwrap()
-        })
+        }).unwrap()
     }).collect();
     let results: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
     assert_eq!(results.iter().filter(|r| r.value.written).count(), 1);

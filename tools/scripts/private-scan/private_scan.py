@@ -845,9 +845,9 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningWebSocket.swift':
         'df27734289781f686114ed98ac44d3e468f73abda3ea22512c3bc41f91b640c1',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':
-        'fe7395eb8aeebfd1f955609e2e6826b1f0336caeb1f84319aea6c8ad2a41f361',
+        '5a6cb94839c6a2f9fe72b2a13b1790d6c47af69605d8d79b1b680c3dc92b32dd',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningTests.swift':
-        'ddf4517aee456b7ba60998e22fa2155cb4fe1088903b2c8a13485a6a3ad68eb7',
+        '0dd6af5c60f89c1e67030f60d36e7dd3c23577b54fb67457c8479568a92898a7',
     'core/crates/meguri-ffi/src/notes.rs':
         'e9fdf9804387494879a07f43a8cf21fa59343f0a7f41d1759512aee5315d61ae',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.

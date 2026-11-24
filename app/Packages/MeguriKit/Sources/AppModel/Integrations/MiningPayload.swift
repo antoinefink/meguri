@@ -35,10 +35,8 @@ nonisolated struct MiningPayload: Sendable {
             guard !string.contains("__meguri_mining_attachment_") else {
                 throw MiningFailure("Reserved media reference in field text.")
             }
-            // Preserve ordinary study markup; reject explicit active/resource
-            // markup. Media acquisition itself accepts embedded bytes only.
-            guard !Self.hasRemoteResource(string) else {
-                throw MiningFailure("Remote resources in card HTML are not supported. Send embedded media instead.")
+            guard !Self.hasUnsafeMarkup(string) else {
+                throw MiningFailure("Unsupported card HTML. Use formatting without attributes and send embedded media separately.")
             }
             text[key] = string
         }
@@ -66,10 +64,20 @@ nonisolated struct MiningPayload: Sendable {
     }
 
     static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
-    static func hasRemoteResource(_ text: String) -> Bool {
-        // Rendering arbitrary active content is outside this local receiver's
-        // grant. Preserve ordinary study markup, reject active/network markup.
-        text.range(of: #"(?is)<\s*(script|iframe|object|embed|link|style|base|meta)\b|\b(src|srcset|poster|background)\s*=\s*["']?\s*(https?:|//)|url\s*\(|@import"#, options: .regularExpression) != nil
+    static func hasUnsafeMarkup(_ text: String) -> Bool {
+        // An attribute-free subset of HTML text formatting, lists and ruby.
+        // Validate whole tags, rather than interpreting attributes or CSS.
+        // Prose (including CSS vocabulary) is never scanned for resource words.
+        let allowed = #"(?i)^</?(?:b|strong|i|em|u|s|strike|sub|sup|mark|small|span|div|p|ul|ol|li|blockquote|pre|code|ruby|rt|rp|br)\s*/?>$"#
+        var remaining = text[...]
+        while let start = remaining.range(of: #"<[A-Za-z/!?]"#, options: .regularExpression) {
+            remaining = remaining[start.lowerBound...]
+            guard let end = remaining.firstIndex(of: ">") else { return true }
+            let tag = String(remaining[...end])
+            guard tag.range(of: allowed, options: .regularExpression) != nil else { return true }
+            remaining = remaining[remaining.index(after: end)...]
+        }
+        return false
     }
 
     func fields(for type: NotetypeRecord) throws -> ([String], [MiningAttachment]) {
@@ -134,11 +142,15 @@ nonisolated struct MiningPayload: Sendable {
         guard let ext = mediaExtension(mime: mime, bytes: bytes) else {
             throw fail("unknown media format.")
         }
+        let imageExtensions: Set<String> = ["webp", "jpg", "png", "gif", "avif", "heic", "bmp"]
+        guard imageExtensions.contains(ext) == (key == "images") else {
+            throw fail("media format does not match the attachment field.")
+        }
         return MiningAttachment(name: Self.hash(bytes) + "." + ext, bytes: bytes)
     }
 
-    /// P9: specific media MIME types win. Generic types use only a bounded
-    /// prefix, never a scan through arbitrary payload content.
+    /// Accept only recognized binary formats, with a matching declared MIME
+    /// when supplied. Generic MIME types use the same bounded signature check.
     static func mediaExtension(mime: String, bytes: Data) -> String? {
         let aliases = [
             "audio/mp4": "m4a", "audio/m4a": "m4a", "audio/x-m4a": "m4a",
@@ -151,17 +163,14 @@ nonisolated struct MiningPayload: Sendable {
             "audio/aac": "aac", "audio/x-aac": "aac", "audio/aacp": "aac",
             "image/webp": "webp", "image/jpeg": "jpg", "image/jpg": "jpg", "image/pjpeg": "jpg",
             "image/png": "png", "image/gif": "gif", "image/avif": "avif",
-            "image/heic": "heic", "image/heif": "heic", "image/svg+xml": "svg", "image/bmp": "bmp"
+            "image/heic": "heic", "image/heif": "heic", "image/bmp": "bmp"
         ]
-        if let ext = aliases[mime] { return ext }
-        if mime.hasPrefix("audio/") || mime.hasPrefix("image/") {
-            var subtype = String(mime.dropFirst(6))
-            if subtype.hasPrefix("x-") { subtype.removeFirst(2) }
-            let ext = String(subtype.prefix { $0 != "+" && $0 != "." && $0 != ";" })
-            if (1...10).contains(ext.utf8.count), ext.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) }) {
-                return ext
-            }
-        }
+        guard let detected = binaryMediaExtension(bytes) else { return nil }
+        if let declared = aliases[mime] { return declared == detected ? detected : nil }
+        return ["", "application/octet-stream", "binary/octet-stream"].contains(mime) ? detected : nil
+    }
+
+    private static func binaryMediaExtension(_ bytes: Data) -> String? {
         let prefix = Array(bytes.prefix(12))
         func has(_ text: String, at offset: Int = 0) -> Bool {
             let signature = Array(text.utf8)
@@ -172,7 +181,8 @@ nonisolated struct MiningPayload: Sendable {
         if prefix.count >= 12, has("ftyp", at: 4) {
             if has("avif", at: 8) || has("avis", at: 8) { return "avif" }
             if has("heic", at: 8) || has("heix", at: 8) || has("mif1", at: 8) { return "heic" }
-            return "m4a"
+            if ["M4A ", "M4B ", "isom", "iso2", "mp41", "mp42"].contains(where: { has($0, at: 8) }) { return "m4a" }
+            return nil
         }
         if has("OggS") { return "ogg" }
         if has("fLaC") { return "flac" }
@@ -182,6 +192,7 @@ nonisolated struct MiningPayload: Sendable {
         if prefix.starts(with: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) { return "png" }
         if prefix.starts(with: [0xff, 0xd8, 0xff]) { return "jpg" }
         if has("GIF87a") || has("GIF89a") { return "gif" }
+        if has("BM") { return "bmp" }
         if prefix.count >= 2, prefix[0] == 0xff {
             if prefix[1] & 0xf6 == 0xf0 { return "aac" }
             if prefix[1] & 0xe0 == 0xe0, prefix[1] & 0x06 != 0 { return "mp3" }

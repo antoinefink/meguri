@@ -124,7 +124,7 @@ extension ReviewCollectionStartupTests {
             let rebound = try await miningListeningPort(mining)
             let retriedAfterEnable = try await miningExchange(port: rebound, method: "POST", path: "/receive", body: Data(basicPayload.utf8))
             #expect((retriedAfterEnable.json?["id"] as? NSNumber)?.int64Value == ordinaryID)
-            #expect(await owner.closeForQuit())
+            try #require(await owner.closeForQuit())
 
             // A different real synthetic collection shares the device switch,
             // but must never inherit the first collection's destination IDs.

@@ -184,7 +184,11 @@ actor MiningReceiver {
                     guard let name = params["modelName"] as? String, let model = catalog.types.first(where: { $0.name == name }) else {
                         throw MiningFailure("model was not found")
                     }
-                    return envelope(try await collection.notetype(model.id).fields.map(\.name), version: version)
+                    let type = try await collection.notetype(model.id)
+                    guard await collection.available() == catalog.generation else {
+                        throw MiningFailure("The collection changed. Request model fields again.")
+                    }
+                    return envelope(type.fields.map(\.name), version: version)
                 case "addNote":
                     guard let note = params["note"] as? [String: Any] else {
                         throw MiningFailure("note must be an object")
@@ -250,7 +254,7 @@ actor MiningReceiver {
         }
         guard let supplied = note["fields"] as? [String: String], !supplied.isEmpty,
               Set(supplied.keys).isSubset(of: Set(type.fields.map(\.name))),
-              !supplied.values.contains(where: { MiningPayload.hasRemoteResource($0) || $0.contains("__meguri_mining_attachment_") }) else {
+              !supplied.values.contains(where: { MiningPayload.hasUnsafeMarkup($0) || $0.contains("__meguri_mining_attachment_") }) else {
             throw MiningFailure("invalid or unsupported note fields")
         }
         for key in ["audio", "picture", "video"] where note[key] != nil {

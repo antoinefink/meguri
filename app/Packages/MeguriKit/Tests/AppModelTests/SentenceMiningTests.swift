@@ -66,35 +66,75 @@ import Testing
             #expect(throws: (any Error).self) { try MiningPayload.media(source, key: "sentenceAudio", index: 1) }
         }
     }
+    @Test func proseAndSafeStudyFormattingArePreserved() throws {
+        for sentence in [
+            "CSS vocabulary: url(), @import, src= and background=.",
+            "A comparison: 2 < 3 and 5 > 4.",
+            "<p>A <strong>useful</strong> <em>sentence</em>.<br>H<sub>2</sub>O</p>",
+            "<ruby>語<rt>ご</rt></ruby><ul><li><code>url()</code></li></ul>"
+        ] {
+            let data = try JSONSerialization.data(withJSONObject: ["sentence": sentence])
+            let payload = try MiningPayload(data)
+            let (fields, media) = try payload.fields(for: Self.type(["Front", "Back"]))
+            #expect(fields == [sentence, ""])
+            #expect(media.isEmpty)
+        }
+        // Benign unsupported markup exercises the attribute/resource boundary.
+        for sentence in ["<span title=\"study\">word</span>", "<img>"] {
+            let data = try JSONSerialization.data(withJSONObject: ["sentence": sentence])
+            #expect(throws: MiningFailure.self) { try MiningPayload(data) }
+        }
+    }
+
     @Test func embeddedMediaAliasesAndGenericSignatures() throws {
         let aliases = [
             "audio/mpeg3": "mp3", "audio/x-mpeg": "mp3", "audio/x-mp3": "mp3",
             "audio/vorbis": "ogg", "audio/wave": "wav", "audio/vnd.wave": "wav",
             "audio/x-flac": "flac", "audio/x-aac": "aac", "audio/aacp": "aac", "image/pjpeg": "jpg"
         ]
-        for (mime, ext) in aliases {
-            let media = try MiningPayload.media("data:\(mime);base64,AQID", key: "images", index: 1)
-            #expect(media.name.hasSuffix("." + ext))
-            #expect(media.bytes == Data([1, 2, 3]))
-        }
-        let signatures: [(Data, String)] = [
-            (Data("ID3".utf8), "mp3"), (Data("OggS".utf8), "ogg"),
-            (Data("fLaC".utf8), "flac"), (Data("RIFF0000WAVE".utf8), "wav"),
-            (Data("RIFF0000WEBP".utf8), "webp"), (Data("0000ftypavif".utf8), "avif"),
-            (Data("0000ftypheic".utf8), "heic"), (Data("0000ftypM4A ".utf8), "m4a"),
-            (Data([0x1a, 0x45, 0xdf, 0xa3]), "webm"),
-            (Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "png"),
-            (Data([0xff, 0xd8, 0xff]), "jpg"), (Data("GIF89a".utf8), "gif"),
-            (Data([0xff, 0xf1]), "aac"), (Data([0xff, 0xfb]), "mp3")
+        let signatures: [(Data, String, String)] = [
+            (Data("ID3".utf8), "mp3", "sentenceAudio"), (Data("OggS".utf8), "ogg", "wordAudio"),
+            (Data("fLaC".utf8), "flac", "sentenceAudio"), (Data("RIFF0000WAVE".utf8), "wav", "wordAudio"),
+            (Data("RIFF0000WEBP".utf8), "webp", "images"), (Data("0000ftypavif".utf8), "avif", "images"),
+            (Data("0000ftypheic".utf8), "heic", "images"), (Data("0000ftypM4A ".utf8), "m4a", "sentenceAudio"),
+            (Data([0x1a, 0x45, 0xdf, 0xa3]), "webm", "wordAudio"),
+            (Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "png", "images"),
+            (Data([0xff, 0xd8, 0xff]), "jpg", "images"), (Data("GIF89a".utf8), "gif", "images"),
+            (Data("BM".utf8), "bmp", "images"),
+            (Data([0xff, 0xf1]), "aac", "sentenceAudio"), (Data([0xff, 0xfb]), "mp3", "wordAudio")
         ]
-        for (bytes, ext) in signatures {
+        for (mime, ext) in aliases {
+            let (bytes, _, key) = try #require(signatures.first { $0.1 == ext })
+            let source = "data:\(mime);base64," + bytes.base64EncodedString()
+            let media = try MiningPayload.media(source, key: key, index: 1)
+            #expect(media.name.hasSuffix("." + ext) && media.bytes == bytes)
+            let wrongKey = key == "images" ? "sentenceAudio" : "images"
+            #expect(throws: MiningFailure.self) { try MiningPayload.media(source, key: wrongKey, index: 1) }
+        }
+        for (bytes, ext, key) in signatures {
             for mime in ["", "application/octet-stream", "binary/octet-stream"] {
-                let media = try MiningPayload.media("DATA:\(mime);BASE64," + bytes.base64EncodedString(), key: "images", index: 1)
+                let source = "DATA:\(mime);BASE64," + bytes.base64EncodedString()
+                let media = try MiningPayload.media(source, key: key, index: 1)
                 #expect(media.name.hasSuffix("." + ext) && media.bytes == bytes)
+                let wrongKey = key == "images" ? "wordAudio" : "images"
+                #expect(throws: MiningFailure.self) { try MiningPayload.media(source, key: wrongKey, index: 1) }
             }
         }
         let parameterized = try MiningPayload.media("data:audio/vorbis;codecs=opus;base64,T2dnUw", key: "sentenceAudio", index: 1)
         #expect(parameterized.name.hasSuffix(".ogg"))
+    }
+
+    @Test func imageRouteRejectsBenignInvalidFormatsAndMismatchedMIME() {
+        for (mime, bytes) in [
+            ("image/png", Data("Not an image.".utf8)),
+            ("image/png", Data("ID3".utf8)),
+            ("image/svg+xml", Data("<svg></svg>".utf8)),
+            ("application/octet-stream", Data("<svg></svg>".utf8))
+        ] {
+            #expect(throws: MiningFailure.self) {
+                try MiningPayload.media("data:\(mime);base64," + bytes.base64EncodedString(), key: "images", index: 1)
+            }
+        }
     }
 
     @Test func fragmentedDataIsConsumedAndControlFramesStillWork() {
@@ -148,7 +188,8 @@ import Testing
             let bound = try #require(port)
             let url = try #require(URL(string: "http://127.0.0.1:\(bound)/srs-check"))
             let reply = Task { try await session.data(from: url) }
-            while !(await gate.entered), clock.now < deadline {
+            let entryDeadline = clock.now + .seconds(5)
+            while !(await gate.entered), clock.now < entryDeadline {
                 try await Task.sleep(for: .milliseconds(10))
             }
             try #require(await gate.entered)
@@ -178,14 +219,23 @@ import Testing
 }
 private actor MiningReplyGate {
     private(set) var entered = false
+    private var released = false
     private var continuation: CheckedContinuation<Void, Never>?
 
     func hold() async {
         entered = true
-        await withCheckedContinuation { continuation = $0 }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if released || Task.isCancelled { continuation.resume() }
+                else { self.continuation = continuation }
+            }
+        } onCancel: {
+            Task { await self.release() }
+        }
     }
 
     func release() {
+        released = true
         continuation?.resume()
         continuation = nil
     }
