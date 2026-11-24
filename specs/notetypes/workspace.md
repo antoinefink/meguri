@@ -61,7 +61,7 @@ The inspector beside the table holds, for the selected field:
 
 ## W6. The template editor
 
-- Three parts: Front, Back, Styling (⌘1, ⌘2, ⌘3; R929). Styling is labelled "Shared by All Card Types"; the preview keeps showing the selected card type.
+- Three parts: Front, Back, Styling (⌘1, ⌘2, ⌘3; R929). While Styling is selected on Mac, the part picker presents “Shared by All Card Types” through its tooltip and accessibility hint. On iPad and the unfolded Duo, the editor shows the same text beside the picker. The preview keeps showing the selected card type.
 - The text is the stored template, byte for byte: Meguri never reformats it (R930, plain quotes, no autocorrection, Tab indents, ⌘/ comments the line with `<!-- -->` in Front and Back and `/* */` in Styling, system find and replace ⌘F).
 - **Colouring** from `render/template-syntax` T12's nodes: field replacements one colour, conditional section tags a second, comments and HTML tags the system's code colours; CSS properties and values in Styling, each colour value with a swatch that opens the system colour picker and rewrites only that value's characters.
 - **Completion**: typing `{{` lists the draft's field names, then the special fields `FrontSide`, `Tags`, `Deck`, `Subdeck`, `Card`, `CardFlag`, `CardID`, `Type` (`render/special-fields` P1); after a filter prefix (`hint:`, `type:`, `cloze:`, `furigana:`, `text:`) the field names again. Accepting inserts the name and `}}`. Typing `{{#` or `{{^` and accepting a name also inserts the matching `{{/<name>}}` after the caret.
