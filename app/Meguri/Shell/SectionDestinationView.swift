@@ -275,9 +275,9 @@ private struct BrowseSidebarHost: View {
     let header: AnyView
 
     var body: some View {
-        BrowseSidebar(model: collection.browse, decks: collection.decks, deckExpanded: { id in
-            Binding(get: { collection.studyExpanded(deckID: id) },
-                    set: { collection.setStudyExpanded(deckID: id, expanded: $0, includingDescendants: false) })
+        BrowseSidebar(model: collection.browse, decks: collection.decks, deckExpanded: { node in
+            Binding(get: { collection.studyExpanded(node) },
+                    set: { collection.setStudyExpanded(deckID: node.id, expanded: $0, includingDescendants: false) })
         }, navigate: { navigation.select(.section($0)) }) {
             header
         }

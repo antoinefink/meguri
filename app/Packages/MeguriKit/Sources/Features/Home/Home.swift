@@ -34,7 +34,7 @@ public struct HomeView: View {
             } else if showsRootDeckList {
                 HomeDeckTree(nodes: collection.homeDecks, navigation: collection.navigation, collection: collection,
                     previousAnswerCount: showsPreviousSession ? collection.homePreviousAnswerCount : nil, error: collection.error,
-                    isExpanded: { collection.studyExpanded(deckID: $0) },
+                    isExpanded: { collection.studyExpanded($0) },
                     isExpansionPending: { collection.isStudyExpansionPending(deckID: $0) },
                     setExpanded: { id, expanded, descendants in
                         collection.setStudyExpanded(deckID: id, expanded: expanded, includingDescendants: descendants)
@@ -366,7 +366,7 @@ public struct HomeView: View {
                     ForEach(subdecks, id: \.id) { node in
                         HomeDeckBranch(node: node, collection: collection, ancestors: path, depth: 0,
                             select: openSubdeck,
-                            isExpanded: { collection.studyExpanded(deckID: $0) },
+                            isExpanded: { collection.studyExpanded($0) },
                             isExpansionPending: { collection.isStudyExpansionPending(deckID: $0) },
                             setExpanded: { id, expanded, descendants in
                                 collection.setStudyExpanded(deckID: id, expanded: expanded, includingDescendants: descendants)
@@ -555,7 +555,7 @@ public struct HomeDeckTree: View {
     private let collection: ReviewCollection?
     private let previousAnswerCount: Int?
     private let error: String?
-    private let isExpanded: ((Int64) -> Bool)?
+    private let isExpanded: ((CountedDeckNode) -> Bool)?
     private let isExpansionPending: ((Int64) -> Bool)?
     private let setExpanded: ((Int64, Bool, Bool) -> Void)?
     private let today: HomeTodayRow?
@@ -570,7 +570,7 @@ public struct HomeDeckTree: View {
 
     public init(nodes: [CountedDeckNode], navigation: AppNavigation? = nil, collection: ReviewCollection? = nil,
                 previousAnswerCount: Int? = nil, error: String? = nil,
-                isExpanded: ((Int64) -> Bool)? = nil,
+                isExpanded: ((CountedDeckNode) -> Bool)? = nil,
                 isExpansionPending: ((Int64) -> Bool)? = nil,
                 setExpanded: ((Int64, Bool, Bool) -> Void)? = nil,
                 today: HomeTodayRow? = nil,
@@ -712,7 +712,7 @@ public struct HomeDeckTree: View {
             for node in nodes {
                 if node.id == deck { return node.id }
                 if selection.marks(node, expanded: false) {
-                    return (isExpanded?(node.id) ?? !node.studyCollapsed) ? visible(in: node.children) : node.id
+                    return (isExpanded?(node) ?? !node.studyCollapsed) ? visible(in: node.children) : node.id
                 }
             }
             return nil
@@ -722,7 +722,7 @@ public struct HomeDeckTree: View {
     private func recordFrame(_ id: Int64, _ frame: CGRect?) { rowFrames[id] = frame }
     private func contains(_ id: Int64, in nodes: [CountedDeckNode]) -> Bool {
         nodes.contains { node in
-            node.id == id || ((isExpanded?(node.id) ?? !node.studyCollapsed) && contains(id, in: node.children))
+            node.id == id || ((isExpanded?(node) ?? !node.studyCollapsed) && contains(id, in: node.children))
         }
     }
     private func scrollToTop(_ proxy: ScrollViewProxy) {
@@ -745,7 +745,7 @@ private struct HomeDeckBranch: View {
     let ancestors: [String]
     let depth: Int
     let select: (Int64) -> Void
-    let isExpanded: ((Int64) -> Bool)?
+    let isExpanded: ((CountedDeckNode) -> Bool)?
     let isExpansionPending: ((Int64) -> Bool)?
     let setExpanded: ((Int64, Bool, Bool) -> Void)?
     /// What shows beside this list (N14.10); nil where the list marks no row.
@@ -767,7 +767,7 @@ private struct HomeDeckBranch: View {
     private var spokenPath: String { path.components(separatedBy: "::").joined(separator: " › ") }
 
     private var expanded: Binding<Bool> {
-        Binding(get: { isExpanded?(node.id) ?? !node.studyCollapsed },
+        Binding(get: { isExpanded?(node) ?? !node.studyCollapsed },
                 set: { setExpanded?(node.id, $0, studyDisclosureIncludesDescendants()) })
     }
 
@@ -1093,7 +1093,7 @@ private struct HomeSidebarBranch: View {
             .quietInSidebar(selected: (collection?.navigation.sidebarSelection ?? previewSelection) == .deck(DeckID(node.id)))
     }
     private var expanded: Binding<Bool> {
-        Binding(get: { collection?.studyExpanded(deckID: node.id) ?? !node.studyCollapsed }, set: {
+        Binding(get: { collection?.studyExpanded(node) ?? !node.studyCollapsed }, set: {
             collection?.setStudyExpanded(deckID: node.id, expanded: $0,
                 includingDescendants: studyDisclosureIncludesDescendants())
         })
