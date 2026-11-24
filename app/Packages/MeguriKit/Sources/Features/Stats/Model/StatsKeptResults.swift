@@ -21,7 +21,35 @@ public final class StatsKeptResults {
     private var entries: [Key: [StatsPartSet]] = [:]
     @ObservationIgnored private var recent: [Key] = []
     @ObservationIgnored private var loading: [Key: Task<Void, Never>] = [:]
-    @ObservationIgnored private var writes: [Task<Void, Never>] = []
+    @ObservationIgnored private var persistence: [Key: Persistence] = [:]
+    @ObservationIgnored private var diskReset: Task<Void, Never>?
+
+    /// Only scalar metadata for at most `perKey` sets; never compares the part records.
+    nonisolated private struct SavedSet: Equatable {
+        let version: StatsSetVersion
+        let complete: Bool
+    }
+
+    private struct SaveRequest {
+        let sets: [StatsPartSet]
+        let versions: [SavedSet]
+        let collection: String
+        let epoch: UInt64
+    }
+
+    private final class Persistence {
+        var versions: [SavedSet] = []
+        var saved: [SavedSet]?
+        var active: [SavedSet]?
+        var requested: SaveRequest?
+        var task: Task<Void, Never>?
+    }
+
+    // Suspension seams for deterministic production-path tests; no production work counters.
+    @ObservationIgnored var beforeSave: (@MainActor () async -> Void)?
+    @ObservationIgnored var afterSave: (@MainActor () async -> Void)?
+    var pendingWriteCount: Int { persistence.values.filter { $0.task != nil }.count }
+    var persistenceKeyCount: Int { persistence.count }
     /// Every caller waiting for a running read (each window that asked), run when it ends.
     @ObservationIgnored private var waiters: [Key: [@MainActor () -> Void]] = [:]
     /// The collection the sets are of; nil keeps nothing.
@@ -73,7 +101,7 @@ public final class StatsKeptResults {
     /// A memory warning: keeps only the sets of the scopes the open pages show.
     public func trim() {
         let keep = Set(shown.values)
-        for key in Array(entries.keys) where !keep.contains(key.scope) { entries[key] = nil }
+        for key in Array(entries.keys) where !keep.contains(key.scope) { evict(key) }
         // A read still running for a scope no page shows would bring its sets back.
         for key in Array(loading.keys) where !keep.contains(key.scope) {
             loading[key]?.cancel()
@@ -85,6 +113,16 @@ public final class StatsKeptResults {
 
     private func drop(disk: Bool) {
         for task in loading.values { task.cancel() }
+        // Cancel and fence the active save, discarding queued bytes. New-epoch requests
+        // reuse its mailbox until it retires; repeated drops create no predecessors.
+        for (key, state) in persistence {
+            state.task?.cancel()
+            state.versions = []
+            state.saved = nil
+            state.active = nil
+            state.requested = nil
+            if state.task == nil { persistence[key] = nil }
+        }
         loading = [:]
         waiters = [:]
         entries = [:]
@@ -92,7 +130,11 @@ public final class StatsKeptResults {
         epoch &+= 1
         if disk, let store = self.disk {
             let epoch = epoch
-            Task { await store.removeAll(epoch: epoch) }
+            let previous = diskReset
+            diskReset = Task {
+                await previous?.value
+                await store.removeAll(epoch: epoch)
+            }
         }
     }
 
@@ -117,19 +159,67 @@ public final class StatsKeptResults {
         sets.append(set)
         sets.sort { $0.isNewer(than: $1) }
         if let complete = sets.firstIndex(where: \.complete) { sets = Array(sets.prefix(complete + 1)) }
-        entries[key] = Array(sets.prefix(Self.perKey))
+        let retained = Array(sets.prefix(Self.perKey))
+        let versions = retained.map { SavedSet(version: StatsSetVersion($0), complete: $0.complete) }
+        let state = persistence[key] ?? Persistence()
+        // Preserve the resident array storage for unchanged versions. Queued requests share
+        // that copy-on-write storage instead of rebuilding or comparing large part records.
+        if entries[key] == nil || state.versions != versions {
+            entries[key] = retained
+            state.versions = versions
+        }
+        persistence[key] = state
         touch(key)
     }
 
     /// Writes the kept sets of `scope` to the device, off the main actor.
     func persist(_ scope: StatsPageScope) {
         guard let disk, let collection else { return }
+        if case .search = scope { return }
         for history in [StatsHistory.last12Months, .allHistory] {
             let key = Key(scope: scope, history: history)
-            guard let sets = entries[key], !sets.isEmpty else { continue }
-            let epoch = epoch
-            writes.removeAll { $0.isCancelled }
-            writes.append(Task { await disk.save(sets, key: key, collection: collection, epoch: epoch) })
+            guard let sets = entries[key], !sets.isEmpty, let state = persistence[key] else { continue }
+            if state.requested?.versions == state.versions { continue }
+            if state.active == state.versions {
+                // A -> B -> A while A is writing: B is no longer wanted.
+                state.requested = nil
+                continue
+            }
+            if state.task == nil, state.saved == state.versions { continue }
+            // At most one replaceable request, sharing entries' array until eviction.
+            state.requested = SaveRequest(sets: sets, versions: state.versions, collection: collection, epoch: epoch)
+            if state.task == nil { startDrain(state, key: key, disk: disk) }
+        }
+    }
+
+    private func startDrain(_ state: Persistence, key: Key, disk: StatsKeptDisk) {
+        state.task = Task { [weak self] in
+            await self?.drain(state, key: key, disk: disk)
+        }
+    }
+
+    private func drain(_ state: Persistence, key: Key, disk: StatsKeptDisk) async {
+        defer {
+            state.task = nil
+            if state.requested != nil { startDrain(state, key: key, disk: disk) }
+            else if entries[key] == nil { persistence[key] = nil }
+        }
+        while !Task.isCancelled, let request = state.requested {
+            state.requested = nil
+            guard request.epoch == epoch, request.collection == collection,
+                  state.saved != request.versions else { continue }
+            state.active = request.versions
+            await diskReset?.value
+            await beforeSave?()
+            if !Task.isCancelled, request.epoch == epoch, request.collection == collection {
+                let success = await disk.save(request.sets, key: key, collection: request.collection, epoch: request.epoch)
+                await afterSave?()
+                if success, request.epoch == epoch, request.collection == collection {
+                    state.saved = request.versions
+                }
+            }
+            state.active = nil
+            // Failure retires normally; only another explicit request continues the loop.
         }
     }
 
@@ -148,12 +238,20 @@ public final class StatsKeptResults {
             waiters[key, default: []].append(loaded)
             guard loading[key] == nil else { continue }
             let epoch = epoch
+            let reset = diskReset
             loading[key] = Task { [weak self] in
+                await reset?.value
                 let sets = await disk.load(key: key, collection: collection, epoch: epoch)
                 guard let self, !Task.isCancelled, self.epoch == epoch, self.collection == collection else { return }
                 self.loading[key] = nil
+                let wasEmpty = self.entries[key] == nil
                 // A set kept meanwhile (this launch's refresh) is newer; the read ones join it.
                 for set in (sets ?? []).reversed() where set.scope == scope && set.history == history { self.keep(set) }
+                // Loaded bytes are already persisted. Absence stays uncached so another
+                // window/process can produce that history before the next prepare.
+                if wasEmpty, self.entries[key] != nil, self.persistence[key]?.task == nil {
+                    self.persistence[key]?.saved = self.persistence[key]?.versions
+                }
                 for waiter in self.waiters.removeValue(forKey: key) ?? [] { waiter() }
             }
         }
@@ -166,9 +264,11 @@ public final class StatsKeptResults {
 
     /// Waits for the writes `persist` started (tests).
     func waitForWrites() async {
-        let pending = writes
-        writes = []
-        for task in pending { await task.value }
+        for state in Array(persistence.values) {
+            // A cancelled epoch's drain can hand its mailbox to a fresh task on retirement.
+            while let task = state.task { await task.value }
+        }
+        await diskReset?.value
     }
 
     private func touch(_ key: Key) {
@@ -176,8 +276,14 @@ public final class StatsKeptResults {
         recent.append(key)
         while recent.count > Self.keysInMemory {
             let old = recent.removeFirst()
-            entries[old] = nil
+            evict(old)
         }
+    }
+
+    private func evict(_ key: Key) {
+        entries[key] = nil
+        // A requested snapshot must survive eviction until this key's drain handles it.
+        if persistence[key]?.task == nil { persistence[key] = nil }
     }
 }
 
@@ -209,14 +315,19 @@ actor StatsKeptDisk {
         return directory.appending(path: "\(scope)-\(history).plist", directoryHint: .notDirectory)
     }
 
-    func save(_ sets: [StatsPartSet], key: StatsKeptResults.Key, collection: String, epoch: UInt64) {
-        guard epoch >= removed else { return }
-        if case .search = key.scope { return }
+    func save(_ sets: [StatsPartSet], key: StatsKeptResults.Key, collection: String, epoch: UInt64) -> Bool {
+        guard !Task.isCancelled, epoch >= removed else { return false }
+        if case .search = key.scope { return false }
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
-        guard let data = try? encoder.encode(File(format: File.format, collection: collection, sets: sets)) else { return }
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? data.write(to: url(key), options: [.atomic])
+        do {
+            let data = try encoder.encode(File(format: File.format, collection: collection, sets: sets))
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: url(key), options: [.atomic])
+            return true
+        } catch {
+            return false
+        }
     }
 
     func load(key: StatsKeptResults.Key, collection: String, epoch: UInt64) -> [StatsPartSet]? {

@@ -1635,6 +1635,17 @@ public final class ReviewCollection: ChangeFanoutSink {
         return task
     }
 
+    /// Disclosure state for a row from the tree its caller is displaying: Home's
+    /// kept/current tree, or Browse's current tree. No tree lookup is needed.
+    /// Recreate the row with the new node when that tree changes; only the
+    /// optimistic override is live independently of the row's saved flag.
+    public func studyExpanded(_ node: CountedDeckNode) -> Bool {
+        if let pending = pendingStudyCollapse[node.id] { return !pending.collapsed }
+        return !node.studyCollapsed
+    }
+
+    /// ID-only callers resolve Home's chosen tree. Rendering known rows uses
+    /// `studyExpanded(_:)` so evaluating each disclosure does not search it again.
     public func studyExpanded(deckID: Int64) -> Bool {
         if let pending = pendingStudyCollapse[deckID] { return !pending.collapsed }
         // The kept tree keeps its saved disclosures, so the read one lands on the same rows (N27.2).

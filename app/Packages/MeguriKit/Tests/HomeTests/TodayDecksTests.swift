@@ -1,3 +1,4 @@
+import AppModel
 import Testing
 @testable import CoreBridge
 @testable import Home
@@ -64,5 +65,29 @@ import Testing
         let today = TodayDecks(nodes: [node(1, "Default", (0, 0, 0))])
         #expect(today.entries.isEmpty)
         #expect(today.totals == ReviewCounts(new: 0, learning: 0, review: 0))
+    }
+
+    @Test(arguments: [false, true])
+    func totalsUseRootCountsIncludingFilteredDecksRegardlessOfCollapse(_ collapsed: Bool) {
+        let tree = [
+            CountedDeckNode(id: 1, name: "Languages", filtered: false,
+                studyCollapsed: collapsed, browserCollapsed: collapsed,
+                counts: ReviewCounts(new: 5, learning: 1, review: 18),
+                children: [node(2, "Languages::Español", (10, 1, 18))]),
+            CountedDeckNode(id: 3, name: "Cram", filtered: true,
+                studyCollapsed: collapsed, browserCollapsed: collapsed,
+                counts: ReviewCounts(new: 0, learning: 2, review: 7), children: []),
+            // A root's daily limit can leave zero even with waiting descendants.
+            node(4, "Science", (0, 0, 0), [node(5, "Science::Chemistry", (9, 0, 9))]),
+            node(6, "Reading", (0, 0, 0)),
+        ]
+        let totals = TodayDecks.totals(nodes: tree)
+        #expect(totals == ReviewCounts(new: 5, learning: 3, review: 25))
+        #expect(totals.waiting == 33)
+        #expect(totals == TodayDecks(nodes: tree).totals)
+        #expect(TodayDecks(nodes: tree).entries.map(\.id) == [2, 3])
+        // The Study walk still excludes the filtered root (N24.2, N24.3).
+        #expect(TodaySummary(nodes: tree, studied: nil).waiting == 24)
+        #expect(TodayDecks.totals(nodes: []) == ReviewCounts(new: 0, learning: 0, review: 0))
     }
 }

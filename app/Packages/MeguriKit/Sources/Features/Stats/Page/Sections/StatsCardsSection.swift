@@ -76,6 +76,10 @@ struct StatsAddedAndStartedBox: View {
 /// changes it. The Mature figure shows only at compact width, where the strip has no Mature
 /// tile (S6). While loading, the ring is a grey track with the progress indicator in its
 /// centre and the table shows its names with dashes (S10.3).
+///
+/// Beside a taller box (Antoine, 2026-11-24: "there is just too much vertical height") the pie
+/// and the table take the row's height instead of floating in its middle: the pie grows up to
+/// a chart page's plot height, the rows share the pie's height and a hairline parts them.
 struct StatsCardCountsBox: View {
     let slot: StatsBoxSlot
     /// Show in Browse for a state's row, given its label and Q4.1's search text; nil offers none.
@@ -84,11 +88,14 @@ struct StatsCardCountsBox: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.statsNarrow) private var statsNarrow
     @State private var hoveredRow: Int?
+    /// Whether the pie is larger than its own side, so the rows are spread beside it.
+    @State private var grown = false
 
     /// The pie's side: the regular plot's height, at every text size (S15); a smaller one where
-    /// that lets it stay beside the table.
+    /// that lets it stay beside the table; and the most it grows to beside a taller box.
     static let side = StatsPlotSize.regular.height
     static let smallSide = StatsPlotSize.panel.height + Spacing.large
+    static let largeSide = StatsPlotSize.page.height
 
     var body: some View {
         let content = slot.content
@@ -104,23 +111,25 @@ struct StatsCardCountsBox: View {
                 // pie beside the table where both fit the box's width, a smaller pie where that
                 // fits, else the pie centred above the table: never past the box's inset.
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .center, spacing: Spacing.large) {
-                        pie(table, phase: content.phase, highlighted: highlighted, summary: title, side: Self.side)
+                    StatsPieBesideTable(side: Self.side, limit: Self.largeSide, spacing: Spacing.large) {
+                        pie(table, phase: content.phase, highlighted: highlighted, summary: title, side: Self.side, grows: true)
                         rows(table, highlighted: highlighted)
                     }
-                    HStack(alignment: .center, spacing: Spacing.medium) {
-                        pie(table, phase: content.phase, highlighted: highlighted, summary: title, side: Self.smallSide)
+                    StatsPieBesideTable(side: Self.smallSide, limit: Self.largeSide, spacing: Spacing.medium) {
+                        pie(table, phase: content.phase, highlighted: highlighted, summary: title, side: Self.smallSide, grows: true)
                         rows(table, highlighted: highlighted)
                     }
                     VStack(alignment: .leading, spacing: Spacing.medium) {
-                        pie(table, phase: content.phase, highlighted: highlighted, summary: title, side: Self.side)
+                        pie(table, phase: content.phase, highlighted: highlighted, summary: title, side: Self.side, grows: false)
                             .frame(maxWidth: .infinity)
                         rows(table, highlighted: highlighted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                // Beside a taller box the row's height is more than the pie and table need: they
-                // sit in the middle of what is left under the header, not at its top with an
-                // empty band under them. Alone in its row the box keeps its own height.
+                // Beside a taller box the row's height is more than the pie and table need: the
+                // pair takes it (`StatsPieBesideTable`), and past the pie's limit sits in the
+                // middle of what is left under the header. Alone in its row the box keeps its
+                // own height.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contextMenu { if let table { exportMenu(table) } }
                 // The narrow page (N25.6), the Duo held tall included, whatever its size class.
@@ -133,14 +142,19 @@ struct StatsCardCountsBox: View {
         .accessibilityIdentifier("stats.box.\(slot.id.rawValue)")
     }
 
+    /// The pie at its side, or with `grows` at the square its layout gives it, never under its
+    /// side. It says whether it grew, which spreads the rows.
     private func pie(_ table: StatsCardCountsTable?, phase: StatsBoxPhase, highlighted: Int?, summary: String,
-                     side: CGFloat) -> some View {
+                     side: CGFloat, grows: Bool) -> some View {
         StatsCardCountsPie(
             table: table, phase: phase, highlighted: highlighted,
             summary: StatsSectionText.summary(summary, slot.content.figure) ?? summary,
             selection: slot.selection, hovered: $hoveredRow
         )
-        .frame(width: side, height: side)
+        .aspectRatio(1, contentMode: .fit)
+        .frame(minWidth: side, idealWidth: side, maxWidth: grows ? Self.largeSide : side,
+               minHeight: side, idealHeight: side, maxHeight: grows ? Self.largeSide : side)
+        .onGeometryChange(for: Bool.self) { $0.size.height > side } action: { grown = $0 }
     }
 
     static func total(_ table: StatsCardCountsTable) -> Int { table.rows.reduce(0) { $0 + $1.count } }
@@ -174,7 +188,8 @@ struct StatsCardCountsBox: View {
                 let (label, name, color) = item
                 let row = table?.rows.firstIndex { $0.label == label }.map { (index: $0, row: table!.rows[$0]) }
                 stateRow(label: label, name: row?.row.name ?? name, color: row?.row.color ?? color, row: row?.row,
-                         index: row?.index ?? index, highlighted: highlighted == (row?.index ?? index) && table != nil,
+                         index: row?.index ?? index, first: index == 0,
+                         highlighted: highlighted == (row?.index ?? index) && table != nil,
                          counts: table?.rows.map(\.countText) ?? loadingCounts, shares: table?.rows.map(\.shareText) ?? loadingShares)
             }
         }
@@ -185,7 +200,7 @@ struct StatsCardCountsBox: View {
 
     @ViewBuilder
     private func stateRow(label: StatsCountLabel, name: String, color: StatsSeriesColor, row: StatsCardCountsTable.Row?,
-                          index: Int, highlighted: Bool, counts: [String], shares: [String]) -> some View {
+                          index: Int, first: Bool, highlighted: Bool, counts: [String], shares: [String]) -> some View {
         // A state with no card stays, in grey (S7.7).
         let grey = row == nil || row?.count == 0
         let cells = HStack(spacing: Spacing.small) {
@@ -200,12 +215,20 @@ struct StatsCardCountsBox: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, Spacing.xxSmall / 2)
+        // Given more height than the rows need (beside a grown pie), they share it out.
+        .frame(maxHeight: .infinity)
         // The highlight reaches a little past the row without widening it: a wider row would
         // push the box past its inset.
         .background {
             Radius.rounded(Radius.small)
                 .fill(highlighted ? AnyShapeStyle(HierarchicalShapeStyle.quaternary) : AnyShapeStyle(Color.clear))
                 .padding(.horizontal, -Spacing.xxSmall)
+        }
+        // A hairline between rows that share a grown pie's height, none between rows at their own.
+        .overlay(alignment: .top) {
+            if grown, !first {
+                Divider().accessibilityHidden(true)
+            }
         }
         .contentShape(Rectangle())
         #if os(macOS)
@@ -229,6 +252,46 @@ struct StatsCardCountsBox: View {
         } else {
             cells
         }
+    }
+}
+
+/// Card Counts' pie beside its table (S7.7), the pie first. Asked for its own size it is the
+/// pie at its side and the table at its own size, as tall as the taller. Given more height
+/// (the box beside a taller one, whose height the row shares) the pie grows into it, up to
+/// `limit` and never into width the table needs, and the table takes the pie's height.
+struct StatsPieBesideTable: Layout {
+    let side: CGFloat
+    let limit: CGFloat
+    let spacing: CGFloat
+
+    /// The pie's side in a given height, with `own` the height the pair asks for itself and
+    /// `room` the width the table leaves the pie. Only height beyond the pair's own grows it:
+    /// a table taller than the pie (large text) leaves the pie at its side.
+    static func pieSide(side: CGFloat, limit: CGFloat, own: CGFloat, height: CGFloat, room: CGFloat) -> CGFloat {
+        height > own ? max(side, min(limit, height, room)) : side
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let table = subviews[1].sizeThatFits(.unspecified)
+        let own = max(side, table.height)
+        return CGSize(width: proposal.width ?? side + spacing + table.width,
+                      height: proposal.height.map { min(max($0, own), max(limit, own)) } ?? own)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let table = subviews[1].sizeThatFits(.unspecified)
+        // The height offered, not only the bounds: a table taller than the limit keeps the bounds
+        // at its own height, and the pie still grows to the limit beside it.
+        let pie = Self.pieSide(side: side, limit: limit, own: max(side, table.height),
+                               height: max(bounds.height, proposal.height ?? 0),
+                               room: bounds.width - spacing - table.width)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
+                          proposal: ProposedViewSize(width: pie, height: pie))
+        subviews[1].place(at: CGPoint(x: bounds.minX + pie + spacing, y: bounds.midY), anchor: .leading,
+                          proposal: ProposedViewSize(width: max(0, bounds.width - pie - spacing),
+                                                     height: pie > side ? max(pie, table.height) : table.height))
     }
 }
 

@@ -73,8 +73,9 @@ extension TestHooks {
                 section == .browse ? AnyView(BrowseView(model: model)) : placeholder(section, navigation)
             }
             features.browseSidebar = { navigation, header in
-                AnyView(BrowseSidebar(model: model, decks: HomeSidebarPreview.nodes, deckExpanded: { id in
-                    Binding(get: { !expansion.collapsed.contains(id) }, set: { expanded in
+                AnyView(BrowseSidebar(model: model, decks: HomeSidebarPreview.nodes, deckExpanded: { node in
+                    let id = node.id
+                    return Binding(get: { !expansion.collapsed.contains(id) }, set: { expanded in
                         if expanded { expansion.collapsed.remove(id) } else { expansion.collapsed.insert(id) }
                     })
                 }, navigate: { navigation.select(.section($0)) }) { header })
