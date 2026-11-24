@@ -70,8 +70,9 @@ final class MacBrowseInspectorTests: XCTestCase {
             // Native VM evidence places the separator immediately below the preview.
             // Resolve a physical point afresh: a preview-relative saved coordinate
             // would move when a previous drag changes the preview's height.
-            let frame = preview.frame, origin = app.frame.origin
-            return app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            let window = app.windows.containing(.outline, identifier: "browse.results.table").firstMatch
+            let frame = preview.frame, origin = window.frame.origin
+            return window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
                 dx: frame.midX - origin.x, dy: frame.maxY + 0.5 - origin.y))
         }
         try app.bringToFront(bundleIdentifier: bundle)
@@ -119,7 +120,8 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertEqual(fields.count, count, "folding keeps the editor")
         header.click()
         XCTAssertTrue(preview.waitForExistence(timeout: 10))
-        XCTAssertTrue(waitUntil { backRendered() }, "folding and a blur-save preserve rendered Back")
+        XCTAssertTrue(waitUntil { backRendered() && cardText("inspectionmarker").exists },
+                      "folding and a blur-save preserve rendered Back with the edited FrontSide")
         // Drag to both bounds: both regions remain useful.
         for shrink in [true, false] {
             try app.bringToFront(bundleIdentifier: bundle)
