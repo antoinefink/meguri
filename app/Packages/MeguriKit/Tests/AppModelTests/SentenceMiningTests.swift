@@ -2,6 +2,7 @@
 @testable import AppModel
 import CoreBridge
 import Foundation
+import Synchronization
 import Testing
 
 @MainActor @Suite struct SentenceMiningTests {
@@ -61,19 +62,132 @@ import Testing
         #expect(media.count == 2 && media[0].name.hasSuffix(".m4a") && media[1].name.hasSuffix(".png"))
         #expect(fields[0].contains("[sound:__meguri_mining_attachment_0__]") && fields[0].contains("<img src=\"__meguri_mining_attachment_1__\">"))
         #expect(fields[1] == "A translation.")
-        for source in ["http://127.0.0.1/private", "https://example.org/audio.mp3", "file:///secret", "data:image/svg+xml;base64,PHN2Zy8+", "data:audio/mp4;base64,!"] {
+        for source in ["http://127.0.0.1/private", "https://example.org/audio.mp3", "file:///secret", "data:audio/mp4;base64,!"] {
             #expect(throws: (any Error).self) { try MiningPayload.media(source, key: "sentenceAudio", index: 1) }
         }
     }
+    @Test func embeddedMediaAliasesAndGenericSignatures() throws {
+        let aliases = [
+            "audio/mpeg3": "mp3", "audio/x-mpeg": "mp3", "audio/x-mp3": "mp3",
+            "audio/vorbis": "ogg", "audio/wave": "wav", "audio/vnd.wave": "wav",
+            "audio/x-flac": "flac", "audio/x-aac": "aac", "audio/aacp": "aac", "image/pjpeg": "jpg"
+        ]
+        for (mime, ext) in aliases {
+            let media = try MiningPayload.media("data:\(mime);base64,AQID", key: "images", index: 1)
+            #expect(media.name.hasSuffix("." + ext))
+            #expect(media.bytes == Data([1, 2, 3]))
+        }
+        let signatures: [(Data, String)] = [
+            (Data("ID3".utf8), "mp3"), (Data("OggS".utf8), "ogg"),
+            (Data("fLaC".utf8), "flac"), (Data("RIFF0000WAVE".utf8), "wav"),
+            (Data("RIFF0000WEBP".utf8), "webp"), (Data("0000ftypavif".utf8), "avif"),
+            (Data("0000ftypheic".utf8), "heic"), (Data("0000ftypM4A ".utf8), "m4a"),
+            (Data([0x1a, 0x45, 0xdf, 0xa3]), "webm"),
+            (Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "png"),
+            (Data([0xff, 0xd8, 0xff]), "jpg"), (Data("GIF89a".utf8), "gif"),
+            (Data([0xff, 0xf1]), "aac"), (Data([0xff, 0xfb]), "mp3")
+        ]
+        for (bytes, ext) in signatures {
+            for mime in ["", "application/octet-stream", "binary/octet-stream"] {
+                let media = try MiningPayload.media("DATA:\(mime);BASE64," + bytes.base64EncodedString(), key: "images", index: 1)
+                #expect(media.name.hasSuffix("." + ext) && media.bytes == bytes)
+            }
+        }
+        let parameterized = try MiningPayload.media("data:audio/vorbis;codecs=opus;base64,T2dnUw", key: "sentenceAudio", index: 1)
+        #expect(parameterized.name.hasSuffix(".ogg"))
+    }
+
+    @Test func fragmentedDataIsConsumedAndControlFramesStillWork() {
+        var socket = MiningWebSocket()
+        func masked(_ opcode: UInt8, _ bytes: [UInt8], final: Bool) -> Data {
+            let mask: [UInt8] = [1, 2, 3, 4]
+            return Data([(final ? 0x80 : 0) | opcode, 0x80 | UInt8(bytes.count)] + mask)
+                + Data(bytes.enumerated().map { $0.element ^ mask[$0.offset % 4] })
+        }
+        // A UTF-8 scalar may span frames, with a ping between fragments.
+        let first = masked(1, [0xf0, 0x9f], final: false)
+        for byte in first { #expect(socket.receive(Data([byte])).isEmpty) }
+        #expect(socket.retainedBytes == 0)
+        #expect(socket.receive(masked(9, [65], final: true)).count == 1)
+        #expect(socket.receive(masked(0, [0x98, 0x80], final: true)).isEmpty)
+        for _ in 0..<100 {
+            #expect(socket.receive(masked(2, Array(repeating: 7, count: 120), final: false)).isEmpty)
+            #expect(socket.receive(masked(0, Array(repeating: 8, count: 120), final: true)).isEmpty)
+            #expect(socket.retainedBytes == 0)
+        }
+        let closing = socket.receive(masked(8, [3, 232], final: true))
+        if case .some(.close(let reply)) = closing.first { #expect(reply == MiningWebSocket.close(1000)) }
+        else { Issue.record("Expected the ordinary close handshake") }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func stoppingListenerDeliversAnAdmittedTerminalReply() async throws {
+        let gate = MiningReplyGate()
+        let states = Mutex<[MiningListener.State]>([])
+        let listener = MiningListener(port: 0, handler: { _, _ in
+            await gate.hold()
+            return .json(200, ["finished": true])
+        }, changed: { state in states.withLock { $0.append(state) } })
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        listener.start()
+        do {
+            let clock = ContinuousClock()
+            let deadline = clock.now + .seconds(5)
+            var port: UInt16?
+            while port == nil, clock.now < deadline {
+                port = states.withLock { values in
+                    values.compactMap { state -> UInt16? in
+                        if case .listening(let port) = state { return port }
+                        return nil
+                    }.last
+                }
+                if port == nil { try await Task.sleep(for: .milliseconds(10)) }
+            }
+            let bound = try #require(port)
+            let url = try #require(URL(string: "http://127.0.0.1:\(bound)/srs-check"))
+            let reply = Task { try await session.data(from: url) }
+            while !(await gate.entered), clock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            try #require(await gate.entered)
+            await listener.stop()
+            #expect(states.withLock { $0.last } == .off)
+            await gate.release()
+            let (data, response) = try await reply.value
+            #expect((response as? HTTPURLResponse)?.statusCode == 200)
+            #expect((try JSONSerialization.jsonObject(with: data) as? [String: Bool])?["finished"] == true)
+        } catch {
+            await gate.release()
+            await listener.stop()
+            throw error
+        }
+    }
+
     @Test func preferencesStartOffAndWaitForLaunchCompletion() {
         let model = SentenceMining(defaults: nil, collectionKey: "synthetic")
-        #expect(!model.enabled && model.status == "Waiting for collection")
+        #expect(!model.enabled && model.status == "Off")
         model.setEnabled(true)
         #expect(model.enabled && model.status == "Waiting for collection") // No bind before entry completes.
     }
     static func type(_ fields: [String]) -> NotetypeRecord {
         .init(id: 1, name: "Imported", kind: 0, sortField: 0, css: "", base: Array(repeating: 1, count: 32),
             fields: fields.enumerated().map { .init(ord: UInt32($0.offset), id: nil, name: $0.element, sticky: false, rtl: false, fontName: "", fontSize: 20, description: "", plainText: false, collapsed: false, excludeFromSearch: false, preventDeletion: false) }, templates: [])
+    }
+}
+private actor MiningReplyGate {
+    private(set) var entered = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func hold() async {
+        entered = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 #endif

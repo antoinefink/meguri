@@ -838,7 +838,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     public var sentenceMining: SentenceMining {
         if let miningOwner { return miningOwner }
         let value = SentenceMining(defaults: configuration.deviceDefaults,
-            collectionKey: configuration.collectionLocation.directory.path)
+            collectionKey: configuration.collectionLocation.directory.path, port: configuration.migakuPort ?? 44432)
         miningOwner = value
         return value
     }

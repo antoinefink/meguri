@@ -2,6 +2,7 @@
 import CoreBridge
 import CoreFoundation
 import Foundation
+import Synchronization
 
 nonisolated struct MiningCatalog: Sendable {
     var generation: UInt64
@@ -13,15 +14,48 @@ nonisolated struct MiningDestination: Sendable, Equatable {
     var deck: Int64
     var type: Int64
 }
+/// Shared with the Settings owner so admission changes before any actor hop.
+nonisolated final class MiningAdmission: Sendable {
+    private nonisolated struct State: Sendable {
+        var token = UUID()
+        var enabled = false
+    }
+    private let state = Mutex(State())
+
+    func update(enabled: Bool) -> UUID {
+        state.withLock {
+            $0.token = UUID()
+            $0.enabled = enabled
+            return $0.token
+        }
+    }
+
+    func matches(_ token: UUID, requiringEnabled: Bool = true) -> Bool {
+        state.withLock { $0.token == token && (!requiringEnabled || $0.enabled) }
+    }
+
+    func current() -> UUID? {
+        state.withLock { $0.enabled ? $0.token : nil }
+    }
+}
+
 actor MiningCoreCollection {
-    func available() async -> UInt64? { try? await CoreCollectionService().waitAvailable(timeoutMilliseconds: 0) }
+    func available(timeoutMilliseconds: UInt32 = 0) async -> UInt64? {
+        try? await CoreCollectionService().waitAvailable(timeoutMilliseconds: timeoutMilliseconds)
+    }
+
     func catalog() async throws -> MiningCatalog {
-        guard let generation = await available() else { throw MiningFailure("Collection unavailable. Open a collection and try again.") }
+        guard let generation = await available() else {
+            throw MiningFailure("Collection unavailable. Open a collection and try again.")
+        }
         let decks = try await CoreDeckService().allDeckNames()
         let types = try await CoreNotetypeService().notetypeNames()
-        guard decks.generation == generation, await available() == generation else { throw MiningFailure("The collection changed. Choose the destination again.") }
+        guard decks.generation == generation, await available() == generation else {
+            throw MiningFailure("The collection changed. Choose the destination again.")
+        }
         return .init(generation: generation, decks: decks.decks.filter { !$0.filtered }, types: types)
     }
+
     func notetype(_ id: Int64) async throws -> NotetypeRecord { try await CoreNotetypeService().readNotetype(id: id) }
     func add(_ request: AddScreenNoteRequest, key: String, digest: String, attachments: [MiningAttachment]) async throws -> NoteMutation {
         try await CoreMiningService().add(request, retryKey: key, payloadDigest: digest, attachments: attachments)
@@ -33,17 +67,73 @@ actor MiningReceiver {
     private var enabled = false
     private var epoch = UUID()
     private var destination: MiningDestination?
-    private var tail: Task<MiningHTTPResponse, Never>?
-    private var queued = 0
-    private var queuedBytes = 0
-    init(collection: MiningCoreCollection = MiningCoreCollection()) { self.collection = collection }
-    func configure(enabled: Bool, destination: MiningDestination?) {
-        if self.enabled != enabled || self.destination != destination { epoch = UUID() }
-        self.enabled = enabled; self.destination = destination
+    nonisolated let admission = MiningAdmission()
+    private nonisolated struct Pending: Sendable {
+        let request: MiningHTTPRequest
+        let token: UUID
+        let admissionToken: UUID
+        let selected: MiningDestination?
+        let reply: CheckedContinuation<MiningHTTPResponse, Never>
     }
-    func drain() async { _ = await tail?.value }
-    func handle(_ request: MiningHTTPRequest) async -> MiningHTTPResponse {
-        guard enabled else { return .error(503, "Sentence mining is off.") }
+    private var pending: [Pending] = []
+    private var executing: Task<Void, Never>?
+    private var queuedBytes = 0
+    private var configuredAdmissionToken: UUID?
+    private var writing = false
+    init(collection: MiningCoreCollection = MiningCoreCollection()) { self.collection = collection }
+    func configure(enabled: Bool, destination: MiningDestination?, admissionToken: UUID? = nil) {
+        let currentToken: UUID
+        if let admissionToken {
+            guard admission.matches(admissionToken, requiringEnabled: false) else {
+                return
+            }
+            currentToken = admissionToken
+        } else {
+            currentToken = admission.update(enabled: enabled)
+        }
+        if configuredAdmissionToken != currentToken {
+            epoch = UUID()
+            retirePending()
+            if !writing { executing?.cancel() }
+        }
+        configuredAdmissionToken = currentToken
+        self.enabled = enabled
+        self.destination = destination
+    }
+
+    private func retirePending() {
+        let retired = pending
+        pending.removeAll()
+        queuedBytes = 0
+        for work in retired {
+            work.reply.resume(returning: .error(503, "Mining settings changed. Send the card again."))
+        }
+    }
+
+    func drain() async {
+        while let executing { await executing.value }
+    }
+
+    private func startNext() {
+        guard executing == nil, !pending.isEmpty else {
+            return
+        }
+        let work = pending.removeFirst()
+        queuedBytes -= work.request.body.count
+        executing = Task {
+            let response = await process(work.request, token: work.token,
+                admissionToken: work.admissionToken, selected: work.selected)
+            work.reply.resume(returning: response)
+            executing = nil
+            startNext()
+        }
+    }
+
+    func handle(_ request: MiningHTTPRequest, admissionToken suppliedToken: UUID? = nil) async -> MiningHTTPResponse {
+        guard enabled, let admissionToken = suppliedToken ?? admission.current(),
+              admission.matches(admissionToken), configuredAdmissionToken == admissionToken else {
+            return .error(503, "Sentence mining is off.")
+        }
         switch request.path {
         case "/srs-check": return .json(200, ["ok": await collection.available() != nil, "version": "4"])
         case "/anki-hello": return .json(200, ["status": "connect", "port": 44432])
@@ -51,33 +141,39 @@ actor MiningReceiver {
         case "/receive", "/":
             // Actor reentrancy does not serialize an awaited collection write.
             // Chain requests explicitly; keep read-only routes off this FIFO.
-            guard queued < 32, queuedBytes + request.body.count <= 268_435_456 else { return .error(503, "Too many pending mining requests. Try again.") }
-            queued += 1; queuedBytes += request.body.count
-            let previous = tail, token = epoch, selected = destination
-            let work = Task { [self] in
-                _ = await previous?.value
-                return await process(request, token: token, selected: selected)
+            guard pending.count < 32, queuedBytes + request.body.count <= 268_435_456 else {
+                return .error(503, "Too many pending mining requests. Try again.")
             }
-            tail = work
-            let response = await work.value
-            queued -= 1; queuedBytes -= request.body.count
-            if queued == 0 { tail = nil }
-            return response
+            return await withCheckedContinuation { reply in
+                pending.append(Pending(request: request, token: epoch, admissionToken: admissionToken,
+                    selected: destination, reply: reply))
+                queuedBytes += request.body.count
+                startNext()
+            }
         default: return .error(404, "Not found.")
         }
     }
-    private func process(_ request: MiningHTTPRequest, token: UUID, selected: MiningDestination?) async -> MiningHTTPResponse {
+
+    private func process(_ request: MiningHTTPRequest, token: UUID, admissionToken: UUID, selected: MiningDestination?) async -> MiningHTTPResponse {
         let root = request.path == "/"
         var version = 6
         do {
-            guard enabled, epoch == token, !Task.isCancelled else { throw MiningFailure("Mining settings changed. Send the card again.") }
+            guard enabled, epoch == token, admission.matches(admissionToken), !Task.isCancelled else {
+                throw MiningFailure("Mining settings changed. Send the card again.")
+            }
             if root {
-                guard let object = try JSONSerialization.jsonObject(with: request.body) as? [String: Any], let action = object["action"] as? String else { throw MiningFailure("invalid request: action must be a string") }
+                guard let object = try JSONSerialization.jsonObject(with: request.body) as? [String: Any], let action = object["action"] as? String else {
+                    throw MiningFailure("invalid request: action must be a string")
+                }
                 if let number = object["version"] {
-                    guard let integer = number as? NSNumber, CFGetTypeID(integer) != CFBooleanGetTypeID(), integer.doubleValue.rounded() == integer.doubleValue else { throw MiningFailure("invalid request: version must be an integer") }
+                    guard let integer = number as? NSNumber, CFGetTypeID(integer) != CFBooleanGetTypeID(), integer.doubleValue.rounded() == integer.doubleValue else {
+                        throw MiningFailure("invalid request: version must be an integer")
+                    }
                     version = integer.intValue
                 } else { version = 4 }
-                guard object["params"] == nil || object["params"] is [String: Any] else { throw MiningFailure("invalid request: params must be an object") }
+                guard object["params"] == nil || object["params"] is [String: Any] else {
+                    throw MiningFailure("invalid request: params must be an object")
+                }
                 let params = object["params"] as? [String: Any] ?? [:]
                 switch action {
                 case "version": return envelope(6, version: version)
@@ -85,11 +181,15 @@ actor MiningReceiver {
                 case "modelNames": return envelope(try await collection.catalog().types.map(\.name), version: version)
                 case "modelFieldNames":
                     let catalog = try await collection.catalog()
-                    guard let name = params["modelName"] as? String, let model = catalog.types.first(where: { $0.name == name }) else { throw MiningFailure("model was not found") }
+                    guard let name = params["modelName"] as? String, let model = catalog.types.first(where: { $0.name == name }) else {
+                        throw MiningFailure("model was not found")
+                    }
                     return envelope(try await collection.notetype(model.id).fields.map(\.name), version: version)
                 case "addNote":
-                    guard let note = params["note"] as? [String: Any] else { throw MiningFailure("note must be an object") }
-                    let result = try await addRoot(note, token: token, selected: selected)
+                    guard let note = params["note"] as? [String: Any] else {
+                        throw MiningFailure("note must be an object")
+                    }
+                    let result = try await addRoot(note, token: token, admissionToken: admissionToken, selected: selected)
                     return envelope(result.id, version: version)
                 default: throw MiningFailure("unsupported action")
                 }
@@ -98,7 +198,7 @@ actor MiningReceiver {
             let (destination, type) = try await resolve(selected)
             let (fields, media) = try payload.fields(for: type)
             let result = try await commit(destination, type: type, fields: fields, media: media,
-                key: payload.retryKey, digest: payload.digest, token: token)
+                key: payload.retryKey, digest: payload.digest, token: token, admissionToken: admissionToken)
             return .json(200, ["success": true, "created": true, "id": result.id])
         } catch {
             let message = (error as? MiningFailure)?.message ?? error.localizedDescription
@@ -106,43 +206,69 @@ actor MiningReceiver {
             return .error(400, message)
         }
     }
+
     private func envelope(_ result: Any, version: Int) -> MiningHTTPResponse {
         version <= 4 ? .json(200, result) : .json(200, ["result": result, "error": NSNull()])
     }
+
     private func resolve(_ selected: MiningDestination?) async throws -> (MiningDestination, NotetypeRecord) {
-        guard let selected else { throw MiningFailure("Choose a destination deck and note type in Settings › Integrations.") }
-        guard await collection.available() == selected.generation else { throw MiningFailure("Collection unavailable or changed. Check Settings › Integrations.") }
+        guard let selected else {
+            throw MiningFailure("Choose a destination deck and note type in Settings › Integrations.")
+        }
+        guard await collection.available(timeoutMilliseconds: 5_000) == selected.generation else {
+            throw MiningFailure("Collection unavailable or changed. Check Settings › Integrations.")
+        }
         let catalog = try await collection.catalog()
         guard catalog.generation == selected.generation, catalog.decks.contains(where: { $0.id == selected.deck }),
-              catalog.types.contains(where: { $0.id == selected.type }) else { throw MiningFailure("The selected deck or note type is missing. Choose a destination again.") }
+              catalog.types.contains(where: { $0.id == selected.type }) else {
+            throw MiningFailure("The selected deck or note type is missing. Choose a destination again.")
+        }
         let type = try await collection.notetype(selected.type)
-        guard await collection.available() == selected.generation else { throw MiningFailure("The collection changed. Send the card again.") }
+        guard await collection.available() == selected.generation else {
+            throw MiningFailure("The collection changed. Send the card again.")
+        }
         return (selected, type)
     }
+
     private func commit(_ selected: MiningDestination, type: NotetypeRecord, fields: [String], media: [MiningAttachment],
-                        key: String, digest: String, token: UUID, tags: [String] = []) async throws -> NoteMutation {
-        guard enabled, epoch == token, destination == selected, !Task.isCancelled else { throw MiningFailure("Mining settings changed. Send the card again.") }
+                        key: String, digest: String, token: UUID, admissionToken: UUID, tags: [String] = []) async throws -> NoteMutation {
+        guard enabled, epoch == token, admission.matches(admissionToken), destination == selected, !Task.isCancelled else {
+            throw MiningFailure("Mining settings changed. Send the card again.")
+        }
+        writing = true
+        defer { writing = false }
         return try await collection.add(.init(expectedGeneration: selected.generation, notetype: type, fields: fields,
             tags: tags, deckId: selected.deck), key: key, digest: digest, attachments: media)
     }
-    private func addRoot(_ note: [String: Any], token: UUID, selected: MiningDestination?) async throws -> NoteMutation {
+
+    private func addRoot(_ note: [String: Any], token: UUID, admissionToken: UUID, selected: MiningDestination?) async throws -> NoteMutation {
         let (selected, type) = try await resolve(selected)
         let catalog = try await collection.catalog()
         guard note["deckName"] as? String == catalog.decks.first(where: { $0.id == selected.deck })?.fullName,
-              note["modelName"] as? String == type.name else { throw MiningFailure("addNote can only write to the destination selected in Settings › Integrations.") }
+              note["modelName"] as? String == type.name else {
+            throw MiningFailure("addNote can only write to the destination selected in Settings › Integrations.")
+        }
         guard let supplied = note["fields"] as? [String: String], !supplied.isEmpty,
               Set(supplied.keys).isSubset(of: Set(type.fields.map(\.name))),
-              !supplied.values.contains(where: { MiningPayload.hasRemoteResource($0) || $0.contains("__meguri_mining_attachment_") }) else { throw MiningFailure("invalid or unsupported note fields") }
-        for key in ["audio", "picture", "video"] where note[key] != nil {
-            guard let items = note[key] as? [Any], items.isEmpty else { throw MiningFailure("Root addNote media is not supported. Use /receive with embedded media.") }
+              !supplied.values.contains(where: { MiningPayload.hasRemoteResource($0) || $0.contains("__meguri_mining_attachment_") }) else {
+            throw MiningFailure("invalid or unsupported note fields")
         }
-        guard note["tags"] == nil || note["tags"] is [String] else { throw MiningFailure("tags must be strings") }
+        for key in ["audio", "picture", "video"] where note[key] != nil {
+            guard let items = note[key] as? [Any], items.isEmpty else {
+                throw MiningFailure("Root addNote media is not supported. Use /receive with embedded media.")
+            }
+        }
+        guard note["tags"] == nil || note["tags"] is [String] else {
+            throw MiningFailure("tags must be strings")
+        }
         let fields = type.fields.map { supplied[$0.name, default: ""] }
-        guard fields.contains(where: { !$0.isEmpty }), type.kind == 0, type.originalStockKind != 6 else { throw MiningFailure("Choose a standard note type and supply nonempty fields.") }
+        guard fields.contains(where: { !$0.isEmpty }), type.kind == 0, type.originalStockKind != 6 else {
+            throw MiningFailure("Choose a standard note type and supply nonempty fields.")
+        }
         let digest = MiningPayload.hash(try JSONSerialization.data(withJSONObject: note, options: [.sortedKeys]))
         let identity = try JSONEncoder().encode([String(selected.type), String(selected.deck), fields.first ?? ""])
         return try await commit(selected, type: type, fields: fields, media: [], key: MiningPayload.hash(identity), digest: digest,
-            token: token, tags: note["tags"] as? [String] ?? [])
+            token: token, admissionToken: admissionToken, tags: note["tags"] as? [String] ?? [])
     }
 }
 #endif

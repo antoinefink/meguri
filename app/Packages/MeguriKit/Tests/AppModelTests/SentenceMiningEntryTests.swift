@@ -3,8 +3,6 @@
 import CoreBridge
 import Darwin
 import Foundation
-import Network
-import Synchronization
 import Testing
 
 // Shares the normal app-entry suite's process-wide Core ownership. Select
@@ -17,40 +15,49 @@ extension ReviewCollectionStartupTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let directory = root.appending(path: "collection"), backups = root.appending(path: "backups")
         var configuration = LaunchConfiguration()
-        configuration.deviceDefaults = nil
+        let suite = "SentenceMiningEntryTests." + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set(false, forKey: "mining.enabled")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        configuration.deviceDefaults = defaults
+        configuration.migakuPort = 0
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory, backupsDirectory: backups)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
             sync: SyncCoordinator(directory: directory, configuration: nil, defaults: nil),
             providerDirectory: root.appending(path: "installation"))
-        let receiver = MiningReceiver()
-        let states = Mutex<[MiningListener.State]>([])
-        let listener = MiningListener(port: 0, handler: { await receiver.handle($0) }, changed: { state in states.withLock { $0.append(state) } })
+        let mining = owner.sentenceMining
         var webSocket: URLSessionWebSocketTask?
         let webConfiguration = URLSessionConfiguration.ephemeral
         webConfiguration.connectionProxyDictionary = [:]
         let webSession = URLSession(configuration: webConfiguration)
         defer { webSession.invalidateAndCancel() }
         do {
-            await owner.start(); try #require(owner.state == .noFile)
-            await owner.startEmpty(); try #require(owner.state == .ready)
-            #expect(!owner.sentenceMining.enabled)
+            await owner.start()
+            try #require(owner.state == .noFile)
+            #expect(!mining.enabled && mining.status == "Off" && mining.port == 0)
+            // Invoke the same production action as SentenceMiningPane's Toggle;
+            // neither a substitute listener nor a separately configured receiver.
+            mining.setEnabled(true)
+            await mining.settle()
+            let initialPort = try await miningListeningPort(mining)
+            let unavailable = try await miningExchange(port: initialPort, method: "GET", path: "/srs-check")
+            #expect(unavailable.json?["ok"] as? Bool == false)
+            #expect(defaults.bool(forKey: "mining.enabled"))
+            await owner.startEmpty()
+            try #require(owner.state == .ready)
             let deck = try await CoreDeckService().addDeck(name: "Synthetic Mining")
             // Represents an imported custom model; no special Meguri stock
             // model or migration is required for it to receive media.
             let imported = try await CoreNotetypeService().addNotetype(.init(name: "Imported Sentence Type", cloze: false,
                 fields: ["Sentence", "Translation", "Sentence Audio", "Screenshot"], templates: [
                     .init(name: "Sentence", front: "{{Sentence}}<br>{{Sentence Audio}}<br>{{Screenshot}}", back: "{{Translation}}", browserFront: "", browserBack: "")], css: nil))
-            let generation = try #require(await MiningCoreCollection().available())
-            owner.sentenceMining.selectDeck(deck.id); owner.sentenceMining.selectType(imported.id)
-            await receiver.configure(enabled: true, destination: .init(generation: generation, deck: deck.id, type: imported.id))
-            listener.start()
-            let clock = ContinuousClock(), deadline = clock.now + .seconds(5)
-            var port: UInt16?
-            while clock.now < deadline, port == nil {
-                port = states.withLock { values in values.compactMap { if case .listening(let port) = $0 { port } else { nil } }.last }
-                if port == nil { try await Task.sleep(for: .milliseconds(10)) }
-            }
-            let bound = try #require(port)
+            mining.selectDeck(deck.id)
+            mining.selectType(imported.id)
+            await mining.settle()
+            let bound = try await miningListeningPort(mining)
+            #expect(bound == initialPort)
+            let restored = SentenceMining(defaults: defaults, collectionKey: directory.path, port: 0)
+            #expect(restored.enabled && restored.selectedDeck == deck.id && restored.selectedType == imported.id)
             let check = try await miningExchange(port: bound, method: "GET", path: "/srs-check")
             #expect(check.status == 200 && check.json?["ok"] as? Bool == true && check.json?["version"] as? String == "4")
             let preflight = try await miningExchange(port: bound, method: "OPTIONS", path: "/receive")
@@ -89,7 +96,8 @@ extension ReviewCollectionStartupTests {
             #expect(denied.json?["error"] as? String == "unsupported action")
             let basic = try await CoreNotetypeService().addNotetype(.init(name: "Ordinary Front Back", cloze: false,
                 fields: ["Front", "Back"], templates: [.init(name: "Card", front: "{{Front}}", back: "{{Back}}", browserFront: "", browserBack: "")], css: nil))
-            await receiver.configure(enabled: true, destination: .init(generation: generation, deck: deck.id, type: basic.id))
+            mining.selectType(basic.id)
+            await mining.settle()
             let basicPayload = raw.replacingOccurrences(of: "A synthetic sentence.", with: "An ordinary front.")
             let ordinary = try await miningExchange(port: bound, method: "POST", path: "/receive", body: Data(basicPayload.utf8))
             let ordinaryID = try #require((ordinary.json?["id"] as? NSNumber)?.int64Value)
@@ -101,22 +109,64 @@ extension ReviewCollectionStartupTests {
             #expect(try await CoreNoteService().readNote(id: rootID).fields == ["From a local tool", "Saved through the compatibility subset"])
             let discovery = try await miningExchange(port: bound, method: "POST", path: "/", body: Data(#"{"action":"deckNames","version":6}"#.utf8))
             #expect((discovery.json?["result"] as? [String])?.contains("Synthetic Mining") == true)
-            // Real unavailable state, rather than a UI flag or always-true stub.
-            await receiver.configure(enabled: true, destination: nil)
-            #expect(await owner.closeForQuit())
-            let unavailable = try await miningExchange(port: bound, method: "GET", path: "/srs-check")
-            #expect(unavailable.json?["ok"] as? Bool == false)
-            let unavailableWrite = try await miningExchange(port: bound, method: "POST", path: "/receive", body: Data(raw.utf8))
-            #expect(unavailableWrite.status == 400)
-            await receiver.configure(enabled: false, destination: nil); await listener.stop(); await receiver.drain()
-            #expect(states.withLock { $0.last } == .off)
+            // Turning off uses the production owner, closes its WebSocket and
+            // persists the switch. Re-enabling creates a fresh listener.
+            mining.setEnabled(false)
+            #expect(mining.status == "Off" && !defaults.bool(forKey: "mining.enabled"))
+            await mining.settle()
             await #expect(throws: (any Error).self) { _ = try await socket.receive() }
             #expect(webSocket?.closeCode == .goingAway)
+            await #expect(throws: (any Error).self) {
+                _ = try await miningExchange(port: bound, method: "GET", path: "/srs-check")
+            }
+            mining.setEnabled(true)
+            await mining.settle()
+            let rebound = try await miningListeningPort(mining)
+            let retriedAfterEnable = try await miningExchange(port: rebound, method: "POST", path: "/receive", body: Data(basicPayload.utf8))
+            #expect((retriedAfterEnable.json?["id"] as? NSNumber)?.int64Value == ordinaryID)
+            #expect(await owner.closeForQuit())
+
+            // A different real synthetic collection shares the device switch,
+            // but must never inherit the first collection's destination IDs.
+            let otherDirectory = root.appending(path: "other-collection")
+            configuration.collectionLocation = AppModel.CollectionLocation(directory: otherDirectory,
+                backupsDirectory: root.appending(path: "other-backups"))
+            let other = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+                sync: SyncCoordinator(directory: otherDirectory, configuration: nil, defaults: nil),
+                providerDirectory: root.appending(path: "other-installation"))
+            do {
+                await other.start()
+                await other.startEmpty()
+                try #require(other.state == .ready)
+                let nextMining = other.sentenceMining
+                await nextMining.settle()
+                #expect(nextMining.enabled && nextMining.selectedDeck == 0 && nextMining.selectedType == 0)
+                let nextPort = try await miningListeningPort(nextMining)
+                let needsDestination = try await miningExchange(port: nextPort, method: "POST", path: "/receive", body: Data(raw.utf8))
+                #expect(needsDestination.status == 400)
+                #expect((needsDestination.json?["error"] as? String)?.contains("Choose a destination") == true)
+                #expect(await other.closeForQuit())
+            } catch {
+                _ = await other.closeForQuit()
+                throw error
+            }
         } catch {
-            await receiver.configure(enabled: false, destination: nil); await listener.stop(); await receiver.drain()
-            _ = await owner.closeForQuit(); throw error
+            _ = await owner.closeForQuit()
+            throw error
         }
     }
+}
+
+@MainActor
+private func miningListeningPort(_ model: SentenceMining) async throws -> UInt16 {
+    let clock = ContinuousClock()
+    let deadline = clock.now + .seconds(5)
+    while clock.now < deadline {
+        if model.port != 0, model.status.hasPrefix("Listening") { return model.port }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    Issue.record("Mining did not listen: \(model.status)")
+    throw MiningFailure("Mining listener did not become ready.")
 }
 
 private struct MiningWireReply {

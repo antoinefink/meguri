@@ -839,13 +839,13 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningHTTP.swift':
         'f67a2676af411161273fefdb3e42075a06439e127ca36fbd1c63a822386de3bc',
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningListener.swift':
-        '9b93221c1302a8c41f62ed865a6653a24b5525d49074bcc96479f1b0a3b44178',
+        '3267e9b13a59e5b755195e28f0f5e607edf66a9dc5293bb9f84891e7a2c13db2',
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningWebSocket.swift':
-        'e0733054b01f3c5c65ccd07bce6419c44ec4dfe6847b50ca04e120887313a7a9',
+        'df27734289781f686114ed98ac44d3e468f73abda3ea22512c3bc41f91b640c1',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':
-        'a87b8a6ba027d2066f09caf6c4d0ff6bd2091b4817c0cd1ae0239ed6cdc1de5d',
+        '4235c4ac441eb5cd6bde3ed06672de8935a9dea1e9c426378aafe8f80756b1bf',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningTests.swift':
-        '4ab28ab490b4cc43cb1fd08eb02a7e31eedea32a2603f9c7ac7275e05c7ffdc1',
+        '3a7041ea9d378203d85d2672aa83cd6649749f51f50e96c7ff59696f3ec6a758',
     'core/crates/meguri-ffi/src/notes.rs':
         'e9fdf9804387494879a07f43a8cf21fa59343f0a7f41d1759512aee5315d61ae',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
@@ -1350,7 +1350,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'cf1988b435f58576bedcb431520f9d98a1161aa2c075a1c8d6b59ffebb207429',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'cb6f0e96c2e62e3d319bf735eef43e24db160b8399e0bd81d5fb49e99f212903',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',
