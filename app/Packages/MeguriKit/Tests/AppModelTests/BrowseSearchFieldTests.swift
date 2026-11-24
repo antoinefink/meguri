@@ -223,6 +223,21 @@ import Testing
         await until { core.suggestionCalls.last?.2 == .tags }
     }
 
+    @Test func aRowOfAKindsValueListIsAcceptedAfterTheFieldEmptiedItsText() async {
+        let (model, core) = await makeModel()
+        let row = FilterSuggestion(section: .decks, row: .value(Self.spanish), key: nil)
+        core.suggestionRows[.decks] = [row]
+        model.setFieldFocused(true)
+        // The caret is after White_Space: the value list has no word to drop.
+        type(model, "plimb ")
+        model.startFilter(.decks)
+        await until { model.suggestions == [row] && model.suggestionsCurrent }
+        // The field empties its text, then hands the row over.
+        model.editText("")
+        model.acceptFieldTokens([.suggestion(row)])
+        #expect(model.query == FilterQuery(tokens: [token(Self.spanish)], text: "plimb "))
+    }
+
     @Test func filterByOpensAKindsValueListAndAddsWithoutDroppingText() async {
         let (model, core) = await makeModel()
         // Filter By shows with the caret after White_Space: no word to drop.

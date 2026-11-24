@@ -160,6 +160,8 @@ extension BrowseModel {
             if query.text.isEmpty, let cleared = clearedThisTurn {
                 queryRevision &+= 1
                 query.text = cleared
+                // The row was read in that text's scope (a kind's value list).
+                if suggestionScope == nil { suggestionScope = clearedScopeThisTurn }
             }
             acceptedThisTurn = true
             Task { acceptedThisTurn = false }
@@ -210,7 +212,11 @@ extension BrowseModel {
             // The field emptying its text after it took a suggestion: the text stays.
             if acceptedThisTurn { return }
             clearedThisTurn = before
-            Task { clearedThisTurn = nil }
+            clearedScopeThisTurn = suggestionScope
+            Task {
+                clearedThisTurn = nil
+                clearedScopeThisTurn = nil
+            }
         }
         pendingSearch = nil
         queryRevision &+= 1

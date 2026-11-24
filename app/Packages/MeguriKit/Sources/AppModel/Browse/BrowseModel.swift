@@ -151,6 +151,9 @@ public final class BrowseModel {
     /// token: the text an emptying edit replaced in this turn, and whether a
     /// suggestion arrived in it, so the typed text survives either order.
     @ObservationIgnored var clearedThisTurn: String?
+    /// The value list the suggestions were scoped to when the field emptied
+    /// its text this turn: it comes back with the text.
+    @ObservationIgnored var clearedScopeThisTurn: FilterSection?
     @ObservationIgnored var acceptedThisTurn = false
     @ObservationIgnored var savingPresentations: UInt64 = 0
     /// The text a commit left, which D5's incomplete rule no longer holds (T8).
