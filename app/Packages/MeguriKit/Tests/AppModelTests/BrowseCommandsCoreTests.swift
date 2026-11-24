@@ -98,6 +98,112 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+    /// U276's sheets on the real core: each acts on the rows it opened on,
+    /// the rows change in place and stay selected, Edit › Undo and Redo name
+    /// the step after the command, and a list that moved on while a sheet was
+    /// open is refused with nothing written.
+    @Test func browseSheetsRunOnTheRealCoreWithUndoAndRedo() async throws {
+        try await withBrowseOwner { owner, ids in
+            let browse = owner.browse, results = browse.results, commands = browse.commands, undo = owner.collectionUndo
+            @MainActor func row(_ index: Int) -> BrowseShownRow? { results.row(at: index) }
+            @MainActor func pick(_ rows: Set<Int>, sourceLocation: SourceLocation = #_sourceLocation) async {
+                results.select(rows)
+                await waitFor({ commands.factsRead != nil && commands.factsRead == results.target() && !commands.busy
+                                && commands.sheet == nil }, sourceLocation: sourceLocation)
+            }
+            @MainActor func undoTitle(_ title: String, sourceLocation: SourceLocation = #_sourceLocation) async {
+                await waitFor({ undo.undoName == title && undo.canUndo }, sourceLocation: sourceLocation)
+            }
+            /// The row's Deck cell reads the new deck (the plain presenter shows the stored name).
+            @MainActor func moved(_ index: Int) -> Bool {
+                row(index)?.cells.contains { cell in
+                    switch cell {
+                    case .text(let text): text == "Plorvex::Moved"
+                    case .deck(_, _, let full): full == "Plorvex › Moved"
+                    default: false
+                    }
+                } ?? false
+            }
+            @MainActor func open(_ command: BrowseCommand, sourceLocation: SourceLocation = #_sourceLocation) async throws -> BrowseSheet {
+                commands.perform(command)
+                let sheet = try #require(commands.sheet, sourceLocation: sourceLocation)
+                await waitFor({ sheet.counts != nil }, sourceLocation: sourceLocation)
+                return sheet
+            }
+
+            // Change Deck to a new deck typed in the search: one step creates it and moves the cards.
+            await pick([0, 1])
+            let move = try await open(.changeDeck)
+            await waitFor { move.decks != nil }
+            #expect(move.deckRows.contains { $0.current }, "the selection's deck is marked")
+            move.deckQuery = "Plorvex::Moved"
+            await waitFor { move.offersCreate }
+            move.confirm()
+            await waitFor { commands.sheet == nil }
+            await waitFor { moved(0) && moved(1) }
+            await undoTitle("Change Deck")
+            #expect(results.selection == [0, 1], "the rows stay, selected")
+            undo.undo(); await undo.waitForCompletion()
+            await waitFor { !moved(0) }
+            await waitFor { undo.redoName == "Change Deck" }
+            undo.redo(); await undo.waitForCompletion()
+            await waitFor { moved(0) }
+
+            // Add Tags, then Remove Tags, which suggests the notes' own tags.
+            await pick([2])
+            let add = try await open(.addTags)
+            add.tags = ["qzalpha", "qzouter::inner"]
+            add.confirm()
+            await waitFor { commands.sheet == nil }
+            await undoTitle("Add Tags")
+            await pick([2, 3])
+            let remove = try await open(.removeTags)
+            await waitFor { remove.selectionTags != nil }
+            #expect(remove.selectionTags == ["qzalpha", "qzouter::inner"])
+            remove.tags = ["qzouter"]
+            remove.confirm()
+            await waitFor { commands.sheet == nil }
+            await undoTitle("Remove Tags")
+            await pick([2])
+            let left = try await open(.removeTags)
+            await waitFor { left.selectionTags != nil }
+            #expect(left.selectionTags == ["qzalpha"], "removing a parent removes the tags inside it")
+            left.cancel()
+
+            // Set Due Date as typed, then Forget; both name their steps.
+            await pick([0])
+            let dueColumn = try #require(results.list?.columns.firstIndex(of: "cardDue"))
+            let dueBefore = try #require(row(0)?.cells[dueColumn])
+            let due = try await open(.setDueDate)
+            due.dueText = "3"
+            await waitFor { if case .valid = due.due { true } else { false } }
+            due.confirm()
+            await waitFor { commands.sheet == nil }
+            await undoTitle("Set Due Date")
+            // The row's Due cell is read again in place (H10).
+            await waitFor { if let cell = row(0)?.cells[dueColumn] { cell != dueBefore } else { false } }
+            let forget = try await open(.forget)
+            forget.confirm()
+            await waitFor { commands.sheet == nil }
+            await undoTitle("Forget")
+            undo.undo(); await undo.waitForCompletion()
+            await waitFor { undo.redoName == "Forget" }
+
+            // A list that moved on while the sheet was open: refused, nothing written.
+            await pick([3])
+            let stale = try await open(.forget)
+            _ = try await CoreNoteService().startDeleteNotes(ids: [try #require(row(0)?.noteID)]).value()
+            await waitFor { results.list?.count == 3 }
+            let before = undo.undoName
+            stale.confirm()
+            await waitFor { stale.failure != nil }
+            #expect(stale.failure == .rowsChanged && commands.sheet === stale)
+            #expect(undo.undoName == before, "no step recorded")
+            stale.cancel()
+            _ = ids
+        }
+    }
+
     /// Waits, suspended, until `condition` holds (at most ten seconds: each
     /// command is a core job, then a change set and a read of its rows).
     private func waitFor(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async {

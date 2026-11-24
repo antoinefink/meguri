@@ -710,6 +710,16 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
     private(set) var actions: [Action] { get { locked { _actions } } set { locked { _actions = newValue } } }
     private var _actions: [Action] = []
     var actionFails = false
+    /// The target cards' home decks the counts report (U276).
+    var deckIDs: [Int64] { get { locked { _deckIDs } } set { locked { _deckIDs = newValue } } }
+    private var _deckIDs: [Int64] = [1]
+    /// The tags `tags(of:)` reports for any target (Remove Tags).
+    var noteTags: [String] { get { locked { _noteTags } } set { locked { _noteTags = newValue } } }
+    private var _noteTags: [String] = []
+    /// U276: a started action reports one progress and waits until it is
+    /// released or cancelled (then it ends `.cancelled`, nothing recorded).
+    var holdsActions = false
+    let heldAction = HeldAction()
 
     private func check(_ target: BrowseTarget) throws -> [Int64] {
         lock.lock(); defer { lock.unlock() }
@@ -735,7 +745,8 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
         return locked {
             BrowseSelectionCounts(cards: UInt64(cards.count), notes: UInt64(notes(ids, target.mode).count),
                                   suspended: UInt64(cards.filter(_suspended.contains).count),
-                                  buried: UInt64(cards.filter(_buried.contains).count), decks: 1, deck: 1, notetypes: [8])
+                                  buried: UInt64(cards.filter(_buried.contains).count), decks: UInt64(_deckIDs.count),
+                                  deck: _deckIDs.count == 1 ? _deckIDs.first : nil, deckIDs: _deckIDs, notetypes: [8])
         }
     }
 
@@ -766,6 +777,23 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
             }
         }
         return Self.result(affected: affected, considered: cards.count, undo: affected > 0 ? "Suspend" : nil)
+    }
+
+    func tags(of target: BrowseTarget) async throws -> [String] {
+        _ = try check(target)
+        return noteTags
+    }
+
+    func start(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BrowseRunningAction {
+        guard holdsActions else { return .finishing { try await self.run(action, on: target) } }
+        _ = try check(target)
+        return heldAction.running { try await self.run(action, on: target) }
+    }
+
+    func start(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BrowseRunningAction {
+        guard holdsActions else { return .finishing { try await self.run(action, on: target) } }
+        _ = try check(target)
+        return heldAction.running { try await self.run(action, on: target) }
     }
 
     func run(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BulkActionResult {
@@ -814,5 +842,43 @@ nonisolated final class FakeSearchSession: BrowseSearching, @unchecked Sendable 
             return BrowseMappedSelection(selected: BrowseResults.ranges(Set(indexes)),
                                          current: currentIndex.map { UInt64($0) })
         }
+    }
+}
+
+/// A held action (U276's progress and Cancel): it reports one progress, then
+/// waits for `release()` (it runs) or its Cancel (it ends cancelled).
+nonisolated final class HeldAction: @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiting: CheckedContinuation<Bool, Never>?
+    private var decided: Bool?
+    private(set) var cancelled = false
+    private(set) var started = 0
+
+    func running(_ run: @escaping @Sendable () async throws -> BulkActionResult) -> BrowseRunningAction {
+        lock.withLock { started += 1; decided = nil }
+        let progress = AsyncStream<BrowseActionProgress> { continuation in
+            continuation.yield(BrowseActionProgress(completed: 1, total: 4, cancellable: true))
+        }
+        return BrowseRunningAction(progress: progress, cancel: { self.decide(false) }, result: {
+            let proceed = await withCheckedContinuation { continuation in
+                self.lock.withLock {
+                    if let decided = self.decided { continuation.resume(returning: decided) } else { self.waiting = continuation }
+                }
+            }
+            guard proceed else { throw BridgeError.cancelled }
+            return try await run()
+        })
+    }
+
+    func release() { decide(true) }
+
+    private func decide(_ proceed: Bool) {
+        let waiting: CheckedContinuation<Bool, Never>? = lock.withLock {
+            if !proceed { cancelled = true }
+            decided = proceed
+            defer { self.waiting = nil }
+            return self.waiting
+        }
+        waiting?.resume(returning: proceed)
     }
 }

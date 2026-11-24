@@ -16,6 +16,11 @@
 //! - `browse.selection_counts.<mode>`: U264a's counts of Select All on a
 //!   whole-collection handle (`browser/workspace` V7, V8.1): resolution and
 //!   the counting reads.
+//! - `browse.selection_note_cards.cards`, `browse.selection_tags.cards`,
+//!   `browse.sibling_rows.cards`: U276's reads of Select All on a cards
+//!   handle (V8.2's cards of a Delete, V8.1's Remove Tags suggestions, V7's
+//!   Select Sibling Cards), in the core instead of every note id crossing
+//!   the FFI.
 //!
 //! Sizes come from `$MEGURI_BENCH_SIZES` (default `10k,150k`), made first by
 //! `tools/mg bench`. The result goes to `$MEGURI_BENCH_RESULTS`.
@@ -28,7 +33,7 @@ use std::time::Duration;
 
 use criterion::Criterion;
 use meguri_engine::CancelToken;
-use meguri_engine::browse::selection_counts;
+use meguri_engine::browse::{selection_counts, selection_note_cards, selection_tags};
 use meguri_engine::browse::search::{
     HandleId, RequestSeq, SearchEvent, SearchListener, SearchSession, SortDirection, SortSpec,
 };
@@ -264,6 +269,36 @@ fn main() -> ExitCode {
                 b.iter_custom(|n| {
                     measurement.run(n, |_| selection_counts(&every, &token).expect("the counts").cards)
                 })
+            });
+            push(&mut suite, measurement);
+        }
+        // U276: the other reads of Select All on a cards handle.
+        {
+            let (_, handle) = search(&session, &events, "", SearchMode::Cards, "noteFld");
+            let state = session.handle_state(handle).expect("the handle");
+            let all: std::ops::Range<u64> = 0..state.count;
+            let every = session.selection(handle, state.revision, std::iter::once(all).collect());
+            let token = CancelToken::new();
+            let name = "browse.selection_note_cards.cards";
+            black_box(selection_note_cards(&every, &token).expect("the cards"));
+            let mut measurement = Measurement::start(name, Some(&size));
+            criterion.bench_function(&format!("{name}/{size}"), |b| {
+                b.iter_custom(|n| measurement.run(n, |_| selection_note_cards(&every, &token).expect("the cards")))
+            });
+            push(&mut suite, measurement);
+            let name = "browse.selection_tags.cards";
+            black_box(selection_tags(&every, &token).expect("the tags"));
+            let mut measurement = Measurement::start(name, Some(&size));
+            criterion.bench_function(&format!("{name}/{size}"), |b| {
+                b.iter_custom(|n| measurement.run(n, |_| selection_tags(&every, &token).expect("the tags").len()))
+            });
+            push(&mut suite, measurement);
+            let name = "browse.sibling_rows.cards";
+            let first = session.selection(handle, state.revision, std::iter::once(0..1).collect());
+            black_box(first.sibling_rows().expect("the rows"));
+            let mut measurement = Measurement::start(name, Some(&size));
+            criterion.bench_function(&format!("{name}/{size}"), |b| {
+                b.iter_custom(|n| measurement.run(n, |_| first.sibling_rows().expect("the rows").len()))
             });
             push(&mut suite, measurement);
         }

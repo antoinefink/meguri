@@ -1,5 +1,6 @@
 import Testing
 
+import AppModel
 import Home
 
 /// `decks/deck-list` H6.2: the deck search's filter over full human names.

@@ -46,6 +46,49 @@ public nonisolated protocol BrowseSearching: AnyObject, Sendable {
     func run(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BulkActionResult
     /// V8.1: a note action on the target notes, one undo step.
     func run(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BulkActionResult
+    /// U276's sheets: the action started, with its progress and Cancel
+    /// (honoured until its commit, `browser/bulk-framework` K3).
+    func start(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BrowseRunningAction
+    func start(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BrowseRunningAction
+    /// V8.1: the tags the target notes store, each once, sorted (Remove
+    /// Tags' field suggests only these).
+    func tags(of target: BrowseTarget) async throws -> [String]
+}
+
+/// A bulk action under way (U276): its progress while it plans, its Cancel,
+/// and its result once it ends. Cancel ends it with `BridgeError.cancelled`
+/// and writes nothing while it can still be cancelled.
+public nonisolated struct BrowseRunningAction: Sendable {
+    public let progress: AsyncStream<BrowseActionProgress>
+    public let cancel: @Sendable () async -> Void
+    public let result: @Sendable () async throws -> BulkActionResult
+
+    public init(progress: AsyncStream<BrowseActionProgress>, cancel: @escaping @Sendable () async -> Void,
+                result: @escaping @Sendable () async throws -> BulkActionResult) {
+        self.progress = progress
+        self.cancel = cancel
+        self.result = result
+    }
+
+    /// An action that is already running to its end with no progress and
+    /// no Cancel (a session without jobs).
+    public static func finishing(_ run: @escaping @Sendable () async throws -> BulkActionResult) -> BrowseRunningAction {
+        BrowseRunningAction(progress: AsyncStream { $0.finish() }, cancel: {}, result: run)
+    }
+}
+
+/// A running action's progress: the work done of its total (nil while not
+/// known), and whether Cancel still stops it (false once it commits).
+public nonisolated struct BrowseActionProgress: Sendable, Hashable {
+    public let completed: UInt64
+    public let total: UInt64?
+    public let cancellable: Bool
+
+    public init(completed: UInt64, total: UInt64?, cancellable: Bool) {
+        self.completed = completed
+        self.total = total
+        self.cancellable = cancellable
+    }
 }
 
 /// The rows a command acts on (`browser/result-sets` H12): index ranges of
@@ -79,6 +122,17 @@ public extension BrowseSearching {
     }
     func run(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BulkActionResult {
         throw BrowseCommandUnsupported()
+    }
+    func tags(of target: BrowseTarget) async throws -> [String] { throw BrowseCommandUnsupported() }
+}
+
+/// A session whose actions run to their end without progress or Cancel.
+public extension BrowseSearching {
+    func start(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BrowseRunningAction {
+        .finishing { try await self.run(action, on: target) }
+    }
+    func start(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BrowseRunningAction {
+        .finishing { try await self.run(action, on: target) }
     }
 }
 
@@ -140,22 +194,30 @@ public nonisolated final class CoreBrowseSearch: BrowseSearching {
         try await CoreBrowseQuery.startSelectionCounts(try await selection(target)).value()
     }
 
+    /// Read in the core from the selection's ranges (U276): no note id
+    /// crosses the FFI, whatever the selection's size (V17).
     public func cardsOfNotes(of target: BrowseTarget) async throws -> UInt64 {
-        // Notes mode: the target cards are already every card of the notes (B1).
-        if target.mode == .notes { return try await counts(of: target).cards }
-        let notes = try await selection(target).resolve(.notes)
-        guard !notes.isEmpty else { return 0 }
-        let text = "nid:" + notes.map(String.init).joined(separator: ",")
-        let counts = try await CoreBrowseQuery.startFilterCounts(.cards, items: [.saved(text)]).value()
-        return counts.first.flatMap { $0 } ?? 0
+        try await Self.cancelling(try await CoreBrowseQuery.startNoteCards(try await selection(target)))
     }
 
+    /// The handle's rows of the selected rows' notes, read from the handle
+    /// in the core (U276).
     public func siblingRows(of target: BrowseTarget) async throws -> [Range<UInt64>] {
-        let notes = try await selection(target).resolve(.notes)
-        guard !notes.isEmpty else { return [] }
-        // H12, notes → cards: every card of those notes that the handle lists.
-        return try await session.mapSelection(from: .mode(.notes), selected: .ids(notes), current: nil, to: target.handle,
-                                              targetRevision: target.revision).selected
+        try await selection(target).siblingRows()
+    }
+
+    public func tags(of target: BrowseTarget) async throws -> [String] {
+        try await Self.cancelling(try await CoreBrowseQuery.startSelectionTags(try await selection(target)))
+    }
+
+    /// A read job's value; cancelling the task cancels the job, so a
+    /// sheet that closes frees the search reader its read holds.
+    private static func cancelling<T: Sendable>(_ job: CoreBrowseReadJob<T>) async throws -> T {
+        try await withTaskCancellationHandler {
+            try await job.value()
+        } onCancel: {
+            Task { try? await job.job.cancel() }
+        }
     }
 
     public func run(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BulkActionResult {
@@ -164,6 +226,29 @@ public nonisolated final class CoreBrowseSearch: BrowseSearching {
 
     public func run(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BulkActionResult {
         try await CoreBulkActions.start(action, on: try await selection(target)).value()
+    }
+
+    public func start(_ action: BulkCardAction, on target: BrowseTarget) async throws -> BrowseRunningAction {
+        Self.running(try await CoreBulkActions.start(action, on: try await selection(target)))
+    }
+
+    public func start(_ action: BulkNoteAction, on target: BrowseTarget) async throws -> BrowseRunningAction {
+        Self.running(try await CoreBulkActions.start(action, on: try await selection(target)))
+    }
+
+    private static func running(_ job: CoreBulkActionJob) -> BrowseRunningAction {
+        let progress = AsyncStream<BrowseActionProgress> { continuation in
+            let task = Task {
+                for await report in job.job.progress {
+                    continuation.yield(BrowseActionProgress(completed: report.completed, total: report.total,
+                                                            cancellable: report.cancellable))
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        return BrowseRunningAction(progress: progress, cancel: { try? await job.job.cancel() },
+                                   result: { try await job.value() })
     }
 }
 

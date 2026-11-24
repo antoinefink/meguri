@@ -493,6 +493,15 @@ public final class BrowseSelection: Sendable {
         let raw = raw
         return try await QueryLane.shared.call(.browseSelectionResolve) { try raw.resolve(target: target.raw) }
     }
+
+    /// V7's Select Sibling Cards: the handle's rows whose note is a selected
+    /// row's, as ascending merged ranges of the handle at the selection's
+    /// revision (in notes mode the selection's own rows). Read from the
+    /// handle in the core: no note id crosses the FFI.
+    public func siblingRows() async throws(BridgeError) -> [Range<UInt64>] {
+        let raw = raw
+        return try await QueryLane.shared.call(.browseSelectionSiblingRows) { try raw.siblingRows().map(Range.init) }
+    }
 }
 
 /// The newest request seq the session started (R1084's second guard).

@@ -355,6 +355,11 @@ fn the_query_model_suggestions_counts_columns_and_selection_counts_run_through_t
             buried: 0,
             decks: 2,
             deck: None,
+            deck_ids: {
+                let mut decks = vec![1, spanish];
+                decks.sort_unstable();
+                decks
+            },
             notetypes,
         })
     );
@@ -365,10 +370,51 @@ fn the_query_model_suggestions_counts_columns_and_selection_counts_run_through_t
     assert_eq!(finish(&core, job.handle.id), JobOutcome::Succeeded);
     let counts = job.result.result().unwrap().unwrap();
     assert_eq!((counts.cards, counts.notes, counts.decks, counts.deck), (2, 1, 1, Some(spanish)));
+    // U276: the cards a Delete of the first note removes, its tags, and
+    // Select Sibling Cards from its first card (sorted by Sort Field, the
+    // first note's two cards are rows 0 and 1).
+    let read = |selection: &Arc<BrowseSelection>, what| {
+        let job = start_browse_selection_read(Arc::clone(selection), what).unwrap();
+        assert_eq!(finish(&core, job.handle.id), JobOutcome::Succeeded);
+        job.result.result().unwrap().unwrap()
+    };
+    let first = session
+        .selection(handle, 0, vec![BrowseIndexRange { start: 0, end: 1 }])
+        .unwrap();
+    assert_eq!(read(&first, BrowseSelectionRead::NoteCards), BrowseSelectionReadResult::NoteCards { cards: 2 });
+    assert_eq!(
+        read(&first, BrowseSelectionRead::Tags),
+        BrowseSelectionReadResult::Tags { tags: vec!["alpha".into()] }
+    );
+    assert_eq!(first.sibling_rows().unwrap(), vec![BrowseIndexRange { start: 0, end: 2 }]);
+    assert_eq!(read(&every, BrowseSelectionRead::NoteCards), BrowseSelectionReadResult::NoteCards { cards: 4 });
+    // B10: the sheets' defaults while their keys are missing.
+    assert_eq!(
+        browse_sheet_defaults().unwrap(),
+        BrowseSheetDefaults {
+            set_due_days: "0".into(),
+            restore_position: true,
+            reset_counts: false,
+        }
+    );
     // A refusal of the selection is the result's error.
     let stale = session
         .selection(handle, 7, vec![BrowseIndexRange { start: 0, end: 1 }])
         .unwrap();
+    let job = start_browse_selection_read(Arc::clone(&stale), BrowseSelectionRead::Tags).unwrap();
+    assert_eq!(finish(&core, job.handle.id), JobOutcome::Succeeded);
+    assert_eq!(
+        job.result.result(),
+        Err(meguri_ffi::CoreError::Browse {
+            failure: BrowseFailure::StaleRevision { current: 0 }
+        })
+    );
+    assert!(matches!(
+        stale.sibling_rows(),
+        Err(meguri_ffi::CoreError::Browse {
+            failure: BrowseFailure::StaleRevision { current: 0 }
+        })
+    ));
     let job = start_browse_selection_counts(stale).unwrap();
     assert_eq!(finish(&core, job.handle.id), JobOutcome::Succeeded);
     assert_eq!(

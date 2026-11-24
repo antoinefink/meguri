@@ -1096,6 +1096,8 @@ pub struct BrowseSelectionCounts {
     pub decks: u64,
     /// That deck when there is exactly one.
     pub deck: Option<i64>,
+    /// Every one of those decks, ascending (Change Deck's sheet marks them).
+    pub deck_ids: Vec<i64>,
     /// The target notes' note types, ascending.
     pub notetypes: Vec<i64>,
 }
@@ -1109,6 +1111,7 @@ impl From<SelectionCounts> for BrowseSelectionCounts {
             buried: counts.buried,
             decks: counts.decks,
             deck: counts.deck.map(|id| id.0),
+            deck_ids: counts.deck_ids.into_iter().map(|id| id.0).collect(),
             notetypes: counts.notetypes.into_iter().map(|id| id.0).collect(),
         }
     }
@@ -1165,6 +1168,113 @@ pub fn start_browse_selection_counts(
     Ok(BrowseSelectionCountsJobStart {
         handle: crate::jobs::wrap(handle),
         result: Arc::new(BrowseSelectionCountsJob { result }),
+    })
+}
+
+// ------------------------------------------------------- selection reads
+
+/// A read of a selection besides its counts (`browser/workspace` V8.1,
+/// V8.2), in the core so a large selection never crosses the FFI as ids.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BrowseSelectionRead {
+    /// Every card of the target notes that exist: the cards a Delete removes.
+    NoteCards,
+    /// The tags the target notes store, each once, sorted (Remove Tags).
+    Tags,
+}
+
+/// What a [`BrowseSelectionRead`] gave.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BrowseSelectionReadResult {
+    NoteCards { cards: u64 },
+    Tags { tags: Vec<String> },
+}
+
+#[derive(Debug, uniffi::Object)]
+pub struct BrowseSelectionReadJob {
+    result: Arc<Mutex<Option<Result<BrowseSelectionReadResult, CoreError>>>>,
+}
+
+#[uniffi::export]
+impl BrowseSelectionReadJob {
+    /// `None` until the job ends; then what it read, or the selection's
+    /// refusal (`UnknownHandle`, `StaleRevision`, `OutOfRange`).
+    pub fn result(&self) -> Result<Option<BrowseSelectionReadResult>, CoreError> {
+        callback::enter("BrowseSelectionReadJob::result");
+        lock(&self.result).clone().transpose()
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BrowseSelectionReadJobStart {
+    pub handle: JobHandle,
+    pub result: Arc<BrowseSelectionReadJob>,
+}
+
+/// V8.1 and V8.2: `read` of `selection`, as a job at utility QoS reading one
+/// snapshot of a search worker's reader, as the counts are read. A refusal
+/// of the selection itself ends the job successfully and `result` returns
+/// it. It writes nothing.
+#[uniffi::export]
+pub fn start_browse_selection_read(
+    selection: Arc<BrowseSelection>,
+    read: BrowseSelectionRead,
+) -> Result<BrowseSelectionReadJobStart, CoreError> {
+    callback::enter("start_browse_selection_read");
+    let engine = runtime::engine()?;
+    let result = Arc::new(Mutex::new(None));
+    let out = Arc::clone(&result);
+    let handle = engine.start_utility_job(meguri_engine::JobKind::BulkOp, move |job| {
+        let selection = selection.engine_selection();
+        let read = match read {
+            BrowseSelectionRead::NoteCards => {
+                browse::selection_note_cards(selection, &job.cancel).map(|cards| BrowseSelectionReadResult::NoteCards { cards })
+            }
+            BrowseSelectionRead::Tags => {
+                browse::selection_tags(selection, &job.cancel).map(|tags| BrowseSelectionReadResult::Tags { tags })
+            }
+        };
+        let read = match read {
+            Ok(read) => Ok(read),
+            Err(BrowseError::Engine(error)) => return Err(error),
+            Err(refusal) => Err(CoreError::from(refusal)),
+        };
+        *lock(&out) = Some(read);
+        Ok(())
+    })?;
+    Ok(BrowseSelectionReadJobStart {
+        handle: crate::jobs::wrap(handle),
+        result: Arc::new(BrowseSelectionReadJob { result }),
+    })
+}
+
+// ------------------------------------------------------------ sheet inputs
+
+/// What Browse's Set Due Date and Forget sheets open with
+/// (`browser/bulk-actions` B10, `browser/config-keys` K6.6).
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BrowseSheetDefaults {
+    /// `setDueBrowser`, or `"0"` when it is missing or not a string.
+    pub set_due_days: String,
+    /// `restorePositionBrowser`, default true.
+    pub restore_position: bool,
+    /// `resetCountsBrowser`, default false.
+    pub reset_counts: bool,
+}
+
+/// B10: the three remembered keys the sheets prefill from, in one snapshot
+/// of the query reader. It writes nothing.
+#[uniffi::export]
+pub fn browse_sheet_defaults() -> Result<BrowseSheetDefaults, CoreError> {
+    callback::enter("browse_sheet_defaults");
+    let collection = runtime::host()?.collection()?;
+    let reader = collection.reader(meguri_storage::ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
+    let config = meguri_search::config::BrowserConfig::read(&*snapshot)?;
+    Ok(BrowseSheetDefaults {
+        set_due_days: config.set_due_browser(),
+        restore_position: config.restore_position_browser(),
+        reset_counts: config.reset_counts_browser(),
     })
 }
 
