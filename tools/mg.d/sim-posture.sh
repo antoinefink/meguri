@@ -3,10 +3,15 @@ mg_job sim-posture host mg_sim_posture \
   "Set a leased pool iPhone Duo's display posture in the running test VM: <udid> open|closed"
 
 mg_posture_target() {
-  local pool rc
-  pool="$(mg_sim_pool_run "$MG_RUN_DIR/pool.err" status)"; rc=$?
-  if [ "$rc" -eq 5 ]; then
-    mg__mac_vm_unreachable "$(mg_sim_pool_queued_reason "$MG_RUN_DIR/pool.err")" 'Duo posture'
+  local pool rc v envs=(MEGURI_SIM_POOL_IN_VM=1 "MEGURI_SIM_DEVICES_JSON=$MG_RUN_DIR/sim-devices.json")
+  # Query only the leased guest. Re-entering pool routing could select/start
+  # another VM or honor an ambient host fallback after our selection.
+  for v in MEGURI_SIM_POOL_DIR MEGURI_SIM_POOL_MAX MEGURI_SIM_DEVICES_DIR; do
+    [ -z "${!v:-}" ] || envs[${#envs[@]}]="$v=${!v}"
+  done
+  pool="$(mg_mac_vm_ssh "env $(mvl_q "${envs[@]}") /bin/bash $(mvl_q "$MG_ROOT/tools/scripts/sim-pool.sh") status" 2>"$MG_RUN_DIR/pool.err")"; rc=$?
+  if mvl_unreachable "$rc" "$(cat "$MG_RUN_DIR/pool.err")"; then
+    mg__mac_vm_unreachable 'selected guest could not query the simulator pool' 'Duo posture'
     return 1
   fi
   MG_POSTURE_DEVICE="$(jq -ce --arg u "$1" '[.devices[] | select(.udid == $u)] | select(length == 1) | .[0]' <<<"$pool")"
@@ -41,6 +46,20 @@ mg_posture_receipt() {
   cp "$out/$file" "$MG_RUN_DIR/posture.json"
 }
 
+mg_posture_native_failure() {
+  local rc="$1" receipt="$2" stage message
+  stage="$(sed -n 's/^sim-posture: xcui-stage=\([a-z-]*\)$/\1/p' "$MG_RUN_DIR/posture.log" | tail -n 1)"
+  stage="${stage:-not-recorded}"
+  # Preserve XCTest's own failure (including activation/query failures), rather
+  # than replacing it with a missing-attachment diagnosis. The result/log stay
+  # authoritative when XCTest produced no readable failing-test record.
+  message="$(xcrun xcresulttool get test-results tests --path "$MG_RUN_DIR/posture.xcresult" 2>/dev/null |
+    jq -r '[.. | objects | select(.nodeType? == "Test Case" and .result? == "Failed") |
+      .children[]? | select(.nodeType == "Failure Message") | .name | strings] | join("; ") | .[0:800]')"
+  mg_failure posture-runner "native XCTest failed (exit $rc; last recorded preflight stage: $stage; valid final receipt: $receipt): ${message:-failure text unavailable; see posture.log and posture.xcresult}"
+  mg_status fail
+}
+
 mg_posture_displays() {
   local u="$1" p="$2" sample displays rc png1="$MG_RUN_DIR/outer.png" png3="$MG_RUN_DIR/inner.png"
   for sample in 1 2; do
@@ -59,12 +78,12 @@ mg_posture_displays() {
 }
 
 mg_posture_hub() {
-  mg_mac_vm_ssh 'developer=$(xcode-select -p) && hub="${developer%/Developer}/Applications/DeviceHub.app" && id=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$hub/Contents/Info.plist") && [ "$id" = com.apple.dt.Devices ] && open -g -a "$hub" && printf "%s\n" "$id"'
+  mg_mac_vm_ssh 'developer=$(xcode-select -p) && case "$developer" in /*/Contents/Developer) ;; *) exit 1 ;; esac && hub="${developer%/Developer}/Applications/DeviceHub.app" && id=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$hub/Contents/Info.plist") && [ "$id" = com.apple.dt.Devices ] && /usr/bin/codesign --verify --strict "$hub" && open -a "$hub" && printf "%s\n" "$hub"'
 }
 
 mg_sim_posture() {
   local udid="${1:-}" posture="${2:-}" rc original inventory types hub report="$MG_RUN_DIR/posture.json"
-  if [ "$#" -ne 2 ] || ! printf '%s' "$udid" | grep -Eq '^[A-Fa-f0-9]{8}(-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}$' ||
+  if [ "$#" -ne 2 ] || ! [[ "$udid" =~ ^[A-Fa-f0-9]{8}(-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}$ ]] ||
     { [ "$posture" != open ] && [ "$posture" != closed ]; }; then
     mg_failure usage 'usage: tools/mg sim-posture <leased-pool-udid> open|closed'
     mg_status error; return 0
@@ -85,9 +104,11 @@ mg_sim_posture() {
   mg_detail sim_runner '"vm"'
   mg_app_build mac Debug || return 0
   mg_mac_vm_take --no-copy --running-only || return 0
+  cp "$MG_ROOT/tools/sim-devices.json" "$MG_RUN_DIR/sim-devices.json" || return 1
+  mg_mac_vm_copy_in "$MG_ROOT/tools/scripts/sim-pool.sh" "$MG_RUN_DIR/sim-devices.json" || return 0
   mg_posture_target "$udid" 120 || return 0
   original="$MG_POSTURE_DEVICE"
-  mg_sim_check_given "$udid" || return 0
+  mg_sim_check_runtime "$udid" "$MG_RUN_DIR/sim-devices.json" || return 0
   inventory="$(mg_simctl list devices --json)"
   types="$(mg_simctl list devicetypes --json)"
   if ! jq -e --argjson d "$original" --argjson t "$types" '
@@ -101,9 +122,10 @@ mg_sim_posture() {
   fi
   mg_mac_vm_copy_in "$MG_ROOT/$MG_APP_DD/Build/Products" "$MG_ROOT/tools/vm/posture-display.js" || return 0
   # This runs outside the sandboxed test runner, under MG's guest lease and
-  # existing logged-in-session admission. XCTest receives no filesystem paths.
+  # existing logged-in-session admission. Only the selected Hub bundle path
+  # crosses into XCTest; no checkout/lease/report paths do.
   hub="$(mg_posture_hub)"
-  if [ "$?" -ne 0 ] || [ "$hub" != com.apple.dt.Devices ]; then
+  if [ "$?" -ne 0 ] || [[ "$hub" != /*/Contents/Applications/DeviceHub.app ]]; then
     mg__mac_vm_queued 'selected Xcode Device Hub unavailable' 'Duo posture'; return 0
   fi
   mg_posture_target "$udid" 120 || return 0
@@ -113,16 +135,26 @@ mg_sim_posture() {
   local TEST_RUNNER_MEGURI_POSTURE_REQUEST
   TEST_RUNNER_MEGURI_POSTURE_REQUEST="$(jq -nc --argjson d "$original" --arg p "$posture" --arg b "$hub" \
     --arg nonce "$MG_RUN_ID" --argjson end "$(($(date +%s) + 90))" \
-    '{udid:$d.udid,name:$d.name,posture:$p,bundleID:$b,nonce:$nonce,mutationUntil:$end}')"
+    '{udid:$d.udid,name:$d.name,posture:$p,bundlePath:$b,nonce:$nonce,mutationUntil:$end}')"
   export TEST_RUNNER_MEGURI_POSTURE_REQUEST
+  jq -nc --argjson d "$original" --arg root "$MG_ROOT" --arg vm "$(jq -r .name <<<"$MG_MAC_VM")" \
+    '{device:$d,root:$root,vm:$vm}' >"$MG_RUN_DIR/posture-context.json" || return 1
+  mg_mac_vm_copy_in "$MG_ROOT/tools/vm/sim-posture-transaction.sh" "$MG_RUN_DIR/posture-context.json" || return 0
   mg_mac_vm_xcodebuild_test "$MG_RUN_DIR/posture" 'platform=macOS,arch=arm64' Debug \
     -only-testing:MeguriUITests/SimulatorPostureTests/testRequestedPosture \
     -parallel-testing-enabled NO -destination-timeout 15 \
     -maximum-test-execution-time-allowance 30 -test-timeouts-enabled YES
   rc=$?
   [ -z "${MG_MAC_VM_RUN_QUEUED:-}${MG_MAC_VM_RUN_ERROR:-}" ] || return 0
+  if [ "$rc" -eq 65 ] && grep -q '^sim-posture: invalid-target-or-lease$' "$MG_RUN_DIR/posture.log"; then
+    mg_failure posture-target 'simulator target or acquisition changed before the transaction, or its TTL is insufficient'
+    mg_status error; return 0
+  fi
   mg_artifact xcresult "$MG_RUN_DIR/posture.xcresult" 'Device Hub control receipt'
   if ! mg_posture_receipt; then
+    if [ "$rc" -ne 0 ]; then
+      mg_posture_native_failure "$rc" missing; return 0
+    fi
     mg_failure posture-report 'expected one target-bound XCTest posture attachment'; mg_status error; return 0
   fi
   mg_detail posture "$(cat "$report")"
@@ -131,7 +163,7 @@ mg_sim_posture() {
     mg_failure posture-target 'simulator lease changed during XCTest'; mg_status error; return 0
   fi
   if [ "$rc" -ne 0 ]; then
-    mg_failure posture-runner 'native XCTest did not pass; see posture.log'; mg_status fail; return 0
+    mg_posture_native_failure "$rc" present; return 0
   fi
   case "$(jq -r .status "$report")" in
     unavailable) mg__mac_vm_queued "Duo posture: $(jq -r .reason "$report")" 'Duo posture' ;;

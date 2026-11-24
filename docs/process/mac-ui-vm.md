@@ -142,7 +142,15 @@ Debug UI products before taking the VM lease; no build runs inside XCTest.
 It never starts a VM/simulator or uses workstation fallbacks, VNC or trust setup.
 
 MG checks the checkout-owned simulator lease, pinned runtime **build**, unique
-simulator name, booted inventory and iPhone Duo type. After product delivery it
+simulator name, booted inventory and iPhone Duo type. Pool status uses the
+selected guest's nonrouting pool script, with the same runtime snapshot used
+for runtime-build validation. The fixed guest transaction takes the existing pool
+mutex and atomically validates the exact acquisition id, checkout, VM, booted
+state and TTL before XCTest input. Release/reset take that mutex before touching
+a device, never a new VM lease: release can free a full pool while acquire
+waits under the VM lease. The mutex ends when XCTest joins, including on
+cancellation; preparation and host result processing hold no pool mutex.
+Existing leases without an acquisition id must be released and reacquired. After product delivery MG
 requires more than 120 seconds on the unchanged simulator lease. The request
 allows input for at most 90 seconds, with five seconds reserved at the click;
 XCTest has a 30-second execution allowance. MG's normal login admission and
@@ -150,14 +158,29 @@ runner's hypervisor/`meguri` account checks remain in effect. The caller retains
 and releases the simulator lease.
 
 The sandboxed runner uses only supported `XCUIApplication` queries and native
-clicks to interact with Device Hub. It tries a uniquely named simulator display
-window, then a unique row in a Simulators outline/group and matching details in
-the same library window. Inspector need not display a UUID. Ambiguous targets
-or missing controls queue with fixed diagnostic counts (Hub/target windows,
+clicks to interact with Device Hub. MG verifies the selected guest Xcode's
+signed DeviceHub bundle and opens that exact path in the guest foreground.
+The runner first proves one nonterminated foreground actor at that exact bundle
+path with a five-second AppKit check; otherwise the final attachment explains
+`hub-not-running` or `hub-not-foreground`. It then binds `XCUIApplication(url:)`
+and calls `activate()` on that exact-URL proxy to establish XCUI automation.
+Before proxy creation, state reads, activation and subsequent query/input stages,
+it retains typed `mg-posture-preflight.json` snapshots with fixed stage tokens,
+exact process/foreground counts, the last observed proxy state (initially
+`not-queried`) and prompt-free `AXIsProcessTrusted()`. These snapshots contain no
+arbitrary UI labels and are diagnostic only; no direct AX inspection/input or
+permission changes are used. A snapshot precedes an operation and does not
+prove that operation completed.
+It tries a uniquely named simulator display window, then a unique row in an
+explicitly labeled Simulators outline/group and matching details in the same
+library window. Inspector need not display a UUID. Ambiguous targets
+or unavailable Hub controls queue with fixed diagnostic counts (Hub/target windows,
 simulator rows, detail panes and named controls); no arbitrary UI labels are
 exported. No physical-device row is selected. Closed, Partially Open and Open
 must be distinct controls with an exclusive selected state. An already-selected
-posture needs no click. A posture click is never retried.
+posture needs no click. Post-click controls may settle within the bounded poll;
+no action is repeated. Invalid target/lease or mutation-deadline refusals fail
+or error instead of queuing. A posture click is never retried.
 
 The runner attaches `mg-posture.json` with `.keepAlways`. MG receives the normal
 result bundle and selectively exports exactly one matching method attachment,
@@ -177,9 +200,26 @@ checks: `tools/mg selftest tools/tests/sim_posture.bats tools/tests/sim_vm.bats
 
 The supplied initial native guest invocation reached XCTest but failed writing
 `posture.json` in MG's workspace with `NSCocoaErrorDomain 513`. This is evidence
-of the blocked file transport, not live posture acceptance. This revision has
-no native build or live acceptance result from the filtered runner. The
-integrator must check compact and expanded Hub windows, Closed → Open → Closed,
+of the blocked file transport, not live posture acceptance. The supplied
+follow-up tests and compilation passed, but the live guest selected
+`/Users/meguri/Applications/MeguriXcode/Xcode-27.2-27B52.app` while the bundle-ID
+XCTest actor resolved `/Applications/Xcode.app/Contents/Applications/DeviceHub.app`.
+Its synchronous `activate()` timed out after 60 seconds in Running Background,
+before any query or attachment. The next supplied exact-URL run proved one
+nonterminated foreground actor (otherwise the existing preflight would have
+attached a refusal), but its immediate window query failed at t=0.01 s:
+`Failed to resolve query: Application com.apple.dt.Devices is not running`.
+No final receipt was produced. That is an XCUI query failure after AppKit
+foreground proof, not evidence that the exact process was absent. This revision
+activates the exact-URL proxy only after foreground proof and retains diagnostic
+preflight snapshots before XCUI can halt the test. Missing receipts after native
+failures now report XCTest's own error, exit code and last recorded stage;
+preflight snapshots can never substitute for the final receipt or posture proof.
+There is no new native build or live acceptance result from this filtered runner.
+The prior focused MG selftest attempt stopped because `jq` was unavailable.
+No existing general helper proves selective build-for-testing transfer inputs;
+the whole-Products copy remains unchanged for development feedback too.
+The integrator must check compact and expanded Hub windows, Closed → Open → Closed,
 repeated requests and a Partially Open start on the selected guest Xcode.
 
 Only Device Hub's buttons change the iPhone Duo's fold position. `tools/vm/duo-fold.sh` reaches them from the headless VM over Tart's VNC server: `start`, then `tools/mg sim acquire foldable`, `hub <udid>`, `fold closed|half|open`, `shot <udid> <display> <file>` and `stop`. Display 1 is outer and 3 is inner. `tools/mg` jobs still work during the session.

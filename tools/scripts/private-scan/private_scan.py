@@ -837,9 +837,9 @@ PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d1273
 PUBLIC_ARTIFACTS = {
     # Complete-content PUBLIC review: duo-simulator-review, 2026-11-24.
     'tools/tests/sim_posture.bats':
-        '0b35b5754388fe39fe2f5c487dbff4f1e3c50caba1379ad0bee8e8305b421529',
+        'd85c08a1b7b76243b8045331281235aaf82541ad7a73c40e53811022da9cddb8',
     'tools/tests/sim_vm.bats':
-        '1e46b7099d01003308cbf9757796e31c619fc3f6afe63101489ccb74ad8e207d',
+        '144207cef7a404e397916121a5c6a5b5b894e78ad7709892b3ce7b9610670cd3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',

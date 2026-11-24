@@ -251,6 +251,28 @@ if [ -n "${TEST_RUNNER_MEGURI_POSTURE_REQUEST:-}" ]; then
   att="$bundle/attachments"
   mkdir -p "$att"
   file=00000000-0000-4000-8000-000000000042.json
+  case "${FAKE_POSTURE_REPORT:-pass}" in
+    native-query-failure|native-activation-timeout|preflight-only)
+      stage=window-query
+      message="Failed to resolve query: Application com.apple.dt.Devices is not running"
+      if [ "$FAKE_POSTURE_REPORT" = native-activation-timeout ]; then
+        stage=activation
+        message="Timed out while activating application com.apple.dt.Devices"
+      fi
+      jq -nc --argjson r "$TEST_RUNNER_MEGURI_POSTURE_REQUEST" --arg stage "$stage" "
+        {schemaVersion:1,kind:\"diagnostic-only\",nonce:\$r.nonce,exactProcessCount:1,
+         exactForegroundCount:1,axTrusted:false,proxyState:\"not-running\",stage:\$stage,sequence:4}" >"$att/$file"
+      jq -nc --arg f "$file" "[{testIdentifier:\"SimulatorPostureTests/testRequestedPosture()\",attachments:[
+        {suggestedHumanReadableName:\"mg-posture-preflight_0_00000000-0000-4000-8000-000000000042.json\",
+         exportedFileName:\$f,isAssociatedWithFailure:false}]}]" >"$att/manifest.json"
+      echo "sim-posture: xcui-stage=$stage"
+      [ "$FAKE_POSTURE_REPORT" != preflight-only ] || exit 0
+      echo "{\"result\":\"Failed\",\"passedTests\":0,\"failedTests\":1,\"skippedTests\":0}" >"$bundle/summary.json"
+      jq -nc --arg message "$message" "{testNodes:[{nodeType:\"Test Case\",
+        nodeIdentifier:\"SimulatorPostureTests/testRequestedPosture\",result:\"Failed\",
+        children:[{nodeType:\"Failure Message\",name:\$message}]}]}" >"$bundle/tests.json"
+      exit 65 ;;
+  esac
   if [ "${FAKE_POSTURE_REPORT:-pass}" != absent ]; then
     jq -nc --argjson r "$TEST_RUNNER_MEGURI_POSTURE_REQUEST" --arg s "${FAKE_POSTURE_REPORT:-pass}" "
       {udid:\$r.udid,name:\$r.name,nonce:\$r.nonce,posture:\$r.posture,status:\$s,reason:\"fixture\",
@@ -415,7 +437,27 @@ lease_in_sandbox() { (cd "$SB" && "$SB/tools/scripts/sim-pool.sh" acquire "$1" -
 # and pixel reduction use fixtures; no report is written into MG's workspace.
 posture_runner_fixture() {
   cat >"$SB/tools/mg.d/zzz-posture-fixture.sh" <<'EOF'
-mg_posture_hub() { echo com.apple.dt.Devices; }
+mg_posture_hub() {
+  # Later checks must stay on the already selected guest/config snapshot.
+  if [ "${FAKE_POSTURE_CHANGE_CONFIG:-}" = 1 ]; then
+    echo invalid >"$MEGURI_MAC_VM_CONFIG"
+    echo invalid >"$MG_ROOT/tools/sim-devices.json"
+  fi
+  echo /Users/meguri/Applications/MeguriXcode/Xcode-27.2-27B52.app/Contents/Applications/DeviceHub.app
+}
+mg_mac_vm_xcodebuild_test() {
+  local prefix="$1" u lease
+  shift
+  u="$(jq -r .udid <<<"$TEST_RUNNER_MEGURI_POSTURE_REQUEST")"
+  lease="$FAKE_VM_DIR/meguri-mac/fs$MEGURI_SIM_POOL_DIR/leases/$u/lease.json"
+  case "${FAKE_POSTURE_RACE:-}" in
+    release) rm -f "$lease" ;;
+    foreign) jq '.worktree="/another-checkout"' "$lease" >"$lease.next" && mv "$lease.next" "$lease" ;;
+    reassign) jq '.acquisition_id="another-acquisition"' "$lease" >"$lease.next" && mv "$lease.next" "$lease" ;;
+    expiry) jq '.expires_epoch=1' "$lease" >"$lease.next" && mv "$lease.next" "$lease" ;;
+  esac
+  mg_vm_xcodebuild_test "$prefix" UI macosx "$@"
+}
 EOF
   stub "$FAKE_VM_BIN/osascript" '
 [ "$1 $2" = "-l JavaScript" ] || exit 97
@@ -427,6 +469,11 @@ posture_lease_fixture() {
   export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
   posture_runner_fixture
   lease_in_sandbox foldable
+}
+
+posture_lease_environment() {
+  # Command substitutions cannot export the fixture's environment to the caller.
+  export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
 }
 
 @test "sim-posture validates arguments before any VM or GUI work" {
@@ -477,6 +524,30 @@ posture_lease_fixture() {
   assert_host_untouched
 }
 
+@test "sim-posture refuses released foreign reassigned or expired acquisitions at the guest transaction" {
+  local u original race lock
+  posture_lease_environment
+  u="$(posture_lease_fixture)"
+  original="$(cat "$(vm_lease "$u")")"
+  lock="$(vm_fs meguri-mac "$MEGURI_SIM_POOL_DIR")/pool.lock"
+  for race in release foreign reassign expiry; do
+    printf '%s\n' "$original" >"$(vm_lease "$u")"
+    FAKE_POSTURE_RACE="$race" mg sim-posture "$u" open
+    [ "$(field '.failures[0].id')" = posture-target ]
+    [ "$(field .status)" = error ]
+    [ ! -d "$lock" ]
+    if [ "$race" = release ]; then
+      [ ! -f "$(vm_lease "$u")" ]
+    else
+      [ -f "$(vm_lease "$u")" ]
+      [ "$(cat "$(vm_lease "$u")")" != "$original" ]
+    fi
+  done
+  not_called '^posture-request '
+  not_called '^vm-xcodebuild '
+  assert_host_untouched
+}
+
 @test "sim-posture checks the pinned runtime build before Hub input" {
   export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
   local u
@@ -513,6 +584,7 @@ posture_lease_fixture() {
   [ "$(cat "$(vm_lease "$u")")" = "$original" ]
   called '^vm-xcodebuild test-without-building .* -destination platform=macOS,arch=arm64 .* -only-testing:MeguriUITests/SimulatorPostureTests/testRequestedPosture'
   [ "$(sed -n 's/^posture-request //p' "$STUB_LOG" | jq -r .udid)" = "$u" ]
+  [ "$(sed -n 's/^posture-request //p' "$STUB_LOG" | jq -r .bundlePath)" = /Users/meguri/Applications/MeguriXcode/Xcode-27.2-27B52.app/Contents/Applications/DeviceHub.app ]
   called '^fake build mac Debug$'
   [ -f "$(dirname "$result")/posture.xcresult/attachments/manifest.json" ]
   [ "$(field .details.display_verified)" = true ]
@@ -523,14 +595,44 @@ posture_lease_fixture() {
   validate "$result"
 }
 
+@test "sim-posture stays on its selected guest and runtime snapshot after config changes" {
+  export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
+  local u
+  u="$(posture_lease_fixture)"
+  FAKE_POSTURE_CHANGE_CONFIG=1 MEGURI_SIM_ALLOW_HOST=1 mg sim-posture "$u" open
+  [ "$(field .status)" = pass ]
+  not_called '^tart (run|stop) '
+  assert_host_untouched
+}
+
 @test "sim-posture cannot accept a missing, wrong-target, stale or ambiguous attachment" {
   export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
   local u kind
   u="$(posture_lease_fixture)"
-  for kind in absent wrong-target ambiguous wrong-nonce; do
+  for kind in absent preflight-only wrong-target ambiguous wrong-nonce; do
     FAKE_POSTURE_REPORT="$kind" mg sim-posture "$u" open
     [ "$(field .status)" != pass ]
     [ "$(field '.failures | length')" -gt 0 ]
+  done
+  assert_host_untouched
+}
+
+@test "sim-posture preserves native XCTest failure and stage when only preflight survives" {
+  export FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s
+  local u kind message
+  u="$(posture_lease_fixture)"
+  for kind in native-query-failure native-activation-timeout; do
+    FAKE_POSTURE_REPORT="$kind" mg sim-posture "$u" open
+    [ "$(field .status)" = fail ]
+    [ "$(field '.failures[0].id')" = posture-runner ]
+    message="$(field '.failures[0].message')"
+    [[ "$message" == *'exit 65'*'final receipt: missing'* ]]
+    if [ "$kind" = native-query-failure ]; then
+      [[ "$message" == *'stage: window-query'*'Failed to resolve query: Application com.apple.dt.Devices is not running'* ]]
+    else
+      [[ "$message" == *'stage: activation'*'Timed out while activating application com.apple.dt.Devices'* ]]
+    fi
+    [ "$(field '.details.display_verified // false')" = false ]
   done
   assert_host_untouched
 }
@@ -589,6 +691,77 @@ assert_host_untouched() {
   [ ! -e "$(vm_lease "$u")" ]
   called "^xcrun simctl status_bar $u clear\$"
   assert_host_untouched
+}
+
+@test "sim-posture pool release unblocks acquisition while acquire holds the VM lease" {
+  local u job next
+  export MEGURI_SIM_POOL_MAX=1 MEGURI_SIM_POOL_WAIT_SECONDS=20
+  u="$(lease_in_sandbox iphone)"
+  MEGURI_SIM_POOL_WAIT_SECONDS=20 "$SB/tools/mg" sim acquire iphone \
+    >"$BATS_TEST_TMPDIR/acquire.out" 2>"$BATS_TEST_TMPDIR/acquire.err" 3>&- &
+  job=$!
+  bg_track "$job"
+  wait_log "$BATS_TEST_TMPDIR/acquire.err" 'all 1 iphone pool devices are leased'
+  MEGURI_MAC_VM_LEASE_WAIT_SECONDS=0 mg sim release "$u"
+  [ "$(field .status)" = pass ]
+  wait "$job"
+  next="$(tail -n 1 "$BATS_TEST_TMPDIR/acquire.out")"
+  [ "$(jq -r .status "$next")" = pass ]
+  [ "$(jq -r .details.udid "$next")" = "$u" ]
+  assert_host_untouched
+}
+
+@test "sim-posture guest transaction fences release and reset until XCUI completes" {
+  local u job pool_job lock op marker original
+  posture_lease_environment
+  u="$(posture_lease_fixture)"
+  original="$(cat "$(vm_lease "$u")")"
+  lock="$(vm_fs meguri-mac "$MEGURI_SIM_POOL_DIR")/pool.lock"
+  for op in reset release; do
+    marker="$BATS_TEST_TMPDIR/held-$op"
+    FAKE_VM_XCODEBUILD_UNTIL="$marker" "$SB/tools/mg" sim-posture "$u" open \
+      >"$BATS_TEST_TMPDIR/owner.out" 2>"$BATS_TEST_TMPDIR/owner.err" 3>&- &
+    job=$!
+    bg_track "$job"
+    wait_for "$marker.started"
+    [ -d "$lock" ]
+    : >"$STUB_LOG"
+    "$SB/tools/scripts/sim-pool.sh" "$op" "$u" >"$BATS_TEST_TMPDIR/pool.out" 2>&1 3>&- &
+    pool_job=$!
+    bg_track "$pool_job"
+    wait_log "$STUB_LOG" "sim-pool.sh.*$op"
+    [ "$(cat "$(vm_lease "$u")")" = "$original" ]
+    not_called "^xcrun simctl (uninstall|privacy|keychain) $u "
+    touch "$marker"
+    # Concurrent reset/release may invalidate MG's later display observation.
+    wait "$job" || :
+    wait "$pool_job"
+    [ ! -d "$lock" ]
+    if [ "$op" = reset ]; then
+      [ "$(cat "$(vm_lease "$u")")" = "$original" ]
+    else
+      [ ! -f "$(vm_lease "$u")" ]
+    fi
+  done
+  assert_host_untouched
+}
+
+@test "sim-posture runner refusal frees only its mutex and keeps its acquisition" {
+  local u original
+  posture_lease_environment
+  u="$(posture_lease_fixture)"
+  original="$(cat "$(vm_lease "$u")")"
+  FAKE_POSTURE_REPORT=fail mg sim-posture "$u" closed
+  [ "$(field .status)" = fail ]
+  [ "$(cat "$(vm_lease "$u")")" = "$original" ]
+  [ ! -d "$(vm_fs meguri-mac "$MEGURI_SIM_POOL_DIR")/pool.lock" ]
+  assert_host_untouched
+}
+
+@test "sim-posture restores public sim commands without a reset alias" {
+  mg sim reset 00000000-0000-4000-8000-000000000001
+  [ "$(field '.failures[0].id')" = usage ]
+  not_called '^(ssh|tart) '
 }
 
 @test "sim-setup checks the VM's runtime and device types and creates the pool there" {

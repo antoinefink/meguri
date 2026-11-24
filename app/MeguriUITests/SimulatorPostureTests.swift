@@ -1,4 +1,6 @@
 #if os(macOS)
+import AppKit
+@preconcurrency import ApplicationServices
 import Foundation
 import XCTest
 
@@ -8,13 +10,66 @@ final class SimulatorPostureTests: XCTestCase {
         let udid: String
         let name: String
         let posture: String
-        let bundleID: String
+        let bundlePath: String
         let nonce: String
         let mutationUntil: TimeInterval
     }
     struct Refusal: Error { let id: String }
+    // Diagnostic only: this can survive an XCTest exception/timeout that never
+    // reaches the final receipt. No UI labels, paths or process identifiers.
+    private struct Preflight: Encodable {
+        enum Stage: String, Encodable {
+            case foreground, proxyCreation = "proxy-creation"
+            case proxyStateBeforeActivation = "proxy-state-before-activation"
+            case activation, proxyStateAfterActivation = "proxy-state-after-activation"
+            case windowQuery = "window-query", controlQuery = "control-query"
+            case selectionQuery = "selection-query", simulatorRowQuery = "simulator-row-query"
+            case simulatorRowClick = "simulator-row-click"
+            case postureActionability = "posture-actionability", postureClick = "posture-click"
+        }
+        enum ProxyState: String, Encodable {
+            case notQueried = "not-queried", unknown, notRunning = "not-running"
+            case runningBackground = "running-background", runningForeground = "running-foreground"
+
+            init(_ state: XCUIApplication.State) {
+                switch state {
+                case .unknown: self = .unknown
+                case .notRunning: self = .notRunning
+                case .runningBackground: self = .runningBackground
+                case .runningForeground: self = .runningForeground
+                @unknown default: self = .unknown
+                }
+            }
+        }
+        let schemaVersion = 1
+        let kind = "diagnostic-only"
+        let nonce: String
+        let exactProcessCount: Int
+        let exactForegroundCount: Int
+        let axTrusted: Bool
+        var sequence = 0
+        var stage: Stage = .foreground
+        var proxyState: ProxyState = .notQueried
+    }
     private let labels = ["Closed", "Partially Open", "Open"]
     private var diagnostics: [String: Any] = [:]
+    private var preflight: Preflight?
+
+    @MainActor
+    private func retainPreflight(_ stage: Preflight.Stage, state: XCUIApplication.State? = nil) throws {
+        guard var facts = preflight else { return }
+        facts.sequence += 1
+        facts.stage = stage
+        if let state { facts.proxyState = Preflight.ProxyState(state) }
+        preflight = facts
+        let attachment = XCTAttachment(data: try JSONEncoder().encode(facts), uniformTypeIdentifier: "public.json")
+        attachment.name = "mg-posture-preflight.json"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        // Fixed stage tokens only; MG can identify the last attempted operation
+        // even when native XCTest halts before a final receipt is attached.
+        FileHandle.standardOutput.write(Data("sim-posture: xcui-stage=\(stage.rawValue)\n".utf8))
+    }
 
     @MainActor
     func testRequestedPosture() throws {
@@ -31,14 +86,45 @@ final class SimulatorPostureTests: XCTestCase {
             guard UUID(uuidString: request.udid) != nil,
                   request.name.range(of: "^Meguri-Pool-foldable-[0-9]+$", options: .regularExpression) != nil,
                   ["open", "closed"].contains(request.posture),
-                  request.bundleID == "com.apple.dt.Devices" else {
+                  request.bundlePath.hasPrefix("/"),
+                  request.bundlePath.hasSuffix("/Contents/Applications/DeviceHub.app") else {
                 throw Refusal(id: "invalid-target")
             }
-            let hub = XCUIApplication(bundleIdentifier: request.bundleID)
-            guard hub.state == .runningBackground || hub.state == .runningForeground else {
-                throw Refusal(id: "hub-not-running")
+            let url = URL(fileURLWithPath: request.bundlePath).standardizedFileURL
+            // Prove the exact actor before establishing automation. Foreground
+            // AppKit state alone does not establish the URL proxy's XCUI session.
+            let end = Date().addingTimeInterval(5)
+            var foreground = false
+            var foregroundCount = 0
+            var actors: [NSRunningApplication] = []
+            repeat {
+                actors = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dt.Devices")
+                    .filter { $0.bundleURL?.standardizedFileURL == url && !$0.isTerminated }
+                diagnostics["hubActors"] = actors.count
+                foregroundCount = actors.filter(\.isActive).count
+                foreground = actors.count == 1 && foregroundCount == 1
+                if foreground { break }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            } while Date() < end
+            diagnostics["hubForeground"] = foreground
+            preflight = Preflight(nonce: request.nonce, exactProcessCount: actors.count,
+                                  exactForegroundCount: foregroundCount,
+                                  axTrusted: AXIsProcessTrusted()) // Never request/prompt for trust.
+            try retainPreflight(.foreground)
+            guard foreground else {
+                throw Refusal(id: (diagnostics["hubActors"] as? Int) == 0 ? "hub-not-running" : "hub-not-foreground")
             }
-            hub.activate()
+            try retainPreflight(.proxyCreation)
+            let hub = XCUIApplication(url: url)
+            // Retain facts even before reading state, in case that operation
+            // itself fails. Later snapshots retain the last observed state.
+            try retainPreflight(.proxyStateBeforeActivation)
+            let initialState = hub.state
+            try retainPreflight(.activation, state: initialState)
+            hub.activate() // Exact URL, never the default Xcode's bundle-ID proxy.
+            try retainPreflight(.proxyStateAfterActivation)
+            let activatedState = hub.state
+            try retainPreflight(.windowQuery, state: activatedState)
             var controls = try readyControls(hub, request)
             let desired = request.posture == "open" ? "Open" : "Closed"
             let already = try selected(controls) == desired
@@ -46,24 +132,32 @@ final class SimulatorPostureTests: XCTestCase {
                 controls = try postureControls(hub, request.name)
                 _ = try selected(controls)
                 let button = controls[desired]!
+                try retainPreflight(.postureActionability)
                 guard button.isEnabled, button.isHittable else { throw Refusal(id: "posture-not-actionable") }
                 try mutationAllowed(request)
+                try retainPreflight(.postureClick)
                 button.click() // Single posture mutation; never retry a click.
                 report["changed"] = true
             }
-            let end = Date().addingTimeInterval(5)
+            let verificationEnd = Date().addingTimeInterval(5)
             repeat {
-                controls = try postureControls(hub, request.name)
-                if try selected(controls) == desired {
-                    report.merge(["status": "pass", "reason": "control-verified",
-                                  "control_verified": true, "changed": !already], uniquingKeysWith: { _, new in new })
-                    break
+                do {
+                    controls = try postureControls(hub, request.name)
+                    if try selected(controls) == desired {
+                        report.merge(["status": "pass", "reason": "control-verified",
+                                      "control_verified": true, "changed": !already], uniquingKeysWith: { _, new in new })
+                        break
+                    }
+                } catch let refusal as Refusal where Self.settlingControls.contains(refusal.id) {
+                    // SwiftUI may replace the controls after input. Observe
+                    // within this same deadline; never repeat the action.
                 }
                 Thread.sleep(forTimeInterval: 0.2)
-            } while Date() < end
+            } while Date() < verificationEnd
             if report["status"] == nil { throw Refusal(id: "posture-state-mismatch") }
         } catch let refusal as Refusal {
-            report["status"] = refusal.id == "posture-state-mismatch" || refusal.id == "invalid-target" ? "fail" : "unavailable"
+            report["status"] = ["posture-state-mismatch", "invalid-target", "mutation-deadline"].contains(refusal.id)
+                ? "fail" : "unavailable"
             report["reason"] = refusal.id
         } catch {
             report["status"] = "fail"
@@ -78,6 +172,11 @@ final class SimulatorPostureTests: XCTestCase {
         // MG interprets the receipt, including failures. Avoid XCTest's automatic
         // failure hierarchy, which could include unrelated device labels.
     }
+
+    private static let settlingControls: Set<String> = [
+        "compact-posture-controls", "expanded-posture-controls", "posture-selection",
+        "simulator-row-selection", "simulator-library-window"
+    ]
 
     private func mutationAllowed(_ request: Request) throws {
         let remaining = request.mutationUntil - Date().timeIntervalSince1970
@@ -111,9 +210,10 @@ final class SimulatorPostureTests: XCTestCase {
     @MainActor
     private func simulatorRows(_ hub: XCUIElement, _ name: String) -> [XCUIElement] {
         // Never navigate a Devices/physical-device row. The simulator outline
-        // or its enclosing Simulators group must supply the context.
+        // or its enclosing Simulators group must itself be labeled. A
+        // descendant section heading also occurs in mixed physical outlines.
         let outlines = hub.outlines.allElementsBoundByIndex.filter { outline in
-            outline.label == "Simulators" || named(outline, "Simulators").count == 1
+            outline.label == "Simulators"
         }
         let groups = hub.groups.allElementsBoundByIndex.filter {
             $0.label == "Simulators" && $0.outlines.count == 1
@@ -124,7 +224,9 @@ final class SimulatorPostureTests: XCTestCase {
 
     @MainActor
     private func postureControls(_ hub: XCUIApplication, _ name: String) throws -> [String: XCUIElement] {
+        try retainPreflight(.windowQuery)
         let windows = hub.windows.allElementsBoundByIndex
+        try retainPreflight(.controlQuery)
         let targets = windows.filter { Self.namesTarget($0.label, name) }
         diagnostics["hubWindows"] = windows.count
         diagnostics["namedControls"] = ["Simulators": named(hub, "Simulators").count,
@@ -174,14 +276,24 @@ final class SimulatorPostureTests: XCTestCase {
             // Preserve the actual failed match. Navigation is authorized only
             // when there is no named display window and one unselected simulator.
             guard (diagnostics["targetWindows"] as? Int ?? 0) == 0 else { throw error }
+            try retainPreflight(.simulatorRowQuery)
             let rows = simulatorRows(hub, request.name)
             diagnostics["targetSimulatorRows"] = rows.count
             guard rows.count == 1 else { throw Refusal(id: "simulator-row-count") }
             guard !rows[0].isSelected else { throw error }
             guard rows[0].isHittable else { throw Refusal(id: "simulator-row-not-actionable") }
             try mutationAllowed(request)
+            try retainPreflight(.simulatorRowClick)
             rows[0].click()
-            return try postureControls(hub, request.name)
+            let end = Date().addingTimeInterval(5)
+            repeat {
+                do { return try postureControls(hub, request.name) }
+                catch let refusal as Refusal where Self.settlingControls.contains(refusal.id) {
+                    if Date() >= end { throw refusal }
+                }
+                Thread.sleep(forTimeInterval: 0.2)
+            } while Date() < end
+            throw Refusal(id: "expanded-posture-controls")
         }
     }
 
@@ -195,6 +307,7 @@ final class SimulatorPostureTests: XCTestCase {
 
     @MainActor
     private func selected(_ controls: [String: XCUIElement]) throws -> String {
+        try retainPreflight(.selectionQuery)
         let values = controls.mapValues {
             $0.isSelected || ($0.value as? NSNumber)?.boolValue == true || ($0.value as? String) == "1"
         }
