@@ -82,7 +82,13 @@ public final class ActivityHeatmapStore {
         let ready = readiness
         let deckID: Int64? = if case .deck(let id) = scope { id } else { nil }
         let days: ActivityDays
-        do { days = try await service.heatmap(deckID: deckID) } catch {
+        do {
+            #if os(macOS)
+            days = try await service.heatmapHistory(deckID: deckID)
+            #else
+            days = try await service.heatmap(deckID: deckID)
+            #endif
+        } catch {
             guard !Task.isCancelled else { return }
             if ready != readiness { attempt &+= 1 } else { failed = true }
             return

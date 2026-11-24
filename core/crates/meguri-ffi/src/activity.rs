@@ -24,6 +24,21 @@ pub struct ActivityCounts {
     pub generation: u64,
 }
 
+/// One studied day, sparse so ancient timestamps cannot cause dense allocation.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct ActivityDayCount {
+    pub days_ago: i64,
+    pub count: u32,
+}
+
+/// Mac Home's sparse result. The bounded result type and export stay unchanged.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct ActivityHistoryCounts {
+    pub window: ActivityCounts,
+    /// Every studied day. Missing days mean zero.
+    pub history: Vec<ActivityDayCount>,
+}
+
 impl From<meguri_engine::activity::ActivityHeatmap> for ActivityCounts {
     fn from(read: meguri_engine::activity::ActivityHeatmap) -> Self {
         let t0 = read.today_date;
@@ -51,6 +66,19 @@ pub fn activity_heatmap(deck_id: Option<i64>) -> Result<ActivityCounts, CoreErro
     Ok(meguri_engine::activity::activity_heatmap(&collection, deck_id.map(DeckId))?.into())
 }
 
+/// The same scoped read for Mac Home, including sparse older history.
+#[uniffi::export]
+pub fn activity_heatmap_history(deck_id: Option<i64>) -> Result<ActivityHistoryCounts, CoreError> {
+    callback::enter("activity_heatmap_history");
+    let host = runtime::host()?;
+    let collection = host.collection()?;
+    let read = meguri_engine::activity::activity_heatmap_history(&collection, deck_id.map(DeckId))?;
+    Ok(ActivityHistoryCounts {
+        window: read.window.into(),
+        history: read.history.into_iter().map(|(days_ago, count)| ActivityDayCount { days_ago, count }).collect(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,5 +86,6 @@ mod tests {
     #[test]
     fn a_read_with_no_collection_open_is_unavailable() {
         assert!(matches!(activity_heatmap(None), Err(CoreError::Unavailable { .. })));
+        assert!(matches!(activity_heatmap_history(None), Err(CoreError::Unavailable { .. })));
     }
 }
