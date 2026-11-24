@@ -767,9 +767,13 @@ struct TemplateCodeEditor: UIViewRepresentable {
                 let length = (text as NSString).length
                 edit = NoteTypeTextEdit(range: 0..<length, text: replacement, caret: min(selection.location, (replacement as NSString).length))
             case .replaceHighlighting(let replacement, let highlight):
-                // W10: the Card Text row's edit; the value written is scrolled into view.
+                // W10: the Card Text row's edit; the value written is selected and scrolled into view.
                 let length = (text as NSString).length
-                edit = NoteTypeTextEdit(range: 0..<length, text: replacement, caret: highlight.upperBound)
+                perform(NoteTypeTextEdit(range: 0..<length, text: replacement, caret: highlight.upperBound))
+                let range = NSRange(location: highlight.lowerBound, length: highlight.count)
+                textView.selectedRange = range
+                textView.scrollRangeToVisible(range)
+                return
             case .append(let suffix):
                 let length = (text as NSString).length
                 edit = NoteTypeTextEdit(range: length..<length, text: suffix, caret: length + (suffix as NSString).length)

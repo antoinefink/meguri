@@ -269,6 +269,12 @@ import AppModel
         navigation.columnVisibility = .all
         navigation.setNarrowWorkspace(false)
         #expect(navigation.columnVisibility == .all)
+        // Opened, then closed again by the person while narrow: it stays closed.
+        navigation.setNarrowWorkspace(true)
+        navigation.columnVisibility = .all
+        navigation.columnVisibility = .detailOnly
+        navigation.setNarrowWorkspace(false)
+        #expect(navigation.columnVisibility == .detailOnly)
     }
 
     @Test func aReviewEndRestoresAHiddenSidebarHidden() {

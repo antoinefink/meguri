@@ -17,11 +17,23 @@ extension NoteTypesModel {
     /// written when the styling changed while the edit was worked out, or
     /// when the core refuses it.
     public func changeCardText(_ id: Int64, card: Int, _ change: CardTextChange, rightToLeft: Bool) async {
-        guard editable(id), let css = draft(id)?.css else { return }
+        guard editable(id), let css = pendingStyling(id) else { return }
         guard let edited = try? await backend.editCardText(css: css, change: change, rightToLeft: rightToLeft),
-              editable(id), draft(id)?.css == css, edited.css != css else { return }
+              editable(id), pendingStyling(id) == css, edited.css != css else { return }
         let start = edited.css.utf16.distance(from: edited.css.startIndex, to: edited.value.lowerBound)
         let end = edited.css.utf16.distance(from: edited.css.startIndex, to: edited.value.upperBound)
         request(id, card: card, part: .styling, .replaceHighlighting(edited.css, highlight: start..<end))
+    }
+
+    /// The styling as it will be once a whole-styling change still waiting
+    /// for the text view lands: a second change builds on the first.
+    func pendingStyling(_ id: Int64) -> String? {
+        if let pending = editorRequest, pending.notetype == id, pending.part == .styling {
+            switch pending.command {
+            case .replaceAll(let text), .replaceHighlighting(let text, _): return text
+            default: break
+            }
+        }
+        return draft(id)?.css
     }
 }

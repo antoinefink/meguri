@@ -23,7 +23,8 @@ struct NoteTypeCardTextRow: View {
     @State private var row: CardTextRow?
     @State private var read: String?
     @State private var sizeText = ""
-    @State private var colourTask: Task<Void, Never>?
+    /// Each colour control's own wait before its change is written.
+    @State private var colourTasks: [String: Task<Void, Never>] = [:]
 
     private var rightToLeft: Bool { direction == .rightToLeft }
     private var editable: Bool { model.editable(id) }
@@ -32,19 +33,25 @@ struct NoteTypeCardTextRow: View {
         // A stack, not a Group: a Group with nothing in it runs no task, and the
         // row's content comes from that task.
         VStack(spacing: .zero) {
-            if let row, read == css {
+            // While the styling is read again the row keeps its place, its controls
+            // held; it goes only once the read finds no plain `.card` rule.
+            if let row {
                 content(row)
                     .padding(.horizontal, Spacing.small)
                     .padding(.vertical, Spacing.xSmall)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .disabled(!editable)
+                    .disabled(!editable || read != css)
                     .accessibilityElement(children: .contain)
                     .accessibilityLabel(Text("noteTypes.cardText.title", bundle: .module))
                     .accessibilityIdentifier("noteTypes.cards.cardText")
                 Divider()
             }
         }
+        .onDisappear { cancelColours() }
         .task(id: css) {
+            // A colour still waiting was picked for the styling as it was: a
+            // Revert or another change means it no longer applies.
+            cancelColours()
             let found = await model.cardTextRow(css, rightToLeft: rightToLeft)
             guard !Task.isCancelled else { return }
             row = found
@@ -222,8 +229,8 @@ struct NoteTypeCardTextRow: View {
             get: { colour?.cgColor ?? CardTextColour.unsetWell },
             set: { value in
                 guard let picked = Self.colour(value, opacity: opacity) else { return }
-                colourTask?.cancel()
-                colourTask = Task {
+                colourTasks[identifier]?.cancel()
+                colourTasks[identifier] = Task {
                     guard (try? await Task.sleep(for: .milliseconds(250))) != nil else { return }
                     change(make(picked))
                 }
@@ -238,6 +245,11 @@ struct NoteTypeCardTextRow: View {
     }
 
     /// The picked colour in 8-bit sRGB (opaque where the control allows no opacity).
+    private func cancelColours() {
+        for task in colourTasks.values { task.cancel() }
+        colourTasks = [:]
+    }
+
     private static func colour(_ value: CGColor, opacity: Bool) -> CardTextColour? {
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let converted = value.converted(to: space, intent: .defaultIntent, options: nil),

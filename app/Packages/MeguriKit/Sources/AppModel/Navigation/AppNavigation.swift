@@ -62,7 +62,16 @@ public final class AppNavigation {
     public private(set) var review: ReviewPresentation?
     /// The sidebar layout's columns. The sidebar's own toggle, ⌃⌘S and the
     /// iPad edge swipe write it (R20).
-    public var columnVisibility: NavigationSplitViewVisibility = .all
+    public var columnVisibility: NavigationSplitViewVisibility = .all {
+        didSet {
+            // The person's own change while the window is narrow is what comes back after.
+            if !narrowing, columnVisibilityBeforeNarrow != nil, columnVisibility != oldValue {
+                columnVisibilityBeforeNarrow = columnVisibility
+            }
+        }
+    }
+    /// Set while `setNarrowWorkspace` itself changes the sidebar.
+    @ObservationIgnored private var narrowing = false
     /// Browse's search text, as a deep link (R319) or another screen hands
     /// it to Browse (U210).
     public var browseSearch = ""
@@ -357,6 +366,8 @@ public final class AppNavigation {
     /// wide again or the screen goes. The person's own choice is what the
     /// app remembers.
     public func setNarrowWorkspace(_ narrow: Bool) {
+        narrowing = true
+        defer { narrowing = false }
         if narrow {
             guard columnVisibilityBeforeNarrow == nil, columnVisibility != .detailOnly else { return }
             columnVisibilityBeforeNarrow = columnVisibility
@@ -364,8 +375,8 @@ public final class AppNavigation {
         } else {
             guard let saved = columnVisibilityBeforeNarrow else { return }
             columnVisibilityBeforeNarrow = nil
-            // The person opened the sidebar meanwhile: leave it as it is.
-            if columnVisibility == .detailOnly { columnVisibility = saved }
+            // The last choice the person made while narrow (or the visibility before it).
+            columnVisibility = saved
         }
     }
 

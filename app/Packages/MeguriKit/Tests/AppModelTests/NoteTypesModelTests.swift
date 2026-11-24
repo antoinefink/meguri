@@ -1268,6 +1268,20 @@ extension NoteTypesModelTests {
         #expect(model.draft(7)?.css == css)
     }
 
+    @Test func aSecondChangeBuildsOnTheFirstStillWaitingForTheTextView() async throws {
+        let (model, _) = await open(record(css: ".card { font-size: 20px; }"))
+        await model.changeCardText(7, card: 0, .size(24), rightToLeft: false)
+        // The text view has not applied it yet; the next change starts from it.
+        await model.changeCardText(7, card: 0, .size(25), rightToLeft: false)
+        let request = try #require(model.editorRequest)
+        guard case .replaceHighlighting(let text, _) = request.command else {
+            Issue.record("expected a highlighted replace, got \(request.command)")
+            return
+        }
+        #expect(text == ".card { font-size: 25px; }")
+        #expect(model.draft(7)?.css == ".card { font-size: 24px; }", "the first change landed in the draft when the second took the slot")
+    }
+
     @Test func aRefusedChangeOrAStylingWithoutTheRuleWritesNothing() async {
         let (model, _) = await open(record(css: ".card { color: red; }"))
         await model.changeCardText(7, card: 0, .size(24), rightToLeft: false)
