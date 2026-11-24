@@ -78,6 +78,16 @@ import WebKit
                 return !section.hidden && !section.querySelector('.fieldBoundary').hidden;
                 """, contentWorld: .page) as? Bool == true)
             try await host.focusField(1)
+            // A detached WKWebView may not emit DOM focus. Deliver it through
+            // the real bridge, using the runtime's next sequence (as in FieldEditorTests).
+            // Awaiting setFocus alone does not join the host's message queue.
+            _ = try await host.webView.callAsyncJavaScript("""
+                const {loadId, seq} = await meguriEditorRuntime.receive({type:'flush', loadId:1, hold:false});
+                return await window.webkit.messageHandlers.meguriEditor.postMessage({type:'focus', loadId, seq, ord:1, mode:'rich'});
+                """, contentWorld: .world(name: "Meguri.FieldEditor.v1"))
+            for _ in 0..<200 where draft.focusedField != 1 || !host.fieldFocused {
+                try await Task.sleep(for: .milliseconds(10))
+            }
             #expect(host.modeField == 1, "type-collapsed fields still support the formatting/source controls")
             try await host.setMode(.html, ord: 1)
             #expect(try await FieldEditorTests.replaceSource(host, ord: 1, value: "new empty-field text"))
