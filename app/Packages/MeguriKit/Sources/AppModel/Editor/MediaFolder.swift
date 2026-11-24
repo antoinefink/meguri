@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import UniformTypeIdentifiers
 
 /// The collection's media folder as the field pages use it: their thumbnails
 /// load from it by name, a sound chip plays one of its files, and a thumbnail
@@ -19,10 +20,23 @@ public final class MediaFolder {
         player?.play()
     }
 
-    /// The file a field names (the page host passes plain names only), when it exists.
+    /// The file a field names (the page host passes plain names only), when it
+    /// exists inside the folder once links are resolved.
     public func file(_ name: String) -> URL? {
         guard let directory else { return nil }
+        let root = directory.resolvingSymlinksInPath().standardizedFileURL
         let url = directory.appending(path: name, directoryHint: .notDirectory)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            .resolvingSymlinksInPath().standardizedFileURL
+        guard url.deletingLastPathComponent().path == root.path,
+              FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
+    /// A clicked thumbnail's file, when it is an image: only images go to the
+    /// system's default app.
+    public func image(_ name: String) -> URL? {
+        guard let url = file(name), let type = UTType(filenameExtension: url.pathExtension),
+              type.conforms(to: .image) else { return nil }
+        return url
     }
 }

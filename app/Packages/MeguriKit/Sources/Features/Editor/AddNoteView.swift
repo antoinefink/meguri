@@ -251,6 +251,9 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
             HStack { modeToggle; Spacer(); cancel(); confirm() }.padding()
         }
         .frame(minWidth: 520, idealWidth: 640, maxWidth: 900, minHeight: 420, idealHeight: 640, maxHeight: .infinity)
+        // Only Cancel (Esc) and Done close the sheet, so the discard decision
+        // always stays on screen; the system never dismisses it on its own.
+        .interactiveDismissDisabled()
     }
     private func subtitleText(_ subtitle: String) -> some View {
         Text(verbatim: subtitle).foregroundStyle(.secondary)

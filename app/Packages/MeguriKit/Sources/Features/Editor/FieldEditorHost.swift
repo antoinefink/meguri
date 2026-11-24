@@ -54,7 +54,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         onPlayMedia = { [weak media] in media?.play($0) }
         #if os(macOS)
         onOpenMedia = { [weak media] name in
-            if let url = media?.file(name) { NSWorkspace.shared.open(url) }
+            if let url = media?.image(name) { NSWorkspace.shared.open(url) }
         }
         #endif
     }
