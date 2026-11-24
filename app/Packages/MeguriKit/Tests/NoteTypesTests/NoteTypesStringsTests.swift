@@ -105,9 +105,10 @@ import Testing
         #expect(NoteTypesStrings.fix(.showNotes([1]), locale: english) == "Show Notes")
         #expect(NoteTypesStrings.fixToSave(2, locale: english) == "Fix the 2 red issues to save.")
         #expect(NoteTypesStrings.fixToSave(1, locale: english) == "Fix the red issue to save.")
+        #expect(NoteTypesStrings.duplicateNamed("Recognition", locale: english) == "Duplicate “Recognition”")
         let bundle = NoteTypesStrings.bundle
         let expected = [
-            "noteTypes.cards.cardTypes": "Card Types", "noteTypes.editor.front": "Front", "noteTypes.editor.back": "Back",
+            "noteTypes.cards.cardTypes": "Card Types", "noteTypes.cards.add": "Add Card Type", "noteTypes.cards.more": "More", "noteTypes.editor.front": "Front", "noteTypes.editor.back": "Back",
             "noteTypes.editor.styling": "Styling", "noteTypes.editor.shared": "Shared by All Card Types", "noteTypes.insert": "Insert",
             "noteTypes.insert.field": "Field", "noteTypes.insert.special": "Special Field",
             "noteTypes.insert.ifContent": "Show Only If Field Has Content", "noteTypes.insert.ifEmpty": "Show Only If Field Is Empty",

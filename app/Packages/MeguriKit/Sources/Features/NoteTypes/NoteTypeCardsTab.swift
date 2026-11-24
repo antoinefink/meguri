@@ -99,20 +99,53 @@ struct CardsColumnBar: ViewModifier {
     }
 }
 
-/// The card types column: its bar, then one list with the card types (+ and
-/// − under them) and the Fields section (W5).
+/// The card types column: its bar, with + at its trailing end, then one
+/// list with the card types and the Fields section (W5).
 struct NoteTypeCardsListColumn: View {
     @Bindable var model: NoteTypesModel
     let id: Int64
 
     var body: some View {
         VStack(spacing: .zero) {
-            SectionTitle(title: "noteTypes.cards.cardTypes")
-                .modifier(CardsColumnBar())
-                .accessibilityIdentifier("noteTypes.cards.cardTypesHeader")
+            HStack(spacing: Spacing.xSmall) {
+                SectionTitle(title: "noteTypes.cards.cardTypes")
+                    .accessibilityIdentifier("noteTypes.cards.cardTypesHeader")
+                Spacer(minLength: Spacing.xxSmall)
+                CardTypeAddButton(model: model, id: id)
+            }
+            .modifier(CardsColumnBar())
             Divider()
             NoteTypeCardTypesList(model: model, id: id)
         }
+    }
+}
+
+/// + in the column's bar: duplicates the shown card type (W5). Its help
+/// names that card type, or says why there is nothing to add.
+private struct CardTypeAddButton: View {
+    let model: NoteTypesModel
+    let id: Int64
+    @Environment(\.locale) private var locale
+
+    private var draft: NoteTypeDraft? { model.draft(id) }
+
+    var body: some View {
+        Button { model.addCardType(id) } label: {
+            Label { Text("noteTypes.cards.add", bundle: .module) } icon: { Image(systemName: "plus") }
+                .labelStyle(.iconOnly)
+                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .disabled(!model.editable(id) || draft?.addCardTypeBlock != nil)
+        .help(help)
+        .accessibilityIdentifier("noteTypes.cards.add")
+    }
+
+    private var help: String {
+        if let block = draft?.addCardTypeBlock { return NoteTypesStrings.cardTypeBlock(block, locale: locale) }
+        guard let row = model.shownCard(id).flatMap({ draft?.cardRow($0) }), !row.deleted else { return "" }
+        return NoteTypesStrings.duplicateNamed(row.name, locale: locale)
     }
 }
 
@@ -143,7 +176,6 @@ extension NoteTypesModel {
 struct NoteTypeCardTypesList: View {
     @Bindable var model: NoteTypesModel
     let id: Int64
-    @Environment(\.locale) private var locale
     /// W5's keys act on the list only while it has focus: in the editor
     /// ⌘⌫ and ⌥⌘↑ stay the text view's.
     @FocusState private var listFocused: Bool
@@ -155,20 +187,18 @@ struct NoteTypeCardTypesList: View {
     }
 
     var body: some View {
-        // One list, two sections: the card types with their + and − under
-        // them, then the fields. Plain rows on the editor side's background,
-        // with the system selection.
+        // One list, two sections: the card types, then the fields. Plain
+        // rows on the editor side's background, with the system selection.
+        // A row's More button and its context menu hold the same commands.
         List(selection: selection) {
             Section {
                 ForEach(model.cardTypeLines(id)) { line in
-                    CardTypeRowView(model: model, id: id, line: line)
+                    CardTypeRowView(model: model, id: id, line: line) { menu(line, shortcuts: false) }
                         .tag(line.id)
-                        .contextMenu { menu(line) }
+                        .contextMenu { menu(line, shortcuts: true) }
                 }
                 .onMove { offsets, destination in model.moveCardTypes(id, fromOffsets: offsets, toOffset: destination) }
                 .disabled(!editable)
-            } footer: {
-                bottomBar
             }
             Section {
                 NoteTypeCardFieldRows(model: model, id: id)
@@ -217,62 +247,36 @@ struct NoteTypeCardTypesList: View {
         .accessibilityHidden(true)
     }
 
-    @ViewBuilder private func menu(_ line: CardTypeLine) -> some View {
+    /// A card type's commands: the context menu's, with W5's keys beside
+    /// them, and the row's More menu's, without. The More menus stay in the
+    /// tree, one a row, so keys on them would act on a row nobody chose; the
+    /// list's own keys (`keys`) act on the selected one.
+    @ViewBuilder private func menu(_ line: CardTypeLine, shortcuts: Bool) -> some View {
         if line.deleted {
             Button { model.restoreCardType(id, row: line.id) } label: { Text("noteTypes.cards.restore", bundle: .module) }
         } else {
             Button { startRename(line.id) } label: { Text("noteTypes.cards.rename", bundle: .module) }
             Button { model.selectedCard[id] = line.id; model.addCardType(id) } label: { Text("noteTypes.cards.duplicate", bundle: .module) }
-                .keyboardShortcut("d", modifiers: .command)
+                .keyboardShortcut(shortcuts ? KeyboardShortcut("d", modifiers: .command) : nil)
                 .disabled(draft?.addCardTypeBlock != nil)
             Divider()
             Button { model.moveCardType(id, row: line.id, by: -1) } label: { Text("noteTypes.cards.moveUp", bundle: .module) }
-                .keyboardShortcut(.upArrow, modifiers: [.option, .command])
+                .keyboardShortcut(shortcuts ? KeyboardShortcut(.upArrow, modifiers: [.option, .command]) : nil)
                 .disabled(draft?.canMoveCardType(line.id, by: -1) != true)
             Button { model.moveCardType(id, row: line.id, by: 1) } label: { Text("noteTypes.cards.moveDown", bundle: .module) }
-                .keyboardShortcut(.downArrow, modifiers: [.option, .command])
+                .keyboardShortcut(shortcuts ? KeyboardShortcut(.downArrow, modifiers: [.option, .command]) : nil)
                 .disabled(draft?.canMoveCardType(line.id, by: 1) != true)
             Divider()
             Button(role: .destructive) { model.deleteCardType(id, row: line.id) } label: { Text("noteTypes.cards.delete", bundle: .module) }
-                .keyboardShortcut(.delete, modifiers: .command)
+                .keyboardShortcut(shortcuts ? KeyboardShortcut(.delete, modifiers: .command) : nil)
                 .disabled(draft?.cardDeleteBlock(line.id) != nil)
         }
-    }
-
-    private var bottomBar: some View {
-        HStack(spacing: Spacing.xxSmall) {
-            Button { model.addCardType(id) } label: {
-                Label { Text("noteTypes.cards.add", bundle: .module) } icon: { Image(systemName: "plus") }
-                    .labelStyle(.iconOnly)
-                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                    .contentShape(Rectangle())
-            }
-            .disabled(draft?.addCardTypeBlock != nil)
-            .help(draft?.addCardTypeBlock.map { NoteTypesStrings.cardTypeBlock($0, locale: locale) } ?? "")
-            .accessibilityIdentifier("noteTypes.cards.add")
-            Button { deleteSelected() } label: {
-                Label { Text("noteTypes.cards.deleteSelected", bundle: .module) } icon: { Image(systemName: "minus") }
-                    .labelStyle(.iconOnly)
-                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                    .contentShape(Rectangle())
-            }
-            .disabled(deleteBlocked)
-            .help(deleteHelp)
-            .accessibilityIdentifier("noteTypes.cards.delete")
-            Spacer()
-        }
-        .buttonStyle(.borderless)
-        .disabled(!editable)
     }
 
     private var shownRow: NoteTypeCardTypeRow? { model.shownCard(id).flatMap { draft?.cardRow($0) } }
     private var deleteBlocked: Bool {
         guard let row = shownRow else { return true }
         return row.deleted || draft?.cardDeleteBlock(row.id) != nil
-    }
-    private var deleteHelp: String {
-        guard let row = shownRow, let block = draft?.cardDeleteBlock(row.id) else { return "" }
-        return NoteTypesStrings.cardTypeBlock(block, locale: locale)
     }
 
     private func deleteSelected() {
@@ -288,17 +292,36 @@ struct NoteTypeCardTypesList: View {
 }
 
 /// A card type's row: its name (crossed out when deleted) or the rename
-/// field, its cards, and a dot when an issue names it.
-private struct CardTypeRowView: View {
+/// field, a More button with the row's commands, a dot when an issue names
+/// it, and its cards.
+private struct CardTypeRowView<Actions: View>: View {
     let model: NoteTypesModel
     let id: Int64
     let line: CardTypeLine
+    /// The row's commands, as the More menu's and VoiceOver's actions.
+    @ViewBuilder let actions: () -> Actions
     @State private var text = ""
     @FocusState private var focused: Bool
+    #if os(macOS)
+    @State private var hovered = false
+    #endif
+
+    private var renaming: Bool { model.renamingCard == line.id }
+
+    /// The pointer shows More on the row under it and on the selected one;
+    /// touch has no pointer, so every row shows it.
+    private var showsMore: Bool {
+        guard !renaming else { return false }
+        #if os(macOS)
+        return hovered || model.shownCard(id) == line.id
+        #else
+        return true
+        #endif
+    }
 
     var body: some View {
         HStack(spacing: Spacing.xSmall) {
-            if model.renamingCard == line.id {
+            if renaming {
                 TextField(text: $text) { Text("noteTypes.cards.name", bundle: .module) }
                     .labelsHidden()
                     .focused($focused)
@@ -332,6 +355,7 @@ private struct CardTypeRowView: View {
                     #endif
             }
             Spacer(minLength: Spacing.xxSmall)
+            more
             if let severity = line.severity, !line.deleted {
                 Image(systemName: "circle.fill")
                     .imageScale(.small)
@@ -345,9 +369,37 @@ private struct CardTypeRowView: View {
                     .fixedSize()
             }
         }
-        .accessibilityElement(children: model.renamingCard == line.id ? .contain : .combine)
+        #if os(macOS)
+        .onHover { hovered = $0 }
+        #endif
+        .accessibilityElement(children: renaming ? .contain : .combine)
         .accessibilityValue(line.deleted ? Text("noteTypes.cards.deleted", bundle: .module) : Text(verbatim: ""))
+        // The More menu's commands, as the row's own actions.
+        .accessibilityActions { actions() }
         .accessibilityIdentifier("noteTypes.cards.row.\(line.id)")
+    }
+
+    /// It keeps its place while hidden, so the cards never move under the
+    /// pointer. Out of the accessibility tree: the row carries its commands
+    /// as actions, and a button inside a combined row would become the
+    /// row's own press.
+    private var more: some View {
+        Menu { actions() } label: {
+            Label { Text("noteTypes.cards.more", bundle: .module) } icon: { Image(systemName: "ellipsis") }
+                .labelStyle(.iconOnly)
+        }
+        #if os(macOS)
+        .menuStyle(.borderlessButton)
+        #else
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
+        #endif
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .foregroundStyle(.secondary)
+        .opacity(showsMore ? 1 : 0)
+        .allowsHitTesting(showsMore)
+        .accessibilityHidden(true)
     }
 }
 
