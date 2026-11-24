@@ -88,6 +88,34 @@ fn rows_land_on_anki_days_back_from_the_boundary_and_only_rated_rows_count() {
 }
 
 #[test]
+fn sparse_history_uses_the_same_day_bounds_without_dense_ancient_padding() {
+    let (_dir, path) = empty_collection();
+    {
+        let conn = plain(&path);
+        insert_card(&conn, 1, 10, 0);
+        insert_card(&conn, 2, 99, 10);
+        insert_card(&conn, 3, 10, 20);
+        insert_review(&conn, window_start(N), 1, 3, 1);
+        insert_review(&conn, window_start(N) - 1, 1, 3, 1);
+        insert_review(&conn, (N - 500 * DAY) * 1000, 2, 2, 0);
+        insert_review(&conn, (N - 500 * DAY) * 1000 + 1, 3, 2, 0);
+        insert_review(&conn, (N - 700 * DAY) * 1000, 999, 4, 1);
+        insert_review(&conn, (N - 800 * DAY) * 1000, 1, 0, 4);
+        insert_review(&conn, (N + DAY) * 1000, 1, 3, 1);
+        insert_review(&conn, i64::MIN, 1, 3, 1);
+    }
+    let collection = open(&path).unwrap();
+    let reader = collection.reader_factory().open(ReaderRole::Query).unwrap();
+    let ancient = (N - i64::MIN / 1000) / DAY;
+    let all = reader.activity_history_counts(ActivityScope::Collection, N).unwrap();
+    assert_eq!(all, vec![(0, 1), (370, 1), (371, 1), (500, 2), (700, 1), (ancient, 1)]);
+    let scoped = reader.activity_history_counts(ActivityScope::HomeDecks(&[DeckId(10)]), N).unwrap();
+    assert_eq!(scoped, vec![(0, 1), (370, 1), (371, 1), (500, 1), (ancient, 1)]);
+    assert!(reader.activity_history_counts(ActivityScope::HomeDecks(&[]), N).unwrap().is_empty());
+    assert_eq!(days(&reader.activity_day_counts(ActivityScope::Collection, N).unwrap()), vec![(0, 1), (370, 1)]);
+}
+
+#[test]
 fn deck_scope_follows_the_home_deck_of_cards_as_they_are_now() {
     let (_dir, path) = empty_collection();
     {

@@ -62,14 +62,34 @@ pub(crate) fn day_counts(
     scope: ActivityScope<'_>,
     next_day_at: i64,
 ) -> Result<Vec<u32>, StorageError> {
-    let start = window_start(next_day_at);
     let mut counts = vec![0u32; ACTIVITY_DAYS as usize];
-    let mut add = |k: i64, n: i64| {
-        // The bound keeps k at or under 370; a row stamped in the far future
-        // has k 0 (max), so nothing falls outside the vector.
+    for (k, n) in sparse_day_counts(conn, scope, next_day_at, window_start(next_day_at))? {
         if let Some(slot) = usize::try_from(k).ok().and_then(|k| counts.get_mut(k)) {
-            *slot = slot.saturating_add(u32::try_from(n).unwrap_or(u32::MAX));
+            *slot = n;
         }
+    }
+    Ok(counts)
+}
+
+/// Mac Home's all-history read. Missing days are zero; space is proportional
+/// to studied days, never to the age of the oldest review timestamp.
+pub(crate) fn history_counts(
+    conn: &Connection,
+    scope: ActivityScope<'_>,
+    next_day_at: i64,
+) -> Result<Vec<(i64, u32)>, StorageError> {
+    sparse_day_counts(conn, scope, next_day_at, i64::MIN)
+}
+
+fn sparse_day_counts(
+    conn: &Connection,
+    scope: ActivityScope<'_>,
+    next_day_at: i64,
+    start: i64,
+) -> Result<Vec<(i64, u32)>, StorageError> {
+    let mut counts = Vec::new();
+    let mut add = |k: i64, n: i64| {
+        counts.push((k, u32::try_from(n).unwrap_or(u32::MAX)));
     };
     match scope {
         ActivityScope::Collection => {

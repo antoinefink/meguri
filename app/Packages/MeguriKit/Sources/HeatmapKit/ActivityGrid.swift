@@ -8,7 +8,7 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
     /// 52 full weeks and the current one: the 371 days the query returns.
     public static let maximumWeeks = 53
 
-    /// N14.11's baseline square, in points. Mac Home can resize it to fill its row.
+    /// N14.11's fixed square, in points.
     public nonisolated struct Square: Sendable, Equatable {
         public let side: CGFloat
         /// The space between two squares, across and down.
@@ -24,8 +24,8 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
         public static let touch = Square(side: 16, gap: 3)
     }
 
-    /// Whole weeks selected at the baseline size, and the grid's own size. By default
-    /// squares keep that size; Mac Home opts into filling the row with square cells.
+    /// Whole weeks at a fixed square size, and the grid's natural size.
+    /// Existing callers keep the 53-week window; Mac Home opts into older weeks.
     public nonisolated struct Geometry: Sendable, Equatable {
         public let weeks: Int
         public let square: Square
@@ -38,23 +38,18 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
         /// Seven rows; before measurement the baseline height is reserved.
         public var height: CGFloat { 7 * side + 6 * gap }
 
-        /// The most recent whole weeks that fit `available`, at most 53: ⌊(available + gap) / pitch⌋,
-        /// and at least one once a width is known. With `fillingWidth`, those weeks fill
-        /// the row by resizing the side alone, keeping the gap fixed even above 53 weeks'
-        /// baseline width. A positive width smaller than one baseline cell shows one
-        /// smaller cell; an unknown or invalid width keeps the baseline placeholder height.
-        public init(width available: CGFloat, square: Square, fillingWidth: Bool = false) {
-            guard available > 0, available.isFinite, square.side > 0 else {
-                weeks = 0
-                self.square = square
-                return
-            }
-            // n columns need n·pitch − gap; the small allowance absorbs layout rounding.
-            let fitting = ((available + square.gap) / (square.side + square.gap) + 1e-6).rounded(.down)
-            weeks = Int(min(CGFloat(ActivityGrid.maximumWeeks), max(1, fitting)))
-            self.square = fillingWidth
-                ? Square(side: (available - CGFloat(weeks - 1) * square.gap) / CGFloat(weeks), gap: square.gap)
-                : square
+        /// The most recent whole weeks that fit, keeping cells and gaps fixed.
+        /// A nil limit is for a source that covers all history (Mac Home only).
+        /// Unknown/invalid widths reserve the seven-row height without columns.
+        public init(width available: CGFloat, square: Square, maximumWeeks: Int? = ActivityGrid.maximumWeeks) {
+            self.square = square
+            guard available > 0, available.isFinite, square.side > 0, square.gap >= 0,
+                  square.side.isFinite, square.gap.isFinite else { weeks = 0; return }
+            let fitting = ((available + square.gap) / (square.side + square.gap)).rounded(.down)
+            // Keep day-index arithmetic representable even for invalid enormous input.
+            guard fitting.isFinite, fitting < CGFloat(Int.max / 7) else { weeks = 0; return }
+            let count = max(1, Int(fitting))
+            weeks = maximumWeeks.map { min(max(0, $0), count) } ?? count
         }
     }
 
@@ -120,6 +115,7 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
     public let todayRow: Int
     /// Counts per day, index = days ago, as the core returns them.
     private let counts: [UInt32]
+    private let history: [Int: UInt32]?
     /// AH7's levels for the days shown.
     public let levels: Levels
     /// The busiest day shown (AH7's M).
@@ -134,7 +130,21 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
         self.weeks = max(0, min(ActivityGrid.maximumWeeks, weeks))
         todayRow = ((todayWeekday - firstWeekday) % 7 + 7) % 7
         self.counts = counts
+        history = nil
         let shown = counts.prefix(max(0, (self.weeks - 1) * 7 + todayRow + 1))
+        levels = Levels(counts: shown)
+        total = shown.reduce(0) { $0 + Int($1) }
+    }
+
+    /// All-history source: only studied days are stored. The visible window, levels
+    /// and total are sliced on resize, without padding back to the oldest timestamp.
+    public init(history: [Int: UInt32], weeks: Int, todayWeekday: Int, firstWeekday: Int) {
+        self.weeks = max(0, min(Int.max / 7, weeks))
+        todayRow = ((todayWeekday - firstWeekday) % 7 + 7) % 7
+        counts = []
+        self.history = history
+        let end = self.weeks > 0 ? (self.weeks - 1) * 7 + todayRow + 1 : 0
+        let shown = history.filter { $0.key >= 0 && $0.key < end }.values
         levels = Levels(counts: shown)
         total = shown.reduce(0) { $0 + Int($1) }
     }
@@ -147,7 +157,8 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
     }
 
     public func count(daysAgo: Int) -> UInt32 {
-        counts.indices.contains(daysAgo) ? counts[daysAgo] : 0
+        if let history { return history[daysAgo] ?? 0 }
+        return counts.indices.contains(daysAgo) ? counts[daysAgo] : 0
     }
 
     public func level(daysAgo: Int) -> Int { levels.level(count(daysAgo: daysAgo)) }
