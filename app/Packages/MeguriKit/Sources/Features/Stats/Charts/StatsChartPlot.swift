@@ -140,6 +140,8 @@ struct StatsChartPlot: View {
     private let topBarSeries: [Int: Int]
     /// The last stacked series: the top band of an area.
     private let topSeries: Int?
+    /// Shared by every bar: scanning all bins inside each mark makes a draw quadratic.
+    let barWidthIsFixed: Bool
 
     init(
         box: String, data: StatsChartData, phase: StatsPlotPhase, size: StatsPlotSize, summary: String,
@@ -157,6 +159,7 @@ struct StatsChartPlot: View {
         self.separatesSeries = separatesSeries
         let ready = phase == .ready && !data.bins.isEmpty
         isReady = ready
+        barWidthIsFixed = ready && data.series.contains { $0.mark == .bar || $0.mark == .stackedBar } && data.isSparse
         domain = ready ? data.yDomain : 0...1
         let segments = ready ? data.stackedSegments() : []
         self.segments = segments
@@ -450,7 +453,7 @@ struct StatsChartPlot: View {
     /// Bars fill their band; with fewer than three bins holding data they keep a
     /// fixed width instead (S8.5).
     private var barWidth: MarkDimension {
-        data.isSparse ? .fixed(18) : .ratio(0.8)
+        barWidthIsFixed ? .fixed(18) : .ratio(0.8)
     }
 
     // MARK: Axes
