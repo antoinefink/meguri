@@ -850,18 +850,27 @@ PUBLIC_ARTIFACTS = {
     # Complete-content PUBLIC review: s-20261124T123814Z-b6a481ac, 20261124T195423Z-42752.
     'docs/design/native-interface-contract.md':
         '4dad165a4448a914c773d7bfdac5fa65bc1f9b2e6f4078aac082dedd3a5f0bb6',
+    # Complete-file reviews recorded in duo-posture-rework-20261124.md.
+    'docs/process/sim-posture.md':
+        'e7e4722c12dcb9705a1e8cd8264b70cc6c3a4f9b8ec8af3a216e5689e317e928',
+    'tools/vm/sim-posture-visual.swift':
+        '56471e99fdc7acc4dec76d99248c68859a46758e50498a67cf53cdb743a87d3d',
+    'tools/vm/sim-posture.py':
+        '9fc732f45ad90e732c973bc5451ed30c4edcfc47378598681c6b7b55e700cff4',
+    'tools/vm/tests/test_sim_posture.py':
+        '56c62162ec9250725310815970941bb0287bc06a4385bcef7f55b7e3e3f7fc9b',
     # Complete-file review of the Duo transport repair, 2026-11-24.
     'docs/process/new-machine.md':
         'ca64a19aae880b88be34955af62194f9f8a358f361aa20d801e789a287534b6a',
     'tools/tests/vnc_session_test.py':
-        'fc1d259404a54138a5fc28a7cf6022246fdb1afeee7cf4b09fa96bef20710671',
+        'bdebc576c9d50cedda7a28be98c2027dedc47e5d07d17990a6e7ad4c272f416a',
     'tools/vm/vnc-holder.py':
-        'b18e7fa249773c492e4bb9d2241bb8f5dacf24992bf27975362c68c36e406ac4',
+        'd730c4b3e646d82f0b9540a3a4d1d39d40d46d6bfafb5f890da655f8c32a5d81',
     # Complete-file privacy reviews for the remote Duo tooling, 2026-11-24.
     'docs/process/review-log/duo-simulator-posture-20261124.md':
         '678c5d137d1b74876d52382f3c27e53a0a3eef2d70fcae355f4d404f1eabb0c1',
     'tools/vm/sim-posture-inspect.py':
-        '34c2970a2037e9b145e4706c0ff077cae047f6bf240577a570711d6c0cdf9ed7',
+        '0c71d599fb3bdcb658abd5bd919afca39b907cf4e3c8c4ec4d8bdf4cdeba567e',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',

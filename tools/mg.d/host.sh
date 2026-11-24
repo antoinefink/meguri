@@ -138,6 +138,8 @@ mg_host_session_state() {
 mg__lease_stale() {
   local pid
   [ ! -e "$1/vm-xcode-pending" ] || return 1
+  [ ! -e "$1/sim-posture-pending" ] || return 1
+  [ ! -e "$1/vm-shutdown-pending" ] || return 1
   pid="$(jq -r '.pid // empty' <<<"$2" 2>/dev/null)"
   { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } ||
     { [ -z "$pid" ] && [ -n "$(find "$1" -maxdepth 0 -mmin +2 2>/dev/null)" ]; }

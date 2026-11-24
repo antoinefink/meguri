@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -129,9 +130,9 @@ class SessionTests(unittest.TestCase):
         # /var/folders on macOS can itself exhaust sockaddr_un's small limit.
         self.tmp = tempfile.TemporaryDirectory(dir="/tmp", prefix="vnc-")
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         self.state = self.root / "build/vm-fold"
-        self.state.mkdir(parents=True)
+        self.state.mkdir(parents=True, mode=0o700)
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.lease = self.root / "scheduler/mac-vm.guest.lock"
@@ -147,6 +148,35 @@ class SessionTests(unittest.TestCase):
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / name, dest)
         self.script("git", "print(__import__('os').environ['FAKE_ROOT'] + '/.git')\n")
+        # The synthetic guest and transport each own an authenticated self-exit
+        # endpoint. No PID file authorizes a fixture signal or host operation.
+        self.script("fixture_control.py", '''import json, os, pathlib, secrets, socket, threading
+root = pathlib.Path(os.environ['FAKE_ROOT'])
+def rpc(name, action):
+    record = json.loads((root / ('fixture-' + name + '.json')).read_text())
+    with socket.create_connection(('127.0.0.1', record['port']), timeout=2) as channel:
+        channel.sendall((record['token'] + ' ' + action + '\\n').encode())
+        return channel.recv(100)
+def serve(name):
+    listener = socket.socket()
+    listener.bind(('127.0.0.1', 0))
+    listener.listen()
+    token = secrets.token_hex(32)
+    record = root / ('fixture-' + name + '.json')
+    temporary = record.with_suffix('.new')
+    temporary.write_text(json.dumps(dict(port=listener.getsockname()[1], token=token)))
+    temporary.replace(record)
+    def run():
+        while True:
+            with listener.accept()[0] as channel:
+                line = channel.makefile('rb').readline(256)
+                if line not in [(token + ' ' + action + '\\n').encode() for action in ('ping', 'exit')]:
+                    continue
+                channel.sendall(b'alive\\n')
+                if line == (token + ' exit\\n').encode():
+                    os._exit(0)
+    threading.Thread(target=run, daemon=True).start()
+''')
         self.script("tart", '''import json, os, pathlib, sys, time
 root = pathlib.Path(os.environ['FAKE_ROOT'])
 assert (root / 'scheduler/mac-vm.guest.lock/holder.json').exists()
@@ -160,8 +190,18 @@ if sys.argv[1] == 'list':
     print(json.dumps([{'Name': 'guest', 'State': state.read_text()}]))
 elif sys.argv[1] == 'stop':
     assert (root / 'pool/pool.lock/pid').exists(), 'shutdown without legacy pool mutex'
+    assert (root / 'scheduler/mac-vm.guest.lock/vm-shutdown-pending/intent.json').exists(), 'stop without scheduler fence'
+    if (root / 'stop-guard-loss').exists():
+        from fixture_control import rpc
+        assert rpc('transport', 'exit') == b'alive\\n'
+        assert rpc('guest', 'ping') == b'alive\\n'
+        (root / 'stop-waiting').touch()
+        while not (root / 'stop-release').exists(): time.sleep(.01)
+        sys.exit(255)
     if (root / 'stop-uncertain').exists(): sys.exit(255)
     if (root / 'stop-failed').exists(): sys.exit(1)
+    from fixture_control import rpc
+    assert rpc('guest', 'exit') == b'alive\\n'
     state.write_text('stopped')
 elif sys.argv[1] == 'run':
     state.write_text('running')
@@ -172,7 +212,7 @@ elif sys.argv[1] == 'run':
         while state.read_text() != 'stopped': time.sleep(.01)
         if (root / 'lost-run').exists(): sys.exit(255)
 ''')
-        self.script("vm-ssh", '''import os, pathlib, subprocess, sys
+        self.script("vm-ssh", '''import os, pathlib, shlex, subprocess, sys
 root = pathlib.Path(os.environ['FAKE_ROOT'])
 assert (root / 'scheduler/mac-vm.guest.lock/holder.json').exists()
 cmd = sys.argv[1]
@@ -181,7 +221,15 @@ if 'pgrep' in cmd:
 elif 'stat -f' in cmd:
     if not ((root / 'no-guest').exists() and (root / 'vm-mode').read_text() == 'vnc'): print('guest-user')
 else:
-    sys.exit(subprocess.call(['/bin/sh', '-c', cmd]))
+    if 'drain guard expired' in cmd:
+        from fixture_control import serve
+        serve('transport')
+        words = shlex.split(cmd)
+        index = words.index('-c') + 1
+        words[index] = ('import sys; sys.path.insert(0, ' + repr(str(root / 'bin')) + '); '
+                        "from fixture_control import serve; serve('guest')\\n" + words[index])
+        cmd = shlex.join(words)
+    sys.exit(subprocess.call(['/bin/sh', '-c', 'exec ' + cmd]))
 ''')
         tunnel = self.script("ssh", '''import json, os, pathlib, socket, sys, time
 root = pathlib.Path(os.environ['FAKE_ROOT'])
@@ -246,7 +294,7 @@ while True:
 ''')
         venv = self.state / "venv/bin"
         venv.mkdir(parents=True)
-        self.script("holder-python", "import os, sys\nif '-c' not in sys.argv:\n    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n")
+        self.script("holder-python", "import os, sys, pathlib\npathlib.Path(os.environ['FAKE_ROOT'], 'holder-interpreter').write_text(sys.argv[0])\nif '-c' not in sys.argv:\n    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n")
         (venv / "python").symlink_to(self.bin / "holder-python")
         (self.root / "config.json").write_text(json.dumps({"tart": str(self.bin / "tart"),
             "ssh": str(self.bin / "vm-ssh"), "vms": ["guest"]}))
@@ -267,7 +315,18 @@ while True:
         self.assertNotIn(b"fake-test-secret", result.stdout + result.stderr)
         return result
 
+    def fixture_rpc(self, name, action):
+        record = json.loads((self.root / ('fixture-' + name + '.json')).read_text())
+        with socket.create_connection(('127.0.0.1', record['port']), timeout=2) as channel:
+            channel.sendall((record['token'] + ' ' + action + '\n').encode())
+            return channel.recv(100)
+
     def kill_children(self):
+        for name in ('guest', 'transport'):
+            try:
+                self.fixture_rpc(name, 'exit')
+            except (OSError, ValueError):
+                pass
         # Synthetic-only cleanup: permit the owned Tart child to end normally.
         (self.root / 'vm-state').write_text('stopped')
         try:
@@ -277,6 +336,108 @@ while True:
 
     def trace(self):
         return (self.root / "trace").read_text() if (self.root / "trace").exists() else ""
+
+    def test_disconnected_route_reuses_canonical_venv_across_commands_and_worktrees(self):
+        canonical = self.state
+        # Synthetic OS observations only; use the real routing/lifecycle code.
+        for name in ("tart", "vm-ssh"):
+            path = self.bin / name
+            path.write_text(path.read_text().replace("guest", "meguri-mac"))
+        config = self.root / "config.json"
+        config.write_text(config.read_text().replace('"guest"', '"meguri-mac"'))
+        self.lease = self.lease.with_name("mac-vm.meguri-mac.lock")
+        for name, value in {"vm": "meguri-mac", "holder.pid": "101", "tunnel.pid": "102",
+                            "tart.pid": "103", "holder.log": "connected\n",
+                            "tart.log": "vnc://:synthetic@127.0.0.1:54321\n"}.items():
+            (canonical / name).write_text(value)
+        os.mkfifo(canonical / "commands", 0o600)
+        ps = self.script("old-ps", '''import os, pathlib, sys
+root = pathlib.Path(os.environ['FAKE_ROOT'])
+if (root / 'old-live').exists(): sys.exit(2)
+if sys.argv[sys.argv.index('-p') + 1] != '101': sys.exit(1)
+if sys.argv[-1] == 'pid=': print('101')
+else:
+    state = root / 'build/vm-fold'
+    print(str(os.getuid()) + ' S Tue Nov 24 12:00:00 2026 /venv/bin/python -I /old/tools/vm/vnc-holder.py ' + str(state / 'commands') + ' ' + str(state / 'holder.pid'))
+''')
+        lsof = self.script("old-lsof", "import sys\nsys.exit(1)\n")
+        helper = self.root / "tools/vm/vnc-session.py"
+        helper.write_text(helper.read_text().replace('"/bin/ps"', repr(str(ps)))
+                          .replace('"/usr/sbin/lsof"', repr(str(lsof))))
+        def old_snapshot():
+            return {p.name: (p.lstat(), p.read_bytes() if p.is_file() else None)
+                    for p in canonical.iterdir()}
+        before = old_snapshot()
+        self.state = canonical.with_name("vmf2")
+        # A failed read-only proof neither creates the managed root nor changes
+        # the roster/guest. Original legacy lifecycle remains refused.
+        (self.root / 'old-live').touch()
+        self.call("prepare", 1)
+        self.call("stop", 1)
+        self.assertFalse(self.state.exists())
+        self.assertEqual(self.trace(), "")
+        (self.root / 'old-live').unlink()
+        self.call("prepare")
+        self.assertEqual((self.root / "holder-interpreter").read_text(), str(canonical / "venv/bin/python"))
+        self.assertFalse((self.state / "venv").exists())
+        owner = (self.state / "owner").read_bytes()
+        trace = self.trace()
+        self.call("prepare")
+        self.assertTrue(json.loads(self.call("status").stdout)["connected"])
+        worktree = self.root / "another-worktree"
+        shutil.copytree(self.root / "tools", worktree / "tools")
+        for command in ("status", "prepare"):
+            result = subprocess.run(["bash", str(worktree / "tools/vm/duo-fold.sh"), command],
+                                    env=self.env, capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual((self.state / "owner").read_bytes(), owner)
+        self.assertEqual(self.trace(), trace)
+        # Validate the selected managed VM with the same bounded nofollow read
+        # as the untouched canonical root, before any lifecycle operation.
+        managed_vm = self.state / 'vm'
+        original_vm = managed_vm.read_bytes()
+        managed_vm.unlink()
+        managed_vm.symlink_to(canonical / 'vm')
+        for command in ('prepare', 'stop', 'status'):
+            self.call(command, 1)
+        self.assertTrue(managed_vm.is_symlink())
+        self.assertEqual(self.trace(), trace)
+        managed_vm.unlink()
+        managed_vm.write_bytes(original_vm)
+        jq = shutil.which('jq')
+        self.script('jq', '''import os, pathlib, sys
+if '--arg' in sys.argv and any(job in sys.argv for job in ('vm-fold-prepare', 'vm-fold-stop')):
+    path = pathlib.Path(os.environ['FAKE_ROOT'], 'build/vmf2/vm')
+    path.unlink()
+    path.symlink_to('/missing-vm')
+os.execv(''' + repr(jq) + ''', ['jq', *sys.argv[1:]])
+''')
+        for command in ('prepare', 'stop'):
+            self.call(command, 1)
+            self.assertTrue(managed_vm.is_symlink())
+            self.assertFalse(self.lease.exists())
+            self.assertEqual(self.trace(), trace)
+            managed_vm.unlink()
+            managed_vm.write_bytes(original_vm)
+        (self.bin / 'jq').unlink()
+        # Both roots with live/unknown evidence refuse before input or lifecycle.
+        (self.root / 'old-live').touch()
+        for command, args in (("prepare", ()), ("stop", ()), ("click", ("1", "2")),
+                              ("hub", ("synthetic",)), ("status", ())):
+            self.call(command, 1, *args)
+        self.assertEqual(self.trace(), trace)
+        self.assertFalse(self.lease.exists())
+        (self.root / 'old-live').unlink()
+        self.call("stop")
+        self.call("prepare")
+        self.call("stop")
+        # atime may change during reads; inode, contents, modes and mtimes don't.
+        after = old_snapshot()
+        self.assertEqual(before.keys(), after.keys())
+        for name in before:
+            for field in ("st_ino", "st_mode", "st_mtime_ns"):
+                self.assertEqual(getattr(before[name][0], field), getattr(after[name][0], field))
+            self.assertEqual(before[name][1], after[name][1])
 
     def test_secondary_lifecycle_refused_before_touching_global_session(self):
         config = self.root / "config.json"
@@ -299,6 +460,109 @@ while True:
         self.call("prepare", 1)
         self.call("stop", 1)
         self.assertEqual(self.trace(), before)
+
+    def test_primary_metadata_refuses_fifo_symlinks_and_oversized_without_lifecycle(self):
+        path = self.state / "vm"
+        target = self.root / "target-vm"
+        target.write_text("guest")
+        for kind in ("fifo", "symlink", "dangling", "oversized"):
+            with self.subTest(kind=kind):
+                if kind == "fifo":
+                    os.mkfifo(path)
+                elif kind in ("symlink", "dangling"):
+                    path.symlink_to(target if kind == "symlink" else self.root / "missing")
+                else:
+                    path.write_text("guest" + " " * 65536)
+                fields = lambda info: (info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns)
+                before = fields(path.lstat())
+                for command in ("prepare", "start", "stop"):
+                    self.call(command, 1)  # Bounded shell timeout catches FIFO opens.
+                self.assertEqual(fields(path.lstat()), before)
+                self.assertEqual(self.trace(), "")
+                self.assertFalse(self.lease.exists())
+                path.unlink()
+
+    def test_primary_metadata_is_rechecked_under_start_and_stop_lease(self):
+        jq = shutil.which("jq")
+        self.script("jq", '''import os, pathlib, sys
+if '--arg' in sys.argv and any(job in sys.argv for job in ('vm-fold-prepare', 'vm-fold-stop')):
+    pathlib.Path(os.environ['FAKE_ROOT'], 'build/vm-fold/vm').symlink_to('/missing-vm')
+os.execv(''' + repr(jq) + ''', ['jq', *sys.argv[1:]])
+''')
+        for command in ("prepare", "stop"):
+            self.call(command, 1)
+            self.assertTrue((self.state / "vm").is_symlink())
+            self.assertFalse(self.lease.exists())
+            self.assertEqual(self.trace(), "")
+            (self.state / "vm").unlink()
+
+    def test_missing_stop_wrapper_does_not_restore_a_running_guest(self):
+        (self.bin / "tart").unlink()
+        result = self.call("prepare", 1)
+        self.assertIn(b"could not launch; no stop issued", result.stderr)
+        self.assertNotIn(b"restoration", result.stderr)
+        self.assertEqual((self.root / "vm-state").read_text(), "running")
+        self.assertEqual(self.trace(), "")
+        for name in ("recovery-pending", "shutdown-pending", "drain-token"):
+            self.assertFalse((self.state / name).exists())
+        self.assertFalse((self.root / "pool/pool.lock").exists())
+        self.assertFalse(self.lease.exists())
+
+    def mac_ui_scheduler_client(self, blocked, secondary=False):
+        result = subprocess.run(["bash", "-c", '''
+mg_job() { :; }
+mg_detail() { :; }
+mg_failure() { echo "$1"; }
+mg_message() { :; }
+mg_status() { :; }
+MG_TOOLS=''' + shlex.quote(str(ROOT / "tools")) + '''
+MG_ROOT=''' + shlex.quote(str(self.root / "other-worktree")) + '''
+MG_JOB=mac-ui MG_SIM_RUNNER="" MG_RUN_ID=second-client
+source "$MG_TOOLS/mg.d/host.sh"
+source "$MG_TOOLS/mg.d/mac-vm.sh"
+MG_MAC_RUNNER=vm
+MG_MAC_VMS='[{"name":"guest"}]'
+[ -z "$SECOND_VM" ] || MG_MAC_VMS='[{"name":"guest"},{"name":"other-guest"}]'
+# No VM execution: admission is the exact boundary this regression exercises.
+mg__mac_vm_boot() { echo admitted; return 1; }
+mg__mac_vm_stop_orphans() { :; }
+mg_mac_ui_take
+'''], env=dict(self.env, MEGURI_MAC_VM_LEASE_WAIT_SECONDS="1",
+              MEGURI_MAC_VM_POLL_SECONDS=".05", SECOND_VM="1" if secondary else ""),
+                                capture_output=True, timeout=5)
+        if blocked:
+            self.assertIn(b"VM lease: waiting for the VM", result.stderr)
+            self.assertIn(b"mac-vm-busy", result.stdout, result.stderr.decode())
+            self.assertNotIn(b"admitted", result.stdout)
+        else:
+            self.assertIn(b"admitted", result.stdout, result.stderr.decode())
+            self.assertNotIn(b"mac-vm-busy", result.stdout)
+
+    def test_uncertain_stop_fences_second_worktree_mac_ui_scheduler(self):
+        (self.root / "stop-uncertain").touch()
+        self.call("prepare", 1)
+        self.assertTrue((self.lease / "vm-shutdown-pending").is_dir())
+        holder = (self.lease / "holder.json").read_bytes()
+        intent = json.loads((self.lease / "vm-shutdown-pending/intent.json").read_text())
+        self.assertEqual(intent["token"], (self.state / "shutdown-pending").read_text())
+        self.assertEqual(intent["token"], (self.state / "drain-token").read_text())
+        self.mac_ui_scheduler_client(blocked=True)
+        self.mac_ui_scheduler_client(blocked=False, secondary=True)
+        self.assertEqual((self.lease / "holder.json").read_bytes(), holder)
+
+    def test_proven_no_stop_launch_and_missing_ssh_allow_second_scheduler_client(self):
+        for missing in ("tart", "vm-ssh"):
+            with self.subTest(missing=missing):
+                wrapper = self.bin / missing
+                saved = wrapper.read_bytes()
+                wrapper.unlink()
+                try:
+                    self.call("prepare", 1)
+                    self.assertFalse(self.lease.exists())
+                    self.mac_ui_scheduler_client(blocked=False)
+                finally:
+                    wrapper.write_bytes(saved)
+                    wrapper.chmod(0o700)
 
     def test_scheduler_metadata_failure_releases_only_own_lease(self):
         jq = shutil.which("jq")
@@ -325,7 +589,7 @@ os.execv(''' + repr(jq) + ''', ['jq', *sys.argv[1:]])
         # Keep the path in Linux's accepted range but over Darwin's 103 bytes.
         long_root = self.root / ("x" * (104 - len(os.fsencode(self.state / "control.sock")) - 1))
         long_state = long_root / "build/vm-fold"
-        long_state.mkdir(parents=True)
+        long_state.mkdir(parents=True, mode=0o700)
         (long_state / "venv").symlink_to(self.state / "venv")
         self.script("git", "print(" + repr(str(long_root / ".git")) + ")\n")
         result = self.call("prepare", 1)
@@ -353,6 +617,10 @@ os.execv(''' + repr(jq) + ''', ['jq', *sys.argv[1:]])
         self.assertNotIn("run --no-graphics", self.trace())
         (self.root / "stop-uncertain").unlink()
         (self.state / "shutdown-pending").unlink()  # Synthetic unknown command has joined.
+        (self.lease / "vm-shutdown-pending/intent.json").unlink()
+        (self.lease / "vm-shutdown-pending").rmdir()
+        self.lease.joinpath("holder.json").unlink()
+        self.lease.rmdir()
         (self.state / "recovery-pending").unlink()
         (self.root / "stop-failed").touch()
         result = self.call("prepare", 1)
@@ -429,6 +697,9 @@ mg_sim_posture prepare
             lease.write_text(json.dumps(data))
             self.call("prepare", 1)
             self.assertEqual(json.loads(lease.read_text()), data)
+            for name in ("recovery-pending", "shutdown-pending", "drain-token"):
+                self.assertFalse((self.state / name).exists())
+            self.assertFalse((self.root / "pool/pool.lock").exists())
         self.assertEqual(self.trace(), "")
         lease.write_text(json.dumps({"expires_epoch": time.time() - 1}))
         self.call("prepare")
@@ -521,10 +792,43 @@ print(json.dumps({'ready': True}))
         self.assertTrue((self.state / 'vm').exists())
         self.assertTrue(m.status(self.state, 'guest')['connected'])
         self.assertNotIn('run --no-graphics guest', self.trace()[len(before):])
-        self.assertFalse((self.root / 'pool/pool.lock').exists())
+        self.assertTrue((self.root / 'pool/pool.lock/vnc-drain-owner').exists())
         (self.root / 'stop-uncertain').unlink()
-        self.call('stop', 1)  # List/running alone cannot resolve lost stop completion.
+        self.call('stop', 3)  # The unresolved stop retains the primary scheduler lease.
         self.assertTrue((self.state / 'shutdown-pending').exists())
+
+    def test_guard_ssh_loss_while_tart_stop_waits_keeps_exclusion(self):
+        (self.root / "stop-guard-loss").touch()
+        attempt = subprocess.Popen(["bash", str(self.root / "tools/vm/duo-fold.sh"), "prepare"],
+                                   env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            m.wait_until(lambda: (self.root / "stop-waiting").exists(), 8, "stop never started")
+            self.assertIsNone(attempt.poll())
+            lock = self.root / "pool/pool.lock"
+            self.assertTrue((lock / "vnc-drain-owner").exists())
+            self.assertEqual(self.fixture_rpc('guest', 'ping'), b'alive\n')
+            with self.assertRaises(FileExistsError):
+                lock.mkdir()
+            # Even an explicit cleanup request must refuse while Tart can stop.
+            cleanup = subprocess.run([sys.executable, str(self.root / "tools/vm/vnc-session.py"),
+                                      "clean-drain", str(self.state), str(self.bin / "vm-ssh")],
+                                     env=self.env, capture_output=True, timeout=3)
+            self.assertEqual(cleanup.returncode, 1)
+            self.assertTrue(lock.exists())
+            (self.root / "stop-release").touch()
+            _, error = attempt.communicate(timeout=10)
+            self.assertEqual(attempt.returncode, 1, error.decode())
+            self.assertTrue(lock.exists())
+            self.call("stop", 3)
+            self.assertEqual(self.trace().count("stop guest"), 1)
+            self.assertNotIn("run --no-graphics", self.trace())
+            self.assertTrue((self.state / "shutdown-pending").exists())
+            self.assertTrue((self.state / "recovery-pending").exists())
+        finally:
+            (self.root / "stop-release").touch()
+            if attempt.poll() is None:
+                attempt.kill()
+            attempt.communicate(timeout=10)
 
     def test_lost_remote_run_retains_evidence_without_headless(self):
         self.call('prepare')
@@ -673,12 +977,34 @@ mg_sim_posture ''' + action], capture_output=True, timeout=3)
                 self.assertEqual(result.returncode, 0, result.stderr.decode())
                 self.assertEqual(result.stdout.decode().strip(), expected)
 
+    def test_posture_scheduler_machine_and_execution_failures_are_distinct(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "vm").mkdir()
+            script = folder / "vm/duo-fold.sh"
+            for code, expected in ((3, "queued:scheduler"), (5, "queued:transport"), (1, "fail")):
+                script.write_text("#!/bin/sh\nexit " + str(code) + "\n")
+                script.chmod(0o700)
+                result = subprocess.run(["bash", "-c", '''
+mg_job() { :; }
+mg_failure() { :; }
+mg_status() { echo "$1"; }
+mg__mac_vm_unreachable() {
+  case "$1" in *scheduler*) echo queued:scheduler;; *transport*) echo queued:transport;; esac
+}
+source ''' + shlex.quote(str(ROOT / "tools/mg.d/sim.sh")) + '''
+MG_TOOLS=''' + shlex.quote(directory) + '''
+mg_sim_posture open 11111111-2222-3333-4444-555555555555
+'''], capture_output=True, timeout=3)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                self.assertEqual(result.stdout.decode().strip(), expected)
+
 
 class PreviousSessionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.state = Path(self.tmp.name) / "private state"
+        self.state = Path(self.tmp.name).resolve() / "private state"
         self.state.mkdir(mode=0o700)
         self.tart = self.state.parent / "tart"
         (self.state.parent / "remote.json").write_text(json.dumps({"host": "m3", "runtime": "/private kit"}))
@@ -709,8 +1035,87 @@ class PreviousSessionTests(unittest.TestCase):
         return {p.name: (p.lstat().st_ino, p.lstat().st_mode, p.read_bytes() if p.is_file() else None)
                 for p in self.state.iterdir()}
 
+    def disconnected_probe(self, args, **kwargs):
+        self.assertEqual(kwargs, {"capture_output": True, "timeout": 3})
+        self.assertIn(args[0], ("/bin/ps", "/usr/sbin/lsof"))
+        pid = args[args.index("-p") + 1]
+        if args[0] == "/usr/sbin/lsof":
+            self.assertIn("-iTCP", args)
+            self.assertNotIn("-sTCP:ESTABLISHED", args)
+            return subprocess.CompletedProcess(args, 1, b"", b"")
+        return subprocess.CompletedProcess(args, 0 if pid == "101" else 1,
+                                           b"101\n" if pid == "101" else b"", b"")
+
+    def test_disconnected_two_observations_route_without_writes_and_refuse_changed_old(self):
+        (self.state / "vm").write_text("meguri-mac")
+        before = self.snapshot()
+        managed = self.state.with_name("vmf2")
+        with mock.patch.object(subprocess, "run", side_effect=self.disconnected_probe) as probe:
+            self.assertEqual(m.route_state(self.state, "meguri-mac"), managed)
+            self.assertEqual(probe.call_count, 8)  # two ps/ps/ps/lsof observations
+            self.assertLess(len(os.fsencode(managed / "control.sock")),
+                            len(os.fsencode(self.state / "control.sock")))
+            self.assertFalse(managed.exists())
+            managed.mkdir(mode=0o700)
+            (managed / "owner").write_text("synthetic")
+            self.assertEqual(m.route_state(self.state, "meguri-mac"), managed)
+            for marker in ("shutdown-pending", "recovery-pending", "drain-token", "owner.pid"):
+                (self.state / marker).touch()
+                with self.assertRaises(RuntimeError):
+                    m.route_state(self.state, "meguri-mac")
+                (self.state / marker).unlink()
+            with mock.patch.object(m, "process_identity", return_value=("0", [], "/usr/bin/sleep 60")):
+                with self.assertRaises(RuntimeError):
+                    m.route_state(self.state, "meguri-mac")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_disconnected_requires_empty_exit_one_and_stable_exact_holder(self):
+        (self.state / "vm").write_text("meguri-mac")
+        for target in ("/bin/ps", "/usr/sbin/lsof"):
+            for code, stdout, stderr in ((0, b"", b""), (1, b" ", b""), (1, b"", b" "), (2, b"", b"")):
+                def bad_probe(args, **kwargs):
+                    if args[0] == target and (target != "/bin/ps" or "102" in args):
+                        return subprocess.CompletedProcess(args, code, stdout, stderr)
+                    return self.disconnected_probe(args, **kwargs)
+                with self.subTest(target=target, result=(code, stdout, stderr)), \
+                        mock.patch.object(subprocess, "run", side_effect=bad_probe):
+                    with self.assertRaises(RuntimeError):
+                        m.legacy_disconnected(self.state, "meguri-mac")
+        with mock.patch.object(subprocess, "run", side_effect=self.disconnected_probe), \
+                mock.patch.object(m, "process_identity", side_effect=[("u", [], self.commands["101"]),
+                                                                   ("u", ["changed"], self.commands["101"])]):
+            with self.assertRaisesRegex(RuntimeError, "observation changed"):
+                m.legacy_disconnected(self.state, "meguri-mac")
+
+    def test_fresh_and_owned_v1_keep_the_canonical_root(self):
+        fresh = self.state.parent / "fresh"
+        self.assertEqual(m.route_state(fresh, "guest"), fresh)
+        self.assertFalse(fresh.exists())
+        (self.state / "owner").write_text("synthetic-owner")
+        with mock.patch.object(m, "legacy_disconnected") as old_probe:
+            self.assertEqual(m.route_state(self.state, "guest"), self.state)
+            old_probe.assert_not_called()
+
+    def test_route_guards_private_directories_and_symlinks_before_writes(self):
+        managed = self.state.with_name("vmf2")
+        for mode in (0o755, 0o777):
+            self.state.chmod(mode)
+            with self.assertRaises(RuntimeError):
+                m.route_state(self.state, "guest")
+        self.state.chmod(0o700)
+        managed.symlink_to(self.state, target_is_directory=True)
+        with self.assertRaises(RuntimeError):
+            m.route_state(self.state, "guest")
+        managed.unlink()
+        linked = self.state.parent / "linked"
+        linked.symlink_to(self.state.parent, target_is_directory=True)
+        with self.assertRaises(RuntimeError):
+            m.init_state(linked / "new-state")
+        self.assertFalse((self.state.parent / "new-state").exists())
+
     def test_previous_format_status_and_inspect_preserve_session_without_lifecycle(self):
         before = self.snapshot()
+        self.assertEqual(m.route_state(self.state, "guest"), self.state)
         with mock.patch.object(os, "kill") as kill, mock.patch.object(m, "start") as start:
             self.assertTrue(m.status(self.state, "guest", self.tart)["connected"])
             for operation in (m.stop, m.owned):
@@ -770,7 +1175,7 @@ class InspectionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         self.udid = "11111111-2222-3333-4444-555555555555"
         self.pin = json.loads((ROOT / "tools/sim-devices.json").read_text())["foldable"]["runtime"]
         self.request = dict(udid=self.udid, checkout="/task checkout", vm="guest", pin=self.pin,
@@ -910,29 +1315,212 @@ class InspectionTests(unittest.TestCase):
 
 class DrainAndJoinTests(unittest.TestCase):
     def test_shutdown_completion_markers_distinguish_lost_exit_from_completed_command(self):
-        for code in (0, 1, 255, -15, "timeout"):
+        for code in (0, 1, 255, -15, "timeout", "wait-error"):
             with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
                 state = Path(directory)
                 guard = mock.Mock()
-                guard.stdout = io.BytesIO(b"drained\n")
+                guard.stdout = io.BytesIO(b"drained\ncommitted\n")
                 guard.poll.return_value = None
-                result = subprocess.CompletedProcess([], code)
-                failure = subprocess.TimeoutExpired("synthetic", 75) if code == "timeout" else None
-                with mock.patch.object(m, "clean_drain"), \
-                        mock.patch.object(subprocess, "Popen", return_value=guard), \
-                        mock.patch.object(m.select, "select", return_value=([guard.stdout], [], [])), \
-                        mock.patch.object(subprocess, "run", return_value=result, side_effect=failure):
+                child = mock.Mock()
+                child.wait.return_value = code
+                if code == "timeout":
+                    child.wait.side_effect = subprocess.TimeoutExpired("synthetic", 75)
+                elif code == "wait-error":
+                    child.wait.side_effect = OSError("synthetic wait failed")
+                with mock.patch.object(m, "clean_drain") as cleanup, \
+                        mock.patch.object(subprocess, "Popen", side_effect=[guard, child]), \
+                        mock.patch.object(m.select, "select", return_value=([guard.stdout], [], [])):
                     if code == 0:
-                        m.shutdown(state, "fake-ssh", "fake-tart", "guest")
+                        m.shutdown(state, "fake-ssh", "fake-tart", "guest", state)
                     else:
                         message = "exited unsuccessfully" if code == 1 else "completion unknown"
                         with self.assertRaisesRegex(RuntimeError, message):
-                            m.shutdown(state, "fake-ssh", "fake-tart", "guest")
+                            m.shutdown(state, "fake-ssh", "fake-tart", "guest", state)
                 self.assertTrue((state / "recovery-pending").exists())
-                self.assertEqual((state / "shutdown-pending").exists(), code in (255, -15, "timeout"))
+                self.assertEqual((state / "shutdown-pending").exists(), code in (255, -15, "timeout", "wait-error"))
+                pending = code in (255, -15, "timeout", "wait-error")
+                self.assertEqual((state / "vm-shutdown-pending").exists(), pending)
+                if pending:
+                    intent = json.loads((state / "vm-shutdown-pending/intent.json").read_text())
+                    self.assertEqual(intent["token"], (state / "drain-token").read_text())
+                    self.assertEqual(intent["token"], (state / "shutdown-pending").read_text())
+                self.assertEqual(cleanup.call_count, 2 if code == 1 else 1)
+                child.wait.assert_called_once_with(timeout=75)
                 guard.stdin.close.assert_called_once()
                 guard.wait.assert_called_once_with(timeout=5)
                 guard.terminate.assert_not_called()
+
+    def test_exec_enoent_rolls_back_only_attempt_owned_evidence(self):
+        for earlier_recovery in (False, True):
+            with self.subTest(earlier_recovery=earlier_recovery), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                if earlier_recovery:
+                    (state / "recovery-pending").write_text("earlier")
+                (state / "sim-posture-pending").mkdir()
+                guard = mock.Mock()
+                guard.stdout = io.BytesIO(b"drained\ncommitted\n")
+                guard.poll.return_value = None
+                with mock.patch.object(subprocess, "Popen", side_effect=[guard, FileNotFoundError()]) as launch, \
+                        mock.patch.object(m.select, "select", return_value=([guard.stdout], [], [])), \
+                        mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as cleanup:
+                    with self.assertRaisesRegex(RuntimeError, "could not launch; no stop issued"):
+                        m.shutdown(state, "fake-ssh", "missing-tart", "guest", state)
+                self.assertEqual(launch.call_count, 2)
+                self.assertFalse((state / "vm-shutdown-pending").exists())
+                self.assertTrue((state / "sim-posture-pending").is_dir())
+                cleanup.assert_called_once()
+                self.assertFalse((state / "shutdown-pending").exists())
+                self.assertFalse((state / "drain-token").exists())
+                self.assertEqual((state / "recovery-pending").exists(), earlier_recovery)
+                if earlier_recovery:
+                    self.assertEqual((state / "recovery-pending").read_text(), "earlier")
+
+    def test_denied_drain_cannot_launch_stop_and_releases_no_stop_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            guard = mock.Mock()
+            guard.stdout = io.BytesIO(b"")
+            guard.poll.return_value = 1
+            with mock.patch.object(subprocess, "Popen", return_value=guard) as launch, \
+                    mock.patch.object(m.select, "select", return_value=([guard.stdout], [], [])), \
+                    mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+                with self.assertRaisesRegex(RuntimeError, "shutdown refused"):
+                    m.shutdown(state, "fake-ssh", "fake-tart", "guest", state)
+            launch.assert_called_once()
+            for name in ("recovery-pending", "shutdown-pending", "drain-token"):
+                self.assertFalse((state / name).exists())
+
+    def test_uncertain_stop_blocks_cleanup_and_duplicate_stop_before_transport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            (state / "shutdown-pending").touch()
+            (state / "drain-token").write_text("owned-token")
+            with mock.patch.object(subprocess, "Popen") as launch, \
+                    mock.patch.object(subprocess, "run") as cleanup:
+                for operation, args in ((m.clean_drain, (state, "fake-ssh")),
+                                        (m.shutdown, (state, "fake-ssh", "fake-tart", "guest", state))):
+                    with self.assertRaisesRegex(RuntimeError, "completion unknown"):
+                        operation(*args)
+                launch.assert_not_called()
+                cleanup.assert_not_called()
+            self.assertEqual((state / "drain-token").read_text(), "owned-token")
+
+    def test_delayed_guard_cannot_publish_after_confirmed_no_stop_cancellation(self):
+        # Pause the real guard before token installation, or after accepting
+        # commit but before its ack. Keep stdin OPEN: delayed EOF is not proof.
+        for phase in ("installation", "ack"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                state, pool = root / "state", root / "pool"
+                state.mkdir()
+                token = "delayed-guard"
+                (state / "drain-token").write_text(token)
+                (state / "drain-precommit").write_text(token)
+                ssh = root / "ssh"
+                ssh.write_text("#!" + sys.executable + "\nimport subprocess, sys\n"
+                               "sys.exit(subprocess.call(['/bin/sh', '-c', sys.argv[1]]))\n")
+                ssh.chmod(0o700)
+                gate_read, gate_write = os.pipe()
+                ready_read, ready_write = os.pipe()
+                pause = ("    os.write(" + str(ready_write) + ", b'ready'); "
+                         "os.read(" + str(gate_read) + ", 1)\n")
+                anchor = ("    deadline = time.monotonic() + 10\n"
+                          "    while True:\n"
+                          "        check_cancelled()" if phase == "installation"
+                          else '    try:\n        print("committed", flush=True)')
+                self.assertEqual(m.DRAIN.count(anchor), 1)
+                script = m.DRAIN.replace(anchor, pause + anchor)
+                env = dict(os.environ, MEGURI_SIM_POOL_DIR=str(pool))
+                child = subprocess.Popen([sys.executable, '-c', script, token], env=env,
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                         stderr=subprocess.DEVNULL, pass_fds=(gate_read, ready_write))
+                os.close(gate_read)
+                os.close(ready_write)
+                try:
+                    if phase == "ack":
+                        self.assertEqual(child.stdout.readline(), b'drained\n')
+                        child.stdin.write(('commit ' + token + '\n').encode())
+                        child.stdin.flush()
+                    self.assertTrue(m.select.select([ready_read], [], [], 3)[0])
+                    self.assertEqual(os.read(ready_read, 5), b'ready')
+                    with mock.patch.dict(os.environ, MEGURI_SIM_POOL_DIR=str(pool)):
+                        m.clean_drain(state, str(ssh), token)
+                    self.assertFalse((state / 'drain-token').exists())
+                    self.assertTrue((pool / 'vnc-drain-cancelled' / token).exists())
+                    os.write(gate_write, b'go')
+                    child.wait(timeout=3)
+                    self.assertFalse((pool / 'pool.lock').exists())
+                    self.assertFalse((pool / 'vnc-drain-cancelled' / token).exists())
+                    # A legacy client can acquire immediately after the guard joins.
+                    (pool / 'pool.lock').mkdir()
+                finally:
+                    child.stdin.close()
+                    child.stdout.close()
+                    os.close(gate_write)
+                    os.close(ready_read)
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait()
+
+    def test_denied_precommit_eof_wrong_instruction_and_timeout_release_pool(self):
+        for denied in ('eof', 'wrong', 'timeout'):
+            with self.subTest(denied=denied), tempfile.TemporaryDirectory() as directory:
+                pool = Path(directory)
+                child = subprocess.Popen([sys.executable, '-c', m.DRAIN, 'test-guard'],
+                                         env=dict(os.environ, MEGURI_SIM_POOL_DIR=directory),
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                         stderr=subprocess.DEVNULL)
+                try:
+                    self.assertEqual(child.stdout.readline(), b'drained\n')
+                    if denied == 'timeout':
+                        child.send_signal(signal.SIGALRM)  # Our own subprocess; same bounded-alarm handler.
+                    else:
+                        if denied == 'wrong':
+                            child.stdin.write(b'commit foreign-token\n')
+                            child.stdin.flush()
+                        child.stdin.close()
+                    self.assertNotEqual(child.wait(timeout=3), 0)
+                    self.assertNotIn(b'committed', child.stdout.read())
+                    self.assertFalse((pool / 'pool.lock').exists())
+                    (pool / 'pool.lock').mkdir()
+                finally:
+                    child.stdin.close()
+                    child.stdout.close()
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait()
+
+    def test_lost_commit_ack_requires_confirmed_cancellation_before_discarding_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            guard = mock.Mock()
+            guard.stdout = io.BytesIO(b'drained\n')  # Commit sent, ack lost.
+            guard.poll.return_value = None
+            with mock.patch.object(subprocess, 'Popen', return_value=guard) as launch, \
+                    mock.patch.object(m.select, 'select', return_value=([guard.stdout], [], [])), \
+                    mock.patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 255)):
+                with self.assertRaisesRegex(RuntimeError, 'cleanup unconfirmed'):
+                    m.shutdown(state, 'fake-ssh', 'fake-tart', 'guest', state)
+            launch.assert_called_once()  # Stop cannot launch without committed ack.
+            guard.stdin.write.assert_called_once()
+            token = (state / 'drain-token').read_text()
+            self.assertEqual((state / 'drain-precommit').read_text(), token)
+            for name in ('recovery-pending', 'shutdown-pending'):
+                self.assertFalse((state / name).exists())
+            with mock.patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as cleanup:
+                m.clean_drain(state, 'fake-ssh')
+            self.assertIn(m.CANCEL_DRAIN, cleanup.call_args.args[0][1])
+            self.assertFalse((state / 'drain-token').exists())
+            self.assertFalse((state / 'drain-precommit').exists())
+
+    def test_unpublished_guard_with_closed_caller_cleans_its_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run([sys.executable, '-c', m.DRAIN, 'test-guard'],
+                                    env=dict(os.environ, MEGURI_SIM_POOL_DIR=directory),
+                                    stdin=subprocess.DEVNULL, capture_output=True, timeout=3)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn(b"committed", result.stdout)
+            self.assertFalse((Path(directory) / "pool.lock").exists())
 
     def test_cleanup_after_hard_stop_matches_only_owned_guard(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -947,23 +1535,126 @@ class DrainAndJoinTests(unittest.TestCase):
                                env=env, check=True, timeout=3)
                 self.assertEqual(lock.exists(), token == 'foreign-guard')
 
-    def test_guard_signal_cleans_lock(self):
+    def test_overlapping_paused_cleanups_exclude_replacement_guard(self):
         with tempfile.TemporaryDirectory() as directory:
-            child = subprocess.Popen([sys.executable, '-c', m.DRAIN, 'test-guard'],
-                                     env=dict(os.environ, MEGURI_SIM_POOL_DIR=directory),
-                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=subprocess.DEVNULL)
+            pool = Path(directory)
+            lock = pool / "pool.lock"
+            lock.mkdir()
+            (lock / "pid").write_text("old")
+            (lock / "vnc-drain-owner").write_text("A")
+            env = dict(os.environ, MEGURI_SIM_POOL_DIR=directory)
+            gate_read, gate_write = os.pipe()
+            ready_read, ready_write = os.pipe()
+            # Pause after checking A, precisely where another timed-out SSH
+            # cleanup used to remove A and let B reuse the pathname.
+            anchor = '            os.unlink("vnc-drain-owner", dir_fd=fd)'
+            self.assertEqual(m.CLEAN_DRAIN.count(anchor), 1)
+            pause = ("            os.write(" + str(ready_write) + ", b'ready'); "
+                     "os.read(" + str(gate_read) + ", 1)\n")
+            first = subprocess.Popen([sys.executable, "-c", m.CLEAN_DRAIN.replace(anchor, pause + anchor), "A"],
+                                     env=env, pass_fds=(gate_read, ready_write), stderr=subprocess.PIPE)
+            os.close(gate_read)
+            os.close(ready_write)
+            second = guard = None
             try:
-                self.assertEqual(child.stdout.readline(), b'drained\n')
-                child.terminate()
-                child.wait(timeout=3)
-                self.assertFalse((Path(directory) / 'pool.lock').exists())
+                self.assertTrue(m.select.select([ready_read], [], [], 3)[0])
+                self.assertEqual(os.read(ready_read, 5), b"ready")
+                # Announce the second cleanup's failed nonblocking flock, so
+                # the assertion proves serialization rather than scheduling.
+                anchor = "            except BlockingIOError:\n"
+                announce = (anchor + "                if not globals().get('_blocked'):\n"
+                            "                    print('blocked', flush=True)\n"
+                            "                    globals()['_blocked'] = True\n")
+                second = subprocess.Popen([sys.executable, "-c", m.CLEAN_DRAIN.replace(anchor, announce), "A"],
+                                          env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertTrue(m.select.select([second.stdout], [], [], 3)[0])
+                self.assertEqual(second.stdout.readline(), b"blocked\n")
+                guard = subprocess.Popen([sys.executable, "-c", m.DRAIN.replace(anchor, announce), "B"], env=env,
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertTrue(m.select.select([guard.stdout], [], [], 3)[0])
+                self.assertEqual(guard.stdout.readline(), b"blocked\n")
+                self.assertEqual((lock / "vnc-drain-owner").read_text(), "A")
+                os.write(gate_write, b"go")
+                self.assertEqual(first.wait(timeout=3), 0, first.stderr.read())
+                # Either mutex order after A's release is legal. Even if the
+                # stale cleanup gets it after B, it must preserve B's inode.
+                self.assertEqual(guard.stdout.readline(), b"drained\n")
+                guard.stdin.write(b"commit B\n")
+                guard.stdin.flush()
+                self.assertEqual(guard.stdout.readline(), b"committed\n")
+                self.assertEqual(second.wait(timeout=3), 0, second.stderr.read())
+                inode = lock.stat().st_ino
+                subprocess.run([sys.executable, "-c", m.CLEAN_DRAIN, "A"], env=env, check=True, timeout=3)
+                self.assertEqual(lock.stat().st_ino, inode)
+                self.assertEqual((lock / "vnc-drain-owner").read_text(), "B")
+                subprocess.run([sys.executable, "-c", m.CLEAN_DRAIN, "B"], env=env, check=True, timeout=3)
+                guard.wait(timeout=3)
             finally:
-                child.stdin.close()
-                child.stdout.close()
-                if child.poll() is None:
-                    child.kill()
-                    child.wait()
+                os.close(gate_write)
+                os.close(ready_read)
+                for child in (first, second, guard):
+                    if child is None:
+                        continue
+                    if child.poll() is None:
+                        child.kill()  # Only a subprocess owned by this test.
+                        child.wait()
+                    for stream in (child.stdin, child.stdout, child.stderr):
+                        if stream:
+                            stream.close()
+
+    def test_cleanup_preserves_pending_and_foreign_pool_entries(self):
+        for entry in ("sim-posture-pending", "posture-owner", "foreign-token"):
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as directory:
+                lock = Path(directory) / "pool.lock"
+                lock.mkdir()
+                (lock / "pid").write_text("old")
+                (lock / "vnc-drain-owner").write_text("A")
+                (lock / entry).mkdir()
+                result = subprocess.run([sys.executable, "-c", m.CLEAN_DRAIN, "A"],
+                                        env=dict(os.environ, MEGURI_SIM_POOL_DIR=directory),
+                                        capture_output=True, timeout=3)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(set(p.name for p in lock.iterdir()), {"pid", "vnc-drain-owner", entry})
+                self.assertEqual((lock / "vnc-drain-owner").read_text(), "A")
+
+    def test_published_guard_survives_transport_loss_and_legacy_stale_rules(self):
+        for lost in ("eof", signal.SIGHUP, signal.SIGTERM, signal.SIGALRM):
+            with self.subTest(lost=lost), tempfile.TemporaryDirectory() as directory:
+                pool = Path(directory)
+                lock = pool / "pool.lock"
+                env = dict(os.environ, MEGURI_SIM_POOL_DIR=directory)
+                child = subprocess.Popen([sys.executable, '-c', m.DRAIN, 'test-guard'],
+                                         env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                         stderr=subprocess.DEVNULL)
+                try:
+                    self.assertEqual(child.stdout.readline(), b'drained\n')
+                    child.stdin.write(b'commit test-guard\n')
+                    child.stdin.flush()
+                    self.assertEqual(child.stdout.readline(), b'committed\n')
+                    if lost == "eof":
+                        child.stdin.close()
+                    else:
+                        child.send_signal(lost)
+                    # Legacy clients reclaim either a dead PID or an old directory.
+                    old = time.time() - 1200
+                    os.utime(lock, (old, old))
+                    m.wait_until(lambda: lock.stat().st_mtime > old, 3, "fence not refreshed")
+                    self.assertIsNone(child.poll())
+                    with self.assertRaises(FileExistsError):
+                        lock.mkdir()
+                    subprocess.run([sys.executable, '-c', m.CLEAN_DRAIN, 'foreign'],
+                                   env=env, check=True, timeout=3)
+                    self.assertTrue(lock.exists())
+                    subprocess.run([sys.executable, '-c', m.CLEAN_DRAIN, 'test-guard'],
+                                   env=env, check=True, timeout=3)
+                    child.wait(timeout=3)
+                    self.assertFalse(lock.exists())
+                finally:
+                    child.stdin.close()
+                    child.stdout.close()
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait()
 
     def test_rejected_inventory_cleans_only_its_guard(self):
         for data in ({'expires_epoch': 10**20}, {}, {'expires_epoch': 'unknown'}):
@@ -979,7 +1670,7 @@ class DrainAndJoinTests(unittest.TestCase):
                 self.assertFalse((pool / 'pool.lock').exists())
                 self.assertEqual(json.loads(lease.read_text()), data)
 
-    def test_final_drain_excludes_legacy_renew_and_eof_cleans_lock(self):
+    def test_final_drain_excludes_legacy_renew_until_explicit_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
             pool = Path(directory)
             lease = pool / 'leases/expired/lease.json'
@@ -990,6 +1681,9 @@ class DrainAndJoinTests(unittest.TestCase):
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE)
             try:
                 self.assertEqual(child.stdout.readline(), b'drained\n')
+                child.stdin.write(b'commit test-guard\n')
+                child.stdin.flush()
+                self.assertEqual(child.stdout.readline(), b'committed\n')
                 self.assertEqual((pool / 'pool.lock/pid').read_text(), str(child.pid))
                 # This is the exact mkdir mutex used by legacy renew clients.
                 with self.assertRaises(FileExistsError):
@@ -997,6 +1691,8 @@ class DrainAndJoinTests(unittest.TestCase):
                 self.assertEqual(lease.read_text(), '{"expires_epoch": 0}')
             finally:
                 child.stdin.close()
+                subprocess.run([sys.executable, '-c', m.CLEAN_DRAIN, 'test-guard'],
+                               env=dict(os.environ, MEGURI_SIM_POOL_DIR=directory), check=True, timeout=3)
                 child.wait(timeout=3)
                 child.stdout.close()
             self.assertFalse((pool / 'pool.lock').exists())

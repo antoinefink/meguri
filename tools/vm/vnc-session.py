@@ -1,4 +1,6 @@
 """Private transport for duo-fold.sh; never print Tart output or credentials."""
+import contextlib
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -62,12 +64,20 @@ def metadata_text(path):
     # A malformed operator entry must not block status on a FIFO, follow a
     # replacement symlink or read an unbounded private log.
     fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
-    with os.fdopen(fd) as source:
+    with os.fdopen(fd, "rb") as source:
         info = os.fstat(source.fileno())
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
                 or info.st_mode & 0o022 or info.st_nlink != 1):
             raise ValueError("session metadata unavailable")
-        return source.read(65536)
+        value = source.read(65537)
+        if len(value) > 65536:
+            raise ValueError("session metadata oversized")
+        return value.decode()
+
+
+def primary(state, vm):
+    if os.path.lexists(state / "vm") and metadata_text(state / "vm").strip() != vm:
+        raise RuntimeError("global VNC state belongs to another VM; retain evidence for operator recovery")
 
 
 def legacy_connected(state, vm, tart):
@@ -158,6 +168,125 @@ def status(state, vm, tart=None):
     return {"vm": recorded, "connected": connected, "remote": remote}
 
 
+def legacy_disconnected(state, vm):
+    """Read-only proof of the disconnected pre-supervisor format, observed twice."""
+    def snapshot():
+        directory = state.lstat()
+        if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid()
+                or directory.st_mode & 0o077 or vm != "meguri-mac"
+                or any(os.path.lexists(state / n) for n in
+                       ("owner", "owner.pid", "control.sock", "shutdown-pending", "recovery-pending", "drain-token", "drain-precommit"))):
+            raise RuntimeError("legacy session unknown; routing refused")
+        fifo = (state / "commands").lstat()
+        if (not stat.S_ISFIFO(fifo.st_mode) or fifo.st_uid != os.getuid()
+                or fifo.st_mode & 0o077 or fifo.st_nlink != 1
+                or "connected\n" not in metadata_text(state / "holder.log")
+                or not address(metadata_text(state / "tart.log"))):
+            raise RuntimeError("legacy session format unknown; routing refused")
+        names = ("vm", "holder.pid", "tunnel.pid", "tart.pid")
+        values = {name: metadata_text(state / name).strip() for name in names}
+        if values["vm"] != vm or any(not re.fullmatch(r"[1-9][0-9]*", values[n])
+                                    or int(values[n]) <= 1 for n in names[1:]):
+            raise RuntimeError("legacy metadata unknown; routing refused")
+        pids = [int(values[n]) for n in names[1:]]
+        if len(set(pids)) != 3:
+            raise RuntimeError("legacy process identity unknown; routing refused")
+        for pid in pids[1:]:
+            # ps's empty no-match (exit 1) is the sole accepted result.
+            probe = subprocess.run(["/bin/ps", "-ww", "-p", str(pid), "-o", "pid="],
+                                   capture_output=True, timeout=3)
+            if probe.returncode != 1 or probe.stdout or probe.stderr:
+                raise RuntimeError("legacy process live or unknown; routing refused")
+        holder = None
+        fifo = None
+        probe = subprocess.run(["/bin/ps", "-ww", "-p", str(pids[0]), "-o", "pid="],
+                               capture_output=True, timeout=3)
+        if not (probe.returncode == 1 and not probe.stdout and not probe.stderr):
+            if (probe.returncode != 0 or probe.stdout.strip() != str(pids[0]).encode()
+                    or probe.stderr or not state.is_absolute()):
+                raise RuntimeError("legacy holder live or unknown; routing refused")
+            holder = process_identity(pids[0])
+            # Use the previous-format full argv binding, including absolute
+            # script/FIFO/PID paths; never signal or send to this idle holder.
+            if not re.fullmatch(r"/[^\n]+/(?:python[0-9.]*|Python) -I /[^\n]+/tools/vm/vnc-holder\.py "
+                                + re.escape(str(state / "commands")) + " "
+                                + re.escape(str(state / "holder.pid")), holder[-1]):
+                raise RuntimeError("legacy holder identity unknown; routing refused")
+            info = (state / "commands").lstat()
+            if (not stat.S_ISFIFO(info.st_mode) or info.st_uid != os.getuid()
+                    or info.st_mode & 0o077 or info.st_nlink != 1):
+                raise RuntimeError("legacy holder FIFO unknown; routing refused")
+            fifo = (info.st_dev, info.st_ino, info.st_mode, info.st_ctime_ns)
+        sockets = subprocess.run(["/usr/sbin/lsof", "-nP", "-a", "-p", str(pids[0]),
+                                  "-iTCP", "-Fn"],
+                                 capture_output=True, timeout=3)
+        if sockets.returncode != 1 or sockets.stdout or sockets.stderr:
+            raise RuntimeError("legacy holder sockets live or unknown; routing refused")
+        return ((directory.st_dev, directory.st_ino, directory.st_mode), values, holder, fifo,
+                [(s.st_dev, s.st_ino, s.st_mode, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+                 for s in ((state / n).lstat() for n in (*names, "commands", "holder.log", "tart.log"))])
+    if snapshot() != snapshot():
+        raise RuntimeError("legacy observation changed; routing refused")
+
+
+# Fixed beside the canonical root: shared across worktrees, and shorter than
+# vm-fold for Darwin's small Unix socket path budget. Never rename the orphan.
+SESSION_EVIDENCE = ("vm", "commands", "holder.pid", "tunnel.pid", "tart.pid",
+                    "owner", "owner.pid", "control.sock", "shutdown-pending",
+                    "recovery-pending", "drain-token", "drain-precommit")
+
+
+def guard_state(state):
+    if not state.is_absolute() or ".." in state.parts:
+        raise RuntimeError("session state path must be absolute")
+    for path in (*reversed(state.parents), state):
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0, os.getuid())
+                or (info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX)
+                or (path == state and (info.st_uid != os.getuid() or info.st_mode & 0o077))):
+            raise RuntimeError("session state directory must be owned, private and unsymlinked")
+
+
+def route_state(canonical, vm):
+    managed = canonical.with_name("vmf2")
+    guard_state(canonical)
+    guard_state(managed)
+    primary(canonical, vm)
+    primary(managed, vm)
+    if os.path.lexists(managed):
+        # Even an empty managed root is not authority to ignore old evidence.
+        legacy_disconnected(canonical, vm)
+        return managed
+    if (not os.path.lexists(canonical)
+            or not any(os.path.lexists(canonical / n) for n in SESSION_EVIDENCE)
+            or os.path.lexists(canonical / "owner")):
+        return canonical
+    try:
+        legacy_disconnected(canonical, vm)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        # Original connected/unknown legacy state stays read-only. Its existing
+        # lifecycle guards still refuse stop/recovery or replacement.
+        return canonical
+    return managed
+
+
+def vacant(state):
+    # A rejected guest drain retains its token for clean-drain on the next try;
+    # it is not by itself a VNC session or a completed/uncertain stop.
+    if any(os.path.lexists(state / name) for name in SESSION_EVIDENCE if name not in ("drain-token", "drain-precommit")):
+        raise RuntimeError("existing session is unavailable; owned sessions may use stop once drained; "
+                           "legacy or uncertain remote exits require operator recovery with evidence retained")
+
+
+def init_state(state):
+    guard_state(state)
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    guard_state(state)
+
+
 def launch(state, children, name, argv, env=None):
     with (state / (name + ".log")).open("wb") as log:
         child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=log,
@@ -195,7 +324,7 @@ def ssh_listening(child, port):
             and child.poll() is None)
 
 
-def connect(state, children, tart, vm):
+def connect(state, children, tart, vm, holder_python=None):
     host = remote_host(tart)
     (state / "vm").write_text(vm)
     child = launch(state, children, "tart", [tart, "run", "--no-graphics", "--vnc-experimental", vm])
@@ -230,7 +359,7 @@ def connect(state, children, tart, vm):
     fifo.unlink(missing_ok=True)
     os.mkfifo(fifo, 0o600)
     env = dict(os.environ, DUO_FOLD_VNC_URL=f"vnc://:{secret}@127.0.0.1:{port}")
-    holder = launch(state, children, "holder", [str(state / "venv/bin/python"), "-I",
+    holder = launch(state, children, "holder", [str(holder_python or state / "venv/bin/python"), "-I",
                     str(Path(__file__).with_name("vnc-holder.py")),
                     str(fifo), str(state / "holder.pid")], env)
 
@@ -302,7 +431,7 @@ def preflight(state):
         listener.close()
 
 
-def serve(state, tart, vm):
+def serve(state, tart, vm, holder_python=None):
     children = {}
     remote = bool(remote_host(tart))
     token = secrets.token_hex(32)
@@ -328,7 +457,7 @@ def serve(state, tart, vm):
     with listener:
         ready = False
         try:
-            connect(state, children, tart, vm)
+            connect(state, children, tart, vm, holder_python)
             ready = True
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             pass  # Keep ownership alive for the caller's guarded rollback.
@@ -365,10 +494,11 @@ def serve(state, tart, vm):
                 return
 
 
-def start(state, tart, vm):
+def start(state, tart, vm, holder_python=None):
     with (state / "owner.log").open("wb") as log:
         child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()),
-                                  "serve", str(state), tart, vm],
+                                  "serve", str(state), tart, vm,
+                                  str(holder_python or state / "venv/bin/python")],
                                  stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                                  close_fds=True, start_new_session=True, cwd="/")
     def listening():
@@ -382,41 +512,121 @@ def start(state, tart, vm):
 def stop(state):
     if (state / "owner").exists():
         request(state, "stop", timeout=35)
-    elif any((state / name).exists() for name in
-             ("vm", "commands", "holder.pid", "tunnel.pid", "tart.pid", "control.sock")):
+    elif any(os.path.lexists(state / name) for name in
+             ("vm", "commands", "holder.pid", "tunnel.pid", "tart.pid", "owner.pid", "control.sock")):
         raise RuntimeError("unowned legacy session; evidence retained; no PID signalled")
 
 
 def owned(state):
     if (state / "owner").exists():
         request(state, "status", timeout=120)
-    elif any((state / name).exists() for name in
-             ("vm", "commands", "holder.pid", "tunnel.pid", "tart.pid", "control.sock")):
+    elif any(os.path.lexists(state / name) for name in
+             ("vm", "commands", "holder.pid", "tunnel.pid", "tart.pid", "owner.pid", "control.sock")):
         raise RuntimeError("unowned legacy session; evidence retained; no PID signalled")
+
+
+# This inode is private and permanent: never unlink/replace it, including after
+# a timed-out SSH cleanup. Admission and every remover use the same mutex.
+POOL_MUTEX = r'''
+import contextlib, fcntl, os, pathlib, stat, sys, time
+pool = pathlib.Path(os.environ.get("MEGURI_SIM_POOL_DIR", str(pathlib.Path.home() / "Library/Caches/meguri/sim-pool")))
+lock = pool / "pool.lock"
+@contextlib.contextmanager
+def pool_mutex():
+    pool.mkdir(parents=True, exist_ok=True)
+    fd = os.open(pool / "vnc-drain.mutex", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o077 or info.st_nlink != 1):
+            raise RuntimeError("unsafe drain mutex")
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("drain mutex busy")
+                time.sleep(.05)
+        bound = (pool / "vnc-drain.mutex").lstat()
+        if (info.st_dev, info.st_ino) != (bound.st_dev, bound.st_ino):
+            raise RuntimeError("drain mutex replaced")
+        yield
+    finally:
+        os.close(fd)
+
+def remove_drain(token, owned=None):
+    # Caller holds pool_mutex. All child operations bind to the opened inode;
+    # admission cannot recycle its pathname until the last operation finishes.
+    root = os.open(pool, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        try:
+            fd = os.open("pool.lock", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+        except FileNotFoundError:
+            return
+        try:
+            info = os.fstat(fd)
+            if owned is not None and info.st_ino != owned:
+                return
+            try:
+                owner = os.open("vnc-drain-owner", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+            except FileNotFoundError:
+                return
+            with os.fdopen(owner) as source:
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode) or source.read(129) != token:
+                    return
+            # Preserve posture-pending and any foreign/unknown entries intact.
+            if set(os.listdir(fd)) - {"pid", "vnc-drain-owner"}:
+                raise RuntimeError("foreign or pending pool entries; fence retained")
+            bound = os.stat("pool.lock", dir_fd=root, follow_symlinks=False)
+            if (bound.st_dev, bound.st_ino) != (info.st_dev, info.st_ino):
+                return
+            os.unlink("vnc-drain-owner", dir_fd=fd)
+            try:
+                os.unlink("pid", dir_fd=fd)
+            except FileNotFoundError:
+                pass
+            os.rmdir("pool.lock", dir_fd=root)
+        finally:
+            os.close(fd)
+    finally:
+        os.close(root)
+'''
 
 
 # Read every acquisition record, including leases without a current device.
 # Never reclaim, renew, cancel or delete one. Missing/malformed expiry is unknown.
-DRAIN = r'''
+DRAIN = POOL_MUTEX + r'''
 import json, os, pathlib, signal, sys, time
 pool = pathlib.Path(os.environ.get("MEGURI_SIM_POOL_DIR", str(pathlib.Path.home() / "Library/Caches/meguri/sim-pool")))
 lock = pool / "pool.lock"
+token = sys.argv[1]
+cancelled = pool / "vnc-drain-cancelled" / token
 owned = None
+committed = False
 def expired(*unused):
+    if committed:
+        return  # Transport loss cannot release a possibly in-flight stop's fence.
     raise TimeoutError("drain guard expired")
+def check_cancelled():
+    if cancelled.exists():
+        raise RuntimeError("drain cancelled")
 signal.signal(signal.SIGALRM, expired)
 signal.signal(signal.SIGTERM, expired)
 signal.signal(signal.SIGHUP, expired)
-signal.alarm(110)  # Well below legacy clients' ten-minute stale-lock threshold.
+signal.alarm(110)  # Bound all work before the coordinator's explicit commit.
 try:
-    pool.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + 10
     while True:
+        check_cancelled()
         try:
-            lock.mkdir()
-            owned = lock.stat().st_ino
-            (lock / "pid").write_text(str(os.getpid()))
-            (lock / "vnc-drain-owner").write_text(sys.argv[1])
+            with pool_mutex():
+                check_cancelled()
+                lock.mkdir()
+                owned = lock.stat().st_ino
+                (lock / "pid").write_text(str(os.getpid()))
+                (lock / "vnc-drain-owner").write_text(token)
             break
         except FileExistsError:
             if time.monotonic() >= deadline:
@@ -428,28 +638,65 @@ try:
         expiry = json.loads((entry / "lease.json").read_text())["expires_epoch"]
         if type(expiry) not in (int, float) or not 0 <= expiry < float("inf") or expiry > now:
             raise ValueError("active or unknown acquisition")
+    check_cancelled()
     print("drained", flush=True)
-    sys.stdin.buffer.read(1)  # EOF releases; shutdown may instead end this guest.
+    # EOF, a partial/wrong instruction, or the admission alarm releases the
+    # unpublished fence. Receipt alone never authorizes permanent exclusion.
+    instruction = sys.stdin.buffer.readline(128)
+    if instruction != ("commit " + token + "\n").encode():
+        raise RuntimeError("drain commit refused")
+    check_cancelled()
+    # Latch before ack: a lost ack must be reconciled with token cancellation.
+    committed = True
+    signal.alarm(0)
+    try:
+        print("committed", flush=True)
+    except OSError:
+        pass
+    while True:
+        if cancelled.exists():
+            break
+        try:
+            if not lock.exists() or lock.stat().st_ino != owned:
+                break
+            if (lock / "vnc-drain-owner").read_text() != token:
+                break
+            os.utime(lock, None)
+        except FileNotFoundError:
+            break
+        time.sleep(.1)
 finally:
-    if owned is not None and lock.exists() and lock.stat().st_ino == owned:
-        (lock / "vnc-drain-owner").unlink(missing_ok=True)
-        (lock / "pid").unlink(missing_ok=True)
-        lock.rmdir()
+    # A normal committed cleanup owns removal on its SSH channel. Only an
+    # unpublished/cancelled guard removes its own fence, avoiding two removers.
+    if (not committed or cancelled.exists()) and owned is not None:
+        with pool_mutex():
+            remove_drain(token, owned)
+    # Once this exact guard exits it cannot install/publish anything later.
+    try:
+        cancelled.rmdir()
+    except FileNotFoundError:
+        pass
 '''
 
 
-# A hard VM stop may prevent the guest guard's finally block. Only remove our
-# exact guard after that stop has completed, under the still-held scheduler.
-CLEAN_DRAIN = r'''
+# A confirmed token cancellation also covers a guard whose SSH command has not
+# started installing its lock yet. Leave the latch until that exact guard exits;
+# a delayed guard consumes it. Rare failed launches may leave one inert latch.
+CANCEL_DRAIN = r'''
 import os, pathlib, sys
 pool = pathlib.Path(os.environ.get("MEGURI_SIM_POOL_DIR", str(pathlib.Path.home() / "Library/Caches/meguri/sim-pool")))
-lock = pool / "pool.lock"
-marker = lock / "vnc-drain-owner"
-if marker.exists() and marker.read_text() == sys.argv[1]:
-    marker.unlink()
-    (lock / "pid").unlink(missing_ok=True)
-    lock.rmdir()
+(pool / "vnc-drain-cancelled" / sys.argv[1]).mkdir(parents=True, exist_ok=True)
 '''
+
+
+# Only after admission was acknowledged, and no stop/known command completion
+# or confirmed postrestart readiness, under the still-held scheduler.
+CLEAN_DRAIN = POOL_MUTEX + r'''
+with pool_mutex():
+    remove_drain(sys.argv[1])
+'''
+
+
 
 
 def guest_command(script, token):
@@ -459,54 +706,153 @@ def guest_command(script, token):
     return shlex.join(command)
 
 
-def clean_drain(state, ssh):
+def clean_drain(state, ssh, token=None):
+    if os.path.lexists(state / "shutdown-pending"):
+        raise RuntimeError("remote shutdown completion unknown; guest fence retained")
     marker = state / "drain-token"
     if marker.exists():
+        recorded = marker.read_text()
+        if token is not None and recorded != token:
+            raise RuntimeError("guest drain ownership changed; evidence retained")
+        precommit = state / "drain-precommit"
+        if os.path.lexists(precommit) and metadata_text(precommit) != recorded:
+            raise RuntimeError("guest drain admission ownership changed; evidence retained")
+        script = CANCEL_DRAIN if os.path.lexists(precommit) else CLEAN_DRAIN
         with (state / "drain-cleanup.log").open("wb") as log:
-            result = subprocess.run([ssh, guest_command(CLEAN_DRAIN, marker.read_text())],
+            result = subprocess.run([ssh, guest_command(script, recorded)],
                                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, timeout=20)
         if result.returncode:
             raise RuntimeError("guest drain cleanup unconfirmed; evidence retained")
+        precommit.unlink(missing_ok=True)
         marker.unlink()
 
 
-def shutdown(state, ssh, tart, vm):
-    clean_drain(state, ssh)
-    token = secrets.token_hex(32)
-    (state / "drain-token").write_text(token)
-    with (state / "drain.log").open("wb") as log:
-        guard = subprocess.Popen([ssh, guest_command(DRAIN, token)], stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE, stderr=log)
-        try:
-            readable, _, _ = select.select([guard.stdout], [], [], 20)
-            if not readable or guard.stdout.readline() != b"drained\n" or guard.poll() is not None:
-                raise RuntimeError("guest acquisitions active, unknown or pool busy; shutdown refused")
-            # The guest pool mutex stays held across the *remote* stop command,
-            # including already-running legacy renew clients outside the scheduler.
-            (state / "recovery-pending").touch()
-            pending = state / "shutdown-pending"
-            pending.touch()
-            with (state / "stop.log").open("wb") as output:
+
+class ShutdownFence:
+    """Use the primary VM's existing cross-worktree scheduler mutex/lease."""
+    def __init__(self, lease, state, token):
+        self.lease = Path(lease)
+        self.identity = file_identity(self.lease.stat())
+        self.marker = self.lease / "vm-shutdown-pending"
+        self.state, self.token = state, token
+        self.owned = None
+
+    @contextlib.contextmanager
+    def scheduler(self):
+        with Path(str(self.lease) + ".mutex").open("a") as mutex:
+            deadline = time.monotonic() + 1
+            while True:
                 try:
-                    result = subprocess.run([tart, "stop", vm, "--timeout", "60"],
-                                            stdin=subprocess.DEVNULL, stdout=output, stderr=output, timeout=75)
-                except (OSError, subprocess.TimeoutExpired):
-                    raise RuntimeError("remote shutdown completion unknown; evidence retained; wrapper retry cannot resolve the lost exit") from None
-            if result.returncode < 0 or result.returncode == 255:
-                raise RuntimeError("remote shutdown completion unknown; evidence retained; wrapper retry cannot resolve the lost exit")
-            pending.unlink()
-            if result.returncode:
-                raise RuntimeError("shutdown command exited unsuccessfully; VM state needs confirmation; evidence retained")
-        finally:
-            guard.stdin.close()
+                    fcntl.flock(mutex, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("scheduler mutex busy; shutdown refused")
+                    time.sleep(.05)
+            if file_identity(self.lease.stat()) != self.identity:
+                raise RuntimeError("scheduler lease replaced; shutdown refused")
+            yield
+
+    def arm(self):
+        with self.scheduler():
+            self.marker.mkdir(mode=0o700)
+            self.owned = file_identity(self.marker.stat())
+            (self.marker / "intent.json").write_text(json.dumps(dict(
+                token=self.token, state=str(self.state))))
+
+    def clear(self):
+        if self.owned is None:
+            return
+        with self.scheduler():
+            if file_identity(self.marker.stat()) != self.owned:
+                raise RuntimeError("shutdown scheduler fence replaced; evidence retained")
+            (self.marker / "intent.json").unlink(missing_ok=True)
+            self.marker.rmdir()
+            self.owned = None
+
+
+def shutdown(state, ssh, tart, vm, lease):
+    clean_drain(state, ssh)  # Refuses any previous stop with unknown completion.
+    token = secrets.token_hex(32)
+    fence = ShutdownFence(lease, state, token)
+    # Mark uncertainty before launching: cleanup on another SSH channel may
+    # overtake this command even before its guest process exists.
+    (state / "drain-precommit").write_text(token)
+    (state / "drain-token").write_text(token)
+    guard = None
+    launched = False
+    records = {}
+    try:
+        with (state / "drain.log").open("wb") as log:
+            guard = subprocess.Popen([ssh, guest_command(DRAIN, token)], stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=log)
+        readable, _, _ = select.select([guard.stdout], [], [], 20)
+        if not readable or guard.stdout.readline() != b"drained\n" or guard.poll() is not None:
+            raise RuntimeError("guest acquisitions active, unknown or pool busy; shutdown refused")
+        guard.stdin.write(("commit " + token + "\n").encode())
+        guard.stdin.flush()
+        readable, _, _ = select.select([guard.stdout], [], [], 20)
+        if not readable or guard.stdout.readline() != b"committed\n" or guard.poll() is not None:
+            raise RuntimeError("guest drain commit unconfirmed; shutdown refused")
+        (state / "drain-precommit").unlink()
+        # Arm evidence before exec. Exclusive, inode-pinned records let a proven
+        # launch failure roll back this attempt without removing earlier evidence.
+        for name in ("recovery-pending", "shutdown-pending"):
+            path = state / name
             try:
-                guard.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                # Only our child transport, never a PID read from disk. The guest
-                # guard also cleans up on EOF/HUP or its bounded alarm.
-                guard.terminate()
-                guard.wait(timeout=5)
-            guard.stdout.close()
+                record = path.open("x")
+            except FileExistsError:
+                if name == "shutdown-pending":
+                    raise RuntimeError("remote shutdown completion unknown; evidence retained")
+            else:
+                records[name] = (file_identity(os.fstat(record.fileno())), record)
+                record.write(token)
+                record.flush()
+        fence.arm()  # Before any actual stop, while the scheduler still owns this lease.
+        with (state / "stop.log").open("wb") as output:
+            try:
+                child = subprocess.Popen([tart, "stop", vm, "--timeout", "60"],
+                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
+            except OSError:
+                raise RuntimeError("shutdown wrapper could not launch; no stop issued") from None
+            launched = True
+            try:
+                code = child.wait(timeout=75)
+            except (OSError, subprocess.TimeoutExpired):
+                raise RuntimeError("remote shutdown completion unknown; evidence retained; wrapper retry cannot resolve the lost exit") from None
+        if code < 0 or code == 255:
+            raise RuntimeError("remote shutdown completion unknown; evidence retained; wrapper retry cannot resolve the lost exit")
+        unlink_owned(state / "shutdown-pending", records["shutdown-pending"][0])
+        fence.clear()  # The actual stop joined, including a known nonzero exit.
+        if code:
+            # A known exit proves the stop command has joined, even on failure.
+            clean_drain(state, ssh, token)
+            raise RuntimeError("shutdown command exited unsuccessfully; VM state needs confirmation; evidence retained")
+        # Successful hard stop may have killed the guard; cleanup follows the
+        # caller's confirmed restart readiness, under the scheduler lease.
+    finally:
+        # EOF releases only precommit guards. Uncertain commit delivery uses a
+        # confirmed cancellation latch before discarding the recovery token.
+        if guard is not None:
+            guard.stdin.close()
+        try:
+            if not launched:
+                fence.clear()  # Proven no launch must leave the scheduler available.
+                for name, (identity, _) in records.items():
+                    unlink_owned(state / name, identity)
+                clean_drain(state, ssh, token)  # Proven no stop; release only this token.
+        finally:
+            for _, record in records.values():
+                record.close()
+            if guard is not None:
+                try:
+                    guard.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Signal only our transport. A published guest guard survives
+                    # EOF/HUP/TERM and refreshes its fence until token cleanup.
+                    guard.terminate()
+                    guard.wait(timeout=5)
+                guard.stdout.close()
 
 
 def main():
@@ -515,6 +861,15 @@ def main():
     try:
         if action == "host":
             print(remote_host(path))
+        elif action == "primary":
+            guard_state(state)
+            primary(state, *args)
+        elif action == "route":
+            print(route_state(state, *args))
+        elif action == "vacant":
+            vacant(state)
+        elif action == "init":
+            init_state(state)
         elif action == "status":
             print(json.dumps(status(state, *args)))
         elif action == "serve":
@@ -534,7 +889,7 @@ def main():
     except RuntimeError as error:
         print("duo-fold: " + str(error), file=sys.stderr)
         return 1
-    except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         # Errors and subprocess output may contain the session secret.
         print("duo-fold: " + ("guest leases active or unreadable; use tools/mg sim status/release"
               if action == "shutdown" else "VNC transport unavailable; inspect private build/vm-fold logs and wrapper remote.json"), file=sys.stderr)

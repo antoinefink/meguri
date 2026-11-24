@@ -20,8 +20,8 @@ import zlib
 
 GUEST_STAGES = ("console", "xcode-select", "bundle", "signature", "simctl-devices",
                 "simctl-runtimes", "simctl-devicetypes", "lease", "open")
-GUEST = r'''
-import json, math, os, pathlib, plistlib, re, subprocess, sys, time
+GUEST_VALIDATE = r'''
+import json, math, os, pathlib, plistlib, re, stat, subprocess, sys, time
 stage = "console"
 request = json.loads(sys.argv[1])
 def require(ok):
@@ -66,13 +66,25 @@ require(sum(t["identifier"] == device["deviceTypeIdentifier"] and t["name"] == "
             and t.get("productFamily") == "iPhone" for t in types) == 1)
 stage = "lease"
 pool = pathlib.Path(request["pool"]) if request["pool"] else pathlib.Path.home() / "Library/Caches/meguri/sim-pool"
+lease_witness = None
 def check_lease():
-    lease = json.loads((pool / "leases" / request["udid"] / "lease.json").read_text())
+    global lease_witness
+    fd = os.open(pool / "leases" / request["udid"] / "lease.json", os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    with os.fdopen(fd) as source:
+        info = os.fstat(source.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= 65536)
+        raw = source.read(65537)
+    witness = (info.st_dev, info.st_ino, raw)
+    require(lease_witness is None or lease_witness == witness)
+    lease_witness = witness
+    lease = json.loads(raw)
     expiry = lease["expires_epoch"]
     require(lease["udid"] == request["udid"] and lease["kind"] == "foldable"
             and lease["worktree"] == request["checkout"] and lease["vm"] == request["vm"]
             and type(expiry) in (int, float) and math.isfinite(expiry) and expiry > time.time())
 check_lease()  # Fresh expiry/ownership check immediately before launch.
+'''
+GUEST = GUEST_VALIDATE + r'''
 # Open the exact selected bundle. Its trampoline may launch another executable;
 # foreground/process identity is not a prerequisite for a read-only capture.
 stage = "open"

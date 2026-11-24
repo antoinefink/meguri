@@ -6,9 +6,7 @@
 # usage: tools/vm/duo-fold.sh start [--vm <name>]   prepare/reuse VNC (manual alias)
 #        tools/vm/duo-fold.sh prepare|status      persistent session (no repeated restart)
 #        tools/vm/duo-fold.sh inspect <udid>       private hardware calibration capture
-#        tools/vm/duo-fold.sh hub <udid>            open Device Hub, boot the simulator
-#        tools/vm/duo-fold.sh fold closed|half|open click Device Hub's fold button
-#        tools/vm/duo-fold.sh click <x> <y>         click a point of the VM's screen
+#        tools/vm/duo-fold.sh open|closed|calibrate <udid>  guarded leased posture
 #        tools/vm/duo-fold.sh screen <file.png>     save the VM's whole screen
 #        tools/vm/duo-fold.sh shot <udid> <display> <file.png>   1 is outer, 3 is inner
 #        tools/vm/duo-fold.sh stop                  disconnect, restart the VM headless
@@ -21,9 +19,8 @@
 # connection may reach VNC: reconnecting crashes Tart and takes running jobs with
 # it (docs/process/mac-ui-vm.md).
 #
-# The fold buttons are screen positions, right for Device Hub's window where it
-# opened on 2026-11-01. Check with `screen`, and set DUO_FOLD_Y and
-# DUO_FOLD_CLOSED_X, DUO_FOLD_HALF_X and DUO_FOLD_OPEN_X if the window moved.
+# Production posture uses private calibration and fresh visual control evidence.
+# No fixed-coordinate fold or unleased generic click/boot route is provided.
 # Exit codes: 0 done, 1 failed, 2 usage, 3 the lease stayed busy.
 
 set -u
@@ -35,8 +32,9 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 . "$ROOT/tools/scripts/host-lease-mutex.sh"
 
 MAIN="$(dirname "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)")"
-STATE="$MAIN/build/vm-fold"
-FIFO="$STATE/commands"
+CANONICAL="$MAIN/build/vm-fold"
+STATE="$CANONICAL"
+VENV="$CANONICAL/venv"
 VNCDOTOOL_VERSION=1.4.2
 
 log() { printf 'duo-fold: %s\n' "$*" >&2; }
@@ -57,12 +55,22 @@ TART="$(jq -r .tart <<<"$SELECTED")"
 SSH="$(jq -r .ssh <<<"$SELECTED")"
 # The persistent state and holder venv are global, not per VM. Never stop or
 # start a secondary guest under the primary guest's state/scheduler lease.
-case "$COMMAND" in start|prepare|stop)
+case "$COMMAND" in start|prepare|stop|inspect|open|closed|calibrate)
   [ "$VM" = "$PRIMARY" ] || { log "VNC lifecycle supports only configured primary VM $PRIMARY"; exit 1; }
-  if [ -e "$STATE/vm" ] && [ "$(cat "$STATE/vm")" != "$PRIMARY" ]; then
-    log "global VNC state belongs to another VM; retain evidence for operator recovery"; exit 1
-  fi
 esac
+
+select_state() {
+  STATE="$(python3 "$SESSION" route "$CANONICAL" "$VM")" || exit 1
+  python3 "$SESSION" primary "$STATE" "$VM" || exit 1
+  FIFO="$STATE/commands"
+}
+
+recheck_state() {
+  local selected
+  selected="$(python3 "$SESSION" route "$CANONICAL" "$VM")" || return 1
+  [ "$selected" = "$STATE" ] || { log "session route changed; retain evidence"; return 1; }
+  python3 "$SESSION" primary "$STATE" "$VM" || return 1
+}
 
 release() {
   if [ -n "$LEASE" ] && host_lease_lock "$LEASE"; then
@@ -74,6 +82,7 @@ release() {
 }
 
 headless() {
+  recheck_state || return 1
   [ ! -e "$STATE/shutdown-pending" ] || {
     log "remote stop completion uncertain; evidence retained; installed wrapper cannot prove recovery"; return 1;
   }
@@ -106,7 +115,7 @@ finish() {
 
 lease() {
   local dir start
-  dir="$(mvl_lease_dir "$ROOT" "$VM")"
+  dir="$(mvl_lease_dir "$ROOT" "$PRIMARY")"
   mkdir -p "$(dirname "$dir")" || exit 1
   start="$(mvl_epoch)"
   trap finish EXIT
@@ -140,8 +149,9 @@ lease() {
 # Scheduler excludes acquisitions/jobs; the guest pool mutex also excludes
 # legacy renewals from final inventory through shutdown initiation.
 shutdown_guest() {
+  recheck_state || return 1
   mvl_tests_idle "$SSH" || { log "guest tests running or unknown; wait for jobs to finish"; return 1; }
-  python3 "$SESSION" shutdown "$STATE" "$SSH" "$TART" "$VM" || return 1
+  python3 "$SESSION" shutdown "$STATE" "$SSH" "$TART" "$VM" "$LEASE" || return 1
   [ "$(mvl_state "$TART" "$VM")" = stopped ] || {
     log "shutdown command completed but stopped state unconfirmed; evidence retained"; return 1;
   }
@@ -159,24 +169,26 @@ start() {
   local host current
   [ $# -eq 0 ] || usage
   lease vm-fold-prepare
-  mkdir -p "$STATE" || exit 1
+  recheck_state || exit 1
+  python3 "$SESSION" init "$STATE" || exit 1
   current="$(session_status)" || exit 1
+  if [ "$(jq -r .vm <<<"$current")" != null ] && [ "$(jq -r .vm <<<"$current")" != "$VM" ]; then
+    log "global VNC state belongs to another VM; retain evidence for operator recovery"; exit 1
+  fi
   if [ "$(jq -r .connected <<<"$current")" = true ]; then
     log "connected to $VM (reused)"; return 0
   fi
   # Never replace an existing or incomplete session on a regular prepare call.
-  if [ -e "$STATE/vm" ] || [ -e "$STATE/commands" ] || [ -e "$STATE/holder.pid" ] || [ -e "$STATE/tart.pid" ] || [ -e "$STATE/tunnel.pid" ] || [ -e "$STATE/owner" ] || [ -e "$STATE/control.sock" ] || [ -e "$STATE/recovery-pending" ]; then
-    log "existing session is unavailable; owned sessions may use stop once drained; legacy or uncertain remote exits require operator recovery with evidence retained"; exit 1
-  fi
-  chmod 700 "$STATE" || exit 1
+  python3 "$SESSION" vacant "$STATE" || exit 1
+  recheck_state || exit 1
   host="$(python3 "$SESSION" host "$TART")" || exit 1
-  if [ -n "$host" ]; then
-    [ -x "$STATE/venv/bin/python" ] && "$STATE/venv/bin/python" -I -c 'from vncdotool import api' >"$STATE/dependency.log" 2>&1 || {
-      log "existing holder venv missing/unusable at $STATE/venv; restore it on the coordinator before preparing"; exit 1;
+  if [ -n "$host" ] || [ "$STATE" != "$CANONICAL" ]; then
+    [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -I -c 'from vncdotool import api' >"$STATE/dependency.log" 2>&1 || {
+      log "existing holder venv missing/unusable at $VENV; restore it on the coordinator before preparing"; exit 1;
     }
   else
-    [ -x "$STATE/venv/bin/python" ] || {
-      python3 -m venv "$STATE/venv" && "$STATE/venv/bin/pip" install --quiet "vncdotool==$VNCDOTOOL_VERSION"
+    [ -x "$VENV/bin/python" ] || {
+      python3 -m venv "$VENV" && "$VENV/bin/pip" install --quiet "vncdotool==$VNCDOTOOL_VERSION"
     } || { log "could not install vncdotool"; exit 1; }
   fi
   python3 "$SESSION" preflight "$STATE" || exit 1
@@ -184,7 +196,8 @@ start() {
   # even if a completed shutdown's subsequent state query fails.
   RECOVER=1
   shutdown_guest || exit 1
-  python3 "$SESSION" start "$STATE" "$TART" "$VM" || exit 1
+  recheck_state || exit 1
+  python3 "$SESSION" start "$STATE" "$TART" "$VM" "$VENV/bin/python" || exit 1
   mvl_wait_ready "$SSH" "$TART" "$VM" true "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
     log "VNC guest did not become accessible; inspect private $STATE logs"; exit 1;
   }
@@ -200,31 +213,11 @@ start() {
 stop() {
   [ $# -eq 0 ] || usage
   lease vm-fold-stop
-  mkdir -p "$STATE" || exit 1
-  if [ -e "$STATE/vm" ] && [ "$(cat "$STATE/vm")" != "$VM" ]; then
-    log "global VNC state belongs to another VM; retain evidence for operator recovery"; exit 1
-  fi
+  recheck_state || exit 1
+  python3 "$SESSION" init "$STATE" || exit 1
   # One recovery attempt only; an uncertain result keeps all session evidence.
   headless || exit 1
   log "$VM is back in plain headless mode"
-}
-
-hub() {
-  [ -n "${1:-}" ] || usage
-  "$SSH" "open -a /Applications/Xcode.app/Contents/Applications/DeviceHub.app; xcrun simctl boot $(mvl_q "$1") 2>/dev/null; xcrun simctl bootstatus $(mvl_q "$1") -b >/dev/null" </dev/null
-}
-
-set_fold() {
-  local x y="${DUO_FOLD_Y:-1889}"
-  case "${1:-}" in
-    closed) x="${DUO_FOLD_CLOSED_X:-2245}" ;;
-    half) x="${DUO_FOLD_HALF_X:-2313}" ;;
-    open) x="${DUO_FOLD_OPEN_X:-2381}" ;;
-    *) usage ;;
-  esac
-  send "move $x $y"
-  send click
-  sleep 6
 }
 
 screen() {
@@ -238,27 +231,38 @@ shot() {
   "$SSH" "xcrun simctl io $(mvl_q "$1") screenshot --display=$(mvl_q "$2") /tmp/duo-fold.png >/dev/null 2>&1 && cat /tmp/duo-fold.png" </dev/null >"$3"
 }
 
-# Hardware pilot only. Never calls start, headless, boot, reset or a controller.
+# Read-only inspection. Never calls start, headless, boot, reset or a controller.
 # Keep the scheduler lease through guest validation, launch and capture join.
 inspect() {
   [ $# -eq 1 ] || usage
   lease vm-fold-inspect
+  recheck_state || exit 1
   python3 "$ROOT/tools/vm/sim-posture-inspect.py" "$STATE" "$SSH" "$VM" "$ROOT" "$1" "$TART"
 }
+
+posture() {
+  [ $# -eq 2 ] || usage
+  [ "$VM" = "$PRIMARY" ] || { log "posture requires the primary pool VM"; exit 1; }
+  lease vm-fold-posture
+  recheck_state || exit 1
+  # Use the existing operator environment, including Pillow. Never install,
+  # prepare VNC, reconnect, start the VM or fall back to host simulators here.
+  [ -x "$VENV/bin/python" ] || { log "existing operator venv required"; return 1; }
+  "$VENV/bin/python" -I -c 'from PIL import Image, ImageChops' >/dev/null 2>&1 || {
+    log "restore Pillow in the existing operator venv before posture"; return 1;
+  }
+  "$VENV/bin/python" -I "$ROOT/tools/vm/sim-posture.py" \
+    "$STATE" "$SSH" "$VM" "$ROOT" "$2" "$TART" "$1" "$LEASE"
+}
+
+select_state
 
 case "$COMMAND" in
   start|prepare) start "$@" ;;
   status) [ $# -eq 0 ] || usage; session_status ;;
   inspect) inspect "$@" ;;
+  open|closed|calibrate) posture "$COMMAND" "$@" ;;
   stop) stop "$@" ;;
-  hub) hub "${1:-}" ;;
-  fold) set_fold "${1:-}" ;;
-  click)
-    [ $# -eq 2 ] || usage
-    send "move $1 $2"
-    sleep 0.4
-    send click
-    ;;
   screen) screen "${1:-}" ;;
   shot) shot "$@" ;;
   *) usage ;;

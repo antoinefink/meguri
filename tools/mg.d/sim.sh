@@ -23,21 +23,31 @@ mg_job sim host mg_sim \
   "Shared iOS simulator pool, in the macOS test VM (queued without it; acquire and gc wait for the VM's lease): acquire <iphone|ipad> [--holder <label>] [--ttl-min N] | renew <udid> [--ttl-min N] | release <udid> | status | gc [--older-than-hours N] [--list]"
 
 mg_job sim-posture host mg_sim_posture \
-  "Hardware pilot: inspect <leased-udid>; prepare|status [--vm <name>] for the persistent VNC holder"
+  "Duo posture: open|closed|calibrate|inspect <leased-udid>; prepare|status [--vm <name>] for the persistent VNC holder"
 
 mg_sim_posture() {
-  local action="${1:-}" out
-  if [ "$action" = inspect ]; then
+  local action="${1:-}" out rc
+  if [ "$action" = inspect ] || [ "$action" = open ] || [ "$action" = closed ] || [ "$action" = calibrate ]; then
     if [ $# -ne 2 ]; then
-      mg_failure usage "usage: tools/mg sim-posture inspect <leased-udid>"
+      mg_failure usage "usage: tools/mg sim-posture open|closed|calibrate|inspect <leased-udid>"
       mg_status error; return 0
     fi
-    if ! out="$("$MG_TOOLS/vm/duo-fold.sh" inspect "$2")"; then
-      mg_failure posture-inspect "Hardware inspection failed; see log.txt. The existing VNC session was not restarted."
+    out="$("$MG_TOOLS/vm/duo-fold.sh" "$action" "$2")" && rc=0 || rc=$?
+    case "$rc" in
+      3) mg__mac_vm_unreachable "posture scheduler lease stayed busy" "sim-posture $action $2"; return 0 ;;
+      5) mg__mac_vm_unreachable "posture guest transport unavailable" "sim-posture $action $2"; return 0 ;;
+    esac
+    if [ "$rc" -ne 0 ]; then
+      mg_failure "posture-$action" "Duo $action failed; see log.txt. Native calibration may be required. The existing VNC session was not restarted."
       mg_status fail; return 0
     fi
-    mg_detail inspection "$out"
-    mg_message "sim-posture: private guest desktop capture complete; operator calibration required"
+    if [ "$action" = inspect ]; then
+      mg_detail inspection "$out"
+      mg_message "sim-posture: private guest desktop capture complete; operator calibration required"
+    else
+      mg_detail "$action" "$out"
+      mg_message "sim-posture: $action complete"
+    fi
     mg_status pass; return 0
   fi
   case "$action" in prepare|status) shift ;; *)
