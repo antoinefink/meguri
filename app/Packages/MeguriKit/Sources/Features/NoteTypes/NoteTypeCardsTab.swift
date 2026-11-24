@@ -430,6 +430,10 @@ struct NoteTypeTemplateEditorColumn: View {
         VStack(spacing: .zero) {
             bar
             Divider()
+            // W10, N22.4: the Card Text row above the styling, when it has one plain `.card` rule.
+            if part == .styling, let card, let css = draft?.css {
+                NoteTypeCardTextRow(model: model, id: id, card: card, css: css)
+            }
             editor
             Divider()
             NoteTypeIssuesList(model: model, id: id)

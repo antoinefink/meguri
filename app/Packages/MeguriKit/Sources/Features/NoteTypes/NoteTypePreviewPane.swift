@@ -37,22 +37,24 @@ struct NoteTypePreviewPane: View {
 
     // MARK: The bar
 
-    /// The bar's controls. Where the column is too narrow for all of them,
-    /// Light | Dark and then the Cloze Number move into the note menu, so
-    /// the bar never runs past its column.
+    /// The bar's controls, each at its own size. Where the column is too
+    /// narrow for all of them, the Cloze Number moves into the note menu,
+    /// then the note menu shows only its symbol, then Light | Dark moves
+    /// into it: the bar never touches the column's edges or clips.
     private var bar: some View {
         ViewThatFits(in: .horizontal) {
-            barLine(appearanceInMenu: false, clozeInMenu: false)
-            barLine(appearanceInMenu: true, clozeInMenu: false)
-            barLine(appearanceInMenu: true, clozeInMenu: true)
+            barLine(noteLabel: true, appearanceInMenu: false, clozeInMenu: false)
+            barLine(noteLabel: true, appearanceInMenu: false, clozeInMenu: true)
+            barLine(noteLabel: false, appearanceInMenu: false, clozeInMenu: true)
+            barLine(noteLabel: false, appearanceInMenu: true, clozeInMenu: true)
         }
     }
 
     private var cloze: Bool { model.draft(id)?.isCloze == true }
 
-    private func barLine(appearanceInMenu: Bool, clozeInMenu: Bool) -> some View {
+    private func barLine(noteLabel: Bool, appearanceInMenu: Bool, clozeInMenu: Bool) -> some View {
         HStack(spacing: Spacing.small) {
-            noteMenu(appearanceInMenu: appearanceInMenu, clozeInMenu: clozeInMenu && cloze)
+            noteMenu(label: noteLabel, appearanceInMenu: appearanceInMenu, clozeInMenu: clozeInMenu && cloze)
             if cloze && !clozeInMenu { clozeMenu }
             Spacer(minLength: Spacing.xSmall)
             sidePicker
@@ -95,7 +97,7 @@ struct NoteTypePreviewPane: View {
             .fixedSize()
     }
 
-    private func noteMenu(appearanceInMenu: Bool, clozeInMenu: Bool) -> some View {
+    private func noteMenu(label: Bool, appearanceInMenu: Bool, clozeInMenu: Bool) -> some View {
         Menu {
             Button { preview.step(by: -1) } label: { Text("noteTypes.preview.previous", bundle: .module) }
                 .disabled(!preview.canStep.previous)
@@ -114,13 +116,17 @@ struct NoteTypePreviewPane: View {
                 appearanceChoices(iconsOnly: false).pickerStyle(.inline)
             }
         } label: {
-            if let position = preview.notePosition {
+            if !label {
+                Label { Text("noteTypes.preview.note", bundle: .module) } icon: { Image(systemName: "doc.text") }
+                    .labelStyle(.iconOnly)
+            } else if let position = preview.notePosition {
                 Text(verbatim: NoteTypesStrings.previewPosition(position.index, of: position.count, locale: locale))
                     .monospacedDigit()
             } else {
                 Text("noteTypes.preview.noNotes", bundle: .module)
             }
         }
+        .help(notePositionText ?? "")
         #if os(iOS)
         .menuStyle(.button)
         .buttonStyle(.borderless)
@@ -128,6 +134,11 @@ struct NoteTypePreviewPane: View {
         .fixedSize()
         .accessibilityLabel(Text("noteTypes.preview.note", bundle: .module))
         .accessibilityIdentifier("noteTypes.cards.preview.note")
+    }
+
+    /// "3 of 12" (the note menu's help where it shows only its symbol).
+    private var notePositionText: String? {
+        preview.notePosition.map { NoteTypesStrings.previewPosition($0.index, of: $0.count, locale: locale) }
     }
 
     private var clozeChoices: some View {
@@ -171,6 +182,10 @@ struct NoteTypePreviewPane: View {
                 // first card would never be ready. Until it is, nothing shows.
                 let drawn = preview.shown != nil
                 CardWebView(pair: pair)
+                    #if os(iOS)
+                    // The card's background runs to the bottom edge, under the home indicator.
+                    .ignoresSafeArea(.container, edges: .bottom)
+                    #endif
                     // Under an error the last card stays, faded, so the place keeps its shape.
                     .opacity(drawn ? (covered ? 0.25 : 1) : 0)
                     .allowsHitTesting(drawn && !covered)

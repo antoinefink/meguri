@@ -32,6 +32,10 @@ import Foundation
     func replaceFieldReferences(_ text: String, from: String, to: String) async throws -> String
     /// W6's colouring of a Front or Back text, or of the styling.
     func syntax(_ text: String, styling: Bool) async throws -> [NotetypeSyntaxSpan]
+    /// W10's Card Text row of a styling (pure: no collection is read).
+    func cardText(css: String, rightToLeft: Bool) async throws -> CardTextRow?
+    /// W10: one control's change on a styling (pure).
+    func editCardText(css: String, change: CardTextChange, rightToLeft: Bool) async throws -> CardTextEdited
 }
 
 /// The section's backend over CoreBridge. A job whose task is cancelled
@@ -81,6 +85,13 @@ import Foundation
     }
     public func syntax(_ text: String, styling: Bool) async throws -> [NotetypeSyntaxSpan] {
         styling ? try await service.notetypeStylingSyntax(text) : try await service.notetypeTemplateSyntax(text)
+    }
+
+    public func cardText(css: String, rightToLeft: Bool) async throws -> CardTextRow? {
+        try await service.cardText(css: css, rightToLeft: rightToLeft)
+    }
+    public func editCardText(css: String, change: CardTextChange, rightToLeft: Bool) async throws -> CardTextEdited {
+        try await service.editCardText(css: css, change: change, rightToLeft: rightToLeft)
     }
 
     private func run<Value: Sendable>(_ start: () async throws -> CoreNotetypeReadJob<Value>) async throws -> Value {

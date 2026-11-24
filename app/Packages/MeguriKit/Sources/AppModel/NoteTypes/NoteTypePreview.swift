@@ -474,9 +474,10 @@ public nonisolated enum NoteTypePreviewLayout {
     public static let listMinimum: CGFloat = 200
     /// The narrowest the code editor stays usable beside the preview.
     public static let editorMinimum: CGFloat = 320
-    /// The preview's narrowest: its bar's controls and a card at its own size.
-    public static let previewMinimum: CGFloat = 300
-    public static let previewIdeal: CGFloat = 380
+    /// The preview's narrowest: its whole bar (note menu, Question | Answer,
+    /// Light | Dark) with its insets, and a card at its own size.
+    public static let previewMinimum: CGFloat = 350
+    public static let previewIdeal: CGFloat = 400
 
     /// Mac: the preview shows beside the editor when asked for and the tab
     /// is wide enough for the lists, a usable editor and the preview;

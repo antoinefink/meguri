@@ -86,6 +86,9 @@ public final class AppNavigation {
     private var scrollPositions: [ScrollAnchorKey: ScrollPosition] = [:]
     /// The sidebar visibility to restore when the review ends (R21).
     private var columnVisibilityBeforeReview: NavigationSplitViewVisibility?
+    /// The sidebar visibility to restore when a narrow window widens again
+    /// (N22.1: the Note Types Cards tab under about 1,100 points).
+    private var columnVisibilityBeforeNarrow: NavigationSplitViewVisibility?
     /// The Settings tab's own section: Settings, or Note Types pushed on it.
     private var settingsTabSection: AppSection = .settings
     /// Set by a restore: the launch layout decides whether the deck page
@@ -348,6 +351,24 @@ public final class AppNavigation {
 
     /// Presents a review. In the sidebar layout the review fills the detail
     /// area and the sidebar collapses until the review ends (R21).
+    /// N22.1: a screen that needs the window's width (the Note Types Cards
+    /// tab under about 1,100 points) hides the sidebar, as Mail and Xcode
+    /// hide their navigators; it comes back as it was once the window is
+    /// wide again or the screen goes. The person's own choice is what the
+    /// app remembers.
+    public func setNarrowWorkspace(_ narrow: Bool) {
+        if narrow {
+            guard columnVisibilityBeforeNarrow == nil, columnVisibility != .detailOnly else { return }
+            columnVisibilityBeforeNarrow = columnVisibility
+            columnVisibility = .detailOnly
+        } else {
+            guard let saved = columnVisibilityBeforeNarrow else { return }
+            columnVisibilityBeforeNarrow = nil
+            // The person opened the sidebar meanwhile: leave it as it is.
+            if columnVisibility == .detailOnly { columnVisibility = saved }
+        }
+    }
+
     public func startReview(_ presentation: ReviewPresentation) {
         if review == nil {
             columnVisibilityBeforeReview = columnVisibility
@@ -391,7 +412,7 @@ public final class AppNavigation {
         UIState(
             section: section,
             selectedDeck: selectedDeck,
-            sidebarVisible: (columnVisibilityBeforeReview ?? columnVisibility) != .detailOnly
+            sidebarVisible: (columnVisibilityBeforeReview ?? columnVisibilityBeforeNarrow ?? columnVisibility) != .detailOnly
         )
     }
 

@@ -277,6 +277,14 @@ struct TemplateCodeEditor: NSViewRepresentable {
             case .replaceAll(let replacement):
                 let length = (text as NSString).length
                 edit = NoteTypeTextEdit(range: 0..<length, text: replacement, caret: min(selection.location, (replacement as NSString).length))
+            case .replaceHighlighting(let replacement, let highlight):
+                // W10: the Card Text row's edit, its value shown with the system's find indicator.
+                let length = (text as NSString).length
+                perform(NoteTypeTextEdit(range: 0..<length, text: replacement, caret: highlight.upperBound))
+                let range = NSRange(location: highlight.lowerBound, length: highlight.count)
+                textView.scrollRangeToVisible(range)
+                textView.showFindIndicator(for: range)
+                return
             case .append(let suffix):
                 let length = (text as NSString).length
                 edit = NoteTypeTextEdit(range: length..<length, text: suffix, caret: length + (suffix as NSString).length)
@@ -758,6 +766,10 @@ struct TemplateCodeEditor: UIViewRepresentable {
             case .replaceAll(let replacement):
                 let length = (text as NSString).length
                 edit = NoteTypeTextEdit(range: 0..<length, text: replacement, caret: min(selection.location, (replacement as NSString).length))
+            case .replaceHighlighting(let replacement, let highlight):
+                // W10: the Card Text row's edit; the value written is scrolled into view.
+                let length = (text as NSString).length
+                edit = NoteTypeTextEdit(range: 0..<length, text: replacement, caret: highlight.upperBound)
             case .append(let suffix):
                 let length = (text as NSString).length
                 edit = NoteTypeTextEdit(range: length..<length, text: suffix, caret: length + (suffix as NSString).length)

@@ -15,9 +15,14 @@ public struct NoteTypesView: View {
     /// The sync button (N23.6), first of the trailing group.
     @Environment(\.syncStatusItem) private var syncStatusItem
     @State private var jobShown = SaveJobShown()
+    /// The window's width (Mac), for N22.1's narrow Cards tab.
+    @State private var windowWidth: CGFloat?
+    /// Hides the app's sidebar while the Cards tab is narrow (N22.1).
+    private let navigation: AppNavigation?
 
-    public init(model: NoteTypesModel) {
+    public init(model: NoteTypesModel, navigation: AppNavigation? = nil) {
         self.model = model
+        self.navigation = navigation
     }
 
     public var body: some View {
@@ -46,6 +51,20 @@ public struct NoteTypesView: View {
             .modifier(SaveOutcomeAlerts(model: model))
             .task(id: model.progress?.notetypeId) { await SaveJobShown.follow(model.progress?.notetypeId, into: $jobShown) }
             .onAppear { model.appear() }
+            // One continuous toolbar in every state: the columns' separators never show through it.
+            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+            // N22.1: under about 1,100 points the sidebar steps aside while the Cards tab shows.
+            .background { WindowWidthReader(width: $windowWidth) }
+            .onChange(of: narrowCards, initial: true) { _, narrow in navigation?.setNarrowWorkspace(narrow) }
+            .onDisappear { navigation?.setNarrowWorkspace(false) }
+    }
+
+    /// N22.1's width under which the Cards tab hides the app's sidebar.
+    static let narrowWindow: CGFloat = 1_100
+
+    private var narrowCards: Bool {
+        guard model.tab == .cards, model.selection != nil, let windowWidth else { return false }
+        return windowWidth < Self.narrowWindow
     }
 
     @ViewBuilder private var split: some View {
@@ -138,6 +157,48 @@ public struct NoteTypesView: View {
     }
     #endif
 }
+
+#if os(macOS)
+/// Reports the window's width as it is resized (the detail's own width
+/// changes when the sidebar hides, so it cannot decide that).
+struct WindowWidthReader: NSViewRepresentable {
+    @Binding var width: CGFloat?
+
+    func makeNSView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.report = { width = $0 }
+        return view
+    }
+
+    func updateNSView(_ view: ReaderView, context: Context) {
+        view.report = { width = $0 }
+    }
+
+    final class ReaderView: NSView {
+        var report: (CGFloat) -> Void = { _ in }
+        private var observer: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+            guard let window else { return }
+            observer = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) {
+                [weak self] _ in
+                MainActor.assumeIsolated { self?.publish() }
+            }
+            publish()
+        }
+
+        private func publish() {
+            guard let width = window?.frame.width else { return }
+            DispatchQueue.main.async { [weak self] in self?.report(width) }
+        }
+
+        isolated deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    }
+}
+#endif
 
 /// Revert and Save (N22.5), or while a save job runs, one status item in
 /// their place; they return when it ends. A plain status, not a control,
