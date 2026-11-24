@@ -189,9 +189,9 @@ public struct HomeView: View {
             selection: DeckListSelection(homeDeckPage: navigation.homeDeckPage),
             countsHeld: collection.homeCountsHeld) { navigation.openHome() }
     }
-    /// Today beside the list (N14.1) already shows the previous session.
+    /// The list beside the detail leaves the previous session to the detail (N14.1).
     private var showsPreviousSession: Bool {
-        !(todayBesideDeckList && collection.navigation.homeDeckPage == nil)
+        !todayBesideDeckList
     }
     /// N14.1: the sidebar layout's root is Today; the tab layout's is the deck list.
     private var showsToday: Bool { shellLayout == .sidebar }
