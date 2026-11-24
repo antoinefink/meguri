@@ -460,10 +460,13 @@ public final class NoteTypePreview {
 
 /// Where the Cards tab puts its preview (N22.3, N22.7).
 public nonisolated enum NoteTypePreviewLayout {
-    /// The card types column's width on the Mac (its ideal).
+    /// The card types column's ideal width on the Mac.
     public static let listWidth: CGFloat = 240
+    /// The card types column's narrowest, which the threshold counts: the
+    /// column gives way before the preview hides.
+    public static let listMinimum: CGFloat = 200
     /// The narrowest the code editor stays usable beside the preview.
-    public static let editorMinimum: CGFloat = 360
+    public static let editorMinimum: CGFloat = 320
     /// The preview's narrowest: its bar's controls and a card at its own size.
     public static let previewMinimum: CGFloat = 300
     public static let previewIdeal: CGFloat = 380
@@ -472,6 +475,6 @@ public nonisolated enum NoteTypePreviewLayout {
     /// is wide enough for the lists, a usable editor and the preview;
     /// narrower, it hides by itself and comes back when there is room.
     public static func macShows(requested: Bool, width: CGFloat) -> Bool {
-        requested && width >= listWidth + editorMinimum + previewMinimum
+        requested && width >= listMinimum + editorMinimum + previewMinimum
     }
 }

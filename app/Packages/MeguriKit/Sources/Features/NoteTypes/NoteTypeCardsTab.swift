@@ -66,7 +66,7 @@ struct NoteTypeCardsTab: View {
         #endif
     }
 
-    private static let columnMinimum: CGFloat = 200
+    private static let columnMinimum: CGFloat = NoteTypePreviewLayout.listMinimum
     #if os(macOS)
     private static let columnIdeal: CGFloat = NoteTypePreviewLayout.listWidth
     #else
