@@ -53,6 +53,7 @@ import Synchronization
         configuration.timeoutIntervalForResource = 5
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
+        var stage = "first endpoint"
         do {
             model.firstOpenAttemptEnded()
             #expect(model.applyPort(String(first.port)))
@@ -66,33 +67,49 @@ import Synchronization
             await model.settle()
             try await waitForStatus(model) { $0.hasPrefix("Listening") }
             #expect(model.port == first.port && model.status.contains(String(first.port)))
-            let socket = session.webSocketTask(with: URL(string: "ws://127.0.0.1:\(first.port)/anki-connect")!)
+            stage = "WebSocket hello"
+            var request = URLRequest(url: URL(string: "ws://127.0.0.1:\(first.port)/anki-connect")!)
+            request.timeoutInterval = 5
+            request.setValue("chrome-extension://abcdefghijklmnopabcdefghijklmnop", forHTTPHeaderField: "Origin")
+            let socket = session.webSocketTask(with: request)
             socket.resume()
             defer { socket.cancel(with: .goingAway, reason: nil) }
-            try await withSocketDeadline(socket) { try await miningSendPing(socket) }
+            try await withSocketDeadline(socket, stage: stage) {
+                try await socket.send(.string(#"{"id":1,"msg":"hello","data":{}}"#))
+            }
+            stage = "first ping"
+            try await miningSendPing(socket, stage: stage)
             let initialStatus = model.status
+            stage = "no-op preserves connection"
             #expect(!model.applyPort(""))
             #expect(!model.applyPort("65536"))
             #expect(model.applyPort(String(first.port)))
             await model.settle()
             #expect(model.status == initialStatus)
-            try await withSocketDeadline(socket) { try await miningSendPing(socket) } // A no-op preserves the listener.
+            try await miningSendPing(socket, stage: stage) // A no-op preserves the listener.
 
             // A real bind conflict retains the selected preference and retires
             // the previous listener, including its WebSocket and Host policy.
+            stage = "occupied endpoint retires old connection"
             #expect(model.applyPort(String(occupied.port)))
             await model.settle()
             try await waitForStatus(model) { $0.contains("is in use") }
             #expect(model.port == occupied.port && model.status.contains(String(occupied.port)))
             #expect(defaults.integer(forKey: "mining.port") == Int(occupied.port))
             await #expect(throws: (any Error).self) {
-                try await withSocketDeadline(socket) { _ = try await socket.receive() }
+                do {
+                    try await withSocketDeadline(socket, stage: "retired WebSocket receive") { _ = try await socket.receive() }
+                } catch {
+                    #expect(!(error is MiningSocketDeadlineExceeded))
+                    throw error
+                }
             }
             try expectMiningPortClosed(first.port)
             #expect(!model.applyPort("12"))
             #expect(model.applyPort(String(occupied.port)))
             #expect(model.status.contains("Port \(occupied.port) is in use"))
 
+            stage = "replacement endpoint and Host policy"
             next.close()
             #expect(model.applyPort(String(next.port)))
             await model.settle()
@@ -108,6 +125,7 @@ import Synchronization
             let restored = SentenceMining(defaults: defaults, collectionKey: "synthetic-new-collection")
             #expect(restored.enabled && restored.configuredPort == next.port)
 
+            stage = "disabled preference change"
             model.setEnabled(false)
             #expect(model.applyPort(String(disabled.port)))
             await model.settle()
@@ -119,6 +137,7 @@ import Synchronization
             offPort.close()
             await model.shutdown()
         } catch {
+            print("SentenceMiningPortTests [\(stage)]: \(error); status=\(model.status)")
             await model.shutdown()
             throw error
         }
@@ -282,6 +301,42 @@ import Synchronization
         }
     }
 
+    @Test(.timeLimit(.minutes(1))) func socketDeadlineCompletesWithoutPongCallbackAndIgnoresLateCallback() async throws {
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        // No connection is started: stand in for Foundation retaining its
+        // callback indefinitely, then delivering it after cancellation.
+        let socket = session.webSocketTask(with: URL(string: "ws://127.0.0.1/anki-connect")!)
+        let callback = Mutex<(@Sendable ((any Error)?) -> Void)?>(nil)
+        let exited = Mutex(false)
+        await #expect(throws: MiningSocketDeadlineExceeded.self) {
+            try await withSocketDeadline(socket, stage: "missing pong", timeout: .milliseconds(100)) {
+                defer { exited.withLock { $0 = true } }
+                try await miningAwaitPong { value in callback.withLock { $0 = value } }
+            }
+        }
+        let deadline = ContinuousClock.now + .seconds(1)
+        while !exited.withLock({ $0 }), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(exited.withLock { $0 })
+        let late = try #require(callback.withLock { $0 })
+        late(nil)
+        late(URLError(.cancelled))
+        let cancellationCallback = Mutex<(@Sendable ((any Error)?) -> Void)?>(nil)
+        let cancelled = Task {
+            try await miningAwaitPong { value in cancellationCallback.withLock { $0 = value } }
+        }
+        let cancellationDeadline = ContinuousClock.now + .seconds(1)
+        while cancellationCallback.withLock({ $0 == nil }), ContinuousClock.now < cancellationDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let afterCancellation = try #require(cancellationCallback.withLock { $0 })
+        cancelled.cancel()
+        await #expect(throws: CancellationError.self) { try await cancelled.value }
+        afterCancellation(nil)
+    }
+
     private func listeningPort(_ events: borrowing Mutex<[MiningListener.State]>) async throws -> UInt16 {
         let deadline = ContinuousClock.now + .seconds(5)
         while ContinuousClock.now < deadline {
@@ -323,29 +378,65 @@ import Synchronization
 
 }
 
-func miningSendPing(_ socket: URLSessionWebSocketTask) async throws {
-    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-        socket.sendPing(pongReceiveHandler: { error in
-            if let error {
-                continuation.resume(throwing: error)
-            } else {
-                continuation.resume(returning: ())
-            }
-        })
+func miningSendPing(_ socket: URLSessionWebSocketTask, stage: String = "WebSocket ping") async throws {
+    try await withSocketDeadline(socket, stage: stage) {
+        try await miningAwaitPong { socket.sendPing(pongReceiveHandler: $0) }
     }
 }
 
-func withSocketDeadline(_ socket: URLSessionWebSocketTask,
-                        operation: () async throws -> Void) async throws {
-    let deadline = Task {
-        try await Task.sleep(for: .seconds(5))
-        socket.cancel(with: .goingAway, reason: nil)
-    }
-    defer { deadline.cancel() }
+// Finishing a stream releases the waiter even when Foundation never calls back;
+// a late callback after cancellation is ignored by the finished continuation.
+nonisolated func miningAwaitPong(_ start: @Sendable (@escaping @Sendable ((any Error)?) -> Void) -> Void) async throws {
+    let reply = AsyncThrowingStream<Void, any Error>.makeStream()
     try await withTaskCancellationHandler {
         try Task.checkCancellation()
-        try await operation()
+        start { error in
+            if let error { reply.continuation.finish(throwing: error) }
+            else { reply.continuation.yield(()); reply.continuation.finish() }
+        }
+        for try await _ in reply.stream { return }
+        throw CancellationError()
     } onCancel: {
+        reply.continuation.finish(throwing: CancellationError())
+    }
+}
+
+nonisolated struct MiningSocketDeadlineExceeded: Error {
+    let stage: String
+}
+
+func withSocketDeadline(_ socket: URLSessionWebSocketTask,
+                        stage: String = "WebSocket operation", timeout: Duration = .seconds(5),
+                        operation: @escaping @MainActor @Sendable () async throws -> Void) async throws {
+    let reply = AsyncStream<Result<Void, any Error>>.makeStream()
+    // An unstructured worker lets the caller finish without joining a stuck
+    // Foundation callback. Cancellation still retires the worker and socket.
+    let worker = Task {
+        do {
+            try Task.checkCancellation()
+            try await operation()
+            reply.continuation.yield(.success(()))
+        } catch { reply.continuation.yield(.failure(error)) }
+        reply.continuation.finish()
+    }
+    let deadline = Task {
+        do { try await Task.sleep(for: timeout) } catch { return }
+        reply.continuation.yield(.failure(MiningSocketDeadlineExceeded(stage: stage)))
+        reply.continuation.finish()
+        worker.cancel()
+        socket.cancel(with: .goingAway, reason: nil)
+    }
+    defer { worker.cancel(); deadline.cancel(); reply.continuation.finish() }
+    try await withTaskCancellationHandler {
+        try Task.checkCancellation()
+        for await result in reply.stream {
+            try Task.checkCancellation()
+            try result.get()
+            return
+        }
+        throw CancellationError()
+    } onCancel: {
+        reply.continuation.finish()
         socket.cancel(with: .goingAway, reason: nil)
     }
 }

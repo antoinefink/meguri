@@ -178,6 +178,10 @@ nonisolated final class MiningListener: @unchecked Sendable {
         }
         do {
             let parameters = NWParameters.tcp
+            // Set the IP policy explicitly as well as the literal bind address.
+            // Keep reuse disabled: a foreign service must never share our port.
+            (parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options)?.version = .v4
+            parameters.requiredInterfaceType = .loopback
             parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1",
                 port: port == 0 ? NWEndpoint.Port.any : NWEndpoint.Port(rawValue: port)!)
             parameters.allowLocalEndpointReuse = false
@@ -228,6 +232,8 @@ nonisolated final class MiningListener: @unchecked Sendable {
         }
         do {
             let parameters = NWParameters.tcp
+            (parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options)?.version = .v6
+            parameters.requiredInterfaceType = .loopback
             parameters.requiredLocalEndpoint = .hostPort(host: "::1", port: NWEndpoint.Port(rawValue: port)!)
             parameters.allowLocalEndpointReuse = false
             let value = try NWListener(using: parameters)

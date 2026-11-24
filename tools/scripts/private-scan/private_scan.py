@@ -836,16 +836,16 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningPortTests.swift':
-        'a19e25d05dfab94e1a8abcbd618d6a786ac3f68a5bc4762c1bf4b1536969f540',
+        'eefe2339326522354c7051875c0589f607543ceae6eaf904cc9e41c709276a50',
     # Complete-content PUBLIC review: cleanroom 20261124T133218Z-2230.
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningHTTP.swift':
         '18e72c0d652f3b438b3c5811cbfe83fbbfb7aff0c9ef5db68c880a534b1d8317',
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningListener.swift':
-        'a5f1b44b2e2a5ae45242bcd141ecad66a24a0a0d20225110523e7d26242150dc',
+        '95b972371bbc552b7a73a755f99ea75620be0f9c0cefb22b9a0ccaf9f1490f27',
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningWebSocket.swift':
         'bb35c52f2d96a87117c374f9cab80da43ce9c22c430883fc508f305a77cdaa46',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':
-        '0eeada8e43c01406ed646ea216740d2bea480a7f0b0c28429d2e3cdec9ab8bb9',
+        '35ae23a2d7c783577ecea9adbbb2236601b7e4445aea91f3adf00dd78ed0df24',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningTests.swift':
         'b185e9c2ef482820e312030e18f676ae1d50f5d0fddfbe7c7eb1b237355d6a7c',
     'core/crates/meguri-ffi/src/notes.rs':

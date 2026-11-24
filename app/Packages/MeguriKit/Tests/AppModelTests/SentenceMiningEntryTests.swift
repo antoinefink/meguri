@@ -67,8 +67,10 @@ extension ReviewCollectionStartupTests {
             wsRequest.setValue("chrome-extension://abcdefghijklmnopabcdefghijklmnop", forHTTPHeaderField: "Origin")
             let socket = webSession.webSocketTask(with: wsRequest)
             webSocket = socket; socket.resume()
-            try await socket.send(.string(#"{"id":1,"msg":"hello","data":{}}"#))
-            try await withSocketDeadline(socket) { try await miningSendPing(socket) }
+            try await withSocketDeadline(socket, stage: "entry WebSocket hello") {
+                try await socket.send(.string(#"{"id":1,"msg":"hello","data":{}}"#))
+            }
+            try await miningSendPing(socket, stage: "entry WebSocket ping")
             let sentence = "<span title='Study > draft' class='term emphasis' lang='en' dir='ltr'><strong>A synthetic sentence.</strong> H<sub>2</sub>O</span>"
             // Complete self-contained media: eight silent PCM samples and a gray pixel.
             let audio = "data:audio/wav;base64,UklGRiwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQgAAACAgICAgICAgA=="
@@ -128,7 +130,14 @@ extension ReviewCollectionStartupTests {
             mining.setEnabled(false)
             #expect(mining.status == "Off · Port \(bound)" && !defaults.bool(forKey: "mining.enabled"))
             await mining.settle()
-            await #expect(throws: (any Error).self) { _ = try await socket.receive() }
+            await #expect(throws: (any Error).self) {
+                do {
+                    try await withSocketDeadline(socket, stage: "disabled entry WebSocket receive") { _ = try await socket.receive() }
+                } catch {
+                    #expect(!(error is MiningSocketDeadlineExceeded))
+                    throw error
+                }
+            }
             #expect(webSocket?.closeCode == .goingAway)
             try expectMiningPortClosed(bound)
             mining.setEnabled(true)
