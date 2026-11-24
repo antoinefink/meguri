@@ -74,9 +74,9 @@
 
 set -u
 
-SP_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SP_SCRIPTS="$(cd "$(dirname "$0")" && pwd -P)"
 SP_ROOT="$(cd "$SP_SCRIPTS/../.." && pwd -P)"
-SP_DEVICES_JSON="${MEGURI_SIM_DEVICES_JSON:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/sim-devices.json}"
+SP_DEVICES_JSON="${MEGURI_SIM_DEVICES_JSON:-$(cd "$(dirname "$0")/.." && pwd -P)/sim-devices.json}"
 SP_KINDS="" # set from SP_DEVICES_JSON before any command runs
 
 SP_PREFIX=Meguri-Pool-
@@ -94,7 +94,6 @@ SP_DEFAULT_TTL=60
 SP_TAB=$'\t'
 
 SP_LOCKED=""
-SP_PENDING_ID=""
 SP_PENDING="" # a lease this run claimed and has not handed out yet
 
 sp_log() { printf 'sim-pool: %s\n' "$*" >&2; }
@@ -146,11 +145,11 @@ sp_lock() {
   mkdir -p "$SP_LEASES" || { sp_log "cannot create $SP_LEASES"; exit 1; }
   until mkdir "$SP_LOCK" 2>/dev/null; do
     pid="$(cat "$SP_LOCK/pid" 2>/dev/null)"
-    # Never evict a live transaction. An old lock without a pid, or a
-    # holder that died, is stale.
+    # A holder that died, or one that has held it for 10 minutes (claims take
+    # seconds), left a stale lock.
     if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null &&
       [ "$(cat "$SP_LOCK/pid" 2>/dev/null)" = "$pid" ]; } ||
-      { [ -z "$pid" ] && [ -n "$(find "$SP_LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; }; then
+      [ -n "$(find "$SP_LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
       sp_log "removing a stale pool lock (pid ${pid:-unknown})"
       rm -rf "$SP_LOCK"
       continue
@@ -167,18 +166,12 @@ sp_lock() {
 }
 
 sp_unlock() {
-  [ -z "$SP_LOCKED" ] || [ "$(cat "$SP_LOCK/pid" 2>/dev/null)" != "$$" ] || rm -rf "$SP_LOCK"
+  [ -n "$SP_LOCKED" ] && rm -rf "$SP_LOCK"
   SP_LOCKED=""
 }
 
 sp_on_exit() {
-  if [ -n "$SP_PENDING" ]; then
-    [ -n "$SP_LOCKED" ] || sp_lock
-    if [ "$(jq -r '.acquisition_id // empty' "$SP_PENDING/lease.json" 2>/dev/null)" = "$SP_PENDING_ID" ] &&
-      [ -n "$SP_PENDING_ID" ]; then
-      rm -rf "$SP_PENDING"
-    fi
-  fi
+  [ -z "$SP_PENDING" ] || rm -rf "$SP_PENDING"
   sp_unlock
 }
 
@@ -211,17 +204,14 @@ sp_checkout() {
 
 # sp_write_lease <udid> <kind> <holder> <ttl minutes>
 sp_write_lease() {
-  local d="$SP_LEASES/$1" now cwd top acquisition
-  acquisition="$(mktemp "$d/acquisition.XXXXXXXX")" || return 1
-  rm -f "$acquisition"
+  local d="$SP_LEASES/$1" now cwd top
   now="$(sp_now)"
   cwd="${MEGURI_SIM_POOL_CWD:-$(pwd -P)}"
   top="$(sp_checkout)"
   jq -n --arg udid "$1" --arg kind "$2" --arg holder "$3" --argjson ttl "$4" \
-    --arg acquisition "${acquisition##*/}" --arg cwd "$cwd" --arg wt "$top" --argjson pid "${MEGURI_SIM_POOL_PID:-$PPID}" --argjson now "$now" \
+    --arg cwd "$cwd" --arg wt "$top" --argjson pid "${MEGURI_SIM_POOL_PID:-$PPID}" --argjson now "$now" \
     --arg vm "${MEGURI_SIM_POOL_VM:-}" '{
       udid: $udid, kind: $kind, holder: $holder, worktree: $wt, cwd: $cwd, pid: $pid,
-      acquisition_id: $acquisition,
       ttl_min: $ttl, acquired_at: ($now | todate), expires_at: ($now + $ttl * 60 | todate),
       acquired_epoch: $now, expires_epoch: ($now + $ttl * 60)
     } + (if $vm == "" then {} else {vm: $vm} end)' >"$d/lease.json.tmp" && mv -f "$d/lease.json.tmp" "$d/lease.json"
@@ -231,12 +221,7 @@ sp_write_lease() {
 sp_take() {
   mkdir "$SP_LEASES/$1" 2>/dev/null || return 1
   SP_PENDING="$SP_LEASES/$1"
-  if ! sp_write_lease "$@"; then
-    rm -rf "$SP_PENDING"
-    SP_PENDING=""
-    return 1
-  fi
-  SP_PENDING_ID="$(jq -r .acquisition_id "$SP_PENDING/lease.json")"
+  sp_write_lease "$@"
 }
 
 # ---------------------------------------------------------------------------
@@ -624,22 +609,18 @@ sp_renew() {
 sp_reset_leased() {
   local udid="${1:-}"
   [ "$#" -le 1 ] || sp_usage "reset: unexpected argument '$2'"
-  sp_lock
   sp_pool_device "$udid"
   [ -d "$SP_LEASES/$udid" ] || { sp_log "$SP_NAME ($udid) is not leased; lease it before resetting it"; exit 1; }
   [ "$SP_STATE" = Booted ] || { sp_log "$SP_NAME is $SP_STATE, not booted"; exit 1; }
   sp_reset "$udid" || exit 1
-  sp_unlock
   sp_log "reset $SP_NAME ($udid); still booted and leased"
 }
 
 sp_release() {
   local udid="${1:-}" rc=0
   [ "$#" -le 1 ] || sp_usage "release: unexpected argument '$2'"
-  sp_lock
   sp_pool_device "$udid"
   if [ ! -d "$SP_LEASES/$udid" ]; then
-    sp_unlock
     sp_log "$SP_NAME ($udid) is not leased; nothing to release"
     return 0
   fi
@@ -648,6 +629,7 @@ sp_release() {
     sp_boot "$udid" "$SP_STATE" && sp_settle "$SP_NAME" && sp_prepare_springboard "$udid" "$SP_NAME" || rc=1
   fi
   [ "$rc" -ne 0 ] || sp_reset "$udid" || rc=1
+  sp_lock
   rm -rf "${SP_LEASES:?}/$udid"
   sp_unlock
   if [ "$rc" -eq 0 ]; then
@@ -902,9 +884,6 @@ exit \$rc" 2>&1 1>&3 3>&- | tee "$tmp/stderr" >&2 3>&-
 }
 
 # ---------------------------------------------------------------------------
-
-# Guest posture transaction shares these functions, without public dispatch.
-[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 trap sp_on_exit EXIT
 trap 'exit 143' TERM

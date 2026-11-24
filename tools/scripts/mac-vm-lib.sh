@@ -332,12 +332,21 @@ mvl_copy_to() {
 # (MVL_STOPPED=1 when it stopped one); 1 when one still runs or the VM did
 # not answer, with MVL_REASON (MVL_UNREACHABLE=1 when the VM could not be
 # reached or could not start the check: mvl_unreachable).
+MVL_TEST_PATTERN='xcodebuild[ ]test-without-building|UITests-Runner[.]app/Contents/MacOS/|UITests-Runner[.]app/[^/]*UITests-Runner|/[x]ctest( |$)|[m]ac-hidden-launch[.]sh|/Build/Products/Debug/Meguri[.]app/Contents/MacOS/[M]eguri'
+
+# Read-only drain guard for an operator restart. Never stop a guest test here.
+mvl_tests_idle() {
+  local out
+  out="$("$1" "p=$(mvl_q "$MVL_TEST_PATTERN"); pgrep -f \"\$p\" >/dev/null; rc=\$?; [ \"\$rc\" = 1 ] && echo idle" 2>/dev/null </dev/null)" || return 1
+  [ "$out" = idle ]
+}
+
 mvl_stop_tests() {
   local t="${MEGURI_MAC_VM_STOP_SECONDS:-20}" out rc
   MVL_STOPPED=""
   MVL_REASON=""
   MVL_UNREACHABLE=""
-  out="$("$1" "p=$(mvl_q 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/Contents/MacOS/|UITests-Runner[.]app/[^/]*UITests-Runner|/[x]ctest( |$)|[m]ac-hidden-launch[.]sh|/Build/Products/Debug/Meguri[.]app/Contents/MacOS/[M]eguri')
+  out="$("$1" "p=$(mvl_q "$MVL_TEST_PATTERN")
 if pgrep -f \"\$p\" >/dev/null; then
   echo 'mg-mac-vm: stopping'
   pkill -f \"\$p\"

@@ -956,7 +956,7 @@ utilities:
   - {job: hierarchy-check, why: "checks a hierarchy export; drive uses it"}
   - {job: metrics, why: "an Instruments recording around a drive script for an agent"}
   - {job: sim, why: "leases pool simulators"}
-  - {job: sim-posture, why: "Explicit leased pool Duo posture through guest Device Hub controls; unavailable controls queue"}
+  - {job: sim-posture, why: "prepares and inspects a leased Duo on the remote VNC test session"}
   - {job: sim-setup, why: "prepares the simulator pool"}
   - {job: sim-reset, why: "resets a leased simulator"}
   - {job: sync-rig, why: "starts and stops the local sync server; the actor scenarios of live-oracle and the sync suites use it"}

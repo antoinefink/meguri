@@ -835,11 +835,11 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
-    # Complete-content PUBLIC review: duo-simulator-review, 2026-11-24.
-    'tools/tests/sim_posture.bats':
-        'd85c08a1b7b76243b8045331281235aaf82541ad7a73c40e53811022da9cddb8',
-    'tools/tests/sim_vm.bats':
-        '144207cef7a404e397916121a5c6a5b5b894e78ad7709892b3ce7b9610670cd3',
+    # Complete-file privacy reviews for the remote Duo tooling, 2026-11-24.
+    'docs/process/review-log/duo-simulator-posture-20261124.md':
+        '678c5d137d1b74876d52382f3c27e53a0a3eef2d70fcae355f4d404f1eabb0c1',
+    'tools/vm/sim-posture-inspect.py':
+        '34c2970a2037e9b145e4706c0ff077cae047f6bf240577a570711d6c0cdf9ed7',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',

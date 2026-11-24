@@ -146,14 +146,25 @@ failures remain in that log for inspection on the hosting Mac. MG still checks
 Tart state and guest readiness. A dropped coordinator connection cannot
 terminate the detached guest. Nothing here stops or recreates it.
 
-Manual VNC starts (including `--vnc-experimental`) remain foreground SSH calls.
-They need their own explicitly managed SSH port-forward tunnel from M5 to the
-hosting Mac's VNC listener; a printed hosting-Mac loopback URL is not reachable
-from M5 directly. Keep the session password private and allow only the one
-holder connection (`mac-ui-vm.md`). The local `duo-fold.sh` helper does not
-create that remote tunnel; its local-address assumption is insufficient for
-remote VNC. Return to ordinary headless operation under the existing VM lease
-and recovery rules after a manual session.
+VNC runs (`--vnc-experimental`) remain foreground SSH calls through the
+installed wrapper. `tools/mg sim-posture prepare` uses `tools/vm/duo-fold.sh`
+to detach that coordinator session, validate Tart's authenticated 127.0.0.1 URI
+privately and forward coordinator 127.0.0.1 to M3's 127.0.0.1 port over OpenSSH.
+It reuses the one persistent holder; `tools/mg sim-posture status` reports it.
+The existing private holder venv in the main checkout's `build/vm-fold/venv`
+must be usable before any remote restart. No remote package install or network
+configuration is needed. The hosting Mac's installed Tart 2.32.1 provides this
+mode with an ephemeral authenticated port; it has no bind flag.
+
+Preparation and manual `duo-fold.sh start` share MG's per-VM scheduler lock and
+refuse active guest simulator acquisitions, unknown lease expiry/inventory or
+running guest test jobs before stopping. Expired records, including orphans,
+are read without changing them. Repeated preparation never restarts an existing
+session. Read-only status/inspection can verify a previous-format session;
+its teardown and any ambiguous state require operator recovery, never PID cleanup.
+A failed preparation after stopping attempts to restore ordinary headless
+service before releasing the lock. Raw Tart/holder/tunnel logs and the session
+password stay in private main-checkout state; never copy them into results.
 
 ## Moving a local VM (historical alternative)
 

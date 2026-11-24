@@ -720,7 +720,7 @@ mg_mac_vm_xcodebuild_test() {
 # job's runs) is a queued part (mg__mac_vm_unreachable), MG_MAC_VM_RUN_QUEUED
 # is set and this returns 1.
 mg_vm_xcodebuild_test() {
-  local prefix="$1" plan="$2" sdk="$3" dest="$4" config="$5" xctestrun n envs=() rc code dir base vm rcs probe out copy_error="" queued="" err runner
+  local prefix="$1" plan="$2" sdk="$3" dest="$4" config="$5" xctestrun n envs=() rc code dir base vm rcs probe out copy_error="" queued="" err
   shift 5
   MG_MAC_VM_RUN_ERROR=""
   MG_MAC_VM_RUN_QUEUED=""
@@ -738,19 +738,12 @@ mg_vm_xcodebuild_test() {
   for n in $(compgen -e); do
     case "$n" in TEST_RUNNER_*) envs[${#envs[@]}]="$n=${!n}" ;; esac
   done
-  runner="xcodebuild test-without-building -xctestrun $(mg_mac_vm_q "$xctestrun") -destination $(mg_mac_vm_q "$dest") -resultBundlePath $(mg_mac_vm_q "$prefix.xcresult") -collect-test-diagnostics never ${1+$(mg_mac_vm_q "$@")}"
-  if [ "$MG_JOB" = sim-posture ]; then
-    # Fixed posture transaction only: no public command or reset route.
-    runner="/bin/bash $(mg_mac_vm_q "$MG_ROOT/tools/vm/sim-posture-transaction.sh" "$MG_RUN_DIR/posture-context.json" "$xctestrun" "$prefix")"
-    for n in MEGURI_SIM_POOL_DIR MEGURI_SIM_POOL_MAX MEGURI_SIM_DEVICES_DIR; do
-      [ -z "${!n:-}" ] || envs[${#envs[@]}]="$n=${!n}"
-    done
-    envs[${#envs[@]}]="MEGURI_SIM_DEVICES_JSON=$MG_RUN_DIR/sim-devices.json"
-  fi
   echo "$MG_JOB: xcodebuild test-without-building in the VM $vm" >&2
   MG_MAC_VM_TESTING=1
   mg_mac_vm_ssh "{ mkdir -p $(mg_mac_vm_q "$dir") && rm -rf $(mg_mac_vm_q "$prefix.xcresult") &&
-    env ${envs[0]+$(mg_mac_vm_q "${envs[@]}")} $runner; }; rc=\$?; echo \"$MG_MAC_VM_MARK \$rc\"; exit \$rc" >"$prefix.log" 2>&1
+    env ${envs[0]+$(mg_mac_vm_q "${envs[@]}")} xcodebuild test-without-building -xctestrun $(mg_mac_vm_q "$xctestrun") \
+    -destination $(mg_mac_vm_q "$dest") -resultBundlePath $(mg_mac_vm_q "$prefix.xcresult") -collect-test-diagnostics never \
+    ${1+$(mg_mac_vm_q "$@")}; }; rc=\$?; echo \"$MG_MAC_VM_MARK \$rc\"; exit \$rc" >"$prefix.log" 2>&1
   rc=$?
   code="$(sed -n "s/^$MG_MAC_VM_MARK \([0-9][0-9]*\)\$/\1/p" "$prefix.log" | tail -n 1)"
   if [ -z "$code" ]; then

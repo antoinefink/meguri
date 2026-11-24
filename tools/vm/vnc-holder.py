@@ -6,6 +6,19 @@ import os
 import sys
 
 from vncdotool import api
+from vncdotool.client import VNCDoToolClient, VNCDoToolFactory
+
+
+class ResizingVNCClient(VNCDoToolClient):
+    def captureScreen(self, *args, **kwargs):
+        # Tart can resize the image while request bounds retain the boot size.
+        if self.screen is not None:
+            self.width, self.height = self.screen.size
+        return super().captureScreen(*args, **kwargs)
+
+
+class ResizingVNCFactory(VNCDoToolFactory):
+    protocol = ResizingVNCClient
 
 
 def run(client, line):
@@ -27,9 +40,12 @@ def main():
     fifo, pid_file = sys.argv[1], sys.argv[2]
     secret, _, address = os.environ["DUO_FOLD_VNC_URL"].removeprefix("vnc://:").rpartition("@")
     port = address.rpartition(":")[2]
-    client = api.connect(f"127.0.0.1::{port}", password=secret)
+    client = api.connect(f"127.0.0.1::{port}", password=secret,
+                         factory_class=ResizingVNCFactory)
     client.timeout = 60
     client.factory.force_caps = True
+    # Force authentication before publishing readiness, using this connection.
+    client.refreshScreen()
     with open(pid_file, "w") as f:
         f.write(str(os.getpid()))
     print("connected", flush=True)
@@ -48,4 +64,5 @@ def main():
                     print("error", line.split(" ")[0], error, flush=True)
 
 
-main()
+if __name__ == "__main__":
+    main()

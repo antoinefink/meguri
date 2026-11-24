@@ -1513,16 +1513,16 @@ mg_sim_check_owned() {
 # it before touching the device. On a mismatch records it (error) and
 # returns 1.
 mg_sim_check_runtime() {
-  local pinned rid actual config="${2:-tools/sim-devices.json}"
-  pinned="$(jq -c .runtime "$config")"
+  local pinned rid actual
+  pinned="$(jq -c .runtime tools/sim-devices.json)"
   rid="$(mg_simctl list devices --json 2>/dev/null |
     jq -r --arg u "$1" 'first(.devices | to_entries[] | select(any(.value[]; .udid == $u)) | .key) // empty')"
   actual="$(mg_simctl list runtimes --json 2>/dev/null |
     jq -c --arg r "$rid" 'first(.runtimes[] | select(.identifier == $r) | {identifier, version, build: .buildversion}) // null')"
   [ -n "$actual" ] || actual=null
   # A foldable pool device runs the foldable kind's own pinned runtime.
-  if [ "$rid" = "$(jq -r .foldable.runtime.identifier "$config")" ]; then
-    pinned="$(jq -c .foldable.runtime "$config")"
+  if [ "$rid" = "$(jq -r .foldable.runtime.identifier tools/sim-devices.json)" ]; then
+    pinned="$(jq -c .foldable.runtime tools/sim-devices.json)"
   fi
   mg_detail runtime "$(jq -nc --arg u "$1" --argjson e "$pinned" --argjson a "$actual" '{device: $u, expected: $e, actual: $a}')"
   if [ "$(jq -r '"\(.identifier) \(.build)"' <<<"$pinned")" = "$(jq -r 'if . == null then "none" else "\(.identifier) \(.build)" end' <<<"$actual")" ]; then

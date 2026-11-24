@@ -22,6 +22,45 @@
 mg_job sim host mg_sim \
   "Shared iOS simulator pool, in the macOS test VM (queued without it; acquire and gc wait for the VM's lease): acquire <iphone|ipad> [--holder <label>] [--ttl-min N] | renew <udid> [--ttl-min N] | release <udid> | status | gc [--older-than-hours N] [--list]"
 
+mg_job sim-posture host mg_sim_posture \
+  "Hardware pilot: inspect <leased-udid>; prepare|status [--vm <name>] for the persistent VNC holder"
+
+mg_sim_posture() {
+  local action="${1:-}" out
+  if [ "$action" = inspect ]; then
+    if [ $# -ne 2 ]; then
+      mg_failure usage "usage: tools/mg sim-posture inspect <leased-udid>"
+      mg_status error; return 0
+    fi
+    if ! out="$("$MG_TOOLS/vm/duo-fold.sh" inspect "$2")"; then
+      mg_failure posture-inspect "Hardware inspection failed; see log.txt. The existing VNC session was not restarted."
+      mg_status fail; return 0
+    fi
+    mg_detail inspection "$out"
+    mg_message "sim-posture: private guest desktop capture complete; operator calibration required"
+    mg_status pass; return 0
+  fi
+  case "$action" in prepare|status) shift ;; *)
+    mg_failure usage "usage: tools/mg sim-posture prepare|status [--vm <name>]"
+    mg_status error; return 0 ;;
+  esac
+  if [ $# -ne 0 ] && { [ $# -ne 2 ] || [ "$1" != --vm ]; }; then
+    mg_failure usage "usage: tools/mg sim-posture prepare|status [--vm <name>]"
+    mg_status error; return 0
+  fi
+  if [ "$action" = prepare ] && ! "$MG_TOOLS/vm/duo-fold.sh" prepare "$@"; then
+    mg_failure vnc-prepare "VNC preparation failed; see log.txt and the coordinator's private build/vm-fold logs"
+    mg_status fail; return 0
+  fi
+  if ! out="$("$MG_TOOLS/vm/duo-fold.sh" status "$@")"; then
+    mg_failure vnc-status "Could not read persistent VNC session status; see log.txt"
+    mg_status error; return 0
+  fi
+  mg_detail vnc "$out"
+  mg_message "sim-posture: $(jq -r 'if .connected then "connected" else "not connected" end' <<<"$out")"
+  mg_status pass
+}
+
 mg_sim__usage() {
   mg_failure usage "usage: tools/mg sim acquire <kind> [--holder <label>] [--ttl-min N] | renew <udid> [--ttl-min N] | release <udid> | status | gc [--older-than-hours N] [--list]" \
     "tools/mg sim status"
