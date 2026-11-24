@@ -149,6 +149,11 @@ import Testing
         model.activate(.flag(2)); model.activate(.flag(2))
         model.activate(.flag(0)); model.activate(.flag(0))
         #expect(model.query.tokens.isEmpty)
+        // Return or Space on the list (T9): the one selected filter row, when that removes it.
+        model.activate(.state(.new))
+        #expect(!model.activateByKey([.section(.browse), .state(.new), .deck(10)]))
+        #expect(!model.activateByKey([.section(.browse)]))
+        #expect(model.activateByKey([.section(.browse), .state(.new)]) && model.query.tokens.isEmpty)
         // VoiceOver's hint says a click removes the filter only where it does.
         model.activate(.deck(10)); model.activate(.deck(20), click: .command)
         #expect(!model.activationRemoves(.deck(10)) && !model.activationRemoves(.state(.new)))

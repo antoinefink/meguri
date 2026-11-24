@@ -317,7 +317,10 @@ private struct BrowseScrollReporter: NSViewRepresentable {
     func makeNSView(context: Context) -> Reporter { Reporter(results: results) }
     func updateNSView(_ view: Reporter, context: Context) {
         view.results = results
-        view.token = token
+        if view.token != token {
+            view.token = token
+            view.reattach()
+        }
     }
 
     final class Reporter: NSView {
@@ -325,6 +328,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
         var token: UInt64?
         private weak var table: NSTableView?
         private var observer: NSObjectProtocol?
+        private var liveObserver: NSObjectProtocol?
 
         init(results: BrowseResults) {
             self.results = results
@@ -335,35 +339,61 @@ private struct BrowseScrollReporter: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            reattach()
+        }
+
+        /// The list changed or the view moved: the table to watch is looked for again.
+        func reattach() {
             if let observer { NotificationCenter.default.removeObserver(observer) }
+            if let liveObserver { NotificationCenter.default.removeObserver(liveObserver) }
             observer = nil
+            liveObserver = nil
             table = nil
             guard window != nil else { return }
             attach(tries: 100)
         }
 
-        /// Browse is left: the rows shown last are kept, whatever moved them.
-        override func viewWillMove(toWindow newWindow: NSWindow?) {
-            if newWindow == nil { report(leaving: true) }
-            super.viewWillMove(toWindow: newWindow)
-        }
-
-        /// The window's results table (the table view with a column header),
-        /// looked for again until SwiftUI has made it.
+        /// The table view whose row count is the list's: SwiftUI swaps the
+        /// table when a list arrives, and the old one never scrolls (VM trace,
+        /// 2026-11-23). Retried until SwiftUI has made it.
         private func attach(tries: Int) {
-            guard window != nil, table == nil else { return }
-            table = window?.contentView.flatMap(BrowseResponder.resultsTable(in:))
+            guard let window, table == nil, token != nil else { return }
+            let rows = results.list?.count ?? 0
+            table = window.contentView.flatMap { BrowseResponder.resultsTables(in: $0) }?
+                .first { $0.window != nil && rows > 0 && $0.numberOfRows == rows }
             guard let clip = table?.enclosingScrollView?.contentView else {
+                if tries == 0 { results.trace("no table found") }
                 if tries > 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.attach(tries: tries - 1) }
                 }
                 return
             }
             clip.postsBoundsChangedNotifications = true
+            // Delivered as the clip view moves (no queue), while the event that moved
+            // it is still the application's current event: on the main queue it came
+            // later, and no scroll was ever kept (VM trace, 2026-11-23).
             observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip,
-                                                              queue: .main) { [weak self] _ in
+                                                              queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    // Only the user's scrolling moves the kept row: the clip view also
+                    // moves while SwiftUI takes the table down for another section
+                    // (a click in the sidebar), and that must not keep its top.
+                    let event = NSApp.currentEvent
+                    switch event?.type {
+                    case .scrollWheel, .keyDown, .leftMouseDragged, .swipe, .periodic: self?.report()
+                    // A click on the scroller's track pages the table: also the user's scroll.
+                    case .leftMouseDown where self?.onScroller(event) == true, .leftMouseUp where self?.onScroller(event) == true:
+                        self?.report()
+                    default: self?.skipped(event?.type)
+                    }
+                }
+            }
+            // A gesture or a scroller drag ends with its own notice: that position is kept too.
+            liveObserver = NotificationCenter.default.addObserver(forName: NSScrollView.didEndLiveScrollNotification,
+                                                                  object: table?.enclosingScrollView, queue: nil) { [weak self] _ in
                 MainActor.assumeIsolated { self?.report() }
             }
+            results.trace("attached \(table.map { "\($0.numberOfRows) rows" } ?? "")")
             restore(tries: 20)
         }
 
@@ -373,6 +403,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
         private func restore(tries: Int) {
             guard let table, let scrollView = table.enclosingScrollView else { return }
             guard let row = results.pendingRestore, row < table.numberOfRows else {
+                if tries == 0, let row = results.pendingRestore { results.trace("restore \(row) gave up: \(table.numberOfRows) rows") }
                 if tries > 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.restore(tries: tries - 1) }
                 }
@@ -387,10 +418,27 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             let y = min(max(top, -insets.top), max(documentHeight - clip.bounds.height + insets.bottom, -insets.top))
             clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
             scrollView.reflectScrolledClipView(clip)
+            results.trace("restored \(row) of \(table.numberOfRows) to y \(Int(y)), now \(Int(clip.bounds.origin.y))")
             results.restored()
         }
 
-        private func report(leaving: Bool = false) {
+        private var lastSkipped: NSEvent.EventType?? = .none
+        /// Debug trace: the first bounds change of a run of non-scroll events.
+        private func skipped(_ type: NSEvent.EventType?) {
+            if case .some(let last) = lastSkipped, last == type { return }
+            lastSkipped = .some(type)
+            results.trace("moved on \(type.map { "\($0.rawValue)" } ?? "no event")")
+        }
+
+        /// The event lands on the table's vertical scroller.
+        private func onScroller(_ event: NSEvent?) -> Bool {
+            guard let event, let scroller = table?.enclosingScrollView?.verticalScroller, scroller.window === event.window else {
+                return false
+            }
+            return scroller.convert(scroller.bounds, to: nil).contains(event.locationInWindow)
+        }
+
+        private func report() {
             guard let table = table ?? window?.contentView.flatMap(BrowseResponder.resultsTable(in:)),
                   let clip = table.enclosingScrollView?.contentView else { return }
             // The rows under the clip view's insets (the toolbar, the header) are not shown.
@@ -400,7 +448,7 @@ private struct BrowseScrollReporter: NSViewRepresentable {
             let rows = table.rows(in: table.convert(shown, from: clip.documentView ?? table))
             guard rows.length > 0 else { return }
             guard let token else { return }
-            results.tableScrolled(first: rows.location, last: rows.location + rows.length - 1, token: token, leaving: leaving)
+            results.tableScrolled(first: rows.location, last: rows.location + rows.length - 1, token: token)
         }
     }
 }
