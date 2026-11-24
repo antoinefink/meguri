@@ -14,6 +14,7 @@
 #        tools/vm/duo-fold.sh stop                  disconnect, restart the VM headless
 #
 # Get the simulator with `tools/mg sim acquire foldable` after `prepare`.
+# Release it with `tools/mg sim release <udid>` before `stop`.
 # Preparation reuses an existing session. A new session and `stop` require no
 # active acquisitions or guest test jobs, under the shared VM scheduler lease.
 # Between them, tools/mg jobs still work. Only this script's one
@@ -42,10 +43,11 @@ log() { printf 'duo-fold: %s\n' "$*" >&2; }
 usage() { sed -n '6,13p' "$0" | sed 's/^# *//' >&2; exit 2; }
 
 SESSION="$ROOT/tools/vm/vnc-session.py"
-RECOVER="" LEASE=""
+RECOVER="" LEASE="" LEASE_WRITING=""
 
 mvl_read_config || { log "$MVL_REASON"; exit 1; }
-VM="$(jq -r '.[0].name' <<<"$MVL_ALL")"
+PRIMARY="$(jq -r '.[0].name' <<<"$MVL_ALL")"
+VM="$PRIMARY"
 COMMAND="${1:-}"
 [ $# -eq 0 ] || shift
 if [ "${1:-}" = --vm ] && [ $# -eq 2 ]; then VM="$2"; shift 2; fi
@@ -53,10 +55,20 @@ SELECTED="$(jq -c --arg n "$VM" 'first(.[] | select(.name == $n)) // empty' <<<"
 [ -n "$SELECTED" ] || { log "VM is not configured"; exit 1; }
 TART="$(jq -r .tart <<<"$SELECTED")"
 SSH="$(jq -r .ssh <<<"$SELECTED")"
+# The persistent state and holder venv are global, not per VM. Never stop or
+# start a secondary guest under the primary guest's state/scheduler lease.
+case "$COMMAND" in start|prepare|stop)
+  [ "$VM" = "$PRIMARY" ] || { log "VNC lifecycle supports only configured primary VM $PRIMARY"; exit 1; }
+  if [ -e "$STATE/vm" ] && [ "$(cat "$STATE/vm")" != "$PRIMARY" ]; then
+    log "global VNC state belongs to another VM; retain evidence for operator recovery"; exit 1
+  fi
+esac
 
 release() {
   if [ -n "$LEASE" ] && host_lease_lock "$LEASE"; then
-    [ "$(jq -r .pid "$LEASE/holder.json" 2>/dev/null)" != "$$" ] || host_lease_drop "$LEASE"
+    if [ "$LEASE_WRITING" = 1 ] || [ "$(jq -r .pid "$LEASE/holder.json" 2>/dev/null)" = "$$" ]; then
+      host_lease_drop "$LEASE"
+    fi
     host_lease_unlock
   fi
 }
@@ -82,9 +94,9 @@ finish() {
   local rc=$?
   trap - EXIT HUP INT TERM
   if [ "$RECOVER" = 1 ] && [ -e "$STATE/recovery-pending" ]; then
-    log "preparation failed; restoring normal headless service"
+    log "preparation failed; checking guarded headless restoration"
     if headless; then log "$VM restored headless"; else
-      log "headless restoration failed; inspect private $STATE logs; restore with the configured Tart wrapper"
+      log "headless restoration unconfirmed; retain private $STATE evidence for operator recovery. Lost remote exits cannot be resolved by rerunning the wrapper; do not clear records or prepare again"
       rc=1
     fi
   fi
@@ -97,19 +109,32 @@ lease() {
   dir="$(mvl_lease_dir "$ROOT" "$VM")"
   mkdir -p "$(dirname "$dir")" || exit 1
   start="$(mvl_epoch)"
-  until mkdir "$dir" 2>/dev/null; do
+  trap finish EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  while :; do
+    host_lease_lock "$dir" || exit 1
+    if mkdir "$dir" 2>/dev/null; then
+      LEASE="$dir" LEASE_WRITING=1
+      # Keep stale-holder reclamation excluded until metadata is complete.
+      if ! jq -nc --argjson pid $$ --arg wt "$ROOT" --arg job "$1" \
+        '{pid: $pid, worktree: $wt, job: $job, holder: "duo-fold"}' >"$LEASE/holder.json"; then
+        host_lease_drop "$LEASE"
+        LEASE="" LEASE_WRITING=""
+        host_lease_unlock
+        exit 1
+      fi
+      LEASE_WRITING=""
+      host_lease_unlock
+      return 0
+    fi
+    host_lease_unlock
     if [ $(($(mvl_epoch) - start)) -ge "${MEGURI_MAC_VM_LEASE_WAIT_SECONDS:-600}" ]; then
       log "the lease of $VM stayed busy"; exit 3
     fi
     sleep 1
   done
-  LEASE="$dir"
-  trap finish EXIT
-  trap 'exit 129' HUP
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-  jq -nc --argjson pid $$ --arg wt "$ROOT" --arg job "$1" \
-    '{pid: $pid, worktree: $wt, job: $job, holder: "duo-fold"}' >"$LEASE/holder.json" || exit 1
 }
 
 # Scheduler excludes acquisitions/jobs; the guest pool mutex also excludes
@@ -118,7 +143,7 @@ shutdown_guest() {
   mvl_tests_idle "$SSH" || { log "guest tests running or unknown; wait for jobs to finish"; return 1; }
   python3 "$SESSION" shutdown "$STATE" "$SSH" "$TART" "$VM" || return 1
   [ "$(mvl_state "$TART" "$VM")" = stopped ] || {
-    log "VM shutdown unconfirmed; evidence retained"; return 1;
+    log "shutdown command completed but stopped state unconfirmed; evidence retained"; return 1;
   }
 }
 
@@ -141,7 +166,7 @@ start() {
   fi
   # Never replace an existing or incomplete session on a regular prepare call.
   if [ -e "$STATE/vm" ] || [ -e "$STATE/commands" ] || [ -e "$STATE/holder.pid" ] || [ -e "$STATE/tart.pid" ] || [ -e "$STATE/tunnel.pid" ] || [ -e "$STATE/owner" ] || [ -e "$STATE/control.sock" ] || [ -e "$STATE/recovery-pending" ]; then
-    log "existing session is unavailable; run duo-fold.sh stop once drained, then prepare"; exit 1
+    log "existing session is unavailable; owned sessions may use stop once drained; legacy or uncertain remote exits require operator recovery with evidence retained"; exit 1
   fi
   chmod 700 "$STATE" || exit 1
   host="$(python3 "$SESSION" host "$TART")" || exit 1
@@ -154,15 +179,19 @@ start() {
       python3 -m venv "$STATE/venv" && "$STATE/venv/bin/pip" install --quiet "vncdotool==$VNCDOTOOL_VERSION"
     } || { log "could not install vncdotool"; exit 1; }
   fi
-  # Set before stop: transport failure may mean that stop reached the host.
-  RECOVER=stopping
-  shutdown_guest || exit 1
+  python3 "$SESSION" preflight "$STATE" || exit 1
+  # The shutdown helper arms recovery only once drain succeeds. Keep it armed
+  # even if a completed shutdown's subsequent state query fails.
   RECOVER=1
+  shutdown_guest || exit 1
   python3 "$SESSION" start "$STATE" "$TART" "$VM" || exit 1
   mvl_wait_ready "$SSH" "$TART" "$VM" true "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
     log "VNC guest did not become accessible; inspect private $STATE logs"; exit 1;
   }
   python3 "$SESSION" clean-drain "$STATE" "$SSH" || exit 1
+  [ "$(session_status | jq -r .connected)" = true ] || {
+    log "VNC transport disconnected after preparation"; exit 1;
+  }
   RECOVER=""
   rm -f "$STATE/recovery-pending"
   log "connected to $VM"
@@ -173,7 +202,7 @@ stop() {
   lease vm-fold-stop
   mkdir -p "$STATE" || exit 1
   if [ -e "$STATE/vm" ] && [ "$(cat "$STATE/vm")" != "$VM" ]; then
-    log "session belongs to another VM; select it with --vm"; exit 1
+    log "global VNC state belongs to another VM; retain evidence for operator recovery"; exit 1
   fi
   # One recovery attempt only; an uncertain result keeps all session evidence.
   headless || exit 1

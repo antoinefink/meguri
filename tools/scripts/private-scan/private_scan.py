@@ -847,6 +847,13 @@ PUBLIC_ARTIFACTS = {
     # Complete-content PUBLIC review: s-20261124T065111Z-cc535ede, 20261124T151622Z-59160.
     'docs/design/native-interface-contract.md':
         '2ba0dc17770ff4254aa00063825bf2bc29a8f2996b816a8c7e9fbddaa65ff6fc',
+    # Complete-file review of the Duo transport repair, 2026-11-24.
+    'docs/process/new-machine.md':
+        'ca64a19aae880b88be34955af62194f9f8a358f361aa20d801e789a287534b6a',
+    'tools/tests/vnc_session_test.py':
+        'fc1d259404a54138a5fc28a7cf6022246fdb1afeee7cf4b09fa96bef20710671',
+    'tools/vm/vnc-holder.py':
+        'b18e7fa249773c492e4bb9d2241bb8f5dacf24992bf27975362c68c36e406ac4',
     # Complete-file privacy reviews for the remote Duo tooling, 2026-11-24.
     'docs/process/review-log/duo-simulator-posture-20261124.md':
         '678c5d137d1b74876d52382f3c27e53a0a3eef2d70fcae355f4d404f1eabb0c1',

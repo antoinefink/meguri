@@ -8,8 +8,20 @@ import sys
 from vncdotool import api
 from vncdotool.client import VNCDoToolClient, VNCDoToolFactory
 
+quitting = False
+
 
 class ResizingVNCClient(VNCDoToolClient):
+    def connectionLost(self, reason):
+        try:
+            super().connectionLost(reason)
+        finally:
+            if not quitting:
+                # Twisted calls this on its reactor thread. The command thread
+                # may be blocked opening/reading the FIFO indefinitely.
+                print("disconnected", flush=True)
+                os._exit(1)
+
     def captureScreen(self, *args, **kwargs):
         # Tart can resize the image while request bounds retain the boot size.
         if self.screen is not None:
@@ -37,6 +49,7 @@ def run(client, line):
 
 
 def main():
+    global quitting
     fifo, pid_file = sys.argv[1], sys.argv[2]
     secret, _, address = os.environ["DUO_FOLD_VNC_URL"].removeprefix("vnc://:").rpartition("@")
     port = address.rpartition(":")[2]
@@ -54,6 +67,7 @@ def main():
             for raw in commands:
                 line = raw.strip()
                 if line == "quit":
+                    quitting = True
                     client.disconnect()
                     api.shutdown()
                     return

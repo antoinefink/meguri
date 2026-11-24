@@ -1,11 +1,12 @@
 """Synthetic VNC transport and operator lifecycle; never contacts a VM or SSH host."""
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import shutil
 import shlex
-import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,51 @@ inspect_spec.loader.exec_module(inspection)
 
 
 class CaptureTests(unittest.TestCase):
+    def test_rfb_loss_exits_while_fifo_idle_and_intentional_quit_calls_base(self):
+        # Twisted calls the protocol instance, not the synchronous API proxy.
+        # A separate process proves loss unblocks even an idle FIFO open.
+        script = '''
+import importlib.util, pathlib, sys, threading, types
+class LibraryClient:
+    def connectionLost(self, reason): print('base-loss', flush=True)
+library = types.ModuleType('vncdotool.client')
+library.VNCDoToolClient = LibraryClient
+library.VNCDoToolFactory = type('Factory', (), {})
+package = types.ModuleType('vncdotool')
+package.api = types.SimpleNamespace()
+sys.modules.update({'vncdotool': package, 'vncdotool.client': library})
+spec = importlib.util.spec_from_file_location('holder', sys.argv[1])
+holder = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(holder)
+protocol = holder.ResizingVNCClient()
+mode = sys.argv[4]
+class Proxy:
+    factory = types.SimpleNamespace(force_caps=False)
+    def refreshScreen(self):
+        if mode == 'idle':
+            threading.Timer(.1, lambda: protocol.connectionLost('lost')).start()
+    def disconnect(self): protocol.connectionLost('intentional')
+package.api.connect = lambda *a, **k: Proxy()
+package.api.shutdown = lambda: print('shutdown')
+sys.argv = ['holder', sys.argv[2], sys.argv[3], sys.argv[4]]
+holder.main()
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            fifo, pid = Path(directory) / "commands", Path(directory) / "holder.pid"
+            os.mkfifo(fifo)
+            for mode in ("idle", "quit"):
+                if mode == "quit":
+                    fifo.unlink()
+                    fifo.write_text("quit\n")
+                result = subprocess.run([sys.executable, "-c", script,
+                    str(ROOT / "tools/vm/vnc-holder.py"), str(fifo), str(pid), mode],
+                    env=dict(os.environ, DUO_FOLD_VNC_URL="vnc://:synthetic@127.0.0.1:12345"),
+                    capture_output=True, timeout=3)
+                self.assertEqual(result.returncode, 1 if mode == "idle" else 0, result.stderr.decode())
+                self.assertIn(b"base-loss\n", result.stdout, result.stderr.decode())
+                self.assertEqual(b"disconnected\n" in result.stdout, mode == "idle")
+                self.assertEqual(b"shutdown\n" in result.stdout, mode == "quit")
+
     def test_capture_resyncs_request_bounds_and_preserves_library_call(self):
         calls = []
         result = object()
@@ -80,7 +126,8 @@ class CaptureTests(unittest.TestCase):
 
 class SessionTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        # /var/folders on macOS can itself exhaust sockaddr_un's small limit.
+        self.tmp = tempfile.TemporaryDirectory(dir="/tmp", prefix="vnc-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.state = self.root / "build/vm-fold"
@@ -107,10 +154,14 @@ with (root / 'trace').open('a') as out: out.write(' '.join(sys.argv[1:]) + '\\n'
 state = root / 'vm-state'
 if sys.argv[1] == 'list':
     if (root / 'unknown-state').exists(): sys.exit(255)
+    if state.read_text() == 'stopped' and (root / 'unknown-after-stop').exists():
+        (root / 'unknown-after-stop').unlink()
+        sys.exit(255)
     print(json.dumps([{'Name': 'guest', 'State': state.read_text()}]))
 elif sys.argv[1] == 'stop':
     assert (root / 'pool/pool.lock/pid').exists(), 'shutdown without legacy pool mutex'
     if (root / 'stop-uncertain').exists(): sys.exit(255)
+    if (root / 'stop-failed').exists(): sys.exit(1)
     state.write_text('stopped')
 elif sys.argv[1] == 'run':
     state.write_text('running')
@@ -140,10 +191,48 @@ forward = sys.argv[sys.argv.index('-L') + 1].split(':')
 s = socket.socket()
 s.bind((forward[0], int(forward[1])))
 s.listen()
+(root / 'listener').write_text(json.dumps({'pid': os.getpid(), 'port': int(forward[1])}))
 while True: time.sleep(.1)
 ''')
+        # Linux/Docker does not provide macOS /usr/sbin/lsof. Substitute just
+        # that OS observation, leaving the production parser and Popen checks.
+        lsof = self.script("lsof", '''import json, os, pathlib, sys
+root = pathlib.Path(os.environ['FAKE_ROOT'])
+try: listener = json.loads((root / 'listener').read_text())
+except FileNotFoundError: sys.exit(1)
+if str(listener['pid']) != sys.argv[sys.argv.index('-p') + 1]: sys.exit(1)
+if '-iTCP:' + str(listener['port']) not in sys.argv: sys.exit(1)
+print('p' + str(listener['pid']))
+print('n127.0.0.1:' + str(listener['port']))
+''')
         session = self.root / "tools/vm/vnc-session.py"
-        session.write_text(session.read_text().replace('"/usr/bin/ssh"', repr(str(tunnel))))
+        source = session.read_text()
+
+        def replace_once(old, new):
+            nonlocal source
+            self.assertEqual(source.count(old), 1, "fixture source anchor missing or ambiguous: " + repr(old))
+            source = source.replace(old, new, 1)
+
+        replace_once('            "/usr/bin/ssh", "-N",',
+                     '            ' + repr(str(tunnel)) + ', "-N",')
+        replace_once('            "/usr/sbin/lsof", "-nP",',
+                     '            ' + repr(str(lsof)) + ', "-nP",')
+        # Fixture-only authenticated exit joins Popen-owned synthetic children
+        # even when a test deliberately makes Tart return SSH's unknown code.
+        # Match complete handler lines, not the CLI's separate stop dispatch.
+        replace_once('''
+                    if action == "stop":
+                        join_transports(children, remote)
+''', '''
+                    if action == "fixture-stop":
+                        join_transports(children, False)
+                        done = True
+                        result = {"ok": True}
+                    elif action == "stop":
+                        join_transports(children, remote)
+''')
+        session.write_text(source)
+        compile(session.read_bytes(), str(session), "exec")
         holder = self.root / "tools/vm/vnc-holder.py"
         holder.write_text('''import os, pathlib, sys, time
 root = pathlib.Path(os.environ['FAKE_ROOT'])
@@ -171,8 +260,8 @@ while True:
         path.chmod(0o700)
         return path
 
-    def call(self, command, expected=0):
-        result = subprocess.run(["bash", str(self.root / "tools/vm/duo-fold.sh"), command],
+    def call(self, command, expected=0, *args):
+        result = subprocess.run(["bash", str(self.root / "tools/vm/duo-fold.sh"), command, *args],
                                 env=self.env, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, expected, result.stderr.decode())
         self.assertNotIn(b"fake-test-secret", result.stdout + result.stderr)
@@ -182,17 +271,94 @@ while True:
         # Synthetic-only cleanup: permit the owned Tart child to end normally.
         (self.root / 'vm-state').write_text('stopped')
         try:
-            m.stop(self.state)
+            m.request(self.state, "fixture-stop", timeout=35)
         except (OSError, RuntimeError):
             pass
-        for name in ("holder", "tunnel", "tart", "owner"):
-            try:
-                os.kill(int((self.state / (name + ".pid")).read_text()), signal.SIGTERM)
-            except (OSError, ValueError):
-                pass
 
     def trace(self):
         return (self.root / "trace").read_text() if (self.root / "trace").exists() else ""
+
+    def test_secondary_lifecycle_refused_before_touching_global_session(self):
+        config = self.root / "config.json"
+        data = json.loads(config.read_text())
+        data["vms"].append("secondary")
+        config.write_text(json.dumps(data))
+        self.call("prepare")
+        before = self.trace()
+        owner = (self.state / "owner").read_bytes()
+        for command in ("prepare", "start", "stop"):
+            result = self.call(command, 1, "--vm", "secondary")
+            self.assertIn(b"primary VM", result.stderr)
+        self.assertEqual(self.trace(), before)
+        self.assertEqual((self.state / "owner").read_bytes(), owner)
+        self.assertFalse((self.lease.parent / "mac-vm.secondary.lock").exists())
+        self.call("stop")
+        # Also refuse earlier secondary state selected under the primary name.
+        (self.state / "vm").write_text("secondary")
+        before = self.trace()
+        self.call("prepare", 1)
+        self.call("stop", 1)
+        self.assertEqual(self.trace(), before)
+
+    def test_scheduler_metadata_failure_releases_only_own_lease(self):
+        jq = shutil.which("jq")
+        self.script("jq", '''import os, sys
+if '--arg' in sys.argv and 'vm-fold-prepare' in sys.argv: sys.exit(1)
+os.execv(''' + repr(jq) + ''', ['jq', *sys.argv[1:]])
+''')
+        self.call("prepare", 1)
+        self.assertFalse(self.lease.exists())
+        self.assertEqual(self.trace(), "")
+        self.lease.mkdir(parents=True)
+        (self.lease / "holder.json").write_text('{"pid": 1, "job": "foreign"}')
+        before = (self.lease / "holder.json").read_bytes()
+        self.call("prepare", 3)
+        self.assertEqual((self.lease / "holder.json").read_bytes(), before)
+
+    def test_control_socket_preflight_failure_never_stops_guest(self):
+        # Existing socket evidence is refused without overwriting it.
+        (self.state / "control.sock").write_text("foreign")
+        self.call("prepare", 1)
+        self.assertEqual(self.trace(), "")
+        self.assertEqual((self.state / "control.sock").read_text(), "foreign")
+        (self.state / "control.sock").unlink()
+        # Keep the path in Linux's accepted range but over Darwin's 103 bytes.
+        long_root = self.root / ("x" * (104 - len(os.fsencode(self.state / "control.sock")) - 1))
+        long_state = long_root / "build/vm-fold"
+        long_state.mkdir(parents=True)
+        (long_state / "venv").symlink_to(self.state / "venv")
+        self.script("git", "print(" + repr(str(long_root / ".git")) + ")\n")
+        result = self.call("prepare", 1)
+        self.assertIn(b"exceeds macOS limit", result.stderr)
+        self.assertEqual(self.trace(), "")
+        self.assertFalse((long_state / "owner").exists())
+
+    def test_completed_shutdown_state_query_failure_still_restores(self):
+        (self.root / "unknown-after-stop").touch()
+        result = self.call("prepare", 1)
+        self.assertIn(b"command completed but stopped state unconfirmed", result.stderr)
+        self.assertIn(b"restored headless", result.stderr)
+        self.assertEqual((self.root / "vm-state").read_text(), "running")
+        self.assertFalse((self.state / "recovery-pending").exists())
+        self.assertFalse((self.state / "shutdown-pending").exists())
+        self.assertFalse(self.lease.exists())
+
+    def test_unknown_and_failed_shutdown_exits_have_distinct_recovery(self):
+        (self.root / "stop-uncertain").touch()
+        result = self.call("prepare", 1)
+        self.assertIn(b"remote shutdown completion unknown", result.stderr)
+        self.assertIn(b"cannot be resolved by rerunning the wrapper", result.stderr)
+        self.assertTrue((self.state / "shutdown-pending").exists())
+        self.assertTrue((self.state / "recovery-pending").exists())
+        self.assertNotIn("run --no-graphics", self.trace())
+        (self.root / "stop-uncertain").unlink()
+        (self.state / "shutdown-pending").unlink()  # Synthetic unknown command has joined.
+        (self.state / "recovery-pending").unlink()
+        (self.root / "stop-failed").touch()
+        result = self.call("prepare", 1)
+        self.assertIn(b"command exited unsuccessfully", result.stderr)
+        self.assertFalse((self.state / "shutdown-pending").exists())
+        self.assertNotIn("run --no-graphics", self.trace())
 
     def test_remote_prepares_once_private_forward_status_and_stop(self):
         # Exercise the actual MG integration without MG's host/container runner.
@@ -275,7 +441,6 @@ mg_sim_posture prepare
         self.call("stop", 1)
         self.assertEqual(self.trace(), before + "list --format json\n")
         self.assertEqual(int((self.state / "holder.pid").read_text()), holder_pid)
-        os.kill(holder_pid, 0)
         self.assertTrue(m.status(self.state, 'guest')['connected'])
         self.assertEqual((self.root / "vm-state").read_text(), "running")
         self.assertEqual(lease.read_bytes(), active_lease)
@@ -332,8 +497,6 @@ print(json.dumps({'ready': True}))
             self.assertEqual(self.trace(), '')
             self.assertEqual(before, {p.name: p.read_bytes() for p in self.state.iterdir() if p.is_file()})
         finally:
-            for name in ('tart', 'holder', 'tunnel'):
-                (self.state / (name + '.pid')).unlink()
             child.terminate()
             child.wait()
 
@@ -391,6 +554,124 @@ print(json.dumps({'ready': True}))
         self.assertTrue(m.status(self.state, 'guest')['connected'])
         (self.root / 'unknown-state').unlink()
         self.call('stop')
+
+
+class TransportTests(unittest.TestCase):
+    def test_ssh_listener_requires_exact_owned_loopback_os_evidence(self):
+        child = mock.Mock(pid=123)
+        child.poll.return_value = None
+        with mock.patch.object(socket, "socket") as probe:
+            for output, expected in ((b"p123\nn127.0.0.1:2345\n", True),
+                                     (b"p456\nn127.0.0.1:2345\n", False),
+                                     (b"p123\nn*:2345\n", False),
+                                     (b"p123\nn127.0.0.1:2346\n", False)):
+                with mock.patch.object(subprocess, "check_output", return_value=output) as lsof:
+                    self.assertEqual(m.ssh_listening(child, 2345), expected)
+                    args = lsof.call_args.args[0]
+                    self.assertEqual(args[:6], ["/usr/sbin/lsof", "-nP", "-a", "-p", "123", "-iTCP:2345"])
+                    self.assertIn("-sTCP:LISTEN", args)
+            with mock.patch.object(subprocess, "check_output", side_effect=subprocess.CalledProcessError(1, "lsof")):
+                self.assertFalse(m.ssh_listening(child, 2345))
+            child.poll.return_value = 255
+            with self.assertRaises(RuntimeError):
+                m.ssh_listening(child, 2345)
+            probe.assert_not_called()
+
+    def test_preflight_enforces_darwin_path_limit_on_linux_too(self):
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="vnc-") as directory:
+            root = Path(directory)
+            for length in (103, 104):
+                state = root / ("x" * (length - len(os.fsencode(root / "control.sock")) - 1))
+                state.mkdir()
+                self.assertEqual(len(os.fsencode(state / "control.sock")), length)
+                if length == 103:
+                    m.preflight(state)
+                    self.assertEqual(list(state.iterdir()), [])
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "macOS limit"):
+                        m.preflight(state)
+                    self.assertEqual(list(state.iterdir()), [])
+
+    def test_prechild_bind_and_listen_failures_clean_only_owned_records(self):
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="vnc-") as directory:
+            state = Path(directory)
+            path = state / "control.sock"
+            path.write_text("foreign socket evidence")
+            with mock.patch.object(m, "connect") as connect:
+                with self.assertRaises(OSError):
+                    m.serve(state, "unused", "guest")
+                connect.assert_not_called()
+            self.assertEqual(path.read_text(), "foreign socket evidence")
+            self.assertEqual({p.name for p in state.iterdir()}, {"control.sock"})
+            path.unlink()
+            for replace in (False, True):
+                with socket.socket(socket.AF_UNIX) as real:
+                    listener = mock.Mock(wraps=real)
+                    def fail_listen(*args):
+                        if replace:
+                            # Keep the original inode alive while replacing it.
+                            for name in ("owner", "control.sock"):
+                                (state / name).rename(state / (name + ".retained"))
+                                (state / name).write_text("replacement")
+                        raise OSError("synthetic listen failure")
+                    listener.listen.side_effect = fail_listen
+                    with mock.patch.object(socket, "socket", return_value=listener), \
+                            mock.patch.object(m, "connect") as connect:
+                        with self.assertRaises(OSError):
+                            m.serve(state, "unused", "guest")
+                        connect.assert_not_called()
+                self.assertFalse((state / "owner.pid").exists())
+                if replace:
+                    self.assertEqual(path.read_text(), "replacement")
+                    self.assertEqual((state / "owner").read_text(), "replacement")
+                else:
+                    self.assertEqual(list(state.iterdir()), [])
+
+    def test_ready_fails_after_transport_exit_but_status_reports_disconnect(self):
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="vnc-") as directory:
+            state = Path(directory)
+            child = mock.Mock()
+            child.poll.return_value = None
+            connected = threading.Event()
+            def connect(state, children, *args):
+                children['holder'] = child
+                connected.set()
+            with mock.patch.object(m, "remote_host", return_value="m3"), \
+                    mock.patch.object(m, "connect", side_effect=connect), \
+                    mock.patch.object(m, "join_transports"):
+                thread = threading.Thread(target=m.serve, args=(state, "unused", "guest"), daemon=True)
+                thread.start()
+                try:
+                    self.assertTrue(connected.wait(3))
+                    self.assertTrue(m.request(state, "ready")["connected"])
+                    child.poll.return_value = 1
+                    self.assertFalse(m.request(state, "status")["connected"])
+                    with self.assertRaises(RuntimeError):
+                        m.request(state, "ready")
+                finally:
+                    m.request(state, "stop")
+                    thread.join(timeout=3)
+                self.assertFalse(thread.is_alive())
+
+    def test_mg_post_prepare_disconnect_fails_but_readonly_status_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tools = Path(directory)
+            (tools / "vm").mkdir()
+            script = tools / "vm/duo-fold.sh"
+            script.write_text('#!/bin/sh\n[ "$1" != status ] || echo \'{"connected":false}\'\nexit 0\n')
+            script.chmod(0o700)
+            for action, expected in (("prepare", "fail"), ("status", "pass")):
+                result = subprocess.run(["bash", "-c", '''
+mg_job() { :; }
+mg_detail() { :; }
+mg_message() { :; }
+mg_failure() { :; }
+mg_status() { echo "$1"; }
+source ''' + shlex.quote(str(ROOT / "tools/mg.d/sim.sh")) + '''
+MG_TOOLS=''' + shlex.quote(directory) + '''
+mg_sim_posture ''' + action], capture_output=True, timeout=3)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                self.assertEqual(result.stdout.decode().strip(), expected)
 
 
 class PreviousSessionTests(unittest.TestCase):
@@ -628,6 +909,31 @@ class InspectionTests(unittest.TestCase):
 
 
 class DrainAndJoinTests(unittest.TestCase):
+    def test_shutdown_completion_markers_distinguish_lost_exit_from_completed_command(self):
+        for code in (0, 1, 255, -15, "timeout"):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                guard = mock.Mock()
+                guard.stdout = io.BytesIO(b"drained\n")
+                guard.poll.return_value = None
+                result = subprocess.CompletedProcess([], code)
+                failure = subprocess.TimeoutExpired("synthetic", 75) if code == "timeout" else None
+                with mock.patch.object(m, "clean_drain"), \
+                        mock.patch.object(subprocess, "Popen", return_value=guard), \
+                        mock.patch.object(m.select, "select", return_value=([guard.stdout], [], [])), \
+                        mock.patch.object(subprocess, "run", return_value=result, side_effect=failure):
+                    if code == 0:
+                        m.shutdown(state, "fake-ssh", "fake-tart", "guest")
+                    else:
+                        message = "exited unsuccessfully" if code == 1 else "completion unknown"
+                        with self.assertRaisesRegex(RuntimeError, message):
+                            m.shutdown(state, "fake-ssh", "fake-tart", "guest")
+                self.assertTrue((state / "recovery-pending").exists())
+                self.assertEqual((state / "shutdown-pending").exists(), code in (255, -15, "timeout"))
+                guard.stdin.close.assert_called_once()
+                guard.wait.assert_called_once_with(timeout=5)
+                guard.terminate.assert_not_called()
+
     def test_cleanup_after_hard_stop_matches_only_owned_guard(self):
         with tempfile.TemporaryDirectory() as directory:
             pool = Path(directory)

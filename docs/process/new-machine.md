@@ -156,14 +156,39 @@ must be usable before any remote restart. No remote package install or network
 configuration is needed. The hosting Mac's installed Tart 2.32.1 provides this
 mode with an ephemeral authenticated port; it has no bind flag.
 
-Preparation and manual `duo-fold.sh start` share MG's per-VM scheduler lock and
+Preparation, manual `duo-fold.sh start` and `stop` support only the configured
+primary VM (the first entry), using its one M5 scheduler lease and the single
+existing main-checkout `build/vm-fold` state directory. Secondary lifecycle
+requests and state naming another VM are refused before teardown/start.
+They share MG's scheduler mutex primitives and
 refuse active guest simulator acquisitions, unknown lease expiry/inventory or
 running guest test jobs before stopping. Expired records, including orphans,
 are read without changing them. Repeated preparation never restarts an existing
 session. Read-only status/inspection can verify a previous-format session;
 its teardown and any ambiguous state require operator recovery, never PID cleanup.
-A failed preparation after stopping attempts to restore ordinary headless
-service before releasing the lock. Raw Tart/holder/tunnel logs and the session
+A fresh preparation checks the control socket's actual bind/listen before
+stopping, including macOS's maximum 103-byte socket pathname. Shorten the main
+checkout path if needed; no alternate state directory is created. SSH forward
+readiness uses macOS `lsof` evidence for the owned foreground SSH child's exact
+loopback listener, never a VNC probe connection. The holder reports actual RFB
+loss even while FIFO-idle; readiness requires live transports. A disconnected
+post-prepare status fails preparation; read-only status can successfully report
+disconnected. Linux/Docker tests substitute the macOS OS observation, not a live
+M5 transport acceptance check.
+
+A failed preparation keeps restoration armed after a completed shutdown,
+including a failed subsequent stopped-state query. It attempts ordinary headless
+service only after confirming stopped state and the owned remote run's exit.
+A lost/255/timed-out shutdown or unknown remote run completion retains evidence
+and refuses another start. Rerunning the installed wrapper or observing Tart's
+state cannot recover a lost command exit. These cases, unowned historical
+sessions and unavailable owners need operator reconciliation on M3 and M5;
+`stop` is not a guaranteed repair. Retain private evidence, do not clear PID/
+owner/pending records or prepare again to bypass the refusal. No automatic
+recovery command is provided for that unresolved state.
+
+Release the acquired simulator with `tools/mg sim release <udid>` before
+`tools/vm/duo-fold.sh stop`; wait for guest test jobs too. Raw Tart/holder/tunnel logs and the session
 password stay in private main-checkout state; never copy them into results.
 
 ## Moving a local VM (historical alternative)

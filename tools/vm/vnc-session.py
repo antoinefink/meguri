@@ -1,6 +1,5 @@
 """Private transport for duo-fold.sh; never print Tart output or credentials."""
 import json
-import errno
 import os
 from pathlib import Path
 import re
@@ -179,6 +178,23 @@ def wait_until(probe, seconds, message):
     raise RuntimeError(message)
 
 
+def ssh_listening(child, port):
+    """macOS OS evidence for our foreground SSH child, never a VNC probe."""
+    if child.poll() is not None:
+        raise RuntimeError("SSH forward exited; inspect private tunnel.log")
+    try:
+        lines = subprocess.check_output([
+            "/usr/sbin/lsof", "-nP", "-a", "-p", str(child.pid),
+            "-iTCP:" + str(port), "-sTCP:LISTEN", "-Fn",
+        ], stderr=subprocess.DEVNULL, timeout=2).decode().splitlines()
+    except subprocess.CalledProcessError as error:
+        if error.returncode == 1:  # No listener yet.
+            return False
+        raise
+    return ("p" + str(child.pid) in lines and "n127.0.0.1:" + str(port) in lines
+            and child.poll() is None)
+
+
 def connect(state, children, tart, vm):
     host = remote_host(tart)
     (state / "vm").write_text(vm)
@@ -207,19 +223,8 @@ def connect(state, children, tart, vm):
         ])
         # Keep SSH in the foreground in its detached coordinator session.
         # No separate socket probe: that would make a second Tart connection.
-        def listening():
-            if tunnel.poll() is not None:
-                raise RuntimeError("SSH forward exited; inspect private tunnel.log")
-            with socket.socket() as probe:
-                try:
-                    probe.bind(("127.0.0.1", local_port))
-                except OSError as error:
-                    if error.errno == errno.EADDRINUSE:
-                        return True
-                    raise
-            return False
-
-        wait_until(listening, 15, "SSH did not bind its loopback forward within 15s")
+        wait_until(lambda: ssh_listening(tunnel, local_port), 15,
+                   "SSH did not own its loopback forward within 15s")
         port = local_port
     fifo = state / "commands"
     fifo.unlink(missing_ok=True)
@@ -255,22 +260,77 @@ def join_transports(children, remote):
             raise RuntimeError("remote VNC run completion unknown")
 
 
+def file_identity(info):
+    return info.st_dev, info.st_ino, info.st_mode
+
+
+def unlink_owned(path, identity):
+    try:
+        if file_identity(path.lstat()) == identity:
+            path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def control_listener(state):
+    path = state / "control.sock"
+    # Darwin sockaddr_un.sun_path is 104 bytes including its terminator.
+    # Enforce the coordinator's limit even in Linux/Docker consistency checks.
+    if len(os.fsencode(path)) >= 104:
+        raise RuntimeError("control socket path exceeds macOS limit; shorten the main checkout path before preparing")
+    listener = socket.socket(socket.AF_UNIX)
+    identity = None
+    try:
+        listener.bind(str(path))
+        identity = file_identity(path.lstat())
+        listener.listen(2)
+        return listener, identity
+    except BaseException:
+        try:
+            if identity is not None:
+                unlink_owned(path, identity)
+        finally:
+            listener.close()
+        raise
+
+
+def preflight(state):
+    listener, identity = control_listener(state)
+    try:
+        unlink_owned(state / "control.sock", identity)
+    finally:
+        listener.close()
+
+
 def serve(state, tart, vm):
     children = {}
     remote = bool(remote_host(tart))
     token = secrets.token_hex(32)
-    # Exclusive creation: do not adopt or replace an earlier owner's evidence.
-    with (state / "owner").open("x") as owner:
-        owner.write(token)
-    (state / "owner.pid").write_text(str(os.getpid()))  # Diagnostic only.
-    with socket.socket(socket.AF_UNIX) as listener:
-        listener.bind(str(state / "control.sock"))
-        listener.listen(2)
+    records = {}
+    try:
+        # Exclusive creation: do not adopt or replace earlier evidence. Before
+        # any children exist, failed bind/listen can discard only our records.
+        for name, value in (("owner", token), ("owner.pid", str(os.getpid()))):
+            record = (state / name).open("x")
+            records[name] = (file_identity(os.fstat(record.fileno())), record)
+            record.write(value)
+            record.flush()
+        listener, _ = control_listener(state)
+    except BaseException:
+        for name, (identity, _) in records.items():
+            unlink_owned(state / name, identity)
+        raise
+    finally:
+        # Pin regular-file inodes through failed-setup cleanup so a recycled
+        # inode cannot turn replacement evidence into an owned record.
+        for _, record in records.values():
+            record.close()
+    with listener:
         ready = False
         try:
             connect(state, children, tart, vm)
             ready = True
-        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             pass  # Keep ownership alive for the caller's guarded rollback.
         while True:
             channel, _ = listener.accept()
@@ -290,8 +350,9 @@ def serve(state, tart, vm):
                         done = True
                         result = {"ok": True}
                     elif action in ("ready", "status"):
-                        result = {"ok": action == "status" or ready,
-                                  "connected": ready and all(c.poll() is None for c in children.values())}
+                        connected = ready and all(c.poll() is None for c in children.values())
+                        result = {"ok": action == "status" or connected,
+                                  "connected": connected}
                     else:
                         raise ValueError("unknown action")
                 except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
@@ -426,12 +487,16 @@ def shutdown(state, ssh, tart, vm):
             pending = state / "shutdown-pending"
             pending.touch()
             with (state / "stop.log").open("wb") as output:
-                result = subprocess.run([tart, "stop", vm, "--timeout", "60"],
-                                        stdin=subprocess.DEVNULL, stdout=output, stderr=output, timeout=75)
-            if result.returncode >= 0 and result.returncode != 255:
-                pending.unlink()
+                try:
+                    result = subprocess.run([tart, "stop", vm, "--timeout", "60"],
+                                            stdin=subprocess.DEVNULL, stdout=output, stderr=output, timeout=75)
+                except (OSError, subprocess.TimeoutExpired):
+                    raise RuntimeError("remote shutdown completion unknown; evidence retained; wrapper retry cannot resolve the lost exit") from None
+            if result.returncode < 0 or result.returncode == 255:
+                raise RuntimeError("remote shutdown completion unknown; evidence retained; wrapper retry cannot resolve the lost exit")
+            pending.unlink()
             if result.returncode:
-                raise RuntimeError("Tart shutdown status uncertain; evidence retained")
+                raise RuntimeError("shutdown command exited unsuccessfully; VM state needs confirmation; evidence retained")
         finally:
             guard.stdin.close()
             try:
@@ -456,6 +521,8 @@ def main():
             serve(state, *args)
         elif action == "start":
             start(state, *args)
+        elif action == "preflight":
+            preflight(state)
         elif action == "stop":
             stop(state)
         elif action == "owned":

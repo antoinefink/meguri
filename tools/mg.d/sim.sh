@@ -57,6 +57,10 @@ mg_sim_posture() {
     mg_status error; return 0
   fi
   mg_detail vnc "$out"
+  if [ "$action" = prepare ] && [ "$(jq -r .connected <<<"$out")" != true ]; then
+    mg_failure vnc-prepare "VNC transport disconnected after preparation; inspect private build/vm-fold logs"
+    mg_status fail; return 0
+  fi
   mg_message "sim-posture: $(jq -r 'if .connected then "connected" else "not connected" end' <<<"$out")"
   mg_status pass
 }
