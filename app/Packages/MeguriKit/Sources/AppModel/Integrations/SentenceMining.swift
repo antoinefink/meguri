@@ -49,6 +49,8 @@ import Observation
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var refreshToken = UUID()
     @ObservationIgnored public var enabledChanged: ((Bool) -> Void)?
+    // Separate from the app delegate's last-window policy callback.
+    @ObservationIgnored var collectionActivityChanged: (() -> Void)?
 
     /// The override pair is only for isolated synthetic wire tests.
     public init(defaults: UserDefaults?, collectionKey: String,
@@ -87,6 +89,7 @@ import Observation
         defaults?.set(value, forKey: id == .migaku ? "mining.migaku.enabled" : "mining.ankiConnect.enabled")
         enabledChanged?(enabled)
         apply()
+        collectionActivityChanged?()
     }
 
     public func selectDeck(_ id: Int64) {

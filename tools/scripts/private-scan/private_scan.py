@@ -847,7 +847,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningWebSocket.swift':
         'bb35c52f2d96a87117c374f9cab80da43ce9c22c430883fc508f305a77cdaa46',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':
-        'b819fb01ad9412d77e097621904d0b05e0717af6870bc0f0166c631b2dae1166',
+        '207a37c06ba700b606294f567677085ff72f583b713a5caf1e9ae3461b819687',
     'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningTests.swift':
         'ccef122d825d7b361cce8c2dcb64145772298f9671b3167cf7917ddb5ac20983',
     'core/crates/meguri-ffi/src/notes.rs':
@@ -1368,7 +1368,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'ca74e23fd581a66fa87d2f66e2d2631918c8af5b4e32f242317f454cc9c6820a',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '079593aab3e69f01f91cb900ca3e328ffe3dea3706933bc527ba9e47d64586b4',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',

@@ -8,6 +8,129 @@ import Testing
 // Shares the normal app-entry suite's process-wide Core ownership. Select
 // this method alone in the VM; no production defaults or collection is read.
 extension ReviewCollectionStartupTests {
+    @Test(.timeLimit(.minutes(2)), arguments: [true, false])
+    func sentenceMiningCommitsWhileCollectionIsBackgrounded(migakuFirst: Bool) async throws {
+        let temporary = try #require(realpath(FileManager.default.temporaryDirectory.path, nil))
+        let root = URL(filePath: String(cString: temporary)).appending(path: "background-mining-\(UUID().uuidString)")
+        free(temporary)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appending(path: "collection")
+        var configuration = LaunchConfiguration()
+        let suite = "BackgroundMiningTests." + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        configuration.deviceDefaults = defaults
+        configuration.migakuPort = 0
+        configuration.ankiConnectPort = 0
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: directory,
+            backupsDirectory: root.appending(path: "backups"))
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            sync: SyncCoordinator(directory: directory, configuration: nil, defaults: nil),
+            providerDirectory: root.appending(path: "installation"))
+        let mining = owner.sentenceMining
+        let first: SentenceMining.EndpointID = migakuFirst ? .migaku : .ankiConnect
+        let second: SentenceMining.EndpointID = migakuFirst ? .ankiConnect : .migaku
+        let service = CoreCollectionService()
+        do {
+            await owner.start()
+            await owner.startEmpty()
+            try #require(owner.state == .ready)
+            let generation = owner.generation
+            let deck = try await CoreDeckService().addDeck(name: "Background Sentences")
+            let type = try await CoreNotetypeService().addNotetype(.init(name: "Background Sentence", cloze: false,
+                fields: ["Sentence", "Translation"], templates: [
+                    .init(name: "Sentence", front: "{{Sentence}}", back: "{{Translation}}", browserFront: "", browserBack: "")], css: nil))
+            mining.selectDeck(deck.id)
+            mining.selectType(type.id)
+            mining.setEnabled(true, for: first)
+            await mining.settle()
+            let port = try await miningListeningPort(mining.endpoint(first))
+            var flushed = false
+            owner.didFlushLocally = { flushed = true }
+            // RootView's background event, with the browser now active. Joining
+            // lifecycle work makes this independent of request/suspend timing.
+            owner.setSceneActive(false)
+            owner.setApplicationActive(false)
+            owner.setForeground(false)
+            await owner.waitForLifecycle()
+            #expect(flushed && !owner.foreground && !owner.reviewIsActive && owner.error == nil)
+            let check = try await miningExchange(port: port, method: "GET", path: "/srs-check")
+            #expect(check.status == 200 && check.json?["ok"] as? Bool == true)
+            let raw = Data(#"{"sentence":"Mined in the browser while Meguri is hidden.","translation":"A disposable background note."}"#.utf8)
+            // Longer than the receiver's five-second availability wait so the
+            // old code reports its refusal, rather than a client timeout.
+            let created = try await miningExchange(port: port, method: "POST", path: "/receive", body: raw, timeout: 10)
+            try #require(created.status == 200)
+            let id = try #require((created.json?["id"] as? NSNumber)?.int64Value)
+            #expect(try await CoreNoteService().readNote(id: id).fields == [
+                "Mined in the browser while Meguri is hidden.", "A disposable background note."])
+            let cards = try await CoreNoteService().noteCards(noteId: id)
+            #expect(cards.count == 1 && cards.first?.deckId == deck.id)
+            let retry = try await miningExchange(port: port, method: "POST", path: "/receive", body: raw)
+            #expect((retry.json?["id"] as? NSNumber)?.int64Value == id)
+            #expect(owner.generation == generation && !owner.foreground)
+
+            // A sibling toggle keeps the collection and its destination alive.
+            mining.setEnabled(true, for: second)
+            await mining.settle()
+            let siblingPort = try await miningListeningPort(mining.endpoint(second))
+            mining.setEnabled(false, for: first)
+            await mining.settle()
+            await owner.waitForLifecycle()
+            try expectMiningPortClosed(port)
+            let sibling = try await miningExchange(port: siblingPort, method: "POST", path: "/receive",
+                body: Data(#"{"sentence":"Still mining through the other endpoint."}"#.utf8))
+            try #require(sibling.status == 200)
+            let siblingID = try #require((sibling.json?["id"] as? NSNumber)?.int64Value)
+            #expect(try await CoreNoteService().readNote(id: siblingID).fields[0] == "Still mining through the other endpoint.")
+
+            // An explicit Core suspension still wins. Settings/catalog work
+            // never resumes it merely because an endpoint remains enabled.
+            #expect(try await service.suspend(timeoutMilliseconds: 1_500) == .suspended)
+            mining.refresh()
+            await mining.settle()
+            await owner.waitForLifecycle()
+            let manual = try await miningExchange(port: siblingPort, method: "GET", path: "/srs-check")
+            #expect(manual.json?["ok"] as? Bool == false)
+            owner.setForeground(true)
+            await owner.waitForLifecycle()
+            owner.setForeground(false)
+            await owner.waitForLifecycle()
+
+            // Disabling the final listener in the background drains it, then
+            // performs the deferred suspension without a foreground event.
+            mining.setEnabled(false, for: second)
+            await mining.settle()
+            await owner.waitForLifecycle()
+            try expectMiningPortClosed(siblingPort)
+            #expect(try await service.lifecycle() == .ready(generation: generation))
+            #expect((try? await service.waitAvailable(timeoutMilliseconds: 0)) == nil)
+            // Enabling is not permission to reopen a suspended collection.
+            mining.setEnabled(true, for: first)
+            await mining.settle()
+            await owner.waitForLifecycle()
+            let rebound = try await miningListeningPort(mining.endpoint(first))
+            let suspended = try await miningExchange(port: rebound, method: "GET", path: "/srs-check")
+            #expect(suspended.json?["ok"] as? Bool == false)
+            owner.setForeground(true)
+            await owner.waitForLifecycle()
+            #expect(try await CoreNoteService().readNote(id: id).fields[1] == "A disposable background note.")
+            owner.setForeground(false)
+            await owner.waitForLifecycle()
+            try #require(await owner.closeForQuit())
+            try expectMiningPortClosed(rebound)
+            mining.setEnabled(false, for: first)
+            await mining.settle()
+            await owner.waitForLifecycle()
+            #expect(try await service.lifecycle() == .noCollection)
+        } catch {
+            owner.setForeground(true)
+            await owner.waitForLifecycle()
+            _ = await owner.closeForQuit()
+            throw error
+        }
+    }
+
     @Test(.timeLimit(.minutes(2))) func sentenceMiningWireFromNormalCollectionEntry() async throws {
         let temporary = try #require(realpath(FileManager.default.temporaryDirectory.path, nil))
         let root = URL(filePath: String(cString: temporary)).appending(path: "mining-\(UUID().uuidString)")
@@ -209,9 +332,9 @@ private struct MiningWireReply {
     let data: Data
     var json: [String: Any]? { (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] }
 }
-private func miningExchange(port: UInt16, method: String, path: String, body: Data = Data(), origin: String = "chrome-extension://abcdefghijklmnopabcdefghijklmnop") async throws -> MiningWireReply {
+private func miningExchange(port: UInt16, method: String, path: String, body: Data = Data(), origin: String = "chrome-extension://abcdefghijklmnopabcdefghijklmnop", timeout: TimeInterval = 5) async throws -> MiningWireReply {
     var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!)
-    request.httpMethod = method; request.timeoutInterval = 5
+    request.httpMethod = method; request.timeoutInterval = timeout
     request.setValue(origin, forHTTPHeaderField: "Origin")
     if !body.isEmpty { request.httpBody = body; request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
     let configuration = URLSessionConfiguration.ephemeral

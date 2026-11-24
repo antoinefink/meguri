@@ -835,13 +835,34 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     #if os(macOS)
     @ObservationIgnored private var miningOwner: SentenceMining?
+    @ObservationIgnored private var miningBackgroundGeneration: UInt64?
     public var sentenceMining: SentenceMining {
         if let miningOwner { return miningOwner }
         let value = SentenceMining(defaults: configuration.deviceDefaults,
             collectionKey: configuration.collectionLocation.directory.path,
             ports: (configuration.migakuPort ?? 44432, configuration.ankiConnectPort ?? 8765))
+        value.collectionActivityChanged = { [weak self] in self?.miningActivityChanged() }
         miningOwner = value
         return value
+    }
+
+    private func miningActivityChanged() {
+        // Only release a suspension we deferred. Enabling never resumes or
+        // opens a collection, including one manually suspended or replaced.
+        guard !foreground, miningOwner?.enabled == false, miningBackgroundGeneration != nil else { return }
+        let previous = lifecycleTask
+        lifecycleTask = Task {
+            await previous?.value
+            // Disable fences new requests synchronously. Join listener teardown
+            // and admitted writes before releasing the background collection.
+            await miningOwner?.settle()
+            guard !foreground, !closed, !closing, state == .ready,
+                  miningOwner?.enabled == false,
+                  miningBackgroundGeneration == generation else { return }
+            miningBackgroundGeneration = nil
+            do { try await suspendCollectionForBackground() }
+            catch { self.error = String(describing: error) }
+        }
     }
     #endif
 
@@ -2498,6 +2519,9 @@ public final class ReviewCollection: ChangeFanoutSink {
                     await addFlowOwner?.resumeInput()
                     resuming = false
                     deferredSuspend = nil
+                    #if os(macOS)
+                    miningBackgroundGeneration = nil
+                    #endif
                     refreshCounts()
                     studyWarmup.warm()
                     deckNamesOwner?.resumeResult()
@@ -2516,12 +2540,24 @@ public final class ReviewCollection: ChangeFanoutSink {
                     guard await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired ? nil : backgroundDeadlineMilliseconds) else {
                         throw BridgeError.cloudPolicy(.coreCapabilityUnavailable)
                     }
-                    switch try await collection.suspend(timeoutMilliseconds: 1_500) {
-                    case .suspended: deferredSuspend = nil
-                    case .deferred(let id): deferredSuspend = id
+                    #if os(macOS)
+                    if miningOwner?.enabled == true {
+                        // P1.1/H14: browser mining outlives the main window.
+                        // Keep only the already-open collection; review input
+                        // and sync still follow the background policy above.
+                        miningBackgroundGeneration = generation
+                        return
                     }
+                    #endif
+                    try await suspendCollectionForBackground()
                 }
             } catch { self.error = String(describing: error) }
+        }
+    }
+    private func suspendCollectionForBackground() async throws {
+        switch try await collection.suspend(timeoutMilliseconds: 1_500) {
+        case .suspended: deferredSuspend = nil
+        case .deferred(let id): deferredSuspend = id
         }
     }
     public func waitForLifecycle() async { await lifecycleTask?.value }
