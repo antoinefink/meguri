@@ -347,7 +347,7 @@ import notify
         let sheet = element(app, "settings.importExport.deck.content")
         XCTAssertTrue(sheet.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(element(app, "onboarding.collectionImport.content").exists)
-        XCTAssertTrue(waitForText(element(app, "settings.importExport.deck.heading"), "shared-deck.apkg"))
+        XCTAssertTrue(app.staticTexts["Import “shared-deck.apkg”"].waitForExistence(timeout: 10), app.debugDescription)
         capture(app, "deck-import-picked")
         try click(element(app, "settings.importExport.deck.import"), app, bundle)
         let done = element(app, "settings.importExport.deck.done")

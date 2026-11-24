@@ -5273,8 +5273,14 @@ extension SyncCoordinator: DeckImportMeguriSync {
         -> MeguriDeckImportOutcome {
         let answer = MeguriDeckImportAnswer()
         let saved = try await runMeguriStructure(progress: { shown, _, _ in stage(shown) }) { jobs, onStage in
-            let outcome = try await jobs.importDeckPackage(session, options: options, confirmation: confirmation,
+            let outcome: MeguriDeckImportOutcome
+            do {
+                outcome = try await jobs.importDeckPackage(session, options: options, confirmation: confirmation,
                                                            reachable: reachable, onStage: onStage)
+            } catch {
+                // Thrown only before the job starts (its admission): nothing was imported.
+                outcome = .notStarted(.unavailable)
+            }
             answer.value.withLock { $0 = outcome }
             return outcome.structureOutcome
         }

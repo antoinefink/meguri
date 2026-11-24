@@ -32,7 +32,7 @@ public enum DeckImportSheetPreview: PreviewStates {
         @State private var options = DeckImportOptions(withScheduling: true)
         var body: some View {
             DeckImportContent(presentation: DeckImportSheetPreview.presentation(name), options: $options, actions: .init(),
-                              initiallyExpanded: name == "result-log" ? [DeckImportText.duplicate(2)] : [])
+                              initiallyExpanded: name == "result-log" ? ["duplicate"] : [])
                 .onAppear {
                     if name == "options-changed" {
                         options = DeckImportOptions(withScheduling: false, withDeckConfigs: true, mergeNotetypes: true,

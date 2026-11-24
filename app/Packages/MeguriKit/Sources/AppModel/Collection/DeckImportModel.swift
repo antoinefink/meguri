@@ -27,6 +27,8 @@ import Observation
     func chooseAnotherImportFile()
     /// The intake's message, shown in place of a sheet that could not open.
     func deckImportMessage(_ message: ImportIntake.Message)
+    /// K5: the inspect found a whole collection: its own flow and confirmation take the file.
+    func deckImportFoundCollection(_ url: URL, release: (@MainActor () -> Void)?)
 }
 
 /// Meguri Sync's side of a deck package import (MP7.1), the sync coordinator in the app.
@@ -132,6 +134,8 @@ public final class DeckImportModel {
     /// MP7.1: what became of the upload, after the job.
     public private(set) var upload: MeguriStructureUpload?
     public private(set) var refusal: Refusal?
+    /// The options of the apply that was refused (X2.6's `TooLarge{rows}` reads its learning progress).
+    public private(set) var appliedOptions: DeckImportOptions?
     public private(set) var refusalSource: RefusalSource?
     public private(set) var canUndo = false
     public private(set) var undoing = false
@@ -156,7 +160,7 @@ public final class DeckImportModel {
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var inspection: DeckImportTask<DeckImportSession>?
     @ObservationIgnored private var application: DeckImportTask<DeckImportApplyOutcome>?
-    @ObservationIgnored private var syncJob = false
+    @ObservationIgnored private var syncJob: (any DeckImportMeguriSync)?
     @ObservationIgnored private var revealTask: Task<Void, Never>?
     @ObservationIgnored private var revision: UInt64 = 0
     /// How long work runs before its progress shows.
@@ -223,11 +227,17 @@ public final class DeckImportModel {
                 // X2.6: an inspect's Cancel offers nothing: the sheet closes.
                 finish(message: nil)
                 return
+            case .failure(.collectionPackage):
+                // K5: a whole collection by its content goes to the collection flow.
+                let release = self.release; self.release = nil
+                finish(message: nil)
+                host?.deckImportFoundCollection(url, release: release)
+                return
             case .failure(let refusal):
                 self.refusal = .engine(refusal); refusalSource = .inspect
                 step = .refused
             }
-            host?.presentDeckImport()
+            ensurePresented()
             task = nil
         }
     }
@@ -287,6 +297,7 @@ public final class DeckImportModel {
         let expected = revision
         let ask = askStructure ?? (host?.deckImportSync?.deckImportSyncReady == true)
         let options = options
+        appliedOptions = options
         beginImporting(expected)
         let application = service.apply(session, options: options, confirmation: confirmation, askStructure: ask)
         self.application = application
@@ -299,7 +310,7 @@ public final class DeckImportModel {
             guard expected == revision else { return }
             self.application = nil
             await receive(outcome, options: options, expected: expected)
-            if expected == revision { task = nil }
+            if expected == revision { task = nil; ensurePresented() }
         }
     }
 
@@ -341,6 +352,11 @@ public final class DeckImportModel {
         endProgress()
         // An option changed meanwhile: the token is not for these options.
         guard options == self.options else { step = .options; return }
+        // Nothing to show: no rows, and Meguri Sync is no longer chosen (D3 asks nothing then).
+        if confirmation.preview.isEmpty, paragraph == nil {
+            apply(confirmation: confirmation, askStructure: false)
+            return
+        }
         notetypeNames = names
         syncParagraph = paragraph
         self.confirmation = confirmation
@@ -354,7 +370,7 @@ public final class DeckImportModel {
         let options = options
         beginImporting(expected)
         progressStage = reachable ? .syncing : .committing
-        syncJob = true
+        syncJob = sync
         task = Task {
             let outcome: MeguriDeckImportOutcome
             do {
@@ -369,9 +385,9 @@ public final class DeckImportModel {
                 outcome = .notStarted(.unavailable)
             }
             guard expected == revision else { return }
-            syncJob = false
+            syncJob = nil
             await receive(outcome, options: options, expected: expected)
-            if expected == revision { task = nil }
+            if expected == revision { task = nil; ensurePresented() }
         }
     }
 
@@ -426,7 +442,7 @@ public final class DeckImportModel {
         guard busy, cancellable, !undoing else { return }
         cancelling = true
         if step == .inspecting { inspection?.cancel(); return }
-        if syncJob { host?.deckImportSync?.cancelDeckImport() } else { application?.cancel() }
+        if let syncJob { syncJob.cancelDeckImport() } else { application?.cancel() }
     }
 
     // MARK: After a refusal (X2.6)
@@ -513,6 +529,24 @@ public final class DeckImportModel {
         show(noteIds)
         done()
     }
+    /// A line's Show: Browse with every note of these categories, read in pages first.
+    public func showCategories(_ categories: [DeckImportLogCategory]) {
+        guard let session, let result, host?.deckImportShowInBrowse != nil else { return }
+        let expected = revision, service = service
+        Task {
+            var ids: [Int64] = []
+            for category in categories {
+                var offset: UInt64 = 0
+                while offset < result.log[category] {
+                    let page = (try? await service.logPage(session, category: category, offset: offset, count: 500)) ?? []
+                    if page.isEmpty { break }
+                    ids += page.map(\.noteId); offset += UInt64(page.count)
+                }
+            }
+            guard expected == revision else { return }
+            showInBrowse(ids)
+        }
+    }
     public var canShowInBrowse: Bool { host?.deckImportShowInBrowse != nil && !undone }
 
     // MARK: Closing
@@ -526,8 +560,20 @@ public final class DeckImportModel {
     /// The sheet was dismissed by the system, or another took the window.
     public func presentationChanged() {
         guard step != .idle, step != .inspecting, host?.deckImportSheetShown == false else { return }
+        // Work that runs ends in a step the person must see: shown again then (`ensurePresented`).
         if busy { return }
         finish(message: nil, dismiss: false)
+    }
+
+    /// After an outcome: the sheet shows it. When another sheet holds the
+    /// window, the flow ends with a message rather than waiting unseen.
+    private func ensurePresented() {
+        guard step != .idle, step != .inspecting, step != .importing, let host else { return }
+        host.presentDeckImport()
+        guard !host.deckImportSheetShown else { return }
+        let imported = step == .result || step == .importedWithoutResult
+        let name = fileName ?? ""
+        finish(message: imported ? .imported(fileName: name) : .alreadyOpen, dismiss: false)
     }
 
     /// Waits until no apply, inspect or job of the sheet runs.
@@ -549,6 +595,7 @@ public final class DeckImportModel {
     public func collectionClosing() async {
         if busy, cancellable { cancelWork() }
         await task?.value
+        if let session { self.session = nil; await service.close(session) }
         finish(message: nil)
     }
 

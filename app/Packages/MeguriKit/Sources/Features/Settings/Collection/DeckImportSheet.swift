@@ -21,6 +21,9 @@ enum DeckImportOffer: Equatable {
     static func offers(_ refusal: DeckImportModel.Refusal, source: DeckImportModel.RefusalSource?,
                        withScheduling: Bool) -> [DeckImportOffer] {
         switch refusal {
+        // MP7.1: after these two the sync status owns the next step; a retry
+        // here could import the structural change without Meguri Sync.
+        case .sync(.fullSyncRequired), .sync(.uploadPending): return []
         case .sync: return [.retry]
         case .engine(let value):
             switch value {
@@ -81,6 +84,8 @@ struct DeckImportPresentation {
     var log: [DeckImportLogCategory: [DeckImportLogEntry]] = [:]
     var moreLog: Set<DeckImportLogCategory> = []
     var canShowInBrowse = false
+    /// The learning progress option of the apply a refusal answered.
+    var appliedScheduling: Bool?
 
     init() {}
     @MainActor init(_ model: DeckImportModel) {
@@ -103,6 +108,7 @@ struct DeckImportPresentation {
         log = model.log
         moreLog = Set(DeckImportLogCategory.allCases.filter { model.moreLog($0) })
         canShowInBrowse = model.canShowInBrowse
+        appliedScheduling = model.appliedOptions?.withScheduling
     }
 
     var busy: Bool { step == .inspecting || step == .importing }
@@ -115,6 +121,36 @@ struct DeckImportPresentation {
         guard let total = progressTotal, total > 0 else { return nil }
         return (min(progressCompleted, total), total)
     }
+    /// The amount done, in words, for a stage that counts files.
+    var progressDetail: String? {
+        guard progressStage == .media, let (done, total) = progressFraction else { return nil }
+        return "\(done.formatted()) of \(DeckImportText.count(total, "file", "files"))"
+    }
+
+    /// The sheet's title, in the window's title bar: the file it is about.
+    var title: String {
+        switch step {
+        case .confirming: DeckImportText.confirmTitle(fileName)
+        case .result: undone ? DeckImportText.undoneTitle : DeckImportText.importedTitle(fileName)
+        case .importedWithoutResult: DeckImportText.importedTitle(fileName)
+        default: DeckImportText.importTitle(fileName)
+        }
+    }
+    var subtitle: String? {
+        switch step {
+        case .options, .importing: facts.map(DeckImportText.summary)
+        case .result: undone ? nil : result.map { DeckImportText.found($0.log.foundNotes) }
+        default: nil
+        }
+    }
+
+    /// X2.3's rows, in the preview's order, each with its own id.
+    var lossRows: [(id: String, text: String)] {
+        guard let preview = confirmation else { return [] }
+        return preview.emptiedFields.enumerated().map { ("emptied\($0.offset)", DeckImportText.emptied($0.element)) }
+            + preview.removedNotetypes.enumerated().map { ("removed\($0.offset)", DeckImportText.removed($0.element, names: notetypeNames)) }
+            + preview.droppedValues.enumerated().map { ("dropped\($0.offset)", DeckImportText.dropped($0.element, names: notetypeNames)) }
+    }
 
     /// X2.5's lines, in their order, each only when not empty.
     struct Line: Identifiable {
@@ -123,7 +159,7 @@ struct DeckImportPresentation {
         /// The categories whose entries the line lists.
         let categories: [DeckImportLogCategory]
         let showable: Bool
-        var id: String { text }
+        var id: String { category.map { "\($0)" } ?? "notImported" }
     }
     var lines: [Line] {
         guard let result else { return [] }
@@ -148,10 +184,12 @@ struct DeckImportPresentation {
     }
 
     /// The counts of I14.5 that are not zero, as rows.
-    var countRows: [(String, String)] {
+    var countRows: [(id: String, label: String, value: String)] {
         guard let counts = result?.counts else { return [] }
-        var rows: [(String, String)] = []
-        func add(_ label: String, _ value: UInt64) { if value > 0 { rows.append((label, value.formatted())) } }
+        var rows: [(id: String, label: String, value: String)] = []
+        func add(_ label: String, _ value: UInt64) {
+            if value > 0 { rows.append((label.replacingOccurrences(of: " ", with: ""), label, value.formatted())) }
+        }
         add("Cards added", counts.cardsAdded)
         add("Reviews added", counts.revlogAdded)
         add("Note types added", counts.notetypesAdded + counts.notetypesCopied)
@@ -189,6 +227,7 @@ struct DeckImportActions {
     var undo: () -> Void = {}
     var loadLog: (DeckImportLogCategory) -> Void = { _ in }
     var show: ([Int64]) -> Void = { _ in }
+    var showLine: ([DeckImportLogCategory]) -> Void = { _ in }
 
     init() {}
     @MainActor init(_ model: DeckImportModel) {
@@ -208,6 +247,7 @@ struct DeckImportActions {
         undo = model.undoImport
         loadLog = model.loadLog
         show = model.showInBrowse
+        showLine = model.showCategories
     }
 }
 
@@ -234,27 +274,21 @@ struct DeckImportContent: View {
             Form { content }
                 .formStyle(.grouped)
                 .accessibilityIdentifier("\(Self.id).content")
-                .navigationTitle(Text(navigationTitle))
+                .navigationTitle(Text(verbatim: presentation.title))
+                .navigationSubtitle(Text(verbatim: presentation.subtitle ?? ""))
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 #endif
                 .toolbar { toolbar }
                 .disabled(presentation.undoing)
         }
-        .presentationSizing(.form)
+        // The sheet is as tall as what it shows, up to the window's room.
+        .presentationSizing(.form.fitted(horizontal: false, vertical: true))
         .interactiveDismissDisabled(presentation.busy || presentation.step == .confirming || presentation.undoing)
         .onChange(of: presentation.step) { _, step in announce(step) }
         #if os(macOS)
         .onExitCommand { escape() }
         #endif
-    }
-
-    private var navigationTitle: String {
-        switch presentation.step {
-        case .result: "Import Complete"
-        case .confirming: "Confirm Import"
-        default: "Import Deck"
-        }
     }
 
     // MARK: Content per step
@@ -274,25 +308,15 @@ struct DeckImportContent: View {
         }
     }
 
-    private func heading(_ title: String, _ subtitle: String?) -> some View {
-        VStack(alignment: .leading) {
-            Text(verbatim: title)
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("\(Self.id).heading")
-            if let subtitle {
-                Text(verbatim: subtitle)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("\(Self.id).summary")
-            }
-        }
-    }
-
     @ViewBuilder private var progressSection: some View {
         Section {
             Group {
                 if let (done, total) = presentation.progressFraction {
-                    ProgressView(value: Double(done), total: Double(total)) { Text(verbatim: presentation.progressTitle) }
+                    ProgressView(value: Double(done), total: Double(total)) {
+                        Text(verbatim: presentation.progressTitle)
+                    } currentValueLabel: {
+                        if let detail = presentation.progressDetail { Text(verbatim: detail) }
+                    }
                 } else {
                     ProgressView { Text(verbatim: presentation.progressTitle) }
                 }
@@ -312,32 +336,30 @@ struct DeckImportContent: View {
     @ViewBuilder private var optionsSections: some View {
         let facts = presentation.facts
         Section {
-            heading(DeckImportText.importTitle(presentation.fileName), facts.map(DeckImportText.summary))
             if let facts {
                 LabeledContent {
-                    Text(verbatim: DeckImportText.list(facts.decks.map(DeckImportText.deckName)))
+                    Text(verbatim: DeckImportText.decks(facts.decks)).lineLimit(1).truncationMode(.middle)
                 } label: {
                     Text(verbatim: facts.decks.count == 1 ? "Deck" : "Decks")
                 }
+                .help(Text(verbatim: facts.decks.map(DeckImportText.deckName).joined(separator: "\n")))
                 .accessibilityIdentifier("\(Self.id).decks")
                 LabeledContent {
-                    Text(verbatim: DeckImportText.list(facts.notetypes))
+                    Text(verbatim: DeckImportText.list(facts.notetypes, shown: 1)).lineLimit(1).truncationMode(.middle)
                 } label: {
                     Text(verbatim: facts.notetypes.count == 1 ? "Note Type" : "Note Types")
                 }
+                .help(Text(verbatim: facts.notetypes.joined(separator: "\n")))
                 .accessibilityIdentifier("\(Self.id).notetypes")
                 LabeledContent { Text(verbatim: DeckImportText.media(facts)) } label: { Text(verbatim: "Media") }
                     .accessibilityIdentifier("\(Self.id).media")
             }
         } footer: {
-            VStack(alignment: .leading) {
-                if let repairs = facts.flatMap({ DeckImportText.repairs($0.repaired) }) {
-                    Text(verbatim: repairs).accessibilityIdentifier("\(Self.id).repairs")
-                }
-                if presentation.otherFilesGiven { Text(verbatim: DeckImportText.otherFiles(presentation.fileName)) }
-                if presentation.cancelledNotice {
-                    Text(verbatim: DeckImportText.cancelled).accessibilityIdentifier("\(Self.id).cancelled")
-                }
+            let notes = [facts.flatMap { DeckImportText.repairs($0.repaired) },
+                         presentation.otherFilesGiven ? DeckImportText.otherFiles(presentation.fileName) : nil,
+                         presentation.cancelledNotice ? DeckImportText.cancelled : nil].compactMap { $0 }
+            if !notes.isEmpty {
+                Text(verbatim: notes.joined(separator: " ")).accessibilityIdentifier("\(Self.id).notes")
             }
         }
         Section {
@@ -345,13 +367,16 @@ struct DeckImportContent: View {
                 Text("import.apkg.withScheduling", bundle: .module)
                 Text(verbatim: DeckImportText.schedulingHelp(facts))
             }
+            .disabled(facts?.hasScheduling == false)
             .accessibilityIdentifier("\(Self.id).withScheduling")
             Toggle(isOn: $options.withDeckConfigs) {
                 Text("import.apkg.withDeckConfigs", bundle: .module)
                 Text(verbatim: DeckImportText.presetsHelp(facts))
             }
+            .disabled(facts?.hasPresets == false)
             .accessibilityIdentifier("\(Self.id).withDeckConfigs")
         }
+        .disabled(presentation.busy)
         Section {
             Toggle(isOn: $options.mergeNotetypes) {
                 Text("import.apkg.mergeNotetypes", bundle: .module)
@@ -382,21 +407,24 @@ struct DeckImportContent: View {
     // MARK: X2.3
 
     @ViewBuilder private var confirmationSections: some View {
-        let preview = presentation.confirmation ?? DeckImportPreview()
-        Section {
-            heading(DeckImportText.confirmTitle(presentation.fileName), nil)
-            ForEach(Array(preview.emptiedFields.enumerated()), id: \.offset) { _, row in
-                lossRow(DeckImportText.emptied(row))
-            }
-            ForEach(Array(preview.removedNotetypes.enumerated()), id: \.offset) { _, row in
-                lossRow(DeckImportText.removed(row, names: presentation.notetypeNames))
-            }
-            ForEach(Array(preview.droppedValues.enumerated()), id: \.offset) { _, row in
-                lossRow(DeckImportText.dropped(row, names: presentation.notetypeNames))
-            }
-        } footer: {
-            if presentation.syncParagraph == nil {
-                Text(verbatim: DeckImportText.backupLine).accessibilityIdentifier("\(Self.id).backup")
+        let rows = presentation.lossRows
+        if !rows.isEmpty {
+            Section {
+                ForEach(rows, id: \.id) { row in
+                    Label {
+                        Text(verbatim: row.text)
+                    } icon: {
+                        Image(systemName: "minus.circle.fill").symbolRenderingMode(.multicolor).foregroundStyle(.red)
+                    }
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("\(Self.id).loss.\(row.id)")
+                }
+            } header: {
+                Text(verbatim: "Deleted by This Import")
+            } footer: {
+                if presentation.syncParagraph == nil {
+                    Text(verbatim: DeckImportText.backupLine).accessibilityIdentifier("\(Self.id).backup")
+                }
             }
         }
         if let paragraph = presentation.syncParagraph {
@@ -413,86 +441,75 @@ struct DeckImportContent: View {
         }
     }
 
-    private func lossRow(_ text: String) -> some View {
-        Label {
-            Text(verbatim: text)
-        } icon: {
-            Image(systemName: "minus.circle.fill").symbolRenderingMode(.multicolor).foregroundStyle(.red)
-        }
-        .foregroundStyle(.red)
-        .accessibilityIdentifier("\(Self.id).loss")
-    }
-
     // MARK: X2.5
 
     @ViewBuilder private var resultSections: some View {
         if let result = presentation.result {
-            Section {
-                heading(presentation.undone ? DeckImportText.undone : DeckImportText.importedTitle(presentation.fileName),
-                        presentation.undone ? nil : DeckImportText.found(result.log.foundNotes))
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(Text(verbatim: presentation.undone ? DeckImportText.undone : presentation.resultSummary))
-                if !presentation.undone {
-                    ForEach(presentation.lines) { line in logLine(line, result: result) }
-                }
-            } footer: {
-                if !presentation.undone {
-                    VStack(alignment: .leading) {
-                        if result.counts.mediaSkipped > 0 {
-                            Text(verbatim: DeckImportText.mediaSkipped(result.counts.mediaSkipped))
-                                .accessibilityIdentifier("\(Self.id).mediaSkipped")
-                        }
-                        if result.log.fieldsOmitted > 0 { Text(verbatim: DeckImportText.fieldsOmitted) }
-                        if result.mediaPending {
-                            Text(verbatim: DeckImportText.mediaPending).accessibilityIdentifier("\(Self.id).mediaPending")
-                        }
-                        if presentation.uploadPending { Text(verbatim: DeckImportText.uploadPending) }
-                    }
-                }
-            }
-            if !presentation.undone, !presentation.countRows.isEmpty {
+            if presentation.undone {
                 Section {
-                    ForEach(presentation.countRows, id: \.0) { row in
-                        LabeledContent { Text(verbatim: row.1) } label: { Text(verbatim: row.0) }
+                    Text(verbatim: DeckImportText.undone).accessibilityIdentifier("\(Self.id).undone")
+                }
+            } else {
+                Section {
+                    ForEach(presentation.lines) { line in logLine(line) }
+                } footer: {
+                    let notes = [result.counts.mediaSkipped > 0 ? DeckImportText.mediaSkipped(result.counts.mediaSkipped) : nil,
+                                 result.log.fieldsOmitted > 0 ? DeckImportText.fieldsOmitted : nil,
+                                 result.mediaPending ? DeckImportText.mediaPending : nil,
+                                 presentation.uploadPending ? DeckImportText.uploadPending : nil].compactMap { $0 }
+                    if !notes.isEmpty {
+                        Text(verbatim: notes.joined(separator: " ")).accessibilityIdentifier("\(Self.id).resultNotes")
                     }
                 }
-                .accessibilityIdentifier("\(Self.id).counts")
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text(verbatim: presentation.resultSummary))
+                if !presentation.countRows.isEmpty {
+                    Section {
+                        ForEach(presentation.countRows, id: \.id) { row in
+                            LabeledContent { Text(verbatim: row.value) } label: { Text(verbatim: row.label) }
+                                .accessibilityIdentifier("\(Self.id).count.\(row.id)")
+                        }
+                    }
+                }
             }
         }
     }
 
-    @ViewBuilder private func logLine(_ line: DeckImportPresentation.Line, result: DeckImportResult) -> some View {
+    @ViewBuilder private func logLine(_ line: DeckImportPresentation.Line) -> some View {
         let entries = line.categories.flatMap { category in
             (presentation.log[category] ?? []).map { (category, $0) }
         }
         DisclosureGroup(isExpanded: Binding(get: { expanded.contains(line.id) },
                                             set: { if $0 { expanded.insert(line.id) } else { expanded.remove(line.id) } })) {
-            ForEach(Array(entries.enumerated()), id: \.offset) { _, item in
-                entryRow(item.1, category: item.0, showable: line.showable)
+            ForEach(Array(entries.enumerated()), id: \.offset) { index, item in
+                entryRow(item.1, category: item.0, showable: line.showable, index: index, line: line.id)
             }
             if line.categories.contains(where: presentation.moreLog.contains) {
                 Button { line.categories.forEach(actions.loadLog) } label: {
                     Text(verbatim: entries.isEmpty ? "Show Notes" : "Show More")
                 }
-                .accessibilityIdentifier("\(Self.id).more")
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("\(Self.id).more.\(line.id)")
             }
         } label: {
             HStack {
                 Text(verbatim: line.text)
                 Spacer()
                 if line.showable, presentation.canShowInBrowse {
-                    Button { actions.show(entries.map(\.1.noteId)) } label: { Text(verbatim: "Show") }
-                        .disabled(entries.isEmpty)
-                        .help(Text(verbatim: "Show these notes in Browse"))
-                        .accessibilityIdentifier("\(Self.id).show")
+                    Button { actions.showLine(line.categories) } label: { Text(verbatim: "Show in Browse") }
+                        .buttonStyle(.borderless)
+                        .accessibilityIdentifier("\(Self.id).show.\(line.id)")
                 }
             }
         }
-        .accessibilityIdentifier("\(Self.id).line")
-        .onAppear { line.categories.forEach(actions.loadLog) }
+        .accessibilityIdentifier("\(Self.id).line.\(line.id)")
+        .onChange(of: expanded.contains(line.id), initial: true) { _, open in
+            if open { line.categories.forEach(actions.loadLog) }
+        }
     }
 
-    private func entryRow(_ entry: DeckImportLogEntry, category: DeckImportLogCategory, showable: Bool) -> some View {
+    private func entryRow(_ entry: DeckImportLogEntry, category: DeckImportLogCategory, showable: Bool, index: Int,
+                          line: String) -> some View {
         HStack {
             VStack(alignment: .leading) {
                 if let first = entry.fields.first(where: { !$0.isEmpty }) ?? entry.fields.first {
@@ -513,10 +530,12 @@ struct DeckImportContent: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("\(Self.id).entry")
+        .accessibilityIdentifier("\(Self.id).entry.\(line).\(index)")
     }
 
     // MARK: X2.6
+
+    private var refusalScheduling: Bool { presentation.appliedScheduling ?? options.withScheduling }
 
     @ViewBuilder private var refusalSections: some View {
         if let refusal = presentation.refusal {
@@ -524,7 +543,7 @@ struct DeckImportContent: View {
                 Label {
                     VStack(alignment: .leading) {
                         Text(verbatim: DeckImportText.refusal(refusal, source: presentation.refusalSource,
-                                                              file: presentation.fileName, withScheduling: options.withScheduling))
+                                                              file: presentation.fileName, withScheduling: refusalScheduling))
                         Text(verbatim: DeckImportText.unchanged).foregroundStyle(.secondary)
                     }
                 } icon: {
@@ -532,10 +551,8 @@ struct DeckImportContent: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("\(Self.id).refusal")
-            } header: {
-                Text(verbatim: DeckImportText.importTitle(presentation.fileName))
             }
-            let offers = DeckImportOffer.offers(refusal, source: presentation.refusalSource, withScheduling: options.withScheduling)
+            let offers = DeckImportOffer.offers(refusal, source: presentation.refusalSource, withScheduling: refusalScheduling)
             if offers.count > 1 {
                 Section {
                     ForEach(offers.dropFirst(), id: \.identifier) { offer in
@@ -555,12 +572,21 @@ struct DeckImportContent: View {
                 Image(systemName: "checkmark.circle.fill").symbolRenderingMode(.multicolor)
             }
             .accessibilityIdentifier("\(Self.id).committedWithoutResult")
-        } header: {
-            Text(verbatim: DeckImportText.importTitle(presentation.fileName))
         }
     }
 
     // MARK: Buttons
+
+    /// X2.3, D3: the confirmation's button is never the default. On the Mac a
+    /// confirmation-placed button is drawn and keyed as the default, so it
+    /// goes beside Cancel instead, as a plain button.
+    private var confirmPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        .cancellationAction
+        #else
+        .confirmationAction
+        #endif
+    }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         switch presentation.step {
@@ -594,8 +620,7 @@ struct DeckImportContent: View {
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("\(Self.id).cancel")
             }
-            // X2.3, D3: never the default; destructive only with losses.
-            ToolbarItem(placement: presentation.hasLosses ? .destructiveAction : .confirmationAction) {
+            ToolbarItem(placement: confirmPlacement) {
                 Button(role: presentation.hasLosses ? .destructive : nil, action: actions.confirm) {
                     Text(verbatim: presentation.syncParagraph == .replaces ? "Import and Upload" : "Import")
                 }
@@ -615,11 +640,11 @@ struct DeckImportContent: View {
             }
         case .refused:
             let offers = presentation.refusal.map {
-                DeckImportOffer.offers($0, source: presentation.refusalSource, withScheduling: options.withScheduling)
+                DeckImportOffer.offers($0, source: presentation.refusalSource, withScheduling: refusalScheduling)
             } ?? []
-            ToolbarItem(placement: .cancellationAction) {
+            ToolbarItem(placement: offers.isEmpty ? .confirmationAction : .cancellationAction) {
                 Button(action: actions.close) { Text(verbatim: offers.isEmpty ? "Done" : "Cancel") }
-                    .keyboardShortcut(.cancelAction)
+                    .keyboardShortcut(offers.isEmpty ? .defaultAction : .cancelAction)
                     .accessibilityIdentifier("\(Self.id).cancel")
             }
             if let first = offers.first {
@@ -650,7 +675,7 @@ struct DeckImportContent: View {
         case .result: presentation.resultSummary
         case .refused: presentation.refusal.map {
             DeckImportText.refusal($0, source: presentation.refusalSource, file: presentation.fileName,
-                                   withScheduling: options.withScheduling)
+                                   withScheduling: refusalScheduling)
         }
         case .importedWithoutResult: DeckImportText.importedWithoutResult
         default: nil

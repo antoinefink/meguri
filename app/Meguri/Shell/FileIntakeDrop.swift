@@ -14,7 +14,7 @@ struct FileIntakeDrop: ViewModifier {
     @State private var targeted = false
 
     /// What a file drag offers: its URL on the Mac, a file representation on the iPad.
-    private static let dropTypes: [UTType] = [.fileURL, .meguriDeckPackage, .meguriCollectionPackage, .zip, .data]
+    private static let dropTypes: [UTType] = [.fileURL, .meguriDeckPackage, .meguriCollectionPackage, .zip]
 
     func body(content: Content) -> some View {
         content
@@ -60,6 +60,7 @@ enum FileIntakeText {
         case .needsCollection: "No Collection Is Open"
         case .collectionImportUnavailable: "Can’t Import a Collection Now"
         case .collectionUnavailable: "The Collection Isn’t Available"
+        case .imported: "Import Finished"
         }
     }
     static func message(_ message: ImportIntake.Message) -> String {
@@ -76,6 +77,7 @@ enum FileIntakeText {
         case .collectionImportUnavailable:
             "A collection file can’t be imported while a review or another long task is running. Try again once it ends."
         case .collectionUnavailable: "Meguri can’t read the collection right now, so the import can’t start. Try again."
+        case .imported(let name): "“\(name)” was imported."
         }
     }
 }

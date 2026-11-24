@@ -41,10 +41,12 @@ public struct CollectionImportPicker: ViewModifier {
         intake = nil
         hosts = coordinator.pickerInSheet == inSheet
     }
-    private var intakePicks: Bool { intake?.pickerPresented == true }
+    /// The intake opened this picker: read at the choice, after the system has
+    /// already set `isPresented` false.
+    private var intakePicks: Bool { intake?.pickerActive == true }
     public func body(content: Content) -> some View {
         content.fileImporter(
-            isPresented: Binding(get: { hosts && (coordinator?.pickerPresented == true || intakePicks) },
+            isPresented: Binding(get: { hosts && (coordinator?.pickerPresented == true || intake?.pickerPresented == true) },
                                  set: {
                                      guard !$0, hosts else { return }
                                      coordinator?.pickerPresented = false
@@ -52,9 +54,11 @@ public struct CollectionImportPicker: ViewModifier {
                                  }),
             allowedContentTypes: intakePicks ? ImportIntake.pickerTypes
                 : [UTType(importedAs: "com.antoinefink.meguri.collection-package")],
-            allowsMultipleSelection: false) { result in
+            allowsMultipleSelection: false,
+            onCompletion: { result in
                 if intakePicks { intake?.selection(result) } else { coordinator?.selection(result) }
-            }
+            },
+            onCancellation: { if intakePicks { intake?.pickerCancelled() } })
     }
 }
 

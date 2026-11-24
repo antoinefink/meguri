@@ -25,13 +25,18 @@ public final class ImportIntake {
         case collectionImportUnavailable
         /// X2.6: `read_options` failed: the collection cannot be read now.
         case collectionUnavailable
+        /// The import finished while another sheet held the window.
+        case imported(fileName: String)
     }
 
     /// The file types every picker of K1 offers (K2.2).
     public static let pickerTypes: [UTType] = [.meguriDeckPackage, .meguriCollectionPackage, .zip]
 
-    /// The picker this intake opened (not the collection sheet's own).
+    /// The picker this intake opened (not the collection sheet's own). The
+    /// system sets it false before the choice arrives: `pickerActive` says
+    /// whose picker it was until then.
     public var pickerPresented = false
+    public private(set) var pickerActive = false
     public private(set) var message: Message?
     /// The window the picker or the file belongs to.
     public private(set) var host: AppNavigation.SheetHost = .main
@@ -58,7 +63,7 @@ public final class ImportIntake {
     public var canChoose: Bool {
         guard let owner else { return false }
         return (owner.state == .ready || owner.entry.canPresent) && owner.navigation.sheet == nil && !importOpen
-            && !pickerPresented && !owner.entry.pickerPresented
+            && !pickerPresented && !pickerActive && !owner.entry.pickerPresented
     }
 
     /// K1's pickers: the system file picker at once, on the window that asked (X7.1).
@@ -66,11 +71,15 @@ public final class ImportIntake {
         guard canChoose else { return }
         self.host = host
         if owner?.navigation.sheet == nil { owner?.navigation.sheetHost = host }
+        pickerActive = true
         pickerPresented = true
     }
 
+    /// The picker closed with no file.
+    public func pickerCancelled() { pickerActive = false; pickerPresented = false }
+
     public func selection(_ result: Result<[URL], any Error>) {
-        pickerPresented = false
+        pickerPresented = false; pickerActive = false
         switch result {
         case .success(let urls): receive(urls, host: host)
         case .failure(let error):
@@ -87,6 +96,10 @@ public final class ImportIntake {
         classifying = true
         Task {
             defer { classifying = false }
+            // K6: a file that arrives while the collection opens waits until it settles.
+            for _ in 0..<300 where owner.state == .unopened || owner.state == .loading {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
             var chosen: (URL, PackageFileClass)?
             var unreadable: URL?
             for url in urls {
@@ -119,8 +132,9 @@ public final class ImportIntake {
             // K5: the collection package flow with its own confirmation.
             guard owner.entryAllowed, owner.entry.canChoose else { message = .collectionImportUnavailable; release?(); return }
             owner.navigation.sheetHost = host
+            // The flow reads the file later: a copy goes when that flow ends (K3 step 6).
+            owner.entry.adoptRelease(release)
             owner.entry.selection(.success([url]))
-            release?()
         case .deckPackage:
             // K6: a deck package needs an open collection (K6.1's creation is not built).
             guard owner.state == .ready, owner.hasCollection else { message = .needsCollection; release?(); return }
@@ -132,6 +146,12 @@ public final class ImportIntake {
     }
 
     public func clearMessage() { message = nil }
+
+    /// K5: the deck sheet's inspect found a whole collection by its content.
+    func routeCollection(_ url: URL, release: (@MainActor () -> Void)?) {
+        guard let owner else { release?(); return }
+        route(url, kind: .collectionPackage, owner: owner, others: false, release: release)
+    }
 
     /// The deck sheet's own message when it could not open (X2.6's `read_options` row).
     func show(_ value: Message) { message = value }

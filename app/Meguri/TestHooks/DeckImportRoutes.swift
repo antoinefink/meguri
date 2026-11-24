@@ -118,6 +118,7 @@ extension TestHooks {
         var deckImportSync: (any DeckImportMeguriSync)? { nil }
         func chooseAnotherImportFile() {}
         func deckImportMessage(_ message: ImportIntake.Message) { outcome = "message" }
+        func deckImportFoundCollection(_ url: URL, release: (@MainActor () -> Void)?) { outcome = "collection" }
     }
 }
 #endif

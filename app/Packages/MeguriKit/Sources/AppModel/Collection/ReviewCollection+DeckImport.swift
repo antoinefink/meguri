@@ -71,4 +71,12 @@ extension ReviewCollection: DeckImportHost {
     public func deckImportMessage(_ message: ImportIntake.Message) {
         intake.show(message)
     }
+
+    public func deckImportFoundCollection(_ url: URL, release: (@MainActor () -> Void)?) {
+        // After the deck sheet's dismissal settles.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            self?.intake.routeCollection(url, release: release)
+        }
+    }
 }

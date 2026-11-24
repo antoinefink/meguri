@@ -8,6 +8,8 @@ import Testing
 @MainActor private final class FakeImportHost: DeckImportHost {
     var deckImportSheetShown = false
     var presented = 0
+    /// Another sheet holds the window: presenting does nothing.
+    var windowTaken = false
     var names: [Int64: String] = [:]
     var undoable: UInt64?
     var undone: [UInt64] = []
@@ -17,7 +19,11 @@ import Testing
     var anotherFile = 0
     var messages: [ImportIntake.Message] = []
 
-    func presentDeckImport() { if !deckImportSheetShown { presented += 1 }; deckImportSheetShown = true }
+    func presentDeckImport() {
+        guard !windowTaken else { return }
+        if !deckImportSheetShown { presented += 1 }
+        deckImportSheetShown = true
+    }
     func dismissDeckImport() { deckImportSheetShown = false }
     func deckImportNotetypeNames() async -> [Int64: String] { names }
     func deckImportCanUndo(step: UInt64) async -> Bool { undoable == step }
@@ -30,6 +36,8 @@ import Testing
     var deckImportSync: (any DeckImportMeguriSync)? { sync }
     func chooseAnotherImportFile() { anotherFile += 1 }
     func deckImportMessage(_ message: ImportIntake.Message) { messages.append(message) }
+    var foundCollections: [URL] = []
+    func deckImportFoundCollection(_ url: URL, release: (@MainActor () -> Void)?) { foundCollections.append(url) }
 }
 
 /// MP7.1's side: answers what the test set.
@@ -410,5 +418,26 @@ private func confirmation(_ token: UInt64, reasons: [DeckImportStructuralReason]
         await model.collectionClosing()
         try await Task.sleep(for: .milliseconds(20))
         #expect(model.step == .idle && !host.deckImportSheetShown && service.openSessions == 0)
+    }
+
+    @Test func anOutcomeNoSheetCanShowEndsWithAMessage() async throws {
+        let host = FakeImportHost(); host.windowTaken = true
+        let (model, service, _) = await opened(.init(inspect: .success(facts), applies: []), host: host)
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(model.step == .idle && host.messages == [.alreadyOpen] && service.openSessions == 0)
+    }
+
+    @Test func aWholeCollectionFoundByTheInspectGoesToItsOwnFlow() async {
+        let (model, _, host) = await opened(.init(inspect: .failure(.collectionPackage), applies: []))
+        #expect(model.step == .idle && host.foundCollections == [file] && !host.deckImportSheetShown)
+    }
+
+    @Test func aRefusalKeepsTheOptionsItsApplyUsed() async {
+        let (model, _, _) = await opened(.init(inspect: .success(facts),
+            applies: [.refused(.tooLarge(what: .rows, found: 9, limit: 1))]))
+        model.options.withScheduling = true
+        model.importPackage(); await model.waitForWork()
+        model.options.withScheduling = false
+        #expect(model.appliedOptions?.withScheduling == true)
     }
 }

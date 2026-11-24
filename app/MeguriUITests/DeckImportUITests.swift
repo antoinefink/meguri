@@ -22,9 +22,8 @@ import XCTest
 
     func testTheMainPathImportsShowsTheLogAndCloses() throws {
         let (app, bundle) = try launch("collection/deck-import/live")
-        let heading = element(app, "\(id).heading")
-        XCTAssertTrue(heading.waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertTrue(label(heading).contains("Spanish Verbs.apkg"))
+        XCTAssertTrue(element(app, "\(id).import").waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Import “Spanish Verbs.apkg”"].exists, app.debugDescription)
         XCTAssertTrue(element(app, "\(id).withScheduling").exists)
         XCTAssertTrue(element(app, "\(id).updateNotes").exists)
         capture(app, "deck-import-options")
@@ -32,8 +31,7 @@ import XCTest
         let done = element(app, "\(id).done")
         XCTAssertTrue(done.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertTrue(element(app, "\(id).undo").exists)
-        let lines = app.descendants(matching: .any).matching(identifier: "\(id).line")
-        XCTAssertGreaterThanOrEqual(lines.count, 2, app.debugDescription)
+        XCTAssertTrue(element(app, "\(id).line.new").exists && element(app, "\(id).line.duplicate").exists, app.debugDescription)
         capture(app, "deck-import-result")
         #if os(macOS)
         // Return is Done here.
@@ -53,8 +51,8 @@ import XCTest
         try click(importButton, app, bundle)
         let confirm = element(app, "\(id).confirm")
         XCTAssertTrue(confirm.waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertTrue(label(element(app, "\(id).heading")).hasSuffix("?"))
-        XCTAssertTrue(element(app, "\(id).loss").exists)
+        XCTAssertTrue(app.staticTexts["Import “Spanish Verbs.apkg”?"].exists, app.debugDescription)
+        XCTAssertTrue(element(app, "\(id).loss.emptied0").exists)
         XCTAssertTrue(element(app, "\(id).backup").exists)
         capture(app, "deck-import-confirmation")
         #if os(macOS)

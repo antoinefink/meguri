@@ -30,7 +30,18 @@ enum DeckImportText {
     static func list(_ names: [String], shown: Int = 3) -> String {
         guard names.count > shown else { return names.formatted(.list(type: .and)) }
         let more = names.count - shown
-        return names.prefix(shown).joined(separator: ", ") + ", and \(more.formatted()) more"
+        return names.prefix(shown).joined(separator: ", ") + " and \(more.formatted()) more"
+    }
+
+    /// The package's decks in one line: a shared top deck and its subdecks, or the first names.
+    static func decks(_ names: [String]) -> String {
+        guard let first = names.first else { return "None" }
+        let root = first.components(separatedBy: "::")[0]
+        if names.count > 1, names.allSatisfy({ $0 == root || $0.hasPrefix(root + "::") }) {
+            let subdecks = names.filter { $0 != root }.count
+            return "\(deckName(root)) and \(count(UInt64(subdecks), "subdeck", "subdecks"))"
+        }
+        return list(names.map(deckName), shown: 1)
     }
 
     // MARK: Titles
@@ -39,6 +50,7 @@ enum DeckImportText {
     static func confirmTitle(_ file: String) -> String { "Import “\(file)”?" }
     static func importedTitle(_ file: String) -> String { "Imported “\(file)”" }
     static func readingTitle(_ file: String) -> String { "Reading “\(file)”…" }
+    static let undoneTitle = "Import Undone"
 
     static func summary(_ facts: DeckImportFacts) -> String {
         [count(facts.notes, "note", "notes"), count(facts.cards, "card", "cards")].joined(separator: " · ")
@@ -71,7 +83,7 @@ enum DeckImportText {
             : "Review history and due dates. When off, its cards start as new."
     }
     static func presetsHelp(_ facts: DeckImportFacts?) -> String {
-        facts?.hasPresets == false ? "This package has no deck presets." : "The deck options presets the package’s decks use."
+        facts?.hasPresets == false ? "This package has no deck presets." : "The deck option presets the package’s decks use."
     }
     static let mergeHelp = "When a note type of the package has the same origin as one here, combine them instead of adding a copy."
     static let updatesFooter = "When a note or note type is already in your collection. “If newer” replaces it only when the package’s version was changed more recently."
@@ -181,8 +193,8 @@ enum DeckImportText {
             case .diskFull, .io: return "This \(device) couldn’t write the files the import needs."
             case .stale: return "The collection kept changing while the import was prepared."
             case .busy(let operation):
-                return operation.isEmpty ? "Another long task is running. Try again once it ends."
-                    : "Another long task is running (\(operation)). Try again once it ends."
+                return busy(operation).map { "\($0) is running. Try again once it ends." }
+                    ?? "Another long task is running. Try again once it ends."
             case .safetyBackupFailed: return "The backup made before this import couldn’t be written, so nothing was imported."
             case .collectionUnavailable, .staleGeneration: return "The collection isn’t available right now."
             case .sessionClosed: return "Choose the file again to import it."
@@ -192,6 +204,18 @@ enum DeckImportText {
             case .committedWithoutResult: return importedWithoutResult
             }
         }
+    }
+
+    /// The core's names of long tasks, as the app names them; nil for the rest.
+    static func busy(_ operation: String) -> String? {
+        let name = operation.lowercased()
+        if name.contains("apkg") || name.contains("deck import") { return "Another deck import" }
+        if name.contains("check database") { return "Check Database" }
+        if name.contains("backup") { return "A backup" }
+        if name.contains("restore") { return "A restore" }
+        if name.contains("sync") { return "A sync" }
+        if name.contains("export") { return "An export" }
+        return nil
     }
 
     static let importedWithoutResult = "The notes were imported, but the result can’t be shown."
