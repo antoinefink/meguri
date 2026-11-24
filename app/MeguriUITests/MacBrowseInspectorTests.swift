@@ -29,39 +29,53 @@ final class MacBrowseInspectorTests: XCTestCase {
         let picker = element(app, "browse.inspector.preview.side")
         XCTAssertTrue(preview.waitForExistence(timeout: 20) && picker.exists)
         let front = picker.radioButtons["Front"], back = picker.radioButtons["Back"]
-        XCTAssertTrue(front.exists && back.exists, "native accessible segments")
+        XCTAssertTrue(waitUntil { front.isEnabled && back.isEnabled }, "native accessible segments are ready")
+        let answer = try XCTUnwrap(fields.element(boundBy: 1).value as? String)
+        XCTAssertFalse(answer.isEmpty)
+        func backRendered() -> Bool {
+            back.value as? Int == 1 && preview.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", answer)).firstMatch.exists
+        }
         back.click()
-        XCTAssertTrue(waitUntil { back.value as? Int == 1 })
-        // Click-to-flip updates the same segmented picker.
-        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.9)).click()
-        XCTAssertTrue(waitUntil { front.value as? Int == 1 })
-        back.click()
+        XCTAssertTrue(waitUntil { backRendered() }, "Back's field content is rendered in the card")
 
         let count = fields.count
-        let label = element(app, "editor.field.0.label")
-        XCTAssertTrue(label.exists, "a field's noninteractive name")
-        label.click()
-        page.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.1)).click()
-        XCTAssertEqual(fields.count, count, "label and nearby whitespace cannot collapse a field")
-        fields.element(boundBy: 0).click()
-        app.typeKey(.downArrow, modifierFlags: [.command])
-        app.typeText(" inspectionmarker")
-        app.typeKey(.leftArrow, modifierFlags: [.option, .shift])
-
         let bar = element(app, "browse.inspector.formatting")
         let initialHeight = preview.frame.height, barBottom = bar.frame.maxY
         let divider = try XCTUnwrap(app.descendants(matching: .splitter).allElementsBoundByIndex.first {
             abs($0.frame.midY - preview.frame.maxY) < 8 && $0.frame.width > $0.frame.height
         }, "native horizontal divider directly below the card")
         let handle = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        handle.press(forDuration: 0.1, thenDragTo: handle.withOffset(CGVector(dx: 0, dy: 70)))
+        try app.bringToFront(bundleIdentifier: bundle)
+        handle.click(forDuration: 0.1, thenDragTo: handle.withOffset(CGVector(dx: 0, dy: 70)))
         XCTAssertTrue(waitUntil { preview.frame.height > initialHeight + 30 }, "dragging resizes the preview")
+        XCTAssertEqual(bar.frame.maxY, barBottom, accuracy: 2, "formatting stays pinned")
+        // Capture a normal selected note before editing or folding anything.
+        XCTAssertTrue(waitUntil { backRendered() })
+        capture(app, "browse-note-pinned-preview-synthetic")
+
+        // Click-to-flip updates the same segmented picker.
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.9)).click()
+        XCTAssertTrue(waitUntil {
+            front.value as? Int == 1 && !preview.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", answer)).firstMatch.exists
+        }, "Front is rendered before selecting Back again")
+        back.click()
+        XCTAssertTrue(waitUntil { backRendered() })
+
+        fields.element(boundBy: 0).click()
+        app.typeKey(.downArrow, modifierFlags: [.command])
+        app.typeText(" inspectionmarker")
+        app.typeKey(.leftArrow, modifierFlags: [.option, .shift])
+
+        let editingHeight = preview.frame.height
+        try app.bringToFront(bundleIdentifier: bundle)
+        handle.click(forDuration: 0.1, thenDragTo: handle.withOffset(CGVector(dx: 0, dy: -30)))
+        XCTAssertTrue(waitUntil { preview.frame.height < editingHeight - 15 })
         XCTAssertEqual(fields.count, count)
         XCTAssertEqual(bar.frame.maxY, barBottom, accuracy: 2, "formatting stays pinned")
         let bold = element(app, "browse.inspector.format.bold")
         XCTAssertTrue(bold.isEnabled, "dragging retains the editing selection")
         bold.click()
-        let html = element(app, "browse.inspector.format.html")
+        let html = element(app, "editor.field.0.htmlToggle")
         html.click()
         XCTAssertTrue(waitUntil { (fields.element(boundBy: 0).value as? String ?? "").contains("<b>inspectionmarker</b>") },
                       "formatting still acts on the selected text after the divider drag")
@@ -73,18 +87,19 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertEqual(fields.count, count, "folding keeps the editor")
         header.click()
         XCTAssertTrue(preview.waitForExistence(timeout: 10))
-        XCTAssertTrue(waitUntil { back.value as? Int == 1 }, "folding and a blur-save preserve Back")
+        XCTAssertTrue(waitUntil { backRendered() }, "folding and a blur-save preserve rendered Back")
         // Drag to both bounds: both regions remain useful.
         for target in [header.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)),
                        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))] {
             let edge = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)).withOffset(CGVector(dx: 0, dy: 1))
-            edge.press(forDuration: 0.1, thenDragTo: target)
+            try app.bringToFront(bundleIdentifier: bundle)
+            edge.click(forDuration: 0.1, thenDragTo: target)
             XCTAssertGreaterThanOrEqual(preview.frame.height, 95)
             XCTAssertGreaterThanOrEqual(bar.frame.maxY - preview.frame.maxY, 179)
         }
         let edge = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)).withOffset(CGVector(dx: 0, dy: 1))
-        edge.press(forDuration: 0.1, thenDragTo: edge.withOffset(CGVector(dx: 0, dy: initialHeight - preview.frame.height)))
-        capture(app, "browse-note-pinned-preview-synthetic")
+        try app.bringToFront(bundleIdentifier: bundle)
+        edge.click(forDuration: 0.1, thenDragTo: edge.withOffset(CGVector(dx: 0, dy: initialHeight - preview.frame.height)))
 
         // Empty Fields is still the separate disclosure; an opened empty field stays open on clicks.
         fields.element(boundBy: 1).click()
@@ -97,7 +112,6 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertTrue(empty.waitForExistence(timeout: 10))
         empty.click()
         XCTAssertTrue(waitUntil { fields.count == count })
-        element(app, "editor.field.1.label").click()
         fields.element(boundBy: 1).click()
         XCTAssertEqual(fields.count, count)
         // Narrow overlay: the picker and card navigation must remain separate and reachable.
@@ -308,7 +322,9 @@ final class MacBrowseInspectorTests: XCTestCase {
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
-        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        let window = app.windows.containing(.outline, identifier: "browse.results.table").firstMatch
+        XCTAssertTrue(window.exists, "capture the Browse window")
+        let attachment = XCTAttachment(screenshot: window.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)

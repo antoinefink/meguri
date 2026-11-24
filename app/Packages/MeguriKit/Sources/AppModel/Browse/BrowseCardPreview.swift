@@ -39,7 +39,7 @@ public final class BrowseCardPreview {
     @ObservationIgnored private var presentation: Task<Void, Never>?
     @ObservationIgnored private var displayedSide: CardRenderSide = .question
     @ObservationIgnored private var requestedCard: Int64?
-    @ObservationIgnored private var committing: (CardUpdate, CheckedContinuation<Void, any Error>)?
+    @ObservationIgnored private var committing: (CardUpdate, AsyncStream<CardUpdate>.Continuation)?
     /// Shows not finished yet; a flip waits until there are none.
     @ObservationIgnored private(set) var showing = 0
     /// Raised by `close`: a load of a closed collection's pair lands nothing.
@@ -53,7 +53,7 @@ public final class BrowseCardPreview {
         cancelCommit()
         token &+= 1
         let token = token
-        if requestedCard != id { side = .question }
+        if requestedCard != id { side = .question; hasAudio = false; pair?.pauseAudio() }
         requestedCard = id
         showing += 1
         let previous = presentation
@@ -68,28 +68,30 @@ public final class BrowseCardPreview {
                 let update = try await pair.prepare(payload)
                 guard token == self.token else { return }
                 try await present(pair, update: update)
+                guard token == self.token else { return }
                 self.payload = payload
                 hasAudio = !payload.questionAudio.isEmpty || !payload.answerAudio.isEmpty
                 displayedSide = .question
                 card = id
+                failed = false
                 try await presentSelectedSide(token: token)
                 if token == self.token { failed = false }
             } catch {
-                if token == self.token { failed = true }
+                fail(token: token)
             }
         }
     }
 
     /// The segmented control sets its side directly, even during a render.
     public func selectSide(_ value: CardRenderSide) {
-        guard requestedCard != nil, side != value else { return }
+        guard requestedCard != nil, side != value || failed else { return }
         side = value
         pair?.pauseAudio()
         let token = token, previous = presentation
         presentation = Task {
             await previous?.value
             do { try await presentSelectedSide(token: token) }
-            catch { if token == self.token { failed = true } }
+            catch { fail(token: token) }
         }
     }
 
@@ -97,7 +99,16 @@ public final class BrowseCardPreview {
     public func flip() { selectSide(side == .question ? .answer : .question) }
 
     private func presentSelectedSide(token: UInt64) async throws {
-        guard let pair, let payload else { return }
+        guard token == self.token, requestedCard == card, let pair, let payload else { return }
+        // A failed reveal may already have changed the page's update identity.
+        // Rebuild Front before retrying rather than revealing that partial page.
+        if failed {
+            let update = try await pair.prepare(payload)
+            guard token == self.token else { return }
+            try await present(pair, update: update)
+            guard token == self.token else { return }
+            displayedSide = .question
+        }
         while token == self.token, displayedSide != side {
             let target = side
             if target == .answer {
@@ -110,11 +121,19 @@ public final class BrowseCardPreview {
             guard token == self.token else { return }
             displayedSide = target
         }
+        if token == self.token { failed = false }
+    }
+
+    private func fail(token: UInt64) {
+        guard token == self.token else { return }
+        side = displayedSide
+        failed = true
+        pair?.pauseAudio()
     }
 
     /// The side shown's sounds, from the start (they never play by themselves).
     public func replay() {
-        guard showing == 0, displayedSide == side, !failed else { return }
+        guard let card, requestedCard == card, showing == 0, displayedSide == side, !failed else { return }
         pair?.replay()
     }
 
@@ -156,17 +175,30 @@ public final class BrowseCardPreview {
     /// Answer reveal requires the question's native presentation to commit.
     /// Join the pair's acknowledgement instead of racing its CA completion.
     private func present(_ pair: CardPagePair, update: CardUpdate) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            committing = (update, continuation)
-            do { try pair.present(update) }
-            catch { committing = nil; continuation.resume(throwing: error) }
+        let committed = AsyncStream<CardUpdate>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        committing = (update, committed.continuation)
+        defer {
+            if committing?.0 == update { committing = nil }
+            committed.continuation.finish()
         }
+        try pair.present(update)
+        // Front's prepared page is now the native current page, even if its
+        // completion is later lost. A failure must not leave Back selected.
+        displayedSide = .question
+        // Native completion can disappear during process recovery or occlusion.
+        let timeout = Task {
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            committed.continuation.finish()
+        }
+        defer { timeout.cancel() }
+        for await shown in committed.stream where shown == update { return }
+        throw CardPage.Failure.updateFailed
     }
 
     private func cancelCommit() {
         let pending = committing
         committing = nil
-        pending?.1.resume(throwing: CancellationError())
+        pending?.1.finish()
     }
 
     /// The pair, made and loaded once; callers meanwhile wait for the same load.
@@ -182,7 +214,8 @@ public final class BrowseCardPreview {
                 made.onCommitted = { [weak self] update, _ in
                     guard let self, let pending = committing, pending.0 == update else { return }
                     committing = nil
-                    pending.1.resume()
+                    pending.1.yield(update)
+                    pending.1.finish()
                 }
                 pair = made
             }
