@@ -4,7 +4,7 @@ Spec: stats/activity-heatmap
 Requirements: R1272, R1275, R1276, R1278, R1280, R1281, R1284, R1291, R1295
 Anki: 26.09.3 (the review-log rows of `stats/counting-rules` N1 and the scheduler day of `stats/day-buckets` B3 and `sched/day-clock`, which it reuses)
 Scenarios: none. It is a Meguri query and presentation with no Anki or add-on behaviour to compare; core unit tests check it against the tables below.
-Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). On 2026-11-24 Antoine requested that the macOS Home heatmap use the full row width. AH1 records that sizing decision, and AH9 applies it to month labels.
+Status: Approved 2026-11-22 (R1357) for the lines that begin "Changed 2026-11-22 (round 11)". Approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/statistics-round11-20261122.md`); Antoine approved the round 11 design in chat on 2026-11-22 (`docs/design/decisions.md`, rows `stats.overview` of 2026-11-22). The 2026-11-24 changes to AH1 and AH9 implement Antoine's full-width macOS Home heatmap decision and are in force. Every other section is in force and unchanged.
 
 ## AH1. What this heatmap is
 
