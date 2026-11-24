@@ -94,9 +94,10 @@ import Testing
         await results.columnWritesSettled()
         try await pollUntil { backend.columnChanges.count == 3 }
         // The sort and the columns are written by two queues: their order between them is not fixed.
-        let written = zip(backend.columnChanges, backend.columnModes).map { "\($0.0) in \($0.1)" }.sorted()
-        #expect(written == ["hide(\"deck\") in cards", "setSort(\(BrowseSort(key: "cardDue", direction: .descending))) in cards",
-                            "show(\"cardReps\") in notes"].sorted())
+        let shown = { (pairs: [(ColumnSetChange, BrowseMode)]) in pairs.map { "\($0.0) in \($0.1)" }.sorted() }
+        #expect(shown(Array(zip(backend.columnChanges, backend.columnModes)))
+            == shown([(.hide("deck"), .cards), (.setSort(BrowseSort(key: "cardDue", direction: .descending)), .cards),
+                      (.show("cardReps"), .notes)]))
     }
 
     // MARK: Sets (V2.2, V2.4)
@@ -181,7 +182,11 @@ import Testing
         #expect(first.results.width(of: "deck") == nil, "Notes mode has its own widths")
         first.results.setWidths(["note": 150])
         // A relaunch reads them back.
-        let second = BrowseModel(backend: backend, store: store)
+        let relaunched = FakeBrowseBackend()
+        let again = FakeSearchSession()
+        again.results[""] = [1, 2, 3]
+        relaunched.searchSession = again
+        let second = BrowseModel(backend: relaunched, store: store)
         second.results.run(FilterQuery(), mode: .cards)
         try await pollUntil { second.results.list != nil }
         #expect(second.results.width(of: "deck") == 210.5 && second.results.width(of: "cardDue") == 96)
