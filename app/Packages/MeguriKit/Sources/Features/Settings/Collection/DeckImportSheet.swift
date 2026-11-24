@@ -299,8 +299,11 @@ struct DeckImportContent: View {
             .toolbar { toolbar }
             .disabled(presentation.undoing)
             .defaultFocus($focus, presentation.step == .result || presentation.step == .importedWithoutResult ? .done : .cancel)
-            .onChange(of: presentation.step) { _, step in
-                focus = step == .result || step == .importedWithoutResult ? .done : .cancel
+            // A sheet's toolbar buttons take the focus only once they exist:
+            // asked for again after the step is drawn.
+            .task(id: presentation.step) {
+                try? await Task.sleep(for: .milliseconds(150))
+                focus = presentation.step == .result || presentation.step == .importedWithoutResult ? .done : .cancel
             }
             .modifier(Sizing(presentation: presentation, announce: announce, escape: escape))
     }
@@ -664,6 +667,8 @@ struct DeckImportContent: View {
         Button(role: presentation.hasLosses ? .destructive : nil, action: actions.confirm) {
             Text(verbatim: presentation.syncParagraph == .replaces ? "Import and Upload" : "Import")
         }
+        // Never drawn as where the keyboard rests: Return does not press it.
+        .focusEffectDisabled()
         .accessibilityIdentifier("\(Self.id).confirm")
     }
 
