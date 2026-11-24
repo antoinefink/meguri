@@ -69,7 +69,13 @@ final class StatisticsCompactUITests: XCTestCase {
         element(app, "stats.page.content").swipeUp(velocity: .fast)
         element(app, "stats.page.content").swipeUp(velocity: .fast)
         // Fast swipes leave the page gliding: the control is read once it has settled.
-        XCTAssertTrue(waitUntil { period.isHittable }, "The period control is still on screen after scrolling")
+        settle(element(app, "stats.page.content").staticTexts.firstMatch)
+        let onScreen = waitUntil { period.isHittable }
+        if !onScreen {
+            add(XCTAttachment(screenshot: app.screenshot()))
+            add(XCTAttachment(string: app.debugDescription))
+        }
+        XCTAssertTrue(onScreen, "The period control is still on screen after scrolling: \(period.frame)")
         XCTAssertEqual(period.frame.minY, top, accuracy: 2, "The period control is pinned")
         XCTAssertTrue(deck.isHittable, "The deck's name shows at every scroll position")
         // Choosing a period works from the pinned control.
@@ -134,6 +140,8 @@ final class StatisticsCompactUITests: XCTestCase {
         XCTAssertLessThan(plot.frame.minY, before - 40, "A swipe over the plot scrolls the page")
         XCTAssertEqual(plot.value as? String ?? "", "", "A swipe selects nothing")
         plot.swipeDown(velocity: .slow)
+        // A touch on a page that still moves after a swipe only stops it: press once it rests.
+        settle(plot)
         plot.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.6)
         let pinned = waitUntil { !((plot.value as? String) ?? "").isEmpty }
         if !pinned {
@@ -229,6 +237,17 @@ final class StatisticsCompactUITests: XCTestCase {
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    /// Waits until `element` has stopped moving (two reads 0.3 s apart agree).
+    private func settle(_ element: XCUIElement) {
+        var last = element.frame
+        _ = waitUntil {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            let now = element.frame
+            defer { last = now }
+            return now == last
+        }
     }
 
     private func waitFor(_ target: XCUIElement, _ predicate: NSPredicate, _ timeout: TimeInterval) -> Bool {
