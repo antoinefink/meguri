@@ -172,12 +172,16 @@ extension ReviewCollectionStartupTests {
 
             // Set Due Date as typed, then Forget; both name their steps.
             await pick([0])
+            let dueColumn = try #require(results.list?.columns.firstIndex(of: "cardDue"))
+            let dueBefore = row(0)?.cells[dueColumn]
             let due = try await open(.setDueDate)
             due.dueText = "3"
             await waitFor { if case .valid = due.due { true } else { false } }
             due.confirm()
             await waitFor { commands.sheet == nil }
             await undoTitle("Set Due Date")
+            // The row's Due cell is read again in place (H10).
+            await waitFor { row(0)?.cells[dueColumn] != dueBefore }
             let forget = try await open(.forget)
             forget.confirm()
             await waitFor { commands.sheet == nil }

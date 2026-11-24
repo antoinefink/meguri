@@ -43,6 +43,8 @@ final class MacBrowseSheetsTests: XCTestCase {
         XCTAssertTrue(undoTitle(app).hasSuffix("Change Deck"), undoTitle(app))
 
         // Set Due Date… ⇧⌘D: the remembered text, a range's preview, an error.
+        let firstRow = table.outlineRows.element(boundBy: 0)
+        let rowBefore = rowText(firstRow)
         app.typeKey("d", modifierFlags: [.command, .shift])
         let due = element(app, "browse.sheet.setDueDate")
         XCTAssertTrue(due.waitForExistence(timeout: 10), "⇧⌘D opens Set Due Date")
@@ -60,6 +62,7 @@ final class MacBrowseSheetsTests: XCTestCase {
         XCTAssertTrue(waitUntil { self.element(app, "browse.sheet.setDueDate.confirm").isEnabled })
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitUntil { !due.exists })
+        XCTAssertTrue(waitUntil { self.rowText(firstRow) != rowBefore }, "the row's Due cell changes in place: \(rowBefore)")
         afterCapture(app, "set-due-date-after-\(appearance)")
         XCTAssertTrue(undoTitle(app).hasSuffix("Set Due Date"), undoTitle(app))
 
@@ -102,6 +105,7 @@ final class MacBrowseSheetsTests: XCTestCase {
             app.typeText("ter")
             app.typeKey(.return, modifierFlags: [])
             XCTAssertTrue(waitUntil { !remove.exists })
+            XCTAssertTrue(undoTitle(app).hasSuffix("Remove Tags"), undoTitle(app))
             afterCapture(app, "remove-tags-after-\(appearance)")
         }
 
@@ -124,7 +128,7 @@ final class MacBrowseSheetsTests: XCTestCase {
         XCTAssertTrue(waitUntil { self.resultsTable(app).outlineRows.count == 2 })
         try app.bringToFront(bundleIdentifier: bundle)
         // T13: the Saved Searches section's context menu.
-        let header = app.staticTexts.matching(NSPredicate(format: "label == 'Saved Searches' OR value == 'Saved Searches'")).firstMatch
+        let header = element(app, "browse.sidebar.savedSearches")
         XCTAssertTrue(header.waitForExistence(timeout: 10), "the sidebar's Saved Searches section")
         header.rightClick()
         let item = app.menuItems.matching(NSPredicate(format: "title BEGINSWITH 'Save Search'")).firstMatch
@@ -175,6 +179,11 @@ final class MacBrowseSheetsTests: XCTestCase {
 
     private func resultsTable(_ app: XCUIApplication) -> XCUIElement {
         app.outlines.matching(identifier: "browse.results.table").firstMatch
+    }
+
+    /// The texts of a row's cells, joined.
+    private func rowText(_ row: XCUIElement) -> String {
+        row.staticTexts.allElementsBoundByIndex.map { "\($0.label)\($0.value.map { "\($0)" } ?? "")" }.joined(separator: "|")
     }
 
     /// Edit › Undo's title, read from the menu bar.
