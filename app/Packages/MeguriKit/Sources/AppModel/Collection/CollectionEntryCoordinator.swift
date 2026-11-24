@@ -41,6 +41,13 @@ public final class CollectionEntryCoordinator {
     private var task: Task<Void, Never>?
     private var revision: UInt64 = 0
     private var selectedSource: URL?
+    /// The intake's hold on a delivered copy (K3 step 6), ended with this flow.
+    private var sourceRelease: (@MainActor () -> Void)?
+    func adoptRelease(_ release: (@MainActor () -> Void)?) {
+        sourceRelease?()
+        sourceRelease = release
+    }
+    private func endSourceHold() { let release = sourceRelease; sourceRelease = nil; release?() }
 
     init(owner: ReviewCollection, service: any CollectionEntryService,
          recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
@@ -207,6 +214,7 @@ public final class CollectionEntryCoordinator {
         guard !requiresRecovery else { return }
         owner?.navigation.dismissSheet()
         stage = .awaitingFile; message = nil; failure = nil; selectedSource = nil
+        endSourceHold()
     }
     public func continueAfterActivation() async {
         guard canContinueRecovery, let owner else { return }
@@ -244,6 +252,7 @@ public final class CollectionEntryCoordinator {
     public func presentationChanged() {
         guard owner?.navigation.sheet != .collectionEntry, !busy else { return }
         pickerPresented = false
+        if !requiresRecovery { endSourceHold() }
         Task { await discardPreview() }
     }
     private func discardPreview() async {

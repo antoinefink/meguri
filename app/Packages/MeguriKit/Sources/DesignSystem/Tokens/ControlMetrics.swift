@@ -7,4 +7,7 @@ nonisolated public enum ControlMetrics {
     #else
     public static let minimumTarget: CGFloat = 44
     #endif
+    /// The outline a window draws while a dropped file would be taken
+    /// (`package/file-intake` K1): as wide as the system's focus ring.
+    public static let dropOutline: CGFloat = 3
 }

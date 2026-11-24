@@ -14,6 +14,19 @@ nonisolated public protocol MeguriStructureJobService: Sendable {
         async throws -> MeguriStructureOutcome
     /// Step 5's durable state: a committed structure save waits for its upload.
     func structureUploadPending() async throws -> Bool
+    /// MP7.1's job for an accepted deck package import confirmation.
+    func importDeckPackage(_ session: DeckImportSession, options: DeckImportOptions, confirmation: DeckImportConfirmation,
+                           reachable: Bool,
+                           onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
+        async throws -> MeguriDeckImportOutcome
+}
+
+nonisolated extension MeguriStructureJobService {
+    /// Fakes that run no import: the job does not start.
+    func importDeckPackage(_ session: DeckImportSession, options: DeckImportOptions, confirmation: DeckImportConfirmation,
+                           reachable: Bool,
+                           onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
+        async throws -> MeguriDeckImportOutcome { .notStarted(.notReady) }
 }
 
 /// The bridge's jobs: the ready binding's round service runs them, the
@@ -34,6 +47,33 @@ nonisolated struct CoreMeguriStructureJobs: MeguriStructureJobService {
         return try await round.uploadNotetypeStructure { stage, job in onStage(stage, job.progress) }
     }
     func structureUploadPending() async throws -> Bool { try await provider.structureUploadPending() }
+    func importDeckPackage(_ session: DeckImportSession, options: DeckImportOptions, confirmation: DeckImportConfirmation,
+                           reachable: Bool,
+                           onStage: @escaping @Sendable (MeguriStructureStage, AsyncStream<CoreProgress>?) -> Void)
+        async throws -> MeguriDeckImportOutcome {
+        guard let round else { return .notStarted(.notReady) }
+        return try await round.importDeckPackage(session, options: options, confirmation: confirmation, reachable: reachable) {
+            stage, job in onStage(stage, job.progress)
+        }
+    }
+}
+
+nonisolated extension MeguriDeckImportOutcome {
+    /// The job's outcome as a structure job's, for what the sync status does after it.
+    var structureOutcome: MeguriStructureOutcome {
+        switch self {
+        case .notStarted(let refusal): .refused(refusal)
+        case .fullSyncRequired: .fullSyncRequired
+        case .roundStopped(let round): .roundStopped(round)
+        case .cancelled: .cancelled
+        case .unavailable: .unavailable
+        // Nothing imported and nothing pending.
+        case .notImported: .refused(.unavailable)
+        case .imported(_, let upload): .saved(upload)
+        // Committed: the upload is pending unless the job said otherwise.
+        case .importedWithoutResult(let upload): .saved(upload ?? .pending(.failed))
+        }
+    }
 }
 
 /// What the app does once a structure job (MP7) ended, besides reading the

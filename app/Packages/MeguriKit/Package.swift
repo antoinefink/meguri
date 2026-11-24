@@ -77,7 +77,7 @@ let package = Package(
             name: "AppModelTests",
             dependencies: ["AppModel", "CardRendering", "Editor", "HeatmapKit", .product(name: "CoreBridge", package: "MeguriCore"), .product(name: "Instrumentation", package: "MeguriCore")],
             exclude: ["AGENTS.md"],
-            resources: [.copy("Fixtures/schema-18.anki2"), .copy("Fixtures/review.colpkg")],
+            resources: [.copy("Fixtures/schema-18.anki2"), .copy("Fixtures/review.colpkg"), .copy("Fixtures/deck-tree.apkg")],
             swiftSettings: settings
         ),
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"], swiftSettings: settings),

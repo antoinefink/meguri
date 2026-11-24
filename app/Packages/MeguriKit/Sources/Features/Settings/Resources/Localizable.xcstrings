@@ -787,6 +787,102 @@
           }
         }
       }
+    },
+    "import.apkg.withScheduling": {
+      "comment": "Deck package import option (package/transfer-strings S2): import the package's review history and scheduling.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import any learning progress"
+          }
+        }
+      }
+    },
+    "import.apkg.withDeckConfigs": {
+      "comment": "Deck package import option (S2): import the deck option presets the package's decks use.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import any deck presets"
+          }
+        }
+      }
+    },
+    "import.apkg.mergeNotetypes": {
+      "comment": "Deck package import option (S2): merge a package note type into the matching one of the collection.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge note types"
+          }
+        }
+      }
+    },
+    "import.apkg.updateNotes": {
+      "comment": "Deck package import option (S2): when to replace notes already in the collection.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update notes"
+          }
+        }
+      }
+    },
+    "import.apkg.updateNotetypes": {
+      "comment": "Deck package import option (S2): when to replace note types already in the collection.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update note types"
+          }
+        }
+      }
+    },
+    "import.apkg.update.ifNewer": {
+      "comment": "Value of both update options (S2): replace only when the package's version is newer.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If newer"
+          }
+        }
+      }
+    },
+    "import.apkg.update.always": {
+      "comment": "Value of both update options (S2): always replace.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Always"
+          }
+        }
+      }
+    },
+    "import.apkg.update.never": {
+      "comment": "Value of both update options (S2): never replace.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Never"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
