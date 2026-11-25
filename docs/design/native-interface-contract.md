@@ -1037,7 +1037,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `ho
 
 ### N21.4 The inspector (6A)
 
-- Field layout integrity (authorized 2026-11-25): imported text/audio notes with many fields or several cards use their current field ordinals, never schema-11's previous ordinals. A valid permutation is shown in ordinal order; duplicate, missing or sentinel current ordinals and mismatched stored field counts refuse editing with a specific explanation. A preview alone does not prove a field layout is safe to write. Save changes only the addressed fields and preserves untouched bytes.
+- Browse shows imported fields in stored ordinal order, including layouts with gaps (`notetypes/records` N1). A field's position in that list selects the note value to display or edit. Saving verifies the stored layout and preserves untouched fields. A note whose field count differs from its definition shows the counts and directs the user to Check Database.
 
 - Trailing pane with a segmented control Note | Info at the trailing edge of its bottom bar (owner decision 2026-11-25, below; first at its top).
 - Note: the card preview (folds with its header), Deck and Type rows as round 5's form, the filled fields as labelled boxes, one "<n> Empty Fields" disclosure row, Tags as a token field, and a formatting bar under the fields (Bold, Italic, Underline, Cloze when it applies, Attach, HTML).
