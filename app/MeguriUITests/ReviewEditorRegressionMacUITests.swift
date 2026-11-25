@@ -87,8 +87,22 @@ import XCTest
     }
 
     func testAddWindowPickersAddAnotherMainWorkspaceAndDiscard() throws {
-        let (app, _) = try launch()
+        let (app, bundle) = try launch()
         defer { app.terminate() }
+        let running = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+            .first { !$0.isTerminated })
+        let application = AXUIElementCreateApplication(running.processIdentifier)
+        func waitForKeyAddWindow() {
+            XCTAssertTrue(wait {
+                var focused: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString, &focused) == .success,
+                      let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
+                var identifier: CFTypeRef?
+                return AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXIdentifierAttribute as CFString, &identifier) == .success
+                    && identifier as? String == "editor.add.window"
+            }, "Add must be the native focused window before keyboard input; AX trusted=\(AXIsProcessTrusted())")
+            XCTAssertEqual(app.windows.matching(identifier: "editor.add.window").count, 1, "New Note reuses the single Add window")
+        }
         app.typeKey("n", modifierFlags: .command)
         var window = app.windows["editor.add.window"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
@@ -113,14 +127,17 @@ import XCTest
         XCTAssertTrue(window.exists)
         app.typeKey("f", modifierFlags: .command)
         XCTAssertTrue(window.exists, "Find in the main workspace leaves Add open")
-        window.click()
+        app.typeKey("n", modifierFlags: .command)
+        waitForKeyAddWindow()
         app.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(window.waitForNonExistence(timeout: 10), "an unchanged post-add draft closes without discard")
 
         app.typeKey("n", modifierFlags: .command)
         window = app.windows["editor.add.window"]
         XCTAssertTrue(window.waitForExistence(timeout: 10))
-        app.typeText("Synthetic unsaved draft")
+        waitForKeyAddWindow()
+        XCTAssertTrue(wait { fields.count == 2 && fields.element(boundBy: 0).isEnabled && fields.element(boundBy: 0).isHittable })
+        fields.element(boundBy: 0).click(); app.typeText("Synthetic unsaved draft")
         app.typeKey("w", modifierFlags: .command)
         let discard = window.sheets.buttons["Discard"], keep = window.sheets.buttons["Keep Editing"]
         XCTAssertTrue(discard.waitForExistence(timeout: 10) && keep.exists)
@@ -131,9 +148,12 @@ import XCTest
         XCTAssertTrue(element(app, "browse.results.table").exists)
         app.typeKey("n", modifierFlags: .command)
         XCTAssertTrue(window.waitForExistence(timeout: 10))
+        waitForKeyAddWindow()
         XCTAssertTrue(wait { fields.count == 2 })
         XCTAssertFalse((fields.element(boundBy: 0).value as? String ?? "").contains("Synthetic unsaved draft"))
         XCTAssertFalse(window.buttons["editor.add.save"].isEnabled, "discarded input must not return on reopen")
+        XCTAssertTrue(wait { fields.element(boundBy: 0).isEnabled && fields.element(boundBy: 0).isHittable })
+        fields.element(boundBy: 0).click()
         app.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(window.waitForNonExistence(timeout: 10))
     }
