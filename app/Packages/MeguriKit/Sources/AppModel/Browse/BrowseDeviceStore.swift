@@ -13,6 +13,8 @@ nonisolated public struct BrowseDeviceState: Codable, Equatable, Sendable {
     public var notesMode: Bool?
     public var folded: Set<BrowseSidebarSection>
     public var showsAllTags: Bool
+    /// The Note Types section's Show All choice (V6); nil before the first.
+    public var showsAllNotetypes: Bool?
     /// The suggestions accepted, newest first (`search/editing-services`
     /// D6.5 step 4); nil before the first.
     public var recentSuggestions: [String]?

@@ -270,6 +270,7 @@ fake_vm() {
   FAKE_VM_MIRROR="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
   FAKE_VM_REPO="$(cd "$SB" && pwd -P)"
   export FAKE_VM_MIRROR FAKE_VM_REPO MEGURI_MAC_VM_STOP_SECONDS=2
+  export MEGURI_MAC_VM_CLAIM_PATH="$FAKE_VM_MIRROR/vm-claim.lock" MEGURI_MAC_VM_CLAIM_POLL_SECONDS=1 MEGURI_MAC_VM_CLAIM_BEAT_SECONDS=1 MEGURI_MAC_VM_SHARED_CLAIM=1
   VM_FS="$FAKE_VM_DIR/meguri-mac/fs"
   mkdir -p "$VM_FS" "$FAKE_VM_BIN"
   echo running >"$FAKE_VM_DIR/meguri-mac/state"

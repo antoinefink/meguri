@@ -87,7 +87,8 @@ import Testing
         model.activate(.tag("brask"), click: .option)
         model.activate(.flag(0))
         #expect(model.selectedRows == [.deck(10), .state(.suspended), .flag(0)])
-        #expect(model.listSelection == [.section(.browse), .deck(10), .state(.suspended), .flag(0)])
+        // The list's own selection is the Browse row alone: the rows draw the query's.
+        #expect(model.listSelection == [.section(.browse)])
         #expect(model.query.selects(Self.spanish) && !model.query.selects(.tag("brask")))
         // Removing a token deselects its rows.
         model.activate(.deck(10), click: .command)
@@ -102,13 +103,13 @@ import Testing
         // A plain click: the one row the list selected.
         #expect(model.listSelectionChanged(to: [.state(.new)], click: .plain) == nil)
         #expect(model.query.tokens == [token(.state(.new))])
-        // A click on another kind keeps the first token; the list then shows both.
+        // A click on another kind keeps the first token; both rows then show selected.
         _ = model.listSelectionChanged(to: [.deck(10)], click: .plain)
         #expect(model.selectedRows == [.state(.new), .deck(10)])
-        // ⌘-click: the row that came is added to its kind, the one that went is removed.
+        // ⌘-click: a row is added to its kind when absent and removed when present.
         _ = model.listSelectionChanged(to: model.listSelection.union([.deck(20)]), click: .command)
         #expect(model.query.tokens[1] == token(Self.spanish, Self.japanese))
-        _ = model.listSelectionChanged(to: model.listSelection.subtracting([.deck(10)]), click: .command)
+        _ = model.listSelectionChanged(to: model.listSelection.union([.deck(10)]), click: .command)
         #expect(model.query.tokens[1] == token(Self.japanese))
         // ⌥-click.
         _ = model.listSelectionChanged(to: [.state(.new)], click: .option)
@@ -118,12 +119,9 @@ import Testing
         _ = model.listSelectionChanged(to: [.state(.learning), .state(.review), .state(.suspended)], click: .plain)
         _ = model.listSelectionChanged(to: [], click: .plain)
         #expect(model.query == before && model.selectionEcho == echo &+ 2)
-        // A ⌘-click with a selected row the list does not draw (folded, filtered
-        // out): only the clicked row changes, the hidden one stays.
+        // A ⌘-click changes the clicked row only: the other kinds' rows stay.
         _ = model.listSelectionChanged(to: [.state(.learning)], click: .plain)
-        _ = model.listSelectionChanged(to: model.listSelection.union([.state(.new)]), click: .command)  // adds New
-        let hiddenDecks: Set<BrowseSidebarTag> = [.section(.browse), .state(.new), .state(.learning), .state(.review)]
-        _ = model.listSelectionChanged(to: [.section(.browse), .state(.learning), .state(.review)], click: .command, shown: hiddenDecks)
+        _ = model.listSelectionChanged(to: model.listSelection.union([.state(.review)]), click: .command)
         #expect(model.selectedRows == [.state(.learning), .state(.review), .deck(20)])
         // A section row navigates; the Browse row itself does nothing.
         #expect(model.listSelectionChanged(to: [.section(.home)], click: .plain) == .home)
@@ -133,55 +131,39 @@ import Testing
     }
 
     @Test(arguments: [BrowseModel.Click.plain, .command, .option], [false, true])
-    func sectionNavigationDoesNotReadVisibleRowsOrChangeFilters(_ click: BrowseModel.Click, mixed: Bool) async {
+    func sectionNavigationDoesNotChangeFilters(_ click: BrowseModel.Click, mixed: Bool) async {
         let (model, _) = await makeModel()
         model.activate(.deck(10))
         model.activate(.tag("brask::oddly"))
         let query = model.query, selection = model.listSelection, echo = model.selectionEcho
-        var shownReads = 0
-        func shown() -> Set<BrowseSidebarTag> {
-            shownReads += 1
-            return []
-        }
         let rows: Set<BrowseSidebarTag> = mixed
             ? [.section(.home), .section(.browse), .deck(20), .tag("brask"), .showAllTags]
             : [.section(.home)]
-        #expect(model.listSelectionChanged(to: rows, click: click, shown: shown()) == .home)
-        #expect(shownReads == 0)
+        #expect(model.listSelectionChanged(to: rows, click: click) == .home)
         #expect(model.query == query && model.listSelection == selection)
         #expect(!model.showsAllTags && model.selectionEcho == echo &+ 1)
     }
 
     @Test(arguments: [BrowseModel.Click.plain, .option])
-    func aSingleFilterClickDoesNotReadVisibleRows(_ click: BrowseModel.Click) async {
+    func aSingleFilterClickBesideTheBrowseRowIsAClickOnIt(_ click: BrowseModel.Click) async {
         let (model, _) = await makeModel()
         model.activate(.deck(10))
-        var shownReads = 0
-        func shown() -> Set<BrowseSidebarTag> {
-            shownReads += 1
-            return []
-        }
-        #expect(model.listSelectionChanged(to: [.section(.browse), .tag("brask")], click: click, shown: shown()) == nil)
-        #expect(shownReads == 0)
+        #expect(model.listSelectionChanged(to: [.section(.browse), .tag("brask")], click: click) == nil)
         #expect(model.query.tokens == [token(Self.spanish), token(.tag("brask"), negated: click == .option)])
     }
 
-    @Test func aCommandClickReadsVisibilityOnceAndKeepsHiddenDeckAndTagSelections() async {
+    /// N21.1 (2026-11-24): the list's selection is the Browse row alone, so a
+    /// ⌘-click reports the clicked row only, and a selected row the list
+    /// does not draw (filtered out, under a collapsed parent) stays selected.
+    @Test func aCommandClickKeepsHiddenDeckAndTagSelections() async {
         let (model, _) = await makeModel()
         model.activate(.deck(10))
         model.activate(.tag("brask"))
         model.activate(.tag("brask::oddly"), click: .command)
         model.activate(.state(.new))
-        var shownReads = 0
-        func shown() -> Set<BrowseSidebarTag> {
-            shownReads += 1
-            // Selected deck 10 is filtered out; the selected child tag is under
-            // a collapsed parent. Only the visible parent tag was deselected.
-            return [.deck(20), .tag("brask"), .state(.new)]
-        }
-        #expect(model.listSelectionChanged(to: [.section(.browse), .deck(20), .state(.new)],
-                                           click: .command, shown: shown()) == nil)
-        #expect(shownReads == 1)
+        // ⌘-clicks on deck 20 (not selected) and on the parent tag (selected).
+        #expect(model.listSelectionChanged(to: [.section(.browse), .deck(20)], click: .command) == nil)
+        #expect(model.listSelectionChanged(to: [.section(.browse), .tag("brask")], click: .command) == nil)
         #expect(model.selectedRows == [.deck(10), .deck(20), .tag("brask::oddly"), .state(.new)])
     }
 
@@ -381,6 +363,27 @@ import Testing
         #expect(model.shownTopLevelTags.showAll == 14)
         #expect(model.listSelectionChanged(to: [.showAllTags], click: .plain) == nil)
         #expect(model.shownTopLevelTags.tags.count == 14 && model.shownTopLevelTags.showAll == nil)
+    }
+
+    @Test func withMoreThanTwelveNoteTypesTheSectionShowsTheEightWithTheMostRowsAndTheQuerysOwn() async {
+        let core = FakeBrowseBackend()
+        core.holdCounts = true
+        core.notetypeList = (1...14).map { NotetypeName(id: Int64($0), name: String(format: "n%02d", $0)) }
+        let model = BrowseModel(backend: core)
+        model.appear()
+        await until { model.notetypes.count == 14 && !core.countCalls.isEmpty }
+        // Before the counts: the first eight, in name order.
+        #expect(model.shownNotetypes.rows.map(\.id) == Array(1...8) && model.shownNotetypes.showAll == 14)
+        let rows: [Int64: UInt64] = [14: 90, 2: 80, 9: 80, 5: 70, 13: 60, 1: 50, 7: 40, 11: 30, 3: 20]
+        core.resumeCounts(0) { item in
+            if case .value(.notetype(let id, _)) = item { rows[id] ?? 1 } else { 3 }
+        }
+        await until { model.shownNotetypes.rows.map(\.id) == [1, 2, 5, 7, 9, 11, 13, 14] }
+        // A note type the query selects shows too, in its place.
+        model.activate(.notetype(4))
+        #expect(model.shownNotetypes.rows.map(\.id) == [1, 2, 4, 5, 7, 9, 11, 13, 14] && model.shownNotetypes.showAll == 14)
+        model.activate(.showAllNotetypes)
+        #expect(model.shownNotetypes.rows.count == 14 && model.shownNotetypes.showAll == nil && model.showsAllNotetypes)
     }
 
     // MARK: Kept state (V1) and opening (T14)
@@ -718,7 +721,8 @@ import Testing
         default: []
         }
     }
-    func notetypes() async throws -> [NotetypeName] { [NotetypeName(id: 8, name: "Basic"), NotetypeName(id: 7, name: "Vocabulary")] }
+    var notetypeList = [NotetypeName(id: 8, name: "Basic"), NotetypeName(id: 7, name: "Vocabulary")]
+    func notetypes() async throws -> [NotetypeName] { notetypeList }
     func tagTree() async throws -> [TagNode] { tagNodes }
     func flagNames() async throws -> [String] { ["Red", "Orange", "Green", "Blue", "Pink", "Turquoise", "Purple"] }
     /// The second read of a refresh, the values only the suggestions show

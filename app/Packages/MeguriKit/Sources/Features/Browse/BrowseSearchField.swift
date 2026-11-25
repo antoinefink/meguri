@@ -4,8 +4,11 @@ import SwiftUI
 
 /// Browse's search field (U271; N21.2, `search/filter-tokens` T8, T10,
 /// T12, T13): the system's search field in the window toolbar with its
-/// standard prompt, the query's tokens as the system's search tokens, each
-/// with its menu, and the system's suggestions list in sections.
+/// standard prompt and the system's suggestions list in sections. On touch
+/// it holds the query's tokens as the system's search tokens, each with its
+/// menu. On the Mac it holds the text only: the tokens are the filter bar's
+/// (`BrowseFilterBar`, N21.2 of 2026-11-24), since the system fixes the
+/// toolbar field's width and two tokens fill it.
 struct BrowseSearchField: ViewModifier {
     let model: BrowseModel
     /// The toolbar's. On the Mac the principal placement would put the field
@@ -16,10 +19,20 @@ struct BrowseSearchField: ViewModifier {
     @FocusState private var focused: Bool
     @Environment(\.locale) private var locale
 
+    /// The field's tokens. The Mac's field shows none; the system still hands
+    /// it a suggestion it took as a token, which the model accepts.
+    private var tokens: Binding<[BrowseFieldToken]> {
+        #if os(macOS)
+        Binding(get: { [] }, set: { model.acceptFieldTokens($0) })
+        #else
+        Binding(get: { model.fieldTokens }, set: { model.setFieldTokens($0) })
+        #endif
+    }
+
     func body(content: Content) -> some View {
         content
             .searchable(text: Binding(get: { model.query.text }, set: { model.editText($0) }),
-                        editableTokens: Binding(get: { model.fieldTokens }, set: { model.setFieldTokens($0) }),
+                        editableTokens: tokens,
                         placement: Self.placement) { $token in
                 BrowseTokenView(model: model, token: token)
             }
@@ -104,7 +117,7 @@ private struct BrowseTokenView: View {
 /// T10's menu: Is and Is Not, the token's values checked, up to 8 others,
 /// Add Another <kind>…, then Remove Filter. A Field token lists its tests;
 /// an advanced token has Edit and Remove Filter only.
-private struct BrowseTokenMenu: View {
+struct BrowseTokenMenu: View {
     let model: BrowseModel
     let index: Int
     let token: FilterToken
@@ -316,31 +329,12 @@ private struct BrowseSuggestionRow: View {
         switch suggestion.row {
         case .contains: "text.magnifyingglass"
         case .builtIn, .savedSearch: "magnifyingglass"
-        case .filterBy(let section), .showAll(let section): Self.symbol(section)
-        case .value(let value): Self.symbol(value.kind.section ?? .filterBy)
-        case .cardType: Self.symbol(.cardTypes)
-        case .field: Self.symbol(.fields)
+        case .filterBy(let section), .showAll(let section): section.symbol
+        case .value(let value): (value.kind.section ?? .filterBy).symbol
+        case .cardType: FilterSection.cardTypes.symbol
+        case .field: FilterSection.fields.symbol
         case .saveSearch: "plus.magnifyingglass"
         case .syntax: "chevron.left.forwardslash.chevron.right"
-        }
-    }
-
-    /// Each kind's symbol.
-    private static func symbol(_ section: FilterSection) -> String {
-        switch section {
-        case .savedSearches: "magnifyingglass"
-        case .cardState: "circle.lefthalf.filled"
-        case .flag: "flag"
-        case .due: "calendar"
-        case .added: "plus.circle"
-        case .edited: "pencil"
-        case .studied: "checkmark.circle"
-        case .decks: "rectangle.stack"
-        case .tags: "tag"
-        case .notetypes: "doc.text"
-        case .cardTypes: "rectangle.on.rectangle"
-        case .fields: "character.textbox"
-        case .filterBy: "line.3.horizontal.decrease"
         }
     }
 
@@ -455,6 +449,27 @@ private struct ContainsPrompt: View {
             .accessibilityIdentifier("browse.search.contains.text")
         Button(role: .cancel) { model.dismissContains() } label: { Text("browse.saveSearch.cancel", bundle: .module) }
         Button { model.finishContains(editing, text) } label: { Text("browse.search.contains.ok", bundle: .module) }
+    }
+}
+
+extension FilterSection {
+    /// Each kind's symbol, in the suggestions and the filter bar's menu.
+    var symbol: String {
+        switch self {
+        case .savedSearches: "magnifyingglass"
+        case .cardState: "circle.lefthalf.filled"
+        case .flag: "flag"
+        case .due: "calendar"
+        case .added: "plus.circle"
+        case .edited: "pencil"
+        case .studied: "checkmark.circle"
+        case .decks: "rectangle.stack"
+        case .tags: "tag"
+        case .notetypes: "doc.text"
+        case .cardTypes: "rectangle.on.rectangle"
+        case .fields: "character.textbox"
+        case .filterBy: "line.3.horizontal.decrease"
+        }
     }
 }
 

@@ -12,7 +12,9 @@ import AppKit
 /// are a view of the query: the system's selection shows the values of
 /// its **is** tokens, and a click, ⌘-click or ⌥-click changes the query as
 /// `search/filter-tokens` T9 says. The sidebar's field filters the rows
-/// (`browser/sidebar` S6).
+/// (`browser/sidebar` S6). Since 2026-11-24 (N21.1) the list's own selection
+/// is the Browse row alone: a filter row the query selects draws a tinted
+/// background itself, and each row leads with a symbol.
 public struct BrowseSidebar<Header: View>: View {
     @Bindable private var model: BrowseModel
     private let decks: [CountedDeckNode]
@@ -59,16 +61,16 @@ public struct BrowseSidebar<Header: View>: View {
         #if os(macOS)
         .contextMenu(forSelectionType: BrowseSidebarTag.self) { rows in
             rowMenu(rows)
-        } primaryAction: { rows in
+        } primaryAction: { _ in
             guard NSApp.currentEvent?.type == .keyDown else { return }
-            model.activateByKey(rows)
+            activateByKey()
         }
         #else
         // On touch a tap is the selection's (a primary action would take every tap).
         .contextMenu(forSelectionType: BrowseSidebarTag.self) { rows in rowMenu(rows) }
         #endif
         // T9: Space on the one selected filter row, as Return.
-        .onKeyPress(.space) { model.activateByKey(selection) ? .handled : .ignored }
+        .onKeyPress(.space) { activateByKey() ? .handled : .ignored }
         // N20.6 (2026-11-22): the system's own prompt, "Search", as with Today selected.
         .searchable(text: $model.filter, placement: .sidebar)
         .accessibilityIdentifier("browse.sidebar.list")
@@ -79,11 +81,10 @@ public struct BrowseSidebar<Header: View>: View {
             model.appear()
         }
         .onDisappear { model.disappear() }
-        // The query changed (a reading arrived, a saved search): the list shows its rows.
-        .onChange(of: model.listSelection) { _, rows in
-            if selection != rows { selection = rows }
-        }
         .onChange(of: selection) { _, rows in selectionChanged(rows) }
+        // The rows shown changed: Return and Space never act on a row out of sight.
+        .onChange(of: model.filter) { forgetKeyRow() }
+        .onChange(of: model.folded) { forgetKeyRow() }
     }
 
     /// V6: a user saved search's Rename… and Delete (T13; not the built-ins),
@@ -107,64 +108,78 @@ public struct BrowseSidebar<Header: View>: View {
 
     // MARK: Selection (T9)
 
-    /// The list's own selection. A click changes it, then the query (T9),
-    /// then it is set back to the query's rows after that event: the list
-    /// keeps a selection it made itself, so a binding that only computes
-    /// the query's rows left the clicked row alone selected.
+    /// The list's own selection: the Browse row, or the row the arrow keys
+    /// stand on. A click changes it, then the query (T9), then it is set
+    /// back to the Browse row after that event: the list keeps a selection
+    /// it made itself, and the rows draw the query's values (`active`).
     @State private var selection: Set<BrowseSidebarTag> = []
+    /// The filter row the arrow keys moved to: Return and Space are a click on it.
+    @State private var keyRow: BrowseSidebarTag?
+    /// The filter row clicked last: Return and Space are a second click on it (T9).
+    @State private var clickedRow: BrowseSidebarTag?
 
     private func selectionChanged(_ rows: Set<BrowseSidebarTag>) {
-        guard rows != model.listSelection else { return }
-        if let section = model.listSelectionChanged(to: rows, click: Self.click(), shown: shownRows) {
+        guard rows != model.listSelection else { return keyRow = nil }
+        if let keyRow, rows == [keyRow] { return }
+        // A ⌘-click on the row the keys stand on empties the list's selection.
+        if let keyRow, rows.isEmpty, !Self.byKey() { return clicked(keyRow) }
+        let filters = rows.filter { if case .section = $0 { false } else { true } }
+        // The arrow keys move through the rows without changing the query.
+        if Self.byKey(), filters.count == 1, filters == rows, let row = filters.first {
+            keyRow = row
+            return
+        }
+        // The row the keys stood on is still in the list's selection after a
+        // ⌘-click on another row; it was not clicked.
+        var rows = rows
+        if let keyRow, rows.count > 1 { rows.remove(keyRow) }
+        let clicked = rows.filter { if case .section = $0 { false } else { true } }
+        keyRow = nil
+        clickedRow = clicked.count == 1 ? clicked.first : nil
+        if let section = model.listSelectionChanged(to: rows, click: Self.click()) {
             navigate(section)
             return
         }
         Task { @MainActor in
-            if selection != model.listSelection { selection = model.listSelection }
+            if keyRow == nil, selection != model.listSelection { selection = model.listSelection }
         }
     }
 
-    /// The rows the list draws now: unfolded sections, the filter's matches,
-    /// the rows under expanded parents, the tags Tags shows.
-    private var shownRows: Set<BrowseSidebarTag> {
-        var rows = Set<BrowseSidebarTag>()
-        func open(_ kind: BrowseSidebarSection) -> Bool { filter.isOn || !model.folded.contains(kind) }
-        if open(.savedSearches) {
-            for saved in savedRows {
-                switch saved {
-                case .builtIn(let search): rows.insert(.builtIn(search))
-                case .user(let search): rows.insert(.saved(search.name))
-                }
-            }
+    /// A click on the row the arrow keys stand on. A plain or ⌥-click leaves
+    /// the list's selection as it is, so the list reports nothing and the
+    /// row's own tap does (`row`); it is T9's click on that row all the same.
+    private func clicked(_ row: BrowseSidebarTag) {
+        guard keyRow == row else { return }
+        keyRow = nil
+        clickedRow = row
+        model.activate(row, click: Self.click())
+        if selection != model.listSelection { selection = model.listSelection }
+    }
+
+    private func forgetKeyRow() {
+        keyRow = nil
+        clickedRow = nil
+        if selection != model.listSelection { selection = model.listSelection }
+    }
+
+    /// T9: Return or Space on the row the keys stand on is a click on it;
+    /// after a click, a second click on that row where it removes its filter.
+    @discardableResult private func activateByKey() -> Bool {
+        if let keyRow {
+            model.activate(keyRow)
+            return true
         }
-        if open(.cardState) { rows.formUnion(stateRows.map { .state($0) }) }
-        if open(.flags) { rows.formUnion(flagRows.map { .flag($0) }) }
-        if open(.decks) {
-            func matches(_ nodes: [BrowseSidebarFilter.Node<CountedDeckNode>]) {
-                for node in nodes { rows.insert(.deck(node.item.id)); matches(node.children) }
-            }
-            func tree(_ nodes: [CountedDeckNode]) {
-                for node in nodes {
-                    rows.insert(.deck(node.id))
-                    if deckExpanded(node).wrappedValue { tree(node.children) }
-                }
-            }
-            if filter.isOn { matches(deckNodes) } else { tree(decks) }
-        }
-        if open(.notetypes) { rows.formUnion(notetypeRows.map { .notetype($0.id) }) }
-        if open(.tags) {
-            func matches(_ nodes: [BrowseSidebarFilter.Node<TagNode>]) {
-                for node in nodes { rows.insert(.tag(node.item.fullName)); matches(node.children) }
-            }
-            func tree(_ nodes: [TagNode]) {
-                for node in nodes {
-                    rows.insert(.tag(node.fullName))
-                    if model.tagExpanded(node) { tree(node.children) }
-                }
-            }
-            if filter.isOn { matches(tagNodes) } else { tree(model.shownTopLevelTags.tags) }
-        }
-        return rows
+        guard let clickedRow else { return false }
+        return model.activateByKey([clickedRow])
+    }
+
+    /// Whether a key, not a click, changed the selection.
+    private static func byKey() -> Bool {
+        #if os(macOS)
+        NSApp.currentEvent?.type == .keyDown
+        #else
+        false
+        #endif
     }
 
     /// The modifier keys of the click that changed the selection.
@@ -233,11 +248,12 @@ public struct BrowseSidebar<Header: View>: View {
             ForEach(savedRows, id: \.self) { saved in
                 switch saved {
                 case .builtIn(let search):
-                    row(.builtIn(search), label: BrowseStrings.builtIn(search), identifier: "saved.\(Self.identifier(search))")
+                    row(.builtIn(search), label: BrowseStrings.builtIn(search), identifier: "saved.\(Self.identifier(search))",
+                        icon: .symbol("magnifyingglass"))
                 case .user(let search):
                     // V6, T13: its Rename… and Delete are in the list's row menu (`rowMenu`).
                     row(.saved(search.name), label: search.name,
-                        identifier: "user.\(model.savedSearches.firstIndex(of: search) ?? 0)")
+                        identifier: "user.\(model.savedSearches.firstIndex(of: search) ?? 0)", icon: .symbol("magnifyingglass"))
                 }
             }
         }
@@ -259,7 +275,7 @@ public struct BrowseSidebar<Header: View>: View {
     private var cardStates: some View {
         section(.cardState, shown: shows(stateRows)) {
             ForEach(stateRows, id: \.self) { state in
-                row(.state(state), label: BrowseStrings.state(state), identifier: "state.\(state)")
+                row(.state(state), label: BrowseStrings.state(state), identifier: "state.\(state)", icon: .state(state))
             }
         }
     }
@@ -277,7 +293,7 @@ public struct BrowseSidebar<Header: View>: View {
     private var flags: some View {
         section(.flags, shown: shows(flagRows)) {
             ForEach(flagRows, id: \.self) { flag in
-                row(.flag(flag), label: flagName(flag), identifier: "flag.\(flag)", flag: flag)
+                row(.flag(flag), label: flagName(flag), identifier: "flag.\(flag)", icon: .flag(flag))
             }
         }
     }
@@ -305,16 +321,20 @@ public struct BrowseSidebar<Header: View>: View {
         }
     }
 
-    // Note Types: by name, A2's order; no children.
+    // Note Types: by name, A2's order; no children. With more than 12, the 8 with
+    // the most rows and the query's own, then Show All (the filter searches them all).
     private var notetypeRows: [NotetypeName] {
-        filter.rows(model.notetypes, label: \.name, rootMatched: rootMatched(.notetypes))
+        filter.rows(filter.isOn ? model.notetypes : model.shownNotetypes.rows, label: \.name, rootMatched: rootMatched(.notetypes))
     }
 
     private var notetypes: some View {
         section(.notetypes, shown: shows(notetypeRows)) {
             ForEach(notetypeRows, id: \.id) { notetype in
                 // V6, W14: Edit Note Type… is in the list's row menu (`rowMenu`).
-                row(.notetype(notetype.id), label: notetype.name, identifier: "notetype.\(notetype.id)")
+                row(.notetype(notetype.id), label: notetype.name, identifier: "notetype.\(notetype.id)", icon: .symbol("doc.text"))
+            }
+            if !filter.isOn, let all = model.shownNotetypes.showAll {
+                showAllRow(.showAllNotetypes, count: all, identifier: "notetypes.showAll")
             }
         }
     }
@@ -335,10 +355,7 @@ public struct BrowseSidebar<Header: View>: View {
                         .tag(BrowseSidebarTag.tag(node.fullName))
                 }
                 if let all = shown.showAll {
-                    Text(verbatim: BrowseStrings.showAll(all))
-                        .foregroundStyle(.secondary)
-                        .tag(BrowseSidebarTag.showAllTags)
-                        .accessibilityIdentifier("browse.sidebar.tags.showAll")
+                    showAllRow(.showAllTags, count: all, identifier: "tags.showAll")
                 }
             }
         }
@@ -346,32 +363,78 @@ public struct BrowseSidebar<Header: View>: View {
 
     // MARK: Rows
 
-    /// One value row: its label (the match highlighted), a flag's colour,
-    /// and its count as the row's badge once known.
-    fileprivate func row(_ tag: BrowseSidebarTag, label: String, identifier: String, flag: UInt8? = nil,
+    /// A row's leading symbol: its section's, a card state's or a flag's own.
+    fileprivate enum RowIcon {
+        case symbol(String), state(FilterState), flag(UInt8)
+    }
+
+    /// A section's Show All row. Like a value row, it takes the click itself
+    /// when it is the row the arrow keys stand on (`clicked`).
+    fileprivate func showAllRow(_ tag: BrowseSidebarTag, count: Int, identifier: String) -> some View {
+        HStack {
+            Text(verbatim: BrowseStrings.showAll(count)).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        #if os(macOS)
+        .simultaneousGesture(TapGesture().onEnded { clicked(tag) })
+        #endif
+        .tag(tag)
+        .accessibilityIdentifier("browse.sidebar.\(identifier)")
+    }
+
+    /// One value row: its symbol, its label (the match highlighted) and its
+    /// count as the row's badge once known. A row the query selects (T9)
+    /// reads in the emphasized weight on a tinted background (no checkmark
+    /// since 2026-11-25: the tint and the weight already say it).
+    fileprivate func row(_ tag: BrowseSidebarTag, label: String, identifier: String, icon: RowIcon,
                          help: String? = nil) -> some View {
-        rowLabel(label, flag: flag)
+        let active = model.selectedRows.contains(tag)
+        return HStack(spacing: Spacing.xxSmall) {
+            Label {
+                highlighted(label).fontWeight(active ? .semibold : nil)
+            } icon: {
+                rowIcon(icon).accessibilityHidden(true)
+            }
             .lineLimit(1)
-            .help(help.map { Text(verbatim: $0) } ?? Text(verbatim: label))
-            .badge(model.counts[tag].map { Text($0, format: .number) })
-            .accessibilityValue(model.counts[tag].map { Text(verbatim: BrowseStrings.count($0, mode: model.mode)) } ?? Text(verbatim: ""))
-            .accessibilityHint(model.activationRemoves(tag) ? Text("browse.sidebar.row.removeHint", bundle: .module) : Text(verbatim: ""))
-            .accessibilityIdentifier("browse.sidebar.\(identifier)")
-            .tag(tag)
+            Spacer(minLength: 0)
+        }
+        // The whole row takes the click below, not the label alone.
+        .contentShape(Rectangle())
+        #if os(macOS)
+        .simultaneousGesture(TapGesture().onEnded { clicked(tag) })
+        #endif
+        .help(help.map { Text(verbatim: $0) } ?? Text(verbatim: label))
+        .badge(model.counts[tag].map { Text($0, format: .number) })
+        .listRowBackground(active ? Radius.rounded(Radius.small).fill(.tint.quaternary).padding(.horizontal, Spacing.xSmall) : nil)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(active ? .isSelected : [])
+        .accessibilityValue(model.counts[tag].map { Text(verbatim: BrowseStrings.count($0, mode: model.mode)) } ?? Text(verbatim: ""))
+        .accessibilityHint(model.activationRemoves(tag) ? Text("browse.sidebar.row.removeHint", bundle: .module) : Text(verbatim: ""))
+        .accessibilityIdentifier("browse.sidebar.\(identifier)")
+        .tag(tag)
     }
 
     @ViewBuilder
-    private func rowLabel(_ label: String, flag: UInt8?) -> some View {
-        if let flag, flag > 0 {
-            Label {
-                highlighted(label)
-            } icon: {
-                Image(systemName: "flag.fill")
-                    .foregroundStyle(BrowseStrings.flagColor(flag))
-                    .accessibilityHidden(true)
-            }
-        } else {
-            highlighted(label)
+    private func rowIcon(_ icon: RowIcon) -> some View {
+        switch icon {
+        case .symbol(let name):
+            Image(systemName: name).foregroundStyle(.secondary)
+        case .state(.new):
+            Image(systemName: "circle.fill").imageScale(.small).foregroundStyle(.token(.countNew))
+        case .state(.learning):
+            Image(systemName: "circle.fill").imageScale(.small).foregroundStyle(.token(.countLearn))
+        case .state(.review):
+            Image(systemName: "circle.fill").imageScale(.small).foregroundStyle(.token(.countDue))
+        // The table's state column draws these two the same way (V2.5).
+        case .state(.suspended):
+            Image(systemName: "pause.circle").foregroundStyle(.secondary)
+        case .state:
+            Image(systemName: "moon").foregroundStyle(.secondary)
+        case .flag(0):
+            Image(systemName: "flag.slash").foregroundStyle(.secondary)
+        case .flag(let flag):
+            Image(systemName: "flag.fill").foregroundStyle(BrowseStrings.flagColor(flag))
         }
     }
 
@@ -388,12 +451,12 @@ public struct BrowseSidebar<Header: View>: View {
 
     fileprivate func deckRow(_ node: CountedDeckNode, ancestors: [String]) -> some View {
         let name = Self.deckName(node)
-        return row(.deck(node.id), label: name, identifier: "deck.\(node.id)",
+        return row(.deck(node.id), label: name, identifier: "deck.\(node.id)", icon: .symbol("rectangle.stack"),
                    help: (ancestors + [name]).joined(separator: " › "))
     }
 
     fileprivate func tagRow(_ node: TagNode) -> some View {
-        row(.tag(node.fullName), label: node.name, identifier: "tag.\(Self.identifier(node.fullName))",
+        row(.tag(node.fullName), label: node.name, identifier: "tag.\(Self.identifier(node.fullName))", icon: .symbol("tag"),
             help: node.fullName.replacingOccurrences(of: "::", with: " › "))
     }
 

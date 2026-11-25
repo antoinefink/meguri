@@ -267,6 +267,11 @@ mg_mac_vm_take() {
     rc=$?
   fi
   [ "$rc" -eq 0 ] || { mg__mac_vm_release_queued "$rc"; return "$rc"; }
+  # Another Mac may schedule jobs in the same VM: its lease is not this
+  # Mac's, so nothing is stopped or started there before the claim is ours.
+  mg__mac_vm_claim
+  rc=$?
+  [ "$rc" -eq 0 ] || { mg__mac_vm_release_queued "$rc"; return "$rc"; }
   # A run that an earlier job could not stop (its SSH session was lost, or the
   # job was killed) ends before this job's run starts: until then the VM gets
   # no new run.
@@ -610,6 +615,135 @@ mg__mac_vm_lease() {
     fi
     mg_sleep "$poll"
   done
+}
+
+# ---------------------------------------------------------------------------
+# VM claim: one Mac at a time per VM. The lease above lives on the Mac that
+# runs the job, so two Macs that reach one VM (the Mac that hosts it, and a
+# coordinator over SSH) each see only their own. The claim is a lock inside
+# the VM (tools/scripts/vm-claim.py): a keeper started here holds it for as
+# long as a live job holds this Mac's lease, across hand-overs to a recording
+# or a nested job. MEGURI_MAC_VM_SHARED_CLAIM=0 turns it off.
+
+# mg__mac_vm_claim: with the lease held and the VM answering, takes the
+# VM's claim, waiting while another Mac holds it. A keeper of this Mac that
+# still holds it (the lease changed hands between two of its jobs) is kept.
+# Returns 0; 2 when the VM did not answer (queued); 1 when the claim stayed
+# with another Mac for MEGURI_MAC_VM_LEASE_WAIT_SECONDS, or could not be
+# taken (recorded).
+mg__mac_vm_claim() {
+  [ "${MEGURI_MAC_VM_SHARED_CLAIM:-1}" != 0 ] || return 0
+  local wait="${MEGURI_MAC_VM_LEASE_WAIT_SECONDS:-3600}" poll="${MEGURI_MAC_VM_CLAIM_POLL_SECONDS:-5}"
+  local beat="${MEGURI_MAC_VM_CLAIM_BEAT_SECONDS:-5}" path="${MEGURI_MAC_VM_CLAIM_PATH:-/tmp/meguri-vm-claim.lock}"
+  local state="$MG_LEASE_DIR.claim" log="$MG_RUN_DIR/mac-vm-claim.log" name ssh start holder token
+  local record st pid n=0 i announced="" who
+  name="$(jq -r .name <<<"$MG_MAC_VM")"
+  ssh="$(jq -r .ssh <<<"$MG_MAC_VM")"
+  start="$(date -u +%s)"
+  ! declare -F mg_on_exit >/dev/null || mg_on_exit "mg__mac_vm_claim_nudge '$state'"
+  holder="$(jq -nc --arg m "$(hostname -s 2>/dev/null || hostname)" --arg job "$MG_JOB" --arg run "$MG_RUN_ID" \
+    --arg wt "$MG_ROOT" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{machine: $m, job: $job, run_id: $run, worktree: $wt, started_at: $at}')"
+  while :; do
+    record="$(cat "$state" 2>/dev/null)"
+    st="$(jq -r '.state // empty' <<<"$record" 2>/dev/null)"
+    pid="$(jq -r '.pid // empty' <<<"$record" 2>/dev/null)"
+    if mg__mac_vm_claim_keeper "$state" "$pid"; then
+      if [ "$st" = taken ]; then
+        # It looks at the lease every $beat s: one that is still there after
+        # that has seen this job hold it, and keeps the claim for it.
+        mg__mac_vm_claim_sleep $((${beat%.*} + 1))
+        if [ "$(cat "$state" 2>/dev/null)" = "$record" ] && mg__mac_vm_claim_keeper "$state" "$pid"; then
+          mg__mac_vm_detail "$(jq -nc --argjson w "$(($(date -u +%s) - start))" '{claim: {kept: true, waited_s: $w}}')"
+          return 0
+        fi
+      else
+        if [ $(($(date -u +%s) - start)) -ge "$wait" ]; then
+          mg__mac_vm_fail mac-vm-busy "$name stayed claimed for $wait s (this Mac's keeper, pid $pid, state ${st:-unknown})"
+          return 1
+        fi
+        mg__mac_vm_claim_sleep 1
+      fi
+      continue
+    fi
+    n=$((n + 1))
+    token="$MG_RUN_ID.$$.$n"
+    rm -f "$state.nudge"
+    (
+      cd / && exec perl -MPOSIX=setsid -e 'fork and exit 0; setsid(); exec @ARGV or die "exec $ARGV[0]: $!\n"' \
+        /usr/bin/env python3 "$MG_TOOLS/scripts/vm-claim.py" --ssh "$ssh" --lease "$MG_LEASE_DIR" --state "$state" \
+        --token "$token" --holder "$holder" --path "$path" --beat "$beat" \
+        </dev/null >>"$log" 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+    )
+    st=""
+    i=0
+    while [ "$i" -lt 180 ]; do
+      record="$(cat "$state" 2>/dev/null)"
+      if [ "$(jq -r '.token // empty' <<<"$record" 2>/dev/null)" = "$token" ]; then
+        st="$(jq -r '.state // empty' <<<"$record" 2>/dev/null)"
+        [ "$st" = starting ] || break
+      fi
+      mg__mac_vm_claim_sleep 0.5
+      i=$((i + 1))
+    done
+    case "$st" in
+      taken)
+        mg__mac_vm_detail "$(jq -nc --argjson w "$(($(date -u +%s) - start))" '{claim: {waited_s: $w}}')"
+        [ -z "$announced" ] || echo "VM claim: took $name after $(($(date -u +%s) - start)) s" >&2
+        return 0
+        ;;
+      busy)
+        who="$(jq -r '.holder // "" | (fromjson? // {}) | "\(.job // "a job") on \(.machine // "another Mac") in \(.worktree // "?") since \(.started_at // "?")"' <<<"$record" 2>/dev/null)"
+        [ -n "$who" ] || who="a job on another Mac"
+        ;;
+      error)
+        mg__mac_vm_fail mac-vm-claim "the claim on $name could not be taken: $(jq -r '.reason // "unknown"' <<<"$record" 2>/dev/null)"
+        return 1
+        ;;
+      *)
+        mg__mac_vm_unreachable "$name did not answer when this job asked for its claim${record:+: $(jq -r '.reason // "no answer"' <<<"$record" 2>/dev/null)}"
+        return 2
+        ;;
+    esac
+    if [ $(($(date -u +%s) - start)) -ge "$wait" ]; then
+      mg__mac_vm_fail mac-vm-busy "$name stayed claimed for $wait s ($who)"
+      return 1
+    fi
+    if [ -z "$announced" ]; then
+      echo "VM claim: waiting for $name ($who)" >&2
+      announced=1
+    fi
+    mg__mac_vm_claim_sleep "$poll"
+  done
+}
+
+# A TERM trap interrupts mg_sleep at once; a harness that sources this file
+# alone has only sleep. The claim uses no other helper of host.sh.
+mg__mac_vm_claim_sleep() {
+  if declare -F mg_sleep >/dev/null; then mg_sleep "$1"; else sleep "$1"; fi
+}
+
+# mg__mac_vm_claim_nudge <state file>: as the job ends, tells this Mac's
+# keeper to look at the lease now, so the claim goes with the lease and not
+# a beat later. A file the keeper looks for, never a signal to a pid read
+# from the state file. The keeper removes it; with no keeper, so does this.
+mg__mac_vm_claim_nudge() {
+  [ -e "$1" ] || return 0
+  : >"$1.nudge" 2>/dev/null || return 0
+  [ -e "$1" ] || rm -f "$1.nudge"
+}
+
+# mg__mac_vm_claim_keeper <state file> <pid>: whether <pid> is the live
+# keeper of that state file, by its command line. A state file whose keeper
+# died names a pid the system may have given to another process: that one is
+# not trusted with the claim. Nothing is ever signalled by this pid.
+mg__mac_vm_claim_keeper() {
+  local command
+  [ -n "$2" ] && kill -0 "$2" 2>/dev/null || return 1
+  command="$(ps -o command= -p "$2" 2>/dev/null)" || return 1
+  case "$command" in
+    *"vm-claim.py --ssh "*" --state $1 --token "*) return 0 ;;
+  esac
+  return 1
 }
 
 # ---------------------------------------------------------------------------
