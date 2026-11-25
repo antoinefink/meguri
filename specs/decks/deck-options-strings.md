@@ -185,7 +185,7 @@ The page of `sched/deck-options` O17 (`docs/design/native-interface-contract.md`
 | `deckOptions.preset.newTitle` | New Preset |
 | `deckOptions.preset.name` | Name |
 | `deckOptions.preset.create` | Create |
-| `deckOptions.preset.newFooter` | Start with the built-in defaults. Save Deck Options to create this preset and assign it to this deck. |
+| `deckOptions.preset.newFooter` | New presets start with the built-in defaults. When you save, this deck uses the selected preset. |
 | `deckOptions.preset.createFailed` | The preset could not be prepared. Cancel and reopen Deck Options to try again. |
 
 - Cancel reuses `deckOptions.cancel`. These entries follow the catalog's current English localization and fallback support; no translated language is introduced by this extension.

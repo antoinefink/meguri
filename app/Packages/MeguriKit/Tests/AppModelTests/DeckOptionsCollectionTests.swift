@@ -40,6 +40,7 @@ extension ReviewCollectionStartupTests {
                 #expect(model.choices(row) == expected[row])
                 for value in model.choices(row) { model.setDisplayOrder(row, value) }
             }
+            await model.waitForCompletion()
             model.beginNewPreset(); model.presetName = "  Daily New  "; model.createPreset()
             await model.waitForCompletion()
             try #require(model.selectedPreset < 0)

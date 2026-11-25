@@ -386,7 +386,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Start with the built-in defaults. Save Deck Options to create this preset and assign it to this deck."
+            "value": "New presets start with the built-in defaults. When you save, this deck uses the selected preset."
           }
         }
       }

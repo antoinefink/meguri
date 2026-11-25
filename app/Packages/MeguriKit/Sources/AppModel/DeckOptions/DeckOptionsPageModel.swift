@@ -182,6 +182,8 @@ public final class DeckOptionsPageModel {
     private var generation: UInt64 = 0
     private var revision: UInt64 = 0
     private var editTask: Task<Void, Never>?
+    // Queued numeric edits remain pending through the core's issue read.
+    private var pendingNumericValidations = 0
     private var selectionTask: Task<Void, Never>?
     private var task: Task<Void, Never>?
     // Tests replace the core session; production reads through CoreBridge.
@@ -257,6 +259,7 @@ public final class DeckOptionsPageModel {
         deckName = snapshot.deckName; presets = snapshot.presets; selectedPreset = snapshot.openingPreset
         ownLimits = snapshot.ownLimits; ownRetention = snapshot.ownRetention
         self.issues = issues
+        pendingNumericValidations = 0
         for row in DeckOptionsPageRow.allCases { fieldText[row] = formatted(row) }
         phase = .editing
         if changedWhileLoading { changedWhileLoading = false; reload() }
@@ -301,10 +304,11 @@ public final class DeckOptionsPageModel {
     }
 
     public var hasErrors: Bool { issues.contains { $0.severity == .error } }
-    /// Another preset can be chosen once the selected one has no error, so an
-    /// error never hides behind another preset's rows.
+    /// Another preset can be chosen once numeric edits are validated and the
+    /// selected one has no error, so an error never hides behind another preset's rows.
     public var canSwitchPreset: Bool {
-        phase == .editing && !addingPreset && !namingPreset && !issues.contains { $0.severity == .error && ($0.preset == nil || $0.preset == selectedPreset) }
+        phase == .editing && !addingPreset && !namingPreset && pendingNumericValidations == 0
+            && !issues.contains { $0.severity == .error && ($0.preset == nil || $0.preset == selectedPreset) }
     }
 
     /// The issues shown under a row: the selected preset's, and the row's shared warnings.
@@ -334,7 +338,8 @@ public final class DeckOptionsPageModel {
         guard phase == .editing, !addingPreset, !namingPreset else { return }
         selectionRequest &+= 1
         let request = selectionRequest
-        if commitAll() {
+        commitAll()
+        if pendingNumericValidations > 0 {
             // A value typed for the current preset is checked first: its error
             // must show on its own rows, not hide behind another preset's.
             let current = revision, typed = fieldText, pending = editTask
@@ -357,7 +362,7 @@ public final class DeckOptionsPageModel {
     private var selectionRequest: UInt64 = 0
 
     private func switchPreset(to id: Int64) {
-        guard phase == .editing, id != selectedPreset, presets.contains(where: { $0.id == id }),
+        guard id != selectedPreset, presets.contains(where: { $0.id == id }),
               canSwitchPreset else { return }
         selectedPreset = id
         for row in DeckOptionsPageRow.allCases { fieldText[row] = formatted(row) }
@@ -372,7 +377,7 @@ public final class DeckOptionsPageModel {
         let preset = selectedPreset
         if presets[index][row] != value {
             presets[index][row] = value
-            enqueue { try await $0.set(row, preset: preset, value: value) }
+            enqueue(numeric: true) { try await $0.set(row, preset: preset, value: value) }
         }
         fieldText[row] = formatted(row)
     }
@@ -389,9 +394,9 @@ public final class DeckOptionsPageModel {
     }
 
     public func beginNewPreset() {
+        commitAll()
         guard canSwitchPreset, !selectingPreset, let owner, owner.generation == generation,
               owner.deckOptionsAllowed else { return }
-        commitAll()
         selectionRequest &+= 1
         presetName = ""; presetCreationFailed = false
         owner.navigation.present(.newDeckOptionsPreset)
@@ -471,9 +476,9 @@ public final class DeckOptionsPageModel {
         return false
     }
 
-    /// Commits every row; true when a value changed.
-    @discardableResult private func commitAll() -> Bool {
-        DeckOptionsPageRow.allCases.map { commit($0) }.contains(true)
+    /// Commits every row.
+    private func commitAll() {
+        for row in DeckOptionsPageRow.allCases { commit(row) }
     }
 
     /// The text a row's field shows for the current value.
@@ -499,10 +504,12 @@ public final class DeckOptionsPageModel {
         }
     }
 
-    private func enqueue(_ edit: @escaping @MainActor (any DeckOptionsPageSession) async throws -> Void) {
+    private func enqueue(numeric: Bool = false, _ edit: @escaping @MainActor (any DeckOptionsPageSession) async throws -> Void) {
         guard let session else { return }
         let current = revision, previous = editTask
+        if numeric { pendingNumericValidations += 1 }
         editTask = Task {
+            defer { if numeric, current == revision { pendingNumericValidations -= 1 } }
             await previous?.value
             guard current == revision else { return }
             do {

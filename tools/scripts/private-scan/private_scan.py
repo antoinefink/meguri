@@ -917,7 +917,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '3093e8502c312bf6e11a44a4e688e95fbc6537b3ce3e83e2307a302a7c4bb582',
+        '22cff2ec7c5c71540d5e6326c2c62993a9e7f8ee01021d354522c2abcabc5707',
     'specs/stats/statistics-page.md':
         '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.

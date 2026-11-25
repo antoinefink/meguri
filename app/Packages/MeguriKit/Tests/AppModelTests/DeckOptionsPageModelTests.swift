@@ -78,6 +78,7 @@ import Testing
         model.open(deckID: 1); await model.waitForCompletion()
         model.setValue(.newPerDay, 30)
         model.selectPreset(2)
+        await model.waitForCompletion()
         // O15.3: a typed value that is not committed yet is saved.
         model.fieldText[.reviewsPerDay] = "300"
         model.save()
@@ -189,13 +190,47 @@ import Testing
     }
 
     @Test func aTypedErrorIsCheckedBeforeAnotherPresetIsChosen() async throws {
-        let (owner, _) = await makeOwner()
+        let (owner, core) = await makeOwner()
         let model = owner.deckOptions
         model.open(deckID: 1); await model.waitForCompletion()
         model.fieldText[.newPerDay] = "10000"
         model.selectPreset(2)
+        model.selectPreset(2)
+        #expect(model.selectedPreset == 1 && model.selectingPreset && !model.canSwitchPreset)
+        model.beginNewPreset()
+        #expect(!model.namingPreset)
         await model.waitForCompletion(); await Task.yield(); await model.waitForCompletion()
         #expect(model.selectedPreset == 1 && model.issues(for: .newPerDay).map(\.code) == [.outOfRange])
+        #expect(model.fieldText[.newPerDay] == "10,000" && !model.selectingPreset)
+        #expect(core.session?.calls == ["set newPerDay 1 10000.0"])
+    }
+
+    @Test func aFocusLossCommitIsValidatedBeforeSwitchingPresets() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        let gate = PageGate(); core.issuesGate = gate
+        model.fieldText[.newPerDay] = "10000"
+        model.commit(.newPerDay)
+        await gate.entered()
+        #expect(model.issues.isEmpty && !model.canSwitchPreset)
+        model.beginNewPreset()
+        #expect(!model.namingPreset)
+        model.selectPreset(2)
+        #expect(model.selectedPreset == 1 && model.selectingPreset)
+        gate.release(); await model.waitForCompletion()
+        #expect(model.selectedPreset == 1 && !model.selectingPreset && !model.canSwitchPreset)
+        #expect(model.fieldText[.newPerDay] == "10,000")
+        #expect(model.issues(for: .newPerDay).map(\.code) == [.outOfRange])
+        #expect(core.session?.calls == ["set newPerDay 1 10000.0"])
+
+        // Once a correction is validated, an ordinary switch is immediate.
+        model.fieldText[.newPerDay] = "21"; model.commit(.newPerDay)
+        await model.waitForCompletion()
+        #expect(model.canSwitchPreset)
+        model.selectPreset(2)
+        #expect(model.selectedPreset == 2 && !model.selectingPreset)
+        await model.waitForCompletion()
     }
 
     @Test func leavingAsksOnlyWhenTheDraftDiffers() async throws {
@@ -425,6 +460,7 @@ import Testing
         model.open(deckID: 1); await model.waitForCompletion()
         model.setValue(.newPerDay, 31)
         model.setDisplayOrder(.reviewOrder, 12)
+        await model.waitForCompletion()
         model.beginNewPreset()
         model.presetName = " \n "
         #expect(!model.canCreatePreset && !model.canSave)
@@ -549,6 +585,7 @@ final class FakePageCore {
     var saveResult: Result<UInt64, BridgeError> = .success(11)
     var saveGate: PageGate?
     var addGate: PageGate?
+    var issuesGate: PageGate?
     private(set) var session: FakePageSession?
     init(snapshot: DeckOptionsPageSnapshot) { self.snapshot = snapshot }
     func open() throws -> FakePageSession {
@@ -597,6 +634,7 @@ final class FakePageSession: DeckOptionsPageSession {
         return snapshot
     }
     func issues() async throws -> [DeckOptionsPageIssue] {
+        if let gate = core.issuesGate { core.issuesGate = nil; await gate.hold() }
         var issues: [DeckOptionsPageIssue] = []
         for preset in values.values.sorted(by: { $0.id < $1.id }) {
             for row in DeckOptionsPageRow.allCases {
