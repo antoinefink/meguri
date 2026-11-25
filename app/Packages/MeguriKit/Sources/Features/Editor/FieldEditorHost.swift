@@ -1,4 +1,5 @@
 import AppModel
+import CoreBridge
 import Foundation
 import Instrumentation
 import Observation
@@ -82,6 +83,16 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     private var commandLoad: UInt64?
     private var processing: Pending?
     private var processTerminated = false
+    #if os(macOS)
+    // The normal collection writer records the media addition for sync.
+    var pictureMedia: any MediaService = CoreMediaService()
+    var picturePasteboard: NSPasteboard = .general
+    private var pictureTask: Task<Void, Never>?
+    private var pictureFailures: [(name: String, cause: String)] = []
+    private var pictureAlertShown = false
+    private var pictureUnhideObserver: (any NSObjectProtocol)?
+    var picturePasteCompletion: Task<Void, Never>? { pictureTask }
+    #endif
     // Tests can join the actual drain after releasing a held Core result.
     var processingCompletion: Task<Void, Never>? { draining }
     @MainActor private final class Pending {
@@ -521,6 +532,11 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
             caret = EditorBridgeMessage.number(message.body["top"])!...EditorBridgeMessage.number(message.body["bottom"])!
         case "playMedia": if let name = (message.body["name"] as? String).flatMap(MediaName.plain) { onPlayMedia?(name) }
         case "openMedia": if let name = (message.body["name"] as? String).flatMap(MediaName.plain) { onOpenMedia?(name) }
+        case "pastePicture":
+            #if os(macOS)
+            pastePicture(ord: EditorBridgeMessage.integer(message.body["ord"])!,
+                         request: EditorBridgeMessage.integer(message.body["request"])!, load: expected)
+            #endif
         default: throw EditorRuntimeError.invalidMessage
         }
         refreshAccessory()
@@ -534,11 +550,81 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
             })
         }
     }
+    #if os(macOS)
+    private func pastePicture(ord: Int, request: Int, load expected: UInt64) {
+        // Snapshot on delivery of the real system paste event, before the
+        // asynchronous media write. No clipboard bytes enter the page bridge.
+        let pictures: [FieldPicturePaste]
+        do { pictures = try FieldPicturePaste.read(picturePasteboard) }
+        catch { pictures = []; reportPictureFailure(error) }
+        pictureTask = Task { [weak self] in
+            guard let self else { return }
+            var html = "", name: String?
+            do {
+                try requireCurrent(expected)
+                let asPNG = pictures.contains(where: \.isBitmap) ? (try? await CoreEditorServices().pasteImagesAsPNG()) ?? false : false
+                try requireCurrent(expected)
+                for raw in pictures {
+                    name = raw.name.isEmpty ? nil : raw.name
+                    let picture: FieldPicturePaste
+                    if raw.isBitmap { picture = try FieldPicturePaste.encode(raw.bytes, asPNG: asPNG) }
+                    else { picture = raw }
+                    name = picture.name
+                    try Task.checkCancellation()
+                    try requireCurrent(expected)
+                    guard !held else { break }
+                    let name = try await pictureMedia.addMedia(name: picture.name, bytes: Array(picture.bytes))
+                    try requireCurrent(expected)
+                    try Task.checkCancellation()
+                    // P3/P16: encode storage-form UTF-8 names exactly once.
+                    let safe = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~/")
+                    guard let src = name.addingPercentEncoding(withAllowedCharacters: safe) else { throw EditorRuntimeError.invalidMessage }
+                    html += "<img src=\"\(src)\">"
+                }
+            } catch {
+                if !Task.isCancelled, (try? requireCurrent(expected)) != nil { reportPictureFailure(error, name: name) }
+            }
+            guard (try? requireCurrent(expected)) != nil else { return }
+            _ = try? await call(["type": "finishPicturePaste", "loadId": expected, "ord": ord, "request": request, "html": html], load: expected)
+        }
+    }
+    private func reportPictureFailure(_ failure: any Error, name: String? = nil) {
+        let path = (failure as NSError).userInfo[NSFilePathErrorKey] as? String
+        pictureFailures.append((name ?? path.map { URL(filePath: $0).lastPathComponent }
+            ?? String(localized: "Picture", bundle: .module), failure.localizedDescription))
+        if pictureUnhideObserver == nil {
+            pictureUnhideObserver = NotificationCenter.default.addObserver(forName: NSApplication.didUnhideNotification,
+                object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.presentPictureFailure() }
+            }
+        }
+        presentPictureFailure()
+    }
+    private func presentPictureFailure() {
+        // AppKit must never present an alert while the app is hidden.
+        guard !closed, isCurrent(), !NSApp.isHidden, !pictureAlertShown,
+              let window = webView.window, window.isVisible, !pictureFailures.isEmpty else { return }
+        let failure = pictureFailures.removeFirst(), alert = NSAlert()
+        alert.messageText = String(localized: "Couldn't Add “\(failure.name)”", bundle: .module)
+        alert.informativeText = failure.cause
+        alert.addButton(withTitle: String(localized: "OK", bundle: .module))
+        pictureAlertShown = true
+        alert.beginSheetModal(for: window) { [weak self] _ in
+            Task { @MainActor in self?.pictureAlertShown = false; self?.presentPictureFailure() }
+        }
+    }
+    #endif
     private func fail(_ failure: any Error, load expected: UInt64) {
         guard activeLoad == expected else { return }
         activeLoad = nil; openedLoad = nil; allowsDocumentNavigation = false; documentNavigation = nil
         error = String(describing: failure); editable = false
         commandLoad = nil
+        #if os(macOS)
+        pictureTask?.cancel(); pictureTask = nil
+        pictureFailures = []
+        if let pictureUnhideObserver { NotificationCenter.default.removeObserver(pictureUnhideObserver) }
+        pictureUnhideObserver = nil
+        #endif
         readyTimeout?.cancel(); readyTimeout = nil
         gapTimeout?.cancel(); gapTimeout = nil
         let waiter = ready; ready = nil; waiter?.resume(throwing: failure)

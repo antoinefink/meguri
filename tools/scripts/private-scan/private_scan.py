@@ -835,6 +835,12 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':
+        '9e1601fd652783d06c762cf7e7083f1c0445c600e86a78f82e02dd558ea594d1',
+    'app/Packages/MeguriKit/Tests/AppModelTests/BrowseFieldEditingTests.swift':
+        'd9bb1dbf133b05b75cea4cbfb0b6cf3d6f2cc925d9b164ec11f633aebb656456',
+    'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
+        '288b3702fb5ef3d41bada044870b9b2f741690fafe68e351d30ed4e21c553866',
     'app/MeguriUITests/MacBrowseInspectorTests.swift':
         '636428a071b53d2b1fa37d59b49aec54d78ccf11dfa70d4912545b2dc989a4f3',
     'docs/process/review-log/meguri-sync-collection-backups-20261125.md':

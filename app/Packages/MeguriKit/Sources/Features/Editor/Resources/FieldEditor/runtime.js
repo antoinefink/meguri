@@ -7,7 +7,7 @@
     const blocks = new Set(("address article aside blockquote details dialog dd div dl dt " +
         "fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr li main " +
         "nav ol p pre section table ul").split(" "));
-    let loadId = 0, seq = 0, held = true, fields = [], current = null, browsing = false, media = false;
+    let loadId = 0, seq = 0, held = true, fields = [], current = null, browsing = false, media = false, pictureID = 0;
     const bridge = window.webkit.messageHandlers.meguriEditor;
     const envelope = (type, payload = {}) => ({type, loadId, seq: ++seq, ...payload});
     const emit = (type, payload) => bridge.postMessage(envelope(type, payload));
@@ -18,8 +18,9 @@
         template.innerHTML = html;
         return template.content;
     };
-    const inline = node => !Array.from(node.querySelectorAll("*")).some(element =>
-        blocks.has(element.localName) || (element.hasAttribute("block") && element.getAttribute("block") !== "false"));
+    const isBlock = element => blocks.has(element.localName) ||
+        (element.hasAttribute("block") && element.getAttribute("block") !== "false");
+    const inline = node => !Array.from(node.querySelectorAll("*")).some(isBlock);
     // Browse's inspector and Edit Note show a sound reference as a chip that
     // plays on a click; the chip stands for its reference's exact text, which is what
     // serialization writes back, so the field's bytes never change by it.
@@ -178,6 +179,7 @@
     }
     function toggleMode(field) {
         if (held) return;
+        cancelPicture(field);
         commit(field, "modeSwitch");
         saveCaret(field);
         if (field.mode === "rich") {
@@ -225,6 +227,17 @@
         if (next) focus(next);
         else { active(field).blur(); void emit("focusLeave", {direction: backwards ? "previous" : "next"}); }
     }
+    const hasContent = node => !!node.textContent || !!node.querySelector("img,hr,audio,video,iframe,object,input,svg,math,[data-meguri-chip]");
+    function fillLine(node) {
+        if (!hasContent(node) && !node.querySelector("br")) node.append(document.createElement("br"));
+    }
+    function lineOwner(field, caret) {
+        let node = caret.startContainer.nodeType === Node.ELEMENT_NODE ? caret.startContainer : caret.startContainer.parentElement;
+        // The custom editable element is a boundary even though it is not an
+        // HTML block tag. Never split the shadow/UI containers outside it.
+        while (node !== field.rich && !isBlock(node)) node = node.parentElement;
+        return node;
+    }
     function breakLine(field, lineBreak) {
         beforeEdit(field, lineBreak ? "insertLineBreak" : "insertParagraph");
         const caret = range(field);
@@ -234,32 +247,63 @@
             caret.insertNode(br); caret.setStartAfter(br); caret.collapse(true);
             // At the end of inline content a second BR supplies the caret's
             // last line. H3 drops this final BR rather than the user's break.
-            if (inline(field.rich) && field.rich.lastChild === br) field.rich.append(document.createElement("br"));
+            const owner = lineOwner(field, caret), tail = document.createRange();
+            tail.setStartAfter(br); tail.setEnd(owner, owner.childNodes.length);
+            const rest = tail.cloneContents();
+            if (!hasContent(rest) && !rest.querySelector("br")) br.after(document.createElement("br"));
         } else {
+            const owner = lineOwner(field, caret);
             let block = caret.startContainer.nodeType === Node.ELEMENT_NODE ? caret.startContainer : caret.startContainer.parentElement;
-            while (block && block !== field.rich && !blocks.has(block.localName)) block = block.parentElement;
-            if (block?.localName === "li") {
+            // A list item's paragraph can itself be a div or another block.
+            while (block !== field.rich && block.localName !== "li") block = block.parentElement;
+            if (block.localName === "li") {
                 const list = block.parentElement;
-                if (!block.textContent && !block.querySelector("img") && block === list.lastElementChild) {
+                if (!hasContent(block) && block === list.lastElementChild) {
                     const next = document.createElement("div"); next.append(document.createElement("br"));
                     list.after(next); block.remove(); if (!list.children.length) list.remove();
                     caret.selectNodeContents(next); caret.collapse(true);
                 } else {
                     const tail = document.createRange(); tail.setStart(caret.startContainer, caret.startOffset); tail.setEnd(block, block.childNodes.length);
                     const next = document.createElement("li"); next.append(tail.extractContents());
-                    if (!next.childNodes.length) next.append(document.createElement("br"));
+                    fillLine(block); fillLine(next);
                     block.after(next); caret.selectNodeContents(next); caret.collapse(true);
                 }
             } else {
-                const owner = block && block !== field.rich ? block : field.rich;
+                // At the root, split only this run of inline nodes. A later
+                // authored block is a boundary, not part of the new line.
+                let boundary = null;
+                if (owner === field.rich) {
+                    let top = caret.startContainer;
+                    while (top !== owner && top.parentNode !== owner) top = top.parentNode;
+                    const start = top === owner ? caret.startOffset : Array.from(owner.childNodes).indexOf(top) + 1;
+                    boundary = Array.from(owner.childNodes).slice(start).find(node => node.nodeType === Node.ELEMENT_NODE && isBlock(node)) ?? null;
+                }
                 const tail = document.createRange(); tail.setStart(caret.startContainer, caret.startOffset); tail.setEnd(owner, owner.childNodes.length);
+                if (boundary) tail.setEndBefore(boundary);
                 const next = document.createElement("div"); next.append(tail.extractContents());
-                if (!next.childNodes.length) next.append(document.createElement("br"));
-                if (owner === field.rich) owner.append(next); else owner.after(next);
+                fillLine(next);
+                if (owner === field.rich) {
+                    owner.insertBefore(next, boundary);
+                    const prefix = document.createRange(); prefix.selectNodeContents(owner); prefix.setEndBefore(next);
+                    const previous = prefix.cloneContents();
+                    if (inline(previous) && !hasContent(previous) && !previous.querySelector("br")) owner.insertBefore(document.createElement("br"), next);
+                } else { fillLine(owner); owner.after(next); }
                 caret.selectNodeContents(next); caret.collapse(true);
             }
         }
         selectRange(field, caret); dirty(field); historyState(field);
+    }
+    function cancelPicture(field) {
+        field.picture = null; field.rich.removeAttribute("aria-busy");
+    }
+    function insert(field, html, caret) {
+        if (!html) return false;
+        const fragment = parse(html), last = fragment.lastChild;
+        if (!last) return false;
+        beforeEdit(field, "insertFromPaste");
+        caret.deleteContents(); caret.insertNode(fragment); caret.setStartAfter(last); caret.collapse(true);
+        selectRange(field, caret); dirty(field); historyState(field); reportCaret(field);
+        return true;
     }
     function wire(field, input) {
         input.addEventListener("focus", () => { current = field; void emit("focus", {ord: field.ord, mode: field.mode}); });
@@ -270,7 +314,7 @@
         input.addEventListener("beforeinput", event => {
             // Composition input cannot be cancelled: remember the field, so
             // what it now shows is committed once the hold ends.
-            if (held) { event.preventDefault(); if (!event.cancelable) field.heldInput = true; return; }
+            if (held || field.picture) { event.preventDefault(); if (!event.cancelable) field.heldInput = true; return; }
             if (["historyUndo", "historyRedo"].includes(event.inputType)) {
                 event.preventDefault(); history(field, event.inputType === "historyRedo"); return;
             }
@@ -281,18 +325,31 @@
         });
         input.addEventListener("input", () => {
             if (held) { field.heldInput = true; return; }
+            if (field.picture) cancelPicture(field);
             dirty(field); historyState(field);
         });
         input.addEventListener("keydown", event => {
             if (held) { event.preventDefault(); return; }
-            if (event.key === "Tab") { event.preventDefault(); tab(field, event.shiftKey); }
+            if (event.key === "Tab") { event.preventDefault(); tab(field, event.shiftKey); return; }
+            if (field.picture) { event.preventDefault(); return; }
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") event.preventDefault();
             if (event.metaKey && event.shiftKey && event.code === "KeyX") { event.preventDefault(); toggleMode(field); }
             if (event.metaKey && event.code === "KeyZ" && history(field, event.shiftKey)) event.preventDefault();
         });
-        // U197 has not supplied the paste/drop pipeline. Refuse these rather
-        // than let WebKit import files, remote resources or strip user HTML.
-        input.addEventListener("paste", event => event.preventDefault());
+        // The system's paste event reaches the real editable, including its
+        // context menu. Native code snapshots local picture representations;
+        // unsupported content remains refused until U197 supplies that path.
+        input.addEventListener("paste", event => {
+            event.preventDefault();
+            if (held || field.mode !== "rich" || fields.some(value => value.picture) ||
+                !document.documentElement.classList.contains("mac")) return;
+            const request = ++pictureID;
+            field.picture = {request, caret: range(field)};
+            field.rich.setAttribute("aria-busy", "true");
+            void emit("pastePicture", {ord: field.ord, request}).catch(() => {
+                if (field.picture?.request === request) cancelPicture(field);
+            });
+        });
         input.addEventListener("drop", event => event.preventDefault());
         input.addEventListener("dragover", event => event.preventDefault());
     }
@@ -608,7 +665,7 @@
         case "flush": {
             keys(message, ["type", "loadId", "hold"]);
             if (typeof message.hold !== "boolean") throw new Error("Invalid hold");
-            if (message.hold) held = true;
+            if (message.hold) { held = true; fields.forEach(cancelPicture); }
             const commits = fields.map(commitValue).filter(Boolean);
             // A hold refuses input in each handler. The fields keep their focus,
             // so on touch the keyboard stays up across an add (N17.1).
@@ -638,6 +695,7 @@
         case "setField":
             keys(message, ["type", "loadId", "ord", "html"]);
             if (!field || typeof message.html !== "string") throw new Error("Invalid field");
+            cancelPicture(field);
             clearTimeout(field.timer); field.pending = false; field.changed = false; field.baseline = message.html;
             field.rich.replaceChildren(loadParse(message.html)); field.source.value = message.html;
             field.undo = []; field.redo = []; field.caret = null; field.sourceCaret = null; field.lastKind = null;
@@ -657,6 +715,7 @@
             for (const value of fields) {
                 const hidden = message.ords.includes(value.ord);
                 if (hidden && current === value) active(value).blur();
+                if (hidden) cancelPicture(value);
                 value.hidden = hidden; show(value);
             }
             return {loadId};
@@ -664,19 +723,41 @@
         case "format": {
             keys(message, ["type", "loadId", "command"]);
             if (!Object.hasOwn(formats, message.command)) throw new Error("Unknown format");
-            if (held || !current || current.mode !== "rich") return {applied: false};
+            if (held || !current || current.picture || current.mode !== "rich") return {applied: false};
             return {applied: format(current, message.command)};
         }
         case "wrap": {
             keys(message, ["type", "loadId", "prefix", "suffix"]);
             if (typeof message.prefix !== "string" || typeof message.suffix !== "string") throw new Error("Invalid wrap");
-            if (held || !current || current.mode !== "rich") return {applied: false};
+            if (held || !current || current.picture || current.mode !== "rich") return {applied: false};
             wrap(current, message.prefix, message.suffix);
             return {applied: true};
         }
+        case "finishPicturePaste": {
+            keys(message, ["type", "loadId", "ord", "request", "html"]);
+            if (!field || !Number.isSafeInteger(message.request) || typeof message.html !== "string") throw new Error("Invalid picture result");
+            const picture = field.picture;
+            if (picture?.request !== message.request) return {changed: false};
+            cancelPicture(field);
+            if (held || field.hidden || field.collapsed || field.mode !== "rich" || !message.html) return {changed: false};
+            // P25: restore the recorded field and selection, even after the
+            // user focused another field while its file was being imported.
+            field.caret = picture.caret; focus(field);
+            return {changed: insert(field, message.html, picture.caret)};
+        }
+        case "insert":
+            keys(message, ["type", "loadId", "ord", "html", "at"]);
+            if (!field || typeof message.html !== "string" || !["selection", "end"].includes(message.at)) throw new Error("Invalid insertion");
+            if (held || current !== field || field.picture || field.mode !== "rich" || field.hidden || field.collapsed) return {changed: false};
+            { const caret = range(field);
+              if (message.at === "end") {
+                  caret.selectNodeContents(field.rich); caret.collapse(false);
+                  if (inline(field.rich) && field.rich.lastChild?.localName === "br") { caret.setStartBefore(field.rich.lastChild); caret.collapse(true); }
+              }
+              return {changed: insert(field, message.html, caret)}; }
         case "undo": case "redo":
             keys(message, ["type", "loadId", "ord"]); if (!field) throw new Error("Unknown field");
-            return {applied: history(field, message.type === "redo")};
+            return {applied: !field.picture && history(field, message.type === "redo")};
         default: throw new Error("Unsupported editor command");
         }
     }

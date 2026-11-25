@@ -90,3 +90,14 @@ pub fn add_notetype_selection(expected_generation: u64, selected_id: i64) -> Res
         notetype: selected.as_ref().map(NotetypeRecord::from),
     })
 }
+
+/// editor/paste P7: the collection's bitmap encoding preference is read at
+/// each paste. A missing or non-boolean value uses the specified JPEG default.
+#[uniffi::export]
+pub fn editor_paste_images_as_png() -> Result<bool, CoreError> {
+    callback::enter("editor_paste_images_as_png");
+    let collection = runtime::host()?.collection()?;
+    let reader = collection.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
+    Ok(snapshot.config_value("pasteImagesAsPng")?.and_then(|value| value.as_bool()).unwrap_or(false))
+}

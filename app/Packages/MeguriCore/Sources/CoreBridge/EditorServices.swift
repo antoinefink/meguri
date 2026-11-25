@@ -47,6 +47,13 @@ public protocol EditorServices: Sendable {
 public actor CoreEditorServices: EditorServices {
     public init() {}
 
+    /// editor/paste P7: read on each paste; native callers use false if unreadable.
+    public func pasteImagesAsPNG() async throws(BridgeError) -> Bool {
+        try await QueryLane.shared.call(.editorPasteImagesAsPNG) {
+            try MeguriCoreBindings.editorPasteImagesAsPng()
+        }
+    }
+
     /// D1: pass the currently displayed review card, and a deck entry point's
     /// preset when present. Both returned identities are persisted identities.
     public func addDefaults(reviewCard: Int64? = nil, presetDeck: Int64? = nil) async throws(BridgeError) -> AddDefaults {
