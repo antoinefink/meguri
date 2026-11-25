@@ -2,6 +2,10 @@
 import CoreBridge
 import Foundation
 import Testing
+@testable import Editor
+#if os(macOS)
+import AppKit
+#endif
 
 // U273 on the real core, through ReviewCollection: the inspector reads the
 // selected row's note and its cards, a save writes only the field changed,
@@ -55,6 +59,70 @@ extension ReviewCollectionStartupTests {
             await waitUntil { first.draft.values[0] == "kerrow a, edited" && undo.undoName == "Edit Note" }
         }
     }
+
+    #if os(macOS)
+    @Test(arguments: [false, true])
+    func browseRichReturnsAndPicturePastePersistThroughTheRealCollectionAndSelection(copiedFile: Bool) async throws {
+        try await withInspectorOwner { owner in
+            let browse = owner.browse, inspector = browse.inspector
+            inspector.makeRuntime = { draft, current in
+                let host = try FieldEditorHost(draft: draft, isCurrent: current)
+                host.browsing = true
+                host.show(media: inspector.media)
+                host.webView.frame = CGRect(x: 0, y: 0, width: 500, height: 600)
+                BrowseFieldEditingTests.installProbe(host)
+                return host
+            }
+            browse.results.select([0])
+            await waitUntil { inspector.note?.runtime?.editable == true }
+            let note = try #require(inspector.note)
+            let host = try #require(note.runtime as? FieldEditorHost)
+            try await BrowseFieldEditingTests.edit(host, """
+                select(rich.firstChild, 4);
+                key('insertParagraph'); key('insertParagraph'); key('insertParagraph');
+                """)
+            // The actual idle timer commits these Returns; no source-mode edit
+            // or injected draft commit stands in for the field runtime.
+            await waitUntil { note.draft.values[0].contains("<div><br></div><div><br></div><div>ow a</div>") }
+            #expect(await inspector.flushForBackground())
+            let returns = try await CoreNoteService().readNote(id: note.noteID).fields[0]
+            #expect(returns == "kerr<div><br></div><div><br></div><div>ow a</div>")
+
+            let bitmap = try BrowseFieldEditingTests.bitmap(.png)
+            let asPNG = (try? await CoreEditorServices().pasteImagesAsPNG()) ?? false
+            let sourceRoot = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: sourceRoot) }
+            let sourceFile = sourceRoot.appending(path: "Synthetic & 100%.PNG")
+            try bitmap.write(to: sourceFile)
+            let encoded: FieldPicturePaste
+            if copiedFile { encoded = FieldPicturePaste(name: "synthetic & 100%.png", bytes: bitmap) }
+            else { encoded = try FieldPicturePaste.encode(bitmap, asPNG: asPNG) }
+            let board = NSPasteboard(name: .init(UUID().uuidString))
+            host.picturePasteboard = board
+            if copiedFile { board.writeObjects([sourceFile as NSURL]) }
+            else { board.setData(bitmap, forType: .png) }
+            defer { board.clearContents() }
+            try await BrowseFieldEditingTests.edit(host, "rich.dispatchEvent(new ClipboardEvent('paste', {bubbles:true, cancelable:true}));")
+            await waitUntil { note.draft.values[0].contains("<img") }
+            #expect(await inspector.flushForBackground())
+            let saved = try await CoreNoteService().readNote(id: note.noteID)
+            #expect(saved.fields[0] == "kerr<div><br></div><div><br></div><div><img src=\"\(encoded.name)\">ow a</div>")
+            #expect(saved.fields[1] == "x")
+            let tracked = try await CoreMediaService().trackedNames()
+            #expect(tracked.names.contains { $0.name == encoded.name })
+            #expect(try Data(contentsOf: tracked.root.appending(path: encoded.name)) == encoded.bytes,
+                    "normal collection import, with exact media readback and sync tracking")
+            browse.results.select([1])
+            await waitUntil { inspector.note?.noteID != note.noteID && inspector.note?.runtime?.editable == true }
+            #expect(try await CoreNoteService().readNote(id: try #require(inspector.note).noteID).fields == ["kerrow b", "x"])
+            browse.results.select([0])
+            await waitUntil { inspector.note?.noteID == note.noteID && inspector.note?.runtime?.editable == true }
+            #expect(inspector.note?.draft.values == saved.fields)
+            #expect(try await CoreNoteService().readNote(id: note.noteID).fields == saved.fields)
+        }
+    }
+    #endif
 
     private func waitUntil(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async {
         for _ in 0..<1_000 where !condition() {

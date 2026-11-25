@@ -56,6 +56,10 @@ impl Harness {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let (shutdown, rx) = oneshot::channel();
+        // Join the real initial sweep, including payload cleanup and lease
+        // release, before ordinary fixtures mutate or restore their accounts.
+        #[cfg(feature = "test-hooks")]
+        let initial_sweep = service.hooks.arm("backup_sweep_complete");
         let serving = service.clone();
         let server = tokio::spawn(async move {
             httpapi::serve(listener, serving, async {
@@ -63,6 +67,12 @@ impl Harness {
             })
             .await
         });
+        #[cfg(feature = "test-hooks")]
+        {
+            tokio::time::timeout(std::time::Duration::from_secs(60), initial_sweep.arrived())
+                .await.expect("initial backup sweep completed");
+            initial_sweep.resume();
+        }
         Self {
             temp,
             service,

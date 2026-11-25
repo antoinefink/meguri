@@ -7,7 +7,7 @@
     const blocks = new Set(("address article aside blockquote details dialog dd div dl dt " +
         "fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr li main " +
         "nav ol p pre section table ul").split(" "));
-    let loadId = 0, seq = 0, held = true, fields = [], current = null, browsing = false;
+    let loadId = 0, seq = 0, held = true, fields = [], current = null, browsing = false, media = false, pictureID = 0;
     const bridge = window.webkit.messageHandlers.meguriEditor;
     const envelope = (type, payload = {}) => ({type, loadId, seq: ++seq, ...payload});
     const emit = (type, payload) => bridge.postMessage(envelope(type, payload));
@@ -18,10 +18,11 @@
         template.innerHTML = html;
         return template.content;
     };
-    const inline = node => !Array.from(node.querySelectorAll("*")).some(element =>
-        blocks.has(element.localName) || (element.hasAttribute("block") && element.getAttribute("block") !== "false"));
-    // Browse's inspector shows a sound reference as a chip that plays on a
-    // click; the chip stands for its reference's exact text, which is what
+    const isBlock = element => blocks.has(element.localName) ||
+        (element.hasAttribute("block") && element.getAttribute("block") !== "false");
+    const inline = node => !Array.from(node.querySelectorAll("*")).some(isBlock);
+    // Browse's inspector and Edit Note show a sound reference as a chip that
+    // plays on a click; the chip stands for its reference's exact text, which is what
     // serialization writes back, so the field's bytes never change by it.
     const soundReference = /\[sound:([^\]]+)\]/g;
     const middle = name => name.length <= 28 ? name : `${name.slice(0, 13)}…${name.slice(-12)}`;
@@ -57,7 +58,7 @@
     }
     const loadParse = html => {
         const fragment = parse(html);
-        if (browsing) chips(fragment);
+        if (media) chips(fragment);
         if (inline(fragment)) fragment.append(document.createElement("br"));
         return fragment;
     };
@@ -89,11 +90,19 @@
         if (field.root.getSelection) return field.root.getSelection();
         return document.getSelection();
     }
+    function validRange(field, value) {
+        const validPoint = (node, offset) => node && field.rich.contains(node) &&
+            Number.isInteger(offset) && offset >= 0 &&
+            offset <= (node instanceof CharacterData ? node.length : node.childNodes.length);
+        return value && validPoint(value.startContainer, value.startOffset) && validPoint(value.endContainer, value.endOffset);
+    }
     function range(field) {
         const current = selection(field);
         if (current?.getComposedRanges) {
             const value = current.getComposedRanges({shadowRoots: [field.root]})[0];
-            if (value && field.rich.contains(value.startContainer) && field.rich.contains(value.endContainer)) {
+            // After DOM replacement WebKit can retain composed offsets from
+            // the old children. Check both points before making a live Range.
+            if (validRange(field, value)) {
                 const result = document.createRange();
                 result.setStart(value.startContainer, value.startOffset);
                 result.setEnd(value.endContainer, value.endOffset);
@@ -102,7 +111,7 @@
         }
         if (current?.rangeCount) {
             const result = current.getRangeAt(0);
-            if (field.rich.contains(result.startContainer) && field.rich.contains(result.endContainer)) return result.cloneRange();
+            if (validRange(field, result)) return result.cloneRange();
         }
         const result = document.createRange();
         result.selectNodeContents(field.rich); result.collapse(false);
@@ -129,8 +138,7 @@
             const [start, end] = field.sourceCaret ?? [field.source.value.length, field.source.value.length];
             field.source.setSelectionRange(start, end);
         } else {
-            try { selectRange(field, field.caret ?? range(field)); }
-            catch { field.caret = null; selectRange(field, range(field)); }
+            selectRange(field, validRange(field, field.caret) ? field.caret : range(field));
         }
     }
     function historyState(field) {
@@ -172,12 +180,14 @@
     }
     function history(field, redo) {
         const from = redo ? field.redo : field.undo, to = redo ? field.undo : field.redo;
+        if (!held) cancelPicture(field);
         if (held || !from.length) return false;
         to.push(content(field)); field.lastKind = null;
         restore(field, from.pop()); return true;
     }
     function toggleMode(field) {
         if (held) return;
+        cancelPicture(field);
         commit(field, "modeSwitch");
         saveCaret(field);
         if (field.mode === "rich") {
@@ -225,41 +235,130 @@
         if (next) focus(next);
         else { active(field).blur(); void emit("focusLeave", {direction: backwards ? "previous" : "next"}); }
     }
+    const hasContent = node => {
+        if (node.querySelector("img,hr,audio,video,iframe,object,input,svg,math,[data-meguri-chip]")) return true;
+        const texts = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+        while (texts.nextNode()) {
+            if (texts.currentNode.data && !texts.currentNode.parentElement?.closest("style,script,template")) return true;
+        }
+        return false;
+    };
+    function fillLine(node) {
+        if (!hasContent(node) && !node.querySelector("br")) node.append(document.createElement("br"));
+    }
+    function lineOwner(field, caret) {
+        let node = caret.startContainer.nodeType === Node.ELEMENT_NODE ? caret.startContainer : caret.startContainer.parentElement;
+        // The custom editable element is a boundary even though it is not an
+        // HTML block tag. Never split the shadow/UI containers outside it.
+        while (node !== field.rich && !isBlock(node)) node = node.parentElement;
+        return node;
+    }
+    function fillRootLine(root, point) {
+        let top = point.startContainer;
+        while (top !== root && top.parentNode !== root) top = top.parentNode;
+        const nodes = Array.from(root.childNodes);
+        const at = top === root ? point.startOffset : nodes.indexOf(top);
+        const block = node => node.nodeType === Node.ELEMENT_NODE && isBlock(node);
+        let start = at, end = at;
+        while (start > 0 && !block(nodes[start - 1])) start--;
+        while (end < nodes.length && !block(nodes[end])) end++;
+        const run = document.createRange(); run.setStart(root, start); run.setEnd(root, end);
+        const content = run.cloneContents();
+        if (!hasContent(content) && !content.querySelector("br")) root.insertBefore(document.createElement("br"), nodes[end] ?? null);
+    }
     function breakLine(field, lineBreak) {
         beforeEdit(field, lineBreak ? "insertLineBreak" : "insertParagraph");
         const caret = range(field);
-        caret.deleteContents();
-        if (lineBreak) {
+        // Deleting across sibling lines already leaves the boundary Return
+        // needs, including a root inline run beside a block. Remember the
+        // suffix's live point before deletion collapses the main range.
+        let paragraphs = null;
+        if (!lineBreak && !caret.collapsed) {
+            const end = caret.cloneRange(); end.collapse(false);
+            const first = lineOwner(field, caret), last = lineOwner(field, end);
+            const adjacent = first === field.rich ? last.parentNode === first :
+                last === field.rich ? first.parentNode === last : first.parentNode === last.parentNode;
+            if (first !== last && adjacent &&
+                (first === field.rich || inline(first)) && (last === field.rich || inline(last)) &&
+                !first.closest("li,ol,ul") && !last.closest("li,ol,ul")) paragraphs = {first, last, end};
+        }
+        // H1/H3's final inline BR is a load/caret sentinel. Once Return
+        // creates a block, H3 no longer drops it: remove it before extracting
+        // the tail, retaining every preceding (authored) break.
+        const loadBreak = !lineBreak && inline(field.rich) && field.rich.lastChild?.localName === "br" ? field.rich.lastChild : null;
+        caret.deleteContents(); loadBreak?.remove();
+        if (paragraphs) {
+            const {first, last, end} = paragraphs;
+            if (first === field.rich) fillRootLine(first, caret); else fillLine(first);
+            if (last === field.rich) fillRootLine(last, end); else fillLine(last);
+            caret.setStart(end.startContainer, end.startOffset); caret.collapse(true);
+        } else if (lineBreak) {
             const br = document.createElement("br");
             caret.insertNode(br); caret.setStartAfter(br); caret.collapse(true);
             // At the end of inline content a second BR supplies the caret's
             // last line. H3 drops this final BR rather than the user's break.
-            if (inline(field.rich) && field.rich.lastChild === br) field.rich.append(document.createElement("br"));
+            const owner = lineOwner(field, caret), tail = document.createRange();
+            tail.setStartAfter(br); tail.setEnd(owner, owner.childNodes.length);
+            const rest = tail.cloneContents();
+            if (!hasContent(rest) && !rest.querySelector("br")) br.after(document.createElement("br"));
         } else {
+            const owner = lineOwner(field, caret);
             let block = caret.startContainer.nodeType === Node.ELEMENT_NODE ? caret.startContainer : caret.startContainer.parentElement;
-            while (block && block !== field.rich && !blocks.has(block.localName)) block = block.parentElement;
-            if (block?.localName === "li") {
+            // A list item's paragraph can itself be a div or another block.
+            while (block !== field.rich && block.localName !== "li") block = block.parentElement;
+            if (block.localName === "li") {
                 const list = block.parentElement;
-                if (!block.textContent && !block.querySelector("img") && block === list.lastElementChild) {
+                if (!hasContent(block) && block === list.lastElementChild) {
                     const next = document.createElement("div"); next.append(document.createElement("br"));
                     list.after(next); block.remove(); if (!list.children.length) list.remove();
                     caret.selectNodeContents(next); caret.collapse(true);
                 } else {
                     const tail = document.createRange(); tail.setStart(caret.startContainer, caret.startOffset); tail.setEnd(block, block.childNodes.length);
                     const next = document.createElement("li"); next.append(tail.extractContents());
-                    if (!next.childNodes.length) next.append(document.createElement("br"));
+                    fillLine(block); fillLine(next);
                     block.after(next); caret.selectNodeContents(next); caret.collapse(true);
                 }
             } else {
-                const owner = block && block !== field.rich ? block : field.rich;
+                // At the root, split only this run of inline nodes. A later
+                // authored block is a boundary, not part of the new line.
+                let boundary = null;
+                if (owner === field.rich) {
+                    let top = caret.startContainer;
+                    while (top !== owner && top.parentNode !== owner) top = top.parentNode;
+                    const start = top === owner ? caret.startOffset : Array.from(owner.childNodes).indexOf(top) + 1;
+                    boundary = Array.from(owner.childNodes).slice(start).find(node => node.nodeType === Node.ELEMENT_NODE && isBlock(node)) ?? null;
+                }
                 const tail = document.createRange(); tail.setStart(caret.startContainer, caret.startOffset); tail.setEnd(owner, owner.childNodes.length);
+                if (boundary) tail.setEndBefore(boundary);
                 const next = document.createElement("div"); next.append(tail.extractContents());
-                if (!next.childNodes.length) next.append(document.createElement("br"));
-                if (owner === field.rich) owner.append(next); else owner.after(next);
+                fillLine(next);
+                if (owner === field.rich) {
+                    owner.insertBefore(next, boundary);
+                    const prefix = document.createRange(); prefix.selectNodeContents(owner); prefix.setEndBefore(next);
+                    // Only this inline run can need a blank source line;
+                    // earlier authored blocks belong to preceding lines.
+                    let previousBlock = next.previousSibling;
+                    while (previousBlock && !(previousBlock.nodeType === Node.ELEMENT_NODE && isBlock(previousBlock))) previousBlock = previousBlock.previousSibling;
+                    if (previousBlock) prefix.setStartAfter(previousBlock);
+                    const previous = prefix.cloneContents();
+                    if (inline(previous) && !hasContent(previous) && !previous.querySelector("br")) owner.insertBefore(document.createElement("br"), next);
+                } else { fillLine(owner); owner.after(next); }
                 caret.selectNodeContents(next); caret.collapse(true);
             }
         }
         selectRange(field, caret); dirty(field); historyState(field);
+    }
+    function cancelPicture(field) {
+        field.picture = null; field.rich.removeAttribute("aria-busy");
+    }
+    function insert(field, html, caret) {
+        if (!html) return false;
+        const fragment = parse(html), last = fragment.lastChild;
+        if (!last) return false;
+        beforeEdit(field, "insertFromPaste");
+        caret.deleteContents(); caret.insertNode(fragment); caret.setStartAfter(last); caret.collapse(true);
+        selectRange(field, caret); dirty(field); historyState(field); reportCaret(field);
+        return true;
     }
     function wire(field, input) {
         input.addEventListener("focus", () => { current = field; void emit("focus", {ord: field.ord, mode: field.mode}); });
@@ -271,6 +370,9 @@
             // Composition input cannot be cancelled: remember the field, so
             // what it now shows is committed once the hold ends.
             if (held) { event.preventDefault(); if (!event.cancelable) field.heldInput = true; return; }
+            // A later edit wins over an unfinished paste. Never swallow keys
+            // or insert the delayed picture ahead of already accepted input.
+            if (field.picture) cancelPicture(field);
             if (["historyUndo", "historyRedo"].includes(event.inputType)) {
                 event.preventDefault(); history(field, event.inputType === "historyRedo"); return;
             }
@@ -281,18 +383,33 @@
         });
         input.addEventListener("input", () => {
             if (held) { field.heldInput = true; return; }
+            if (field.picture) cancelPicture(field);
             dirty(field); historyState(field);
         });
         input.addEventListener("keydown", event => {
             if (held) { event.preventDefault(); return; }
-            if (event.key === "Tab") { event.preventDefault(); tab(field, event.shiftKey); }
+            if (event.key === "Tab") { event.preventDefault(); tab(field, event.shiftKey); return; }
+            if (field.picture && (event.key === "Backspace" || event.key === "Delete" ||
+                (event.key.length === 1 && !event.metaKey && !event.ctrlKey))) cancelPicture(field);
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") event.preventDefault();
             if (event.metaKey && event.shiftKey && event.code === "KeyX") { event.preventDefault(); toggleMode(field); }
             if (event.metaKey && event.code === "KeyZ" && history(field, event.shiftKey)) event.preventDefault();
         });
-        // U197 has not supplied the paste/drop pipeline. Refuse these rather
-        // than let WebKit import files, remote resources or strip user HTML.
-        input.addEventListener("paste", event => event.preventDefault());
+        // The system's paste event reaches the real editable, including its
+        // context menu. Native code snapshots local picture representations;
+        // unsupported content remains refused until U197 supplies that path.
+        input.addEventListener("paste", event => {
+            event.preventDefault();
+            if (held || field.mode !== "rich" ||
+                !document.documentElement.classList.contains("mac")) return;
+            fields.forEach(cancelPicture);
+            const request = ++pictureID;
+            field.picture = {request, caret: range(field)};
+            field.rich.setAttribute("aria-busy", "true");
+            void emit("pastePicture", {ord: field.ord, request}).catch(() => {
+                if (field.picture?.request === request) cancelPicture(field);
+            });
+        });
         input.addEventListener("drop", event => event.preventDefault());
         input.addEventListener("dragover", event => event.preventDefault());
     }
@@ -495,7 +612,9 @@
         const style = document.createElement("style");
         style.textContent = ":host { display:block; position:relative } meguri-field-content { display:block; min-height:1.3em; outline:none; overflow-wrap:anywhere } " +
             ".placeholder { position:absolute; inset-block-start:0; inset-inline-start:0; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; color:GrayText } [hidden] { display:none !important }" +
-            (browsing ? " meguri-field-content { min-height:1.2em } img { max-height:64px; max-width:100%; vertical-align:middle; border-radius:4px; cursor:zoom-in }" +
+            (browsing ? " meguri-field-content { min-height:1.2em } img { max-height:64px }" : "") +
+            (media ? " img { max-width:100%; vertical-align:middle; border-radius:4px; cursor:zoom-in }" +
+                (browsing ? "" : " img { max-height:120px }") +
                 " [data-meguri-chip] { display:inline-flex; align-items:center; gap:4px; max-width:100%; padding:1px 8px 1px 6px; margin:1px 0;" +
                 " border-radius:999px; font-size:12px; line-height:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle;" +
                 " cursor:default; user-select:none; color:-apple-system-label; background:-apple-system-quaternary-label }" +
@@ -507,10 +626,11 @@
         placeholderLabel.className = "placeholder"; placeholderLabel.textContent = value.description;
         placeholderLabel.setAttribute("aria-hidden", "true");
         // CSS properties are assigned as data. A field font cannot inject CSS.
-        // In Browse's inspector the text takes the system font at the body size;
-        // the note type's fonts belong to the card (its preview), and an
+        // In Browse's inspector and the Mac's columns form the text takes the
+        // system font (the form's 13 pt, beside its 13 pt labels); the note
+        // type's fonts belong to the card (its preview). In the inspector an
         // unmarked field reads in its own content's direction.
-        if (!browsing) { host.style.fontFamily = value.fontFamily; host.style.fontSize = `${value.fontSize}px`; }
+        if (!browsing && !document.documentElement.classList.contains("mac")) { host.style.fontFamily = value.fontFamily; host.style.fontSize = `${value.fontSize}px`; }
         host.style.direction = value.rtl ? "rtl" : browsing ? "" : "ltr";
         if (browsing && !value.rtl) rich.dir = "auto";
         rich.replaceChildren(loadParse(value.html)); root.append(style, rich, placeholderLabel);
@@ -532,15 +652,23 @@
             if (event.target === boundary && !held && !field.collapsed) active(field).focus();
         });
         wire(field, rich); wire(field, source); show(field);
-        if (browsing) {
+        if (media) {
             // A chip plays its sound; a thumbnail opens the larger view (the host does both).
             rich.addEventListener("click", event => {
                 const chip = event.target.closest?.("[data-meguri-chip]");
-                if (chip) { event.preventDefault(); void emit("playMedia", {name: chip.getAttribute("data-meguri-name")}); return; }
+                // A chip the note's own HTML imitates may carry no name: it plays nothing.
+                if (chip) {
+                    event.preventDefault();
+                    const name = chip.getAttribute("data-meguri-name");
+                    if (name) void emit("playMedia", {name});
+                    return;
+                }
                 if (event.target.localName === "img" && event.target.getAttribute("src")) {
                     void emit("openMedia", {name: event.target.getAttribute("src")});
                 }
             });
+        }
+        if (browsing) {
             const follow = () => reportCaret(field);
             for (const type of ["input", "keyup", "mouseup", "focus"]) rich.addEventListener(type, follow);
             source.addEventListener("input", () => { grow(source); follow(); });
@@ -582,6 +710,8 @@
             for (const field of fields) clearTimeout(field.timer);
             loadId = message.loadId; seq = 0; current = null;
             browsing = message.mode === "browse";
+            // Edit Note shows the same media as the inspector (2026-11-24, option A).
+            media = browsing || message.mode === "edit";
             document.documentElement.classList.toggle("inspector", browsing);
             held = true; container.replaceChildren(); fields = message.fields.map(makeField);
             held = false; container.inert = false;
@@ -595,7 +725,7 @@
         case "flush": {
             keys(message, ["type", "loadId", "hold"]);
             if (typeof message.hold !== "boolean") throw new Error("Invalid hold");
-            if (message.hold) held = true;
+            if (message.hold) { held = true; fields.forEach(cancelPicture); }
             const commits = fields.map(commitValue).filter(Boolean);
             // A hold refuses input in each handler. The fields keep their focus,
             // so on touch the keyboard stays up across an add (N17.1).
@@ -625,6 +755,7 @@
         case "setField":
             keys(message, ["type", "loadId", "ord", "html"]);
             if (!field || typeof message.html !== "string") throw new Error("Invalid field");
+            cancelPicture(field);
             clearTimeout(field.timer); field.pending = false; field.changed = false; field.baseline = message.html;
             field.rich.replaceChildren(loadParse(message.html)); field.source.value = message.html;
             field.undo = []; field.redo = []; field.caret = null; field.sourceCaret = null; field.lastKind = null;
@@ -644,6 +775,7 @@
             for (const value of fields) {
                 const hidden = message.ords.includes(value.ord);
                 if (hidden && current === value) active(value).blur();
+                if (hidden) cancelPicture(value);
                 value.hidden = hidden; show(value);
             }
             return {loadId};
@@ -652,17 +784,51 @@
             keys(message, ["type", "loadId", "command"]);
             if (!Object.hasOwn(formats, message.command)) throw new Error("Unknown format");
             if (held || !current || current.mode !== "rich") return {applied: false};
+            cancelPicture(current);
             return {applied: format(current, message.command)};
         }
         case "wrap": {
             keys(message, ["type", "loadId", "prefix", "suffix"]);
             if (typeof message.prefix !== "string" || typeof message.suffix !== "string") throw new Error("Invalid wrap");
             if (held || !current || current.mode !== "rich") return {applied: false};
+            cancelPicture(current);
             wrap(current, message.prefix, message.suffix);
             return {applied: true};
         }
+        case "classifyPicturePaste": {
+            keys(message, ["type", "loadId", "html", "urls"]);
+            if (typeof message.html !== "string" || message.html.length > 1048576 ||
+                !Array.isArray(message.urls) || message.urls.some(url => typeof url !== "string")) throw new Error("Invalid clipboard HTML");
+            const fragment = parse(message.html);
+            // Never attach clipboard nodes to the document. Attribute text,
+            // including > in alt, is not selection text or another element.
+            for (const node of fragment.querySelectorAll("head,script,style,meta,link,base,title")) node.remove();
+            const elements = [...fragment.querySelectorAll("*")];
+            const wrappers = new Set(["a", "div", "span", "p", "figure"]);
+            const text = fragment.textContent.trim();
+            return {copyImage: elements.filter(node => node.localName === "img").length === 1 &&
+                elements.every(node => node.localName === "img" || wrappers.has(node.localName)) &&
+                (!text || message.urls.includes(text))};
+        }
+        case "finishPicturePaste": {
+            keys(message, ["type", "loadId", "ord", "request", "html"]);
+            if (!field || !Number.isSafeInteger(message.request) || typeof message.html !== "string") throw new Error("Invalid picture result");
+            const picture = field.picture;
+            if (picture?.request !== message.request) return {changed: false};
+            cancelPicture(field);
+            if (held || field.hidden || field.collapsed || field.mode !== "rich" || !message.html) return {changed: false};
+            // P25: restore the recorded field and selection, even after the
+            // user focused another field while its file was being imported.
+            field.caret = picture.caret; focus(field);
+            return {changed: insert(field, message.html, picture.caret)};
+        }
+        case "picturePasteCurrent":
+            keys(message, ["type", "loadId", "ord", "request"]);
+            return {current: !!field && !held && !field.hidden && !field.collapsed && field.mode === "rich" &&
+                field.picture?.request === message.request};
         case "undo": case "redo":
             keys(message, ["type", "loadId", "ord"]); if (!field) throw new Error("Unknown field");
+            cancelPicture(field);
             return {applied: history(field, message.type === "redo")};
         default: throw new Error("Unsupported editor command");
         }

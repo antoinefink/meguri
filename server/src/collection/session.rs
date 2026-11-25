@@ -134,7 +134,12 @@ mod tests {
         let authority=service.validate_hostkey(&key).await.unwrap();
         let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();let address=listener.local_addr().unwrap();
         let (stop,stopped)=tokio::sync::oneshot::channel();let serving=service.clone();
-        let server=tokio::spawn(async move {crate::httpapi::serve(listener,serving,async {let _=stopped.await;}).await.unwrap();});
+        // Exercise native HTTP expiry without background backups sharing the
+        // collection pool whose entire capacity this fixture checks below.
+        let server=tokio::spawn(async move {
+            axum::serve(listener,crate::httpapi::router(serving).into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .with_graceful_shutdown(async {let _=stopped.await;}).await.unwrap();
+        });
         let client=reqwest::Client::builder().no_proxy().build().unwrap();
         for (method,body) in [("start",json!({"minUsn":0,"lnewer":false,"graves":null})),("applyChanges",json!({"changes":{"models":[],"decks":[[],[]],"tags":["expires"]}}))] {
             let r=client.post(format!("http://{address}/sync/{method}")).header("anki-sync",json!({"v":11,"k":key,"s":"expiry","c":"synthetic"}).to_string())

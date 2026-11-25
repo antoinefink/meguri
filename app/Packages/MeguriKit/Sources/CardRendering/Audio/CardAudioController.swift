@@ -1,5 +1,6 @@
 import CoreBridge
 import Foundation
+import Synchronization
 
 /// The caller supplies the home-deck and collection playback policy.
 public nonisolated struct CardAudioPolicy: Sendable, Equatable {
@@ -19,15 +20,41 @@ public nonisolated struct CardAudioSample: Sendable {
     }
 }
 
+/// One play attempt's authority to submit output. Scheduling and revocation
+/// share a lock: no asynchronous work may occur inside the scheduling closure.
+public nonisolated final class CardAudioPlayPermit: Sendable {
+    private enum State { case pending, revoked, submitted }
+    private let state = Mutex<State>(.pending)
+
+    public init() {}
+    public var hasSubmitted: Bool { state.withLock { $0 == .submitted } }
+    public func revoke() { state.withLock { if $0 == .pending { $0 = .revoked } } }
+
+    /// A false result means the backend refused scheduling, so no output exists.
+    public func trySchedule(_ schedule: () throws -> Bool) throws -> Bool {
+        try state.withLock { state in
+            guard state == .pending else { throw CancellationError() }
+            // Consume even a failed attempt; retries need a fresh permit.
+            state = .revoked
+            let submitted = try schedule()
+            if submitted { state = .submitted }
+            return submitted
+        }
+    }
+}
+
 public protocol CardAudioClip: AnyObject {
     var duration: TimeInterval? { get }
     var seekable: Bool { get }
     var onEnd: ((Bool) -> Void)? { get set }
-    func play() async throws
+    func play(permit: CardAudioPlayPermit) async throws
     func pause() async
     func stop() async
     func sample() async -> CardAudioSample
     func seek(to time: TimeInterval) async throws
+}
+public extension CardAudioClip {
+    func play() async throws { try await play(permit: CardAudioPlayPermit()) }
 }
 public protocol CardAudioBackend: AnyObject {
     func prepare(_ file: MediaFile) async throws -> any CardAudioClip
@@ -35,6 +62,12 @@ public protocol CardAudioBackend: AnyObject {
 public protocol CardAudioSession: AnyObject {
     func activate(_ owner: UUID) async throws
     func release(_ owner: UUID)
+    func maintainContinuity(_ owner: UUID)
+    func releaseContinuity(_ owner: UUID)
+}
+public extension CardAudioSession {
+    func maintainContinuity(_ owner: UUID) {}
+    func releaseContinuity(_ owner: UUID) {}
 }
 
 public final class CardAudioController {
@@ -103,7 +136,7 @@ public final class CardAudioController {
     private var nextClip: (Entry, any CardAudioClip)?
     private var nextSerial: UInt64 = 0
     private var preloads: [CardUpdate: Task<Void, Never>] = [:]
-    private var prepared: [CardUpdate: (Entry, any CardAudioClip)] = [:]
+    private var prepared: [CardUpdate: (Entry, any CardAudioClip, autoplay: Bool)] = [:]
     private var preloadSerials: [CardUpdate: UInt64] = [:]
     private var preparationOrder: [CardUpdate] = []
     private var generation: UInt64 = 0
@@ -112,11 +145,18 @@ public final class CardAudioController {
     private var presentation: CardUpdate?
     private var lastTransition: CardUpdate?
     private var closed = false
-    private var sessionEvents: Task<Void, Never>?
+    private let session: any CardAudioSession
+    private let continuityOwner = UUID()
+    private var reviewAdmitted = false
+    private var continuityAllowed = false
+    private var audioRevision: UInt64 = 0
+    public var audioIntent: UInt64 { audioRevision }
+    public func allowsAudio(_ intent: UInt64) -> Bool { !closed && intent == audioRevision }
+    private var sessionObserver: UUID?
 
     public init(resolver: MediaPathResolver, backend: any CardAudioBackend = AVQueuePlayback(),
                 session: any CardAudioSession = AudioSessionCoordinator.shared, diagnostics: CardDiagnostics = CardDiagnostics()) {
-        self.resolver = resolver; self.backend = backend; self.diagnostics = diagnostics
+        self.resolver = resolver; self.backend = backend; self.diagnostics = diagnostics; self.session = session
         transport = AudioTransport(session: session)
         transport.onStopped = { [weak self] in self?.advance() }
         transport.onStarted = { [weak self] clip, entry, serial in
@@ -129,20 +169,31 @@ public final class CardAudioController {
             if sessionFailure {
                 self.diagnostics.record("audioSession", update: self.diagnosticUpdate(entry), name: entry.name, index: entry.index)
             }
+            if self.paused {
+                // A genuine play failure has already stopped the native owner.
+                // Retire it without carrying the disconnected queue forward.
+                self.cancelNext()
+                self.queue.removeAll()
+            }
             self.complete(serial, success: false, reportFailure: !sessionFailure)
         }
         transport.onSeekEnd = { [weak self] serial in self?.complete(serial, success: true) }
         if let coordinator = session as? AudioSessionCoordinator {
-            let events = coordinator.events()
-            sessionEvents = Task { [weak self] in
-                for await event in events {
-                    guard let self else { return }
-                    self.sessionEvent(event)
-                }
-            }
+            sessionObserver = coordinator.observe { [weak self] event in self?.sessionEvent(event) }
         }
     }
     isolated deinit { close() }
+
+    /// Only the actual native review surface admits continuity. In particular,
+    /// preparing the deck list's first card and preview playback never admit it.
+    public func admitReview(update: CardUpdate? = nil, intent: UInt64? = nil) {
+        guard !closed, intent.map(allowsAudio) ?? true else { return }
+        reviewAdmitted = true; continuityAllowed = true
+        if let update, prepared[update]?.autoplay == true { maintainContinuity() }
+    }
+    private func maintainContinuity() {
+        if reviewAdmitted && continuityAllowed && !closed { session.maintainContinuity(continuityOwner) }
+    }
 
     private func entries(_ payload: CardPayload, update: CardUpdate, side: CardRenderSide) -> [Entry] {
         payload.audio(on: side).enumerated().compactMap { index, audio in
@@ -160,10 +211,11 @@ public final class CardAudioController {
         queue.removeAll()
         if policy.interrupt || clip == nil { replace(keepPreload: true) }
     }
-    public func present(payload: CardPayload, update: CardUpdate) {
-        guard !closed, presentation != update else { return }
+    public func present(payload: CardPayload, update: CardUpdate, intent: UInt64? = nil) {
+        guard !closed, intent.map(allowsAudio) ?? true, presentation != update else { return }
         beginTransition(to: update, policy: payload.audioPolicy)
         presentation = update
+        continuityAllowed = true
         queue = payload.audioPolicy.autoplay ? entries(payload, update: update, side: update.side) : []
         advance()
         if clip != nil { prepareNext() }
@@ -172,6 +224,7 @@ public final class CardAudioController {
     public func replay(payload: CardPayload, update: CardUpdate) {
         guard !closed else { return }
         replace()
+        continuityAllowed = true
         if update.side == .answer, payload.audioPolicy.replayQuestion {
             queue = entries(payload, update: update, side: .question) + entries(payload, update: update, side: .answer)
         } else { queue = entries(payload, update: update, side: update.side) }
@@ -181,19 +234,22 @@ public final class CardAudioController {
     public func playEntry(payload: CardPayload, update: CardUpdate, side: CardRenderSide, index: Int) {
         guard !closed, payload.audio(on: side).indices.contains(index) else { return }
         replace()
+        continuityAllowed = true
         if case .sound(let name) = payload.audio(on: side)[index] { queue = [Entry(update: update, side: side, index: index, name: name)] }
         advance()
     }
 
-    @discardableResult public func prepare(payload: CardPayload, update: CardUpdate) -> Task<Void, Never>? {
+    @discardableResult public func prepare(payload: CardPayload, update: CardUpdate, intent: UInt64? = nil) -> Task<Void, Never>? {
         cancelPreparation(update)
-        guard !closed else { return nil }
+        let intent = intent ?? audioIntent
+        guard allowsAudio(intent) else { return nil }
         while preparationOrder.count >= 2 { cancelPreparation(preparationOrder[0]) }
         preparationOrder.append(update)
         preloadGeneration += 1
         let serial = preloadGeneration
         preloadSerials[update] = serial
         let entries = self.entries(payload, update: update, side: update.side)
+        let autoplay = payload.audioPolicy.autoplay
         let resolver = self.resolver, backend = self.backend
         let task = Task { [weak self] in
             for entry in entries {
@@ -201,8 +257,9 @@ public final class CardAudioController {
                     try Task.checkCancellation()
                     let file = try await resolver.openAudioName(entry.name)
                     let clip = try await Self.prepareFile(file, backend: backend)
-                    guard let self, !Task.isCancelled, self.preloadSerials[update] == serial, !self.closed else { await clip.stop(); return }
-                    self.prepared[update] = (entry, clip)
+                    guard let self, !Task.isCancelled, self.preloadSerials[update] == serial, self.allowsAudio(intent) else { await clip.stop(); return }
+                    self.prepared[update] = (entry, clip, autoplay: autoplay)
+                    if autoplay { self.maintainContinuity() }
                     return
                 } catch {
                     guard !Task.isCancelled else { return }
@@ -213,6 +270,8 @@ public final class CardAudioController {
         preloads[update] = task
         return task
     }
+    func preparationTask(for update: CardUpdate) -> Task<Void, Never>? { preloads[update] }
+
     public func cancelPreparation(_ update: CardUpdate) {
         preloadSerials[update] = nil
         preloads.removeValue(forKey: update)?.cancel()
@@ -318,6 +377,7 @@ public final class CardAudioController {
 
     private func start(_ clip: any CardAudioClip, entry: Entry, serial: UInt64) {
         self.clip = clip
+        maintainContinuity()
         if onPlaybackObservation != nil { readinessStage = .ready }
         armCompletion(clip, serial: serial)
         transport.install(clip, entry: entry, serial: serial, paused: paused,
@@ -412,14 +472,26 @@ public final class CardAudioController {
     public func sessionEvent(_ event: AudioSessionCoordinator.Event) {
         switch event {
         case .stop: stop()
-        case .pause: pause()
+        case .pause:
+            transport.revokePendingOutput()
+            audioRevision += 1
+            continuityAllowed = false
+            session.releaseContinuity(continuityOwner)
+            // Preserve only the current word actually submitted to the backend.
+            // Pending activation/decode belongs to the disconnected route.
+            if let clip, current != nil, transport.canPreserve(clip, serial: generation) {
+                cancelPreload()
+                pause()
+            } else { replace() }
         case .available: break // Explicit user play is required.
         }
     }
     public func resume() {
         guard paused, current != nil else { return }
         paused = false
+        continuityAllowed = true
         if let clip {
+            maintainContinuity()
             armCompletion(clip, serial: generation)
             transport.resume()
             drain()
@@ -450,12 +522,20 @@ public final class CardAudioController {
     private func cancelPreload() {
         for update in preparationOrder { cancelPreparation(update) }
     }
-    public func stop() { replace(); cancelPreload() }
+    public func stop() {
+        audioRevision += 1
+        continuityAllowed = false
+        session.releaseContinuity(continuityOwner)
+        replace()
+    }
     public func close() {
         guard !closed else { return }
         closed = true; stop()
         onPlaybackObservation = nil
-        sessionEvents?.cancel(); sessionEvents = nil
+        if let sessionObserver, let coordinator = session as? AudioSessionCoordinator {
+            coordinator.removeObserver(sessionObserver)
+        }
+        sessionObserver = nil
     }
 }
 
@@ -469,6 +549,8 @@ private final class AudioTransport {
         let serial: UInt64
         var intent: Intent
         var playing = false
+        var hasStarted = false
+        var playPermit: CardAudioPlayPermit?
         var readinessStage: CardAudioController.Readiness.Stage?
         var pauseRequired = false
         var keepSession = false
@@ -483,7 +565,15 @@ private final class AudioTransport {
     private var lease: UUID?
     private var owned: OwnedClip?
     private var running = false
+    private var playAttempt: Task<Void, Error>?
+    // Submission is published inside the scheduling lock, before the async
+    // play return reaches MainActor. Entering play alone proves nothing.
+    private var hasSubmittedOutput: Bool { owned.map { $0.hasStarted || $0.playPermit?.hasSubmitted == true } == true }
     var isEmpty: Bool { owned == nil }
+    func canPreserve(_ clip: any CardAudioClip, serial: UInt64) -> Bool {
+        guard let owned else { return false }
+        return owned.clip === clip && owned.serial == serial && owned.intent != .stopped && hasSubmittedOutput
+    }
     var onStopped: (() -> Void)?
     var onStarted: (((any CardAudioClip), CardAudioController.Entry, UInt64) -> Void)?
     var onFailure: ((UInt64, Bool) -> Void)?
@@ -503,6 +593,7 @@ private final class AudioTransport {
     func pause() {
         guard let owned, owned.intent != .stopped else { return }
         owned.intent = .paused
+        playAttempt?.cancel()
         // Even a following resume must cross this barrier after a held play.
         owned.pauseRequired = true
     }
@@ -518,9 +609,16 @@ private final class AudioTransport {
     func stop(keepSession: Bool) {
         guard let owned else { if !keepSession { releaseIfIdle() }; return }
         owned.intent = .stopped
+        owned.playPermit?.revoke()
+        playAttempt?.cancel()
         owned.keepSession = keepSession
         owned.seek = nil
         owned.clip.onEnd = nil
+    }
+    func revokePendingOutput() {
+        owned?.playPermit?.revoke()
+        playAttempt?.cancel()
+        if !hasSubmittedOutput { release() }
     }
     func releaseIfIdle() {
         guard owned == nil else { return }
@@ -580,23 +678,39 @@ private final class AudioTransport {
                 do { try await session.activate(owner) }
                 catch {
                     release()
-                    if item.intent != .stopped { onFailure?(item.serial, true) }
+                    if item.intent == .playing { onFailure?(item.serial, true) }
                     continue
                 }
                 // Re-evaluate pause/stop/seek intent after activation.
                 continue
             }
-            do {
-                if item.readinessStage != nil { item.readinessStage = .playPending }
-                try await item.clip.play()
+            if item.readinessStage != nil { item.readinessStage = .playPending }
+            let permit = CardAudioPlayPermit()
+            item.playPermit = permit
+            let attempt = Task { @MainActor in
+                try Task.checkCancellation()
+                guard item.intent == .playing, !item.pauseRequired else { throw CancellationError() }
+                try await item.clip.play(permit: permit)
+                // Publish before this attempt finishes, without a parent-task hop.
+                // Cancellation can arrive after native scheduling succeeded.
+                item.playing = true; item.hasStarted = true
                 if item.readinessStage != nil { item.readinessStage = .playReturned }
-                item.playing = true
+            }
+            playAttempt = attempt
+            do {
+                try await attempt.value
                 if item.intent == .playing, !item.pauseRequired {
                     onStarted?(item.clip, item.entry, item.serial)
                 }
+            } catch is CancellationError {
+                // A revoked/cancelled attempt leaves previously submitted audio
+                // safe to pause and explicitly resume.
             } catch {
+                // Cancellation can race an ordinary native scheduling failure.
+                // That failure stops the backend, even if this clip played before.
                 if item.intent != .stopped { onFailure?(item.serial, false) }
             }
+            playAttempt = nil
         }
     }
 }

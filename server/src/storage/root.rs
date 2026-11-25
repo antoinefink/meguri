@@ -539,7 +539,7 @@ impl DataRoot {
             drop(db);
             return self.initialize_schema();
         }
-        if !matches!(version,1|2|3|4|5) {
+        if !matches!(version,1|2|3|4|5|6) {
             return Err(unavailable());
         }
         super::semantic::validate(self, &db, true)?;
@@ -599,7 +599,7 @@ impl DataRoot {
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
         let integrity: String = db.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
         let foreign: bool = db.prepare("PRAGMA foreign_key_check")?.exists([])?;
-        if !matches!(version,1|2|3|4|5) || integrity != "ok" || foreign {
+        if !matches!(version,1|2|3|4|5|6) || integrity != "ok" || foreign {
             return Err(unavailable());
         }
         let (phase, hash): (String, Vec<u8>) = db.query_row(

@@ -578,3 +578,8 @@ success
 download_collection
 download_url
 download_token
+# servers/meguri-sync-web W11: backup history wire fields and safety-point kind.
+before_restore
+created_at
+size_bytes
+X-Meguri-Expected-Account

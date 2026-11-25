@@ -21,6 +21,7 @@ struct EditorBridgeMessage {
         case "loaded": members = ["type", "loadId", "seq"]
         case "focus", "modeChanged": members = ["type", "loadId", "seq", "ord", "mode"]
         case "blur", "dirty": members = ["type", "loadId", "seq", "ord"]
+        case "pastePicture": members = ["type", "loadId", "seq", "ord", "request"]
         case "commit": members = ["type", "loadId", "seq", "ord", "html", "unchanged", "reason"]
         case "focusLeave": members = ["type", "loadId", "seq", "direction"]
         case "collapsedChanged": members = ["type", "loadId", "seq", "ord", "collapsed"]
@@ -47,6 +48,9 @@ struct EditorBridgeMessage {
         if members.contains("mode") {
             guard let mode = body["mode"] as? String, NoteEditorDraft.Mode(rawValue: mode) != nil else { throw EditorRuntimeError.invalidMessage }
         }
+        if type == "pastePicture" {
+            guard let request = Self.integer(body["request"]), request > 0 else { throw EditorRuntimeError.invalidMessage }
+        }
         if members.contains("collapsed"), Self.boolean(body["collapsed"]) == nil { throw EditorRuntimeError.invalidMessage }
         if members.contains("canUndo"), Self.boolean(body["canUndo"]) == nil || Self.boolean(body["canRedo"]) == nil {
             throw EditorRuntimeError.invalidMessage
@@ -63,8 +67,9 @@ struct EditorBridgeMessage {
         }
         // A reference the inspector cannot serve (a web address, a folder) is not a protocol
         // error: the host ignores it (`MediaName.plain`) and the page keeps editing.
+        // A chip the note's own HTML imitates may have no name (null): ignored the same way.
         if type == "playMedia" || type == "openMedia" {
-            guard body["name"] is String else { throw EditorRuntimeError.invalidMessage }
+            guard body["name"] is String || body["name"] is NSNull else { throw EditorRuntimeError.invalidMessage }
         }
         if type == "contentHeight" {
             guard let height = Self.number(body["height"]), height >= 0 else { throw EditorRuntimeError.invalidMessage }

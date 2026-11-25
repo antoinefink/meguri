@@ -28,8 +28,8 @@
         "sha256": "847e3146fdc8b8cd99167dabf13c492ccd16373113b015813dc61142672e72b8"
       },
       "DEPENDENCIES.md": {
-        "bytes": 16262,
-        "sha256": "c0c7a492883bcfd1ca27d1eaa887626cb41b3225f7fed2e438271b6c8a9a6902"
+        "bytes": 16990,
+        "sha256": "062796f5dd9be0fb9339cec1c3174aabd2db8b92d21d443fd95637239de556a9"
       },
       "LICENSE": {
         "bytes": 1076,
@@ -130,12 +130,12 @@
         "sha256": "1ed4afb68d79be9a0a6ea2ec5a4e1a836fe8d5c7728caf1d95ab1d3275d5c749"
       },
       "src/api.ts": {
-        "bytes": 5377,
-        "sha256": "095239bbdd42f84fa7c0d65e6355b46709af35c5e276134b1c5605c93c9685a7"
+        "bytes": 6806,
+        "sha256": "1cc8591266d6499db67d507154075aae1f4288794bb063f5196763ec968dd239"
       },
       "src/app.tsx": {
-        "bytes": 13351,
-        "sha256": "7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63"
+        "bytes": 13821,
+        "sha256": "2d32bd613d50aa1df4e388595c11bbeeed3ba1ffb4dbd780464085205753e20d"
       },
       "src/apple-touch-icon.png": {
         "bytes": 50588,
@@ -146,8 +146,8 @@
         "sha256": "7c47a2f985e545fceba68c55efdd34106ad303b67bc92e399b726179ff5c47d8"
       },
       "src/collection.tsx": {
-        "bytes": 1919,
-        "sha256": "ebb16f232b58ddc19a8354cd6c2b1cca3c9fcd43c5f062169efac8100d0acd95"
+        "bytes": 11311,
+        "sha256": "6f2783e0b015cd92e63a8b5e30a444aa1d9d54651d54b586179fc5b5314f4dc3"
       },
       "src/connection.tsx": {
         "bytes": 6795,
@@ -182,28 +182,32 @@
         "sha256": "e52593b7fc00da8d8354538999bf35e5c6db886bed06c7422823c446457c1d31"
       },
       "src/style.css": {
-        "bytes": 13065,
-        "sha256": "04f338be9525f8e0f3503e43d56b742dcd809cbaa18dc4b9d38bef7c9a33992b"
+        "bytes": 14530,
+        "sha256": "39e6e70a5d5118f450375b13c90faa1e80f6d1de4d50f2047e348e16b5bfbd2b"
       },
       "src/ui.tsx": {
         "bytes": 4952,
         "sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
       },
       "tests/api.test.ts": {
-        "bytes": 4776,
-        "sha256": "9cefc3723cf52869ccaf3d2dbe1b775b0668c77570945ea3e448f971cf4ccad8"
+        "bytes": 7210,
+        "sha256": "07eedde417f5b6a0a338c665cf42673b01d56a852fda07c5fc011cccd9ea19be"
       },
       "tests/browser/account-actions.spec.ts": {
-        "bytes": 8640,
-        "sha256": "8c3de382b91ded4c5f1751c1718465625efd38b61b92fda0e2675d52d73c4a2e"
+        "bytes": 8792,
+        "sha256": "3845ec64412198ca04dee9cd87e9887a5c0669a294ecb1c76e10974f579f4abd"
       },
       "tests/browser/accounts.spec.ts": {
-        "bytes": 48169,
-        "sha256": "e8f82051540e0cbf0fce3d430d5856e63e80a6b454247f81dabf89349b9b3c4f"
+        "bytes": 48309,
+        "sha256": "e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3"
+      },
+      "tests/browser/backups.spec.ts": {
+        "bytes": 31304,
+        "sha256": "415de8426361101e7835eb600665c7af271f7553c7f573090d576a8cf7cc25ba"
       },
       "tests/browser/mcp.spec.ts": {
-        "bytes": 37514,
-        "sha256": "9377050f417a5b5a72d1f83b0f54944233e1d1891e36af1954ec902780dd748c"
+        "bytes": 37730,
+        "sha256": "261b286236452b954829529242b040eb4d3784019eeb0e321b2f10ae7ece1f10"
       },
       "tests/policy.test.ts": {
         "bytes": 1397,
@@ -227,7 +231,7 @@
       },
       "upstream-records.json": {
         "bytes": 7364,
-        "sha256": "dcc688efcf71f4d94de14736eb09932e5fcf6be12f3315c15241f4d9c6573d26"
+        "sha256": "a3a66b858a72331499de6289e4745f834d34105b52655d1c22133fe0c599b099"
       },
       "vite.config.ts": {
         "bytes": 1520,
@@ -277,8 +281,8 @@
         "sha256": "303972069cba005453abe7939235e27b5622e986968adb0344836cb0475875d9"
       },
       "server/src/httpapi/mod.rs": {
-        "bytes": 24500,
-        "sha256": "31b4f6b9d2790302ff01aa23288a6a8b95b5d92104cf2da77009d35536192f19"
+        "bytes": 27662,
+        "sha256": "d3c7d5e496d2d59a7f5afd2f1ebd4b5b8e51063f6c5a71947a6aac1bb6f8cb67"
       },
       "server/src/webassets/mod.rs": {
         "bytes": 4512,
