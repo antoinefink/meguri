@@ -12,8 +12,10 @@
 //! checkpoint maintenance separately; MCP disables automatic/close checkpoints.
 //! All methods are
 //! synchronous: run them on the server's bounded blocking collection executor.
+pub(crate) mod browse;
 mod input;
 mod read;
+mod browse_projection;
 mod search_index;
 mod search_cache;
 pub(crate) use search_cache::SearchCache;

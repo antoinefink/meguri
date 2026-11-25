@@ -9,7 +9,8 @@ import AppKit
 
 /// N21.4 (owner decision 2026-11-24): edit the visible note while keeping
 /// the desired card side in sight. The native vertical split resizes the card;
-/// fields scroll independently and the formatting bar stays at the bottom.
+/// fields scroll independently. The formatting controls are in the pane's
+/// bottom bar (`BrowseInspectorPane`).
 struct BrowseNoteTab: View {
     let model: BrowseModel
     let note: BrowseInspectorNote
@@ -68,10 +69,6 @@ struct BrowseNoteTab: View {
             // A line typed at the end: the page grows after the caret moves there.
             .onChange(of: host?.contentHeight) { follow(host?.caret) }
             .onChange(of: visible.height) { follow(host?.caret) }
-            if note.error == nil {
-                Divider()
-                BrowseFormattingBar(host: host, cloze: note.isCloze)
-            }
         }
     }
 
@@ -410,13 +407,15 @@ struct BrowsePreviewCard: NSViewRepresentable {
     }
 }
 
-/// V12's formatting bar under the fields: Bold, Italic, Underline, Cloze
-/// (a cloze note type only), Attach, HTML. They act on the focused rich
-/// field (`editor/formatting` F2). Attach waits for the editor's media
-/// insertion (U194), so it is in its place, disabled.
+/// V12's formatting controls, at the leading edge of the pane's bottom bar:
+/// Bold, Italic, Underline, Cloze (a cloze note type only), Attach, HTML.
+/// They act on the focused rich field (`editor/formatting` F2). Attach waits
+/// for the editor's media insertion (U194), so it is in its place, disabled.
 struct BrowseFormattingBar: View {
-    let host: FieldEditorHost?
-    let cloze: Bool
+    let note: BrowseInspectorNote
+
+    private var host: FieldEditorHost? { note.runtime as? FieldEditorHost }
+    private var cloze: Bool { note.isCloze }
 
     var body: some View {
         HStack(spacing: Spacing.xSmall) {
@@ -437,7 +436,6 @@ struct BrowseFormattingBar: View {
             .disabled(true)
             .help(Text("browse.inspector.format.attach", bundle: .module))
             .accessibilityIdentifier("browse.inspector.format.attach")
-            Spacer()
             if let host {
                 Toggle(isOn: Binding(get: { host.focusedMode == .html }, set: { _ in host.toggleFocusedMode() })) {
                     Label { Text("browse.inspector.format.html", bundle: .module) } icon: {
@@ -452,8 +450,6 @@ struct BrowseFormattingBar: View {
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.borderless)
-        .padding(.horizontal)
-        .padding(.vertical, Spacing.xSmall)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("browse.inspector.formatting")
     }

@@ -202,6 +202,7 @@ mg_sync_web__browser() {
       -v "$(mg_compose_project)_sync-web-deps:/deps:ro" \
       -v "$(mg_compose_project)_sync-web-browsers:/browsers:ro" \
       -v "$MG_ROOT/server/web:/source:ro" -v "$MG_RUN_DIR:/out" \
+      --mount "type=bind,src=$MG_ROOT/server/src/collection/schema.sql,dst=/collection-schema.sql,readonly" \
       -v "$fixture_dir/test:/fixture:ro" -e MEGURI_WEB_BASE_URL=https://localhost:18447 \
       "$image" browser || execution_status=$?
   mg_sync_server__remove_container "$name" "$owner" || execution_status=1

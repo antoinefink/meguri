@@ -16,6 +16,8 @@ pub mod auth;
 pub mod backups;
 #[path = "backup_round_trip.rs"]
 pub mod backup_round_trip;
+#[path = "browse.rs"]
+pub mod browse;
 #[path = "codecs.rs"]
 pub mod codecs;
 #[path = "deletion.rs"]

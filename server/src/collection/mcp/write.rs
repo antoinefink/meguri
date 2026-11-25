@@ -147,14 +147,14 @@ fn guid(mut number: u64) -> String {
     while number>0 { out.push(DIGITS[(number%91) as usize]);number/=91; }
     out.reverse();String::from_utf8(out).expect("ASCII alphabet")
 }
-struct Stamps { usn: i32, next: i32, millis: i64, seconds: i64 }
+pub(super) struct Stamps { pub(super) usn: i32, next: i32, millis: i64, seconds: i64 }
 impl Stamps {
-    fn read(c: &Connection, now: i64) -> Result<Self> {
+    pub(super) fn read(c: &Connection, now: i64) -> Result<Self> {
         let (usn,old):(i32,i64)=c.query_row("SELECT usn,mod FROM col WHERE id=1",[],|r|Ok((r.get(0)?,r.get(1)?))).map_err(sql_error)?;
         if usn<0 || now<=0 { return Err(unsupported()); }
         Ok(Self { usn,next:usn.checked_add(1).ok_or_else(unsupported)?,millis:now.max(old.checked_add(1).ok_or_else(unsupported)?),seconds:now.div_euclid(1000) })
     }
-    fn save(&self, c: &Connection) -> Result<()> {
+    pub(super) fn save(&self, c: &Connection) -> Result<()> {
         c.execute("UPDATE col SET usn=?1,mod=?2 WHERE id=1",params![self.next,self.millis]).map_err(sql_error)?; Ok(())
     }
 }
