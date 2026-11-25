@@ -78,6 +78,26 @@ extension TestHooks {
                         fields["focus"] = focus
                         fields["firstResponderClass"] = responder.map { NSStringFromClass($0.classForCoder) } ?? "none"
                         fields["workspaceKey"] = workspace != nil && window === workspace ? "true" : "false"
+                        // Exact identifiers, not NSApp.mainWindow (Add can be main).
+                        let main = NSApp.windows.first { $0.identifier?.rawValue == "main" && $0.isVisible }
+                        let add = NSApp.windows.first { $0.identifier?.rawValue == "editor.add.window" && $0.isVisible }
+                        let closeGuard = main?.delegate as? AddNoteWindowGuard.Coordinator
+                        fields["workspaceIdentifier"] = workspace?.identifier?.rawValue ?? "none"
+                        fields["workspaceVisible"] = main == nil ? "false" : "true"
+                        fields["workspaceMatchesMain"] = main != nil && workspace === main ? "true" : "false"
+                        fields["addWindowVisible"] = add == nil ? "false" : "true"
+                        fields["workspaceAttachedSheet"] = main?.attachedSheet == nil ? "false" : "true"
+                        fields["addAttachedSheet"] = add?.attachedSheet == nil ? "false" : "true"
+                        fields["modalWindowIdentifier"] = NSApp.modalWindow?.identifier?.rawValue ?? "none"
+                        fields["keyWindowIdentifier"] = window?.identifier?.rawValue ?? "none"
+                        fields["mainWindowIdentifier"] = NSApp.mainWindow?.identifier?.rawValue ?? "none"
+                        fields["workspaceDelegateClass"] = main?.delegate.map { String(describing: type(of: $0)) } ?? "none"
+                        fields["workspaceCloseRequests"] = closeGuard.map { String($0.closeRequestCount) } ?? "none"
+                        fields["workspaceLastCloseAllowed"] = closeGuard.flatMap { $0.lastCloseAllowed }.map { String($0) } ?? "none"
+                        fields["navigationSheet"] = source.collection.map { String(describing: $0.navigation.sheet) } ?? "none"
+                        // Inspect the installed menu's real Cmd-W action/target,
+                        // including a missing or disabled system Close item.
+                        fields["commandWMenuRoutes"] = Self.commandWMenuRoutes(NSApp.mainMenu).joined(separator: ";")
                         fields["collectionIdentity"] = source.collection.map { String(describing: ObjectIdentifier($0)) } ?? "none"
                         fields["collectionGeneration"] = source.collection.map { String($0.generation) } ?? "none"
                         fields["collectionReady"] = source.collection?.state == .ready ? "true" : "false"
@@ -95,6 +115,17 @@ extension TestHooks {
             }.onDisappear {
                 if let observer { DistributedNotificationCenter.default().removeObserver(observer); self.observer = nil }
             }
+        }
+
+        private static func commandWMenuRoutes(_ menu: NSMenu?) -> [String] {
+            menu?.items.flatMap { item -> [String] in
+                var routes = commandWMenuRoutes(item.submenu)
+                if item.keyEquivalent.lowercased() == "w", item.keyEquivalentModifierMask == .command {
+                    let target = item.target.map { String(describing: type(of: $0)) } ?? "responderChain"
+                    routes.append("action=\(item.action.map(NSStringFromSelector) ?? "none"),target=\(target),enabled=\(item.isEnabled)")
+                }
+                return routes
+            } ?? []
         }
     }
 }

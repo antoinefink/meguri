@@ -186,30 +186,57 @@ import XCTest
         defer { app.terminate() }
         let deckPage = try selectDeck("Synthetic Summary", app: app)
         let collection = try inputEvidence(bundle: bundle)
-        let main = app.windows.containing(.any, identifier: "shell.root.sidebar.browse").firstMatch
+        let main = app.windows["main"]
+        XCTAssertTrue(main.waitForExistence(timeout: 10))
+        XCTAssertTrue(main.descendants(matching: .any).matching(identifier: "shell.root.sidebar.browse").firstMatch.exists)
         app.typeKey("n", modifierFlags: .command)
         let add = app.windows["editor.add.window"]
         XCTAssertTrue(add.waitForExistence(timeout: 15))
-        // Reselecting an already-selected row can perform its AX action without
-        // making main key. Click the exposed left sidebar with native input.
-        let rows = HomeControls.deckRows(app, labelContaining: "Synthetic Summary")
-        XCTAssertTrue(wait { HomeControls.hittable(rows) != nil })
-        let row = try XCTUnwrap(HomeControls.hittable(rows))
-        row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
-        XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
-            "Cmd-W must target the actual main key window")
-        app.typeKey("w", modifierFlags: .command)
-        XCTAssertTrue(main.waitForNonExistence(timeout: 10), "the main window must continue its own close")
-        XCTAssertTrue(add.exists && add.sheets.count == 0, "main close must not cancel Add")
-        app.menuBars.menuBarItems["Window"].click(); app.menuItems["Meguri"].click()
-        XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
-            "Window > Meguri brings the workspace to the front")
-        let reopened = try inputEvidence(bundle: bundle)
-        XCTAssertTrue(element(app, deckPage).waitForExistence(timeout: 15), "Window > Meguri restores the same deck: \(reopened)")
-        XCTAssertEqual(reopened["collectionIdentity"], collection["collectionIdentity"])
-        XCTAssertEqual(reopened["collectionGeneration"], collection["collectionGeneration"])
-        XCTAssertEqual(reopened["collectionReady"], "true")
-        XCTAssertTrue(add.exists, "reopening main preserves the collection-owned Add window")
+        // Prove ordinary native Close first, then retain the real keyboard
+        // regression after reopen. A red-button pass cannot hide broken Cmd-W.
+        for keyboard in [false, true] {
+            let rows = HomeControls.deckRows(app, labelContaining: "Synthetic Summary")
+            XCTAssertTrue(wait { HomeControls.hittable(rows) != nil })
+            let row = try XCTUnwrap(HomeControls.hittable(rows))
+            row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
+            XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
+                "Close must target the actual main key window")
+            let before = try inputEvidence(bundle: bundle)
+            XCTAssertEqual(before["workspaceIdentifier"], "main")
+            XCTAssertEqual(before["workspaceMatchesMain"], "true")
+            if keyboard {
+                app.typeKey("w", modifierFlags: .command)
+            } else {
+                let close = main.buttons[XCUIIdentifierCloseWindow]
+                XCTAssertTrue(wait { close.exists && close.isEnabled && close.isHittable })
+                close.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+            }
+            let closed = main.waitForNonExistence(timeout: 10)
+            let addStayedOpen = add.exists && add.sheets.count == 0
+            if !closed || !addStayedOpen {
+                let hierarchy = XCTAttachment(string: app.state == .notRunning ? "App terminated" : app.debugDescription)
+                hierarchy.name = "main-close-real-hierarchy-synthetic"
+                hierarchy.lifetime = .keepAlways; self.add(hierarchy)
+                // The main-scene probe leaves with a successfully closed main.
+                // Preserve the hierarchy even if a still-visible main stops replying.
+                let after = main.exists ? (try? inputEvidence(bundle: bundle)) ?? [:]
+                    : ["workspaceVisible": "false", "addWindowVisible": String(add.exists)]
+                let evidence = XCTAttachment(string: "before=\(before)\nafter=\(after)")
+                evidence.name = "main-close-\(keyboard ? "command-w" : "red-button")-synthetic"
+                evidence.lifetime = .keepAlways; self.add(evidence)
+            }
+            XCTAssertTrue(closed, "main must close via \(keyboard ? "Cmd-W" : "its native close button")")
+            XCTAssertTrue(addStayedOpen, "main close must not cancel Add")
+            app.menuBars.menuBarItems["Window"].click(); app.menuItems["Meguri"].click()
+            XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
+                "Window > Meguri brings the workspace to the front")
+            let reopened = try inputEvidence(bundle: bundle)
+            XCTAssertTrue(element(app, deckPage).waitForExistence(timeout: 15), "Window > Meguri restores the same deck: \(reopened)")
+            XCTAssertEqual(reopened["collectionIdentity"], collection["collectionIdentity"])
+            XCTAssertEqual(reopened["collectionGeneration"], collection["collectionGeneration"])
+            XCTAssertEqual(reopened["collectionReady"], "true")
+            XCTAssertTrue(add.exists, "reopening main preserves the collection-owned Add window")
+        }
         app.typeKey("n", modifierFlags: .command)
         XCTAssertTrue(wait { (add.popUpButtons["editor.add.deck"].value as? String ?? "").contains("Synthetic Summary") })
         XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["addWindowKey"]) == "true" })
@@ -218,10 +245,9 @@ import XCTest
     }
 
     func testMainCloseCancelsCleanEditThenClosesAndQuitStillGuardsDirtyAdd() throws {
-        let (app, bundle) = try launch(extra: ["-MeguriIntegrations", "on"])
+        let (app, bundle) = try launch()
         defer { app.terminate() }
-        let deckPage = try study("Synthetic Long Audio", app: app, bundle: bundle)
-        let collection = try inputEvidence(bundle: bundle)
+        try study("Synthetic Long Audio", app: app, bundle: bundle)
         app.typeKey("e", modifierFlags: .command)
         let edit = app.windows["review.editCurrent.window"]
         XCTAssertTrue(edit.waitForExistence(timeout: 15))
@@ -232,37 +258,29 @@ import XCTest
         close.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
         XCTAssertTrue(edit.waitForNonExistence(timeout: 10))
         XCTAssertTrue(main.waitForNonExistence(timeout: 10), "clean Edit cancellation must continue main close")
-        app.menuBars.menuBarItems["Window"].click(); app.menuItems["Meguri"].click()
-        // S4's lifetime contract restores the deck and collection. It does not
-        // promise that closing/recreating a scene retains a transient review.
-        let page = element(app, deckPage)
-        XCTAssertTrue(wait { (try? inputEvidence(bundle: bundle)["workspaceKey"]) == "true" },
-            "the reopened workspace owns the keys")
-        let reopened = try inputEvidence(bundle: bundle)
-        XCTAssertTrue(page.waitForExistence(timeout: 15), "Window > Meguri restores the same known deck: \(reopened)")
-        XCTAssertEqual(reopened["collectionIdentity"], collection["collectionIdentity"])
-        XCTAssertEqual(reopened["collectionGeneration"], collection["collectionGeneration"])
-        XCTAssertEqual(reopened["collectionReady"], "true")
-        let study = page.buttons["home.deck.study"]
-        XCTAssertTrue(wait { study.exists && study.isEnabled && study.isHittable })
-        study.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
-        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
-        try clickReviewButton("review.session.close", app: app, bundle: bundle)
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 15), "the shipped default quits after the last window closes")
+
+        // A new synthetic launch owns the dirty-Quit checks. Window-menu
+        // reopening belongs only to a process with a surviving window or integration.
+        let (fresh, _) = try launch()
+        defer { fresh.terminate() }
+        let deckPage = try selectDeck("Synthetic Long Audio", app: fresh)
+        let page = element(fresh, deckPage)
         XCTAssertTrue(page.waitForExistence(timeout: 10))
-        app.typeKey("n", modifierFlags: .command)
-        let add = app.windows["editor.add.window"]
+        fresh.typeKey("n", modifierFlags: .command)
+        let add = fresh.windows["editor.add.window"]
         XCTAssertTrue(add.waitForExistence(timeout: 15))
         let fields = add.descendants(matching: .any).matching(identifier: "editor.fields").firstMatch.textViews
         XCTAssertTrue(wait { fields.count > 0 })
-        fields.element(boundBy: 0).click(); app.typeText("Synthetic quit guard")
-        app.typeKey("q", modifierFlags: .command)
+        fields.element(boundBy: 0).click(); fresh.typeText("Synthetic quit guard")
+        fresh.typeKey("q", modifierFlags: .command)
         let keep = add.sheets.buttons["Keep Editing"]
         XCTAssertTrue(keep.waitForExistence(timeout: 10)); keep.click()
-        XCTAssertTrue(add.exists && element(app, "home.deck.study").exists, "Keep Editing refuses actual termination")
-        app.typeKey("q", modifierFlags: .command)
+        XCTAssertTrue(add.exists && element(fresh, "home.deck.study").exists, "Keep Editing refuses actual termination")
+        fresh.typeKey("q", modifierFlags: .command)
         let discard = add.sheets.buttons["Discard"]
         XCTAssertTrue(discard.waitForExistence(timeout: 10)); discard.click()
-        XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
+        XCTAssertTrue(fresh.wait(for: .notRunning, timeout: 15))
     }
 
     func testManyFieldMultiCardBrowseInspectorEditsFieldTwelve() throws {

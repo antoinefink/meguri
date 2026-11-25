@@ -28,6 +28,9 @@ struct AddNoteWindowGuard: NSViewRepresentable {
         weak var editNote: EditNoteFlow?
         private var awaitingEditClose = false
         private var continuingClose = false
+        // Read-only evidence for the synthetic native-window probe.
+        private(set) var closeRequestCount = 0
+        private(set) var lastCloseAllowed: Bool?
         private weak var window: NSWindow?
         // NSObject's nonisolated selector introspection only reads this weak
         // reference. Installation and all window callbacks stay on MainActor.
@@ -43,6 +46,12 @@ struct AddNoteWindowGuard: NSViewRepresentable {
             window = nil; previous = nil
         }
         func windowShouldClose(_ sender: NSWindow) -> Bool {
+            closeRequestCount += 1
+            let allowed = allowsClose(sender)
+            lastCloseAllowed = allowed
+            return allowed
+        }
+        private func allowsClose(_ sender: NSWindow) -> Bool {
             if continuingClose { return previous?.windowShouldClose?(sender) ?? true }
             guard !awaitingEditClose else { return false }
             if let editNote, editNote.isPresented {
