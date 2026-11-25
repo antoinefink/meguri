@@ -115,6 +115,100 @@ import AppKit
         #expect(host.draft.values[0] == original)
     }
 
+    @Test(arguments: [0, 1, 2, 3, 4])
+    func returnAcrossParagraphsUsesTheSurvivingBoundary(_ variant: Int) async throws {
+        let formatted = variant == 4
+        let prefix = formatted ? "<b><i>ab</i></b>" : "ab"
+        let suffix = formatted ? "<slot><b><i>cd</i></b></slot>" : "cd"
+        let original = "<div>" + prefix + "</div>" + (variant == 1 ? "<div>selected paragraph</div>" : "")
+            + "<div>" + suffix + "</div><div data-author=\"keep\">later</div>"
+        let first = variant == 2 ? "<br>" : formatted ? "<b><i>a</i></b>" : "a"
+        let last = variant == 3 ? "<br>" : formatted ? "<slot><b><i>d</i></b></slot>" : "d"
+        let expected = "<div>" + first + "</div><div>" + last + "</div><div data-author=\"keep\">later</div>"
+        let host = try Self.host(original)
+        defer { host.shutDown() }
+        try await host.start()
+        try await Self.edit(host, """
+            const lines = rich.children;
+            const text = node => { const walk = document.createTreeWalker(node, NodeFilter.SHOW_TEXT); walk.nextNode(); return walk.currentNode; };
+            const first = text(lines[0]), last = text(lines[lines.length - 2]);
+            const start = \(variant == 2 ? 0 : 1), end = \(variant == 3 ? 2 : 1);
+            if (\(variant == 1)) selection.setBaseAndExtent(last, end, first, start);
+            else selection.setBaseAndExtent(first, start, last, end);
+            key('insertParagraph');
+            if (rich.children.length !== 3 || [...rich.children].some(node => node.getBoundingClientRect().height <= 0))
+                throw new Error('Selection Return lost a visible surviving paragraph');
+            const caret = selection.getComposedRanges ? selection.getComposedRanges({shadowRoots:[root]})[0]
+                : selection.getRangeAt(0);
+            if (!rich.children[1].contains(caret.startContainer) || caret.startOffset !== 0 ||
+                caret.startContainer !== caret.endContainer || caret.endOffset !== 0)
+                throw new Error('Selection Return did not leave the caret before the suffix');
+            """)
+        try await host.flush(hold: false)
+        #expect(host.draft.values[0] == expected)
+        try await Self.edit(host, """
+            document.execCommand('insertText', false, 'x');
+            if (rich.children[1].textContent !== '\(variant == 3 ? "x" : "xd")' ||
+                rich.lastElementChild.outerHTML !== '<div data-author="keep">later</div>')
+                throw new Error('Typing missed the surviving suffix or changed a later block');
+            if (\(formatted) && rich.querySelector('slot i').textContent !== 'xd')
+                throw new Error('Typing lost nested inline formatting in the slotted suffix');
+            """)
+        for value in [expected, original] {
+            _ = try await host.webView.callAsyncJavaScript("return await meguriEditorRuntime.receive({type:'undo', loadId:1, ord:0});", contentWorld: Self.world)
+            try await host.flush(hold: false)
+            #expect(host.draft.values[0] == value)
+        }
+    }
+
+    @Test(arguments: [false, true], [0, 1, 2])
+    func returnAcrossRootInlineAndBlockKeepsTwoLines(_ rootFirst: Bool, _ variant: Int) async throws {
+        let later = variant == 0 ? "" : "<div data-author=\"keep\">later</div>"
+        let middle = variant == 1 ? "<div>selected paragraph</div>" : ""
+        let original = (rootFirst ? "ab" + middle + "<div>cd</div>" : "<div>ab</div>" + middle + "cd") + later
+        let first = variant == 2 ? "<br>" : "a", last = variant == 2 ? "<br>" : "d"
+        let prefix = rootFirst ? first : "<div>" + first + "</div>"
+        let expected = prefix + (rootFirst ? "<div>" + last + "</div>" : last) + later
+        let host = try Self.host(original)
+        defer { host.shutDown() }
+        try await host.start()
+        try await Self.edit(host, """
+            const texts = document.createTreeWalker(rich, NodeFilter.SHOW_TEXT), nodes = [];
+            while (texts.nextNode()) nodes.push(texts.currentNode);
+            const first = nodes[0], last = nodes.find(node => node.data === 'cd');
+            const start = \(variant == 2 ? 0 : 1), end = \(variant == 2 ? 2 : 1);
+            if (\(variant == 1)) selection.setBaseAndExtent(last, end, first, start);
+            else selection.setBaseAndExtent(first, start, last, end);
+            key('insertParagraph');
+            const caret = selection.getComposedRanges ? selection.getComposedRanges({shadowRoots:[root]})[0]
+                : selection.getRangeAt(0);
+            if (caret.startContainer !== last || caret.startOffset !== 0 ||
+                caret.endContainer !== last || caret.endOffset !== 0)
+                throw new Error('Mixed-line Return did not leave the caret before the suffix');
+            const block = rich.querySelector('div'), run = document.createRange();
+            run.selectNodeContents(rich);
+            if (\(rootFirst)) run.setEndBefore(block);
+            else { run.setStartAfter(block); if (rich.lastElementChild !== block) run.setEndBefore(rich.lastElementChild); }
+            const inlineRect = run.getBoundingClientRect(), blockRect = block.getBoundingClientRect();
+            if (inlineRect.height <= 0 || blockRect.height <= 0 ||
+                (\(rootFirst) ? blockRect.top <= inlineRect.top : inlineRect.top <= blockRect.top))
+                throw new Error('Mixed-line Return lost a visible surviving line');
+            """)
+        try await host.flush(hold: false)
+        #expect(host.draft.values == [expected, "other field"])
+        try await Self.edit(host, "document.execCommand('insertText', false, 'x');")
+        try await host.flush(hold: false)
+        let typedSuffix = variant == 2 ? "x" : "xd"
+        let typed = prefix + (rootFirst ? "<div>" + typedSuffix + "</div>" : typedSuffix) + later
+        // WebKit may retain the empty suffix's caret BR after the typed text.
+        #expect(host.draft.values[0].replacingOccurrences(of: "x<br>", with: "x") == typed)
+        for value in [expected, original] {
+            _ = try await host.webView.callAsyncJavaScript("return await meguriEditorRuntime.receive({type:'undo', loadId:1, ord:0});", contentWorld: Self.world)
+            try await host.flush(hold: false)
+            #expect(host.draft.values == [value, "other field"])
+        }
+    }
+
     @Test func returnSelectionShiftReturnListsAndUndoUseTheLiveCaret() async throws {
         let host = try Self.host("<blockquote><div data-author=\"kept\"><b>abcd</b></div></blockquote>")
         defer { host.shutDown() }

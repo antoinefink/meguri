@@ -253,15 +253,46 @@
         while (node !== field.rich && !isBlock(node)) node = node.parentElement;
         return node;
     }
+    function fillRootLine(root, point) {
+        let top = point.startContainer;
+        while (top !== root && top.parentNode !== root) top = top.parentNode;
+        const nodes = Array.from(root.childNodes);
+        const at = top === root ? point.startOffset : nodes.indexOf(top);
+        const block = node => node.nodeType === Node.ELEMENT_NODE && isBlock(node);
+        let start = at, end = at;
+        while (start > 0 && !block(nodes[start - 1])) start--;
+        while (end < nodes.length && !block(nodes[end])) end++;
+        const run = document.createRange(); run.setStart(root, start); run.setEnd(root, end);
+        const content = run.cloneContents();
+        if (!hasContent(content) && !content.querySelector("br")) root.insertBefore(document.createElement("br"), nodes[end] ?? null);
+    }
     function breakLine(field, lineBreak) {
         beforeEdit(field, lineBreak ? "insertLineBreak" : "insertParagraph");
         const caret = range(field);
+        // Deleting across sibling lines already leaves the boundary Return
+        // needs, including a root inline run beside a block. Remember the
+        // suffix's live point before deletion collapses the main range.
+        let paragraphs = null;
+        if (!lineBreak && !caret.collapsed) {
+            const end = caret.cloneRange(); end.collapse(false);
+            const first = lineOwner(field, caret), last = lineOwner(field, end);
+            const adjacent = first === field.rich ? last.parentNode === first :
+                last === field.rich ? first.parentNode === last : first.parentNode === last.parentNode;
+            if (first !== last && adjacent &&
+                (first === field.rich || inline(first)) && (last === field.rich || inline(last)) &&
+                !first.closest("li,ol,ul") && !last.closest("li,ol,ul")) paragraphs = {first, last, end};
+        }
         // H1/H3's final inline BR is a load/caret sentinel. Once Return
         // creates a block, H3 no longer drops it: remove it before extracting
         // the tail, retaining every preceding (authored) break.
         const loadBreak = !lineBreak && inline(field.rich) && field.rich.lastChild?.localName === "br" ? field.rich.lastChild : null;
         caret.deleteContents(); loadBreak?.remove();
-        if (lineBreak) {
+        if (paragraphs) {
+            const {first, last, end} = paragraphs;
+            if (first === field.rich) fillRootLine(first, caret); else fillLine(first);
+            if (last === field.rich) fillRootLine(last, end); else fillLine(last);
+            caret.setStart(end.startContainer, end.startOffset); caret.collapse(true);
+        } else if (lineBreak) {
             const br = document.createElement("br");
             caret.insertNode(br); caret.setStartAfter(br); caret.collapse(true);
             // At the end of inline content a second BR supplies the caret's
