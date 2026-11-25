@@ -120,3 +120,15 @@ Independent reviewer `s-20261124T123814Z-b6a481ac` classified the following comp
 | `tools/vm/tests/test_fold_claim.py` | `86fc1ba9df429f7fd4d32a5d38e631e861019922deea7ccc6bbb8ed4220a947d` | `20261125T110607Z-23826` |
 | `tools/vm/tests/test_hosted_posture.py` | `3d7868c00eba12d3eb974b214440b27959564ff2ba87039f464d13d728e844d0` | `20261125T113114Z-71613` |
 | `tools/vm/tests/test_sim_posture.py` | `beda7a182485725d56eb3668cf9027be6d78aea6a8fba2a739f93a42c8762e7d` | `20261125T120956Z-22843` |
+
+## Neutral text outside the Device Hub window
+
+The M3 calibration selected the leased Duo and found the three matching pose controls, then refused before clicking. Offscreen inspection of a fresh parked frame located one OCR row wholly below the signed window. The revised baseline check admitted that static row. All 309 Docker image-tool tests passed, including new, moved and partly overlapping text cases. The native fold cycle is pending.
+
+Independent complete-file review by `s-20261124T123814Z-b6a481ac`.
+
+| Public file | SHA-256 | Cleanroom run |
+| --- | --- | --- |
+| `docs/process/sim-posture.md` | `be4fecbe5e3cbc522e3233317f3338735686d86673122a1ab710f7e5353ffbbd` | `20261125T122435Z-47844` |
+| `tools/vm/sim-posture.py` | `ba1d4671b5908fde12b7a9d9792af2825232b5d2f80d9023d9e3544864218b04` | `20261125T122435Z-47844` |
+| `tools/vm/tests/test_sim_posture.py` | `6fd677428d02d01c615591cc2dc6425f881743efe1b84d5873ad28c3b107db7b` | `20261125T122435Z-47844` |

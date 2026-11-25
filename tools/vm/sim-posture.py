@@ -567,6 +567,12 @@ def inside(box, rect):
     return a <= x and b <= y and x + w <= a + c and y + h <= b + d
 
 
+def intersects(box, rect):
+    x, y, w, h = box
+    a, b, c, d = rect
+    return x < a + c and a < x + w and y < b + d and b < y + h
+
+
 def window_binding(window, dimensions, name):
     rect, screen = window["rect"], window["screen"]
     require(len(rect) == len(screen) == 4 and all(type(v) in (int, float) and math.isfinite(v)
@@ -738,13 +744,21 @@ def localized_poses(boxes, point, scale):
 
 def nearby_text(boxes, point, scale, *, control_local=False):
     # text_boxes already admits only high-confidence rows. Keep arbitrary OCR
-    # text private, and ignore canvas text outside the control's tooltip scope
-    # when deciding whether a pointer-away baseline is neutral.
+    # text private. Hover changes always use the entire wide region.
     x, y = point
     return [(text, box) for text, box in boxes
             if text.strip() and inside(box, tooltip_region(point, scale))
             and (not control_local or (abs(box[0] + box[2] / 2 - x) <= 75 * scale
                  and box[1] + box[3] >= y - 35 * scale and box[1] <= y + 55 * scale))]
+
+
+def neutral_target_text(boxes, point, scale, window):
+    # Baseline admission only: background behind the signed window can appear
+    # in the wide crop. Use original desktop-pixel boxes, never clipped boxes
+    # or containment (a partially overlapping row still intersects).
+    rect = tuple(value * scale for value in window["rect"])
+    return [(text, box) for text, box in nearby_text(boxes, point, scale, control_local=True)
+            if intersects(box, rect)]
 
 
 def display_evidence(path):
@@ -1119,8 +1133,8 @@ def hover(guest, holder, window, geometry, name, point, label, ocr, record=None)
     # A visible old label is not a neutral baseline. Refuse instead of allowing
     # a correct-but-stale tooltip or a later unlabelled frame to enable glyphs.
     if (localized_poses(before, absolute, scale) or localized_poses(before_tooltip, absolute, scale)
-            or nearby_text(before, absolute, scale, control_local=True)
-            or nearby_text(before_tooltip, absolute, scale, control_local=True)):
+            or neutral_target_text(before, absolute, scale, window)
+            or neutral_target_text(before_tooltip, absolute, scale, window)):
         reject("fresh localized pose tooltip absent or ambiguous")
     stable_window(guest, window)
     deadline = time.monotonic() + HOVER_ACQUISITION_SECONDS
@@ -1149,9 +1163,11 @@ def hover(guest, holder, window, geometry, name, point, label, ocr, record=None)
         # own baseline so stable canvas text cannot masquerade as a new overlay.
         for old, boxes in ((before, after), (before_tooltip, after_tooltip)):
             prior = nearby_text(old, absolute, scale)
-            if any(text != label and (text, box) not in prior
-                   for text, box in nearby_text(boxes, absolute, scale)):
-                reject("fresh localized pose tooltip absent or ambiguous")
+            for row in nearby_text(boxes, absolute, scale):
+                if row[0] != label:
+                    if row not in prior:
+                        reject("fresh localized pose tooltip absent or ambiguous")
+                    prior.remove(row)  # Each baseline row admits at most one unchanged row.
         if glyph_proof:
             toolbar_evidence(path, window, geometry, record)
         require(time.monotonic() < deadline, "tooltip proof deadline expired")
@@ -1195,6 +1211,7 @@ def calibrate_toolbar(guest, holder, window, geometry, name, controls, approved,
                                     for px, py in points.values()),
             "calibration needs the verified neutral pointer")
     record = dict(controls=controls, glyphs=toolbar_glyphs(approved, window, geometry, controls))
+    approved_text = {}
     # Include the neutralized, operator-approved frame, then two fresh joined
     # resident captures. No buttons, keyboard input or further pointer movement.
     for path in (approved, None, None):
@@ -1204,14 +1221,22 @@ def calibrate_toolbar(guest, holder, window, geometry, name, controls, approved,
             path = holder.batch()
         boxes = text_boxes(ocr, path)
         title_evidence(boxes, window, geometry["scale"], name)
-        for px, py in points.values():
+        for pose, (px, py) in points.items():
             absolute = ((x + px) * geometry["scale"], (y + py) * geometry["scale"])
             crop_boxes = tooltip_text_boxes(ocr, path, absolute, geometry["scale"])
             require(not localized_poses(boxes, absolute, geometry["scale"])
                     and not localized_poses(crop_boxes, absolute, geometry["scale"])
-                    and not nearby_text(boxes, absolute, geometry["scale"], control_local=True)
-                    and not nearby_text(crop_boxes, absolute, geometry["scale"], control_local=True),
+                    and not neutral_target_text(boxes, absolute, geometry["scale"], window)
+                    and not neutral_target_text(crop_boxes, absolute, geometry["scale"], window),
                     "calibration requires a neutral toolbar")
+            # Each view must remain stable against the operator-approved
+            # frame in BOTH fresh parked captures, including outside-window
+            # text. Keep contents/bounds in memory only, never in calibration.
+            nearby = [sorted(nearby_text(view, absolute, geometry["scale"]))
+                      for view in (boxes, crop_boxes)]
+            if pose not in approved_text:
+                approved_text[pose] = nearby
+            require(nearby == approved_text[pose], "calibration requires stable parked text")
         toolbar_evidence(path, window, geometry, record)
         stable_window(guest, window, pointer)
     return record["glyphs"]

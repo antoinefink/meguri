@@ -267,8 +267,13 @@ permission setup or recovery as part of this procedure.
    OCR, stable signed window/geometry/pointer and the same three distinct,
    nonempty glyphs. Every approved/fresh frame also needs neutral full-frame
    and localized crop OCR around all three controls. Movement away from the
-   verified neutral pointer, visible pose labels or nonempty high-confidence
-   text within a control's tooltip scope refuses the calibration write. The row
+   verified neutral pointer, visible pose labels anywhere in a control's wide
+   tooltip ROI or nonempty high-confidence text within its precise tooltip
+   scope that intersects the signed window refuses the calibration write.
+   Unknown background text wholly outside the signed window may remain, but
+   each OCR view's nearby text must be unchanged between the approved image
+   and both fresh parked captures. Contents and original desktop-pixel bounds
+   are compared only in memory and never saved in calibration. The row
    must be within two points, 12–90 points above the
    window bottom, with equal 24–48 point spacing. Each glyph must fit wholly
    inside its 22-point square patch and the signed window. Blank, clipped,
@@ -304,15 +309,22 @@ distinguishes full Open from Partially Open even when the display state cannot.
 The existing strong exact localized tooltip path remains preferred when present.
 Before hovering, the pointer-away baseline must have no recognized nearby pose
 labels in either its full frame or its accurate localized crop, and no nonempty
-high-confidence text within the candidate control's tooltip scope. This also
-rejects unknown or localized overlay text. A stale visible label, including the
+high-confidence text within the candidate control's precise tooltip scope that
+intersects the actual signed window. Unknown background text wholly outside
+that window is not a baseline veto solely by position. Intersection uses the
+original bounds in desktop pixels; a partially overlapping row intersects.
+This exception applies only to unknown baseline text; pose-label vetoes still
+cover the whole wide ROI. A stale visible label, including the
 correct requested tooltip, refuses the request; this
 candidate does not retry the baseline. In every hover sample, wrong or ambiguous
 nearby pose labels in either OCR view fail immediately, even if all glyphs agree.
 Conflicting labels, duplicate labels and split partial-open text refuse. Every
 hover sample also refuses any new nonempty high-confidence nearby text other than the
-exact requested label. Each OCR view is compared with its own baseline; unchanged
-canvas text outside the precise tooltip scope may remain. Unknown OCR strings
+exact requested label. Each OCR view is compared with its own baseline using
+original text and bounds across the entire wide ROI, including outside the
+signed window: new, relocated, resized or mutated unknown text always refuses.
+Unchanged canvas text outside the precise tooltip scope or background text
+wholly outside the signed window may remain. Unknown OCR strings
 never enter diagnostics or receipts. A later
 unlabelled sample can never erase any recognized label: even a correct label
 that fails freshness or precise tooltip scope blocks glyph fallback for that

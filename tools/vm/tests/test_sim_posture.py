@@ -94,10 +94,10 @@ def synthetic_toolbar(w, geometry, controls, variant=None):
 
 
 class ToolbarTests(unittest.TestCase):
-    def fixture(self, folder, scale=1):
+    def fixture(self, folder, scale=1, toolbar_y=650):
         w = window()
         geometry = p.window_binding(w, (800 * scale, 900 * scale), NAME)
-        controls = dict(closed=[170, 650], open=[230, 650])
+        controls = dict(closed=[170, toolbar_y], open=[230, toolbar_y])
         path = Path(folder) / "neutral.png"
         synthetic_toolbar(w, geometry, controls).save(path)
         record = dict(schema=3, binding=dict(name=NAME), geometry=geometry,
@@ -170,6 +170,142 @@ class ToolbarTests(unittest.TestCase):
                         self.assertEqual(holder.batch.call_args_list, [mock.call(), mock.call()])
                 holder.click.assert_not_called()
                 self.assertTrue(all(not call.args and not call.kwargs for call in holder.batch.call_args_list))
+
+    def test_posture_calibration_outside_background_requires_all_approved_and_parked_views_stable(self):
+        # Real-layout relationships, invented pixels/text: a bottom-row control
+        # has background below the signed window inside its wide tooltip crop.
+        for scale in (1, 2):
+            for view in ("full", "crop"):
+                for case in ("stable", "partial-overlap", "inside", "new-first", "new-second",
+                             "moved-first", "moved-second", "mutated-first", "mutated-second",
+                             "removed-second", "duplicate-second", "Open", "Closed",
+                             "Partially Open", "Partially"):
+                    with self.subTest(scale=scale, view=view, case=case), tempfile.TemporaryDirectory() as folder:
+                        w, geometry, approved, record = self.fixture(folder, scale, toolbar_y=688)
+                        w["pointer"] = [300, 62]
+                        fresh = [Path(folder) / ("parked-%d.png" % n) for n in (1, 2)]
+                        box = (315, 773, 50, 10)  # Wholly below window bottom 750.
+                        if case == "partial-overlap":
+                            box = (315, 749, 50, 10)
+                        elif case == "inside":
+                            box = (315, 720, 50, 10)
+                        text = case if case in ("Open", "Closed", "Partially Open", "Partially") else "Background"
+                        if text != "Background":
+                            box = (220, 773, 30, 10)  # Broad ROI, outside precise tooltip scope.
+                        for path in (approved, *fresh):
+                            image = synthetic_toolbar(w, geometry, record["controls"])
+                            ImageDraw.Draw(image).text((315 * scale, 773 * scale), "Background", fill="white")
+                            image.save(path)
+
+                        def rows(path):
+                            stage = (approved, *fresh).index(path)
+                            value = [(text, box)]
+                            change = 1 if case.endswith("first") else 2
+                            if case.startswith("new"):
+                                value = [(text, box)] if stage >= change else []
+                            elif stage == change:
+                                if case.startswith("moved"):
+                                    value = [(text, (316, 773, 50, 10))]
+                                elif case.startswith("mutated"):
+                                    value = [("Popover", box)]
+                                elif case == "removed-second":
+                                    value = []
+                                elif case == "duplicate-second":
+                                    value *= 2
+                            return [(label, tuple(v * scale for v in bounds)) for label, bounds in value]
+
+                        def full(ocr, path):
+                            title = [(NAME, (130 * scale, 60 * scale, 250 * scale, 18 * scale))]
+                            return title + (rows(path) if view == "full" else [])
+
+                        guest, holder = mock.Mock(), mock.Mock()
+                        guest.call.return_value = w
+                        holder.batch.side_effect = fresh
+                        with mock.patch.object(p, "text_boxes", side_effect=full), \
+                                mock.patch.object(p, "tooltip_text_boxes", side_effect=lambda ocr, path, *args:
+                                                  rows(path) if view == "crop" else []), \
+                                mock.patch.object(p.time, "sleep"):
+                            if case == "stable":
+                                glyphs = p.calibrate_toolbar(guest, holder, w, geometry, NAME,
+                                                             record["controls"], approved, None)
+                                self.assertEqual(glyphs, record["glyphs"])
+                                self.assertNotIn("Background", json.dumps(glyphs))
+                                self.assertEqual(holder.batch.call_args_list, [mock.call(), mock.call()])
+                            else:
+                                with self.assertRaises(RuntimeError) as caught:
+                                    p.calibrate_toolbar(guest, holder, w, geometry, NAME,
+                                                        record["controls"], approved, None)
+                                self.assertNotIn("Background", str(caught.exception))
+                                self.assertNotIn("Popover", str(caught.exception))
+                        holder.click.assert_not_called()
+                        self.assertTrue(all(not call.args and not call.kwargs for call in holder.batch.call_args_list))
+
+    def test_posture_hover_outside_background_does_not_exempt_new_relocated_or_mutated_popovers(self):
+        for scale in (1, 2):
+            for view in ("full", "crop"):
+                for case in ("stable", "fresh-tooltip", "partial-overlap", "new", "mutated", "relocated", "resized",
+                             "duplicate", "new-with-correct", "baseline-Open", "baseline-Closed", "baseline-Partially Open",
+                             "baseline-Partially", "after-Closed", "after-Partially Open", "after-Partially"):
+                    with self.subTest(scale=scale, view=view, case=case), tempfile.TemporaryDirectory() as folder:
+                        w, geometry, baseline, record = self.fixture(folder, scale, toolbar_y=688)
+                        after = Path(folder) / "hover.png"
+                        box = (315, 773, 50, 10)
+                        if case == "partial-overlap":
+                            box = (315, 749, 50, 10)
+                        for path in (baseline, after):
+                            image = synthetic_toolbar(w, geometry, record["controls"])
+                            ImageDraw.Draw(image).text((315 * scale, 773 * scale), "Background", fill="white")
+                            if case == "fresh-tooltip" and path == after:
+                                ImageDraw.Draw(image).rectangle((315 * scale, 749 * scale, 345 * scale, 759 * scale),
+                                                                fill="white")
+                            image.save(path)
+
+                        def rows(path):
+                            value = [("Background", box)]
+                            if case.startswith("new") and path == baseline:
+                                value = []
+                            if path == after:
+                                if case == "mutated":
+                                    value = [("Popover", box)]
+                                elif case == "relocated":
+                                    value = [("Background", (316, 773, 50, 10))]
+                                elif case == "resized":
+                                    value = [("Background", (315, 773, 51, 10))]
+                                elif case == "duplicate":
+                                    value *= 2
+                                elif case == "new-with-correct":
+                                    value += [("Open", (315, 760, 30, 10))]
+                                elif case == "fresh-tooltip":
+                                    value += [("Open", (315, 749, 30, 10))]
+                            if case.startswith("baseline-") or (case.startswith("after-") and path == after):
+                                value = [(case.split("-", 1)[1], (220, 773, 30, 10))]
+                            return [(text, tuple(v * scale for v in bounds)) for text, bounds in value]
+
+                        def full(ocr, path):
+                            title = [(NAME, (130 * scale, 60 * scale, 250 * scale, 18 * scale))]
+                            return title + (rows(path) if view == "full" or case == "fresh-tooltip" else [])
+
+                        holder = mock.Mock()
+                        holder.batch.side_effect = [baseline, baseline, after]
+                        with mock.patch.object(p, "stable_window"), \
+                                mock.patch.object(p, "text_boxes", side_effect=full), \
+                                mock.patch.object(p, "tooltip_text_boxes", side_effect=lambda ocr, path, *args:
+                                                  rows(path) if view == "crop" or case == "fresh-tooltip" else []), \
+                                mock.patch.object(p.time, "sleep"):
+                            if case in ("stable", "fresh-tooltip"):
+                                proof = p.hover(mock.Mock(), holder, w, geometry, NAME,
+                                                record["controls"]["open"], "Open", None, record=record)
+                                self.assertIn("tooltip" if case == "fresh-tooltip" else "three-glyph", proof)
+                                self.assertNotIn("Background", proof)
+                            else:
+                                with self.assertRaises(RuntimeError) as caught:
+                                    p.hover(mock.Mock(), holder, w, geometry, NAME,
+                                            record["controls"]["open"], "Open", None, record=record)
+                                self.assertNotIn("Background", str(caught.exception))
+                                self.assertNotIn("Popover", str(caught.exception))
+                        holder.click.assert_not_called()
+                        self.assertEqual(holder.batch.call_count,
+                                         2 if case.startswith("baseline-") or case == "partial-overlap" else 3)
 
     def test_posture_glyph_fallback_cannot_erase_any_observed_pose_label(self):
         box = (315, 720, 30, 14)
