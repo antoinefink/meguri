@@ -130,22 +130,34 @@ final class MacBrowseInspectorTests: XCTestCase {
             XCTAssertFalse(hasTag(query), "unfinished query is not saved as another token: \(query)")
         }
 
-        // A highlighted offer is not acceptance. Both ordinary blur and a note
-        // switch commit the typed token, never the highlighted full name.
-        for (query, offered, switchNote) in [("Spanish::Grammar::NOU", paths[4], false),
-                                             ("Spanish::Grammar::PRO", paths[6], true)] {
+        // A highlighted offer is not acceptance. Tab blur and an outside click
+        // dismiss it without accepting the highlighted full name.
+        for (query, offered, dismissByClick) in [("Spanish::Grammar::NOU", paths[4], false),
+                                                 ("Spanish::Grammar::PRO", paths[6], true)] {
             tags.click()
             app.typeKey(.downArrow, modifierFlags: [.command])
             app.typeText(" ")
-            _ = typeQuery(query, showing: offered)
+            let offeredChoice = typeQuery(query, showing: offered)
             app.typeKey(.downArrow, modifierFlags: [])
-            if !switchNote {
-                app.typeKey(.tab, modifierFlags: [])
-                XCTAssertTrue(waitUntil { hasTag(query) }, "blur preserves the typed token")
-                XCTAssertFalse(hasTag(offered), "blur never accepts a highlight")
+            if dismissByClick {
+                // The native menu consumes its dismissal click. Use the quiet
+                // Tags header above the field, away from any action or result row.
+                tags.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+                    .withOffset(CGVector(dx: 0, dy: -12)).click()
+                XCTAssertTrue(waitUntil { !offeredChoice.exists }, "the outside click dismisses the offered row")
+                XCTAssertTrue((tags.value as? String ?? "").contains(query), "dismissal preserves the literal query")
+                XCTAssertFalse(hasTag(offered), "dismissal never accepts a highlight")
+                XCTAssertTrue(shows(fields, secondFront), "dismissal leaves the current note selected")
             }
+            // A neutral click can leave the token field's editor owning focus.
+            // Tab explicitly ends editing after dismissal and commits its literal text.
+            app.typeKey(.tab, modifierFlags: [])
+            XCTAssertTrue(waitUntil { hasTag(query) }, "blur preserves the typed token")
+            XCTAssertFalse(hasTag(offered), "blur never accepts a highlight")
             press(table.outlineRows.element(boundBy: 0))
             XCTAssertTrue(shows(fields, firstFront))
+            XCTAssertFalse(hasTag(query), "the typed token is not saved to the other note")
+            XCTAssertTrue(hasTag(offered), "the other note retains its original tag")
             press(table.outlineRows.element(boundBy: 1))
             XCTAssertTrue(shows(fields, secondFront))
             XCTAssertTrue(waitUntil { hasTag(query) }, "typed token persists after switching notes")

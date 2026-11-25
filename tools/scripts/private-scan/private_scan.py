@@ -847,7 +847,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/BrowseTests/BrowseTagFieldTests.swift':
         'f8389c31bf475893b70ff473535c3f347d09f78a5ad06a037743d1355c6611ab',
     'app/MeguriUITests/MacBrowseInspectorTests.swift':
-        '9ac640eecb6a44833a166e3c05eebafafc0ce5e8cf31d03d839a58d3495fc03f',
+        'f06c35d2865435fd06062d139805e5247e496eaa0c7e21e5afc8cc01ab200736',
     'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
         '2609f9fde767c011219bba509519fd667f167a6f3937ce865095b64795acd2a3',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
