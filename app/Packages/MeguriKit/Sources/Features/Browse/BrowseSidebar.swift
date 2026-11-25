@@ -334,10 +334,7 @@ public struct BrowseSidebar<Header: View>: View {
                 row(.notetype(notetype.id), label: notetype.name, identifier: "notetype.\(notetype.id)", icon: .symbol("doc.text"))
             }
             if !filter.isOn, let all = model.shownNotetypes.showAll {
-                Text(verbatim: BrowseStrings.showAll(all))
-                    .foregroundStyle(.secondary)
-                    .tag(BrowseSidebarTag.showAllNotetypes)
-                    .accessibilityIdentifier("browse.sidebar.notetypes.showAll")
+                showAllRow(.showAllNotetypes, count: all, identifier: "notetypes.showAll")
             }
         }
     }
@@ -358,10 +355,7 @@ public struct BrowseSidebar<Header: View>: View {
                         .tag(BrowseSidebarTag.tag(node.fullName))
                 }
                 if let all = shown.showAll {
-                    Text(verbatim: BrowseStrings.showAll(all))
-                        .foregroundStyle(.secondary)
-                        .tag(BrowseSidebarTag.showAllTags)
-                        .accessibilityIdentifier("browse.sidebar.tags.showAll")
+                    showAllRow(.showAllTags, count: all, identifier: "tags.showAll")
                 }
             }
         }
@@ -372,6 +366,21 @@ public struct BrowseSidebar<Header: View>: View {
     /// A row's leading symbol: its section's, a card state's or a flag's own.
     fileprivate enum RowIcon {
         case symbol(String), state(FilterState), flag(UInt8)
+    }
+
+    /// A section's Show All row. Like a value row, it takes the click itself
+    /// when it is the row the arrow keys stand on (`clicked`).
+    fileprivate func showAllRow(_ tag: BrowseSidebarTag, count: Int, identifier: String) -> some View {
+        HStack {
+            Text(verbatim: BrowseStrings.showAll(count)).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        #if os(macOS)
+        .simultaneousGesture(TapGesture().onEnded { clicked(tag) })
+        #endif
+        .tag(tag)
+        .accessibilityIdentifier("browse.sidebar.\(identifier)")
     }
 
     /// One value row: its symbol, its label (the match highlighted) and its
