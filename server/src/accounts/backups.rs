@@ -36,11 +36,17 @@ async fn backup_files<T: Send + 'static>(
 struct BackupWork {
     gate: Arc<PublicationBarrier>,
     _backup: tokio::sync::OwnedMutexGuard<()>,
+    _restore: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
 }
 impl BackupWork {
     fn acquire(gate: Arc<PublicationBarrier>) -> Result<Arc<Self>> {
         let guard=gate.try_backup().ok_or(Error::new("busy"))?;
-        Ok(Arc::new(Self {gate,_backup:guard}))
+        Ok(Arc::new(Self {gate,_backup:guard,_restore:None}))
+    }
+    fn acquire_restore(gate: Arc<PublicationBarrier>) -> Result<Arc<Self>> {
+        let restore = gate.try_restore().ok_or(Error::new("busy"))?;
+        let backup = gate.try_backup().ok_or(Error::new("busy"))?;
+        Ok(Arc::new(Self {gate, _backup:backup, _restore:Some(restore)}))
     }
 }
 /// Drop the candidate before releasing the last backup-work lease. This also
@@ -272,15 +278,25 @@ impl Service {
         authority: BrowserAuthority,
         expected_account: Option<String>,
     ) -> Result<BackupHistory> {
+        // Acquire before opening the read snapshot: checking after its first
+        // query could accept rows from before an already completed restore.
+        // BrowserAuthority already binds an authenticated, existing account;
+        // revalidate it in the snapshot below, as for all other history reads.
+        let gate = self.barriers.get(&authority.identity().id)?;
         #[cfg(feature = "test-hooks")]
         let hooks = self.hooks.clone();
         self.metadata.run(move |c| {
+            let history_owner = gate;
+            let history = history_owner.try_history();
             let tx = c.transaction()?;
             admission(&tx)?;
             let account = check_browser(&tx, &authority, "authentication_failed")?;
             let id = account.identity.id;
             check_expected_account(&id, expected_account.as_deref())?;
             crate::storage::reset::admitted_epoch(&tx, &id)?;
+            // Validate authority and durable fences even on lease contention.
+            // Keep the optional guard (and gate) until after the tx is dropped.
+            if history.is_none() {return Err(Error::new("busy"));}
             #[cfg(feature = "test-hooks")]
             tokio::runtime::Handle::current().block_on(hooks.hit("backup_history_admitted"));
             let backups = store::list(&tx, &id)?;
@@ -300,9 +316,22 @@ impl Service {
         backup: String,
         expected_account: Option<String>,
     ) -> Result<String> {
+        let actor = authority.clone();
+        let (id, epoch) = self.metadata.run(move |c| {
+            let tx = c.transaction()?;
+            admission(&tx)?;
+            let account = check_browser(&tx, &actor, "authentication_failed")?;
+            let id = account.identity.id;
+            check_expected_account(&id, expected_account.as_deref())?;
+            let epoch = crate::storage::reset::admitted_epoch(&tx, &id)?;
+            Ok((id, epoch))
+        }).await?;
+        // No await between ownership and spawn. The detached worker and every
+        // blocking stage retain the same gate and restore lease until cleanup.
+        let work = BackupWork::acquire_restore(self.barriers.get(&id)?)?;
         let owner = self.clone();
         tokio::spawn(async move {
-            owner.restore_backup_inner(authority, backup, expected_account).await.map_err(|e| {
+            owner.restore_backup_inner(authority, backup, id, epoch, work).await.map_err(|e| {
                 if matches!(e.code, "invalid_collection" | "media_integrity") {
                     Error::new("storage_unavailable")
                 } else {
@@ -315,20 +344,11 @@ impl Service {
         &self,
         authority: BrowserAuthority,
         backup: String,
-        expected_account: Option<String>,
+        id: String,
+        epoch: i64,
+        work: Arc<BackupWork>,
     ) -> Result<String> {
-        let actor = authority.clone();
-        let (id, epoch) = self.metadata.run(move |c| {
-            let tx = c.transaction()?;
-            admission(&tx)?;
-            let account = check_browser(&tx, &actor, "authentication_failed")?;
-            let id = account.identity.id;
-            check_expected_account(&id, expected_account.as_deref())?;
-            let epoch = crate::storage::reset::admitted_epoch(&tx, &id)?;
-            Ok((id, epoch))
-        }).await?;
-        let gate = self.barriers.get(&id)?;
-        let work = BackupWork::acquire(gate.clone())?;
+        let gate = work.gate.clone();
         // Verify and prepare the selected immutable point before the safety
         // capture. No invalid/foreign ID can create a new recovery point.
         let capacity = self.collections.acquire()?;

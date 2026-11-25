@@ -301,11 +301,98 @@ async fn restore_rechecks_intervening_media_and_logout_and_serializes_with_daily
     let cookie=h.login("root.admin",PASSWORD).await;
     let pause=h.service.hooks.arm("backup_snapshot_pinned");let s=h.service.clone();
     let pending=tokio::spawn(async move {s.capture_backups_at(today()+86400).await});within(pause.arrived()).await;
+    assert_eq!(history(&h,&cookie).await,points,"daily capture permits history reads");
     // Capture owns the per-account backup slot, so a concurrent restore refuses.
     error(h.post(&format!("/api/me/backups/{id}/restore"),json!({}),Some(&cookie)).await,409,"busy").await;
     pause.resume();within(pending).await.unwrap().unwrap();
     restore(&h,&cookie,id).await;
     let _=h.stop().await;
+}
+
+#[tokio::test]
+async fn lost_restore_caller_cannot_settle_authenticated_history_before_intent_or_cleanup() {
+    struct ResumeOnDrop(std::sync::Arc<meguri_sync_server::test_hooks::Pause>);
+    impl Drop for ResumeOnDrop {fn drop(&mut self) {self.0.resume();}}
+    for phase in ["backup_restore_preparing", "backup_snapshot_pinned", "backup_restore_before_commit", "backup_restore_cleanup"] {
+        let h = Harness::new().await;
+        h.setup().await;
+        let admin = h.login("root.admin", PASSWORD).await;
+        h.member(&admin, "lease.member").await;
+        let cookie = h.login("lease.member", PASSWORD).await;
+        h.service.capture_backups_at(today()).await.unwrap();
+        let before = history(&h, &cookie).await;
+        let independent = history(&h, &admin).await;
+        let backup = before[0]["id"].as_str().unwrap().to_owned();
+        let actor = h.service.browser_authority(secret(&cookie)).await.unwrap();
+        let id = actor.identity().id.clone();
+        let pause = h.service.hooks.arm(phase);
+        let _release = ResumeOnDrop(pause.clone());
+        let owner = h.service.clone();
+        let selected = backup.clone();
+        let caller = tokio::spawn(async move { owner.restore_backup(actor, selected).await });
+        within(pause.arrived()).await;
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        // A fresh authenticated browser request must not clear an unknown
+        // restore outcome, even before the journal has anything to fence.
+        error(h.client.get(format!("{}/api/me/backups", h.base)).header("cookie", &cookie)
+            .header("x-meguri-expected-account", &id).send().await.unwrap(), 409, "busy").await;
+        error(h.post(&format!("/api/me/backups/{backup}/restore"), json!({}), Some(&cookie)).await, 409, "busy").await;
+        assert_eq!(history(&h, &admin).await, independent);
+        if phase != "backup_restore_cleanup" {
+            // Preserve the no-early-safety-point invariant without asking the
+            // public history route to report settled during an active restore.
+            let c = rusqlite::Connection::open(h.database()).unwrap();
+            assert_eq!(c.query_row("SELECT count(*) FROM backup_restores WHERE account_id=?1", [&id], |r| r.get::<_, i64>(0)).unwrap(), 0);
+            assert_eq!(c.query_row("SELECT count(*) FROM backup_points WHERE account_id=?1 AND kind='before_restore'", [&id], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        }
+        pause.resume();
+        let response = within(async {
+            loop {
+                let response = h.client.get(format!("{}/api/me/backups", h.base)).header("cookie", &cookie)
+                    .header("x-meguri-expected-account", &id).send().await.unwrap();
+                if response.status() != 409 {break response;}
+                error(response, 409, "busy").await;
+                tokio::task::yield_now().await;
+            }
+        }).await;
+        assert_eq!(response.status(), 200);
+        let body = response.json::<Value>().await.unwrap();
+        assert_eq!(body["data"]["account_id"], id);
+        let points = body["data"]["backups"].as_array().unwrap();
+        assert_eq!(points.len(), before.len() + 1);
+        assert_eq!(points.iter().filter(|p| p["kind"] == "before_restore").count(), 1);
+        assert!(points.iter().any(|p| p["id"] == backup));
+        assert_eq!(history(&h, &admin).await, independent);
+        let _ = h.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn history_snapshot_owns_restore_exclusion_until_its_rows_are_read() {
+    struct ResumeOnDrop(std::sync::Arc<meguri_sync_server::test_hooks::Pause>);
+    impl Drop for ResumeOnDrop {fn drop(&mut self) {self.0.resume();}}
+    let h = Harness::new().await;
+    h.setup().await;
+    let cookie = h.login("root.admin", PASSWORD).await;
+    h.service.capture_backups_at(today()).await.unwrap();
+    let before = history(&h, &cookie).await;
+    let pause = h.service.hooks.arm("backup_history_admitted");
+    let _release = ResumeOnDrop(pause.clone());
+    let client = h.client.clone();
+    let url = format!("{}/api/me/backups", h.base);
+    let actor = cookie.clone();
+    let pending = tokio::spawn(async move { client.get(url).header("cookie", actor).send().await.unwrap() });
+    within(pause.arrived()).await;
+    let response = h.post(&format!("/api/me/backups/{}/restore", before[0]["id"].as_str().unwrap()), json!({}), Some(&cookie)).await;
+    pause.resume();
+    error(response, 409, "busy").await;
+    let response = within(pending).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.json::<Value>().await.unwrap()["data"]["backups"], json!(before));
+    restore(&h, &cookie, before[0]["id"].as_str().unwrap()).await;
+    assert_eq!(history(&h, &cookie).await.len(), before.len() + 1);
+    let _ = h.stop().await;
 }
 
 async fn child_service(path: &std::path::Path,phase: &str,kill: bool,signal: &std::path::Path) -> (Child,String) {
@@ -613,6 +700,9 @@ async fn expected_account_mismatch_precedes_any_restore_changes_even_with_a_vali
         } else {
             h.client.get(format!("{}{route}", h.base))
         };
+        for value in ["account-a", "account-a,account-b", "", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB"] {
+            error(request.try_clone().unwrap().header("cookie", &cookie).header("x-meguri-expected-account", value).send().await.unwrap(), 400, "invalid_request").await;
+        }
         error(request.header("cookie", &cookie).header("x-meguri-expected-account", root["id"].as_str().unwrap()).send().await.unwrap(), 409, "stale_authority").await;
     }
     assert_eq!(history(&h, &cookie).await, points);

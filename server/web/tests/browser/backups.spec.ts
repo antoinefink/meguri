@@ -271,6 +271,29 @@ test("server failure requires explicit history review before another restore", a
   await expect(restoreButton(page)).toHaveAttribute("aria-disabled", "false");
 });
 
+for (const failure of [{ status: 409, code: "busy" }, { status: 503, code: "storage_unavailable" }]) {
+  test(`unknown restore stays disabled after a ${failure.code} history refresh`, async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!); await ready(page);
+    state.loseRestoreResponse = true;
+    await restoreButton(page).click();
+    await confirmation(page).getByRole("button", { name: "Restore backup", exact: true }).click();
+    await expect(history(page).getByRole("alert")).toContainText("The restore result is unknown");
+    await history(page).getByRole("button", { name: "Dismiss", exact: true }).click();
+    state.historyError = failure;
+    await history(page).getByRole("button", { name: "Refresh history" }).click();
+    await expect(history(page).getByRole("alert")).toBeVisible();
+    await expect(restoreButton(page)).toHaveAttribute("aria-disabled", "true");
+    await restoreButton(page).evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
+    await expect(confirmation(page)).toHaveCount(0);
+    expect(state.restores).toEqual(["demo-nov16"]); expect(state.historyReads).toBe(2);
+    state.historyError = null;
+    await history(page).getByRole("button", { name: "Refresh history" }).click();
+    await expect(history(page).getByRole("listitem")).toHaveCount(8);
+    await expect(restoreButton(page)).toHaveAttribute("aria-disabled", "false");
+    expect(state.restores).toEqual(["demo-nov16"]); expect(state.historyReads).toBe(3);
+  });
+}
+
 for (const result of ["lost", "malformed"] as const) {
   test(`${result} response after commit preserves the first safety point until history review`, async ({ page, baseURL }) => {
     const state = await fixture(page, baseURL!, false, result === "lost");

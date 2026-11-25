@@ -383,11 +383,17 @@ async fn backup_scheduler_stops_before_new_work_and_joins_an_active_sweep() {
 fn expected_account_header_is_optional_for_legacy_callers_but_unambiguous() {
     let mut headers = HeaderMap::new();
     assert_eq!(expected_account(&headers).unwrap(), None);
-    headers.insert("x-meguri-expected-account", "account-a".parse().unwrap());
-    assert_eq!(expected_account(&headers).unwrap().as_deref(), Some("account-a"));
-    headers.append("x-meguri-expected-account", "account-b".parse().unwrap());
+    let account = "A".repeat(43); // canonical unpadded base64url of 32 zero bytes
+    headers.insert("x-meguri-expected-account", account.parse().unwrap());
+    assert_eq!(expected_account(&headers).unwrap().as_deref(), Some(account.as_str()));
+    headers.append("x-meguri-expected-account", account.parse().unwrap());
     assert_eq!(expected_account(&headers).unwrap_err().code, "invalid_request");
     headers.remove("x-meguri-expected-account");
-    headers.insert("x-meguri-expected-account", "".parse().unwrap());
-    assert_eq!(expected_account(&headers).unwrap_err().code, "invalid_request");
+    for invalid in ["", "account-a", "account-a,account-b", &format!("{account},{account}"),
+        &format!("{account}="), &format!("{}B", "A".repeat(42))] {
+        headers.insert("x-meguri-expected-account", invalid.parse().unwrap());
+        let error = expected_account(&headers).unwrap_err();
+        assert_eq!(error.code, "invalid_request");
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+    }
 }

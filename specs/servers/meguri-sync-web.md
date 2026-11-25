@@ -162,10 +162,12 @@ inherit W1's session authentication, response envelope, no-store/security header
 browser admission, query rejection and closing-body handling. The account comes
 only from the captured browser session. The web client must send
 `X-Meguri-Expected-Account` with the opaque account ID displayed by the tab on
-both routes. This is an equality precondition, never an account selector: reject
-mismatch as `stale_authority` (409) before staging, safety capture or any mutation.
-Callers without this header retain session-scoped admission; malformed or duplicate
-headers are `invalid_request`. The client validates response `account_id` against
+both routes. Account IDs are the canonical unpadded URL-safe base64 encoding
+of 32 bytes (43 characters, with canonical trailing bits). This is an equality
+precondition, never an account selector: reject a well-formed different ID as
+`stale_authority` (409) before staging, safety capture or any mutation.
+Callers without this header retain session-scoped admission; malformed, comma-joined
+or duplicate headers are `invalid_request` (400). Never echo the supplied ID. The client validates response `account_id` against
 its displayed identity before rendering history or announcing success.
 
 | Method and route | Input | Success `data` |
@@ -179,9 +181,18 @@ return `route_not_found` (404) after authentication. Restore accepts the existin
 JSON content type and body bounds and rejects extra fields, malformed bodies,
 wrong content types and origins using existing errors. History is also available
 to administrators for their own account only. Members cannot select an
-administrator's history. A pending reset/restore or corrupt point produces
-`storage_unavailable` (503); concurrent history work or a live state changed
-since safety capture produces `busy` (409). Failures never disclose private
+administrator's history. History enumerates metadata; it does not open, hash or
+read every saved database or media file. Restore verifies the selected database
+and media payloads and reports corruption as `storage_unavailable` (503).
+A same-account admitted restore excludes history for its entire operation,
+including preparation, safety capture and cleanup, even if its HTTP caller
+disconnects before durable intent. Such history reads return `busy` (409).
+Without an active restore lease, a pending durable reset/restore intent still
+returns `storage_unavailable` (503).
+A history snapshot excludes restore admission until its rows have been read.
+Normal daily capture and work on independent accounts do not exclude history.
+A second restore or a live state changed since safety capture produces `busy`
+(409). Failures never disclose private
 paths or media names. Existing browser credentials survive successful restore.
 No web request is required for daily scheduling, and opening history does not
 trigger a native collection download or alter stamps.

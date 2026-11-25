@@ -838,7 +838,7 @@ PUBLIC_ARTIFACTS = {
     'docs/process/review-log/meguri-sync-collection-backups-20261125.md':
         'a2c98300371f81cb18abe2847ca1de877c8df8fd1e40ba555bde6461943882d9',
     'server/src/accounts/backups.rs':
-        'd7fccc4c211bf95228b7a63a20c89477922073ffecd000a4ee43809fc43c4001',
+        'beb1848a3cfe689881074df7ceb4096dfd36c8497cdb4a69023711b63cf9f4c8',
     'server/tests/support/mod.rs':
         'fbaccbd87526b237ac1db6d1a2f17ff810838bb15366409b5f0ef254d4cecce8',
     'server/tests/media_recovery.rs':
@@ -846,7 +846,7 @@ PUBLIC_ARTIFACTS = {
     'server/tests/deletion.rs':
         'ab0089c0ae552f21ca4cced65c799cdaf3f49e2605c5a66aa8c712dc31827cbe',
     'server/tests/backups.rs':
-        '04217e3055f0b6a346f277d2ed22540847c9318ac4256a81a3c5a5fea1de6873',
+        '35fdd9a3e691f6be45654b772cf843543b0ed78fe1a082c94f7a7910df845109',
     'server/src/storage/reset.rs':
         'eb4b91a93c9976b7b07d3212f58e1e8e62b4deea0a9346e5e7c824c7dd052ee9',
     'server/src/storage/mod.rs':
@@ -860,7 +860,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/tests/browser/mcp.spec.ts':
         '261b286236452b954829529242b040eb4d3784019eeb0e321b2f10ae7ece1f10',
     'server/web/tests/browser/backups.spec.ts':
-        'd550ece559a79d0c461b44215eb1d68e1214f19d158249c9fd07b786d82fd6ed',
+        '415de8426361101e7835eb600665c7af271f7553c7f573090d576a8cf7cc25ba',
     # Complete-content public review, collection recovery fixture, 2026-11-25.
     'server/tests/backup_round_trip.rs':
         '6549998c8c16276260dc3acd8f05ec395dca05f29c29072a8d25c9cee6a2a1fd',
@@ -958,7 +958,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        'cda96348d6084e7bccc0af148fd92275b8931145b2ed252e484decf62aafcae5',
+        'ad960eeefde05b6fe79722164c90728ab4719fa518ef9e9272008abc00ffdb2d',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1251,7 +1251,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        '55272c12aad4637f57353ffdac921fd6bda1ae24bd7564d6eb5280df4bfc8c37',
+        '13ea0f91d6c87d98a1a3923db80344d2c435208b5c0419134ace2836bfe28437',
     "specs/servers/meguri-collection-mcp.md":
         "ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
@@ -1320,9 +1320,9 @@ PUBLIC_ARTIFACTS = {
     'server/src/httpapi/ingress.rs':
         'aaee8e568d0a2c915288942b847f45ec262874d13887ce2911bbe0dac4f39ef6',
     'server/src/httpapi/mod.rs':
-        '5928daeba0ce60e79881ce7043d6202e4a28e70ec8c44324f4540eb1fb08b864',
+        '60cbff1cbde7ddb223e4e4a5358458035304d53301410e6ac75a2d3c91c4ea00',
     'server/src/httpapi/tests.rs':
-        'e060bad11937cdd2a4f56a04103c6eecf2d34ac8d34c966d663ddfac01203960',
+        '6d5fb8c47e98e5a474bced2b8d36fb8f259bd87f29bbd386fcac8ca63bc948c8',
     'server/src/storage/schema.sql':
         '4842a61b5bf0e3b8e909364d5df7667aea59f054c7175313dd28f840f6c7a31b',
     'server/src/storage/semantic.rs':

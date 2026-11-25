@@ -433,9 +433,10 @@ fn expected_account(headers: &HeaderMap) -> Result<Option<String>> {
         return Ok(None);
     };
     let value = value.to_str().map_err(|_| Error::new("invalid_request"))?;
-    if value.is_empty() || values.next().is_some() {
+    if values.next().is_some() {
         return Err(Error::new("invalid_request"));
     }
+    crate::crypto::bearer(value).map_err(|_| Error::new("invalid_request"))?;
     Ok(Some(value.to_owned()))
 }
 fn backup_restore_id(path: &str) -> Option<&str> {

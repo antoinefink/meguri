@@ -202,8 +202,8 @@
         "sha256": "e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3"
       },
       "tests/browser/backups.spec.ts": {
-        "bytes": 29787,
-        "sha256": "d550ece559a79d0c461b44215eb1d68e1214f19d158249c9fd07b786d82fd6ed"
+        "bytes": 31304,
+        "sha256": "415de8426361101e7835eb600665c7af271f7553c7f573090d576a8cf7cc25ba"
       },
       "tests/browser/mcp.spec.ts": {
         "bytes": 37730,
@@ -281,8 +281,8 @@
         "sha256": "303972069cba005453abe7939235e27b5622e986968adb0344836cb0475875d9"
       },
       "server/src/httpapi/mod.rs": {
-        "bytes": 26923,
-        "sha256": "5928daeba0ce60e79881ce7043d6202e4a28e70ec8c44324f4540eb1fb08b864"
+        "bytes": 26981,
+        "sha256": "60cbff1cbde7ddb223e4e4a5358458035304d53301410e6ac75a2d3c91c4ea00"
       },
       "server/src/webassets/mod.rs": {
         "bytes": 4512,
