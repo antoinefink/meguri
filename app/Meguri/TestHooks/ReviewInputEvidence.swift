@@ -29,7 +29,7 @@ extension TestHooks {
                         if command == "focus-review-control", let window = NSApp.keyWindow {
                             // Focus the production AppKit button, never WebKit or
                             // a substitute responder, to prove window-level R.
-                            func button(in view: NSView) -> NSButton? {
+                            @MainActor func button(in view: NSView) -> NSButton? {
                                 if let button = view as? NSButton,
                                    button.accessibilityIdentifier() == "review.session.rate.good" { return button }
                                 for child in view.subviews {
