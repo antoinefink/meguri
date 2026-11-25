@@ -11,10 +11,10 @@ import XCTest
         for key in [" ", "\r", "\u{3}"] {
             let (app, bundle) = try launch()
             defer { app.terminate() }
-            try study("Synthetic Summary", app: app, bundle: bundle)
-            app.typeKey(" ", modifierFlags: [])
+            let deckPage = try study("Synthetic Summary", app: app, bundle: bundle)
+            try clickReviewButton("review.session.reveal", app: app, bundle: bundle)
             XCTAssertTrue(element(app, "review.session.rate.easy").waitForExistence(timeout: 10))
-            app.typeKey("\r", modifierFlags: [])
+            try clickReviewButton("review.session.rate.easy", app: app, bundle: bundle)
             let done = element(app, "review.session.done")
             XCTAssertTrue(done.waitForExistence(timeout: 15), "the final grade leaves the summary visible")
             XCTAssertTrue(element(app, "review.session.summary").label.hasPrefix("1"))
@@ -27,7 +27,7 @@ import XCTest
             capture(app.windows.firstMatch, "review-summary-one-card-before-done-\(key == " " ? "space" : key == "\r" ? "return" : "enter")")
             app.typeKey(key, modifierFlags: [])
             XCTAssertTrue(done.waitForNonExistence(timeout: 10))
-            XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10), "Done returns to the same deck")
+            XCTAssertTrue(element(app, deckPage).waitForExistence(timeout: 10), "Done returns to the same deck")
             app.terminate()
         }
     }
@@ -62,8 +62,16 @@ import XCTest
         input.click(); app.typeText("r")
         XCTAssertEqual(try audio(app, bundle: bundle).count, question.count, "typed answer owns r")
         XCTAssertTrue(element(app, "review.session.reveal").exists)
-        element(app, "review.session.reveal").click()
+        app.typeKey(.tab, modifierFlags: [])
+        try clickReviewButton("review.session.reveal", app: app, bundle: bundle)
         XCTAssertTrue(element(app, "review.session.rate.good").waitForExistence(timeout: 10))
+        let good = app.buttons["review.session.rate.good"]
+        XCTAssertTrue(wait { good.exists && good.isEnabled && good.isHittable })
+        // Start within the long answer, with text continuing behind the grades.
+        // Capture before changing native focus.
+        card.scroll(byDeltaX: 0, deltaY: 10000)
+        card.scroll(byDeltaX: 0, deltaY: -750)
+        capture(app.windows.firstMatch, "review-\(appearance)-long-scroll-over-grades-before-focus-synthetic")
         // Focus the actual native grade button after reveal, without touching WebKit.
         inject("focus-review-control", bundle: bundle)
         XCTAssertEqual(try audio(app, bundle: bundle).focus, "native")
@@ -232,11 +240,26 @@ import XCTest
         XCTAssertFalse(element(app, "browse.inspector.error").exists)
         capture(app.windows.firstMatch, "browse-many-field-audio-working-inspector-preview-synthetic")
         let edited = fields.element(boundBy: 11)
-        for _ in 0..<8 where !edited.isHittable { edited.scroll(byDeltaX: 0, deltaY: -450) }
+        let fieldScroll = app.scrollViews["browse.inspector.fields.scroll"]
+        XCTAssertTrue(fieldScroll.waitForExistence(timeout: 10) && fieldScroll.isHittable)
+        for _ in 0..<8 where !edited.isHittable { fieldScroll.scroll(byDeltaX: 0, deltaY: -450) }
         XCTAssertTrue(edited.isHittable)
         edited.click(); app.typeKey("a", modifierFlags: .command); app.typeText("Synthetic field twelve saved")
         app.typeKey(.tab, modifierFlags: [])
         table.outlineRows.element(boundBy: 1).coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
+        XCTAssertTrue(wait { table.outlineRows.element(boundBy: 1).isSelected && fields.count == 13 })
+        // A sibling card shares the editor. Leave this note and return so the
+        // saved value must survive a new editor load, without its old focus.
+        let otherDeck = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "browse.sidebar.deck.", "Synthetic Summary")).firstMatch
+        XCTAssertTrue(otherDeck.waitForExistence(timeout: 10)); otherDeck.click()
+        XCTAssertTrue(wait { table.outlineRows.count == 1 && !element(app, "editor.fields").exists })
+        filter.click()
+        XCTAssertTrue(wait { table.outlineRows.count == 2 })
+        table.outlineRows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).click()
+        XCTAssertTrue(wait { fields.count == 13 })
+        for _ in 0..<8 where !edited.isHittable { fieldScroll.scroll(byDeltaX: 0, deltaY: -450) }
+        XCTAssertTrue(edited.isHittable)
         XCTAssertTrue(wait { (fields.element(boundBy: 11).value as? String ?? "").contains("Synthetic field twelve saved") })
         XCTAssertTrue((fields.element(boundBy: 0).value as? String ?? "").contains("Synthetic many-field prompt"))
         capture(app.windows.firstMatch, "browse-many-field-audio-edited-field-twelve-synthetic")
@@ -255,13 +278,6 @@ import XCTest
         XCTAssertTrue(element(app, "shell.root.sidebar.browse").waitForExistence(timeout: 25))
         return (app, bundle)
     }
-    private func study(_ name: String, app: XCUIApplication, bundle: String) throws {
-        try selectDeck(name, app: app)
-        let study = element(app, "home.deck.study")
-        study.click()
-        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
-        try app.bringToFront(bundleIdentifier: bundle)
-    }
     private func selectDeck(_ name: String, app: XCUIApplication) throws {
         let rows = HomeControls.deckRows(app, labelContaining: name)
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 15))
@@ -269,6 +285,24 @@ import XCTest
         XCTAssertTrue(wait { element(app, "home.deck.title").label == name }, "the selected deck page must finish changing")
         let study = element(app, "home.deck.study")
         XCTAssertTrue(study.waitForExistence(timeout: 10))
+    }
+    @discardableResult
+    private func study(_ name: String, app: XCUIApplication, bundle: String) throws -> String {
+        try selectDeck(name, app: app)
+        let page = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.page.")).firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        let pageIdentifier = page.identifier
+        let study = element(app, "home.deck.study")
+        XCTAssertTrue(wait { study.exists && study.isEnabled && study.isHittable }); study.clickOrTap()
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
+        try app.bringToFront(bundleIdentifier: bundle)
+        return pageIdentifier
+    }
+    private func clickReviewButton(_ identifier: String, app: XCUIApplication, bundle: String) throws {
+        try app.bringToFront(bundleIdentifier: bundle)
+        let button = app.buttons[identifier]
+        XCTAssertTrue(wait { button.exists && button.isEnabled && button.isHittable }, "\(identifier) must be ready for a visible click")
+        button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).clickOrTap()
     }
     private func inject(_ command: String, bundle: String) {
         DistributedNotificationCenter.default().postNotificationName(.init(bundle + ".testhooks.reviewInput"),
