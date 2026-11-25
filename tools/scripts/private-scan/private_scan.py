@@ -835,6 +835,9 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete-content public review, collection recovery fixture, 2026-11-25.
+    'server/tests/backup_round_trip.rs':
+        'f4c2931a964617aee54b1ffc21a438b2f72aba3fbd59f75fa9d891be88936914',
     # Complete-content PUBLIC review: s-20261124T142356Z-950aa36a, 2026-11-24.
     'app/Packages/MeguriKit/Sources/Features/Stats/Charts/StatsChartFormat.swift':
         '1cf8eb49077cdd24dcc2303c5063cdc326376f8dff8a98ccc33cc7c56acb52fa',
