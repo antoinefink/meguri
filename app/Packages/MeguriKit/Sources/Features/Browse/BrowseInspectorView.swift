@@ -54,10 +54,11 @@ enum BrowseInspectorText {
 }
 
 #if os(macOS)
-/// The trailing pane (N21.4, N21.5; `browser/workspace` V7, V13): the Note |
-/// Info control at its top, then "No Selection", the summary of several rows
-/// with their commands, or the one row's Note tab or Info tab. The two tabs
-/// show no row and several rows alike; the tab chosen is kept on the device.
+/// The trailing pane (N21.4, N21.5; `browser/workspace` V7, V13): "No
+/// Selection", the summary of several rows with their commands, or the one
+/// row's Note tab or Info tab, over a bottom bar with the Note | Info control
+/// at its trailing edge (owner decision 2026-11-25). The two tabs show no row
+/// and several rows alike; the tab chosen is kept on the device.
 struct BrowseInspectorPane: View {
     let model: BrowseModel
 
@@ -65,8 +66,9 @@ struct BrowseInspectorPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            tabs
             content
+            Divider()
+            bar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: inspector.infoCard, initial: true) { inspector.followCardInfo() }
@@ -74,7 +76,26 @@ struct BrowseInspectorPane: View {
         .accessibilityIdentifier("browse.inspector")
     }
 
-    /// N21.4: Note | Info, centred at the pane's top.
+    /// The note whose fields the formatting controls act on: one row, the
+    /// Note tab, an editor that could be shown.
+    private var formattedNote: BrowseInspectorNote? {
+        guard inspector.content == .note, inspector.tab == .note, let note = inspector.note, note.error == nil else { return nil }
+        return note
+    }
+
+    /// The pane's bottom bar: the formatting controls at the leading edge
+    /// while a note is edited, Note | Info at the trailing edge in every state.
+    private var bar: some View {
+        HStack(spacing: Spacing.small) {
+            if let note = formattedNote { BrowseFormattingBar(note: note) }
+            Spacer(minLength: 0)
+            tabs
+        }
+        .padding(.horizontal)
+        .padding(.vertical, Spacing.xSmall)
+    }
+
+    /// N21.4: Note | Info.
     private var tabs: some View {
         Picker(selection: Binding(get: { inspector.tab }, set: { inspector.tab = $0 })) {
             Text("browse.inspector.tab.note", bundle: .module).tag(BrowseInspectorTab.note)
@@ -85,9 +106,6 @@ struct BrowseInspectorPane: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .fixedSize()
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal)
-        .padding(.vertical, Spacing.xSmall)
         .accessibilityIdentifier("browse.inspector.tabs")
     }
 
