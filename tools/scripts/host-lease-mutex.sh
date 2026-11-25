@@ -39,6 +39,8 @@ host_lease_unlock() { exec 6>&-; }
 host_lease_drop() {
   local inner
   [ ! -e "$1/vm-xcode-pending" ] || return 1
+  [ ! -e "$1/sim-posture-pending" ] || return 1
+  [ ! -e "$1/vm-shutdown-pending" ] || return 1
   inner="$(jq -r '.pid // empty' "$1/inner/holder.json" 2>/dev/null)"
   if [ -n "$inner" ] && kill -0 "$inner" 2>/dev/null &&
     jq 'del(.nested)' "$1/inner/holder.json" >"$1/holder.json.tmp" &&
