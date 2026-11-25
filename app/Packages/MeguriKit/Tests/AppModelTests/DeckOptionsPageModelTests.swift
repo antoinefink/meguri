@@ -78,6 +78,7 @@ import Testing
         model.open(deckID: 1); await model.waitForCompletion()
         model.setValue(.newPerDay, 30)
         model.selectPreset(2)
+        await model.waitForCompletion()
         // O15.3: a typed value that is not committed yet is saved.
         model.fieldText[.reviewsPerDay] = "300"
         model.save()
@@ -189,13 +190,47 @@ import Testing
     }
 
     @Test func aTypedErrorIsCheckedBeforeAnotherPresetIsChosen() async throws {
-        let (owner, _) = await makeOwner()
+        let (owner, core) = await makeOwner()
         let model = owner.deckOptions
         model.open(deckID: 1); await model.waitForCompletion()
         model.fieldText[.newPerDay] = "10000"
         model.selectPreset(2)
+        model.selectPreset(2)
+        #expect(model.selectedPreset == 1 && model.selectingPreset && !model.canSwitchPreset)
+        model.beginNewPreset()
+        #expect(!model.namingPreset)
         await model.waitForCompletion(); await Task.yield(); await model.waitForCompletion()
         #expect(model.selectedPreset == 1 && model.issues(for: .newPerDay).map(\.code) == [.outOfRange])
+        #expect(model.fieldText[.newPerDay] == "10,000" && !model.selectingPreset)
+        #expect(core.session?.calls == ["set newPerDay 1 10000.0"])
+    }
+
+    @Test func aFocusLossCommitIsValidatedBeforeSwitchingPresets() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        let gate = PageGate(); core.issuesGate = gate
+        model.fieldText[.newPerDay] = "10000"
+        model.commit(.newPerDay)
+        await gate.entered()
+        #expect(model.issues.isEmpty && !model.canSwitchPreset)
+        model.beginNewPreset()
+        #expect(!model.namingPreset)
+        model.selectPreset(2)
+        #expect(model.selectedPreset == 1 && model.selectingPreset)
+        gate.release(); await model.waitForCompletion()
+        #expect(model.selectedPreset == 1 && !model.selectingPreset && !model.canSwitchPreset)
+        #expect(model.fieldText[.newPerDay] == "10,000")
+        #expect(model.issues(for: .newPerDay).map(\.code) == [.outOfRange])
+        #expect(core.session?.calls == ["set newPerDay 1 10000.0"])
+
+        // Once a correction is validated, an ordinary switch is immediate.
+        model.fieldText[.newPerDay] = "21"; model.commit(.newPerDay)
+        await model.waitForCompletion()
+        #expect(model.canSwitchPreset)
+        model.selectPreset(2)
+        #expect(model.selectedPreset == 2 && !model.selectingPreset)
+        await model.waitForCompletion()
     }
 
     @Test func leavingAsksOnlyWhenTheDraftDiffers() async throws {
@@ -328,6 +363,384 @@ import Testing
         #expect(model.phase == .editing)
     }
 
+    @Test func displayOrderEditsStayWithEachPresetAndSaveInSequence() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        #expect(!model.advancedExpanded)
+        #expect(model.selected?.displayOrder[.reviewOrder] == 11)
+        #expect(model.choices(.newGatherPriority) == [0, 5, 1, 2, 3, 4])
+        model.advancedExpanded = true
+        model.setDisplayOrder(.reviewOrder, 12)
+        model.setDisplayOrder(.newGatherPriority, 5)
+        model.selectPreset(2)
+        model.setDisplayOrder(.newSortOrder, 4)
+        model.selectPreset(1)
+        #expect(model.selected?.displayOrder[.reviewOrder] == 12)
+        model.setDisplayOrder(.reviewOrder, 999) // Only the core's choices are offered.
+        model.save(); model.save()
+        model.setDisplayOrder(.newMix, 2); model.selectPreset(2)
+        await model.waitForCompletion()
+        #expect(core.session?.calls == ["order reviewOrder 1 12", "order newGatherPriority 1 5",
+            "select 2", "order newSortOrder 2 4", "select 1", "save"])
+        #expect(model.outcome == .saved)
+        model.open(deckID: 1); await model.waitForCompletion()
+        #expect(!model.advancedExpanded)
+    }
+
+    @Test(arguments: [false, true])
+    func newPresetOwnsMainWindowAdmissionUntilCancelled(interactively: Bool) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions, history = owner.collectionUndo
+        let undo = PresetAdmissionUndo()
+        history.service = undo
+        await history.waitForRefresh(); await history.refreshNow()
+        model.open(deckID: 1); await model.waitForCompletion()
+        owner.navigation.setPath([.deckOptions(DeckID(1))], for: .home)
+        // A previous Settings presentation must not host this main-window form.
+        owner.navigation.sheetHost = .settings
+        #expect(history.canUndo && history.canRedo && owner.deckOptionsAllowed)
+        model.beginNewPreset(); model.presetName = "Temporary"
+        #expect(owner.navigation.sheet == .newDeckOptionsPreset && owner.navigation.sheetHost == .main)
+        #expect(model.namingPreset && model.canCreatePreset)
+        #expect(!history.canUndo && !history.canRedo && !owner.deckOptionsAllowed)
+        #expect(!owner.deckSearchAvailable(layout: .sidebar) && !owner.deckActions.canPresent(.create))
+        history.undo(); history.redo()
+        await history.waitForCompletion()
+        #expect(await undo.writes == 0)
+        #expect(!model.requestLeave() && !model.canOpen(deckID: 2))
+        if interactively { owner.navigation.dismissSheet() } else { model.cancelNewPreset() }
+        #expect(owner.navigation.sheet == nil && !model.namingPreset && !model.canCreatePreset)
+        #expect(history.canUndo && history.canRedo && owner.deckOptionsAllowed)
+        #expect(owner.deckSearchAvailable(layout: .sidebar) && owner.deckActions.canPresent(.create))
+        #expect(!model.hasChanges && core.session?.calls.isEmpty == true)
+        model.beginNewPreset()
+        #expect(model.namingPreset && model.presetName.isEmpty && !model.canCreatePreset)
+        model.cancelNewPreset()
+        // An unchanged page may open another deck after either dismissal path.
+        model.open(deckID: 2); await model.waitForCompletion()
+        #expect(model.deckID == 2 && model.phase == .editing && owner.navigation.sheet == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func newPresetCannotReplaceAnotherHostsSheet(settings: Bool) async throws {
+        let (owner, _) = await makeOwner()
+        let model = owner.deckOptions
+        let host: AppNavigation.SheetHost = settings ? .settings : .main
+        model.open(deckID: 1); await model.waitForCompletion()
+        for route in [SheetRoute.collectionExport, .noteTypeSave, .add(deck: nil), .deckName(.create)] {
+            owner.navigation.present(route); owner.navigation.sheetHost = host
+            model.beginNewPreset()
+            #expect(owner.navigation.sheet == route && owner.navigation.sheetHost == host)
+            #expect(!model.namingPreset && !model.canCreatePreset)
+            model.cancelNewPreset()
+            #expect(owner.navigation.sheet == route)
+            owner.navigation.dismissSheet()
+        }
+    }
+
+    @Test func endingTheDraftReleasesOnlyItsOwnSheet() async throws {
+        let (owner, _) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        owner.navigation.setPath([.deckOptions(DeckID(1))], for: .home)
+        model.beginNewPreset()
+        owner.navigation.collectionReplaced()
+        #expect(model.phase == .closed && !model.namingPreset && owner.navigation.sheet == nil)
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.beginNewPreset()
+        owner.navigation.present(.collectionExport)
+        model.invalidate()
+        #expect(model.phase == .closed && owner.navigation.sheet == .collectionExport)
+    }
+
+    @Test func newPresetValidatesNameSelectsCanonicalDraftAndKeepsPriorEdits() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.setValue(.newPerDay, 31)
+        model.setDisplayOrder(.reviewOrder, 12)
+        await model.waitForCompletion()
+        model.beginNewPreset()
+        model.presetName = " \n "
+        #expect(!model.canCreatePreset && !model.canSave)
+        model.createPreset()
+        model.presetName = "  Default  "
+        model.createPreset(); model.createPreset()
+        // Nothing can switch or save while the canonical Add is in flight.
+        model.selectPreset(2); model.save(); model.setValue(.newPerDay, 55)
+        await model.waitForCompletion()
+        #expect(owner.navigation.sheet == nil && !model.namingPreset && owner.deckOptionsAllowed)
+        #expect(model.selectedPreset == -1 && model.selected?.name == "Default1894701600")
+        #expect(model.selectedUseCount == 0 && model.value(.newPerDay) == 20)
+        #expect(model.selected?.displayOrder[.reviewOrder] == 0)
+        model.setDisplayOrder(.reviewOrder, 6)
+        model.selectPreset(1)
+        #expect(model.value(.newPerDay) == 31 && model.selected?.displayOrder[.reviewOrder] == 12)
+        #expect(model.selectedUseCount == 6)
+        model.selectPreset(-1)
+        #expect(model.selectedUseCount == 0 && model.selected?.displayOrder[.reviewOrder] == 6)
+        model.save(); await model.waitForCompletion()
+        #expect(core.session?.calls == ["set newPerDay 1 31.0", "order reviewOrder 1 12", "add Default",
+            "order reviewOrder -1 6", "select 1", "select -1", "save"])
+        #expect(model.outcome == .saved)
+    }
+
+    @Test func cancellingNameEntryAndDiscardingAStagedPresetNeverSaves() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.beginNewPreset(); model.presetName = "Abandoned"; model.cancelNewPreset()
+        #expect(!model.hasChanges && !model.namingPreset && core.session?.calls.isEmpty == true)
+        model.beginNewPreset(); model.presetName = "Staged"; model.createPreset()
+        await model.waitForCompletion()
+        #expect(model.hasChanges && !model.requestLeave())
+        model.keepEditing()
+        #expect(model.selectedPreset < 0)
+        model.requestLeave(); model.discardChanges()
+        await model.waitForCompletion()
+        #expect(core.session?.calls == ["add Staged"] && model.outcome == .left)
+    }
+
+    @Test(arguments: [false, true])
+    func rejectedAddKeepsEarlierEditsForCancelOrRetry(retry: Bool) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.setValue(.newPerDay, 31); model.setDisplayOrder(.reviewOrder, 12)
+        await model.waitForCompletion()
+        let draft = model.presets
+        model.beginNewPreset(); model.presetName = "Temporary"
+        core.addFailure = .busy(runningOperation: "sync")
+        model.createPreset(); await model.waitForCompletion()
+        #expect(model.presetCreationFailed && model.canCreatePreset && model.namingPreset)
+        #expect(!model.changedElsewhere && model.presets == draft && model.selectedPreset == 1)
+        #expect(core.session?.snapshot == core.snapshot)
+        if retry {
+            model.presetName = "Retry"
+            model.createPreset(); model.createPreset()
+            await model.waitForCompletion()
+            #expect(!model.namingPreset && !model.presetCreationFailed && model.selectedPreset == -1)
+        } else {
+            model.cancelNewPreset()
+            #expect(model.selectedPreset == 1 && model.value(.newPerDay) == 31)
+        }
+        #expect(model.canSave)
+        model.save(); await model.waitForCompletion()
+        let saved = try #require(core.session?.savedPresets)
+        #expect(saved.first { $0.id == 1 }?.newPerDay == 31)
+        #expect(saved.first { $0.id == 1 }?.displayOrder[.reviewOrder] == 12)
+        #expect(saved.filter { $0.id < 0 }.count == (retry ? 1 : 0))
+        #expect(core.session?.savedSelection == (retry ? -1 : 1))
+        #expect(core.opens == 1 && model.outcome == .saved)
+        #expect(core.session?.calls.filter { $0.hasPrefix("add ") }.count == (retry ? 2 : 1))
+    }
+
+    @Test(arguments: [false, true])
+    func addedPresetSurvivesValidationReadFailureAndSaveRetriesWithoutDuplicate(numeric: Bool) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.setValue(.newPerDay, 31); model.setDisplayOrder(.reviewOrder, 12)
+        await model.waitForCompletion()
+        model.beginNewPreset(); model.presetName = "Default"
+        let gate = PageGate(); core.issuesGate = gate
+        core.issuesFailure = .cancelled
+        model.createPreset()
+        await gate.entered()
+        #expect(model.selectedPreset == -1 && model.selected?.name == "Default1894701600")
+        #expect(model.presets == core.session?.snapshot.presets && model.addingPreset)
+        model.createPreset()
+        gate.release(); await model.waitForCompletion()
+        #expect(model.presetValidationFailed && !model.changedElsewhere && !model.namingPreset)
+        #expect(model.canSave && !model.canSwitchPreset && model.selectedUseCount == 0)
+        model.createPreset(); model.beginNewPreset(); model.selectPreset(1)
+        #expect(model.selectedPreset == -1 && !model.namingPreset)
+        core.issuesFailure = .cancelled
+        if numeric { model.setValue(.newPerDay, 42) }
+        else { model.setDisplayOrder(.reviewOrder, 6) }
+        await model.waitForCompletion()
+        #expect(model.presetValidationFailed && !model.changedElsewhere && model.canSave && !model.canSwitchPreset)
+        let staged = try #require(model.selected)
+        #expect(staged.id == -1 && staged.name == "Default1894701600")
+        #expect(staged.newPerDay == (numeric ? 42 : 20) && staged.displayOrder[.reviewOrder] == (numeric ? 0 : 6))
+        core.saveResult = .failure(.sessionActive)
+        model.save(); await model.waitForCompletion()
+        #expect(model.phase == .editing && model.saveFailure == .busy && model.canSave)
+        #expect(core.session?.savedPresets == nil && model.presets.count == 3)
+        core.saveResult = .success(11)
+        model.save(); await model.waitForCompletion()
+        let saved = try #require(core.session?.savedPresets)
+        #expect(saved.filter { $0.id < 0 }.count == 1 && core.session?.savedSelection == -1)
+        #expect(saved.first { $0.id == -1 } == staged)
+        #expect(saved.first { $0.id == 1 }?.newPerDay == 31)
+        #expect(saved.first { $0.id == 1 }?.displayOrder[.reviewOrder] == 12)
+        #expect(core.session?.calls == ["set newPerDay 1 31.0", "order reviewOrder 1 12", "add Default",
+            numeric ? "set newPerDay -1 42.0" : "order reviewOrder -1 6", "save", "save"])
+        #expect(core.opens == 1 && model.outcome == .saved)
+    }
+
+    @Test(arguments: [false, true])
+    func validationErrorsAfterAddStillBlockWritesAndKeepTheStagedPreset(duringSave: Bool) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.setValue(.newPerDay, 31); await model.waitForCompletion()
+        model.beginNewPreset(); model.presetName = "Staged"
+        let invalid = BridgeError.deckOptionsInvalid([
+            .init(field: .newPerDay, preset: -1, code: .outOfRange, severity: .error, params: [:]),
+        ])
+        core.issuesFailure = duringSave ? .cancelled : invalid
+        model.createPreset(); await model.waitForCompletion()
+        if duringSave {
+            #expect(model.presetValidationFailed && model.canSave)
+            core.saveResult = .failure(invalid)
+            model.save(); await model.waitForCompletion()
+        }
+        #expect(!model.presetValidationFailed && !model.canSave && model.hasErrors)
+        #expect(model.selectedPreset == -1 && model.presets.first { $0.id == 1 }?.newPerDay == 31)
+        model.save(); await model.waitForCompletion()
+        #expect(core.session?.calls.filter { $0 == "save" }.count == (duringSave ? 1 : 0))
+        #expect(core.session?.savedPresets == nil && !model.changedElsewhere)
+        model.setValue(.newPerDay, 21); await model.waitForCompletion()
+        core.saveResult = .success(11)
+        model.save(); await model.waitForCompletion()
+        #expect(model.outcome == .saved && core.opens == 1)
+        #expect(core.session?.savedPresets?.filter { $0.id < 0 }.count == 1)
+        #expect(core.session?.calls.filter { $0 == "add Staged" }.count == 1)
+    }
+
+    @Test(arguments: [false, true])
+    func cachedErrorsAfterNumericValidationFailureLetSaveValidateTheStagedPreset(corrected: Bool) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.beginNewPreset(); model.presetName = "Staged"; model.createPreset()
+        await model.waitForCompletion()
+        let staged = try #require(model.selected)
+        #expect(staged.id == -1 && staged.name == "Staged")
+        model.fieldText[.newPerDay] = "10000"; model.commit(.newPerDay)
+        await model.waitForCompletion()
+        #expect(model.issues(for: .newPerDay).map(\.code) == [.outOfRange])
+        #expect(!model.canSave && !model.presetValidationFailed)
+        let cached = model.issues
+        core.issuesFailure = .cancelled
+        model.fieldText[.newPerDay] = corrected ? "21" : "10001"; model.commit(.newPerDay)
+        await model.waitForCompletion()
+        #expect(model.value(.newPerDay) == (corrected ? 21 : 10001))
+        #expect(model.issues == cached && model.presetValidationFailed && model.canSave)
+        #expect(!model.canSwitchPreset && !model.changedElsewhere)
+        if !corrected {
+            core.saveResult = .failure(.deckOptionsInvalid([
+                .init(field: .newPerDay, preset: staged.id, code: .outOfRange, severity: .error, params: [:]),
+            ]))
+        }
+        model.save(); await model.waitForCompletion()
+        if !corrected {
+            #expect(model.phase == .editing && model.outcome == nil && model.saveFailure == nil)
+            #expect(model.hasErrors && !model.presetValidationFailed && !model.canSave)
+            #expect(model.issues(for: .newPerDay).map(\.code) == [.outOfRange])
+            #expect(core.session?.savedPresets == nil && model.selectedPreset == staged.id && model.presets.count == 3)
+            model.save(); await model.waitForCompletion()
+            #expect(core.session?.calls.filter { $0 == "save" }.count == 1)
+            model.fieldText[.newPerDay] = "21"; model.commit(.newPerDay)
+            await model.waitForCompletion()
+            #expect(!model.hasErrors && model.canSave)
+            core.saveResult = .success(11)
+            model.save(); await model.waitForCompletion()
+        }
+        let saved = try #require(core.session?.savedPresets)
+        var expected = staged; expected.newPerDay = 21
+        #expect(saved.first { $0.id == staged.id } == expected)
+        #expect(saved.count == 3 && saved.filter { $0.id < 0 }.count == 1 && core.session?.savedSelection == staged.id)
+        #expect(core.session?.calls.filter { $0 == "add Staged" }.count == 1)
+        #expect(core.session?.calls.filter { $0 == "save" }.count == (corrected ? 1 : 2))
+        #expect(core.opens == 1 && model.phase == .closed && model.outcome == .saved)
+    }
+
+    @Test(arguments: [false, true])
+    func presetFailuresKeepStaleDraftProtection(afterAdd: Bool) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.setValue(.newPerDay, 31); await model.waitForCompletion()
+        model.beginNewPreset(); model.presetName = "Stale"
+        let failure = BridgeError.stale(table: .deckConfig, key: "1")
+        if afterAdd { core.issuesFailure = failure } else { core.addFailure = failure }
+        model.createPreset(); await model.waitForCompletion()
+        #expect(model.changedElsewhere && !model.canCreatePreset)
+        let session = try #require(core.session)
+        model.cancelNewPreset()
+        model.save(); await model.waitForCompletion()
+        #expect(core.opens == 2 && model.saveFailure == .failed && !model.hasChanges)
+        #expect(session.savedPresets == nil && !session.calls.contains("save"))
+    }
+
+    @Test(arguments: [false, true])
+    func presetFailuresEndAStaleGeneration(afterAdd: Bool) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.beginNewPreset(); model.presetName = "Stale"
+        let failure = BridgeError.staleGeneration(planned: 11, current: 12)
+        if afterAdd { core.issuesFailure = failure } else { core.addFailure = failure }
+        model.createPreset(); await model.waitForCompletion()
+        #expect(model.outcome == .ended && model.phase == .closed && model.presets.isEmpty)
+        #expect(!model.namingPreset && !model.addingPreset && !model.presetValidationFailed)
+    }
+
+    @Test(arguments: ["31", "10000"])
+    func newPresetWaitsForTypedNumericValidationOnTheFirstClick(text: String) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        let gate = PageGate(); core.issuesGate = gate
+        model.fieldText[.newPerDay] = text
+        model.beginNewPreset()
+        await gate.entered()
+        #expect(model.selectingPreset && !model.namingPreset && !model.canSwitchPreset)
+        model.createPreset()
+        gate.release(); await model.waitForCompletion()
+        #expect(!model.selectingPreset && model.namingPreset == (text == "31"))
+        #expect(model.value(.newPerDay) == Double(text) && model.selectedPreset == 1)
+        #expect(core.session?.calls == ["set newPerDay 1 \(Double(text)!)"])
+        model.cancelNewPreset()
+    }
+
+    @Test(arguments: [false, true])
+    func pendingNewPresetDoesNotOpenAfterNewerInputOrGeneration(generationEnds: Bool) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        let gate = PageGate(); core.issuesGate = gate
+        model.fieldText[.newPerDay] = "31"; model.beginNewPreset()
+        await gate.entered()
+        if generationEnds { owner.receiveLifecycle(.ready(generation: 12)) }
+        else { model.fieldText[.newPerDay] = "32" }
+        gate.release(); await model.waitForCompletion()
+        #expect(!model.namingPreset && !model.selectingPreset)
+        if generationEnds { #expect(model.phase == .closed && model.outcome == .ended) }
+        else { #expect(model.fieldText[.newPerDay] == "32" && model.phase == .editing) }
+    }
+
+    @Test func anAddInFlightCannotReplaceANewerGeneration() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        let gate = PageGate(); core.addGate = gate
+        model.beginNewPreset(); model.presetName = "Held"; model.createPreset()
+        await gate.entered()
+        #expect(model.addingPreset && !model.canSave && !model.canSwitchPreset)
+        #expect(owner.navigation.sheet == .newDeckOptionsPreset && !owner.deckOptionsAllowed)
+        model.cancelNewPreset(); model.reload(); model.save()
+        #expect(model.namingPreset && core.opens == 1)
+        owner.receiveLifecycle(.ready(generation: 12))
+        #expect(owner.navigation.sheet == nil && !model.namingPreset)
+        gate.release(); await model.waitForCompletion()
+        #expect(model.phase == .closed && model.presets.isEmpty && model.outcome == .ended)
+        #expect(core.session?.calls == ["add Held"])
+    }
+
     // MARK: Fixtures
 
     private static func changes(decks: [Int64]) -> ChangeSet {
@@ -353,15 +766,35 @@ import Testing
         owner.receiveLifecycle(.ready(generation: 11)); await owner.loadCounts()
         let snapshot = DeckOptionsPageSnapshot(deckID: 1, deckName: "Parent", assignedPreset: 1, openingPreset: 1,
             presets: [
-                .init(id: 1, name: "Default", storedUseCount: stored[0], newPerDay: 20, reviewsPerDay: 200, desiredRetention: retention),
-                .init(id: 2, name: "Solo", storedUseCount: stored[1], newPerDay: 10, reviewsPerDay: 100, desiredRetention: 0.85),
+                .init(id: 1, name: "Default", storedUseCount: stored[0], newPerDay: 20, reviewsPerDay: 200, desiredRetention: retention,
+                    displayOrder: [.newGatherPriority: 3, .newSortOrder: 2, .newMix: 1, .interdayLearningMix: 2, .reviewOrder: 11]),
+                .init(id: 2, name: "Solo", storedUseCount: stored[1], newPerDay: 10, reviewsPerDay: 100, desiredRetention: 0.85,
+                    displayOrder: [.newGatherPriority: 4, .newSortOrder: 1, .newMix: 2, .interdayLearningMix: 1, .reviewOrder: 6]),
             ],
             ownLimits: ownValues, ownRetention: ownValues,
-            ranges: [.newPerDay: 0...9999, .reviewsPerDay: 0...9999, .desiredRetention: 0.7...0.99])
+            ranges: [.newPerDay: 0...9999, .reviewsPerDay: 0...9999, .desiredRetention: 0.7...0.99],
+            displayOrderChoices: pageOrderChoices)
         let core = FakePageCore(snapshot: snapshot)
         owner.deckOptions.locale = Locale(identifier: "en_US")
         owner.deckOptions.openSession = { [core] _ in try core.open() }
         return (owner, core)
+    }
+}
+
+/// Available history in both directions, recording any write admitted by the modal guard.
+private actor PresetAdmissionUndo: UndoService {
+    private(set) var writes = 0
+    func peekUndo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus {
+        .available(step: ReviewStepInfo(id: 1, name: "Deck Options", kind: .other, session: nil, longWrite: nil))
+    }
+    func peekRedo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus { try peekUndo(scope: scope) }
+    func startUndo(scope: ReviewUndoScope) throws(BridgeError) -> CoreUndoStart {
+        writes += 1
+        throw .cancelled
+    }
+    func startRedo(scope: ReviewUndoScope) throws(BridgeError) -> CoreUndoStart {
+        writes += 1
+        throw .cancelled
     }
 }
 
@@ -372,6 +805,10 @@ final class FakePageCore {
     var openFailure: BridgeError?
     var saveResult: Result<UInt64, BridgeError> = .success(11)
     var saveGate: PageGate?
+    var addGate: PageGate?
+    var issuesGate: PageGate?
+    var addFailure: BridgeError?
+    var issuesFailure: BridgeError?
     private(set) var session: FakePageSession?
     init(snapshot: DeckOptionsPageSnapshot) { self.snapshot = snapshot }
     func open() throws -> FakePageSession {
@@ -386,9 +823,11 @@ final class FakePageCore {
 /// A scripted core draft: it records every edit and validates as O4 does for the three rows.
 @MainActor
 final class FakePageSession: DeckOptionsPageSession {
-    let snapshot: DeckOptionsPageSnapshot
+    private(set) var snapshot: DeckOptionsPageSnapshot
     private unowned let core: FakePageCore
     private(set) var calls: [String] = []
+    private(set) var savedPresets: [DeckOptionsPagePreset]?
+    private(set) var savedSelection: Int64?
     private var values: [Int64: DeckOptionsPagePreset]
     private var selected: Int64
     init(core: FakePageCore) {
@@ -400,7 +839,29 @@ final class FakePageSession: DeckOptionsPageSession {
     func set(_ row: DeckOptionsPageRow, preset: Int64, value: Double) async throws {
         calls.append("set \(row.rawValue) \(preset) \(value)"); values[preset]?[row] = value
     }
+    func setDisplayOrder(_ row: DeckOptionsDisplayOrder, preset: Int64, value: Int32) async throws {
+        calls.append("order \(row.rawValue) \(preset) \(value)")
+        values[preset]?.displayOrder[row] = value
+    }
+    func addPreset(name: String) async throws -> DeckOptionsPageSnapshot {
+        calls.append("add \(name)")
+        if let gate = core.addGate { await gate.hold() }
+        if let failure = core.addFailure { core.addFailure = nil; throw failure }
+        let id = min(values.keys.min() ?? 0, 0) - 1
+        let canonical = values.values.contains { $0.name == name } ? name + "1894701600" : name
+        values[id] = DeckOptionsPagePreset(id: id, name: canonical, storedUseCount: 0,
+            newPerDay: 20, reviewsPerDay: 200, desiredRetention: 0.9,
+            displayOrder: Dictionary(uniqueKeysWithValues: DeckOptionsDisplayOrder.allCases.map { ($0, Int32(0)) }))
+        selected = id
+        snapshot = DeckOptionsPageSnapshot(deckID: snapshot.deckID, deckName: snapshot.deckName,
+            assignedPreset: snapshot.assignedPreset, openingPreset: id,
+            presets: values.values.sorted { $0.name < $1.name }, ownLimits: snapshot.ownLimits,
+            ownRetention: snapshot.ownRetention, ranges: snapshot.ranges, displayOrderChoices: snapshot.displayOrderChoices)
+        return snapshot
+    }
     func issues() async throws -> [DeckOptionsPageIssue] {
+        if let gate = core.issuesGate { core.issuesGate = nil; await gate.hold() }
+        if let failure = core.issuesFailure { core.issuesFailure = nil; throw failure }
         var issues: [DeckOptionsPageIssue] = []
         for preset in values.values.sorted(by: { $0.id < $1.id }) {
             for row in DeckOptionsPageRow.allCases {
@@ -428,7 +889,9 @@ final class FakePageSession: DeckOptionsPageSession {
     func save() async throws -> UInt64 {
         calls.append("save")
         if let gate = core.saveGate { await gate.hold() }
-        return try core.saveResult.get()
+        let generation = try core.saveResult.get()
+        savedPresets = values.values.sorted { $0.id < $1.id }; savedSelection = selected
+        return generation
     }
     func cancel() async {}
 }
@@ -452,3 +915,9 @@ final class PageGate {
     }
     func release() { continuation?.resume(); continuation = nil }
 }
+
+private let pageOrderChoices: [DeckOptionsDisplayOrder: [Int32]] = [
+    .newGatherPriority: [0, 5, 1, 2, 3, 4], .newSortOrder: [0, 1, 2, 3, 4],
+    .newMix: [0, 1, 2], .interdayLearningMix: [0, 1, 2],
+    .reviewOrder: [0, 1, 2, 3, 4, 6, 5, 7, 11, 12, 8, 9, 10],
+]

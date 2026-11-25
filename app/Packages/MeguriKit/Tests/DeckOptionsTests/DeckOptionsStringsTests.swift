@@ -38,6 +38,42 @@ import Testing
         #expect(DeckOptionsStrings.path("Languages::Japanese::Kanji") == "Languages › Japanese › Kanji")
     }
 
+    @Test func displayOrderLabelsAndChoiceMappingMatchK3AndK5() {
+        let lists: [(DeckOptionsDisplayOrder, [Int32], [String])] = [
+            (.newGatherPriority, [0, 5, 1, 2, 3, 4],
+             ["Deck", "Deck, then random notes", "Ascending position", "Descending position", "Random notes", "Random cards"]),
+            (.newSortOrder, [0, 1, 2, 3, 4],
+             ["Card type, then order gathered", "Order gathered", "Card type, then random", "Random note, then card type", "Random"]),
+            (.newMix, [0, 1, 2], ["Mix with reviews", "Show after reviews", "Show before reviews"]),
+            (.interdayLearningMix, [0, 1, 2], ["Mix with reviews", "Show after reviews", "Show before reviews"]),
+            (.reviewOrder, [0, 1, 2, 3, 4, 6, 5, 7, 11, 12, 8, 9, 10],
+             ["Due date, then random", "Due date, then deck", "Deck, then due date", "Ascending intervals", "Descending intervals",
+              "Easy cards first", "Difficult cards first", "Ascending retrievability", "Descending retrievability",
+              "Relative overdueness", "Random", "Order added", "Latest added first"]),
+        ]
+        #expect(lists.map { $0.0 } == DeckOptionsDisplayOrder.allCases)
+        for (row, values, expected) in lists {
+            let labels = values.map { value in
+                DeckOptionsStrings.bundle.localizedString(forKey: DeckOptionsStrings.choiceCatalogKey(row, value: value),
+                    value: "missing", table: nil)
+            }
+            #expect(labels == expected)
+        }
+        let expected = [
+            "deckOptions.section.displayOrder": "Display Order", "deckOptions.disclosure.advanced": "Advanced",
+            "deckOptions.option.newGatherPriority": "New card gather order", "deckOptions.option.newSortOrder": "New card sort order",
+            "deckOptions.option.newMix": "New/review order", "deckOptions.option.interdayLearningMix": "Interday learning/review order",
+            "deckOptions.option.reviewOrder": "Review sort order", "deckOptions.preset.new": "New Preset…",
+            "deckOptions.preset.newTitle": "New Preset", "deckOptions.preset.name": "Name", "deckOptions.preset.create": "Create",
+            "deckOptions.preset.createFailed": "The preset could not be prepared. Cancel to return to your options.",
+            "deckOptions.preset.validationFailed": "The preset was prepared, but its options could not be checked. Save to try again.",
+            "deckOptions.displayOrder.footer": "Gathering chooses which new cards enter the daily limit. Sorting sets the order in which they appear.",
+        ]
+        for (key, text) in expected {
+            #expect(DeckOptionsStrings.bundle.localizedString(forKey: key, value: "missing", table: nil) == text)
+        }
+    }
+
     @Test func issueTextsNameTheRangeInTheRowsUnit() {
         let limit = DeckOptionsPageIssue(row: .newPerDay, preset: 1, code: .outOfRange, severity: .error)
         #expect(DeckOptionsStrings.issue(limit, range: 0...9999, locale: english) == "Enter a number from 0 to 9,999.")

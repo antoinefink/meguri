@@ -175,4 +175,19 @@ The page of `sched/deck-options` O17 (`docs/design/native-interface-contract.md`
 | `deckOptions.v1.save` | Save | the confirmation button |
 
 - The preset menu's items keep K6's `deckOptions.preset.usedBy`.
+- Extended 2026-11-25 at the user's request (O17, N20.9): Advanced → Display Order uses K2's section name and the five K3 option names with K5's exact choice labels and order. The disclosure and supporting text are Meguri's localized catalog entries:
+
+| Key | English |
+|---|---|
+| `deckOptions.disclosure.advanced` | Advanced |
+| `deckOptions.displayOrder.footer` | Gathering chooses which new cards enter the daily limit. Sorting sets the order in which they appear. |
+| `deckOptions.preset.new` | New Preset… |
+| `deckOptions.preset.newTitle` | New Preset |
+| `deckOptions.preset.name` | Name |
+| `deckOptions.preset.create` | Create |
+| `deckOptions.preset.newFooter` | New presets start with the built-in defaults. When you save, this deck uses the selected preset. |
+| `deckOptions.preset.createFailed` | The preset could not be prepared. Cancel to return to your options. |
+| `deckOptions.preset.validationFailed` | The preset was prepared, but its options could not be checked. Save to try again. |
+
+- Cancel reuses `deckOptions.cancel`. These entries follow the catalog's current English localization and fallback support; no translated language is introduced by this extension.
 - The Discard prompt uses the editor's "Discard changes?", Discard and Keep Editing (`editor/editing-strings`).

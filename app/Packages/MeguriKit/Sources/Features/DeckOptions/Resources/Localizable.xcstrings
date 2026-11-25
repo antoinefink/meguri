@@ -41,6 +41,116 @@
         }
       }
     },
+    "deckOptions.disclosure.advanced": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced"
+          }
+        }
+      }
+    },
+    "deckOptions.disclosure.collapsed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapsed"
+          }
+        }
+      }
+    },
+    "deckOptions.disclosure.expanded": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expanded"
+          }
+        }
+      }
+    },
+    "deckOptions.displayOrder.footer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gathering chooses which new cards enter the daily limit. Sorting sets the order in which they appear."
+          }
+        }
+      }
+    },
+    "deckOptions.displayOrder.unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unavailable choice"
+          }
+        }
+      }
+    },
+    "deckOptions.gather.ascendingPosition": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ascending position"
+          }
+        }
+      }
+    },
+    "deckOptions.gather.deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck"
+          }
+        }
+      }
+    },
+    "deckOptions.gather.deckThenRandomNotes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck, then random notes"
+          }
+        }
+      }
+    },
+    "deckOptions.gather.descendingPosition": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descending position"
+          }
+        }
+      }
+    },
+    "deckOptions.gather.randomCards": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Random cards"
+          }
+        }
+      }
+    },
+    "deckOptions.gather.randomNotes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Random notes"
+          }
+        }
+      }
+    },
     "deckOptions.issue.notWhole": {
       "localizations": {
         "en": {
@@ -121,6 +231,206 @@
         }
       }
     },
+    "deckOptions.mix.afterReviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show after reviews"
+          }
+        }
+      }
+    },
+    "deckOptions.mix.beforeReviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show before reviews"
+          }
+        }
+      }
+    },
+    "deckOptions.mix.mixWithReviews": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mix with reviews"
+          }
+        }
+      }
+    },
+    "deckOptions.newSort.cardTypeThenGathered": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card type, then order gathered"
+          }
+        }
+      }
+    },
+    "deckOptions.newSort.cardTypeThenRandom": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card type, then random"
+          }
+        }
+      }
+    },
+    "deckOptions.newSort.gathered": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Order gathered"
+          }
+        }
+      }
+    },
+    "deckOptions.newSort.random": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Random"
+          }
+        }
+      }
+    },
+    "deckOptions.newSort.randomNoteThenCardType": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Random note, then card type"
+          }
+        }
+      }
+    },
+    "deckOptions.option.interdayLearningMix": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interday learning/review order"
+          }
+        }
+      }
+    },
+    "deckOptions.option.newGatherPriority": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New card gather order"
+          }
+        }
+      }
+    },
+    "deckOptions.option.newMix": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New/review order"
+          }
+        }
+      }
+    },
+    "deckOptions.option.newSortOrder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New card sort order"
+          }
+        }
+      }
+    },
+    "deckOptions.option.reviewOrder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review sort order"
+          }
+        }
+      }
+    },
+    "deckOptions.preset.create": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create"
+          }
+        }
+      }
+    },
+    "deckOptions.preset.createFailed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The preset could not be prepared. Cancel to return to your options."
+          }
+        }
+      }
+    },
+    "deckOptions.preset.validationFailed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The preset was prepared, but its options could not be checked. Save to try again."
+          }
+        }
+      }
+    },
+    "deckOptions.preset.name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name"
+          }
+        }
+      }
+    },
+    "deckOptions.preset.new": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Preset…"
+          }
+        }
+      }
+    },
+    "deckOptions.preset.newFooter": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New presets start with the built-in defaults. When you save, this deck uses the selected preset."
+          }
+        }
+      }
+    },
+    "deckOptions.preset.newTitle": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Preset"
+          }
+        }
+      }
+    },
     "deckOptions.preset.usedBy": {
       "localizations": {
         "en": {
@@ -149,6 +459,136 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.added": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Order added"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.ascendingIntervals": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ascending intervals"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.ascendingRetrievability": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ascending retrievability"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.deckThenDue": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck, then due date"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.descendingIntervals": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descending intervals"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.descendingRetrievability": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descending retrievability"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.difficultFirst": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Difficult cards first"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.dueThenDeck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due date, then deck"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.dueThenRandom": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Due date, then random"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.easyFirst": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Easy cards first"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.latestAddedFirst": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Latest added first"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.random": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Random"
+          }
+        }
+      }
+    },
+    "deckOptions.reviewSort.relativeOverdueness": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relative overdueness"
           }
         }
       }
@@ -189,6 +629,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Couldn’t Save Deck Options"
+          }
+        }
+      }
+    },
+    "deckOptions.section.displayOrder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Display Order"
           }
         }
       }

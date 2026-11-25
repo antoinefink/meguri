@@ -79,3 +79,88 @@ extension EventTests {
         }
     }
 }
+
+extension EventTests {
+    @Test func deckOptionsAddUsesDefaultsCanonicalNamesAndOneDurableAssignment() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let collection = root.appending(path: "collection"), backups = root.appending(path: "backups")
+        try FileManager.default.createDirectory(at: collection, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let location = CoreBridge.CollectionLocation(collectionDirectory: collection, backupsDirectory: backups,
+            appGroupSnapshot: root.appending(path: "widget"), manualTransferDirectory: root.appending(path: "transfers"))
+        try await MaintenanceLane.shared.bootstrapCollection(location)
+        let service = CoreCollectionService(clock: OptionsClock())
+        do {
+            #expect(await (try await service.startOpen(location, randomSeed: 7)).outcome() == .succeeded)
+            let options = CoreDeckOptionsService()
+            let initial = try await (try await options.startRead(deck: 1)).value().snapshot()
+            // Editing Default before Add proves that Add uses built-in defaults, not a clone.
+            let edited = try await (try await options.startRead(deck: 1)).value()
+            _ = try await edited.edit(.set(preset: 1, field: .newPerDay, value: .number(37)))
+            _ = try await edited.edit(.set(preset: nil, field: .newLimit, value: .number(50)))
+            _ = try await edited.edit(.set(preset: nil, field: .deckDesiredRetention, value: .number(0.85)))
+            _ = try await (try await edited.startSave()).value()
+            // Dropping an editor, including one with a staged preset, writes nothing.
+            do {
+                let cancelled = try await (try await options.startRead(deck: 1)).value()
+                let staged = try await cancelled.edit(.add(name: "Discarded"))
+                #expect(staged.selectedPreset < 0 && staged.presets.first { $0.key < 0 }?.useCount == 0)
+            }
+            let unchanged = try await (try await options.startRead(deck: 1)).value().snapshot()
+            #expect(unchanged.presets.count == 1 && unchanged.assignedPreset == 1)
+            let editor = try await (try await options.startRead(deck: 1)).value()
+            _ = try await editor.edit(.keep(fields: DeckOptionsEdit.deckValues))
+            let staged = try await editor.edit(.add(name: "  Default  "))
+            let key = staged.selectedPreset
+            let added = try #require(staged.presets.first { $0.key == key })
+            #expect(key < 0 && added.name == "Default1894701600" && added.useCount == 0)
+            #expect(added.values[.newPerDay] == .number(20))
+            let order: [(CoreBridge.OptionField, [Int32])] = [
+                (.newCardGatherPriority, [0, 5, 1, 2, 3, 4]), (.newCardSortOrder, [0, 1, 2, 3, 4]),
+                (.newMix, [0, 1, 2]), (.interdayLearningMix, [0, 1, 2]),
+                (.reviewOrder, [0, 1, 2, 3, 4, 6, 5, 7, 11, 12, 8, 9, 10]),
+            ]
+            for (field, choices) in order {
+                #expect(staged.metadata.first { $0.field == field }?.choices == choices)
+                for choice in choices {
+                    let changed = try await editor.edit(.set(preset: key, field: field, value: .number(Double(choice))))
+                    #expect(changed.presets.first { $0.key == key }?.values[field] == .number(Double(choice)))
+                    #expect(try await editor.validate().allSatisfy { $0.severity != .error })
+                }
+            }
+            _ = try await editor.edit(.select(preset: 1))
+            let switched = try await editor.edit(.select(preset: key))
+            #expect(switched.presets.first { $0.key == key }?.useCount == 0)
+            let mutation = try await (try await editor.startSave()).value()
+            #expect(mutation.preset > 0 && mutation.summary.undoName == "Deck Options")
+            #expect(mutation.summary.changes.decks.map(\.id) == [1])
+            let savedID = mutation.preset
+            _ = try await (try await CoreUndoService().startUndo(scope: .global)).value()
+            let undone = try await (try await options.startRead(deck: 1)).value().snapshot()
+            #expect(undone.assignedPreset == 1 && undone.presets.count == 1 && undone.deckValues == unchanged.deckValues)
+            _ = try await (try await CoreUndoService().startRedo(scope: .global)).value()
+            try await service.close()
+            #expect(await (try await service.startOpen(location, randomSeed: 7)).outcome() == .succeeded)
+            let after = try await (try await options.startRead(deck: 1)).value().snapshot()
+            #expect(after.assignedPreset == savedID && after.selectedPreset == savedID && after.presets.count == 2)
+            let persisted = try #require(after.presets.first { $0.key == savedID })
+            #expect(persisted.name == added.name && persisted.useCount == 1)
+            #expect(after.presets.first { $0.key == 1 }?.values[.newPerDay] == .number(37))
+            for (field, choices) in order {
+                let last = try #require(choices.last)
+                #expect(persisted.values[field] == .number(Double(last)))
+            }
+            // All unrelated defaults and globals survived the same transaction.
+            let changedFields = Set(order.map { $0.0 })
+            for (field, value) in initial.presets[0].values where !changedFields.contains(field) {
+                #expect(persisted.values[field] == value)
+            }
+            #expect(after.globals == initial.globals && after.deckValues == unchanged.deckValues)
+            try await service.close()
+        } catch {
+            try? await service.close()
+            throw error
+        }
+    }
+}

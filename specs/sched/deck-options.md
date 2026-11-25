@@ -478,6 +478,8 @@ Added 2026-11-10. Anki's FSRS screen hides the SM-2 options that R752 hides. It 
 
 Added 2026-11-20 (`docs/design/native-interface-contract.md` N20.9, decided by Antoine, option 6B). The first version of the deck options screen shows a part of O3. The core of this file is unchanged except for O17.3's input.
 
+Extended 2026-11-25 at the user's request: the native page adds Display Order under a collapsed Advanced disclosure and Add from built-in defaults beside Preset. Other Advanced sections remain deferred.
+
 ### O17.1 What it shows
 
 | Row | Option (O3) | Editor | Checks (O4) |
@@ -486,10 +488,15 @@ Added 2026-11-20 (`docs/design/native-interface-contract.md` N20.9, decided by A
 | New Cards per Day | `new_per_day` of the selected preset | integer 0 to 9999 | `out_of_range`, `not_whole` |
 | Maximum Reviews per Day | `reviews_per_day` of the selected preset | integer 0 to 9999 | `out_of_range`, `not_whole`, `reviews_below_ten_times_new` |
 | Desired Retention | `desired_retention` of the selected preset | 70 % to 99 %, whole percent, stepper 1 % (O3) | `out_of_range`, `retention_low`, `retention_high` |
+| Advanced → Display Order | the five Display Order preset fields of O3, in that order | native menu pickers, values and ordered choices from O2 item 5; exact labels K3/K5 | `invalid_choice` |
+
+- Advanced sits beneath Memory and starts collapsed each time the page opens. Expanding it changes no draft value. A short localized footer distinguishes gathering (which new cards enter the daily limit) from sorting (the order they appear). Every picker shows the selected preset's actual draft value.
 
 - The rows edit the selected preset's values: there are no limit tabs, so O14 does not apply. An emptied field or text that is not a number changes nothing, and the field shows its value again when committed. A committed value outside the range is kept in the draft and gives O4's error, which disables Save.
 - The warnings compare the values the rows show (O14.6): `reviews_below_ten_times_new` the two limit rows, the retention warnings the Desired Retention row. The deck's own values (O2 item 3) play no part in them.
-- Not shown, and so not changed: every other option of O3, the hidden options, the deck values, the global options. No Add, Clone, Rename, Remove or Save to All Subdecks (O6.3 to O6.5): the draft never stages or removes a preset, and "Save to all subdecks" is off.
+- Not shown, and so not changed: every other option of O3, the hidden options, the deck values, the global options. No Clone, Rename, Remove or Save to All Subdecks; "Save to all subdecks" is off.
+- **New Preset…**, beside the picker (stacking at compact width as needed), prompts for a name in a native form. Trim surrounding whitespace; a blank name cannot be submitted. The existing core draft Add applies O6.3/P7's canonical naming, stages built-in defaults and selects the returned preset. Its use count is 0 until saved (O6.3). Save creates all staged presets and assigns the currently selected preset to this deck. Cancel name entry changes nothing; discarding the page creates nothing. No UI naming or scheduler rules replace the core's.
+- Edits, selections and Add are serialized. While Add is in flight, further edits, selection, submission and Save are disabled. Save waits for pending edits; obsolete completions cannot replace a newer draft. Switching between existing and staged presets keeps every preset's draft values and O6.1/O6.3's use counts.
 - During a review the screen is not offered in this version (N20.9); O15.1's review rows apply once it is.
 - The footer count is O6.1's use count of the selected preset. The facts for the "own value" footers of N20.9 are O2 item 3: a This-deck limit set, a Today-only limit active, or the deck's own desired retention set.
 
@@ -499,7 +506,7 @@ Selecting another preset makes it the target preset (O6.1); the rows then show i
 
 ### O17.3 The save
 
-- O7's save, with: the draft's presets (only those whose shown values changed differ from the snapshot), no staged presets, no removals, "save to all subdecks" off, the three global options as the snapshot read them (step 7 writes none), and the five deck values as **keep**.
+- O7's save, with: the draft's presets (including staged presets and edits to previously selected presets), no removals, "save to all subdecks" off, the three global options as the snapshot read them (step 7 writes none), and the five deck values as **keep**.
 - **Keep** is a new value of O7's deck-value input, used only by this screen: O9 writes nothing for that field and the deck record keeps it byte for byte. O9's "value given" and "value none" would rewrite a Today-only limit's day (or remove a future one), which the page does not show. The target deck is then written only when its `config_id` changes.
 - A preset that the save writes keeps every field the page does not show as read, with the read bounds applied (O3's hidden-options rule, as Anki writes it): a field only another client could have stored out of bounds is written as its V3 replacement. Every preset the save does not write keeps its stored bytes.
 - A change to a preset applies to every deck that uses it: the save writes the preset row, not the decks.
@@ -514,5 +521,9 @@ Selecting another preset makes it the target preset (O6.1); the rows then show i
 | Switch to a preset with another insertion order and save | `config_id` written, no preset row written, new cards re-sorted (O8). |
 | Edit a shared preset used by 3 decks; save | One preset row written; all 3 decks use the new value; the footer read "Used by 3 decks. Changes apply to all of them." |
 | 10000 in New Cards per Day; 65 % in Desired Retention; an empty field | `out_of_range` under the row and Save disabled; the empty field shows its value again. |
-| Untouched page; back | Nothing written, no step, no prompt. |
+| Add with whitespace-only name; cancel name entry | No staged preset; no write. |
+| Add a name equal to an existing name; switch existing/staged; Save | Core P7 name, built-in defaults; draft edits and counts preserved; creation and target assignment in one undoable save. |
+| Add, edit Display Order, then discard; reopen | No preset or edits persisted. |
+| Change each Display Order choice, including gather 5 and review 6, 5, 11, 12; save and reopen | Exact values round-trip; labels and order are K3/K5; all other preset, deck and global values preserved. |
+| Untouched page; expand/collapse Advanced; back | Nothing written, no step, no prompt. |
 | A change, then Cancel (it replaces back) or another sidebar row | "Discard changes?"; Keep Editing keeps the draft; Discard leaves with nothing written. |
