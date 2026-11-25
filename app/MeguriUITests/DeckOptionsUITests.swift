@@ -97,6 +97,91 @@ final class DeckOptionsUITests: XCTestCase {
         }
     }
 
+    func testExpandedDisplayOrderAndNewPresetThroughNativeDeckMenu() throws {
+        let (app, bundle) = try launch()
+        defer { app.terminate() }
+        try app.bringToFront(bundleIdentifier: bundle)
+        let deckMenu = app.menuBars.menuBarItems["Deck"]
+        deckMenu.click()
+        let options = deckMenu.menuItems["Deck Options…"]
+        XCTAssertTrue(options.waitForExistence(timeout: 10) && options.isEnabled)
+        options.click()
+        let save = element(app, "deckOptions.options.save")
+        XCTAssertTrue(save.waitForExistence(timeout: 20))
+        let gather = element(app, "deckOptions.options.order.newGatherPriority")
+        XCTAssertFalse(gather.exists, "Advanced is collapsed whenever the page opens")
+        try app.bringToFront(bundleIdentifier: bundle)
+        let advanced = app.disclosureTriangles["Advanced"].firstMatch
+        XCTAssertTrue(advanced.waitForExistence(timeout: 10))
+        advanced.click()
+        XCTAssertTrue(gather.waitForExistence(timeout: 10))
+        for row in ["newSortOrder", "newMix", "interdayLearningMix", "reviewOrder"] {
+            XCTAssertTrue(element(app, "deckOptions.options.order." + row).exists)
+        }
+        XCTAssertFalse(save.isEnabled, "Expanding the disclosure never changes the draft")
+        capture(app, "deck-options-expanded")
+        // This is the native menu's spec order, including the nonsequential value 5.
+        gather.clickOrTap()
+        let gatherLabels = ["Deck", "Deck, then random notes", "Ascending position", "Descending position", "Random notes", "Random cards"]
+        let menu = app.menus.firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        let titles = menu.menuItems.allElementsBoundByIndex.map(\.title).filter { !$0.isEmpty }
+        XCTAssertEqual(titles, gatherLabels)
+        app.menuItems["Deck, then random notes"].firstMatch.click()
+        XCTAssertTrue(waitForEnabled(save))
+        element(app, "deckOptions.options.newPreset").clickOrTap()
+        let name = element(app, "deckOptions.newPreset.name")
+        let create = element(app, "deckOptions.newPreset.create")
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        XCTAssertFalse(create.isEnabled)
+        name.clickOrTap(); app.typeText("   ")
+        XCTAssertFalse(create.isEnabled, "Whitespace is not a name")
+        app.typeKey("a", modifierFlags: .command); app.typeText("  Native Options  ")
+        XCTAssertTrue(waitForEnabled(create))
+        capture(app, "deck-options-new-preset-name")
+        create.clickOrTap()
+        XCTAssertTrue(name.waitForNonExistence(timeout: 20))
+        let preset = element(app, "deckOptions.options.presetPicker")
+        XCTAssertTrue(preset.exists)
+        // Add uses defaults and selects a staged preset; it has not assigned the deck yet.
+        XCTAssertTrue(waitForValue(element(app, "deckOptions.options.option.newPerDay"), "20"))
+        capture(app, "deck-options-new-preset-staged")
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("s", modifierFlags: .command)
+        XCTAssertTrue(save.waitForNonExistence(timeout: 20))
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("o", modifierFlags: []) // The deck-page O route opens the same saved draft.
+        XCTAssertTrue(save.waitForExistence(timeout: 20))
+        XCTAssertFalse(gather.exists, "The disclosure opens collapsed after Save too")
+        preset.clickOrTap()
+        XCTAssertTrue(app.menuItems["Native Options (used by 1 deck)"].firstMatch.waitForExistence(timeout: 10))
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertFalse(save.isEnabled)
+        // A second staged preset is discarded through the existing leave prompt.
+        element(app, "deckOptions.options.newPreset").clickOrTap()
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        name.clickOrTap(); app.typeText("Discarded Native")
+        create.clickOrTap()
+        XCTAssertTrue(name.waitForNonExistence(timeout: 20))
+        element(app, "deckOptions.options.cancel").clickOrTap()
+        let discard = app.sheets.buttons["Discard"].firstMatch
+        XCTAssertTrue(discard.waitForExistence(timeout: 10))
+        discard.click()
+        XCTAssertTrue(save.waitForNonExistence(timeout: 20))
+        app.typeKey("o", modifierFlags: [.command, .option])
+        XCTAssertTrue(save.waitForExistence(timeout: 20))
+        preset.clickOrTap()
+        XCTAssertFalse(app.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", "Discarded Native")).firstMatch.exists)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+    }
+
+    private func capture(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     private func launch() throws -> (XCUIApplication, String) {
         let build = try BuildUnderTest.current()
         guard build.hasHooks else { throw XCTSkip("generated fixtures require a hook build") }

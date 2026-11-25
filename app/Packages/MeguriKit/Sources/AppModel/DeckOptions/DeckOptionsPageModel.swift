@@ -7,6 +7,22 @@ public nonisolated enum DeckOptionsPageRow: String, Sendable, Hashable, CaseIter
     case newPerDay, reviewsPerDay, desiredRetention
 }
 
+/// Display Order's preset fields in O3's presentation order. Values and choice
+/// order come from the core snapshot, not from a second scheduler definition.
+public nonisolated enum DeckOptionsDisplayOrder: String, Sendable, Hashable, CaseIterable {
+    case newGatherPriority, newSortOrder, newMix, interdayLearningMix, reviewOrder
+
+    public var field: OptionField {
+        switch self {
+        case .newGatherPriority: .newCardGatherPriority
+        case .newSortOrder: .newCardSortOrder
+        case .newMix: .newMix
+        case .interdayLearningMix: .interdayLearningMix
+        case .reviewOrder: .reviewOrder
+        }
+    }
+}
+
 /// One preset as the page shows it.
 public nonisolated struct DeckOptionsPagePreset: Sendable, Hashable, Identifiable {
     public let id: Int64
@@ -17,10 +33,13 @@ public nonisolated struct DeckOptionsPagePreset: Sendable, Hashable, Identifiabl
     public var reviewsPerDay: Double
     /// A fraction (0.9), shown as a percentage.
     public var desiredRetention: Double
+    public var displayOrder: [DeckOptionsDisplayOrder: Int32]
 
-    public init(id: Int64, name: String, storedUseCount: UInt64, newPerDay: Double, reviewsPerDay: Double, desiredRetention: Double) {
+    public init(id: Int64, name: String, storedUseCount: UInt64, newPerDay: Double, reviewsPerDay: Double, desiredRetention: Double,
+                displayOrder: [DeckOptionsDisplayOrder: Int32] = [:]) {
         self.id = id; self.name = name; self.storedUseCount = storedUseCount
         self.newPerDay = newPerDay; self.reviewsPerDay = reviewsPerDay; self.desiredRetention = desiredRetention
+        self.displayOrder = displayOrder
     }
 
     public subscript(row: DeckOptionsPageRow) -> Double {
@@ -57,13 +76,16 @@ public nonisolated struct DeckOptionsPageSnapshot: Sendable, Hashable {
     public let ownRetention: Bool
     /// Each row's editor range (O3), from the core's metadata.
     public let ranges: [DeckOptionsPageRow: ClosedRange<Double>]
+    public let displayOrderChoices: [DeckOptionsDisplayOrder: [Int32]]
 
     public init(deckID: Int64, deckName: String, assignedPreset: Int64, openingPreset: Int64,
                 presets: [DeckOptionsPagePreset], ownLimits: Bool, ownRetention: Bool,
-                ranges: [DeckOptionsPageRow: ClosedRange<Double>]) {
+                ranges: [DeckOptionsPageRow: ClosedRange<Double>],
+                displayOrderChoices: [DeckOptionsDisplayOrder: [Int32]] = [:]) {
         self.deckID = deckID; self.deckName = deckName; self.assignedPreset = assignedPreset
         self.openingPreset = openingPreset; self.presets = presets
         self.ownLimits = ownLimits; self.ownRetention = ownRetention; self.ranges = ranges
+        self.displayOrderChoices = displayOrderChoices
     }
 }
 
@@ -99,6 +121,9 @@ protocol DeckOptionsPageSession: AnyObject {
     var snapshot: DeckOptionsPageSnapshot { get }
     func select(_ preset: Int64) async throws
     func set(_ row: DeckOptionsPageRow, preset: Int64, value: Double) async throws
+    func setDisplayOrder(_ row: DeckOptionsDisplayOrder, preset: Int64, value: Int32) async throws
+    /// Returns the canonical core draft after Add (including its name, order and selection).
+    func addPreset(name: String) async throws -> DeckOptionsPageSnapshot
     func issues() async throws -> [DeckOptionsPageIssue]
     /// O17.3's save; returns the generation it committed in.
     func save() async throws -> UInt64
@@ -137,6 +162,13 @@ public final class DeckOptionsPageModel {
     /// "Discard changes?" is showing (N20.9).
     public private(set) var confirmingDiscard = false
     public var saveFailure: SaveFailure?
+    /// Kept with the draft across layout changes; reset whenever a new page opens.
+    public var advancedExpanded = false
+    public private(set) var namingPreset = false
+    public var presetName = ""
+    public private(set) var addingPreset = false
+    public private(set) var selectingPreset = false
+    public private(set) var presetCreationFailed = false
     /// The text of each row's field; committed by `commit(_:)` (O15.3).
     public var fieldText: [DeckOptionsPageRow: String] = [:]
     @ObservationIgnored public var locale = Locale.autoupdatingCurrent
@@ -147,6 +179,7 @@ public final class DeckOptionsPageModel {
     private var generation: UInt64 = 0
     private var revision: UInt64 = 0
     private var editTask: Task<Void, Never>?
+    private var selectionTask: Task<Void, Never>?
     private var task: Task<Void, Never>?
     // Tests replace the core session; production reads through CoreBridge.
     @ObservationIgnored var openSession: @MainActor (Int64) async throws -> any DeckOptionsPageSession
@@ -161,7 +194,7 @@ public final class DeckOptionsPageModel {
     /// Whether the deck's Deck Options… entries are enabled (N20.2, N20.4): a
     /// normal deck, outside review, with no other collection work holding it.
     public func canOpen(deckID: Int64) -> Bool {
-        guard let owner, phase != .saving, owner.deckOptionsAllowed else { return false }
+        guard let owner, phase != .saving, !addingPreset, !namingPreset, !selectingPreset, owner.deckOptionsAllowed else { return false }
         // The page already open for this deck stays as it is; a changed draft
         // of another deck is never replaced without its own leave (N20.9).
         if phase != .closed, self.deckID == deckID || hasChanges { return false }
@@ -175,6 +208,7 @@ public final class DeckOptionsPageModel {
         let current = revision
         session = nil; opening = nil; presets = []; issues = []; fieldText = [:]
         changedElsewhere = false; confirmingDiscard = false; saveFailure = nil; outcome = nil
+        advancedExpanded = false; namingPreset = false; presetName = ""; addingPreset = false; selectingPreset = false; presetCreationFailed = false
         leftWhileSaving = false; saveCancelled = false; changedWhileLoading = false
         self.deckID = deckID; deckName = owner.fullDeckName(deckID) ?? ""
         generation = owner.generation; phase = .loading
@@ -183,7 +217,7 @@ public final class DeckOptionsPageModel {
 
     /// Reads a new snapshot for the open deck: Try Again, and N11.9's Reload.
     public func reload() {
-        guard let deckID, phase != .saving, phase != .closed, let owner,
+        guard let deckID, phase != .saving, phase != .closed, !addingPreset, !namingPreset, !selectingPreset, let owner,
               owner.generation == generation, owner.deckOptionsAllowed else { return }
         revision &+= 1
         let current = revision
@@ -234,6 +268,8 @@ public final class DeckOptionsPageModel {
     /// The picker's count of a preset (O6.1): the stored count, less this deck
     /// for its stored preset, plus this deck for the selected one.
     public func useCount(_ preset: DeckOptionsPagePreset) -> UInt64 {
+        // O6.3: a staged preset is shown as unused until Save assigns it.
+        guard preset.id >= 0 else { return 0 }
         var count = preset.storedUseCount
         if preset.id == opening?.assignedPreset, count > 0 { count -= 1 }
         if preset.id == selectedPreset { count += 1 }
@@ -256,7 +292,8 @@ public final class DeckOptionsPageModel {
         }
         return presets.contains { preset in
             guard let base = opening.presets.first(where: { $0.id == preset.id }) else { return true }
-            return DeckOptionsPageRow.allCases.contains { Float(preset[$0]) != Float(base[$0]) }
+            return preset.displayOrder != base.displayOrder
+                || DeckOptionsPageRow.allCases.contains { Float(preset[$0]) != Float(base[$0]) }
         }
     }
 
@@ -264,7 +301,7 @@ public final class DeckOptionsPageModel {
     /// Another preset can be chosen once the selected one has no error, so an
     /// error never hides behind another preset's rows.
     public var canSwitchPreset: Bool {
-        phase == .editing && !issues.contains { $0.severity == .error && ($0.preset == nil || $0.preset == selectedPreset) }
+        phase == .editing && !addingPreset && !namingPreset && !issues.contains { $0.severity == .error && ($0.preset == nil || $0.preset == selectedPreset) }
     }
 
     /// The issues shown under a row: the selected preset's, and the row's shared warnings.
@@ -283,7 +320,7 @@ public final class DeckOptionsPageModel {
         let pending = pendingRows
         let blocking = issues.contains { $0.severity == .error
             && !(pending.contains($0.row) && ($0.preset == nil || $0.preset == selectedPreset)) }
-        guard phase == .editing, hasChanges, !blocking, let owner,
+        guard phase == .editing, !addingPreset, !selectingPreset, !namingPreset, hasChanges, !blocking, let owner,
               owner.generation == generation else { return false }
         return owner.deckOptionsAllowed
     }
@@ -291,21 +328,30 @@ public final class DeckOptionsPageModel {
     /// Selecting a preset makes it the target preset (O17.2); edits to the
     /// first one stay in the draft.
     public func selectPreset(_ id: Int64) {
+        guard phase == .editing, !addingPreset, !namingPreset else { return }
+        selectionRequest &+= 1
+        let request = selectionRequest
         if commitAll() {
             // A value typed for the current preset is checked first: its error
             // must show on its own rows, not hide behind another preset's.
-            let current = revision, typed = fieldText
-            Task { [weak self] in
-                await self?.waitForCompletion()
+            let current = revision, typed = fieldText, pending = editTask
+            selectingPreset = true
+            selectionTask = Task { [weak self] in
+                await pending?.value
                 // Text typed while the value was checked cancels the switch,
                 // so the new text is never replaced by the other preset's.
-                guard let self, self.revision == current, self.fieldText == typed else { return }
+                guard let self, self.revision == current, self.selectionRequest == request else { return }
+                self.selectingPreset = false
+                guard self.fieldText == typed else { return }
                 self.switchPreset(to: id)
             }
             return
         }
+        selectingPreset = false
         switchPreset(to: id)
     }
+
+    private var selectionRequest: UInt64 = 0
 
     private func switchPreset(to id: Int64) {
         guard phase == .editing, id != selectedPreset, presets.contains(where: { $0.id == id }),
@@ -318,7 +364,7 @@ public final class DeckOptionsPageModel {
     /// Sets a row's value for the selected preset. A value outside the range
     /// stays in the draft, where O4's error disables Save (O17.1).
     public func setValue(_ row: DeckOptionsPageRow, _ value: Double) {
-        guard phase == .editing, value.isFinite,
+        guard phase == .editing, !addingPreset, !namingPreset, value.isFinite,
               let index = presets.firstIndex(where: { $0.id == selectedPreset }) else { return }
         let preset = selectedPreset
         if presets[index][row] != value {
@@ -326,6 +372,66 @@ public final class DeckOptionsPageModel {
             enqueue { try await $0.set(row, preset: preset, value: value) }
         }
         fieldText[row] = formatted(row)
+    }
+
+    public func choices(_ row: DeckOptionsDisplayOrder) -> [Int32] { opening?.displayOrderChoices[row] ?? [] }
+
+    public func setDisplayOrder(_ row: DeckOptionsDisplayOrder, _ value: Int32) {
+        guard phase == .editing, !addingPreset, !namingPreset, choices(row).contains(value),
+              let index = presets.firstIndex(where: { $0.id == selectedPreset }),
+              presets[index].displayOrder[row] != value else { return }
+        let preset = selectedPreset
+        presets[index].displayOrder[row] = value
+        enqueue { try await $0.setDisplayOrder(row, preset: preset, value: value) }
+    }
+
+    public func beginNewPreset() {
+        guard canSwitchPreset, !selectingPreset else { return }
+        commitAll()
+        selectionRequest &+= 1
+        presetName = ""; presetCreationFailed = false; namingPreset = true
+    }
+
+    public var canCreatePreset: Bool {
+        phase == .editing && namingPreset && !addingPreset && !presetCreationFailed
+            && !presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    public func cancelNewPreset() {
+        guard !addingPreset else { return }
+        namingPreset = false; presetName = ""; presetCreationFailed = false
+    }
+
+    public func createPreset() {
+        guard canCreatePreset, let session else { return }
+        let name = presetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let current = revision, previous = editTask
+        addingPreset = true; presetCreationFailed = false
+        selectionRequest &+= 1
+        // Reserve editing synchronously before awaiting the pending edit chain.
+        // Add returns all canonical values; nothing can overwrite newer input.
+        editTask = Task {
+            await previous?.value
+            guard current == revision else { return }
+            if issues.contains(where: { $0.severity == .error && ($0.preset == nil || $0.preset == selectedPreset) }) {
+                addingPreset = false; namingPreset = false
+                return
+            }
+            do {
+                let updated = try await session.addPreset(name: name)
+                let checked = try await session.issues()
+                guard current == revision else { return }
+                presets = updated.presets; selectedPreset = updated.openingPreset; issues = checked
+                for row in DeckOptionsPageRow.allCases { fieldText[row] = formatted(row) }
+                addingPreset = false; namingPreset = false; presetName = ""
+            } catch {
+                guard current == revision else { return }
+                addingPreset = false; presetCreationFailed = true
+                // An edit may have reached the core before validation failed.
+                // Refuse a later save until that draft has been reloaded.
+                changedElsewhere = true
+            }
+        }
     }
 
     /// The Desired Retention stepper: one whole percent, within the range.
@@ -341,7 +447,7 @@ public final class DeckOptionsPageModel {
     /// Commits a row's typed text. Text that is not a number changes nothing
     /// and the field shows its value again (O17.1).
     @discardableResult public func commit(_ row: DeckOptionsPageRow) -> Bool {
-        guard phase == .editing else { return false }
+        guard phase == .editing, !addingPreset else { return false }
         // Text the field shows unchanged is not parsed back: a stored value
         // with more decimals than the field shows stays as it is.
         let shown = formatted(row)
@@ -406,7 +512,7 @@ public final class DeckOptionsPageModel {
         // Errors are checked after the commits below are validated (in the
         // task): a correction just committed must not meet its old error.
         commitAll()
-        guard phase == .editing, hasChanges, let session, let owner,
+        guard phase == .editing, !addingPreset, !selectingPreset, !namingPreset, hasChanges, let session, let owner,
               owner.generation == generation, owner.deckOptionsAllowed else { return }
         phase = .saving; saveFailure = nil; saveCancelled = false; leftWhileSaving = false
         let current = revision, expected = generation
@@ -454,7 +560,7 @@ public final class DeckOptionsPageModel {
     /// Back, Cancel, Esc or another sidebar row (N20.9). Returns true when the
     /// page may close now; otherwise it asks "Discard changes?" first.
     @discardableResult public func requestLeave() -> Bool {
-        if phase == .saving { return false }
+        if phase == .saving || addingPreset || selectingPreset || namingPreset { return false }
         commitAll()
         if phase == .editing, hasChanges {
             confirmingDiscard = true
@@ -465,6 +571,7 @@ public final class DeckOptionsPageModel {
     }
 
     public func discardChanges() {
+        guard phase != .saving, !addingPreset else { return }
         confirmingDiscard = false
         end(.left)
     }
@@ -479,6 +586,7 @@ public final class DeckOptionsPageModel {
         let previous = session, closing = deckID
         session = nil; opening = nil; presets = []; issues = []; fieldText = [:]
         changedElsewhere = false; confirmingDiscard = false
+        namingPreset = false; addingPreset = false; selectingPreset = false; presetName = ""; presetCreationFailed = false
         deckID = nil; phase = .closed; self.outcome = outcome
         if let previous { Task { await previous.cancel() } }
         // The model, not the view, returns to the deck page (a page that is
@@ -514,7 +622,7 @@ public final class DeckOptionsPageModel {
         // The read in flight may predate this change: read again once it lands.
         if phase == .loading { changedWhileLoading = true; return }
         guard phase == .editing else { return }
-        if hasChanges || !(owner?.deckOptionsAllowed ?? false) { changedElsewhere = true } else { reload() }
+        if hasChanges || namingPreset || addingPreset || selectingPreset || !(owner?.deckOptionsAllowed ?? false) { changedElsewhere = true } else { reload() }
     }
 
     /// The collection's generation ended or it is no longer ready.
@@ -527,11 +635,13 @@ public final class DeckOptionsPageModel {
         if phase == .saving { saveCancelled = true }
         let current = session
         await current?.cancel()
+        await selectionTask?.value
         await editTask?.value
         await task?.value
     }
 
     public func waitForCompletion() async {
+        await selectionTask?.value
         await editTask?.value
         await task?.value
     }
@@ -558,6 +668,16 @@ final class CoreDeckOptionsPageSession: DeckOptionsPageSession {
 
     func set(_ row: DeckOptionsPageRow, preset: Int64, value: Double) async throws {
         _ = try await editor.edit(.set(preset: preset, field: Self.field(row), value: .number(value)))
+    }
+
+    func setDisplayOrder(_ row: DeckOptionsDisplayOrder, preset: Int64, value: Int32) async throws {
+        _ = try await editor.edit(.set(preset: preset, field: row.field, value: .number(Double(value))))
+    }
+
+    func addPreset(name: String) async throws -> DeckOptionsPageSnapshot {
+        let raw = try await editor.edit(.add(name: name))
+        snapshot = Self.page(raw)
+        return snapshot
     }
 
     func issues() async throws -> [DeckOptionsPageIssue] {
@@ -597,12 +717,15 @@ final class CoreDeckOptionsPageSession: DeckOptionsPageSession {
         func number(_ value: OptionValue?) -> Double? { if case .number(let v)? = value { v } else { nil } }
         let presets = raw.presets.map { preset in
             var stored = preset.useCount
-            if preset.key == raw.selectedPreset, stored > 0 { stored -= 1 }
+            if preset.key >= 0, preset.key == raw.selectedPreset, stored > 0 { stored -= 1 }
             if preset.key == raw.assignedPreset { stored += 1 }
             return DeckOptionsPagePreset(id: preset.key, name: preset.name, storedUseCount: stored,
                 newPerDay: number(preset.values[.newPerDay]) ?? 0,
                 reviewsPerDay: number(preset.values[.reviewsPerDay]) ?? 0,
-                desiredRetention: number(preset.values[.desiredRetention]) ?? 0)
+                desiredRetention: number(preset.values[.desiredRetention]) ?? 0,
+                displayOrder: Dictionary(uniqueKeysWithValues: DeckOptionsDisplayOrder.allCases.compactMap { row in
+                    number(preset.values[row.field]).flatMap(Int32.init(exactly:)).map { (row, $0) }
+                }))
         }
         var ranges: [DeckOptionsPageRow: ClosedRange<Double>] = [:]
         for row in DeckOptionsPageRow.allCases {
@@ -615,6 +738,9 @@ final class CoreDeckOptionsPageSession: DeckOptionsPageSession {
         return DeckOptionsPageSnapshot(deckID: raw.deck, deckName: raw.name, assignedPreset: raw.assignedPreset,
             openingPreset: raw.selectedPreset, presets: presets,
             ownLimits: set(.newLimit) || set(.reviewLimit) || set(.newLimitToday) || set(.reviewLimitToday),
-            ownRetention: set(.deckDesiredRetention), ranges: ranges)
+            ownRetention: set(.deckDesiredRetention), ranges: ranges,
+            displayOrderChoices: Dictionary(uniqueKeysWithValues: DeckOptionsDisplayOrder.allCases.map { row in
+                (row, raw.metadata.first { $0.field == row.field }?.choices ?? [])
+            }))
     }
 }

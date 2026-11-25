@@ -37,6 +37,10 @@ public struct DeckOptionsPage: View {
             .onExitCommand { leave() }
             #endif
             .toolbar { toolbar }
+            .sheet(isPresented: Binding(get: { appVisible && model.namingPreset }, set: { if !$0 { model.cancelNewPreset() } })) {
+                NewDeckOptionsPresetForm(model: model)
+                    .environment(\.locale, locale)
+            }
             // N20.9: while the draft differs, Cancel replaces back and swipe back is off.
             .navigationBarBackButtonHidden(model.hasChanges || model.phase == .saving)
             .confirmationDialog(Text("deckOptions.discard.title", bundle: .module), isPresented: Binding(
@@ -89,14 +93,17 @@ public struct DeckOptionsPage: View {
         case .loading, .closed:
             form.redacted(reason: .placeholder).disabled(true)
         case .editing, .saving:
-            form.disabled(model.phase == .saving)
+            form.disabled(model.phase == .saving || model.addingPreset)
         }
     }
 
     private var form: some View {
         Form {
             Section {
-                presetPicker
+                ViewThatFits(in: .horizontal) {
+                    HStack { presetPicker; newPresetButton }
+                    VStack(alignment: .leading) { presetPicker; newPresetButton }
+                }
             } footer: {
                 Text(DeckOptionsStrings.presetFooter(count: model.selectedUseCount, locale: locale))
                     .accessibilityIdentifier("deckOptions.options.presetFooter")
@@ -122,6 +129,26 @@ public struct DeckOptionsPage: View {
                 Text(verbatim: DeckOptionsStrings.memoryFooter(ownRetention: model.ownRetention, locale: locale))
                     .accessibilityIdentifier("deckOptions.options.memoryFooter")
             }
+            Section {
+                DisclosureGroup(isExpanded: $model.advancedExpanded) {
+                    VStack(alignment: .leading) {
+                        Text("deckOptions.section.displayOrder", bundle: .module)
+                            .font(.headline)
+                            .accessibilityAddTraits(.isHeader)
+                        ForEach(DeckOptionsDisplayOrder.allCases, id: \.self) { row in
+                            displayOrderPicker(row)
+                        }
+                        Text("deckOptions.displayOrder.footer", bundle: .module)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("deckOptions.options.displayOrderFooter")
+                    }
+                } label: {
+                    Text("deckOptions.disclosure.advanced", bundle: .module)
+                }
+                // Scope identifiers to leaf controls: Mac disclosure IDs propagate to children.
+            }
         }
         .formStyle(.grouped)
     }
@@ -141,6 +168,28 @@ public struct DeckOptionsPage: View {
         // An error in the selected preset is fixed before another is chosen.
         .disabled(!model.canSwitchPreset)
         .accessibilityIdentifier("deckOptions.options.presetPicker")
+    }
+
+    private var newPresetButton: some View {
+        Button { model.beginNewPreset() } label: { Text("deckOptions.preset.new", bundle: .module) }
+            .disabled(!model.canSwitchPreset || model.selectingPreset)
+            .accessibilityIdentifier("deckOptions.options.newPreset")
+    }
+
+    @ViewBuilder private func displayOrderPicker(_ row: DeckOptionsDisplayOrder) -> some View {
+        if let value = model.selected?.displayOrder[row] {
+            Picker(selection: Binding(get: { model.selected?.displayOrder[row] ?? value },
+                                      set: { model.setDisplayOrder(row, $0) })) {
+                ForEach(model.choices(row), id: \.self) { choice in
+                    Text(DeckOptionsStrings.choiceKey(row, value: choice), bundle: .module).tag(choice)
+                }
+            } label: {
+                Text(DeckOptionsStrings.optionKey(row), bundle: .module)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("deckOptions.options.order.\(row.rawValue)")
+        }
     }
 
     /// The row itself is the form's row, so the system keeps its label and
@@ -267,6 +316,42 @@ public enum DeckOptionsStrings {
     /// A deck path as the interface shows it, its components joined with " › " (N20.3).
     public static func path(_ name: String) -> String {
         name.components(separatedBy: "::").joined(separator: " \u{203A} ")
+    }
+
+    static func optionKey(_ row: DeckOptionsDisplayOrder) -> LocalizedStringKey {
+        switch row {
+        case .newGatherPriority: "deckOptions.option.newGatherPriority"
+        case .newSortOrder: "deckOptions.option.newSortOrder"
+        case .newMix: "deckOptions.option.newMix"
+        case .interdayLearningMix: "deckOptions.option.interdayLearningMix"
+        case .reviewOrder: "deckOptions.option.reviewOrder"
+        }
+    }
+
+    /// Only label mapping lives here; the core supplies values and menu order.
+    static func choiceKey(_ row: DeckOptionsDisplayOrder, value: Int32) -> LocalizedStringKey {
+        LocalizedStringKey(choiceCatalogKey(row, value: value))
+    }
+
+    static func choiceCatalogKey(_ row: DeckOptionsDisplayOrder, value: Int32) -> String {
+        let keys: [Int32: String]
+        switch row {
+        case .newGatherPriority:
+            keys = [0: "gather.deck", 5: "gather.deckThenRandomNotes", 1: "gather.ascendingPosition",
+                    2: "gather.descendingPosition", 3: "gather.randomNotes", 4: "gather.randomCards"]
+        case .newSortOrder:
+            keys = [0: "newSort.cardTypeThenGathered", 1: "newSort.gathered", 2: "newSort.cardTypeThenRandom",
+                    3: "newSort.randomNoteThenCardType", 4: "newSort.random"]
+        case .newMix, .interdayLearningMix:
+            keys = [0: "mix.mixWithReviews", 1: "mix.afterReviews", 2: "mix.beforeReviews"]
+        case .reviewOrder:
+            keys = [0: "reviewSort.dueThenRandom", 1: "reviewSort.dueThenDeck", 2: "reviewSort.deckThenDue",
+                    3: "reviewSort.ascendingIntervals", 4: "reviewSort.descendingIntervals", 6: "reviewSort.easyFirst",
+                    5: "reviewSort.difficultFirst", 7: "reviewSort.ascendingRetrievability",
+                    11: "reviewSort.descendingRetrievability", 12: "reviewSort.relativeOverdueness",
+                    8: "reviewSort.random", 9: "reviewSort.added", 10: "reviewSort.latestAddedFirst"]
+        }
+        return keys[value].map { "deckOptions." + $0 } ?? "deckOptions.displayOrder.unavailable"
     }
 
     /// K6: "Default (used by 6 decks)", the count grouped in the locale's format.

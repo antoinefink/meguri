@@ -328,6 +328,93 @@ import Testing
         #expect(model.phase == .editing)
     }
 
+    @Test func displayOrderEditsStayWithEachPresetAndSaveInSequence() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        #expect(!model.advancedExpanded)
+        #expect(model.selected?.displayOrder[.reviewOrder] == 11)
+        #expect(model.choices(.newGatherPriority) == [0, 5, 1, 2, 3, 4])
+        model.advancedExpanded = true
+        model.setDisplayOrder(.reviewOrder, 12)
+        model.setDisplayOrder(.newGatherPriority, 5)
+        model.selectPreset(2)
+        model.setDisplayOrder(.newSortOrder, 4)
+        model.selectPreset(1)
+        #expect(model.selected?.displayOrder[.reviewOrder] == 12)
+        model.setDisplayOrder(.reviewOrder, 999) // Only the core's choices are offered.
+        model.save(); model.save()
+        model.setDisplayOrder(.newMix, 2); model.selectPreset(2)
+        await model.waitForCompletion()
+        #expect(core.session?.calls == ["order reviewOrder 1 12", "order newGatherPriority 1 5",
+            "select 2", "order newSortOrder 2 4", "select 1", "save"])
+        #expect(model.outcome == .saved)
+        model.open(deckID: 1); await model.waitForCompletion()
+        #expect(!model.advancedExpanded)
+    }
+
+    @Test func newPresetValidatesNameSelectsCanonicalDraftAndKeepsPriorEdits() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.setValue(.newPerDay, 31)
+        model.setDisplayOrder(.reviewOrder, 12)
+        model.beginNewPreset()
+        model.presetName = " \n "
+        #expect(!model.canCreatePreset && !model.canSave)
+        model.createPreset()
+        model.presetName = "  Default  "
+        model.createPreset(); model.createPreset()
+        // Nothing can switch or save while the canonical Add is in flight.
+        model.selectPreset(2); model.save(); model.setValue(.newPerDay, 55)
+        await model.waitForCompletion()
+        #expect(model.selectedPreset == -1 && model.selected?.name == "Default1894701600")
+        #expect(model.selectedUseCount == 0 && model.value(.newPerDay) == 20)
+        #expect(model.selected?.displayOrder[.reviewOrder] == 0)
+        model.setDisplayOrder(.reviewOrder, 6)
+        model.selectPreset(1)
+        #expect(model.value(.newPerDay) == 31 && model.selected?.displayOrder[.reviewOrder] == 12)
+        #expect(model.selectedUseCount == 6)
+        model.selectPreset(-1)
+        #expect(model.selectedUseCount == 0 && model.selected?.displayOrder[.reviewOrder] == 6)
+        model.save(); await model.waitForCompletion()
+        #expect(core.session?.calls == ["set newPerDay 1 31.0", "order reviewOrder 1 12", "add Default",
+            "order reviewOrder -1 6", "select 1", "select -1", "save"])
+        #expect(model.outcome == .saved)
+    }
+
+    @Test func cancellingNameEntryAndDiscardingAStagedPresetNeverSaves() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.beginNewPreset(); model.presetName = "Abandoned"; model.cancelNewPreset()
+        #expect(!model.hasChanges && !model.namingPreset && core.session?.calls.isEmpty == true)
+        model.beginNewPreset(); model.presetName = "Staged"; model.createPreset()
+        await model.waitForCompletion()
+        #expect(model.hasChanges && !model.requestLeave())
+        model.keepEditing()
+        #expect(model.selectedPreset < 0)
+        model.requestLeave(); model.discardChanges()
+        await model.waitForCompletion()
+        #expect(core.session?.calls == ["add Staged"] && model.outcome == .left)
+    }
+
+    @Test func anAddInFlightCannotReplaceANewerGeneration() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        let gate = PageGate(); core.addGate = gate
+        model.beginNewPreset(); model.presetName = "Held"; model.createPreset()
+        await gate.entered()
+        #expect(model.addingPreset && !model.canSave && !model.canSwitchPreset)
+        model.cancelNewPreset(); model.reload(); model.save()
+        #expect(model.namingPreset && core.opens == 1)
+        owner.receiveLifecycle(.ready(generation: 12))
+        gate.release(); await model.waitForCompletion()
+        #expect(model.phase == .closed && model.presets.isEmpty && model.outcome == .ended)
+        #expect(core.session?.calls == ["add Held"])
+    }
+
     // MARK: Fixtures
 
     private static func changes(decks: [Int64]) -> ChangeSet {
@@ -353,11 +440,14 @@ import Testing
         owner.receiveLifecycle(.ready(generation: 11)); await owner.loadCounts()
         let snapshot = DeckOptionsPageSnapshot(deckID: 1, deckName: "Parent", assignedPreset: 1, openingPreset: 1,
             presets: [
-                .init(id: 1, name: "Default", storedUseCount: stored[0], newPerDay: 20, reviewsPerDay: 200, desiredRetention: retention),
-                .init(id: 2, name: "Solo", storedUseCount: stored[1], newPerDay: 10, reviewsPerDay: 100, desiredRetention: 0.85),
+                .init(id: 1, name: "Default", storedUseCount: stored[0], newPerDay: 20, reviewsPerDay: 200, desiredRetention: retention,
+                    displayOrder: [.newGatherPriority: 3, .newSortOrder: 2, .newMix: 1, .interdayLearningMix: 2, .reviewOrder: 11]),
+                .init(id: 2, name: "Solo", storedUseCount: stored[1], newPerDay: 10, reviewsPerDay: 100, desiredRetention: 0.85,
+                    displayOrder: [.newGatherPriority: 4, .newSortOrder: 1, .newMix: 2, .interdayLearningMix: 1, .reviewOrder: 6]),
             ],
             ownLimits: ownValues, ownRetention: ownValues,
-            ranges: [.newPerDay: 0...9999, .reviewsPerDay: 0...9999, .desiredRetention: 0.7...0.99])
+            ranges: [.newPerDay: 0...9999, .reviewsPerDay: 0...9999, .desiredRetention: 0.7...0.99],
+            displayOrderChoices: pageOrderChoices)
         let core = FakePageCore(snapshot: snapshot)
         owner.deckOptions.locale = Locale(identifier: "en_US")
         owner.deckOptions.openSession = { [core] _ in try core.open() }
@@ -372,6 +462,7 @@ final class FakePageCore {
     var openFailure: BridgeError?
     var saveResult: Result<UInt64, BridgeError> = .success(11)
     var saveGate: PageGate?
+    var addGate: PageGate?
     private(set) var session: FakePageSession?
     init(snapshot: DeckOptionsPageSnapshot) { self.snapshot = snapshot }
     func open() throws -> FakePageSession {
@@ -386,7 +477,7 @@ final class FakePageCore {
 /// A scripted core draft: it records every edit and validates as O4 does for the three rows.
 @MainActor
 final class FakePageSession: DeckOptionsPageSession {
-    let snapshot: DeckOptionsPageSnapshot
+    private(set) var snapshot: DeckOptionsPageSnapshot
     private unowned let core: FakePageCore
     private(set) var calls: [String] = []
     private var values: [Int64: DeckOptionsPagePreset]
@@ -399,6 +490,25 @@ final class FakePageSession: DeckOptionsPageSession {
     func select(_ preset: Int64) async throws { calls.append("select \(preset)"); selected = preset }
     func set(_ row: DeckOptionsPageRow, preset: Int64, value: Double) async throws {
         calls.append("set \(row.rawValue) \(preset) \(value)"); values[preset]?[row] = value
+    }
+    func setDisplayOrder(_ row: DeckOptionsDisplayOrder, preset: Int64, value: Int32) async throws {
+        calls.append("order \(row.rawValue) \(preset) \(value)")
+        values[preset]?.displayOrder[row] = value
+    }
+    func addPreset(name: String) async throws -> DeckOptionsPageSnapshot {
+        calls.append("add \(name)")
+        if let gate = core.addGate { await gate.hold() }
+        let id = min(values.keys.min() ?? 0, 0) - 1
+        let canonical = values.values.contains { $0.name == name } ? name + "1894701600" : name
+        values[id] = DeckOptionsPagePreset(id: id, name: canonical, storedUseCount: 0,
+            newPerDay: 20, reviewsPerDay: 200, desiredRetention: 0.9,
+            displayOrder: Dictionary(uniqueKeysWithValues: DeckOptionsDisplayOrder.allCases.map { ($0, Int32(0)) }))
+        selected = id
+        snapshot = DeckOptionsPageSnapshot(deckID: snapshot.deckID, deckName: snapshot.deckName,
+            assignedPreset: snapshot.assignedPreset, openingPreset: id,
+            presets: values.values.sorted { $0.name < $1.name }, ownLimits: snapshot.ownLimits,
+            ownRetention: snapshot.ownRetention, ranges: snapshot.ranges, displayOrderChoices: snapshot.displayOrderChoices)
+        return snapshot
     }
     func issues() async throws -> [DeckOptionsPageIssue] {
         var issues: [DeckOptionsPageIssue] = []
@@ -452,3 +562,9 @@ final class PageGate {
     }
     func release() { continuation?.resume(); continuation = nil }
 }
+
+private let pageOrderChoices: [DeckOptionsDisplayOrder: [Int32]] = [
+    .newGatherPriority: [0, 5, 1, 2, 3, 4], .newSortOrder: [0, 1, 2, 3, 4],
+    .newMix: [0, 1, 2], .interdayLearningMix: [0, 1, 2],
+    .reviewOrder: [0, 1, 2, 3, 4, 6, 5, 7, 11, 12, 8, 9, 10],
+]

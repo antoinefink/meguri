@@ -837,8 +837,12 @@ screens:
       footer "Used by N decks. Changes apply to all of them." or "Used by this deck only."), Daily
       Limits (New Cards per Day, Maximum Reviews per Day; the preset's values, no tabs) and Memory
       (Desired Retention, footer "How likely you are to remember a card when it comes back."); Save
-      is the confirmation action (⌘S); leaving with a change asks "Discard changes?". No Advanced
-      row, preset actions, tabs, restore-default or help controls yet; the rest of this purpose
+      is the confirmation action (⌘S); leaving with a change asks "Discard changes?". Extended
+      2026-11-25 at the user's request: Advanced beneath Memory starts collapsed and contains
+      Display Order's five native preset pickers (O3, exact K3/K5 labels and order), plus a localized
+      gathering-versus-sorting footer. New Preset… beside Preset opens native name entry and stages
+      core built-in defaults; Save creates and assigns in one operation, Discard creates nothing.
+      No clone, rename, delete, tabs, restore-default or help controls yet; the rest of this purpose
       applies as those parts land.
       A normal deck's options: its preset, the Essentials, the Advanced sections and the one undoable
       save (U232: shell, presets and save; U233: Essentials and Daily Limits; U234: the other
