@@ -108,8 +108,23 @@ pub(crate) fn visible_text(raw: &str) -> String {
     let mut out = String::new();
     let mut at = 0;
     let mut hidden: Vec<String> = Vec::new();
+    let mut hidden_paragraph = None;
     while at < raw.len() {
         let tail = &raw[at..];
+        if let Some(name) = hidden.last().filter(|name| matches!(name.as_str(), "script" | "style")) {
+            // Raw text has no attribute quotes, comments or nested tags. Only
+            // its own end tag matters, even after a comparison or lone quote.
+            let length = name.len() + 2;
+            let start = tail.as_bytes().windows(length).enumerate().find_map(|(i, bytes)| {
+                (bytes.starts_with(b"</") && bytes[2..].eq_ignore_ascii_case(name.as_bytes())
+                    && tail.as_bytes().get(i + length).is_some_and(|b| b.is_ascii_whitespace() || matches!(b, b'/' | b'>'))).then_some(i)
+            });
+            let Some(start) = start else { break; };
+            let Some(end) = tail[start..].find('>') else { break; };
+            at += start + end + 1;
+            hidden.pop();
+            continue;
+        }
         if tail.starts_with("<!--") {
             if let Some(end) = tail.find("-->") { at += end + 3; continue; }
             if hidden.is_empty() { out.push_str(tail); }
@@ -135,15 +150,26 @@ pub(crate) fn visible_text(raw: &str) -> String {
                 at += end+1;
                 continue;
             }
+            // Starting a paragraph implicitly ends the previous paragraph and
+            // its hidden descendants. Remember its index to avoid stack scans.
+            if !closing && name == "p" {
+                if let Some(index) = hidden_paragraph.take() { hidden.truncate(index); }
+            }
             if closing {
-                if hidden.last().is_some_and(|n| n == name) { hidden.pop(); }
+                if hidden.last().is_some_and(|n| n == name) {
+                    hidden.pop();
+                    if name == "p" { hidden_paragraph = None; }
+                }
             } else if !void_tag(name) && !tag.ends_with('/') {
                 let hide = match hidden.last() {
                     None => raw_hidden(name) || hidden_attribute(&tag, name),
-                    Some(parent) if raw_hidden(parent) => name == "template" && parent == "template",
+                    Some(parent) if raw_hidden(parent) => matches!(name, "script" | "style") || (name == "template" && parent == "template"),
                     Some(_) => true,
                 };
-                if hide { hidden.push(name.into()); }
+                if hide {
+                    if name == "p" { hidden_paragraph = Some(hidden.len()); }
+                    hidden.push(name.into());
+                }
             }
             if hidden.is_empty() && matches!(name, "br" | "div" | "p" | "li" | "tr" | "hr") { out.push(' '); }
             at += end+1;
@@ -230,10 +256,13 @@ fn project_candidate(c: &Connection, card: &Card, input: &PageInput, query: Opti
     // Browse needs only bounded field text, never the MCP edit hash, tags,
     // guid, sfld or data. Large opaque note members do not block card listing.
     let (mid, bytes) = projection::note_head(c,card.nid)?;
+    let nt = projection::notetype(c, mid)?;
+    if input.field.as_ref().is_some_and(|name| !nt.fields.contains(name)) {
+        return Ok(CandidateProjection::NoMatch);
+    }
     if bytes <= MAX_PAGE_WORK_BYTES && *work > 0 && *work + bytes > MAX_PAGE_WORK_BYTES {
         return Ok(CandidateProjection::BudgetReached);
     }
-    let nt = projection::notetype(c, mid)?;
     if bytes > MAX_PAGE_WORK_BYTES {
         // Include unchecked cards during search too. An unavailable projection
         // is explicit uncertainty, never evidence of an exhausted search.
@@ -439,5 +468,28 @@ mod tests {
         }
         assert_eq!(visible_text("x <a <b>café</b> y [sound:bad [sound:ok.mp3] done"), "x <a café y [sound:bad done");
         assert_eq!(visible_text("3 < 5 and 7 > 6; <42> <a,b>"), "3 < 5 and 7 > 6; <42> <a,b>");
+    }
+
+    #[test]
+    fn raw_script_and_style_end_tags_survive_markup_comparisons_and_lone_quotes() {
+        for name in ["script", "style"] {
+            for body in ["if (a<b && c>d) secret", "a<b ' secret", "a<b \" secret", "<!-- <a title='secret", "</scripted></styled>secret"] {
+                let raw = format!("before <{name}>{body}</{name}> visible");
+                assert_eq!(visible_text(&raw), "before visible", "{raw}");
+                let raw = format!("<head><{name}>{body}</{name}></head>visible");
+                assert_eq!(visible_text(&raw), "visible", "{raw}");
+            }
+            let raw = format!("<{name}>{}</{} >visible", "a<b ' secret ".repeat(10_000), name.to_ascii_uppercase());
+            assert_eq!(visible_text(&raw), "visible");
+        }
+    }
+
+    #[test]
+    fn new_paragraph_ends_hidden_paragraph_without_revealing_hidden_ancestors() {
+        assert_eq!(visible_text("<p hidden>secret<p>visible</p>"), "visible");
+        assert_eq!(visible_text("<p hidden><span>secret<p>visible</p>"), "visible");
+        assert_eq!(visible_text("<div hidden><p>secret<p>also secret</p></div>visible"), "visible");
+        let raw = format!("{}<p>visible</p>", "<p hidden><span>secret".repeat(10_000));
+        assert_eq!(visible_text(&raw), "visible");
     }
 }

@@ -56,7 +56,7 @@ export function App() {
     const token = consumeInitialToken();
     return { path: location.pathname, token: ["/setup", "/invite", "/reset", "/oauth/consent"].includes(location.pathname) ? token : "", visit: 0 };
   });
-  const currentPage = useRef(page); currentPage.current = page;
+  const currentUrl = useRef(location.pathname + location.search);
   const [me, setMe] = useState<Me | null>(null), [setup, setSetup] = useState(false), [loading, setLoading] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<OutcomeValue | null>(null), [notice, setNotice] = useState<OutcomeValue | null>(null);
   const [signingOut, setSigningOut] = useState(false), logoutBusy = useRef(false);
@@ -66,6 +66,7 @@ export function App() {
   const navigationGuard = useRef<(() => boolean) | null>(null);
   const go = (path: string, message?: string, replace = false) => {
     if (replace) history.replaceState(null, "", path); else history.pushState(null, "", path);
+    currentUrl.current = path;
     setPage(previous => ({ path, token: "", visit: previous.visit + 1 }));
     setNotice(message ? { text: message } : null);
   };
@@ -91,10 +92,11 @@ export function App() {
   useEffect(() => {
     void bootstrap();
     const onHistory = () => {
-      if (navigationGuard.current && !navigationGuard.current()) {
-        history.pushState(null, "", currentPage.current.path); return;
-      }
       const token = takeFragment(location, history);
+      if (navigationGuard.current && !navigationGuard.current()) {
+        history.pushState(null, "", currentUrl.current); return;
+      }
+      currentUrl.current = location.pathname + location.search;
       setPage(previous => ({ path: location.pathname, token, visit: previous.visit + 1 })); setNotice(null);
     };
     const onHash = () => { if (location.hash) onHistory(); };

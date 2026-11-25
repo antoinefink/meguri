@@ -40,3 +40,15 @@ Independent reviewers inspected the Rust projection, browser changes, generated 
 - `server/web/tests/browser/browse.spec.ts` — `bdf575d6a2885aad21e79fcdb908c4419ad37a21c1ab2f57ad428c54c705a45e`
 - `tools/mg.d/sync-web.sh` — `4d5b78e965e356d65ed0ef67ae60b5b01f7171d2a130f6aeffae13b3cf5ff255`
 - `docs/process/provenance/sessions/s-20261125T150342Z-453d824d.json` — `ed382bc21324f5d47c9419f0f8d50839fd5d9922e0dfc058b833a337b86817c5`
+
+The server and web reviewers examined the complete files after cleanroom runs `20261125T151737Z-37986`, `20261125T152034Z-44303`, `20261125T152347Z-52646` and `20261125T152639Z-57550`. The PR feedback session handled field visibility, stale reads, catalog-independent editing and credential-fragment cleanup. The metadata session added bounded incremental SQLite blob reads and corrected the synthetic test assertions. The independent session reviewer approved the PR feedback session metadata. Both browser captures come from the generated fixture. Exact privacy admissions follow.
+
+- `server/tests/browse.rs` — `d83caabe7cb86e4b6ac9befa5e4e5d4c469af11fa0dd4ea0142f2fd6e0cc198a`
+- `docs/process/provenance/sessions/s-20261125T151948Z-d98eea19.json` — `e7c6621adec739d2f580915a77662a04838715682f45d47142a5ac875584d482`
+- `server/web/scripts/audit-assessment.json` — `1a7395ed0774877d08635d76c231a6eccc18d86c69fafcf3d0310d6cd7ff9dbe`
+- `server/web/src/app.tsx` — `bade6fe1e0b7127118f7e52815f7ad26542a46706493aee86e798f3d5d6e8d69`
+- `server/web/src/browse.tsx` — `c94f0c3348d20e190c1e3efd81051c2006b7e18d1c69b98e03756053c0e7995a`
+- `server/web/tests/browser/browse-real.spec.ts` — `f76ff57b65b65befd66ccf524213c938b76da053f4eae27a0dce7e6d6fb1d797`
+- `server/web/tests/browser/browse.spec.ts` — `e2e1947904b415bce17d7a9ecd079d5d41ea3ee14dd786b932e59c9661f8f482`
+- `server/web/upstream-records.json` — `68f9aab35e91111f608f4d056f4de7ffff153cf092c216fdbc6c0f48ab384385`
+- `docs/process/provenance/sessions/s-20261125T151725Z-6d0637e0.json` — `97c13487dc2912036161db927fa4f01750c4efcd895a1820eeafdb066d307e0e`

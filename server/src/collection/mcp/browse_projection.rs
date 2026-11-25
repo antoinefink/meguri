@@ -2,7 +2,7 @@
 //! Browse labels and ordinal metadata, independent of the MCP object readers.
 //! Opaque templates, CSS and deck configuration never enter these projections.
 use super::*;
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{MAIN_DB, OptionalExtension, params};
 
 pub(super) fn unavailable() -> Error { Error::new("browse_content_unavailable") }
 pub(super) fn is_content_error(e: &Error) -> bool {
@@ -45,29 +45,36 @@ fn label(c: &Connection, table: &str, id: i64) -> Result<String> {
 }
 
 // P2/P6 top-level wire projection. Read only key/length/scalar headers through
-// bounded SQLite blob slices; skip payloads by offset, including >512KiB CSS.
+// incremental SQLite blob reads; skip payloads by offset, including >512KiB CSS.
 // This is not validation of opaque payloads and never changes stored content.
 fn headers(c: &Connection, table: &str, column: &str, id: i64, mut take: impl FnMut(u32, u8, u64) -> Result<()>) -> Result<()> {
     let length: Option<i64> = c.query_row(&format!("SELECT CASE WHEN typeof({column})='blob' THEN octet_length({column}) END FROM {table} WHERE id=?1"), [id], |r| r.get(0)).optional().map_err(sql_error)?.flatten();
-    let length = length.ok_or_else(unavailable)?;
-    let mut at = 0i64; let mut steps = 0; let mut groups = Vec::new();
-    let mut q = c.prepare(&format!("SELECT substr({column},?2,20) FROM {table} WHERE id=?1")).map_err(sql_error)?;
+    let length = usize::try_from(length.ok_or_else(unavailable)?).map_err(|_| unavailable())?;
+    // Both tables use INTEGER PRIMARY KEY ids, which are the blob API's ROWIDs.
+    // Opening read-only avoids materializing the whole value for each header.
+    let blob = c.blob_open(MAIN_DB, table, column, id, true).map_err(sql_error)?;
+    if blob.len() != length { return Err(unavailable()); }
+    let mut at = 0usize; let mut steps = 0; let mut groups = Vec::new();
     while at < length {
         steps += 1; if steps > 1024 { return Err(unavailable()); }
-        let bytes: Vec<u8> = q.query_row(params![id, at+1], |r|r.get(0)).map_err(sql_error)?;
+        // A key and its scalar/length varint need at most twenty bytes. The
+        // final header can be shorter; read_at_exact must stay inside the blob.
+        let mut buffer = [0u8; 20];
+        let bytes = &mut buffer[..20.min(length - at)];
+        blob.read_at_exact(bytes, at).map_err(sql_error)?;
         let mut pos = 0;
-        let key = varint(&bytes, &mut pos)?;
+        let key = varint(bytes, &mut pos)?;
         if key > u32::MAX as u64 || key >> 3 == 0 { return Err(unavailable()); }
         let number = (key >> 3) as u32; let wire = (key & 7) as u8;
-        let value = match wire { 0 | 2 => varint(&bytes, &mut pos)?, _ => 0 };
+        let value = match wire { 0 | 2 => varint(bytes, &mut pos)?, _ => 0 };
         if groups.is_empty() { take(number, wire, value)?; }
         let skip = match wire {
-            0 => 0, 1 => 8, 2 => i64::try_from(value).map_err(|_|unavailable())?, 5 => 4,
+            0 => 0, 1 => 8, 2 => usize::try_from(value).map_err(|_|unavailable())?, 5 => 4,
             3 => { if groups.len() >= 100 { return Err(unavailable()); } groups.push(number); 0 },
             4 => { if groups.pop() != Some(number) { return Err(unavailable()); } 0 },
             _ => return Err(unavailable()),
         };
-        at = at.checked_add(pos as i64).and_then(|n|n.checked_add(skip)).filter(|n|*n<=length).ok_or_else(unavailable)?;
+        at = at.checked_add(pos).and_then(|n|n.checked_add(skip)).filter(|n|*n<=length).ok_or_else(unavailable)?;
     }
     if !groups.is_empty() { return Err(unavailable()); } Ok(())
 }

@@ -134,8 +134,8 @@
         "sha256": "f19533df2233862fb2aab364ae6ea1c5aaed22ab5ead6d8b537bd6100f83cae0"
       },
       "src/app.tsx": {
-        "bytes": 14667,
-        "sha256": "301d9f69df4ccd9906bfb3d9df1b30773785a20eb68f070e4bda485b5e2ae821"
+        "bytes": 14758,
+        "sha256": "bade6fe1e0b7127118f7e52815f7ad26542a46706493aee86e798f3d5d6e8d69"
       },
       "src/apple-touch-icon.png": {
         "bytes": 50588,
@@ -146,8 +146,8 @@
         "sha256": "7c47a2f985e545fceba68c55efdd34106ad303b67bc92e399b726179ff5c47d8"
       },
       "src/browse.tsx": {
-        "bytes": 23644,
-        "sha256": "f423c0ef1598a5e58ef781af2e1fb728d74c05463b81927f77cb97a1735cb24c"
+        "bytes": 23642,
+        "sha256": "c94f0c3348d20e190c1e3efd81051c2006b7e18d1c69b98e03756053c0e7995a"
       },
       "src/collection.tsx": {
         "bytes": 11311,
@@ -214,12 +214,12 @@
         "sha256": "415de8426361101e7835eb600665c7af271f7553c7f573090d576a8cf7cc25ba"
       },
       "tests/browser/browse-real.spec.ts": {
-        "bytes": 13949,
-        "sha256": "eb93107249c9590a1b076c4a8d8962bb95d7bbe8873989e04c69dc92d1f6735f"
+        "bytes": 15395,
+        "sha256": "f76ff57b65b65befd66ccf524213c938b76da053f4eae27a0dce7e6d6fb1d797"
       },
       "tests/browser/browse.spec.ts": {
-        "bytes": 30070,
-        "sha256": "bdf575d6a2885aad21e79fcdb908c4419ad37a21c1ab2f57ad428c54c705a45e"
+        "bytes": 36739,
+        "sha256": "e2e1947904b415bce17d7a9ecd079d5d41ea3ee14dd786b932e59c9661f8f482"
       },
       "tests/browser/mcp.spec.ts": {
         "bytes": 37730,
@@ -247,7 +247,7 @@
       },
       "upstream-records.json": {
         "bytes": 7364,
-        "sha256": "5119ff9bd4949fd36ab572c03b5319f820cc436b1e4f0b1356400b4fa2f6cd14"
+        "sha256": "68f9aab35e91111f608f4d056f4de7ffff153cf092c216fdbc6c0f48ab384385"
       },
       "vite.config.ts": {
         "bytes": 1520,

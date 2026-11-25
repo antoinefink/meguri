@@ -169,7 +169,7 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
     detailRequest.current?.abort(); setOpening(false); setAdding(true); setDetail(null); setFields({}); setTags(""); setConflict(false); setConfirmDelete(false); setOutcome(null);
   }
   async function save(event: FormEvent) {
-    event.preventDefault(); if (writing.current || opening || locked.current || !catalog || (!adding && !detail) || conflict) return;
+    event.preventDefault(); if (writing.current || opening || locked.current || (adding ? !catalog : !detail) || conflict) return;
     writing.current = true; setBusy(true); setOutcome(null);
     // A list request begun before this mutation cannot republish old excerpts.
     listRequest.current?.abort(); detailRequest.current?.abort(); setLoading(false); setOpening(false);
@@ -181,7 +181,7 @@ export function Browse({ accountId, sessionLoss, refreshIdentity, guardNavigatio
     try {
       let committed: BrowseWrite;
       if (wasAdding) {
-        committed = await browseApi("create", { generation: catalog.generation, deck_id: newDeck, note_type_id: newType, fields: savedFields, tags: proposedTags }, accountId);
+        committed = await browseApi("create", { generation: catalog!.generation, deck_id: newDeck, note_type_id: newType, fields: savedFields, tags: proposedTags }, accountId);
       } else {
         const note = originalDetail!.note;
         const patch = Object.fromEntries(Object.entries(savedFields).filter(([name, value]) => value !== note.fields[name]));

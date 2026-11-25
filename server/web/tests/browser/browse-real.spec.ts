@@ -88,7 +88,20 @@ test("real Browse field examples, compact editing, siblings, conflict and native
     await page.goto("/browse"); await expect(page).toHaveURL(/\/login$/);
     await page.getByLabel("Username", { exact: true }).fill(username); await page.getByLabel("Password", { exact: true }).fill(memberPassword);
     await page.getByRole("button", { name: "Sign in", exact: true }).click(); await expect(page).toHaveURL(/\/collection$/);
-    await page.getByRole("link", { name: "Browse", exact: true }).click();
+    // Observe the normal entry requests before navigation. Fail on either
+    // answer without waiting for a disabled Add note to exhaust the test timeout.
+    const entryChecks = ["catalog", "page"].map(async kind => {
+      const path = `/api/me/browse/${kind}`;
+      const response = await page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === "POST", { timeout: 8_000 });
+      // Only fixed public error codes may enter diagnostics, never body text,
+      // metadata, headers, account identities or collection contents.
+      const publicCodes = ["authentication_failed", "permission_denied", "origin_rejected", "capability_invalid", "stale_authority", "busy", "browse_conflict", "validation_failed", "rate_limited", "provision_unavailable", "storage_unavailable", "admission_closed", "invalid_request", "unsupported_content_type", "request_too_large", "route_not_found", "internal_error"];
+      const code: unknown = response.ok() ? undefined : await response.json().then(body => body?.error?.code, () => undefined);
+      const diagnostic = typeof code === "string" && publicCodes.includes(code) ? code : "without a public error code";
+      expect(response.status(), `Browse ${kind} answered HTTP ${response.status()} ${diagnostic}`).toBe(200);
+    });
+    await Promise.all([...entryChecks, page.getByRole("link", { name: "Browse", exact: true }).click()]);
+    await expect(page.getByRole("button", { name: "Add note", exact: true })).toBeEnabled();
     const rows = () => page.getByRole("list", { name: "Cards", exact: true }).getByRole("button");
     const samples = [["el viaje", "trip", "Quiero aprovechar el viaje para visitar a mi hermana."], ["aprovechar", "make use of", "Quiero aprovechar el día."], ["la oportunidad", "opportunity", "Hay que aprovechar la oportunidad."]];
     for (const [Spanish, English, Example] of samples) {

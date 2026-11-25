@@ -251,6 +251,16 @@ async fn browse_projection_passes_mcp_caps_and_large_unchecked_cards_do_not_bloc
     assert!(last["next_cursor"].is_null());
     let comparisons = page(&h, &cookie, id, json!({"query":"3 < 5 and 7 > 6"})).await;
     assert!(comparisons["cards"].as_array().unwrap().iter().any(|card|card["note_id"] == later["note_id"]));
+    // A known missing field excludes even an unchecked oversized note. When
+    // the field exists, preserve the explicit uncertainty rather than hiding it.
+    for query in ["", "CAFÉ"] {
+        let absent = page(&h, &cookie, id, json!({"query":query,"field":"Front"})).await;
+        assert_eq!(absent["cards"], json!([]));
+        assert!(absent["next_cursor"].is_null());
+        let present = page(&h, &cookie, id, json!({"query":query,"field":"Example"})).await;
+        let unchecked = present["cards"].as_array().unwrap().iter().find(|card|card["note_id"] == oversized["note_id"]).unwrap();
+        assert!(unchecked["unavailable"].as_str().unwrap().contains("not searched"));
+    }
     drop(db);
     h.stop().await;
 }
@@ -332,7 +342,8 @@ async fn browse_metadata_projection_skips_large_opaque_blobs_and_advances_past_u
         decks.extend(catalog["decks"].as_array().unwrap().iter().cloned());types.extend(catalog["note_types"].as_array().unwrap().iter().cloned());
         cursor=catalog["next_cursor"].clone();if cursor.is_null(){break;}
     }
-    assert_eq!(decks.len(),3);assert_eq!(types.len(),4);
+    assert_eq!(decks.iter().map(|d|d["deck_id"].as_str().unwrap()).collect::<Vec<_>>(),vec!["1","2","3"]);
+    assert_eq!(types.iter().map(|t|t["note_type_id"].as_str().unwrap()).collect::<Vec<_>>(),vec!["5","6","10","20","30"]);
     assert!(decks.iter().find(|d|d["deck_id"]=="3").unwrap()["unavailable"].is_string());
     assert!(types.iter().find(|t|t["note_type_id"]=="5").unwrap()["unavailable"].is_string());
     assert!(types.iter().find(|t|t["note_type_id"]=="6").unwrap()["name"].as_str().unwrap().contains("6"));
