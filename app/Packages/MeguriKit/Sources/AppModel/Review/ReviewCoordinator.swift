@@ -772,8 +772,9 @@ public final class ReviewCoordinator {
             // N16.11: the leech icon belongs to a card; the end screen has none.
             dismissLeechNotice()
             clearVisibleMedia()
+            surface.invalidatePresentationAudio()
             preload?.cancel(); await preload?.value; preload = nil
-            timer.pause(at: uptime()); activeTime.pause(at: uptime()); surface.pair?.pauseAudio()
+            timer.pause(at: uptime()); activeTime.pause(at: uptime())
             studyState = nil; presentationRevision &+= 1
             // From cards, a start, or an error's retry: any way into the end state counts.
             let entering = phase != .waiting && phase != .finished
@@ -855,6 +856,7 @@ public final class ReviewCoordinator {
         let logger = Logger(subsystem: "Meguri", category: "ReviewStartup")
         logger.notice("render.begin")
         #endif
+        surface.beginPresentationAudio()
         try await surface.render(sessionID: sessionID, items: head.items)
         try Task.checkCancellation()
         startTrace?.mark(.rendered)
@@ -932,7 +934,7 @@ public final class ReviewCoordinator {
         surface.pair?.ownsKeyboardFocus = false
         timer.pause(at: uptime()); activeTime.pause(at: uptime())
         deadlineTimer?.invalidate(); deadlineTimer = nil
-        surface.pair?.pauseAudio()
+        surface.pair?.revokeReviewAudio()
     }
     public func pause() async throws {
         beginPause()
@@ -1186,6 +1188,9 @@ public final class ReviewCoordinator {
         guard phase != .ended else { return }
         startTrace?.cancel()
         presentationRevision &+= 1
+        preload?.cancel()
+        surface.invalidatePresentationAudio()
+        presentedKey = nil
         notice = String(describing: error); phase = .error
         // A start that failed before its session opened never shows (N16.8).
         if sessionID != nil { firstPresentation() }

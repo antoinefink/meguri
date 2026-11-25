@@ -9,34 +9,7 @@ bats_require_minimum_version 1.5.0
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
-setup_file() {
-  local t="$BATS_FILE_TMPDIR/template"
-  mkdir -p "$t/core"
-  cp -R "$REPO_ROOT/tools" "$t/tools"
-  cp -R "$REPO_ROOT/docker" "$t/docker"
-  cp "$REPO_ROOT/core/rust-toolchain.toml" "$t/core/"
-  cp "$REPO_ROOT/.gitignore" "$t/"
-  git -C "$t" init -q
-  git -C "$t" add -A
-  git -C "$t" -c user.name=selftest -c user.email=selftest@localhost commit -qm template
-}
-
-setup() {
-  SB="$BATS_TEST_TMPDIR/repo"
-  cp -R "$BATS_FILE_TMPDIR/template" "$SB"
-  export CARGO_TARGET_DIR="$BATS_TEST_TMPDIR/target" CARGO_NET_OFFLINE=true
-}
-
-# mg <args>: run the sandbox's tools/mg. Sets status, output (stdout), stderr,
-# lines, and result (the last stdout line).
-mg() {
-  run --separate-stderr "$SB/tools/mg" "$@"
-  result="${lines[${#lines[@]} - 1]:-}"
-}
-
-field() { jq -r "$@" "$result"; }
-
-validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
+. "$REPO_ROOT/tools/tests/mg_sandbox.sh"
 
 . "$REPO_ROOT/tools/tests/doctor_result.sh"
 
@@ -238,49 +211,6 @@ write_crate() { # write_crate <name> <lib.rs contents>
 write_workspace() {
   printf '[workspace]\nresolver = "3"\nmembers = ["crates/*"]\n' >"$SB/core/Cargo.toml"
 }
-
-write_file() { # write_file <path under the sandbox> <contents>
-  mkdir -p "$(dirname "$SB/$1")"
-  printf '%s\n' "$2" >"$SB/$1"
-}
-
-# copy_core: the real core/ workspace (without build output) in the sandbox,
-# with its crates.io dependencies in CARGO_HOME. Fetching is a no-op once the
-# shared cargo home has them. Builds share one target directory per file.
-copy_core() {
-  rm -rf "$SB/core"
-  (cd "$REPO_ROOT" && tar cf - --exclude=core/target core) | (cd "$SB" && tar xf -)
-  # Rust tests embed neutral conformance goldens with include_str!.
-  mkdir -p "$SB/conformance"
-  cp -R "$REPO_ROOT/conformance/goldens" "$SB/conformance/"
-  # The Unicode10 unit test embeds this independent neutral reference.
-  mkdir -p "$SB/specs/render"
-  cp "$REPO_ROOT/specs/render/unicode10-marks.json" "$SB/specs/render/"
-  CARGO_NET_OFFLINE=false cargo fetch --locked --manifest-path "$SB/core/Cargo.toml" >&2
-  export CARGO_TARGET_DIR="$BATS_FILE_TMPDIR/core-target"
-}
-
-# vendor_crate <name> <license>: a stand-in for a crates.io crate, outside the workspace.
-vendor_crate() {
-  write_file "vendor/$1/Cargo.toml" "[package]
-name = \"$1\"
-version = \"0.1.0\"
-edition = \"2024\"
-license = \"$2\""
-  write_file "vendor/$1/src/lib.rs" ""
-}
-
-# add_dep <crate dir under core/> <dependency line>: under [dependencies].
-add_dep() {
-  local manifest="$SB/core/$1/Cargo.toml"
-  if grep -q '^\[dependencies\]$' "$manifest"; then
-    sed -i "/^\[dependencies\]\$/a $2" "$manifest"
-  else
-    printf '\n[dependencies]\n%s\n' "$2" >>"$manifest"
-  fi
-}
-
-failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
 
 # --- dispatcher ------------------------------------------------------------
 
@@ -1743,138 +1673,6 @@ meguri-engine::engine_it session_predict::${SESSION_CASE}_extra"
   mg core-deny
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
-  validate "$result"
-}
-
-@test "core-lint fails naming the forbidden edges: tokio in sched, sched in search, stats in package" {
-  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
-  copy_core
-  vendor_crate tokio MIT
-  add_dep crates/meguri-sched 'tokio = { path = "../../../vendor/tokio" }'
-  # An upward edge to a crate that does not depend on the source: since U40
-  # meguri-engine depends on meguri-sched, so sched -> engine is a cycle that
-  # cargo refuses before layering-check runs.
-  add_dep crates/meguri-search 'meguri-sched.workspace = true'
-  add_dep crates/meguri-package 'meguri-stats.workspace = true'
-  mg core-lint
-  [ "$status" -eq 1 ]
-  [ "$(field .status)" = fail ]
-  # Preserve actionable compiler diagnostics if the deliberately changed
-  # graph also exposes a fixture build error.
-  jq -r '.failures[] | "\(.id): \(.message)"' "$result" >&2
-  [ "$(failure_ids)" = "layering/edge/meguri-package -> meguri-stats
-layering/edge/meguri-search -> meguri-sched
-layering/restricted/meguri-sched -> tokio" ]
-  local m
-  m="$(jq -r '.failures[] | select(.id == "layering/restricted/meguri-sched -> tokio") | .message' "$result")"
-  [[ "$m" == *"meguri-sched depends on tokio"* ]]
-  m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-search -> meguri-sched") | .message' "$result")"
-  [[ "$m" == *"edges.toml row 5"*"(row 6)"* ]]
-  m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-package -> meguri-stats") | .message' "$result")"
-  [[ "$m" == *"edges.toml row 8"*"(row 8)"*siblings* ]]
-  [ "$(field '.failures[0].repro')" = "tools/mg core-lint" ]
-  [ "$(field -c .summary)" = '{"total":3,"passed":2,"failed":1,"skipped":0}' ]
-  validate "$result"
-}
-
-@test "core-lint reports SystemTime::now outside the clock module while allowing unformatted code" {
-  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
-  copy_core
-  printf '%s\n' '' 'pub fn stamp() -> std::time::SystemTime {' '    std::time::SystemTime::now()' '}' \
-    >>"$SB/core/crates/meguri-text/src/lib.rs"
-  printf '%s\n' 'pub fn  spaced ( ) { }' >>"$SB/core/crates/meguri-search/src/lib.rs"
-  mg core-lint
-  [ "$status" -eq 1 ]
-  local ids
-  ids="$(failure_ids)"
-  [[ "$ids" == *"clippy/clippy::disallowed_methods/crates/meguri-text/src/lib.rs:"* ]]
-  [ "$(field '.failures | length')" -eq 1 ]
-  [[ "$(jq -r '.failures[] | select(.id | startswith("clippy/")) | .message' "$result")" == *"std::time::SystemTime::now"* ]]
-  validate "$result"
-}
-
-@test "core-lint passes all three retained checks with formatting-only differences" {
-  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
-  copy_core
-  printf '%s\n' '' 'pub fn  spaced ( ) { }' >>"$SB/core/crates/meguri-search/src/lib.rs"
-  mg core-lint
-  [ "$status" -eq 0 ]
-  [ "$(field .status)" = pass ]
-  [ "$(field '.failures | length')" -eq 0 ]
-  [ "$(field -c .summary)" = '{"total":3,"passed":3,"failed":0,"skipped":0}' ]
-  validate "$result"
-}
-
-@test "core-lint allows the three delivery style rules but still rejects forbidden time" {
-  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
-  copy_core
-  cat >>"$SB/core/crates/meguri-text/src/lib.rs" <<'EOF'
-
-pub fn delivery_collapsible_if(outer: bool, inner: bool, observed: &mut u8) {
-    if outer {
-        if inner {
-            *observed = 1;
-        }
-    }
-}
-
-pub fn delivery_manual_inspect(value: Option<u8>, observed: &mut u8) -> Option<u8> {
-    value.map(|item| {
-        *observed = item;
-        item
-    })
-}
-
-pub fn delivery_many_arguments(
-    a: u8, b: u8, c: u8, d: u8, e: u8, f: u8, g: u8, h: u8,
-) -> [u8; 8] {
-    [a, b, c, d, e, f, g, h]
-}
-EOF
-  mg core-lint
-  [ "$status" -eq 0 ]
-  [ "$(field .status)" = pass ]
-  [ "$(field '.failures | length')" -eq 0 ]
-  [ "$(field -c .summary)" = '{"total":3,"passed":3,"failed":0,"skipped":0}' ]
-  validate "$result"
-
-  # A changed fixture must still fail on a real clock violation alongside the style forms.
-  printf '%s\n' '' 'pub fn delivery_forbidden_clock() -> std::time::SystemTime {' \
-    '    std::time::SystemTime::now()' '}' >>"$SB/core/crates/meguri-text/src/lib.rs"
-  mg core-lint
-  [ "$status" -eq 1 ]
-  [ "$(field .status)" = fail ]
-  [ "$(field '.failures | length')" -eq 1 ]
-  [[ "$(failure_ids)" == "clippy/clippy::disallowed_methods/crates/meguri-text/src/lib.rs:"* ]]
-  [[ "$(field '.failures[0].message')" == *"std::time::SystemTime::now"* ]]
-  [ "$(field -c .summary)" = '{"total":3,"passed":2,"failed":1,"skipped":0}' ]
-  validate "$result"
-}
-
-@test "core-lint still denies the four reachable rand paths with allow-invalid" {
-  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
-  copy_core
-  # Compile this public probe without calling it or executing randomness.
-  printf '%s\n' '' '#[allow(deprecated)]' 'pub fn forbidden_randomness_probe() {' \
-    '    use rand::SeedableRng;' \
-    '' \
-    '    let _ = rand::thread_rng();' \
-    '    let _: Option<rand::rngs::OsRng> = None;' \
-    '    let _ = rand::rngs::StdRng::from_os_rng();' \
-    '    let _ = rand::rngs::StdRng::try_from_os_rng();' \
-    '}' >>"$SB/core/crates/meguri-engine/src/lib.rs"
-  mg core-lint
-  [ "$status" -eq 1 ]
-  [ "$(field .status)" = fail ]
-  local path
-  for path in rand::thread_rng rand::SeedableRng::from_os_rng rand::SeedableRng::try_from_os_rng; do
-    jq -e --arg path "$path" '.failures | any(
-      (.id | startswith("clippy/clippy::disallowed_methods/crates/meguri-engine/src/lib.rs:"))
-      and (.message | contains("use of a disallowed method `" + $path + "`")))' "$result"
-  done
-  jq -e '.failures | any(
-    (.id | startswith("clippy/clippy::disallowed_types/crates/meguri-engine/src/lib.rs:"))
-    and (.message | contains("use of a disallowed type `rand::rngs::OsRng`")))' "$result"
   validate "$result"
 }
 
@@ -3684,6 +3482,58 @@ EOF
   [ "$(field -c .summary)" = '{"total":2,"passed":0,"failed":0,"skipped":0}' ]
   [ "$(field -c '[.failures[].id]')" = '["tap-incomplete"]' ]
   [ "$(field '.failures[0].message')" = 'the test run stopped after 0 of 2 tests (runner exit 2); see log.txt' ]
+  validate "$result"
+}
+
+@test "selftest records its shard and each file's seconds, and names a failure without bats' timing" {
+  selftest_tap_fixture
+  # A bats that writes the junit report it was asked for, as the real one does.
+  cat >"$BATS_TEST_TMPDIR/selftest-bin/bats" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$@" >"$SELFTEST_BATS_ARGS"
+out=""
+while [ "$#" -gt 0 ]; do
+  [ "$1" != --output ] || out="$2"
+  shift
+done
+[ -z "$out" ] || cat >"$out/report.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites time="1.750">
+<testsuite name="a.bats" tests="2" failures="1" errors="0" skipped="0" time="1.500" timestamp="2026-11-25T09:21:07" hostname="x">
+    <testcase classname="a.bats" name="selected pass" time="1.488" />
+</testsuite>
+<testsuite name="b.bats" tests="1" failures="0" errors="0" skipped="0" time="0.250" timestamp="2026-11-25T09:21:08" hostname="x">
+</testsuite>
+</testsuites>
+XML
+printf '%s' "$SELFTEST_TAP"
+exit "${SELFTEST_RC:-0}"
+EOF
+  export SELFTEST_TAP=$'1..3\nok 1 selected pass # in 1488 ms\nnot ok 2 selected failure # in 12 ms\n# assertion failed\nok 3 selected skip # skip unavailable\n' SELFTEST_RC=1
+  mg selftest --shard 2/3
+  [ "$status" -eq 1 ]
+  [ "$(field -c .summary)" = '{"total":3,"passed":1,"failed":1,"skipped":1}' ]
+  [ "$(field -c '[.failures[].id]')" = '["selected failure"]' ]
+  [ "$(field '.failures[0].repro')" = "tools/mg selftest --filter 'selected failure'" ]
+  [ "$(field -c .args)" = '["--shard","2/3"]' ]
+  jq -e '.details.file_seconds == {"a.bats": 1.5, "b.bats": 0.25}' "$result"
+  local all
+  all="$(cd "$SB" && printf '%s\n' tools/tests/*.bats | wc -l)"
+  jq -e --argjson all "$all" '.details.shard | .index == 2 and .count == 3 and .all_files == $all
+    and (.files | length) > 0 and (.files | length) < $all' "$result"
+  # Bats gets the shard's files and our report request, never --shard.
+  ! grep -q -- 'shard' "$SELFTEST_BATS_ARGS"
+  [ "$(grep '\.bats$' "$SELFTEST_BATS_ARGS" | jq -R -n -c '[inputs]')" = "$(field -c .details.shard.files)" ]
+  [ "$(grep -A1 -x -- '--report-formatter' "$SELFTEST_BATS_ARGS" | tail -n 1)" = junit ]
+  [ -f "$(grep -A1 -x -- '--output' "$SELFTEST_BATS_ARGS" | tail -n 1)/report.xml" ]
+  validate "$result"
+
+  # A report the caller asks for replaces ours.
+  mkdir "$BATS_TEST_TMPDIR/report"
+  mg selftest --report-formatter tap13 --output "$BATS_TEST_TMPDIR/report"
+  [ "$(grep -c -x -- '--report-formatter' "$SELFTEST_BATS_ARGS")" -eq 1 ]
+  [ "$(grep -c -x -- '--output' "$SELFTEST_BATS_ARGS")" -eq 1 ]
+  [ "$(field '.details | has("shard") or has("file_seconds")')" = false ]
   validate "$result"
 }
 

@@ -90,3 +90,23 @@ pub fn add_notetype_selection(expected_generation: u64, selected_id: i64) -> Res
         notetype: selected.as_ref().map(NotetypeRecord::from),
     })
 }
+
+/// editor/paste P7: the collection's bitmap encoding preference is read at
+/// each paste. A missing or non-boolean value uses the specified JPEG default.
+#[uniffi::export]
+pub fn editor_paste_images_as_png() -> Result<bool, CoreError> {
+    callback::enter("editor_paste_images_as_png");
+    let collection = runtime::host()?.collection()?;
+    let reader = collection.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
+    Ok(snapshot.config_value("pasteImagesAsPng")?.and_then(|value| value.as_bool()).unwrap_or(false))
+}
+
+/// P4/P25: retain the admitted media service, then check its collection before
+/// writing. An asynchronous clipboard import must not write into a replacement.
+#[uniffi::export]
+pub fn editor_add_picture(expected_generation: u64, name: String, bytes: Vec<u8>) -> Result<String, CoreError> {
+    callback::enter("editor_add_picture");
+    let media = runtime::host()?.media()?;
+    Ok(media.add_for_generation(expected_generation, &name, &bytes)?)
+}
