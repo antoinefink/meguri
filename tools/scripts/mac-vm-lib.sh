@@ -490,19 +490,6 @@ mvl_lease_base() {
 # mvl_lease_dir <checkout> <vm name>: that VM's lease.
 mvl_lease_dir() { printf '%s/mac-vm.%s.lock\n' "$(mvl_lease_base "$1")" "$2"; }
 
-# mvl_claim_holder <ssh>: looks at the VM's claim (tools/mg.d/mac-vm.sh)
-# without taking it. Returns 0 and prints the holder's record when a job of
-# some Mac holds it, 1 when it is free, 2 when the VM did not answer.
-mvl_claim_holder() {
-  local file="${MEGURI_MAC_VM_CLAIM_PATH:-/tmp/meguri-vm-claim.lock}" out rc=0
-  out="$("$1" "/usr/bin/perl -MFcntl=:flock -e $(mvl_q 'open(my $f, "+>>", $ARGV[0]) or exit 0; exit 0 if flock($f, LOCK_EX | LOCK_NB); seek($f, 0, 0); my $h = <$f>; print "held ", (defined $h ? $h : ""), "\n";') $(mvl_q "$file")" 2>/dev/null)" || rc=$?
-  [ "$rc" -eq 0 ] || return 2
-  case "$out" in
-    held*) printf '%s\n' "${out#held }" ;;
-    *) return 1 ;;
-  esac
-}
-
 # mvl_lease_held <lease dir>: whether this process runs under the holder of
 # the lease or of its nested slot (that pid is this shell's or one of its
 # ancestors'): a job's own scripts use what the job leased, and must not wait

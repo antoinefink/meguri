@@ -667,6 +667,7 @@ mg__mac_vm_claim() {
     fi
     n=$((n + 1))
     token="$MG_RUN_ID.$$.$n"
+    rm -f "$state.nudge"
     (
       cd / && exec perl -MPOSIX=setsid -e 'fork and exit 0; setsid(); exec @ARGV or die "exec $ARGV[0]: $!\n"' \
         /usr/bin/env python3 "$MG_TOOLS/scripts/vm-claim.py" --ssh "$ssh" --lease "$MG_LEASE_DIR" --state "$state" \
@@ -717,17 +718,18 @@ mg__mac_vm_claim() {
 
 # mg__mac_vm_claim_nudge <state file>: as the job ends, tells this Mac's
 # keeper to look at the lease now, so the claim goes with the lease and not
-# a beat later.
+# a beat later. A file the keeper looks for, never a signal to a pid read
+# from the state file. The keeper removes it; with no keeper, so does this.
 mg__mac_vm_claim_nudge() {
-  local pid
-  pid="$(jq -r '.pid // empty' "$1" 2>/dev/null)"
-  ! mg__mac_vm_claim_keeper "$1" "$pid" || kill -USR1 "$pid" 2>/dev/null || :
+  [ -e "$1" ] || return 0
+  : >"$1.nudge" 2>/dev/null || return 0
+  [ -e "$1" ] || rm -f "$1.nudge"
 }
 
 # mg__mac_vm_claim_keeper <state file> <pid>: whether <pid> is the live
 # keeper of that state file, by its command line. A state file whose keeper
 # died names a pid the system may have given to another process: that one is
-# neither trusted with the claim nor sent a signal.
+# not trusted with the claim. Nothing is ever signalled by this pid.
 mg__mac_vm_claim_keeper() {
   local command
   [ -n "$2" ] && kill -0 "$2" 2>/dev/null || return 1

@@ -20,7 +20,6 @@ import json
 import os
 import select
 import shlex
-import signal
 import subprocess
 import sys
 import time
@@ -153,10 +152,22 @@ def main():
         write(refused[0], **refused[1])
         return {"busy": 3, "error": 1}.get(refused[0], 2)
 
-    # A job that ends nudges its keeper (SIGUSR1), which then looks at the
-    # lease at once and often for a moment, instead of at its next beat.
+    # A job that ends nudges its keeper by creating <state>.nudge (a file,
+    # never a signal: a pid read from a file may belong to another process by
+    # the time it is signalled). The keeper then looks at the lease at once
+    # and often for a moment, instead of at its next beat.
+    nudge = args.state + ".nudge"
     nudged = [0.0]
-    signal.signal(signal.SIGUSR1, lambda *_: nudged.__setitem__(0, time.monotonic() + 3))
+
+    def heard():
+        if os.path.exists(nudge):
+            try:
+                os.unlink(nudge)
+            except OSError:
+                pass
+            nudged[0] = time.monotonic() + 3
+        return time.monotonic() < nudged[0]
+
     write("taken")
     beat = 0.0
     while lease_held(args.lease):
@@ -189,19 +200,20 @@ def main():
                 beat = 0.0
                 continue
         wake = time.monotonic() + args.beat
-        while time.monotonic() < wake and time.monotonic() >= nudged[0]:
+        while time.monotonic() < wake and not heard():
             time.sleep(0.1)
-        if time.monotonic() < nudged[0]:
+        if heard():
             time.sleep(0.1)
     # Said before the lock goes, so a job that takes the lease now starts a
     # keeper of its own instead of adopting this one.
     write("releasing")
     if session is not None:
         end(session)
-    try:
-        os.unlink(args.state)
-    except OSError:
-        pass
+    for leftover in (args.state, nudge):
+        try:
+            os.unlink(leftover)
+        except OSError:
+            pass
     return 0
 
 
