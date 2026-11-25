@@ -40,6 +40,9 @@ async fn deletion_kill_boundaries_preserve_intent_and_restart_only_selected_clea
         let cookie = h.login("deleted.member", PASSWORD).await;
         let account = h.path().join("state/accounts").join(id);
         let kept = h.path().join("state/accounts");
+        // Include the ready siblings' immutable daily payloads in the exact
+        // baseline; Harness has already joined the serving startup sweep.
+        h.service.capture_backups_at(time::OffsetDateTime::now_utc().unix_timestamp()).await.unwrap();
         let before = store_bytes(&kept).into_iter().filter(|(path, _)| !path.starts_with(id)).collect::<std::collections::BTreeMap<_,_>>();
         let temp = h.stop().await;
         let owner = temp.path().join("owner");

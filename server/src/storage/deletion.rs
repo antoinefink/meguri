@@ -90,7 +90,7 @@ impl DataRoot {
         // Only called after upgrade_media has validated the complete store.
         let mut c = super::open(self.database(), false)?;
         let version: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if matches!(version, 3 | 4 | 5) { return Ok(()); }
+        if matches!(version, 3 | 4 | 5 | 6) { return Ok(()); }
         if version == 2 {
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             tx.execute_batch(MIGRATION)?;

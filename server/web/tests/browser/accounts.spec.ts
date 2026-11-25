@@ -241,12 +241,12 @@ async function accountShell(page: Page, username: string, admin: boolean) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
-// Collection's identity check and storage read can each show a focused alert
+// Collection's identity, storage and backup reads can each show a focused alert
 // in place of the focused <main>. Record the answers that arrive on Collection
-// (bootstrap's earlier /api/me does not count), wait for both after
+// (bootstrap's earlier /api/me does not count), wait for all three after
 // navigating, and name any failed answer or alert.
 async function landOnCollection(page: Page, navigate: () => Promise<unknown>) {
-  const paths = ["/api/me", "/api/me/storage"];
+  const paths = ["/api/me", "/api/me/storage", "/api/me/backups"];
   const answers: Response[] = [];
   const record = (response: Response) => {
     if (paths.includes(new URL(response.url()).pathname) && new URL(page.url()).pathname === "/collection") answers.push(response);
@@ -265,6 +265,7 @@ async function landOnCollection(page: Page, navigate: () => Promise<unknown>) {
         /^[a-z_]{1,40}$/.test(code ?? "") ? code : "without an error code"}`).toBe(true);
     }
     await expect(page.getByRole("main").getByText("Loading storage…", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("main").getByText("Loading backup history…", { exact: true })).toHaveCount(0);
     expect(await page.getByRole("alert").allTextContents()).toEqual([]);
   } finally {
     page.off("response", record);

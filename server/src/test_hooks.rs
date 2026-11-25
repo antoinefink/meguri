@@ -52,36 +52,49 @@ pub(crate) fn process_phase(name: &str) -> Result<()> {
         return Err(Error::new("provision_unavailable"));
     }
     if std::env::var("MEGURI_TEST_KILL_PHASE").ok().as_deref() == Some(name) {
-        use std::io::Write;
         let path = std::path::PathBuf::from(
             std::env::var_os("MEGURI_TEST_SIGNAL_FILE").ok_or(Error::new("internal_error"))?,
         );
-        let mut pending_name = path
-            .file_name()
-            .ok_or(Error::new("internal_error"))?
-            .to_os_string();
-        pending_name.push(".pending");
-        let pending = path.with_file_name(pending_name);
-        let mut signal = std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&pending)?;
-        let publication = (|| -> std::io::Result<()> {
-            signal.write_all(name.as_bytes())?;
-            signal.sync_all()?;
-            // Existence must imply complete synced bytes, without replacing a marker.
-            std::fs::hard_link(&pending, &path)
-        })();
-        drop(signal);
-        // Only our successfully created sibling is ours to remove. Cleanup is
-        // best effort so a published signal cannot be followed by an error.
-        let _ = std::fs::remove_file(&pending);
-        publication?;
-        loop {
-            std::thread::park();
-        }
+        signal_and_park(name, path)?;
     }
     Ok(())
+}
+/// Observe real startup migration independently of the first scheduled capture.
+/// Only an explicitly controlled child uses this gate; HTTP remains available.
+pub(crate) async fn before_initial_backup_sweep() -> Result<()> {
+    if let Some(path) = std::env::var_os("MEGURI_TEST_BACKUP_START_SIGNAL") {
+        tokio::task::spawn_blocking(move || {
+            signal_and_park("backup_before_initial_sweep", path.into())
+        }).await.map_err(|_| Error::new("internal_error"))??;
+    }
+    Ok(())
+}
+fn signal_and_park(name: &str, path: std::path::PathBuf) -> Result<()> {
+    use std::io::Write;
+    let mut pending_name = path
+        .file_name()
+        .ok_or(Error::new("internal_error"))?
+        .to_os_string();
+    pending_name.push(".pending");
+    let pending = path.with_file_name(pending_name);
+    let mut signal = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&pending)?;
+    let publication = (|| -> std::io::Result<()> {
+        signal.write_all(name.as_bytes())?;
+        signal.sync_all()?;
+        // Existence must imply complete synced bytes, without replacing a marker.
+        std::fs::hard_link(&pending, &path)
+    })();
+    drop(signal);
+    // Only our successfully created sibling is ours to remove. Cleanup is
+    // best effort so a published signal cannot be followed by an error.
+    let _ = std::fs::remove_file(&pending);
+    publication?;
+    loop {
+        std::thread::park();
+    }
 }
 
 // Unit fixtures call synchronous storage operations on their own thread. This

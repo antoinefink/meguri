@@ -208,6 +208,8 @@ pub async fn serve(
 ) -> std::io::Result<()> {
     let owner = service.clone();
     let stopping = service.clone();
+    let (backup_stop, backup_stopped) = tokio::sync::oneshot::channel::<()>();
+    let backups = tokio::spawn(backup_sweeps(service.clone(), backup_stopped));
     let (router, mcp) = mounted_router(service);
     let stopping_mcp = mcp.clone();
     let result = axum::serve(
@@ -216,11 +218,13 @@ pub async fn serve(
     )
     .with_graceful_shutdown(async move {
         shutdown.await;
+        let _ = backup_stop.send(());
         stopping_mcp.close();
         stopping.browser_ingress.close();
         stopping.native_ingress.close();
     })
     .await;
+    let _ = backups.await;
     mcp.close();
     owner.browser_ingress.close();
     owner.native_ingress.close();
@@ -229,10 +233,39 @@ pub async fn serve(
     mcp.idle().await;
     result
 }
+async fn backup_sweeps(service: Arc<Service>, mut stopped: tokio::sync::oneshot::Receiver<()>) {
+    #[cfg(feature = "test-hooks")]
+    crate::test_hooks::before_initial_backup_sweep().await.expect("backup startup fixture gate");
+    loop {
+        // Prefer a ready stop over scheduling another sweep. Once started,
+        // join the sweep before releasing the service's root ownership.
+        tokio::select! {
+            biased;
+            _ = &mut stopped => break,
+            _ = std::future::ready(()) => {},
+        }
+        let _ = service.sweep_backups(crate::accounts::now).await;
+        #[cfg(feature = "test-hooks")]
+        service.hooks.hit("backup_sweep_complete").await;
+        tokio::select! {
+            biased;
+            _ = &mut stopped => break,
+            _ = tokio::time::sleep(Duration::from_secs(300)) => {},
+        }
+    }
+}
+// This guard belongs to the handler, never the detached browser worker.
+struct RestoreConnection(Arc<crate::accounts::RestoreCaller>);
+impl Drop for RestoreConnection {
+    fn drop(&mut self) {self.0.cancel();}
+}
 async fn handle(State(service): State<Arc<Service>>, request: Request) -> Response {
     if request.uri().path().starts_with("/sync/") || request.uri().path().starts_with("/msync/") {
         return secure(crate::protocol::handle(service, request).await);
     }
+    let restore_connection = (request.method() == Method::POST
+        && backup_restore_id(request.uri().path()).is_some())
+        .then(|| RestoreConnection(Arc::default()));
     let browser_api = request.uri().path().starts_with("/api/");
     let oauth_route = oauth::route(request.uri().path());
     let browser = browser_api || oauth_route;
@@ -254,7 +287,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
         match early {
             Err(e) => ingress::retain(api_error(e, ticket_route), body, None, service),
             Ok(()) if exempt => {
-                let response = dispatch(&service, &parts, None)
+                let response = dispatch(&service, &parts, None, None)
                     .await
                     .unwrap_or_else(IntoResponse::into_response);
                 ingress::retain(response, body, None, service)
@@ -266,9 +299,10 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
                     // cancellation must not free its slot while slow work runs.
                     let deadline =
                         tokio::time::Instant::now() + Duration::from_secs(ingress::BODY_SECONDS);
+                    let restore_caller = restore_connection.as_ref().map(|c| c.0.clone());
                     let worker = tokio::spawn(async move {
                         let mut body = body;
-                        let response = dispatch_browser(&service, &parts, &mut body, deadline)
+                        let response = dispatch_browser(&service, &parts, &mut body, deadline, restore_caller.as_deref())
                             .await
                             .unwrap_or_else(|e| api_error(e, ticket_route));
                         ingress::retain(response, body, Some(permit), service)
@@ -284,7 +318,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
         // their own envelopes, admission and authentication above.
         match web_asset(&parts) {
             Some(response) => response,
-            None => dispatch(&service, &parts, None)
+            None => dispatch(&service, &parts, None, None)
                 .await
                 .unwrap_or_else(IntoResponse::into_response),
         }
@@ -333,6 +367,7 @@ async fn dispatch_browser(
     parts: &axum::http::request::Parts,
     body: &mut Body,
     deadline: tokio::time::Instant,
+    restore_caller: Option<&crate::accounts::RestoreCaller>,
 ) -> Result<Response> {
     if oauth::route(parts.uri.path()) {
         return oauth::dispatch(service, parts, body, deadline).await;
@@ -344,7 +379,7 @@ async fn dispatch_browser(
         return collection_download(service, parts).await;
     }
     if parts.method != Method::POST {
-        return dispatch(service, parts, None).await;
+        return dispatch(service, parts, None, None).await;
     }
     if !mutation(parts.uri.path()) {
         return Err(Error::new("route_not_found"));
@@ -357,7 +392,7 @@ async fn dispatch_browser(
         return Err(Error::new("admission_closed"));
     }
     let bytes = service.browser_ingress.read(body, deadline).await?;
-    dispatch(service, parts, Some(&bytes)).await
+    dispatch(service, parts, Some(&bytes), restore_caller).await
 }
 // Retain the common admission, unread body and private response headers. Ticket
 // failures disclose neither OAuth metadata nor whether a credential ever existed.
@@ -401,8 +436,25 @@ async fn media_upload(service: &Service, parts: &axum::http::request::Parts, bod
     service.accept_media_upload(id.to_owned(),bytes,permit).await?;
     Ok(data(serde_json::json!({"uploaded":true}),false))
 }
+fn expected_account(headers: &HeaderMap) -> Result<Option<String>> {
+    let all = headers.get_all("x-meguri-expected-account");
+    let mut values = all.iter();
+    let Some(value) = values.next() else {
+        return Ok(None);
+    };
+    let value = value.to_str().map_err(|_| Error::new("invalid_request"))?;
+    if values.next().is_some() {
+        return Err(Error::new("invalid_request"));
+    }
+    crate::crypto::bearer(value).map_err(|_| Error::new("invalid_request"))?;
+    Ok(Some(value.to_owned()))
+}
+fn backup_restore_id(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/me/backups/").and_then(|s|s.strip_suffix("/restore"))
+        .filter(|id| !id.is_empty() && !id.contains('/'))
+}
 fn mutation(path: &str) -> bool {
-    matches!(
+    backup_restore_id(path).is_some() || matches!(
         path,
         "/api/mcp/media-upload"
             | "/api/setup"
@@ -423,9 +475,10 @@ fn mutation(path: &str) -> bool {
             .is_some_and(|(id, action)| !id.is_empty() && action == "revoke")
 }
 async fn dispatch(
-    service: &Service,
+    service: &Arc<Service>,
     parts: &axum::http::request::Parts,
     bytes: Option<&[u8]>,
+    restore_caller: Option<&crate::accounts::RestoreCaller>,
 ) -> Result<Response> {
     let path = parts.uri.path();
     let method = &parts.method;
@@ -466,6 +519,10 @@ async fn dispatch(
                 );
                 set_cookie(&mut response, Some((&secret, expires_at)));
                 Ok(response)
+            }
+            "/api/me/backups" => {
+                let a = authority(service, &parts.headers).await?;
+                Ok(data(service.backups(a, expected_account(&parts.headers)?).await?, false))
             }
             "/api/me/storage" => {
                 let a = authority(service, &parts.headers).await?;
@@ -572,6 +629,14 @@ async fn dispatch(
             Ok(data((), false))
         }
         _ => {
+            if let Some(id) = backup_restore_id(path) {
+                let _: Empty = parse(bytes)?;
+                let a = authority(service, &parts.headers).await?;
+                let account_id = service.restore_backup_for_caller(
+                    a, id.into(), expected_account(&parts.headers)?, restore_caller,
+                ).await?;
+                return Ok(data(serde_json::json!({"account_id": account_id}), false));
+            }
             if let Some((id, "revoke")) = path.strip_prefix("/api/me/mcp-grants/").and_then(|s| s.split_once('/')) {
                 if !id.is_empty() {
                     let _: Empty = parse(bytes)?;

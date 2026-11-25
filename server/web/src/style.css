@@ -118,6 +118,21 @@ main:focus { outline: none; }
 .collection-storage > div + div { border-top: 1px solid var(--border); }
 .collection-storage dt { overflow-wrap: anywhere; }
 .collection-storage dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.backup-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; }
+.backup-columns, .backup-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 8rem) minmax(0, 5rem) 6rem; align-items: center; gap: 1rem; }
+.backup-columns { margin-top: 1.25rem; padding-bottom: .65rem; color: var(--muted); font-size: .85rem; }
+.backup-columns > :nth-child(3), .backup-size { text-align: right; }
+.backup-list { list-style: none; padding: 0; margin: 0; }
+.backup-row { border-top: 1px solid var(--border); padding-block: 1.25rem; }
+.backup-row time { font-weight: 600; }
+.backup-row time > span { display: block; margin-top: .25rem; font-weight: 400; }
+.backup-kind, .backup-size { font-size: .9rem; overflow-wrap: anywhere; }
+.backup-size { font-variant-numeric: tabular-nums; }
+.backup-row > [data-slot="button"] { min-width: 44px; }
+.backup-empty { margin-top: 1rem; }
+.backup-confirmation { margin: 0 0 1.5rem; }
+.backup-confirmation .stack { gap: .75rem; }
+.backup-confirmation [role="status"]:empty { display: none; }
 .account-info p { color: var(--muted); font-size: .9rem; margin-top: .25rem; }
 .link-result, .confirmation { margin-top: 1.25rem; padding: 1rem; border: 1px solid var(--border); border-radius: .5rem; background: #f8f8f8; }
 .confirmation { display: grid; gap: .85rem; }
@@ -145,6 +160,14 @@ main:focus { outline: none; }
 @media (max-width: 360px) {
   .account-layout [data-slot="sidebar"] { padding-inline: .75rem; }
   [data-slot="sidebar-menu-button"] { font-size: .8125rem; }
+}
+@media (max-width: 40rem) {
+  .backup-columns { display: none; }
+  .backup-list { margin-top: 1rem; }
+  .backup-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem 1rem; }
+  .backup-row time { grid-column: 1 / -1; }
+  .backup-kind, .backup-size { color: var(--muted); }
+  .backup-row > [data-slot="button"] { grid-column: 1 / -1; justify-self: start; margin-top: .35rem; }
 }
 @media (forced-colors: active) {
   [data-slot="button"], [data-slot="input"], [data-slot="card"], .account-list { border: 1px solid ButtonText; }
