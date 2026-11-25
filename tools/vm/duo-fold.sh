@@ -77,13 +77,26 @@ wait_for_vm() {
 # the claim first and keeps it up to the restart: another Mac's job can then
 # neither be running in the VM nor start there meanwhile. The keeper holds
 # it while this script's lease lasts and takes it again after the restart.
-# A VM that Tart does not list as running runs no job and has no claim. One
-# that runs but does not answer has an unknown claim: no restart, unless
+# A VM that Tart lists as stopped, suspended or absent runs no job and has no
+# claim. One that runs but does not answer, or that Tart could not list, has
+# an unknown claim: no restart, unless
 # DUO_FOLD_FORCE=1 says the VM is to be recovered whatever runs in it.
 claim_take() {
   local state="$LEASE.claim" token="duo-fold.$$" record st="" i
   [ "${MEGURI_MAC_VM_SHARED_CLAIM:-1}" != 0 ] || return 0
-  [ "$(mvl_state "$TART" "$VM")" = running ] || return 0
+  case "$(mvl_state "$TART" "$VM")" in
+    running) ;;
+    stopped | suspended | missing) return 0 ;;
+    *)
+      # Tart gave no list: the VM may be running a job of another Mac.
+      if [ "${DUO_FOLD_FORCE:-}" = 1 ]; then
+        log "Tart did not say whether $VM runs, so whether a job holds it is unknown; restarting it anyway (DUO_FOLD_FORCE=1)"
+        return 0
+      fi
+      log "Tart did not say whether $VM runs, so whether another Mac's job holds it is unknown; not restarting it (DUO_FOLD_FORCE=1 restarts it anyway)"
+      exit 1
+      ;;
+  esac
   # A keeper of the job that just gave up the lease is leaving.
   for i in $(seq 1 40); do [ -e "$state" ] || break; sleep 0.5; done
   rm -f "$state.nudge"
