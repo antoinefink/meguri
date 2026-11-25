@@ -1,8 +1,6 @@
 import Foundation
 import XCTest
 #if os(macOS)
-import AppKit
-import ApplicationServices
 
 /// Deck Options' keys on the Mac (N20.9, `sched/deck-options` O15.3): ⌥⌘O
 /// opens the page on the shown deck, ⌘↩ saves as ⌘S does, and Save returns
@@ -104,23 +102,28 @@ final class DeckOptionsUITests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
         let deckMenu = app.menuBars.menuBarItems["Deck"]
         deckMenu.click()
-        let options = deckMenu.menuItems["Deck Options…"]
+        let options = menuItem(deckMenu, titled: "Deck Options…")
         XCTAssertTrue(options.waitForExistence(timeout: 10) && options.isEnabled)
         options.click()
         let save = element(app, "deckOptions.options.save")
         XCTAssertTrue(save.waitForExistence(timeout: 20))
-        let gather = element(app, "deckOptions.options.order.newGatherPriority")
+        let gather = app.popUpButtons["deckOptions.options.order.newGatherPriority"]
         XCTAssertFalse(gather.exists, "Advanced is collapsed whenever the page opens")
         try app.bringToFront(bundleIdentifier: bundle)
         let advanced = app.disclosureTriangles["Advanced"].firstMatch
         XCTAssertTrue(advanced.waitForExistence(timeout: 10))
-        advanced.click()
+        XCTAssertTrue(advanced.isHittable)
+        // The VM reports a 94 × 16 combined chevron/label AX frame. Its
+        // midpoint hits the label; click the native chevron's leading square.
+        let triangleSide = advanced.frame.height
+        advanced.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: triangleSide / 2, dy: triangleSide / 2)).click()
         XCTAssertTrue(gather.waitForExistence(timeout: 10))
         for row in ["newSortOrder", "newMix", "interdayLearningMix", "reviewOrder"] {
-            XCTAssertTrue(element(app, "deckOptions.options.order." + row).exists)
+            XCTAssertTrue(app.popUpButtons["deckOptions.options.order." + row].exists,
+                          "Advanced exposes the actual native picker for \(row)")
         }
         XCTAssertFalse(save.isEnabled, "Expanding the disclosure never changes the draft")
-        capture(app, "deck-options-expanded")
         // This is the native menu's spec order, including the nonsequential value 5.
         gather.clickOrTap()
         let gatherLabels = ["Deck", "Deck, then random notes", "Ascending position", "Descending position", "Random notes", "Random cards"]
@@ -128,9 +131,24 @@ final class DeckOptionsUITests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         let titles = menu.menuItems.allElementsBoundByIndex.map(\.title).filter { !$0.isEmpty }
         XCTAssertEqual(titles, gatherLabels)
-        app.menuItems["Deck, then random notes"].firstMatch.click()
+        menuItem(menu, titled: "Deck, then random notes").click()
         XCTAssertTrue(waitForEnabled(save))
-        element(app, "deckOptions.options.newPreset").clickOrTap()
+        let review = app.popUpButtons["deckOptions.options.order.reviewOrder"]
+        let scroll = app.scrollViews.containing(.popUpButton, identifier: "deckOptions.options.order.reviewOrder").firstMatch
+        XCTAssertTrue(bringIntoView(review, in: scroll, app: app))
+        review.click()
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        XCTAssertEqual(menu.menuItems.allElementsBoundByIndex.map(\.title).filter { !$0.isEmpty },
+                       ["Due date, then random", "Due date, then deck", "Deck, then due date", "Ascending intervals",
+                        "Descending intervals", "Easy cards first", "Difficult cards first", "Ascending retrievability",
+                        "Descending retrievability", "Relative overdueness", "Random", "Order added", "Latest added first"])
+        menuItem(menu, titled: "Descending intervals").click()
+        XCTAssertTrue(waitForValue(review, "Descending intervals"))
+        XCTAssertTrue(bringIntoView(review, in: scroll, app: app))
+        capture(app, "deck-options-expanded")
+        let newPreset = app.buttons["deckOptions.options.newPreset"]
+        XCTAssertTrue(bringIntoView(newPreset, in: scroll, app: app))
+        newPreset.click()
         let name = element(app, "deckOptions.newPreset.name")
         let create = element(app, "deckOptions.newPreset.create")
         XCTAssertTrue(name.waitForExistence(timeout: 10))
@@ -155,7 +173,7 @@ final class DeckOptionsUITests: XCTestCase {
         XCTAssertTrue(save.waitForExistence(timeout: 20))
         XCTAssertFalse(gather.exists, "The disclosure opens collapsed after Save too")
         preset.clickOrTap()
-        XCTAssertTrue(app.menuItems["Native Options (used by 1 deck)"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(menuItem(app, titled: "Native Options (used by 1 deck)").waitForExistence(timeout: 10))
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         XCTAssertFalse(save.isEnabled)
         // A second staged preset is discarded through the existing leave prompt.
@@ -165,7 +183,19 @@ final class DeckOptionsUITests: XCTestCase {
         create.clickOrTap()
         XCTAssertTrue(name.waitForNonExistence(timeout: 20))
         element(app, "deckOptions.options.cancel").clickOrTap()
-        let discard = app.sheets.buttons["Discard"].firstMatch
+        let window = app.windows.containing(.button, identifier: "deckOptions.options.save").firstMatch
+        let prompt = window.sheets.firstMatch
+        let discard = prompt.buttons["Discard"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 10))
+        XCTAssertTrue(discard.exists)
+        // macOS confirmationDialog supplies the native Cancel caption for
+        // the cancel role, even though the source label is Keep Editing.
+        let keep = prompt.buttons["Cancel"]
+        XCTAssertTrue(keep.exists)
+        keep.click()
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(save.exists, "Cancelling the confirmation keeps the staged draft")
+        element(app, "deckOptions.options.cancel").clickOrTap()
         XCTAssertTrue(discard.waitForExistence(timeout: 10))
         discard.click()
         XCTAssertTrue(save.waitForNonExistence(timeout: 20))
@@ -191,32 +221,29 @@ final class DeckOptionsUITests: XCTestCase {
         XCTAssertTrue(save.waitForExistence(timeout: 20))
         let edit = app.menuBars.menuBarItems["Edit"]
         edit.click()
-        XCTAssertTrue(edit.menuItems["Undo Deck Options"].isEnabled, "A real collection step is available before opening")
+        let collectionUndo = menuItem(edit, titled: "Undo Deck Options")
+        XCTAssertTrue(collectionUndo.waitForExistence(timeout: 10))
+        XCTAssertTrue(collectionUndo.isEnabled, "A real collection step is available before opening")
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
 
         element(app, "deckOptions.options.newPreset").clickOrTap()
-        let name = element(app, "deckOptions.newPreset.name")
+        let sheet = app.sheets.containing(.textField, identifier: "deckOptions.newPreset.name").firstMatch
+        let name = sheet.textFields["deckOptions.newPreset.name"]
         XCTAssertTrue(name.waitForExistence(timeout: 10))
+        XCTAssertTrue(sheet.buttons["deckOptions.newPreset.cancel"].exists)
+        try app.bringToFront(bundleIdentifier: bundle)
         name.clickOrTap(); app.typeText("Q")
         app.typeKey("z", modifierFlags: .command)
         XCTAssertTrue(waitForValue(name, ""), "The sheet keeps the field's native text undo")
         app.typeKey("z", modifierFlags: [.command, .shift])
         XCTAssertTrue(waitForValue(name, "Q"))
 
-        // Full keyboard access moves focus onto a native sheet button. Prove
-        // that focus left Name before checking the collection-undo regression.
+        // Full keyboard access moves from Name to the native Cancel button.
+        // Ordinary typing proves Name no longer receives keys; Space below
+        // proves button focus after all menus have returned keyboard ownership.
         app.typeKey("\t", modifierFlags: [])
-        let running = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
-            .first { !$0.isTerminated })
-        let application = AXUIElementCreateApplication(running.processIdentifier)
-        var focused: CFTypeRef?
-        XCTAssertEqual(AXUIElementCopyAttributeValue(application, kAXFocusedUIElementAttribute as CFString, &focused), .success)
-        let focusValue = try XCTUnwrap(focused)
-        XCTAssertEqual(CFGetTypeID(focusValue), AXUIElementGetTypeID())
-        let control = focusValue as! AXUIElement
-        var role: CFTypeRef?
-        XCTAssertEqual(AXUIElementCopyAttributeValue(control, kAXRoleAttribute as CFString, &role), .success)
-        XCTAssertEqual(role as? String, kAXButtonRole as String)
+        app.typeKey("x", modifierFlags: [])
+        XCTAssertTrue(waitForValue(name, "Q"), "After Tab, ordinary typing does not enter Name")
         edit.click()
         let undo = edit.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", "Undo")).firstMatch
         XCTAssertTrue(undo.waitForExistence(timeout: 10))
@@ -224,22 +251,30 @@ final class DeckOptionsUITests: XCTestCase {
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         let file = app.menuBars.menuBarItems["File"]
         file.click()
-        XCTAssertFalse(file.menuItems["Import…"].isEnabled)
-        XCTAssertFalse(file.menuItems["Export Collection…"].isEnabled)
+        let importItem = menuItem(file, titled: "Import…")
+        let exportItem = menuItem(file, titled: "Export Collection…")
+        XCTAssertTrue(importItem.waitForExistence(timeout: 10) && exportItem.exists)
+        XCTAssertFalse(importItem.isEnabled)
+        XCTAssertFalse(exportItem.isEnabled)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         let view = app.menuBars.menuBarItems["View"]
         view.click()
-        XCTAssertFalse(view.menuItems["Browse"].isEnabled)
+        let browse = menuItem(view, titled: "Browse")
+        XCTAssertTrue(browse.waitForExistence(timeout: 10))
+        XCTAssertFalse(browse.isEnabled)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         app.typeKey("z", modifierFlags: .command)
         app.typeKey("b", modifierFlags: [.command, .shift])
         XCTAssertTrue(name.exists, "Window commands leave the naming sheet in place")
-        element(app, "deckOptions.newPreset.cancel").clickOrTap()
+        XCTAssertTrue(waitForValue(name, "Q"), "The command checks leave Name unchanged")
+        app.typeKey(" ", modifierFlags: [])
         XCTAssertTrue(name.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Space activates the focused Cancel button")
         XCTAssertTrue(save.exists, "Closing returns to the same Deck Options page")
         XCTAssertTrue(waitForValue(limit, changed), "The saved collection step was never undone behind the sheet")
         edit.click()
-        XCTAssertTrue(edit.menuItems["Undo Deck Options"].isEnabled, "Closing restores the collection's Undo")
+        XCTAssertTrue(collectionUndo.waitForExistence(timeout: 10))
+        XCTAssertTrue(collectionUndo.isEnabled, "Closing restores the collection's Undo")
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
@@ -274,6 +309,22 @@ final class DeckOptionsUITests: XCTestCase {
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+    private func menuItem(_ menu: XCUIElement, titled title: String) -> XCUIElement {
+        // Native Mac menu items may have a title and an empty AX label.
+        menu.menuItems.matching(NSPredicate(format: "title == %@", title)).firstMatch
+    }
+    private func bringIntoView(_ control: XCUIElement, in scroll: XCUIElement, app: XCUIApplication) -> Bool {
+        guard scroll.exists else { return false }
+        for _ in 0..<8 {
+            let viewport = scroll.frame.intersection(app.windows.firstMatch.frame)
+            guard !viewport.isEmpty, !control.frame.isEmpty else { return false }
+            if viewport.contains(control.frame), control.isHittable { return true }
+            let reach = viewport.height / 3
+            let move = max(-reach, min(reach, viewport.midY - control.frame.midY))
+            scroll.scroll(byDeltaX: 0, deltaY: move)
+        }
+        return false
     }
     private func waitForValue(_ target: XCUIElement, _ value: String) -> Bool {
         XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND value == %@", value),
