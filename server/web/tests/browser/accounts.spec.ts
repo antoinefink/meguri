@@ -86,7 +86,7 @@ async function accountShell(page: Page, username: string, admin: boolean) {
   await brand(page);
   const mobile = page.viewportSize()!.width <= 768;
   const navigation = page.getByRole("navigation", { name: "Account", exact: true });
-  const names = admin ? ["Collection", "Connection", "Password", "Accounts"] : ["Collection", "Connection", "Password"];
+  const names = admin ? ["Collection", "Browse", "Connection", "Password", "Accounts"] : ["Collection", "Browse", "Connection", "Password"];
   await expect(navigation.getByRole("link")).toHaveCount(names.length);
   await expect(navigation.getByRole("link")).toHaveText(names);
   for (const name of names) {

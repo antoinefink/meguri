@@ -11,3 +11,11 @@ The independent plan reviewer read the full public candidates, including the syn
 The review reconciled compact account navigation, bound Browse requests to the displayed account and collection generation, and required current sync stamps for deletions of recreated IDs.
 
 The server reviewer inspected the complete Rust patch exported by cleanroom run `20261125T141926Z-84121`. The new server test uses generated accounts and synthetic vocabulary. Its exact approved bytes for the initial implementation are `07151331ac0489f0bf4b9ce42ca6fadf87ee0b555d8c1f5bac99c5678b0c69ea`. The first check found a fixture integer type error. The independent review also requested fixes for required account identity, visible text projection, large notes and logout contention.
+
+The independent web reviewer inspected all changed web sources and tests, their synthetic collection and the MIT adaptation records. The following initial bytes passed complete-content review.
+
+- `server/web/src/browse.tsx` — `095a096d756cc03d00dccd61548d1d81bf9f32afde9910fd49512f94793bd832`
+- `server/web/tests/browser/browse-real.spec.ts` — `e8b068d84678caa5654dcdd7d425100354442c33beb492c5399770be2a4c95a9`
+- `server/web/tests/browser/browse.spec.ts` — `069269d7a09c0d48abe640490f2e486287453f588040ee4125f9160690e9526f`
+
+The first typecheck found a catalog declaration error. The review requested corrections to draft ownership, sparse search and list restoration. The web dependency graph and the build-time matcher inputs remain subject to the existing fixed assessment.
