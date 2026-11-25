@@ -7,6 +7,7 @@ import AppKit
 /// active window, leaving text input, sheets, menus and other windows alone.
 struct ReviewTerminalKeyboard: NSViewRepresentable {
     let enabled: Bool
+    let continueFocused: Bool
     let done: () -> Void
     final class Host: NSView {
         var attached: (() -> Void)?
@@ -14,11 +15,30 @@ struct ReviewTerminalKeyboard: NSViewRepresentable {
     }
     final class Coordinator {
         var enabled = false
+        var continueFocused = false
         var done: () -> Void = {}
-        var gate = ReviewTerminalKeyGate(presentedAt: ProcessInfo.processInfo.systemUptime)
+        private var presentedAt: Double
+        private var gate: ReviewTerminalKeyGate
         var monitor: Any?
         var menuTrackingDepth = 0
         var observers: [NSObjectProtocol] = []
+        init(presentedAt: Double = ProcessInfo.processInfo.systemUptime) {
+            self.presentedAt = presentedAt
+            gate = ReviewTerminalKeyGate(presentedAt: presentedAt)
+        }
+        func reset() {
+            presentedAt = ProcessInfo.processInfo.systemUptime
+            gate = ReviewTerminalKeyGate(presentedAt: presentedAt)
+        }
+        /// Admission (window, modifiers, text and menus) is checked by the
+        /// monitor. Only the Continue button's explicit focus yields Space;
+        /// held grades still cannot activate it or finish the summary.
+        func route(_ event: NSEvent) -> NSEvent? {
+            if continueFocused, event.charactersIgnoringModifiers == " ", !event.isARepeat,
+               event.timestamp > presentedAt { return event }
+            if gate.take(timestamp: event.timestamp, repeated: event.isARepeat, enabled: enabled) { done() }
+            return nil
+        }
         isolated deinit {
             if let monitor { NSEvent.removeMonitor(monitor) }
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
@@ -40,7 +60,7 @@ struct ReviewTerminalKeyboard: NSViewRepresentable {
             guard let owner else { return }
             if let monitor = owner.monitor { NSEvent.removeMonitor(monitor); owner.monitor = nil }
             guard view?.window != nil else { return }
-            owner.gate = ReviewTerminalKeyGate(presentedAt: ProcessInfo.processInfo.systemUptime)
+            owner.reset()
             owner.monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak view, weak owner] event in
                 guard let owner, let window = view?.window, event.window === window,
                       NSApp.isActive, window.isKeyWindow, window.attachedSheet == nil, NSApp.modalWindow == nil,
@@ -48,15 +68,14 @@ struct ReviewTerminalKeyboard: NSViewRepresentable {
                       [" ", "\r", "\n", "\u{3}"].contains(event.charactersIgnoringModifiers ?? ""),
                       !(window.firstResponder is NSTextView), !(window.firstResponder is NSTextField),
                       owner.enabled, owner.menuTrackingDepth == 0 else { return event }
-                if owner.gate.take(timestamp: event.timestamp, repeated: event.isARepeat, enabled: owner.enabled) { owner.done() }
-                // Consume repeats too: a focused native button must not run them.
-                return nil
+                return owner.route(event)
             }
         }
         return view
     }
     func updateNSView(_ view: Host, context: Context) {
         context.coordinator.enabled = enabled
+        context.coordinator.continueFocused = continueFocused
         context.coordinator.done = done
     }
     static func dismantleNSView(_ view: Host, coordinator: Coordinator) {
