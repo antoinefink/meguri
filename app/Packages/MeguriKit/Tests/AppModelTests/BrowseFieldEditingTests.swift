@@ -56,6 +56,36 @@ import AppKit
         #expect(host.draft.values[0].contains("<div><br></div><div><br></div>"))
     }
 
+    @Test(arguments: ["", "<br>", "<br><br>"])
+    func midRootReturnsKeepOnlyAuthoredBreaksAndReload(_ trailing: String) async throws {
+        let original = "<span style=\"color: red\"><b>abcd</b></span>" + trailing
+        let host = try Self.host(original)
+        defer { host.shutDown() }
+        try await host.start()
+        try await Self.edit(host, """
+            select(rich.querySelector('b').firstChild, 2);
+            key('insertParagraph'); key('insertParagraph');
+            if (rich.querySelector('div').getBoundingClientRect().height <= 0)
+                throw new Error('Empty split source lost caret height');
+            """)
+        try await host.flush(hold: false)
+        let saved = "<span style=\"color: red\"><b>ab</b></span><div><br></div><div><span style=\"color: red\"><b>cd</b></span>" + trailing + "</div>"
+        #expect(host.draft.values[0] == saved)
+        try await host.reload(fields: [0])
+        try await Self.edit(host, """
+            const blanks = [...rich.querySelectorAll('div')].filter(node => node.innerHTML === '<br>');
+            if (blanks.length !== 1 || blanks[0].getBoundingClientRect().height <= 0)
+                throw new Error('Reload collapsed the consecutive split');
+            """)
+        try await host.flush(hold: false)
+        #expect(host.draft.values[0] == saved)
+        let reopened = try Self.host(saved)
+        defer { reopened.shutDown() }
+        try await reopened.start()
+        try await reopened.flush(hold: true)
+        #expect(reopened.draft.values[0] == saved && !reopened.draft.hasChanges)
+    }
+
     @Test func rootInlineReturnStopsBeforeTheNextAuthoredBlock() async throws {
         let host = try Self.host("<b>abcd</b><section data-author=\"keep\">later</section>")
         defer { host.shutDown() }
@@ -90,8 +120,9 @@ import AppKit
     }
 
     #if os(macOS)
-    @Test(arguments: [NSPasteboard.PasteboardType.png, .tiff, .fileURL])
-    func picturePasteImportsAtTheCaretAndKeepsMediaBytes(_ type: NSPasteboard.PasteboardType) async throws {
+    @Test(arguments: ["png", "tiff", "file", "html", "archive", "url"])
+    func picturePasteImportsAtTheCaretAndKeepsMediaBytes(_ representation: String) async throws {
+        let type: NSPasteboard.PasteboardType = representation == "file" ? .fileURL : representation == "tiff" ? .tiff : .png
         let host = try Self.host("<b>abcd</b>")
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -109,6 +140,15 @@ import AppKit
         board.clearContents()
         if type == .fileURL { board.writeObjects([source as NSURL]) }
         else { board.setData(bytes, forType: type) }
+        let remote = "https://example.invalid/copy-image.png"
+        if representation == "html" { board.setString("<a href='\(remote)'><img src='\(remote)'></a>", forType: .html) }
+        if representation == "archive" {
+            let archive: [String: Any] = ["WebMainResource": ["WebResourceMIMEType": "text/html",
+                "WebResourceTextEncodingName": "UTF-8", "WebResourceData": Data("<img src='\(remote)'>".utf8)]]
+            board.setData(try PropertyListSerialization.data(fromPropertyList: archive, format: .binary, options: 0),
+                forType: .init("com.apple.webarchive"))
+        }
+        if representation == "url" { board.setString(remote, forType: .URL); board.setString(remote, forType: .string) }
         defer { board.clearContents() }
         // Exercise the runtime's real paste listener with a private native
         // pasteboard. The VM UI test supplies native Cmd-V as well.
@@ -148,7 +188,7 @@ import AppKit
         #expect(reopened.draft.values[0] == saved)
     }
 
-    @Test(arguments: ["field", "note", "held", "source", "setField"])
+    @Test(arguments: ["field", "note", "held", "source", "setField", "typing"])
     func delayedPicturePasteCannotChangeAnotherTarget(_ change: String) async throws {
         let owner = CurrentOwner()
         let host = try Self.host("abcd", current: { owner.isCurrent })
@@ -170,15 +210,61 @@ import AppKit
         else if change == "note" { owner.isCurrent = false; host.shutDown() }
         else if change == "held" { try await host.flush(hold: true) }
         else if change == "source" { try await host.setMode(.html, ord: 0) }
-        else { try await host.reload(fields: [0]) }
+        else if change == "typing" {
+            try await Self.edit(host, """
+                select(rich.firstChild, 2);
+                rich.dispatchEvent(new InputEvent('beforeinput', {bubbles:true, cancelable:true, inputType:'insertText', data:'X'}));
+                document.execCommand('insertText', false, 'X');
+                """)
+        } else { try await host.reload(fields: [0]) }
         hold.release()
         await completion.value
         if change != "note" {
             try await host.flush(hold: false)
             #expect(host.draft.values[1] == "other field")
             #expect(host.draft.values[0].contains("<img") == (change == "field"))
+            if change == "typing" { #expect(host.draft.values[0] == "abXcd", "a delayed paste cannot swallow or reorder subsequent typing") }
         } else { #expect(host.draft.values == ["abcd", "other field"]) }
         #expect(!hold.expired && media.added.count == 1)
+    }
+
+    @Test(arguments: [false, true])
+    func filePasteWarnsInOrderContinuesFailuresAndKeepsSVG(addEmpty: Bool) async throws {
+        let host = try Self.host("abcd")
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { host.shutDown(); try? FileManager.default.removeItem(at: root) }
+        let empty = root.appending(path: "empty.png"), large = root.appending(path: "large.png")
+        let vector = root.appending(path: "vector.svg"), last = root.appending(path: "last.png"), refused = root.appending(path: "refused.png")
+        try Data().write(to: empty); try Data().write(to: large)
+        let handle = try FileHandle(forWritingTo: large)
+        try handle.truncate(atOffset: UInt64(FieldPicturePaste.maximumSyncSize + 1)); try handle.close()
+        let svg = Data("<svg xmlns='http://www.w3.org/2000/svg' width='2' height='2'><rect width='2' height='2' fill='red'/></svg>".utf8)
+        try svg.write(to: vector)
+        let bitmap = try Self.bitmap(.png)
+        try bitmap.write(to: last); try bitmap.write(to: refused)
+        let media = PictureTestMedia(root: root.appending(path: "media"))
+        media.refusedNames = ["refused.png"]
+        host.pictureMedia = media
+        var warnings: [(String, Int)] = []
+        host.confirmPictureSize = { name, size in warnings.append((name, size)); return name == "empty.png" && addEmpty }
+        try await host.start()
+        let board = NSPasteboard(name: .init(UUID().uuidString))
+        defer { board.clearContents() }
+        board.writeObjects([root.appending(path: "missing.png"), empty, large, refused, vector, last].map { $0 as NSURL })
+        host.picturePasteboard = board
+        try await Self.edit(host, "select(rich.firstChild, 2); rich.dispatchEvent(new ClipboardEvent('paste', {bubbles:true, cancelable:true}));")
+        for _ in 0..<300 where host.picturePasteCompletion == nil { try await Task.sleep(for: .milliseconds(10)) }
+        await (try #require(host.picturePasteCompletion)).value
+        try await host.flush(hold: false)
+        #expect(warnings.map(\.0) == ["empty.png", "large.png"])
+        #expect(warnings.map(\.1) == [0, FieldPicturePaste.maximumSyncSize + 1])
+        #expect(host.pictureFailures.map(\.name) == ["missing.png", "refused.png"])
+        let names = (addEmpty ? ["empty.png"] : []) + ["vector.svg", "last.png"]
+        #expect(media.added.map(\.0) == names)
+        #expect(media.added.first(where: { $0.0 == "vector.svg" })?.1 == svg)
+        #expect(host.draft.values[0] == "ab" + names.map { "<img src=\"\($0)\">" }.joined() + "cd")
+        #expect(!host.draft.values[0].contains("<svg"))
     }
 
     @MainActor private final class CurrentOwner {
@@ -192,23 +278,30 @@ import AppKit
         for type in ["public.html", "net.meguri.field-html", "public.rtf", "com.apple.webarchive"] {
             let item = NSPasteboardItem()
             item.setData(bitmap, forType: .png)
-            item.setString("<img src='https://example.invalid/image.png'>", forType: .init(type))
+            let html = type == "public.html" ? "<p>A meaningful selection<img src='https://example.invalid/image.png'></p>"
+                : "<img src='https://example.invalid/image.png'>"
+            item.setString(html, forType: .init(type))
             board.clearContents(); board.writeObjects([item])
-            #expect(try FieldPicturePaste.read(board).isEmpty, "unsupported HTML/private types never fall through to bitmap")
+            #expect(FieldPicturePaste.sources(FieldPicturePaste.snapshot(board)).isEmpty, "unsupported HTML/private types never fall through to bitmap")
         }
         board.clearContents(); board.setString("https://example.invalid/image.png", forType: .URL)
-        #expect(try FieldPicturePaste.read(board).isEmpty)
+        #expect(FieldPicturePaste.sources(FieldPicturePaste.snapshot(board)).isEmpty)
         board.clearContents(); board.setData(Data([0, 1, 2]), forType: .png)
-        #expect(try FieldPicturePaste.read(board).isEmpty)
+        let invalid = try #require(FieldPicturePaste.sources(FieldPicturePaste.snapshot(board)).first)
+        #expect(throws: (any Error).self) { try invalid.prepare(asPNG: false) }
         board.clearContents(); board.setString("file:///unreadable/note.txt", forType: .fileURL)
         board.setData(bitmap, forType: .tiff)
-        #expect(try FieldPicturePaste.read(board).isEmpty, "a copied unsupported file cannot paste its icon")
+        #expect(FieldPicturePaste.sources(FieldPicturePaste.snapshot(board)).isEmpty, "a copied unsupported file cannot paste its icon")
+        #expect(FieldPicturePaste.needsSizeWarning(0))
+        #expect(!FieldPicturePaste.needsSizeWarning(FieldPicturePaste.maximumSyncSize))
+        #expect(FieldPicturePaste.needsSizeWarning(FieldPicturePaste.maximumSyncSize + 1))
         for png in [true, false] {
             let encoded = try FieldPicturePaste.encode(bitmap, asPNG: png)
             let decoded = try #require(NSBitmapImageRep(data: encoded.bytes))
             #expect(decoded.pixelsWide == 2 && decoded.pixelsHigh == 2)
             #expect(encoded.name.hasSuffix(png ? ".png" : ".jpg"))
             #expect(encoded.name.count == 50)
+            #expect(!FieldPicturePaste.needsSizeWarning(encoded.bytes.count))
             if !png {
                 let color = try #require(decoded.colorAt(x: 0, y: 0)?.usingColorSpace(.deviceRGB))
                 #expect(color.redComponent > 0.9 && color.greenComponent > 0.35 && color.blueComponent > 0.35,
@@ -277,8 +370,10 @@ import AppKit
     let root: URL
     var added: [(String, Data)] = []
     var afterAdd: (@MainActor () async -> Void)?
+    var refusedNames: Set<String> = []
     init(root: URL) { self.root = root }
     func addMedia(name: String, bytes: [UInt8]) async throws(BridgeError) -> String {
+        if refusedNames.contains(name) { throw .unavailable(reason: "Synthetic refusal") }
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             let data = Data(bytes)

@@ -78,16 +78,22 @@ extension ReviewCollectionStartupTests {
             let note = try #require(inspector.note)
             let host = try #require(note.runtime as? FieldEditorHost)
             try await BrowseFieldEditingTests.edit(host, """
-                select(rich.firstChild, rich.firstChild.length);
+                select(rich.firstChild, 4);
                 key('insertParagraph'); key('insertParagraph'); key('insertParagraph');
                 """)
             // The actual idle timer commits these Returns; no source-mode edit
             // or injected draft commit stands in for the field runtime.
-            await waitUntil { note.draft.values[0].contains("<div><br></div><div><br></div><div><br></div>") }
+            await waitUntil { note.draft.values[0].contains("<div><br></div><div><br></div><div>ow a</div>") }
             #expect(await inspector.flushForBackground())
             let returns = try await CoreNoteService().readNote(id: note.noteID).fields[0]
-            #expect(returns == "kerrow a<div><br></div><div><br></div><div><br></div>")
+            #expect(returns == "kerr<div><br></div><div><br></div><div>ow a</div>")
 
+            do {
+                _ = try await CoreMediaService(expectedGeneration: note.draft.generation + 1)
+                    .addMedia(name: "stale-picture.png", bytes: [1])
+                Issue.record("Stale collection generation admitted a picture")
+            } catch { }
+            #expect(!(try await CoreMediaService().trackedNames()).names.contains { $0.name == "stale-picture.png" })
             let bitmap = try BrowseFieldEditingTests.bitmap(.png)
             let asPNG = (try? await CoreEditorServices().pasteImagesAsPNG()) ?? false
             let sourceRoot = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -107,7 +113,7 @@ extension ReviewCollectionStartupTests {
             await waitUntil { note.draft.values[0].contains("<img") }
             #expect(await inspector.flushForBackground())
             let saved = try await CoreNoteService().readNote(id: note.noteID)
-            #expect(saved.fields[0] == "kerrow a<div><br></div><div><br></div><div><img src=\"\(encoded.name)\"><br></div>")
+            #expect(saved.fields[0] == "kerr<div><br></div><div><br></div><div><img src=\"\(encoded.name)\">ow a</div>")
             #expect(saved.fields[1] == "x")
             let tracked = try await CoreMediaService().trackedNames()
             #expect(tracked.names.contains { $0.name == encoded.name })

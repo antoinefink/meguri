@@ -85,11 +85,14 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     private var processTerminated = false
     #if os(macOS)
     // The normal collection writer records the media addition for sync.
-    var pictureMedia: any MediaService = CoreMediaService()
+    var pictureMedia: (any MediaService)?
+    var confirmPictureSize: (@MainActor (String, Int) async -> Bool)?
+    private var pictureSizeAlert: NSAlert?
     var picturePasteboard: NSPasteboard = .general
     private var pictureTask: Task<Void, Never>?
-    private var pictureFailures: [(name: String, cause: String)] = []
+    private(set) var pictureFailures: [(name: String, cause: String)] = []
     private var pictureAlertShown = false
+    private var pictureFailureAlert: NSAlert?
     private var pictureUnhideObserver: (any NSObjectProtocol)?
     var picturePasteCompletion: Task<Void, Never>? { pictureTask }
     #endif
@@ -281,6 +284,9 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     /// Resolve all earlier sequence numbers before returning the flushed draft
     /// targets. A caller must not submit a write before this returns.
     public func flush(hold: Bool) async throws {
+        #if os(macOS)
+        if hold { cancelPictureTask() }
+        #endif
         // Browse's inspector flushes for a save, a cloze and a reload: a flush
         // waits for the one under way rather than fail (no input is skipped).
         while browsing, editable, commandLoad != nil { try await Task.sleep(for: .milliseconds(5)) }
@@ -552,41 +558,96 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     }
     #if os(macOS)
     private func pastePicture(ord: Int, request: Int, load expected: UInt64) {
-        // Snapshot on delivery of the real system paste event, before the
-        // asynchronous media write. No clipboard bytes enter the page bridge.
-        let pictures: [FieldPicturePaste]
-        do { pictures = try FieldPicturePaste.read(picturePasteboard) }
-        catch { pictures = []; reportPictureFailure(error) }
+        // Only the immutable pasteboard snapshot runs on AppKit's actor.
+        let snapshot = FieldPicturePaste.snapshot(picturePasteboard)
+        cancelPictureTask()
+        let importer = pictureMedia ?? CoreMediaService(expectedGeneration: draft.generation)
         pictureTask = Task { [weak self] in
             guard let self else { return }
-            var html = "", name: String?
+            var html = ""
             do {
-                try requireCurrent(expected)
-                let asPNG = pictures.contains(where: \.isBitmap) ? (try? await CoreEditorServices().pasteImagesAsPNG()) ?? false : false
-                try requireCurrent(expected)
-                for raw in pictures {
-                    name = raw.name.isEmpty ? nil : raw.name
-                    let picture: FieldPicturePaste
-                    if raw.isBitmap { picture = try FieldPicturePaste.encode(raw.bytes, asPNG: asPNG) }
-                    else { picture = raw }
-                    name = picture.name
-                    try Task.checkCancellation()
-                    try requireCurrent(expected)
-                    guard !held else { break }
-                    let name = try await pictureMedia.addMedia(name: picture.name, bytes: Array(picture.bytes))
-                    try requireCurrent(expected)
-                    try Task.checkCancellation()
-                    // P3/P16: encode storage-form UTF-8 names exactly once.
-                    let safe = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~/")
-                    guard let src = name.addingPercentEncoding(withAllowedCharacters: safe) else { throw EditorRuntimeError.invalidMessage }
-                    html += "<img src=\"\(src)\">"
+                let sources = await Task.detached { FieldPicturePaste.sources(snapshot) }.value
+                try await requirePictureTarget(ord: ord, request: request, load: expected)
+                let asPNG = sources.contains(where: \.isBitmap) ? (try? await CoreEditorServices().pasteImagesAsPNG()) ?? false : false
+                for source in sources {
+                    var name = source.name
+                    do {
+                        try await requirePictureTarget(ord: ord, request: request, load: expected)
+                        // Disk files warn before allocation. Compressed bitmap
+                        // input size says nothing about the encoded output.
+                        var approvedSize: Int?
+                        if !source.isBitmap {
+                            let size = try await Task.detached { try source.size() }.value
+                            if FieldPicturePaste.needsSizeWarning(size) {
+                                guard try await approvePictureSize(name: name, size: size, ord: ord, request: request, load: expected) else { continue }
+                                approvedSize = size
+                            }
+                        }
+                        try await requirePictureTarget(ord: ord, request: request, load: expected)
+                        let picture = try await Task.detached { try source.prepare(asPNG: asPNG) }.value
+                        name = picture.name
+                        if FieldPicturePaste.needsSizeWarning(picture.bytes.count), approvedSize != picture.bytes.count {
+                            guard try await approvePictureSize(name: name, size: picture.bytes.count, ord: ord, request: request, load: expected) else { continue }
+                        }
+                        // The existing MediaService accepts an array; allocate
+                        // it on the worker and release each file before the next.
+                        let bytes = await Task.detached { Array(picture.bytes) }.value
+                        try await requirePictureTarget(ord: ord, request: request, load: expected)
+                        let stored = try await importer.addMedia(name: name, bytes: bytes)
+                        try await requirePictureTarget(ord: ord, request: request, load: expected)
+                        let safe = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~/")
+                        guard let src = stored.addingPercentEncoding(withAllowedCharacters: safe) else { throw EditorRuntimeError.invalidMessage }
+                        html += "<img src=\"\(src)\">"
+                    } catch {
+                        // One unreadable file never discards preceding pictures
+                        // or stops the later items of this paste.
+                        try await requirePictureTarget(ord: ord, request: request, load: expected)
+                        reportPictureFailure(error, name: name.isEmpty ? nil : name)
+                    }
                 }
+                try await requirePictureTarget(ord: ord, request: request, load: expected)
+                _ = try await call(["type": "finishPicturePaste", "loadId": expected, "ord": ord, "request": request, "html": html], load: expected)
             } catch {
-                if !Task.isCancelled, (try? requireCurrent(expected)) != nil { reportPictureFailure(error, name: name) }
+                // A hold, reload, later edit or retired owner invalidates the
+                // request. Never clear a newer paste's state or restore its caret.
             }
-            guard (try? requireCurrent(expected)) != nil else { return }
-            _ = try? await call(["type": "finishPicturePaste", "loadId": expected, "ord": ord, "request": request, "html": html], load: expected)
         }
+    }
+    private func requirePictureTarget(ord: Int, request: Int, load expected: UInt64) async throws {
+        try Task.checkCancellation(); try requireCurrent(expected)
+        guard !held else { throw EditorRuntimeError.unavailable }
+        let result = try await call(["type": "picturePasteCurrent", "loadId": expected, "ord": ord, "request": request], load: expected) as? [String: Any]
+        try Task.checkCancellation(); try requireCurrent(expected)
+        guard result?["current"] as? Bool == true else { throw EditorRuntimeError.unavailable }
+    }
+    private func cancelPictureTask() {
+        pictureTask?.cancel(); pictureTask = nil
+        if let alert = pictureSizeAlert, let window = alert.window.sheetParent {
+            window.endSheet(alert.window, returnCode: .alertSecondButtonReturn)
+        }
+        pictureSizeAlert = nil
+    }
+    private func approvePictureSize(name: String, size: Int, ord: Int, request: Int, load expected: UInt64) async throws -> Bool {
+        try await requirePictureTarget(ord: ord, request: request, load: expected)
+        if let confirmPictureSize { return await confirmPictureSize(name, size) }
+        // Present only on a visible owning window, including after unhide.
+        while webView.window?.isVisible != true || NSApp.isHidden || pictureAlertShown {
+            try await Task.sleep(for: .milliseconds(50))
+            try await requirePictureTarget(ord: ord, request: request, load: expected)
+        }
+        guard let window = webView.window else { throw EditorRuntimeError.unavailable }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "This File Won't Sync", bundle: .module)
+        let formatted = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+        alert.informativeText = String(localized: "“\(name)” is \(formatted). Files this size don't sync to your other devices.", bundle: .module)
+        alert.addButton(withTitle: String(localized: "Add Anyway", bundle: .module))
+        alert.addButton(withTitle: String(localized: "Cancel", bundle: .module))
+        pictureSizeAlert = alert
+        let response = await alert.beginSheetModal(for: window)
+        if pictureSizeAlert === alert { pictureSizeAlert = nil }
+        try Task.checkCancellation(); try requireCurrent(expected)
+        presentPictureFailure()
+        return response == .alertFirstButtonReturn
     }
     private func reportPictureFailure(_ failure: any Error, name: String? = nil) {
         let path = (failure as NSError).userInfo[NSFilePathErrorKey] as? String
@@ -602,15 +663,15 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     }
     private func presentPictureFailure() {
         // AppKit must never present an alert while the app is hidden.
-        guard !closed, isCurrent(), !NSApp.isHidden, !pictureAlertShown,
-              let window = webView.window, window.isVisible, !pictureFailures.isEmpty else { return }
+        guard !closed, isCurrent(), !pictureAlertShown, pictureSizeAlert == nil,
+              let window = webView.window, window.isVisible, !NSApp.isHidden, !pictureFailures.isEmpty else { return }
         let failure = pictureFailures.removeFirst(), alert = NSAlert()
         alert.messageText = String(localized: "Couldn't Add “\(failure.name)”", bundle: .module)
         alert.informativeText = failure.cause
         alert.addButton(withTitle: String(localized: "OK", bundle: .module))
-        pictureAlertShown = true
+        pictureAlertShown = true; pictureFailureAlert = alert
         alert.beginSheetModal(for: window) { [weak self] _ in
-            Task { @MainActor in self?.pictureAlertShown = false; self?.presentPictureFailure() }
+            Task { @MainActor in self?.pictureAlertShown = false; self?.pictureFailureAlert = nil; self?.presentPictureFailure() }
         }
     }
     #endif
@@ -620,8 +681,10 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         error = String(describing: failure); editable = false
         commandLoad = nil
         #if os(macOS)
-        pictureTask?.cancel(); pictureTask = nil
+        cancelPictureTask()
         pictureFailures = []
+        if let alert = pictureFailureAlert, let window = alert.window.sheetParent { window.endSheet(alert.window) }
+        pictureFailureAlert = nil; pictureAlertShown = false
         if let pictureUnhideObserver { NotificationCenter.default.removeObserver(pictureUnhideObserver) }
         pictureUnhideObserver = nil
         #endif

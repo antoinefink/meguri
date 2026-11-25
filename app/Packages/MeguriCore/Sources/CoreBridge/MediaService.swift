@@ -23,13 +23,20 @@ public protocol MediaService: Sendable {
     func addMedia(name: String, bytes: [UInt8]) async throws(BridgeError) -> String
 }
 public actor CoreMediaService: MediaService {
-    public init() {}
+    private let expectedGeneration: UInt64?
+    public init(expectedGeneration: UInt64? = nil) { self.expectedGeneration = expectedGeneration }
     public func trackedNames() async throws(BridgeError) -> MediaNameSnapshot {
         try await InteractiveLane.shared.call(.trackedMediaNames) {
             MediaNameSnapshot(try MeguriCoreBindings.trackedMediaNames())
         }
     }
     public func addMedia(name: String, bytes: [UInt8]) async throws(BridgeError) -> String {
-        try await InteractiveLane.shared.call(.addMedia) { try MeguriCoreBindings.addMedia(name: name, bytes: Data(bytes)) }
+        let expected = expectedGeneration
+        return try await InteractiveLane.shared.call(.addMedia) {
+            if let expected {
+                return try MeguriCoreBindings.editorAddPicture(expectedGeneration: expected, name: name, bytes: Data(bytes))
+            }
+            return try MeguriCoreBindings.addMedia(name: name, bytes: Data(bytes))
+        }
     }
 }

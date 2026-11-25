@@ -101,3 +101,13 @@ pub fn editor_paste_images_as_png() -> Result<bool, CoreError> {
     let snapshot = reader.snapshot()?;
     Ok(snapshot.config_value("pasteImagesAsPng")?.and_then(|value| value.as_bool()).unwrap_or(false))
 }
+
+/// P4/P25: retain the admitted media service, then check its collection before
+/// writing. An asynchronous clipboard import must not write into a replacement.
+#[uniffi::export]
+pub fn editor_add_picture(expected_generation: u64, name: String, bytes: Vec<u8>) -> Result<String, CoreError> {
+    callback::enter("editor_add_picture");
+    let media = runtime::host()?.media()?;
+    media.check_generation(expected_generation)?;
+    Ok(media.add(&name, &bytes)?)
+}

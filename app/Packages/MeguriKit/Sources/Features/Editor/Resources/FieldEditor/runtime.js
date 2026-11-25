@@ -173,6 +173,7 @@
     }
     function history(field, redo) {
         const from = redo ? field.redo : field.undo, to = redo ? field.undo : field.redo;
+        if (!held) cancelPicture(field);
         if (held || !from.length) return false;
         to.push(content(field)); field.lastKind = null;
         restore(field, from.pop()); return true;
@@ -227,7 +228,14 @@
         if (next) focus(next);
         else { active(field).blur(); void emit("focusLeave", {direction: backwards ? "previous" : "next"}); }
     }
-    const hasContent = node => !!node.textContent || !!node.querySelector("img,hr,audio,video,iframe,object,input,svg,math,[data-meguri-chip]");
+    const hasContent = node => {
+        if (node.querySelector("img,hr,audio,video,iframe,object,input,svg,math,[data-meguri-chip]")) return true;
+        const texts = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+        while (texts.nextNode()) {
+            if (texts.currentNode.data && !texts.currentNode.parentElement?.closest("style,script,template")) return true;
+        }
+        return false;
+    };
     function fillLine(node) {
         if (!hasContent(node) && !node.querySelector("br")) node.append(document.createElement("br"));
     }
@@ -241,7 +249,11 @@
     function breakLine(field, lineBreak) {
         beforeEdit(field, lineBreak ? "insertLineBreak" : "insertParagraph");
         const caret = range(field);
-        caret.deleteContents();
+        // H1/H3's final inline BR is a load/caret sentinel. Once Return
+        // creates a block, H3 no longer drops it: remove it before extracting
+        // the tail, retaining every preceding (authored) break.
+        const loadBreak = !lineBreak && inline(field.rich) && field.rich.lastChild?.localName === "br" ? field.rich.lastChild : null;
+        caret.deleteContents(); loadBreak?.remove();
         if (lineBreak) {
             const br = document.createElement("br");
             caret.insertNode(br); caret.setStartAfter(br); caret.collapse(true);
@@ -314,7 +326,10 @@
         input.addEventListener("beforeinput", event => {
             // Composition input cannot be cancelled: remember the field, so
             // what it now shows is committed once the hold ends.
-            if (held || field.picture) { event.preventDefault(); if (!event.cancelable) field.heldInput = true; return; }
+            if (held) { event.preventDefault(); if (!event.cancelable) field.heldInput = true; return; }
+            // A later edit wins over an unfinished paste. Never swallow keys
+            // or insert the delayed picture ahead of already accepted input.
+            if (field.picture) cancelPicture(field);
             if (["historyUndo", "historyRedo"].includes(event.inputType)) {
                 event.preventDefault(); history(field, event.inputType === "historyRedo"); return;
             }
@@ -331,7 +346,8 @@
         input.addEventListener("keydown", event => {
             if (held) { event.preventDefault(); return; }
             if (event.key === "Tab") { event.preventDefault(); tab(field, event.shiftKey); return; }
-            if (field.picture) { event.preventDefault(); return; }
+            if (field.picture && (event.key === "Backspace" || event.key === "Delete" ||
+                (event.key.length === 1 && !event.metaKey && !event.ctrlKey))) cancelPicture(field);
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") event.preventDefault();
             if (event.metaKey && event.shiftKey && event.code === "KeyX") { event.preventDefault(); toggleMode(field); }
             if (event.metaKey && event.code === "KeyZ" && history(field, event.shiftKey)) event.preventDefault();
@@ -341,8 +357,9 @@
         // unsupported content remains refused until U197 supplies that path.
         input.addEventListener("paste", event => {
             event.preventDefault();
-            if (held || field.mode !== "rich" || fields.some(value => value.picture) ||
+            if (held || field.mode !== "rich" ||
                 !document.documentElement.classList.contains("mac")) return;
+            fields.forEach(cancelPicture);
             const request = ++pictureID;
             field.picture = {request, caret: range(field)};
             field.rich.setAttribute("aria-busy", "true");
@@ -723,13 +740,15 @@
         case "format": {
             keys(message, ["type", "loadId", "command"]);
             if (!Object.hasOwn(formats, message.command)) throw new Error("Unknown format");
-            if (held || !current || current.picture || current.mode !== "rich") return {applied: false};
+            if (held || !current || current.mode !== "rich") return {applied: false};
+            cancelPicture(current);
             return {applied: format(current, message.command)};
         }
         case "wrap": {
             keys(message, ["type", "loadId", "prefix", "suffix"]);
             if (typeof message.prefix !== "string" || typeof message.suffix !== "string") throw new Error("Invalid wrap");
-            if (held || !current || current.picture || current.mode !== "rich") return {applied: false};
+            if (held || !current || current.mode !== "rich") return {applied: false};
+            cancelPicture(current);
             wrap(current, message.prefix, message.suffix);
             return {applied: true};
         }
@@ -745,10 +764,15 @@
             field.caret = picture.caret; focus(field);
             return {changed: insert(field, message.html, picture.caret)};
         }
+        case "picturePasteCurrent":
+            keys(message, ["type", "loadId", "ord", "request"]);
+            return {current: !!field && !held && !field.hidden && !field.collapsed && field.mode === "rich" &&
+                field.picture?.request === message.request};
         case "insert":
             keys(message, ["type", "loadId", "ord", "html", "at"]);
             if (!field || typeof message.html !== "string" || !["selection", "end"].includes(message.at)) throw new Error("Invalid insertion");
-            if (held || current !== field || field.picture || field.mode !== "rich" || field.hidden || field.collapsed) return {changed: false};
+            if (held || current !== field || field.mode !== "rich" || field.hidden || field.collapsed) return {changed: false};
+            cancelPicture(field);
             { const caret = range(field);
               if (message.at === "end") {
                   caret.selectNodeContents(field.rich); caret.collapse(false);
@@ -757,7 +781,8 @@
               return {changed: insert(field, message.html, caret)}; }
         case "undo": case "redo":
             keys(message, ["type", "loadId", "ord"]); if (!field) throw new Error("Unknown field");
-            return {applied: !field.picture && history(field, message.type === "redo")};
+            cancelPicture(field);
+            return {applied: history(field, message.type === "redo")};
         default: throw new Error("Unsupported editor command");
         }
     }
