@@ -66,7 +66,7 @@ public enum StatsPlotSize: Hashable, Sendable {
     /// One of two aligned panels in a regular box (Time of Day, S7.11).
     case panel
 
-    var height: CGFloat {
+    nonisolated var height: CGFloat {
         switch self {
         case .lead: 200
         case .regular: 150
