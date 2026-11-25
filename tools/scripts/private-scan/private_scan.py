@@ -911,9 +911,15 @@ PUBLIC_ARTIFACTS = {
         '1bf97e602e93e0809c259aae993be3b7328aab5ce181f192cfdf95cadc3bfa8d',
     'core/crates/meguri-storage/tests/activity.rs':
         'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
-    # Merged contract, whole-file PUBLIC review in cleanroom 20261124T192531Z-55996.
+    # Complete-content PUBLIC review: compact card statistics, privacy_review, 2026-11-25.
+    'app/Packages/MeguriKit/Sources/Features/Stats/Page/Sections/StatsCardsSection.swift':
+        'e4259a20833050402de0cb3727ad09b489321ba511751470e57626d558f88508',
+    'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
+        'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        '50c5a5853c9f846cc214bd20fe336d5b1da2898716f05709aa0cad9908574624',
+        'd9ed2a06da3dfacd3009e68c5ae3c56e046be708202777c41b9dcf873ada9a3f',
+    'specs/stats/statistics-page.md':
+        '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
