@@ -50,7 +50,7 @@ struct NativeCommandContext {
 
     /// The Add menu's New Note: on a deck page it presets that deck.
     private var newNoteDeck: Int64? {
-        guard let deck = shownDeck, collection.deck(deck)?.filtered != true else { return nil }
+        guard let deck = selectedDeck, collection.deck(deck)?.filtered != true else { return nil }
         return deck
     }
     var canNewNote: Bool { host == .main && collection.addNotePresentation.canPresent(presetDeck: newNoteDeck) }
@@ -138,7 +138,12 @@ struct NativeCommandContext {
 
     /// The deck the workspace shows: the sidebar's selection, or the deck page.
     var shownDeck: Int64? {
-        guard host == .main, fileActionsAvailable, collection.navigation.section == .home,
+        fileActionsAvailable ? selectedDeck : nil
+    }
+    // Add re-entry uses the workspace selection even while its auxiliary
+    // window is open. The flow owns validation and keeps the existing draft.
+    private var selectedDeck: Int64? {
+        guard host == .main, collection.navigation.section == .home,
               collection.review == nil, collection.navigation.review == nil,
               let deck = collection.navigation.homeDeckPage?.rawValue,
               collection.deck(deck) != nil || collection.deckPage(deck) != nil else { return nil }

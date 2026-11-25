@@ -106,7 +106,7 @@ struct RootView: View {
         // Hide only the presenting shell; sheets and alerts own their AX tree.
         .accessibilityHidden(launchSheet || launchAlert || linkRefusal != nil || hasModalSheet)
         .modifier(AddNoteWindowPresentation(collection: collection, enabled: features.nativeMacWorkspace))
-        .background(AddNoteWindowGuard(navigation: navigation, editNote: collection?.editNoteFlow))
+        .background(AddNoteWindowGuard(editNote: collection?.editNoteFlow))
         // Here, not in the status button: review mounts that button only while sync needs the person (N16.2).
         .onChange(of: collection?.syncPresentation.settingsRequest) { _, request in
             if request != nil, collection?.sync.providerState?.selection == .meguri { openSettings() }

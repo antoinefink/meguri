@@ -1,6 +1,7 @@
 import CardRendering
 #if os(macOS)
 import AppKit
+import WebKit
 #else
 import UIKit
 #endif
@@ -11,6 +12,27 @@ public enum ReviewInputOwnership {
         cardFocused && !editing && !paused && !repeated
     }
     #if os(macOS)
+    /// Replay belongs to the active review window, including its native
+    /// controls. Text input, sheets and menu tracking retain their keys.
+    public static func replayFocused(in container: CardPlatformView) -> Bool {
+        guard let window = container.window, NSApp?.isActive == true, window.isKeyWindow,
+              window.attachedSheet == nil, NSApp.modalWindow == nil,
+              RunLoop.current.currentMode != .eventTracking,
+              let responder = window.firstResponder else { return false }
+        return replayResponder(responder, in: container)
+    }
+
+    static func replayResponder(_ responder: NSResponder, in container: CardPlatformView) -> Bool {
+        guard let view = responder as? NSView else { return responder === container.window }
+        if contains(view, in: container) { return true } // DOM editing is checked separately.
+        var ancestor: NSView? = view
+        while let current = ancestor {
+            if current is NSText || current is NSTextField || current is NSComboBox || current is WKWebView { return false }
+            ancestor = current.superview
+        }
+        return true
+    }
+
     /// Menu commands use exactly the card input admission boundary, including
     /// native focus, behavior dialogs, DOM editing and repeated key events.
     public static func admitsNativeCommand(_ model: ReviewCoordinator) -> Bool {

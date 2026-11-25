@@ -34,7 +34,7 @@ public final class AddNotePresentation {
         #endif
         guard prepare != nil, !opening, owner.canBeginAddAction,
               owner.review == nil, owner.navigation.review == nil,
-              presentationFree, owner.reviewIsActive else { return false }
+              presentationFree, owner.navigation.sheet.isAddNote || owner.reviewIsActive else { return false }
         // A normal empty deck need not be in the tree. The real preparation
         // validates its persisted ID; no name-derived or invented ID is used.
         if let presetDeck, owner.deck(presetDeck)?.filtered == true { return false }

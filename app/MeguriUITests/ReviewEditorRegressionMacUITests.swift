@@ -64,7 +64,9 @@ import XCTest
         XCTAssertTrue(element(app, "review.session.reveal").exists)
         element(app, "review.session.reveal").click()
         XCTAssertTrue(element(app, "review.session.rate.good").waitForExistence(timeout: 10))
-        card.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.25)).click()
+        // Focus the actual native grade button after reveal, without touching WebKit.
+        inject("focus-review-control", bundle: bundle)
+        XCTAssertEqual(try audio(app, bundle: bundle).focus, "native")
         app.typeKey("r", modifierFlags: [])
         let answer = try audio(app, bundle: bundle)
         XCTAssertEqual(answer.count, question.count + 1)
@@ -119,6 +121,99 @@ import XCTest
         XCTAssertTrue(discard.waitForExistence(timeout: 10)); discard.click()
         XCTAssertTrue(window.waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, "browse.results.table").exists)
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        XCTAssertTrue(wait { fields.count == 2 })
+        XCTAssertFalse((fields.element(boundBy: 0).value as? String ?? "").contains("Synthetic unsaved draft"))
+        XCTAssertFalse(window.buttons["editor.add.save"].isEnabled, "discarded input must not return on reopen")
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(window.waitForNonExistence(timeout: 10))
+    }
+
+    func testNewNoteReentryUsesTheSelectedDeckAndKeepsTheDirtyDraft() throws {
+        let (app, _) = try launch()
+        defer { app.terminate() }
+        try selectDeck("Synthetic Summary", app: app)
+        app.typeKey("n", modifierFlags: .command)
+        let window = app.windows["editor.add.window"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        let deck = window.popUpButtons["editor.add.deck"]
+        XCTAssertTrue(wait { (deck.value as? String ?? "").contains("Synthetic Summary") })
+        window.popUpButtons["editor.add.type"].click(); app.menuItems["Meguri Basic"].click()
+        let fields = window.descendants(matching: .any).matching(identifier: "editor.fields").firstMatch.textViews
+        XCTAssertTrue(wait { fields.count == 2 })
+        fields.element(boundBy: 0).click(); app.typeText("Synthetic retained draft")
+        fields.element(boundBy: 1).click(); app.typeText("Synthetic retained answer")
+        try selectDeck("Synthetic Long Audio", app: app)
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(wait { (deck.value as? String ?? "").contains("Synthetic Long Audio") })
+        XCTAssertEqual(app.windows.matching(identifier: "editor.add.window").count, 1)
+        XCTAssertTrue((fields.element(boundBy: 0).value as? String ?? "").contains("Synthetic retained draft"))
+        XCTAssertTrue((fields.element(boundBy: 1).value as? String ?? "").contains("Synthetic retained answer"))
+        app.typeKey("w", modifierFlags: .command)
+        let discard = window.sheets.buttons["Discard"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 10)); discard.click()
+        XCTAssertTrue(window.waitForNonExistence(timeout: 10))
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        XCTAssertTrue(wait { (deck.value as? String ?? "").contains("Synthetic Long Audio") })
+        XCTAssertTrue(wait { fields.count == 2 })
+        XCTAssertFalse((fields.element(boundBy: 0).value as? String ?? "").contains("Synthetic retained draft"))
+        XCTAssertFalse(window.buttons["editor.add.save"].isEnabled)
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(window.waitForNonExistence(timeout: 10))
+    }
+
+    func testMainCloseLeavesCleanAddOpenAndReopensTheSameWorkspace() throws {
+        let (app, _) = try launch()
+        defer { app.terminate() }
+        try selectDeck("Synthetic Summary", app: app)
+        let main = app.windows.containing(.any, identifier: "shell.root.sidebar.browse").firstMatch
+        app.typeKey("n", modifierFlags: .command)
+        let add = app.windows["editor.add.window"]
+        XCTAssertTrue(add.waitForExistence(timeout: 15))
+        try selectDeck("Synthetic Summary", app: app)
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(main.waitForNonExistence(timeout: 10), "the main window must continue its own close")
+        XCTAssertTrue(add.exists && add.sheets.count == 0, "main close must not cancel Add")
+        app.menuBars.menuBarItems["Window"].click(); app.menuItems["Meguri"].click()
+        XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10))
+        XCTAssertTrue(add.exists, "reopening main preserves the collection-owned Add window")
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(wait { (add.popUpButtons["editor.add.deck"].value as? String ?? "").contains("Synthetic Summary") })
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(add.waitForNonExistence(timeout: 10))
+    }
+
+    func testMainCloseCancelsCleanEditThenClosesAndQuitStillGuardsDirtyAdd() throws {
+        let (app, bundle) = try launch(extra: ["-MeguriIntegrations", "on"])
+        defer { app.terminate() }
+        try study("Synthetic Long Audio", app: app, bundle: bundle)
+        app.typeKey("e", modifierFlags: .command)
+        let edit = app.windows["review.editCurrent.window"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 15))
+        let main = app.windows.containing(.any, identifier: "review.session.card").firstMatch
+        main.click(); app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(edit.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(main.waitForNonExistence(timeout: 10), "clean Edit cancellation must continue main close")
+        app.menuBars.menuBarItems["Window"].click(); app.menuItems["Meguri"].click()
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 15))
+        element(app, "review.session.close").click()
+        XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10))
+        app.typeKey("n", modifierFlags: .command)
+        let add = app.windows["editor.add.window"]
+        XCTAssertTrue(add.waitForExistence(timeout: 15))
+        let fields = add.descendants(matching: .any).matching(identifier: "editor.fields").firstMatch.textViews
+        XCTAssertTrue(wait { fields.count > 0 })
+        fields.element(boundBy: 0).click(); app.typeText("Synthetic quit guard")
+        app.typeKey("q", modifierFlags: .command)
+        let keep = add.sheets.buttons["Keep Editing"]
+        XCTAssertTrue(keep.waitForExistence(timeout: 10)); keep.click()
+        XCTAssertTrue(add.exists && element(app, "home.deck.study").exists, "Keep Editing refuses actual termination")
+        app.typeKey("q", modifierFlags: .command)
+        let discard = add.sheets.buttons["Discard"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 10)); discard.click()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 15))
     }
 
     func testManyFieldMultiCardBrowseInspectorEditsFieldTwelve() throws {
@@ -147,7 +242,7 @@ import XCTest
         capture(app.windows.firstMatch, "browse-many-field-audio-edited-field-twelve-synthetic")
     }
 
-    private func launch(appearance: String = "light") throws -> (XCUIApplication, String) {
+    private func launch(appearance: String = "light", extra: [String] = []) throws -> (XCUIApplication, String) {
         guard CardSwapTimingGate.hypervisorPresent() == true else { throw XCTSkip("Mac UI VM only") }
         continueAfterFailure = false
         let build = try BuildUnderTest.current(), bundle = try build.bundleIdentifier
@@ -155,25 +250,31 @@ import XCTest
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/review-editor-1"),
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false,
-            windowSize: "1440x900", appearance: appearance).arguments
+            windowSize: "1440x900", appearance: appearance, extra: extra).arguments
         app.launch(); try app.bringToFront(bundleIdentifier: bundle)
         XCTAssertTrue(element(app, "shell.root.sidebar.browse").waitForExistence(timeout: 25))
         return (app, bundle)
     }
     private func study(_ name: String, app: XCUIApplication, bundle: String) throws {
+        try selectDeck(name, app: app)
+        let study = element(app, "home.deck.study")
+        study.click()
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
+        try app.bringToFront(bundleIdentifier: bundle)
+    }
+    private func selectDeck(_ name: String, app: XCUIApplication) throws {
         let rows = HomeControls.deckRows(app, labelContaining: name)
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 15))
         (HomeControls.hittable(rows) ?? rows.firstMatch).click()
+        XCTAssertTrue(wait { element(app, "home.deck.title").label == name }, "the selected deck page must finish changing")
         let study = element(app, "home.deck.study")
-        XCTAssertTrue(study.waitForExistence(timeout: 10)); study.click()
-        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
-        try app.bringToFront(bundleIdentifier: bundle)
+        XCTAssertTrue(study.waitForExistence(timeout: 10))
     }
     private func inject(_ command: String, bundle: String) {
         DistributedNotificationCenter.default().postNotificationName(.init(bundle + ".testhooks.reviewInput"),
             object: command, userInfo: nil, deliverImmediately: true)
     }
-    private func audio(_ app: XCUIApplication, bundle: String) throws -> (count: UInt64, sides: String) {
+    private func audio(_ app: XCUIApplication, bundle: String) throws -> (count: UInt64, sides: String, focus: String) {
         let reply = expectation(description: "Actual review audio queue")
         let received = Mutex<[String: String]?>(nil)
         let center = DistributedNotificationCenter.default()
@@ -186,7 +287,8 @@ import XCTest
         inject("snapshot", bundle: bundle)
         wait(for: [reply], timeout: 10)
         let fields = received.withLock { $0 }
-        return (try XCTUnwrap(UInt64(fields?["requests"] ?? "")), fields?["sides"] ?? "")
+        XCTAssertEqual(fields?["live"], "true", "the snapshot must read the live collection and audio controller")
+        return (try XCTUnwrap(UInt64(fields?["requests"] ?? "")), fields?["sides"] ?? "", fields?["focus"] ?? "none")
     }
     private func capture(_ window: XCUIElement, _ name: String) {
         let attachment = XCTAttachment(screenshot: window.screenshot())

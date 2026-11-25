@@ -474,6 +474,8 @@ public final class BrowseInspector {
                 switch error as? BridgeError {
                 case .commitCompleted?, .mediaCommitPending?:
                     note.draft.acknowledgeSaved(patch)
+                    note.saveFailure = nil
+                    reloadWanted = true
                     return .saved
                 case .noteNotFound?:
                     noteGone(note, droppingChanges: true)
@@ -521,11 +523,20 @@ public final class BrowseInspector {
             fields[position] = html
         }
         let again = NoteFieldPatch(id: note.noteID, notetype: type, fields: fields, tags: patch.tags, generation: patch.generation)
-        guard let result = try? await backend.save(again) else { return false }
-        ownPatches.insert(result.summary.seq)
+        do {
+            let result = try await backend.save(again)
+            ownPatches.insert(result.summary.seq)
+            if result.written, result.summary.undoName != nil { stepRecorded(result.summary.seq, "Edit Note") }
+        } catch {
+            switch error as? BridgeError {
+            case .commitCompleted?, .mediaCommitPending?: break
+            default: return false
+            }
+        }
+        // The draft still has the original layout. Acknowledge its positional
+        // patch, keeping any input committed since this save began.
         note.draft.acknowledgeSaved(patch)
         note.saveFailure = nil
-        if result.written, result.summary.undoName != nil { stepRecorded(result.summary.seq, "Edit Note") }
         reloadWanted = true
         return true
     }
