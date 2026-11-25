@@ -506,14 +506,19 @@ public final class BrowseInspector {
     private func resendOnNewLayout(_ note: BrowseInspectorNote, _ patch: NoteFieldPatch) async -> Bool {
         guard let stored = try? await backend.note(note.noteID),
               let type = try? await backend.notetype(stored.notetypeId) else { return false }
+        // A schema change must not bypass the editor's count/layout checks
+        // or turn an ordinary field edit into an Image Occlusion edit.
+        guard (try? NoteEditorDraft(editing: stored, notetype: type, deck: note.draft.deck,
+                                    generation: patch.generation ?? generation())) != nil else { return false }
         var fields: [Int: String] = [:]
         for (ord, html) in patch.fields {
+            guard note.notetype.fields.indices.contains(ord) else { return false }
             let old = note.notetype.fields[ord]
-            guard let new = type.fields.first(where: { $0.id != nil && $0.id == old.id }) ?? type.fields.first(where: { $0.name == old.name })
+            guard let position = type.fields.firstIndex(where: { $0.id != nil && $0.id == old.id }) ?? type.fields.firstIndex(where: { $0.name == old.name })
             else { return false }
             // Two edits on one field of the new layout: nothing is sent.
-            guard fields[Int(new.ord)] == nil else { return false }
-            fields[Int(new.ord)] = html
+            guard fields[position] == nil else { return false }
+            fields[position] = html
         }
         let again = NoteFieldPatch(id: note.noteID, notetype: type, fields: fields, tags: patch.tags, generation: patch.generation)
         guard let result = try? await backend.save(again) else { return false }

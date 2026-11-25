@@ -5,7 +5,7 @@ use common::tagging::{fresh, raw};
 use meguri_engine::{EngineError, UndoScope, notes};
 use meguri_model::{changes::OpSource, ids::NoteId, ids::NotetypeId};
 use meguri_storage::raw::SqlValue;
-use meguri_storage::{ReadRows, ReaderRole, Table};
+use meguri_storage::{ReadRows, ReaderRole, Record, Table};
 
 fn layout(h: &common::Harness, nt: NotetypeId) -> Vec<notes::AddFieldIdentity> {
     let r = h.collection.reader(ReaderRole::Query).unwrap();
@@ -34,6 +34,70 @@ fn patch(id: NoteId, nt: NotetypeId, layout: Vec<notes::AddFieldIdentity>, field
 
 fn stored(h: &common::Harness, id: NoteId) -> meguri_model::note::Note {
     h.collection.reader(ReaderRole::Query).unwrap().note(id).unwrap().unwrap()
+}
+
+#[test]
+fn sparse_stored_ordinals_patch_a_later_position_and_survive_reopen_without_schema_writes() {
+    for ords in [[0, 4, 12], [7, 15, 90]] {
+        let h = fresh();
+        let nt = kind(&h, false, &["Front", "Back", "Extra"], &["{{Front}}"]);
+        let mut draft = input(nt, &["<span  class='kept'>front</span><br/>", "back", "[sound:kept.mp3]"]);
+        draft.tags = vec!["kept".to_owned()];
+        let added = add(&h, draft);
+        let unrelated = add(&h, input(nt, &["unrelated", "<b>exact</b>", "other"])).id;
+        // Persist genuinely sparse rows, as a sync/import may supply them.
+        // Move the later rows first so their primary keys never collide.
+        for position in (0..ords.len()).rev() {
+            raw(
+                &h.collection,
+                "UPDATE fields SET ord = ? WHERE ntid = ? AND ord = ?",
+                &[SqlValue::Integer(ords[position]), SqlValue::Integer(nt.0), SqlValue::Integer(position as i64)],
+            );
+        }
+        let schema_rows = |h: &common::Harness| {
+            let reader = h.collection.reader(ReaderRole::Query).unwrap();
+            ["notetypes", "fields", "templates"].map(|table| {
+                reader.execute_raw(&format!("SELECT * FROM {table} ORDER BY 1, 2"), &[]).unwrap()
+            })
+        };
+        let before_schema = schema_rows(&h);
+        let before_note = stored(&h, added.id);
+        let before_unrelated = stored(&h, unrelated);
+        let expected = layout(&h, nt);
+        assert_eq!(expected.iter().map(|f| i64::from(f.ord)).collect::<Vec<_>>(), ords);
+        // The fingerprint still uses raw ord/id/name. Normalizing it would
+        // weaken the protection against a layout change under the editor.
+        let mut normalized = expected.clone();
+        for (position, field) in normalized.iter_mut().enumerate() {
+            field.ord = position as u32;
+        }
+        assert!(matches!(
+            notes::patch(&h.collection, patch(added.id, nt, normalized, &[(1, "wrong")]), OpSource::UserUndoable),
+            Err(EngineError::Stale { table: Table::Notetypes, .. })
+        ));
+        assert_eq!(stored(&h, added.id).to_cells(), before_note.to_cells());
+        // Patch key 1 is the second logical value, never stored ordinal 15/4.
+        let result = notes::patch(
+            &h.collection, patch(added.id, nt, expected, &[(1, "later field edited")]), OpSource::UserUndoable,
+        ).unwrap();
+        assert!(result.value.written);
+        let mut expected_note = before_note;
+        expected_note.fields = "<span  class='kept'>front</span><br/>\u{1f}later field edited\u{1f}[sound:kept.mp3]".to_owned();
+        let saved = stored(&h, added.id);
+        // Only ordinary note stamps may differ besides the selected value.
+        expected_note.mtime = saved.mtime;
+        expected_note.usn = saved.usn;
+        assert_eq!(saved.to_cells(), expected_note.to_cells());
+        assert_eq!(schema_rows(&h), before_schema);
+        let common::Harness { dir, path, engine, collection, .. } = h;
+        engine.close().unwrap();
+        drop(collection);
+        drop(engine);
+        let reopened = common::Harness::open_path(dir, path);
+        assert_eq!(stored(&reopened, added.id).to_cells(), expected_note.to_cells());
+        assert_eq!(stored(&reopened, unrelated).to_cells(), before_unrelated.to_cells());
+        assert_eq!(schema_rows(&reopened), before_schema);
+    }
 }
 
 #[test]

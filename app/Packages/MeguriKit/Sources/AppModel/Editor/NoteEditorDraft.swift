@@ -7,8 +7,16 @@ import Observation
 /// across layout remounts and web-process recovery. It performs no note writes.
 @Observable @MainActor
 public final class NoteEditorDraft {
+    /// Preparation failures are displayed by Add, Edit and Browse. Keep the
+    /// diagnostic readable even for callers using String(describing:).
+    public struct LayoutError: Error, LocalizedError, CustomStringConvertible, Sendable {
+        public nonisolated let description: String
+        public nonisolated var errorDescription: String? { description }
+    }
     public enum Mode: String, Codable, Sendable { case rich, html }
     public struct Field: Sendable, Equatable {
+        /// The raw stored definition, including its ordinal for stale checks.
+        /// All editor/page addresses use this field's position in `fields`.
         public let definition: NotetypeField
         public fileprivate(set) var baseline: String
         /// The value the page was opened (or last reloaded) with: what its
@@ -16,6 +24,7 @@ public final class NoteEditorDraft {
         /// away from it (`acknowledgeSaved`).
         fileprivate var opened: String
         public fileprivate(set) var target: String
+        /// The page differs from `opened`, independently of the save baseline.
         public fileprivate(set) var changed: Bool
         public fileprivate(set) var mode: Mode
         public fileprivate(set) var collapsed: Bool
@@ -69,10 +78,22 @@ public final class NoteEditorDraft {
 
     private init(generation: UInt64, notetype: NotetypeRecord, deck: DeckNameEntry,
                  values: [String]?, tags: [String], noteID: Int64?) throws {
-        guard noteID != nil || !deck.filtered, notetype.originalStockKind != 6, !notetype.fields.isEmpty,
-              notetype.fields.enumerated().allSatisfy({ Int($0.element.ord) == $0.offset }),
-              values == nil || values?.count == notetype.fields.count else {
-            throw BridgeError.invalidArgument("This note type or field layout is not supported by the field editor.")
+        guard noteID != nil || !deck.filtered else {
+            throw LayoutError(description: "Choose a normal deck before adding a note.")
+        }
+        guard notetype.originalStockKind != 6 else {
+            throw LayoutError(description: "Image Occlusion notes cannot be edited in the field editor.")
+        }
+        guard !notetype.fields.isEmpty else {
+            throw LayoutError(description: "This note type has no fields. Run Check Database before editing it.")
+        }
+        // N1 permits gaps, including before the first row. Storage supplies
+        // ord order; preserve those identities while addressing values by position.
+        guard zip(notetype.fields, notetype.fields.dropFirst()).allSatisfy({ pair in pair.0.ord < pair.1.ord }) else {
+            throw LayoutError(description: "This note type has duplicate or unordered field ordinals. Run Check Database before editing it.")
+        }
+        guard values == nil || values?.count == notetype.fields.count else {
+            throw LayoutError(description: "The note’s field count (\(values?.count ?? 0)) does not match its note type (\(notetype.fields.count)). Run Check Database before editing it.")
         }
         self.generation = generation; self.notetype = notetype; self.deck = deck; self.tags = tags
         self.noteID = noteID; baselineTags = tags
@@ -157,7 +178,9 @@ public final class NoteEditorDraft {
         guard patch.id == noteID else { return }
         for (ord, html) in patch.fields where fields.indices.contains(ord) {
             fields[ord].baseline = html
-            fields[ord].changed = fields[ord].target != html
+            // Saving does not change what the page opened with. Recovery
+            // still needs that baseline, or an unchanged page commit could
+            // restore the text from before this save.
         }
         if let tags = patch.tags { baselineTags = tags }
         revision &+= 1

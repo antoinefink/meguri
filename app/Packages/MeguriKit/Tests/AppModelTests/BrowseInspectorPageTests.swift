@@ -14,6 +14,59 @@ import WebKit
 @Suite(.serialized) struct BrowseInspectorPageTests {
     private static let stored = "say [sound:kip wurl.mp3] then <b>tem</b> [sound:a&amp;b.ogg]<img src=\"zant.png\">"
 
+    @Test(arguments: ["add", "edit", "browse"])
+    func sparseDefinitionsUsePositionsForThePageFocusModesClozeAndClosedReload(_ flow: String) async throws {
+        let type = Self.type(ords: [7, 19], cloze: true)
+        let deck = DeckNameEntry(id: 1, fullName: "D", filtered: false)
+        let note = NoteRecord(id: 5, notetypeId: 42, fields: [Self.stored, "second"], tags: [], guid: "g")
+        let draft: NoteEditorDraft
+        if flow == "add" {
+            draft = try NoteEditorDraft(generation: 1, notetype: type, deck: deck, values: note.fields)
+        } else {
+            draft = try NoteEditorDraft(editing: note, notetype: type, deck: deck, generation: 1)
+        }
+        let host = try FieldEditorHost(draft: draft, isCurrent: { true })
+        host.browsing = flow == "browse"
+        defer { host.shutDown() }
+        try await host.start()
+        #expect(draft.fields.map { $0.definition.ord } == [7, 19])
+        try await host.focusField(1)
+        _ = try await host.webView.callAsyncJavaScript("""
+            const {loadId, seq} = await meguriEditorRuntime.receive({type:'flush', loadId:1, hold:false});
+            return await window.webkit.messageHandlers.meguriEditor.postMessage({type:'focus', loadId, seq, ord:1, mode:'rich'});
+            """, contentWorld: .world(name: "Meguri.FieldEditor.v1"))
+        try await pollUntil { draft.focusedField == 1 && host.fieldFocused }
+        #expect(host.modeField == 1 && host.canFormat && host.canCloze)
+        #expect(host.modeControlIdentifier == "editor.field.1.htmlToggle")
+        try await host.setMode(.html, ord: 1)
+        #expect(try await FieldEditorTests.replaceSource(host, ord: 1, value: "<b>later</b>"))
+        try await host.setMode(.rich, ord: 1)
+        try await host.flush(hold: false)
+        #expect(draft.values == [Self.stored, "<b>later</b>"])
+        if flow != "add" {
+            let patch = try #require(draft.patch())
+            #expect(patch.fields == [1: "<b>later</b>"] && patch.notetype == type)
+            draft.acknowledgeSaved(patch)
+            #expect(!draft.hasChanges && draft.fields[1].changed, "the page baseline survives a save until it is reloaded")
+            let positions = draft.reloadUnchanged(stored: [Self.stored + " external", "<b>later</b>"], tags: [])
+            #expect(positions == [0])
+            try await host.reload(fields: positions)
+        }
+        host.shutDown()
+        // A new page over the retained draft must not reinterpret stored ords.
+        let reopened = try FieldEditorHost(draft: draft, isCurrent: { true })
+        reopened.browsing = flow == "browse"
+        defer { reopened.shutDown() }
+        try await reopened.start()
+        try await reopened.setMode(.html, ord: 1)
+        let source = try await reopened.webView.callAsyncJavaScript(
+            "return document.querySelectorAll('textarea')[1].value;", contentWorld: .page) as? String
+        #expect(source == "<b>later</b>")
+        try await reopened.flush(hold: false)
+        #expect(draft.values[0] == Self.stored + (flow == "add" ? "" : " external"))
+        if flow != "add" { #expect(draft.patch() == nil) }
+    }
+
     /// Edit Note's page (option A, 2026-11-24) shows the same chips: `browsing` false.
     @Test(arguments: [true, false])
     func soundChipsKeepTheFieldsBytesThroughTheSourceAndAnEdit(browsing: Bool) async throws {
@@ -133,11 +186,12 @@ import WebKit
         #expect(!FieldEditorHost.formats(editable: false, held: false, fieldFocused: true, mode: .rich))
     }
 
-    private static func type(collapsed: Bool = false) -> NotetypeRecord {
+    private static func type(collapsed: Bool = false, ords: [UInt32] = [0, 1], cloze: Bool = false) -> NotetypeRecord {
         let fields = ["Front", "Back"].enumerated().map { index, name in
-            NotetypeField(ord: UInt32(index), id: Int64(index), name: name, sticky: false, rtl: false, fontName: "Hiragino Mincho",
+            NotetypeField(ord: ords[index], id: Int64(index), name: name, sticky: false, rtl: false, fontName: "Hiragino Mincho",
                           fontSize: 40, description: "", plainText: false, collapsed: collapsed, excludeFromSearch: false)
         }
-        return .init(id: 42, name: "Two fields", kind: 0, sortField: 0, css: "", base: [], fields: fields, templates: [])
+        return .init(id: 42, name: "Two fields", kind: cloze ? 1 : 0, sortField: 0, css: "", base: [], fields: fields, templates: [],
+                     clozeFields: cloze ? [1] : [])
     }
 }

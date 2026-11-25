@@ -95,6 +95,87 @@ import Testing
 
     // MARK: Saving (V12, W2, W4)
 
+    @Test(arguments: [[UInt32(0), 4, 12], [UInt32(7), 15, 90]])
+    func sparseStoredOrdinalsSaveTheLogicalPositionAndKeepTheRawFingerprint(_ ords: [UInt32]) async throws {
+        let fixture = try await Fixture()
+        fixture.backend.fieldOrds = ords
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true }
+        let runtime = try #require(fixture.runtime)
+        try await runtime.type(1, "later field")
+        runtime.blur()
+        try await pollUntil { fixture.backend.saves.count == 1 }
+        let patch = try #require(fixture.backend.saves.first)
+        #expect(patch.fields == [1: "later field"] && patch.notetype.fields.map(\.ord) == ords)
+        let raw = try #require(patch.raw)
+        #expect(raw.fields.map(\.ord) == [1] && raw.fields.map(\.html) == ["later field"])
+        #expect(raw.fieldLayout.map(\.ord) == ords)
+        #expect(raw.fieldLayout.map(\.id) == [0, 1, 2] && raw.fieldLayout.map(\.name) == ["Front", "Back", "Extra"])
+        #expect(runtime.draft.values == ["front 10", "later field", ""])
+        // A foreign change still reloads by position without disturbing a
+        // committed edit, even though there is no stored ordinal zero.
+        fixture.backend.notes[10] = .init(id: 10, notetypeId: 42, fields: ["front 10", "later field", "external"], tags: [], guid: "g10")
+        fixture.model.changesCommitted(Self.noteUpdated(10), seq: 900)
+        try await pollUntil { fixture.page.reloads.contains([2]) }
+        #expect(runtime.draft.values == ["front 10", "later field", "external"])
+    }
+
+    @Test func aStalePatchRemapsToTheNewLogicalPositionWithItsRawLayout() async throws {
+        let fixture = try await Fixture()
+        fixture.backend.fieldOrds = [7, 15, 90]
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true }
+        let runtime = try #require(fixture.runtime)
+        try await runtime.type(2, "edited extra")
+        fixture.backend.failNext = .stale(table: .notetypes, key: "42")
+        fixture.backend.onSave = { _ in
+            fixture.backend.fieldOrder = [2, 0, 1]
+            fixture.backend.fieldOrds = [9, 25, 61]
+        }
+        runtime.blur()
+        try await pollUntil { fixture.backend.saves.count == 1 }
+        let patch = try #require(fixture.backend.saves.first)
+        #expect(fixture.backend.saveCalls == 2 && patch.fields == [0: "edited extra"])
+        let raw = try #require(patch.raw)
+        #expect(raw.fieldLayout.map(\.ord) == [9, 25, 61] && raw.fieldLayout.map(\.id) == [2, 0, 1])
+        #expect(raw.fields.map(\.ord) == [0])
+    }
+
+    @Test func malformedCountsAndOrdinalsShowReadableDiagnosticsWithoutOpeningAFieldPage() async throws {
+        for ords in [[UInt32(7), 7, 90], [UInt32(15), 7, 90]] {
+            let fixture = try await Fixture()
+            fixture.backend.fieldOrds = ords
+            fixture.select([0])
+            try await pollUntil { fixture.inspector.note != nil }
+            #expect(fixture.inspector.note?.error == "This note type has duplicate or unordered field ordinals. Run Check Database before editing it.")
+            #expect(fixture.page.opened.isEmpty && fixture.backend.saves.isEmpty)
+        }
+        for values in [["short"], ["too", "many", "stored", "values"]] {
+            let fixture = try await Fixture()
+            fixture.backend.fieldOrds = [7, 15, 90]
+            fixture.backend.notes[10] = .init(id: 10, notetypeId: 42, fields: values, tags: [], guid: "g10")
+            fixture.select([0])
+            try await pollUntil { fixture.inspector.note != nil }
+            #expect(fixture.inspector.note?.error == "The note’s field count (\(values.count)) does not match its note type (3). Run Check Database before editing it.")
+            #expect(fixture.page.opened.isEmpty && fixture.backend.saves.isEmpty)
+        }
+    }
+
+    @Test func aStalePatchCannotResendIntoImageOcclusionFields() async throws {
+        let fixture = try await Fixture()
+        fixture.backend.fieldOrds = [7, 15, 90]
+        fixture.select([0])
+        try await pollUntil { fixture.inspector.note?.runtime?.editable == true }
+        let runtime = try #require(fixture.runtime)
+        try await runtime.type(1, "keep my draft")
+        fixture.backend.failNext = .stale(table: .notetypes, key: "42")
+        fixture.backend.onSave = { _ in fixture.backend.originalStockKind = 6 }
+        runtime.blur()
+        try await pollUntil { fixture.inspector.note?.saveFailure == .notSaved }
+        #expect(fixture.backend.saveCalls == 1 && fixture.backend.saves.isEmpty)
+        #expect(runtime.draft.values[1] == "keep my draft")
+    }
+
     @Test func losingTheFocusSavesTheChangedFieldsAsOneEditNoteStep() async throws {
         let fixture = try await Fixture()
         fixture.select([0])
@@ -404,6 +485,9 @@ import Testing
     var saveCalls = 0
     var failNext: BridgeError?
     var onSave: ((NoteFieldPatch) -> Void)?
+    var fieldOrds: [UInt32] = [0, 1, 2]
+    var fieldOrder = [0, 1, 2]
+    var originalStockKind: Int32 = 0
     private(set) var lastSeq: UInt64 = 100
 
     func releaseReads() {
@@ -419,11 +503,12 @@ import Testing
         return note
     }
     func notetype(_ id: Int64) async throws -> NotetypeRecord {
-        let fields = ["Front", "Back", "Extra"].enumerated().map { index, name in
-            NotetypeField(ord: UInt32(index), id: Int64(index), name: name, sticky: false, rtl: false, fontName: "", fontSize: 20,
+        let fields = fieldOrder.enumerated().map { position, index in
+            NotetypeField(ord: fieldOrds[position], id: Int64(index), name: ["Front", "Back", "Extra"][index], sticky: false, rtl: false, fontName: "", fontSize: 20,
                           description: "", plainText: false, collapsed: false, excludeFromSearch: false)
         }
-        return NotetypeRecord(id: id, name: "Three", kind: 0, sortField: 0, css: "", base: [], fields: fields, templates: [])
+        return NotetypeRecord(id: id, name: "Three", kind: 0, sortField: 0, css: "", base: [], fields: fields, templates: [],
+                              originalStockKind: originalStockKind)
     }
     func cards(ofNote id: Int64) async throws -> [NoteCard] {
         cards[id] ?? [NoteCard(id: id / 10, ord: 0, deckId: 1, originalDeckId: 0)]
