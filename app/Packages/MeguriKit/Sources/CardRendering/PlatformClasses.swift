@@ -31,14 +31,37 @@ open class CardNativeWebView: WKWebView {
         if let contentRectangle { return contentRectangle }
         #if os(macOS)
         var rect = bounds
-        // Flipped or not, the covered part is on the window's bottom side.
-        if isFlipped { rect.size.height -= min(rect.height, obscuredBottom) }
-        else { rect.origin.y += min(rect.height, obscuredBottom); rect.size.height -= min(rect.height, obscuredBottom) }
+        // Flipped or not, the covered parts are on the window's top and bottom sides.
+        let top = min(rect.height, obscuredTop), bottom = min(rect.height - top, obscuredBottom)
+        rect.origin.y += isFlipped ? top : bottom
+        rect.size.height -= top + bottom
         return rect
         #else
-        // The scroll view's bottom inset is the covered part (below).
+        // The scroll view's insets are the covered parts (below).
         return bounds.inset(by: scrollView.adjustedContentInset)
         #endif
+    }
+    /// Covered by the bars at the top (N16.12): the card rests below them
+    /// and scrolls on under them, to the screen's edge. A change is a
+    /// geometry change (H5).
+    var obscuredTop: CGFloat = 0 {
+        didSet {
+            guard oldValue != obscuredTop else { return }
+            #if !os(macOS)
+            // A card resting at its top stays at rest under the new inset;
+            // one the reader has scrolled keeps its place. Read before
+            // WebKit hears of the inset: it may move the scroll view's own.
+            let rested = scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top
+            #endif
+            var insets = obscuredContentInsets
+            insets.top = obscuredTop
+            obscuredContentInsets = insets
+            #if !os(macOS)
+            scrollView.contentInset.top = obscuredTop
+            if rested { scrollView.contentOffset.y = -scrollView.adjustedContentInset.top }
+            #endif
+            onHostGeometryChange?()
+        }
     }
     /// Covered by the review's answer area at the bottom (N16.9): WebKit's
     /// layout viewport ends above it. A change is a geometry change (H5).

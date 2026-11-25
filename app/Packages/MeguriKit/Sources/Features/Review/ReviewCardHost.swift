@@ -18,6 +18,8 @@ struct ReviewCardHost {
     var actions = ReviewMoreActions()
     /// How much of the card's bottom the answer area covers (N16.9).
     var obscuredBottom: CGFloat = 0
+    /// How much of the card's top the bars cover (N16.12).
+    var obscuredTop: CGFloat = 0
 
     private func key(_ input: String, command: Bool, shift: Bool, repeated: Bool = false) -> Bool {
         guard let pages = model.surface as? ReviewPages, pages.presenter.isAvailable,
@@ -107,6 +109,7 @@ extension ReviewCardHost: NSViewControllerRepresentable {
         (model.surface as? ReviewPages)?.presenter.window = host.view.window
         (model.surface as? ReviewPages)?.establishInitialFocus()
         if pair.obscuredBottom != obscuredBottom { pair.obscuredBottom = obscuredBottom }
+        if pair.obscuredTop != obscuredTop { pair.obscuredTop = obscuredTop }
         // N20.8: the card's context menu starts with Edit Note | Bury Card, Suspend Card.
         let actions = actions
         for page in pair.pages {
@@ -183,9 +186,12 @@ extension ReviewCardHost: UIViewControllerRepresentable {
         /// N16.9: SwiftUI's `safeAreaBar` registers the answer area with the
         /// page's scroll view, which draws the edge effect under its buttons;
         /// the soft style only, as the hard one draws a line at its top edge.
+        /// N16.12: no edge effect at all where the card passes under the top
+        /// bars: the card stays sharp up to the screen's edge.
         func softEdges(_ scrollViews: [UIScrollView]) {
-            for scrollView in scrollViews where scrollView.bottomEdgeEffect.style != .soft {
-                scrollView.bottomEdgeEffect.style = .soft
+            for scrollView in scrollViews {
+                if scrollView.bottomEdgeEffect.style != .soft { scrollView.bottomEdgeEffect.style = .soft }
+                if !scrollView.topEdgeEffect.isHidden { scrollView.topEdgeEffect.isHidden = true }
             }
         }
     }
@@ -215,6 +221,7 @@ extension ReviewCardHost: UIViewControllerRepresentable {
         (model.surface as? ReviewPages)?.presenter.host = host
         (model.surface as? ReviewPages)?.establishInitialFocus()
         if pair.obscuredBottom != obscuredBottom { pair.obscuredBottom = obscuredBottom }
+        if pair.obscuredTop != obscuredTop { pair.obscuredTop = obscuredTop }
         host.softEdges(pair.pages.map(\.webView.scrollView))
     }
 }
