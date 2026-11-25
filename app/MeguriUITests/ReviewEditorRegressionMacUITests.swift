@@ -267,6 +267,9 @@ import XCTest
         let (app, bundle) = try launch()
         defer { app.terminate() }
         try study("Synthetic Long Audio", app: app, bundle: bundle)
+        let editNote = app.menuBars.menuBarItems["Note"].menuItems.matching(NSPredicate(format: "title == %@", "Edit Note")).firstMatch
+        XCTAssertTrue(wait { editNote.exists && editNote.isEnabled },
+            "Note > Edit Note must exist and be enabled for the review before sending Cmd-E")
         app.typeKey("e", modifierFlags: .command)
         let edit = app.windows["review.editCurrent.window"]
         XCTAssertTrue(edit.waitForExistence(timeout: 15))
