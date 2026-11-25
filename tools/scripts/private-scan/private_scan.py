@@ -835,12 +835,14 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
+        '942a5279b631f540be37d0031fd3e2032911b21a56a822b9551f6d0e11a295b4',
     'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':
-        '5e0b01eeb2e588177fae19b8f541b6a8a5ca3a9a3f731af0ace1710f1deb6df0',
+        '98ba53131645b21b17821dc509811b58942f5cd0387b95b5c32cb2eaf5064396',
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseFieldEditingTests.swift':
-        'c7b7622a2e6f86985132745f144a00b67e432cceff367efc746e976c614046d8',
+        '1d40a9d90bae3a1331db5363740145632cffba2724c7a984dc87f86e24c2159d',
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
-        '143c09cfc8ba1ab90c089333eef26d37834881bd7b5a3ab88c17aacac04763a3',
+        '2ce95ae66faf33cfd5d50bc78a27d665df3d048913e5ba00ed1b07726f97c139',
     'app/MeguriUITests/MacBrowseInspectorTests.swift':
         '636428a071b53d2b1fa37d59b49aec54d78ccf11dfa70d4912545b2dc989a4f3',
     'docs/process/review-log/meguri-sync-collection-backups-20261125.md':

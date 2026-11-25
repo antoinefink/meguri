@@ -88,12 +88,6 @@ extension ReviewCollectionStartupTests {
             let returns = try await CoreNoteService().readNote(id: note.noteID).fields[0]
             #expect(returns == "kerr<div><br></div><div><br></div><div>ow a</div>")
 
-            do {
-                _ = try await CoreMediaService(expectedGeneration: note.draft.generation + 1)
-                    .addMedia(name: "stale-picture.png", bytes: [1])
-                Issue.record("Stale collection generation admitted a picture")
-            } catch { }
-            #expect(!(try await CoreMediaService().trackedNames()).names.contains { $0.name == "stale-picture.png" })
             let bitmap = try BrowseFieldEditingTests.bitmap(.png)
             let asPNG = (try? await CoreEditorServices().pasteImagesAsPNG()) ?? false
             let sourceRoot = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

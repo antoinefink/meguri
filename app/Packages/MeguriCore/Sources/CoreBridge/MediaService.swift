@@ -32,7 +32,7 @@ public actor CoreMediaService: MediaService {
     }
     public func addMedia(name: String, bytes: [UInt8]) async throws(BridgeError) -> String {
         let expected = expectedGeneration
-        return try await InteractiveLane.shared.call(.addMedia) {
+        return try await InteractiveLane.shared.call(expected == nil ? .addMedia : .editorAddPicture) {
             if let expected {
                 return try MeguriCoreBindings.editorAddPicture(expectedGeneration: expected, name: name, bytes: Data(bytes))
             }

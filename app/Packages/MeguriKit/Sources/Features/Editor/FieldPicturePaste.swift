@@ -16,14 +16,13 @@ nonisolated struct FieldPicturePaste: Sendable {
 
     nonisolated struct Snapshot: Sendable {
         var urls: [URL] = []
-        var bitmap: Data?
+        var bitmaps: [Data] = []
         var html: Data?
         var archive: Data?
         var text: String?
-        var privateOrRichText = false
     }
     nonisolated enum Source: Sendable {
-        case file(URL), bitmap(Data)
+        case file(URL), bitmap([Data])
         var name: String { if case let .file(url) = self { return url.lastPathComponent }; return "" }
         var isBitmap: Bool { if case .bitmap = self { return true }; return false }
         func size() throws -> Int {
@@ -34,7 +33,7 @@ nonisolated struct FieldPicturePaste: Sendable {
                 let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
                 guard values.isRegularFile == true, let size = values.fileSize else { throw CocoaError(.fileReadUnknown) }
                 return size
-            case let .bitmap(data): return data.count
+            case let .bitmap(candidates): return candidates.reduce(0) { $0 + $1.count }
             }
         }
         func prepare(asPNG: Bool) throws -> FieldPicturePaste {
@@ -45,7 +44,11 @@ nonisolated struct FieldPicturePaste: Sendable {
                 // Files (including SVG) keep their bytes. They render through
                 // the existing local-media img path, never as injected markup.
                 return FieldPicturePaste(name: url.lastPathComponent, bytes: try Data(contentsOf: url))
-            case let .bitmap(data): return try FieldPicturePaste.encode(data, asPNG: asPNG)
+            case let .bitmap(candidates):
+                for data in candidates {
+                    if let picture = try? FieldPicturePaste.encode(data, asPNG: asPNG) { return picture }
+                }
+                throw CocoaError(.fileReadCorruptFile)
             }
         }
     }
@@ -54,10 +57,9 @@ nonisolated struct FieldPicturePaste: Sendable {
         var result = Snapshot()
         let items = board.pasteboardItems ?? []
         // Private field content and actual rich selections retain precedence.
-        result.privateOrRichText = items.contains { item in
+        if items.contains(where: { item in
             ["net.meguri.field-html", "public.rtf", "com.apple.flat-rtfd"].contains { item.types.contains(.init($0)) }
-        }
-        if result.privateOrRichText { return result }
+        }) { return result }
         result.text = board.string(forType: .string) ?? board.string(forType: .init("public.plain-text"))
         for item in items {
             for type in [NSPasteboard.PasteboardType.fileURL, .URL] {
@@ -74,36 +76,34 @@ nonisolated struct FieldPicturePaste: Sendable {
         for item in items {
             let preferred: [NSPasteboard.PasteboardType] = [.png, .tiff, .init("public.jpeg")]
             let types = preferred + item.types.filter { !preferred.contains($0) && UTType($0.rawValue)?.conforms(to: .image) == true }
-            if let data = types.lazy.filter({ item.types.contains($0) }).compactMap({ item.data(forType: $0) }).first {
-                result.bitmap = data; break
-            }
+            result.bitmaps += types.filter { item.types.contains($0) }.compactMap { item.data(forType: $0) }
         }
         return result
     }
 
-    static func sources(_ snapshot: Snapshot) -> [Source] {
-        guard !snapshot.privateOrRichText else { return [] }
-        // An offered bitmap may accompany Copy Image's HTML or webarchive.
-        // Inspect only enough to distinguish that from a meaningful selection;
-        // no clipboard HTML, subresource or URL is ever inserted or fetched.
-        var html = snapshot.html.map { String(decoding: $0, as: UTF8.self) }
-        if html == nil, let data = snapshot.archive {
-            guard let archive = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-                  let main = archive["WebMainResource"] as? [String: Any],
-                  main["WebResourceMIMEType"] as? String == "text/html",
-                  let bytes = main["WebResourceData"] as? Data else { return [] }
-            let charset = (main["WebResourceTextEncodingName"] as? String ?? "utf-8") as CFString
-            let encoding = CFStringConvertIANACharSetNameToEncoding(charset)
-            let nsEncoding = CFStringConvertEncodingToNSStringEncoding(encoding == kCFStringEncodingInvalidId ? CFStringBuiltInEncodings.UTF8.rawValue : encoding)
-            html = String(data: bytes, encoding: String.Encoding(rawValue: nsEncoding)) ?? String(decoding: bytes, as: UTF8.self)
+    // Decode only a bounded main HTML resource, never archive subresources.
+    static func htmlText(_ snapshot: Snapshot) -> String? {
+        let maximum = 1_048_576
+        if let data = snapshot.html {
+            guard data.count <= maximum else { return nil }
+            return String(decoding: data, as: UTF8.self)
         }
-        if let html {
-            let body = html.replacingOccurrences(of: "(?is)<!--.*?-->|<(head|script|style)\\b[^>]*>.*?</\\1\\s*>", with: "", options: .regularExpression)
-            guard let images = try? NSRegularExpression(pattern: "<img(?:\\s|>)", options: .caseInsensitive),
-                  images.numberOfMatches(in: body, range: NSRange(body.startIndex..., in: body)) == 1 else { return [] }
-            let text = body.replacingOccurrences(of: "(?s)<[^>]*>", with: "", options: .regularExpression)
-                .replacingOccurrences(of: "&nbsp;", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard text.isEmpty || snapshot.urls.contains(where: { $0.absoluteString == text }) else { return [] }
+        guard let data = snapshot.archive, data.count <= 8 * maximum,
+              let archive = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let main = archive["WebMainResource"] as? [String: Any],
+              main["WebResourceMIMEType"] as? String == "text/html",
+              let bytes = main["WebResourceData"] as? Data, bytes.count <= maximum else { return nil }
+        let charset = (main["WebResourceTextEncodingName"] as? String ?? "utf-8") as CFString
+        let encoding = CFStringConvertIANACharSetNameToEncoding(charset)
+        let nsEncoding = CFStringConvertEncodingToNSStringEncoding(encoding == kCFStringEncodingInvalidId ? CFStringBuiltInEncodings.UTF8.rawValue : encoding)
+        return String(data: bytes, encoding: String.Encoding(rawValue: nsEncoding)) ?? String(decoding: bytes, as: UTF8.self)
+    }
+
+    static func sources(_ snapshot: Snapshot, isCopyImage: Bool = false) -> [Source] {
+        // The isolated runtime classifies HTML using inert element nodes.
+        // Only the local bitmap is imported; clipboard resources never load.
+        if snapshot.html != nil || snapshot.archive != nil {
+            guard isCopyImage else { return [] }
             if let text = snapshot.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
                !snapshot.urls.contains(where: { $0.absoluteString == text }) { return [] }
         }
@@ -111,7 +111,7 @@ nonisolated struct FieldPicturePaste: Sendable {
             return snapshot.urls.filter { $0.isFileURL && ($0.host == nil || $0.host == "" || $0.host == "localhost") &&
                 imageExtensions.contains($0.pathExtension.lowercased()) }.map(Source.file)
         }
-        return snapshot.bitmap.map { [.bitmap($0)] } ?? []
+        return snapshot.bitmaps.isEmpty ? [] : [.bitmap(snapshot.bitmaps)]
     }
 
     static func needsSizeWarning(_ size: Int) -> Bool { size == 0 || size > maximumSyncSize }
@@ -146,9 +146,9 @@ nonisolated struct FieldPicturePaste: Sendable {
         guard let destination = CGImageDestinationCreateWithData(output as CFMutableData, type as CFString, 1, nil) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        let properties: [CFString: Any] = asPNG ? [:] : [kCGImageDestinationLossyCompressionQuality: 0.8,
+        let destinationProperties: [CFString: Any] = asPNG ? [:] : [kCGImageDestinationLossyCompressionQuality: 0.8,
             kCGImagePropertyJFIFDictionary: [kCGImagePropertyJFIFIsProgressive: false]]
-        CGImageDestinationAddImage(destination, result, properties as CFDictionary)
+        CGImageDestinationAddImage(destination, result, destinationProperties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
         let bytes = output as Data
         guard !bytes.isEmpty else { throw CocoaError(.fileWriteUnknown) }

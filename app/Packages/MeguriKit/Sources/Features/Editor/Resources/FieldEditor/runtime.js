@@ -297,6 +297,11 @@
                 if (owner === field.rich) {
                     owner.insertBefore(next, boundary);
                     const prefix = document.createRange(); prefix.selectNodeContents(owner); prefix.setEndBefore(next);
+                    // Only this inline run can need a blank source line;
+                    // earlier authored blocks belong to preceding lines.
+                    let previousBlock = next.previousSibling;
+                    while (previousBlock && !(previousBlock.nodeType === Node.ELEMENT_NODE && isBlock(previousBlock))) previousBlock = previousBlock.previousSibling;
+                    if (previousBlock) prefix.setStartAfter(previousBlock);
                     const previous = prefix.cloneContents();
                     if (inline(previous) && !hasContent(previous) && !previous.querySelector("br")) owner.insertBefore(document.createElement("br"), next);
                 } else { fillLine(owner); owner.after(next); }
@@ -752,6 +757,21 @@
             wrap(current, message.prefix, message.suffix);
             return {applied: true};
         }
+        case "classifyPicturePaste": {
+            keys(message, ["type", "loadId", "html", "urls"]);
+            if (typeof message.html !== "string" || message.html.length > 1048576 ||
+                !Array.isArray(message.urls) || message.urls.some(url => typeof url !== "string")) throw new Error("Invalid clipboard HTML");
+            const fragment = parse(message.html);
+            // Never attach clipboard nodes to the document. Attribute text,
+            // including > in alt, is not selection text or another element.
+            for (const node of fragment.querySelectorAll("head,script,style,meta,link,base,title")) node.remove();
+            const elements = [...fragment.querySelectorAll("*")];
+            const wrappers = new Set(["a", "div", "span", "p", "figure"]);
+            const text = fragment.textContent.trim();
+            return {copyImage: elements.filter(node => node.localName === "img").length === 1 &&
+                elements.every(node => node.localName === "img" || wrappers.has(node.localName)) &&
+                (!text || message.urls.includes(text))};
+        }
         case "finishPicturePaste": {
             keys(message, ["type", "loadId", "ord", "request", "html"]);
             if (!field || !Number.isSafeInteger(message.request) || typeof message.html !== "string") throw new Error("Invalid picture result");
@@ -768,17 +788,6 @@
             keys(message, ["type", "loadId", "ord", "request"]);
             return {current: !!field && !held && !field.hidden && !field.collapsed && field.mode === "rich" &&
                 field.picture?.request === message.request};
-        case "insert":
-            keys(message, ["type", "loadId", "ord", "html", "at"]);
-            if (!field || typeof message.html !== "string" || !["selection", "end"].includes(message.at)) throw new Error("Invalid insertion");
-            if (held || current !== field || field.mode !== "rich" || field.hidden || field.collapsed) return {changed: false};
-            cancelPicture(field);
-            { const caret = range(field);
-              if (message.at === "end") {
-                  caret.selectNodeContents(field.rich); caret.collapse(false);
-                  if (inline(field.rich) && field.rich.lastChild?.localName === "br") { caret.setStartBefore(field.rich.lastChild); caret.collapse(true); }
-              }
-              return {changed: insert(field, message.html, caret)}; }
         case "undo": case "redo":
             keys(message, ["type", "loadId", "ord"]); if (!field) throw new Error("Unknown field");
             cancelPicture(field);

@@ -377,6 +377,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let startClearUnusedTags = BridgeCall("start_clear_unused_tags")
     public static let trackedMediaNames = BridgeCall("tracked_media_names")
     public static let addMedia = BridgeCall("add_media")
+    public static let editorAddPicture = BridgeCall("editor_add_picture")
     public static let flushForBackground = BridgeCall("flush_for_background")
     public static let suspend = BridgeCall("suspend")
     public static let resume = BridgeCall("resume")
@@ -799,7 +800,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         addNoteTags, startAddNoteTags, removeNoteTags, startRemoveNoteTags, setCardFlag,
         startSetCardFlag, toggleCardFlag, startToggleCardFlag, markNotes, startMarkNotes,
         unmarkNotes, startUnmarkNotes, toggleNoteMark, startToggleNoteMark, startRenameTag,
-        startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, trackedMediaNames, flushForBackground,
+        startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, editorAddPicture, trackedMediaNames, flushForBackground,
         suspend, resume, checkRollover, fsrsPolicyStatus, enableFsrs, undoJobResult, peekUndo, peekRedo,
         tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startUndoStep, startRedo, startAddNotes, noteAdditionJobResult,
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,

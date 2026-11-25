@@ -91,7 +91,6 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     var picturePasteboard: NSPasteboard = .general
     private var pictureTask: Task<Void, Never>?
     private(set) var pictureFailures: [(name: String, cause: String)] = []
-    private var pictureAlertShown = false
     private var pictureFailureAlert: NSAlert?
     private var pictureUnhideObserver: (any NSObjectProtocol)?
     var picturePasteCompletion: Task<Void, Never>? { pictureTask }
@@ -566,7 +565,14 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
             guard let self else { return }
             var html = ""
             do {
-                let sources = await Task.detached { FieldPicturePaste.sources(snapshot) }.value
+                let clipboardHTML = await Task.detached { FieldPicturePaste.htmlText(snapshot) }.value
+                let isCopyImage: Bool
+                if let clipboardHTML {
+                    let result = try await call(["type": "classifyPicturePaste", "loadId": expected,
+                        "html": clipboardHTML, "urls": snapshot.urls.map(\.absoluteString)], load: expected) as? [String: Any]
+                    isCopyImage = result?["copyImage"] as? Bool == true
+                } else { isCopyImage = false }
+                let sources = await Task.detached { FieldPicturePaste.sources(snapshot, isCopyImage: isCopyImage) }.value
                 try await requirePictureTarget(ord: ord, request: request, load: expected)
                 let asPNG = sources.contains(where: \.isBitmap) ? (try? await CoreEditorServices().pasteImagesAsPNG()) ?? false : false
                 for source in sources {
@@ -583,7 +589,6 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
                                 approvedSize = size
                             }
                         }
-                        try await requirePictureTarget(ord: ord, request: request, load: expected)
                         let picture = try await Task.detached { try source.prepare(asPNG: asPNG) }.value
                         name = picture.name
                         if FieldPicturePaste.needsSizeWarning(picture.bytes.count), approvedSize != picture.bytes.count {
@@ -631,11 +636,19 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         try await requirePictureTarget(ord: ord, request: request, load: expected)
         if let confirmPictureSize { return await confirmPictureSize(name, size) }
         // Present only on a visible owning window, including after unhide.
-        while webView.window?.isVisible != true || NSApp.isHidden || pictureAlertShown {
-            try await Task.sleep(for: .milliseconds(50))
+        let window: NSWindow
+        while true {
+            while webView.window?.isVisible != true || NSApp.isHidden || pictureFailureAlert != nil {
+                try await Task.sleep(for: .milliseconds(50))
+                try Task.checkCancellation(); try requireCurrent(expected)
+                guard !held else { throw EditorRuntimeError.unavailable }
+            }
             try await requirePictureTarget(ord: ord, request: request, load: expected)
+            // The WebKit check suspends: recheck visibility before presenting.
+            if let visible = webView.window, visible.isVisible, !NSApp.isHidden, pictureFailureAlert == nil {
+                window = visible; break
+            }
         }
-        guard let window = webView.window else { throw EditorRuntimeError.unavailable }
         let alert = NSAlert()
         alert.messageText = String(localized: "This File Won't Sync", bundle: .module)
         let formatted = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
@@ -663,15 +676,15 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     }
     private func presentPictureFailure() {
         // AppKit must never present an alert while the app is hidden.
-        guard !closed, isCurrent(), !pictureAlertShown, pictureSizeAlert == nil,
+        guard !closed, isCurrent(), pictureFailureAlert == nil, pictureSizeAlert == nil,
               let window = webView.window, window.isVisible, !NSApp.isHidden, !pictureFailures.isEmpty else { return }
         let failure = pictureFailures.removeFirst(), alert = NSAlert()
         alert.messageText = String(localized: "Couldn't Add “\(failure.name)”", bundle: .module)
         alert.informativeText = failure.cause
         alert.addButton(withTitle: String(localized: "OK", bundle: .module))
-        pictureAlertShown = true; pictureFailureAlert = alert
+        pictureFailureAlert = alert
         alert.beginSheetModal(for: window) { [weak self] _ in
-            Task { @MainActor in self?.pictureAlertShown = false; self?.pictureFailureAlert = nil; self?.presentPictureFailure() }
+            Task { @MainActor in self?.pictureFailureAlert = nil; self?.presentPictureFailure() }
         }
     }
     #endif
@@ -684,7 +697,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         cancelPictureTask()
         pictureFailures = []
         if let alert = pictureFailureAlert, let window = alert.window.sheetParent { window.endSheet(alert.window) }
-        pictureFailureAlert = nil; pictureAlertShown = false
+        pictureFailureAlert = nil
         if let pictureUnhideObserver { NotificationCenter.default.removeObserver(pictureUnhideObserver) }
         pictureUnhideObserver = nil
         #endif

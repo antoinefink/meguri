@@ -95,6 +95,26 @@ import AppKit
         #expect(host.draft.values[0] == "<b>ab</b><div><b>cd</b></div><section data-author=\"keep\">later</section>")
     }
 
+    @Test(arguments: [false, true])
+    func rootInlineReturnAfterAnAuthoredBlockKeepsBlankLine(_ rootBoundary: Bool) async throws {
+        let original = "<div>a</div>bc"
+        let host = try Self.host(original)
+        defer { host.shutDown() }
+        try await host.start()
+        try await Self.edit(host, """
+            \(rootBoundary ? "select(rich, 1);" : "select(rich.lastChild, 0);")
+            key('insertParagraph');
+            const lines = rich.querySelectorAll('div');
+            if (lines[1].getBoundingClientRect().top <= lines[0].getBoundingClientRect().bottom)
+                throw new Error('Return after an authored block lost the visible blank line');
+            """)
+        try await host.flush(hold: false)
+        #expect(host.draft.values[0] == "<div>a</div><br><div>bc</div>")
+        _ = try await host.webView.callAsyncJavaScript("return await meguriEditorRuntime.receive({type:'undo', loadId:1, ord:0});", contentWorld: Self.world)
+        try await host.flush(hold: false)
+        #expect(host.draft.values[0] == original)
+    }
+
     @Test func returnSelectionShiftReturnListsAndUndoUseTheLiveCaret() async throws {
         let host = try Self.host("<blockquote><div data-author=\"kept\"><b>abcd</b></div></blockquote>")
         defer { host.shutDown() }
@@ -104,12 +124,27 @@ import AppKit
         #expect(host.draft.values[0] == "<blockquote><div data-author=\"kept\"><b>a</b></div><div><b>d</b></div></blockquote>")
         try await Self.edit(host, "key('insertLineBreak'); document.execCommand('insertText', false, 'x');")
         try await host.flush(hold: false)
-        #expect(host.draft.values[0].contains("<div><br>x<b>d</b></div>"))
-        _ = try await host.webView.callAsyncJavaScript("return await meguriEditorRuntime.receive({type:'undo', loadId:1, ord:0});", contentWorld: Self.world)
-        _ = try await host.webView.callAsyncJavaScript("return await meguriEditorRuntime.receive({type:'undo', loadId:1, ord:0});", contentWorld: Self.world)
-        _ = try await host.webView.callAsyncJavaScript("return await meguriEditorRuntime.receive({type:'undo', loadId:1, ord:0});", contentWorld: Self.world)
-        try await host.flush(hold: false)
-        #expect(host.draft.values[0] == "<blockquote><div data-author=\"kept\"><b>abcd</b></div></blockquote>")
+        #expect(host.draft.values[0] == "<blockquote><div data-author=\"kept\"><b>a</b></div><div><br><b>xd</b></div></blockquote>")
+        try await Self.edit(host, """
+            const bold = rich.querySelector('blockquote > div:nth-child(2) > b');
+            const caret = selection.getComposedRanges ? selection.getComposedRanges({shadowRoots:[root]})[0]
+                : selection.getRangeAt(0);
+            if (caret.startContainer !== bold.firstChild || caret.startOffset !== 1 ||
+                caret.endContainer !== caret.startContainer || caret.endOffset !== 1)
+                throw new Error('Typing in bold lost the live caret');
+            if (rich.querySelector('[data-author="kept"]').innerHTML !== '<b>a</b>' ||
+                [...rich.querySelectorAll('b')].some(node => Number(getComputedStyle(node).fontWeight) < 600))
+                throw new Error('Return changed authored bold styling');
+            """)
+        for expected in [
+            "<blockquote><div data-author=\"kept\"><b>a</b></div><div><br><b>d</b></div></blockquote>",
+            "<blockquote><div data-author=\"kept\"><b>a</b></div><div><b>d</b></div></blockquote>",
+            "<blockquote><div data-author=\"kept\"><b>abcd</b></div></blockquote>"
+        ] {
+            _ = try await host.webView.callAsyncJavaScript("return await meguriEditorRuntime.receive({type:'undo', loadId:1, ord:0});", contentWorld: Self.world)
+            try await host.flush(hold: false)
+            #expect(host.draft.values[0] == expected)
+        }
 
         let list = try Self.host("<ul><li><div>a</div></li></ul>")
         defer { list.shutDown() }
@@ -120,7 +155,7 @@ import AppKit
     }
 
     #if os(macOS)
-    @Test(arguments: ["png", "tiff", "file", "html", "archive", "url"])
+    @Test(arguments: ["png", "tiff", "corrupt-png-tiff", "file", "html", "html-alt", "archive", "url"])
     func picturePasteImportsAtTheCaretAndKeepsMediaBytes(_ representation: String) async throws {
         let type: NSPasteboard.PasteboardType = representation == "file" ? .fileURL : representation == "tiff" ? .tiff : .png
         let host = try Self.host("<b>abcd</b>")
@@ -139,9 +174,15 @@ import AppKit
         host.picturePasteboard = board
         board.clearContents()
         if type == .fileURL { board.writeObjects([source as NSURL]) }
-        else { board.setData(bytes, forType: type) }
+        else if representation == "corrupt-png-tiff" {
+            let item = NSPasteboardItem()
+            item.setData(Data([0, 1, 2]), forType: .png)
+            item.setData(try Self.bitmap(.tiff), forType: .tiff)
+            board.writeObjects([item])
+        } else { board.setData(bytes, forType: type) }
         let remote = "https://example.invalid/copy-image.png"
         if representation == "html" { board.setString("<a href='\(remote)'><img src='\(remote)'></a>", forType: .html) }
+        if representation == "html-alt" { board.setString("<div><a href='\(remote)'><img src='\(remote)' alt='3 > 2'></a></div>", forType: .html) }
         if representation == "archive" {
             let archive: [String: Any] = ["WebMainResource": ["WebResourceMIMEType": "text/html",
                 "WebResourceTextEncodingName": "UTF-8", "WebResourceData": Data("<img src='\(remote)'>".utf8)]]
@@ -246,8 +287,8 @@ import AppKit
         let media = PictureTestMedia(root: root.appending(path: "media"))
         media.refusedNames = ["refused.png"]
         host.pictureMedia = media
-        var warnings: [(String, Int)] = []
-        host.confirmPictureSize = { name, size in warnings.append((name, size)); return name == "empty.png" && addEmpty }
+        let warnings = PictureWarnings()
+        host.confirmPictureSize = { name, size in warnings.values.append((name, size)); return name == "empty.png" && addEmpty }
         try await host.start()
         let board = NSPasteboard(name: .init(UUID().uuidString))
         defer { board.clearContents() }
@@ -257,8 +298,8 @@ import AppKit
         for _ in 0..<300 where host.picturePasteCompletion == nil { try await Task.sleep(for: .milliseconds(10)) }
         await (try #require(host.picturePasteCompletion)).value
         try await host.flush(hold: false)
-        #expect(warnings.map(\.0) == ["empty.png", "large.png"])
-        #expect(warnings.map(\.1) == [0, FieldPicturePaste.maximumSyncSize + 1])
+        #expect(warnings.values.map(\.0) == ["empty.png", "large.png"])
+        #expect(warnings.values.map(\.1) == [0, FieldPicturePaste.maximumSyncSize + 1])
         #expect(host.pictureFailures.map(\.name) == ["missing.png", "refused.png"])
         let names = (addEmpty ? ["empty.png"] : []) + ["vector.svg", "last.png"]
         #expect(media.added.map(\.0) == names)
@@ -267,8 +308,32 @@ import AppKit
         #expect(!host.draft.values[0].contains("<svg"))
     }
 
+    @MainActor private final class PictureWarnings {
+        var values: [(String, Int)] = []
+    }
+
     @MainActor private final class CurrentOwner {
         var isCurrent = true
+    }
+
+    @Test(arguments: [
+        ("<div><a href='https://example.invalid/image'><img alt='3 > 2' src='https://example.invalid/image'></a></div>", true),
+        ("<!-- <img> --><img alt='3 > 2'>", true),
+        ("<p>A meaningful selection<img alt='3 > 2'></p>", false),
+        ("<span>3 &gt; 2</span><img>", false),
+        ("<img><img>", false),
+        ("<iframe src='https://example.invalid/'></iframe><img>", false)
+    ])
+    func copyImageClassificationUsesInertHTMLNodes(_ html: String, _ expected: Bool) async throws {
+        let host = try Self.host("unchanged")
+        defer { host.shutDown() }
+        try await host.start()
+        let result = try await host.webView.callAsyncJavaScript(
+            "return await meguriEditorRuntime.receive({type:'classifyPicturePaste', loadId:1, html, urls:[]});",
+            arguments: ["html": html], contentWorld: Self.world) as? [String: Any]
+        #expect(result?["copyImage"] as? Bool == expected)
+        try await host.flush(hold: false)
+        #expect(host.draft.values == ["unchanged", "other field"])
     }
 
     @Test func unsupportedPasteRepresentationsFailClosedAndBitmapsRespectEncoding() throws {
