@@ -693,3 +693,94 @@ mg_sandbox() {
   [[ "$stderr" == *"not a pool device"* ]]
   not_called "simctl (uninstall|privacy|keychain)"
 }
+
+# Check at the fake command boundary, including acquire preparation and a direct
+# release's boot. Device/lease validation must happen under the same mutex.
+posture_lock_checked_xcrun() {
+  export POSTURE_REAL_XCRUN="$REPO_ROOT/tools/tests/sim_pool_fake_xcrun.sh"
+  rm "$BATS_TEST_TMPDIR/bin/xcrun"
+  cat >"$BATS_TEST_TMPDIR/bin/xcrun" <<'SH'
+#!/bin/bash
+case "$1 $2" in
+  'simctl create'|'simctl boot'|'simctl bootstatus'|'simctl listapps'|'simctl uninstall'|'simctl privacy'|'simctl keychain'|'simctl ui'|'simctl status_bar'|'simctl spawn'|'devicectl device')
+    [ -f "$MEGURI_SIM_POOL_DIR/pool.lock/pid" ] || exit 96
+    if [ "$1 $2" = 'simctl listapps' ] && [ -n "${POSTURE_RESET_GATE:-}" ]; then
+      touch "$POSTURE_RESET_GATE.entered"
+      for n in {1..200}; do
+        [ -e "$POSTURE_RESET_GATE" ] || break
+        sleep .05
+      done
+      [ ! -e "$POSTURE_RESET_GATE" ] || exit 95
+    fi
+    ;;
+esac
+exec "$POSTURE_REAL_XCRUN" "$@"
+SH
+  chmod +x "$BATS_TEST_TMPDIR/bin/xcrun"
+}
+
+@test "posture mutex covers acquire preparation direct reset renew and release boot" {
+  posture_lock_checked_xcrun
+  pool acquire iphone
+  [ "$status" -eq 0 ]
+  local u="${lines[0]}"
+  pool reset "$u"
+  [ "$status" -eq 0 ]
+  pool renew "$u"
+  [ "$status" -eq 0 ]
+  local stopped
+  stopped="$(sim __add Meguri-Pool-iphone-2 Shutdown)"
+  mkdir -p "$LEASES/$stopped"
+  jq --arg u "$stopped" '.udid=$u' "$LEASES/$u/lease.json" >"$LEASES/$stopped/lease.json"
+  pool release "$stopped"
+  [ "$status" -eq 0 ]
+  called "^xcrun simctl boot $stopped\$"
+  [ ! -d "$LEASES/$stopped" ]
+  [ ! -d "$MEGURI_SIM_POOL_DIR/pool.lock" ]
+}
+
+@test "posture release holds pool mutex during reset and a racing reset revalidates the dropped lease" {
+  pool acquire iphone
+  [ "$status" -eq 0 ]
+  local u="${lines[0]}" releasing resetting n
+  posture_lock_checked_xcrun
+  export POSTURE_RESET_GATE="$BATS_TEST_TMPDIR/reset-gate"
+  touch "$POSTURE_RESET_GATE"
+  "$POOL" release "$u" >"$BATS_TEST_TMPDIR/release.out" 2>"$BATS_TEST_TMPDIR/release.err" &
+  releasing=$!
+  for n in {1..200}; do
+    [ ! -e "$POSTURE_RESET_GATE.entered" ] || break
+    sleep .05
+  done
+  [ -e "$POSTURE_RESET_GATE.entered" ]
+  [ "$(cat "$MEGURI_SIM_POOL_DIR/pool.lock/pid")" = "$releasing" ]
+  "$POOL" reset "$u" >"$BATS_TEST_TMPDIR/reset.out" 2>"$BATS_TEST_TMPDIR/reset.err" &
+  resetting=$!
+  rm "$POSTURE_RESET_GATE"
+  wait "$releasing"
+  if wait "$resetting"; then false; fi
+  [[ "$(cat "$BATS_TEST_TMPDIR/reset.err")" == *"is not leased"* ]]
+  [ "$(count_calls "^xcrun simctl listapps $u\$")" -eq 1 ]
+  [ ! -d "$MEGURI_SIM_POOL_DIR/pool.lock" ]
+}
+
+@test "posture actual pending input excludes direct reset release renew and acquire before any mutation" {
+  pool acquire iphone
+  [ "$status" -eq 0 ]
+  local u="${lines[0]}" action
+  mkdir -p "$MEGURI_SIM_POOL_DIR/pool.lock/sim-posture-pending"
+  printf '%s\n' 99999999 >"$MEGURI_SIM_POOL_DIR/pool.lock/pid"
+  for action in reset release renew; do
+    : >"$STUB_LOG"
+    pool "$action" "$u"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"input completion uncertain"* ]]
+    not_called '^xcrun '
+  done
+  : >"$STUB_LOG"
+  pool acquire iphone
+  [ "$status" -eq 1 ]
+  not_called '^xcrun simctl (boot|bootstatus|create|listapps|privacy|keychain|ui|uninstall) '
+  [ -d "$MEGURI_SIM_POOL_DIR/pool.lock/sim-posture-pending" ]
+  [ -f "$LEASES/$u/lease.json" ]
+}

@@ -18,10 +18,13 @@ Python 3.8+, standard library only.
 import argparse
 import json
 import os
+import secrets
 import select
 import shlex
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 # Runs in the VM. Line 1 of its output is the verdict. It keeps the lock
@@ -30,7 +33,7 @@ GUEST = r"""
 use Fcntl qw(:flock);
 use File::Basename;
 use File::Path qw(make_path);
-my ($path, $holder) = @ARGV;
+my ($path, $holder, $token, $acquisition) = @ARGV;
 $| = 1;
 make_path(dirname($path));
 open(my $f, "+>>", $path) or do { print "ERROR $!\n"; exit 1 };
@@ -54,6 +57,14 @@ while (1) {
         $l;
     };
     last unless defined $line;
+    if ($line =~ /^PROVE (\S+) (\S+) ([0-9a-f]{64})\n$/) {
+        my ($t, $a, $challenge) = ($1, $2, $3);
+        my @opened = stat($f); my @bound = stat($path);
+        last unless @bound && $opened[0] == $bound[0] && $opened[1] == $bound[1];
+        # This process has never dropped its flock. Reply on the same SSH
+        # stream that acquired it; file contents are not ownership evidence.
+        print "OWNED $t $a $challenge\n" if $t eq $token && $a eq $acquisition;
+    }
 }
 truncate($f, 0);
 """
@@ -71,7 +82,8 @@ def alive(pid):
 
 def lease_held(lease):
     """A live job holds the lease or its nested slot, or a guard retains it."""
-    if os.path.exists(os.path.join(lease, "vm-xcode-pending")):
+    if any(os.path.exists(os.path.join(lease, guard)) for guard in
+           ("vm-xcode-pending", "sim-posture-pending", "vm-shutdown-pending")):
         return True
     for slot in (lease, os.path.join(lease, "inner")):
         try:
@@ -96,7 +108,10 @@ def main():
     args = parser.parse_args()
 
     def write(state, **extra):
-        record = {"pid": os.getpid(), "token": args.token, "state": state}
+        record = {"pid": os.getpid(), "token": args.token, "state": state,
+                  "holder": args.holder}
+        if state == "taken":
+            record.update(proof=proof_path, acquisition=acquisition)
         record.update(extra)
         tmp = "%s.%d.tmp" % (args.state, os.getpid())
         with open(tmp, "w") as out:
@@ -104,11 +119,13 @@ def main():
         os.replace(tmp, args.state)
 
     holder = json.dumps(json.loads(args.holder), separators=(",", ":"))
-    command = "exec /usr/bin/perl -e %s %s %s" % (
-        shlex.quote(GUEST), shlex.quote(args.path), shlex.quote(holder))
-
     def ask():
         """One attempt: (session, None) when taken, else (None, (state, extra))."""
+        nonlocal acquisition
+        acquisition = secrets.token_hex(32)
+        command = "exec /usr/bin/perl -e %s %s %s %s %s" % (
+            shlex.quote(GUEST), shlex.quote(args.path), shlex.quote(holder),
+            shlex.quote(args.token), shlex.quote(acquisition))
         try:
             session = subprocess.Popen([args.ssh, command], stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, cwd="/")
@@ -146,6 +163,54 @@ def main():
             session.kill()
             session.wait()
 
+    # Short private socket path works with macOS sockaddr_un, even when the
+    # scheduler's checkout path is long. Ordinary jobs need no proof request.
+    proof_dir = tempfile.TemporaryDirectory(prefix="mg-claim-", dir="/tmp")
+    proof_path = os.path.join(proof_dir.name, "proof")
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(proof_path)
+    listener.listen(4)
+    acquisition = None
+
+    def prove():
+        if not select.select([listener], [], [], 0)[0]:
+            return
+        channel, _ = listener.accept()
+        with channel:
+            channel.settimeout(.2)
+            try:
+                with channel.makefile("rb") as source:
+                    request = json.loads(source.readline(1025))
+                challenge = request["challenge"]
+                if (request != dict(token=args.token, acquisition=acquisition, challenge=challenge)
+                        or not isinstance(challenge, str) or len(challenge) != 64
+                        or any(c not in "0123456789abcdef" for c in challenge)
+                        or session is None or session.poll() is not None):
+                    return
+                expected = ("OWNED %s %s %s\n" % (args.token, acquisition, challenge)).encode()
+                session.stdin.write(("PROVE %s %s %s\n" % (args.token, acquisition, challenge)).encode())
+                session.stdin.flush()
+                line = b""
+                deadline = time.monotonic() + 1
+                while len(line) <= 1024:
+                    left = deadline - time.monotonic()
+                    if left <= 0 or not select.select([session.stdout], [], [], left)[0]:
+                        return
+                    chunk = os.read(session.stdout.fileno(), 1024)
+                    if not chunk:
+                        return
+                    line += chunk
+                    # A late answer from a timed-out earlier request cannot
+                    # authorize this one or poison every future challenge.
+                    while b"\n" in line:
+                        reply, line = line.split(b"\n", 1)
+                        if reply + b"\n" == expected:
+                            if session.poll() is None and lease_held(args.lease):
+                                channel.sendall((json.dumps(request) + "\n").encode())
+                            return
+            except (OSError, ValueError, KeyError, TypeError):
+                pass  # No fresh answer means no fold authority. Keep ordinary jobs alive.
+
     write("starting")
     session, refused = ask()
     if session is None:
@@ -171,6 +236,7 @@ def main():
     write("taken")
     beat = 0.0
     while lease_held(args.lease):
+        prove()
         now = time.monotonic()
         lost = False
         if session is not None and now >= beat:
@@ -201,6 +267,7 @@ def main():
                 continue
         wake = time.monotonic() + args.beat
         while time.monotonic() < wake and not heard():
+            prove()
             time.sleep(0.1)
         if heard():
             time.sleep(0.1)
@@ -214,6 +281,8 @@ def main():
             os.unlink(leftover)
         except OSError:
             pass
+    listener.close()
+    proof_dir.cleanup()
     return 0
 
 

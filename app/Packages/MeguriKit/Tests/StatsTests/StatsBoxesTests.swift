@@ -251,6 +251,7 @@ import Testing
         #expect(added.values[26] == 4 && added.values[29] == 3)
         #expect(box.figure?.value == "7")
         #expect(box.figure?.sentence == "5 started")
+        #expect(box.detail == .addedAndStarted(added: "7", started: "5"))
         #expect(Self.figures(box) == ["Added a Day": "0.2", "Started a Day": "0.2"])
         #expect(box.data.browsable == IndexSet([26, 29]))
     }

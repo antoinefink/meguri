@@ -105,6 +105,8 @@ nonisolated public struct StatsBoxContent: Hashable, Sendable {
 /// A box's values beyond its chart.
 nonisolated public enum StatsBoxDetail: Hashable, Sendable {
     case cardCounts(StatsCardCountsTable)
+    /// Localized period totals for the macOS overview's summary row (S7.8).
+    case addedAndStarted(added: String, started: String)
     case answers(StatsAnswersTable)
     /// Time of Day's upper panel, the share remembered per hour (S7.11); `data` is the lower.
     case timeOfDay(retention: StatsChartData)

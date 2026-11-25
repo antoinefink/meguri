@@ -520,7 +520,7 @@ nonisolated struct StatsPresenter {
                        figures: [
                            StatsSmallFigure(label: text.figureAddedADay, value: decimal(addedTotal / Double(axis.days))),
                            StatsSmallFigure(label: text.figureStartedADay, value: decimal(startedTotal / Double(axis.days))),
-                       ])
+                       ], detail: .addedAndStarted(added: count(addedTotal), started: count(startedTotal)))
     }
 
 
