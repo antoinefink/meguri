@@ -40,7 +40,7 @@ async function fixture(page: Page, origin: string, many = false) {
     };
   });
   const notes = samples.map(([Spanish, Example], i) => ({ note_id: String(101 + i), note_type_id: "10", fields: { Spanish: Spanish!, English: "<b>keep this field</b>", Example: Example! }, tags: ["study"], revision: "r1" }));
-  const state = { account: "synthetic-a", responseAccount: "synthetic-a", notes, pages: [] as BrowseScope[], writes: [] as { path: string; body: Record<string, unknown> }[],
+  const state = { signedIn: true, account: "synthetic-a", responseAccount: "synthetic-a", notes, pages: [] as BrowseScope[], writes: [] as { path: string; body: Record<string, unknown> }[],
     pageGate: null as Promise<void> | null, detailGate: null as Promise<void> | null, writeGate: null as Promise<void> | null,
     pageGateAt: null as number | null, releasedPages: 0, releasedDetails: 0, conflict: false, catalogError: false, detailError: false, pageError: false, detailUnavailable: false, sparse: false, detailReads: 0, pageReads: 0, writesStarted: 0, create: false };
   const card = (i: number, scope: BrowseScope): BrowseCard => {
@@ -55,9 +55,12 @@ async function fixture(page: Page, origin: string, many = false) {
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname;
     const reply = (data: unknown) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ data }) });
+    const signedOut = () => route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: { code: "authentication_failed" } }) });
     if (path === "/api/status") return reply({ setup_required: false });
-    if (path === "/api/me") return reply({ id: state.account, username: "synthetic.member", role: "member", server_url: origin });
-    if (path === "/api/logout") return reply(null);
+    if (path === "/api/me") return state.signedIn ? reply({ id: state.account, username: "synthetic.member", role: "member", server_url: origin })
+      : signedOut();
+    if (path === "/api/logout") { state.signedIn = false; return reply(null); }
+    if (!state.signedIn) return signedOut();
     if (route.request().headers()["x-meguri-expected-account"] !== state.account) return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: { code: "stale_authority" } }) });
     expect(route.request().headers()["x-meguri-expected-account"]).toBe(state.account);
     const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -114,6 +117,38 @@ const rows = (page: Page) => page.getByRole("list", { name: "Cards", exact: true
 async function readSettled(page: Page, kind: "page" | "detail", ordinal: number, result: "aborted" | "completed") {
   await expect.poll(() => page.evaluate(id => (JSON.parse(document.documentElement.dataset.browseReadsSettled ?? "{}") as Record<string, string>)[id], `${kind}:${ordinal}`)).toBe(result);
 }
+async function observeNavigation(page: Page, draftQuery = false) {
+  await page.addInitScript(draftQuery => {
+    // Fetch the exact /browse shell; add a same-document query before React
+    // captures currentUrl. The server intentionally rejects queried documents.
+    if (draftQuery && location.pathname === "/browse") history.replaceState(null, "", "/browse?draft=synthetic");
+    const confirm = window.confirm.bind(window);
+    window.confirm = message => {
+      document.documentElement.dataset.fragmentClearedAtGuard = String(location.hash === "");
+      return confirm(message);
+    };
+    const events = { popstate: 0, hashchange: 0 };
+    for (const kind of ["popstate", "hashchange"] as const) window.addEventListener(kind, () => {
+      // Fence both native events after the application handlers have run.
+      setTimeout(() => {
+        events[kind]++;
+        document.documentElement.dataset.navigationSettled = JSON.stringify(events);
+      }, 0);
+    });
+  }, draftQuery);
+}
+async function navigationSettled(page: Page, popstate: number, hashchange: number) {
+  await expect.poll(() => page.evaluate(() => JSON.parse(document.documentElement.dataset.navigationSettled ?? "{}") as Record<string, number>)).toEqual({ popstate, hashchange });
+}
+async function traverseToCredential(page: Page, target: string) {
+  await page.evaluate(target => {
+    const current = location.pathname + location.search;
+    history.pushState(null, "", `${target}#token=${"S".repeat(43)}`); // Synthetic placeholder only.
+    history.pushState(null, "", current);
+    // A real traversal delivers the asynchronous popstate/hashchange pair.
+    history.back();
+  }, target);
+}
 test("field examples, inert highlights, shared editing and unchanged markup", async ({ page, baseURL }) => {
   const state = await fixture(page, baseURL!); await page.goto("/browse"); await expect(rows(page)).toHaveCount(3);
   await search(page, "aprovechar"); await expect(rows(page)).toHaveCount(3); await expect(rows(page).first().locator("mark")).toHaveText("aprovechar");
@@ -148,36 +183,39 @@ test("compact Back retains scope, scroll and row focus; dirty drafts require a d
 });
 
 for (const entry of ["history", "hash"] as const) test(`declined ${entry} navigation clears a synthetic credential before guarding the draft`, async ({ page, baseURL }) => {
-  await fixture(page, baseURL!);
-  await page.addInitScript(() => {
-    const confirm = window.confirm.bind(window);
-    window.confirm = message => {
-      document.documentElement.dataset.fragmentClearedAtGuard = String(location.hash === "");
-      return confirm(message);
-    };
+  const state = await fixture(page, baseURL!); await observeNavigation(page, true);
+  const dialogs: string[] = []; let acceptNavigation = false;
+  page.on("dialog", async dialog => {
+    dialogs.push(dialog.type());
+    if (acceptNavigation) await dialog.accept(); else await dialog.dismiss();
   });
-  await page.goto("/browse?draft=synthetic"); await rows(page).first().click();
+  await page.goto("/browse"); await expect(page).toHaveURL(`${baseURL}/browse?draft=synthetic`); await rows(page).first().click();
   await page.getByLabel("Example", { exact: true }).fill("retained draft");
-  const decision = page.waitForEvent("dialog").then(dialog => dialog.dismiss());
-  await page.evaluate(entry => {
-    const fragment = `token=${"S".repeat(43)}`; // Synthetic placeholder only.
-    if (entry === "hash") location.hash = fragment;
-    else {
-      history.pushState(null, "", `/reset?source=synthetic#${fragment}`);
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    }
-  }, entry);
-  await decision;
+  if (entry === "hash") await page.evaluate(() => { location.hash = `token=${"S".repeat(43)}`; });
+  else await traverseToCredential(page, "/reset?source=synthetic");
+  await navigationSettled(page, 1, entry === "hash" ? 1 : 0); expect(dialogs).toEqual(["confirm"]);
   await expect(page.locator("html")).toHaveAttribute("data-fragment-cleared-at-guard", "true");
   await expect(page).toHaveURL(`${baseURL}/browse?draft=synthetic`);
   await expect(page.getByLabel("Example", { exact: true })).toHaveValue("retained draft");
   // Revisit the entry we refused. Its fragment must already be gone, and must
   // not be offered to the application again when the user later leaves.
-  page.once("dialog", dialog => void dialog.accept()); await page.goBack();
+  acceptNavigation = true; await page.goBack(); await navigationSettled(page, 2, entry === "hash" ? 1 : 0);
+  expect(dialogs).toEqual(["confirm", "confirm"]);
+  const target = entry === "history" ? "/reset?source=synthetic" : "/browse?draft=synthetic";
+  await expect(page).toHaveURL(`${baseURL}${target}`);
+  await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0);
+  // Both adjacent entries are clean, including the restored query. Waiting for
+  // each popstate also fences same-URL traversals in the hash case.
+  await page.goForward(); await navigationSettled(page, 3, entry === "hash" ? 1 : 0);
+  await expect(page).toHaveURL(`${baseURL}/browse?draft=synthetic`); await expect(rows(page)).toHaveCount(3);
+  await page.goBack(); await navigationSettled(page, 4, entry === "hash" ? 1 : 0);
+  await expect(page).toHaveURL(`${baseURL}${target}`);
+  expect(dialogs).toEqual(["confirm", "confirm"]);
   if (entry === "history") {
-    await expect(page).toHaveURL(`${baseURL}/reset?source=synthetic`);
     await page.getByRole("button", { name: "Sign out synthetic.member", exact: true }).click();
     await expect(page.getByText("Open the original invitation or reset link to continue.", { exact: true })).toBeVisible();
+    expect(state.signedIn).toBe(false);
+    await expect(page.getByText("Secure link received. It has been removed from the address bar.", { exact: true })).toHaveCount(0);
   } else {
     await expect(page).toHaveURL(`${baseURL}/browse?draft=synthetic`);
     await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0);
@@ -187,17 +225,27 @@ for (const entry of ["history", "hash"] as const) test(`declined ${entry} naviga
 });
 
 test("accepted history navigation still delivers a cleared synthetic credential", async ({ page, baseURL }) => {
-  await fixture(page, baseURL!); await page.goto("/browse"); await rows(page).first().click();
+  const state = await fixture(page, baseURL!); await observeNavigation(page);
+  const dialogs: string[] = [];
+  page.on("dialog", async dialog => { dialogs.push(dialog.type()); await dialog.accept(); });
+  await page.goto("/browse"); await rows(page).first().click();
   await page.getByLabel("Example", { exact: true }).fill("discarded draft");
-  const decision = page.waitForEvent("dialog").then(dialog => dialog.accept());
-  await page.evaluate(() => {
-    history.pushState(null, "", `/reset#token=${"S".repeat(43)}`); // Synthetic placeholder only.
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  });
-  await decision;
-  await expect(page).toHaveURL(`${baseURL}/reset`);
+  await traverseToCredential(page, "/reset?source=synthetic");
+  await navigationSettled(page, 1, 0); expect(dialogs).toEqual(["confirm"]);
+  await expect(page.locator("html")).toHaveAttribute("data-fragment-cleared-at-guard", "true");
+  await expect(page).toHaveURL(`${baseURL}/reset?source=synthetic`);
+  await expect(page.getByLabel("Example", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Sign out synthetic.member", exact: true }).click();
   await expect(page.getByText("Secure link received. It has been removed from the address bar.", { exact: true })).toBeVisible();
+  expect(state.signedIn).toBe(false);
+  await expect(page.getByLabel("New password", { exact: true })).toBeEditable();
+  // Delivery is one-time: returning to the now-clean entry cannot recover it.
+  await page.goForward(); await navigationSettled(page, 2, 0);
+  await expect(page).toHaveURL(`${baseURL}/login`);
+  await page.goBack(); await navigationSettled(page, 3, 0);
+  await expect(page).toHaveURL(`${baseURL}/reset?source=synthetic`);
+  await expect(page.getByText("Open the original invitation or reset link to continue.", { exact: true })).toBeVisible();
+  expect(dialogs).toEqual(["confirm"]);
 });
 
 test("conflicts retain proposed fields and deletion requires the displayed sibling confirmation", async ({ page, baseURL }) => {

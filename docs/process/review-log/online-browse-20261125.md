@@ -52,3 +52,14 @@ The server and web reviewers examined the complete files after cleanroom runs `2
 - `server/web/tests/browser/browse.spec.ts` — `e2e1947904b415bce17d7a9ecd079d5d41ea3ee14dd786b932e59c9661f8f482`
 - `server/web/upstream-records.json` — `68f9aab35e91111f608f4d056f4de7ffff153cf092c216fdbc6c0f48ab384385`
 - `docs/process/provenance/sessions/s-20261125T151725Z-6d0637e0.json` — `97c13487dc2912036161db927fa4f01750c4efcd895a1820eeafdb066d307e0e`
+
+History test run `20261125T153145Z-66176` corrects the fixture entry point. It loads the supported browser route and exercises real same-document navigation. The independent web reviewer approved the complete synthetic fixture, matching audit input and operational session record.
+
+- `server/web/scripts/audit-assessment.json` — `89b3cdee886a1af842af4a4adfd665c919e6f143eb973582e607b020f6c8dfa5`
+- `server/web/tests/browser/browse.spec.ts` — `02ebe0ed47b4e2c5019834be22368794d36f976271f623e7f1586af046877d5f`
+- `docs/process/provenance/sessions/s-20261125T153128Z-eb7fef85.json` — `49a5a9e5257e2d449b303fdd0e49ad578d4f9b7ddc398fc159f57647cbf95904`
+
+The history fixture now asserts the events Chromium delivered for each navigation type. All three Back and Forward cases passed in `sync-web-verify/20261125T153825Z-84099`. The independent web reviewer approved these revised bytes from cleanroom run `20261125T153737Z-83326`.
+
+- `server/web/tests/browser/browse.spec.ts` — `d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8`
+- `server/web/scripts/audit-assessment.json` — `b8077355d45a759b03bf533748a1d427017ff2de9df731ccffee4720dc748b77`

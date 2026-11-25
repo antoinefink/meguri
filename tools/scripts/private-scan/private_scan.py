@@ -836,7 +836,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     "server/web/tests/browser/browse.spec.ts":
-        "e2e1947904b415bce17d7a9ecd079d5d41ea3ee14dd786b932e59c9661f8f482",
+        "d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8",
     "server/web/tests/browser/browse-real.spec.ts":
         "f76ff57b65b65befd66ccf524213c938b76da053f4eae27a0dce7e6d6fb1d797",
     "server/web/src/browse.tsx":
@@ -1001,7 +1001,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        "1a7395ed0774877d08635d76c231a6eccc18d86c69fafcf3d0310d6cd7ff9dbe",
+        "b8077355d45a759b03bf533748a1d427017ff2de9df731ccffee4720dc748b77",
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
