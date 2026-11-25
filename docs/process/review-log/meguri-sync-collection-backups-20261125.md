@@ -82,5 +82,5 @@ The independent cleanroom reviewers and the `data_review` and `plan_review` revi
 | `server/web/tests/browser/backups.spec.ts` | `415de8426361101e7835eb600665c7af271f7553c7f573090d576a8cf7cc25ba` |
 | `server/web/tests/browser/mcp.spec.ts` | `261b286236452b954829529242b040eb4d3784019eeb0e321b2f10ae7ece1f10` |
 | `server/web/upstream-records.json` | `a3a66b858a72331499de6289e4745f834d34105b52655d1c22133fe0c599b099` |
-| `specs/servers/meguri-sync-web.md` | `0e1a49d4f0a66e447f932e9760dccf131d5be7c0efc694a2ff11c6ec95a25d85` |
+| `specs/servers/meguri-sync-web.md` | `2a4303891cc65b73e0667511fb3d2ef941999a255f9caa816bcb5516ff599d33` |
 | `specs/sync/server-lifecycle.md` | `ae5b10969d39c9bae94095fdb81d025d63b502cdb1d87720e5983fdd9559c5bf` |

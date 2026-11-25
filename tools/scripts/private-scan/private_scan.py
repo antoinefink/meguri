@@ -836,7 +836,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'docs/process/review-log/meguri-sync-collection-backups-20261125.md':
-        '1536bcbe9e55360cb8ecdd80221cfb9162e3fa33268e17c62934cd59b3de4797',
+        '7c0b0a10b44ae639c53a312462f26a50cd71368853473614c4745431e949ba56',
     'server/src/accounts/backups.rs':
         '8d9801640afbe5dbb862060d8aea8accb4ddf47063dc775278e176559b32622a',
     'server/tests/support/mod.rs':
@@ -1251,7 +1251,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        '0e1a49d4f0a66e447f932e9760dccf131d5be7c0efc694a2ff11c6ec95a25d85',
+        '2a4303891cc65b73e0667511fb3d2ef941999a255f9caa816bcb5516ff599d33',
     "specs/servers/meguri-collection-mcp.md":
         "ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
