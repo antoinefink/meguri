@@ -2,6 +2,7 @@
 import AppKit
 import AppModel
 @_spi(MeguriTestHooks) import CardRendering
+import CoreBridge
 import SwiftUI
 
 extension TestHooks {

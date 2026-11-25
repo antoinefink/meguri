@@ -214,25 +214,6 @@ impl From<&meguri_model::notetype::Notetype> for NotetypeRecord {
     }
 }
 
-#[cfg(test)]
-mod ordinal_tests {
-    use super::NotetypeRecord;
-    use meguri_engine::notetypes::StockKind;
-    use meguri_model::rng::SeededRandom;
-
-    #[test]
-    fn sparse_definitions_keep_raw_ordinals_but_cloze_fields_are_positions() {
-        let mut notetype = StockKind::Cloze.notetype(&SeededRandom::new(7));
-        notetype.fields[0].ord = 7;
-        notetype.fields[1].ord = 19;
-        notetype.templates[0].ord = 23;
-        notetype.templates[0].config.q_format = format!("{{{{cloze:{}}}}}", notetype.fields[1].name);
-        let record = NotetypeRecord::from(&notetype);
-        assert_eq!(record.fields.iter().map(|field| field.ord).collect::<Vec<_>>(), [7, 19]);
-        assert_eq!(record.templates[0].ord, 23);
-        assert_eq!(record.cloze_fields, [1]);
-    }
-}
 #[uniffi::export]
 pub fn add_notetype(request: AddNotetypeRequest) -> Result<NotetypeMutation, CoreError> {
     callback::enter("add_notetype");
@@ -372,4 +353,24 @@ pub fn set_notetype_template_options(request: NotetypeTemplateOptions) -> Result
     row.config.browser_font_name = request.browser_font_name;
     row.config.browser_font_size = request.browser_font_size;
     Ok(notetypes::save(&c, d, SaveOptions::default())?.into())
+}
+
+#[cfg(test)]
+mod ordinal_tests {
+    use super::NotetypeRecord;
+    use meguri_engine::notetypes::StockKind;
+    use meguri_model::rng::SeededRandom;
+
+    #[test]
+    fn sparse_definitions_keep_raw_ordinals_but_cloze_fields_are_positions() {
+        let mut notetype = StockKind::Cloze.notetype(&SeededRandom::new(7));
+        notetype.fields[0].ord = 7;
+        notetype.fields[1].ord = 19;
+        notetype.templates[0].ord = 23;
+        notetype.templates[0].config.q_format = format!("{{{{cloze:{}}}}}", notetype.fields[1].name);
+        let record = NotetypeRecord::from(&notetype);
+        assert_eq!(record.fields.iter().map(|field| field.ord).collect::<Vec<_>>(), [7, 19]);
+        assert_eq!(record.templates[0].ord, 23);
+        assert_eq!(record.cloze_fields, [1]);
+    }
 }

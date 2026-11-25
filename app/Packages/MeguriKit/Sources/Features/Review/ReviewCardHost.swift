@@ -37,7 +37,7 @@ struct ReviewCardHost {
             else if model.phase == .answer { model.rate(.good) }
             return true
         case "r", "R":
-            guard !shift, model.phase == .question || model.phase == .answer else { return false }
+            guard !shift else { return false }
             pair.replay()
             return true
         case "1": model.rate(.again); return true
