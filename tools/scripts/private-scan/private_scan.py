@@ -903,7 +903,7 @@ PUBLIC_ARTIFACTS = {
         'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
     # Complete-content PUBLIC review: compact card statistics, privacy_review, 2026-11-25.
     'app/Packages/MeguriKit/Sources/Features/Stats/Page/Sections/StatsCardsSection.swift':
-        'f73bae7a59bae22db476fea13ab47348a12f6796476fe829ca0e7a3f24e9254c',
+        'e4259a20833050402de0cb3727ad09b489321ba511751470e57626d558f88508',
     'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
         'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':

@@ -132,7 +132,7 @@ struct StatsCardCountsBox: View {
     /// The pie's side: the regular plot's height, at every text size (S15); a smaller one where
     /// that lets it stay beside the table; and the most it grows to beside a taller box.
     static let side = StatsPlotSize.regular.height
-    static let smallSide = StatsPlotSize.panel.height + Spacing.large
+    nonisolated static let smallSide = StatsPlotSize.panel.height + Spacing.large
     static let largeSide = StatsPlotSize.page.height
 
     private var compactOverview: Bool {
