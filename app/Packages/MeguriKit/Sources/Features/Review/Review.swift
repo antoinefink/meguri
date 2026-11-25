@@ -38,7 +38,8 @@ public struct ReviewView: View {
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
             reveal: model.reveal, rate: model.rate,
             redoDescription: redoDescription, status: status,
-            actions: moreActions, leech: model.leechNotice, showInBrowse: showInBrowse) {
+            actions: moreActions, leech: model.leechNotice, showInBrowse: showInBrowse,
+            editingNote: model.editingNote) {
             ZStack {
                 if let pair = model.pair {
                     // A walk's next deck brings its own pages: a new host for them, while
@@ -63,15 +64,10 @@ public struct ReviewView: View {
                 stateContent
             }
         }
-        #if os(iOS)
+        // N20.8: a sheet on every platform; on the Mac it drops from the
+        // window's title bar and holds the window (and its Back to Decks)
+        // while it shows. The review's input is held meanwhile (N11.1).
         .modifier(ReviewEditNotePresentation(editNote: editNote))
-        #else
-        // N20.8: on the Mac the form is a panel over the card, which owns the
-        // keys while it shows (the review's input is held, N11.1).
-        .overlay {
-            if let editNote, editNote.flow.isPresented { editNote.form }
-        }
-        #endif
         .onChange(of: model.leechAnnouncement?.id) { _, id in
             guard id != nil, let text = model.leechAnnouncement?.text else { return }
             AccessibilityNotification.Announcement(text).post()
@@ -278,6 +274,8 @@ struct ReviewLayout<Card: View>: View {
     /// N16.11: the leech notice, as one icon first in the top controls.
     var leech: ReviewLeechNotice? = nil
     var showInBrowse: ((Int64) -> Void)? = nil
+    /// N20.8: an open Edit Note holds Back to Decks (the Mac toolbar's).
+    var editingNote = false
     @State private var noticeContentHeight: CGFloat?
     @State private var answerAreaTop: CGFloat?
     @State private var bottomInset: CGFloat = 0
@@ -304,6 +302,9 @@ struct ReviewLayout<Card: View>: View {
                         .labelStyle(.iconOnly)
                 }
                 .help(Text("Back to Decks", bundle: .module))
+                // N20.8: never ends the review under an open Edit Note; its
+                // sheet holds the window, and this states it as well.
+                .disabled(editingNote)
                 .accessibilityIdentifier("review.session.close")
             }
             ToolbarSpacer()
@@ -451,27 +452,52 @@ extension EnvironmentValues {
     @Entry var reviewAnswerAreaTop: CGFloat? = nil
 }
 
-#if os(iOS)
 /// Edit Note's form as Add Note's is placed (N17.1): a sheet, or the whole
 /// screen on an iPhone at regular width. A fold moves the same draft and
 /// page to the other presentation; the swipe down asks as Cancel does.
+/// Mac: its own window (F1, user-approved 2026-11-25; `EditNoteWindow`).
 private struct ReviewEditNotePresentation: ViewModifier {
     let editNote: ReviewEditNote?
+    #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     private var coversScreen: Bool {
         AddNotePresentation.coversScreen(phone: UIDevice.current.userInterfaceIdiom == .phone, regularWidth: sizeClass == .regular)
     }
+    #else
+    // A separate window takes these from the app, not from the presenter
+    // (app/AGENTS.md): the form gets the review's again.
+    @Environment(\.locale) private var locale
+    @Environment(\.timeZone) private var timeZone
+    @Environment(\.appClock) private var clock
+    #endif
+    #if os(iOS)
     private func shown(cover: Bool) -> Binding<Bool> {
         Binding(get: { editNote?.flow.isPresented == true && coversScreen == cover },
                 set: { if !$0, coversScreen == cover, let flow = editNote?.flow, flow.isPresented { Task { await flow.requestCancel() } } })
     }
+    #endif
     func body(content: Content) -> some View {
+        #if os(iOS)
         content
             .sheet(isPresented: shown(cover: false)) { editNote?.form }
             .fullScreenCover(isPresented: shown(cover: true)) { editNote?.form }
+        #else
+        content
+            .onChange(of: editNote?.flow.isPresented == true, initial: true) { _, presented in
+                guard presented, let editNote else { return }
+                EditNoteWindow.show(editNote.form
+                    .environment(\.locale, locale)
+                    .environment(\.timeZone, timeZone)
+                    .environment(\.appClock, clock), flow: editNote.flow, over: NSApp.keyWindow)
+            }
+            // The review leaving (its window closed) cancels as Cancel does; the
+            // edit window stays for a discard question and closes with the flow.
+            .onDisappear {
+                if let flow = editNote?.flow, flow.isPresented { Task { await flow.requestCancel() } }
+            }
+        #endif
     }
 }
-#endif
 
 /// The session's progress as a thin grey bar: no text, no accent colour,
 /// and not a control (N16.1).

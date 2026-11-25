@@ -74,6 +74,8 @@ impl Drop for ReadPin {
     }
 }
 impl Generation {
+    pub(crate) fn name(&self) -> &str { &self.name }
+    pub(crate) fn retain(&mut self) { self.keep=true; }
     pub fn writer(&self) -> Result<File> { at::open(&self.directory,"collection.anki2",false,false) }
     pub fn durable(&self) -> Result<()> {
         self.writer()?.sync_all()?;

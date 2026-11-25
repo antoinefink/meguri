@@ -3,6 +3,7 @@ use super::*;
 use crate::storage::reset::{self, Pending};
 
 fn target(c: &Connection, id: &str) -> Result<Account> {
+    if crate::storage::backups::pending(c,id)? {return Err(Error::new("storage_unavailable"));}
     read_account(c,id)?.filter(|a|a.state=="ready").ok_or(Error::new("route_not_found"))
 }
 impl Service {
@@ -52,6 +53,7 @@ impl Service {
                     let binding=root.account_deletion_binding(&id,false)?.ok_or(Error::new("storage_unavailable"))?;
                     let epoch=expected.checked_add(1).ok_or(Error::new("storage_unavailable"))?;
                     gate.retire()?;
+                    crate::storage::backups::clear(&tx,&id)?;
                     tx.execute("DELETE FROM media_names WHERE account_id=?1",[&id])?;
                     tx.execute("DELETE FROM media_blobs WHERE account_id=?1",[&id])?;
                     tx.execute("UPDATE accounts SET media_usn=0 WHERE id=?1",[&id])?;

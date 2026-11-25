@@ -63,8 +63,9 @@ struct EditorBridgeMessage {
         }
         // A reference the inspector cannot serve (a web address, a folder) is not a protocol
         // error: the host ignores it (`MediaName.plain`) and the page keeps editing.
+        // A chip the note's own HTML imitates may have no name (null): ignored the same way.
         if type == "playMedia" || type == "openMedia" {
-            guard body["name"] is String else { throw EditorRuntimeError.invalidMessage }
+            guard body["name"] is String || body["name"] is NSNull else { throw EditorRuntimeError.invalidMessage }
         }
         if type == "contentHeight" {
             guard let height = Self.number(body["height"]), height >= 0 else { throw EditorRuntimeError.invalidMessage }

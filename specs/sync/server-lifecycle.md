@@ -54,7 +54,7 @@ After revocation acknowledges, old-generation requests cannot publish collection
 
 ## L5. Backup and restore admission
 
-Backup requires the service stopped and exclusive L1 ownership. Recover/checkpoint and close every database, retaining required journal state if any remains. Snapshot account metadata, current collection generations, media metadata and all referenced durable blobs together. Record a manifest of relative owned paths, sizes and SHA-256 hashes and the format version; include no secret values in ordinary logs. Verify the manifest before accepting the backup as complete. A backup interrupted before completion is not a usable backup.
+A whole-service operator backup requires the service stopped and exclusive L1 ownership. Recover/checkpoint and close every database, retaining required journal state if any remains. Snapshot account metadata, current collection generations, media metadata and all referenced durable blobs together. Record a manifest of relative owned paths, sizes and SHA-256 hashes and the format version; include no secret values in ordinary logs. Verify the manifest before accepting the backup as complete. A backup interrupted before completion is not a usable backup.
 
 Restore requires an empty target and exclusive stable lock ownership. Reject absolute paths, traversal, links, duplicate paths, missing/hash-mismatched files, unsupported versions and references to absent blobs/generations before admitting the restored state. Partial failure leaves serving closed. Verify all database integrity and metadata references. Invalidate restored sessions, hostkeys, outstanding setup/invite/reset bearer capabilities and other redeemable links; they cannot regain authority after rollback. Keep collection state and media cursor history intact as snapshot data. Retain the restored password hashes and enabled states for explicit operator review; do not claim post-backup revocations survived rollback.
 
@@ -64,6 +64,97 @@ Persist a restore-admission closure before any service can expose restored accou
 
 Every participating client, including a delayed reconnecting one, needs renewed credentials and an explicit operator/client decision to perform a full collection transfer with the restored authoritative copy, then the verified media reset/rescan procedure. Full-transfer direction must preserve the chosen authoritative state; it is never guessed from zero cards. Verify content, review history, scheduling and media hashes afterwards before marking that client recovered. Keep a recovery checklist per client outside transferable collections. Opening service admission and completing client recovery are separate outcomes.
 
-**B:** `meta-status#M3` gives equal-mod precedence over scm; `media-sync#Y11` describes cursor/count limitations. **M:** A changed scm, cursor ahead/behind/equal, matching USNs, equal file counts or HTTP success cannot prove restore reconciliation. No invented wire signal, automatic transparent restore claim, online backup scheduler or external authentication journal is introduced.
+**B:** `meta-status#M3` gives equal-mod precedence over scm; `media-sync#Y11` describes cursor/count limitations. **M:** A changed scm, cursor ahead/behind/equal, matching USNs, equal file counts or HTTP success cannot prove restore reconciliation. No invented wire signal, automatic transparent restore claim or external authentication journal is introduced. Online collection history follows L9 and does not roll back the account database or media cursor.
 
 **P:** C8 must seal the exact Desktop 26.09.4 explicit full-transfer/media-reset procedure, then the exact AnkiMobile 26.10 procedure in its device lane. Test equal mod with different scm, cursor reused or overtaken after restore, equal counts with different bytes, offline local edits and delayed reconnect with revoked credentials. If a supported client procedure cannot be verified, the affected restore acceptance remains incomplete even if service storage recovery passes.
+
+## L9. Online account collection recovery points (M)
+
+Online collection history is distinct from L5's stopped operator backup of the
+whole service. It does not back up identities, passwords, grants or the volume.
+`serve` runs a serial startup sweep and repeats it every five minutes, with
+keyset pages of at most 32 ready accounts. Disabled ready accounts also receive
+history. A busy or failed account does not prevent later accounts from running.
+There is no historical catch-up fabrication: after downtime, capture today's
+committed state once. Graceful shutdown joins the active sweep before releasing
+root ownership.
+
+Capture pins a committed SQLite read transaction and its current generation,
+and reads the live media-name manifest under the account publication barrier.
+It never calls native full-download snapshotting, advances stamps or retires a
+normal round. Uncommitted round edits are absent. Page copying, integrity checks
+and hashing happen outside publication and metadata writer locks. Reserve the
+shared temporary budget for the manifest, collection scratch and staging before
+copying. Accept valid positive collection sizes within SQLite's signed integer
+range, using checked page-count multiplication and scratch-budget arithmetic;
+there is no separate backup collection-size cap. Serialize recovery-point work
+per account and use existing collection/metadata worker admission limits.
+Before publication, recheck ready state, data epoch and absence of reset or
+restore intents. Reset, deletion or restore during copying invalidates capture.
+A point becomes visible only after its immutable payload is durable and its
+metadata plus complete media manifest commit together. Collection payloads use
+account-local SHA-256 names, with exact byte comparison before deduplication;
+media manifests reference existing immutable account-local blobs. Never copy
+another account's payload or media by a digest alone.
+
+Keep the newest point per UTC day for today and the preceding six days. Older
+points in the preceding four Monday-based UTC weeks become weekly points (one
+newest point per week). Remaining points become monthly points, at most one newest point for
+each of the twelve preceding UTC calendar months beyond daily/weekly coverage,
+at most twelve monthly points, including a selected monthly point protected during
+restore. Prune old history only after a successful daily capture (or when that
+day already has a published point), so capture failure cannot erase the last
+restorable history. Always retain the newest ordinary recovery point, even if
+it has aged beyond these windows. Preserve points captured after the sweep's
+sampled clock when the clock moves backwards. Promote metadata in place without copying payloads.
+Expired and unreferenced collection payloads are reclaimed only in the account's
+owned backup directory. Online reclamation retains the strong account
+publication barrier and per-account backup-work lease through cleanup, even if
+the calling future is cancelled; blocking candidate preparation retains the lease
+until its own work and candidate cleanup finish. Reset/deletion cannot interleave
+between reclamation's account validation and unlink. Preserve at most three
+`before_restore` points separately;
+the selected point and the new safety point count toward that allowance when
+restoring a safety point. IDs are opaque and account scoped. `created_at` is the
+capture time in Unix seconds; reported size is the collection plus unique media
+blob sizes within the point, not physical storage consumed after deduplication.
+
+Restore verifies the selected collection's size, SHA-256, integrity and schema,
+and verifies every selected media object before cutover. It then captures a
+complete pre-restore safety point. Recheck the original browser authority and
+epoch under the publication barrier. Require the current generation, SQLite
+connection data-version and media cursor still to match the safety capture;
+otherwise refuse `busy`, preserving live state. Never overwrite intervening
+commits without a matching safety point. Exhausted stamp, epoch, media cursor or
+staging budgets refuse before cutover. Both `scm` and `mod` in the prepared
+collection strictly exceed both corresponding live and restored stamps and the
+sampled clock. This includes repeated restores in one millisecond and backwards
+clock movement. Retire the unfinished native round at cutover.
+
+`current-collection` and `accounts.sqlite` have separate durable commits. Before
+switching the pointer, commit one account-local restore intent referencing the
+prepared durable generation and chosen point, together with a strictly advanced
+data epoch and the pre-restore safety point. Pending intent rejects all target
+collection/media/MCP admissions, storage measurements, reset and deletion.
+Retain the target publication barrier through pointer durability, media diff and
+intent completion, including request cancellation. Compare the native media
+index to the selected manifest: removed names receive tombstones, reintroduced
+and changed names receive fresh increasing USNs, and unchanged entries retain
+their USNs. Keep the account's cursor monotonic; never replace it with a saved
+cursor. Media application and intent removal share one metadata transaction.
+On failure after intent commit, keep the account fenced. Startup completes every
+intent before any request is admitted and before generation cleanup. Replaying
+the pointer and an uncommitted media diff is idempotent. A closed operator-restore
+admission remains closed. The account barrier prevents any reader from resolving
+a split collection/media cutover.
+
+The data epoch fences previously admitted native and MCP operations, sessions,
+search continuations and pending writes without changing password hashes or
+browser sessions. Native hostkeys and OAuth grants can authorize fresh requests
+after completion; old admitted work must revalidate the new epoch. Clients take
+an explicit full collection download of the restored server copy, then ordinary
+media changes/downloads to reconcile added, changed and removed names. Unlike
+L5's full-service rollback, online history preserves the live media cursor and
+credentials. Do not infer complete device recovery merely from HTTP success.
+Permanent account data reset and account deletion remove all online history and
+its payloads. Offline operator backup and volume-loss protection remain separate.

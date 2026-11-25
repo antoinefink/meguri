@@ -168,30 +168,19 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
     let host: FieldEditorHost?
     let decisions: Decisions
     let attemptClose: () -> Void
+    /// Mac: Edit Note is its own window (N20.8, F1): the window's title names
+    /// the note, the form sits on the window background, and Cancel beside
+    /// Save at the bottom trailing corner. Add keeps its panel's header.
+    var window = false
     @ViewBuilder let cancel: () -> Cancel
     @ViewBuilder let confirm: () -> Confirm
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         #if os(macOS)
-        VStack(spacing: 0) {
-            HStack {
-                title.font(.headline)
-                if let subtitle {
-                    Text(verbatim: subtitle).foregroundStyle(.secondary)
-                        .accessibilityIdentifier(subtitleIdentifier)
-                }
-                Spacer()
-                cancel()
-            }
-            .padding()
-            Divider()
-            content()
-            Divider()
-            HStack { modeToggle; Spacer(); confirm() }.padding()
+        Group {
+            if window { windowBody } else { panelBody }
         }
-        // The page's own background, so the fields and their form read as one surface.
-        .background(Color(nsColor: .textBackgroundColor))
         .modifier(decisions)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
@@ -230,6 +219,38 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
     }
     #endif
     #if os(macOS)
+    private var panelBody: some View {
+        VStack(spacing: 0) {
+            HStack {
+                title.font(.headline)
+                if let subtitle { subtitleText(subtitle) }
+                Spacer()
+                cancel()
+            }
+            .padding()
+            Divider()
+            content()
+            Divider()
+            HStack { modeToggle; Spacer(); confirm() }.padding()
+        }
+        // The page's own background, so the fields and their form read as one surface.
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+    /// The window's own background shows through the page's columns form
+    /// (`FieldEditor/page.html`); the one mode control sits at the bottom
+    /// leading corner, Cancel and the default Save at the trailing one.
+    private var windowBody: some View {
+        VStack(spacing: 0) {
+            content()
+            HStack { modeToggle; Spacer(); cancel(); confirm() }.padding()
+        }
+        .frame(minWidth: 480, idealWidth: 580, maxWidth: .infinity, minHeight: 320, idealHeight: 440, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+    private func subtitleText(_ subtitle: String) -> some View {
+        Text(verbatim: subtitle).foregroundStyle(.secondary)
+            .accessibilityIdentifier(subtitleIdentifier)
+    }
     /// The one mode control, for the field that has focus (⇧⌘X does the same).
     @ViewBuilder private var modeToggle: some View {
         if let host {

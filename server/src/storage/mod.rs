@@ -2,6 +2,7 @@
 pub(crate) mod owned;
 pub(crate) mod deletion;
 pub(crate) mod reset;
+pub(crate) mod backups;
 mod root;
 mod semantic;
 mod oauth;

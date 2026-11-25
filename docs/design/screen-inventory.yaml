@@ -363,7 +363,9 @@ screens:
       with Cancel and Done and the subtitle "<deck> · <note type>", which cannot be changed here.
       Opened from the touch review's More menu or Mac Review actions toolbar menu (N20.8),
       Note › Edit Note (⌘E) and the card's context menu on Mac, and E. iPhone and the Duo folded or held tall: a sheet; the Duo held
-      wide: the whole screen with a centred column; iPad: a page sheet; Mac: a panel over the card.
+      wide: the whole screen with a centred column; iPad: a page sheet; Mac: its own window over the
+      review, titled with the note, a columns form on the window background, Cancel beside Save
+      at its bottom trailing corner, sound chips and thumbnails (F1, 2026-11-25).
       Changes are a draft: Done saves them in one note update and returns to the same card,
       re-rendered; Cancel asks "Discard changes?" when there is a change. Error: a failed save keeps
       the form open with its text and the reason. Overflow: long fields scroll in the form.

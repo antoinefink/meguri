@@ -311,7 +311,7 @@ public struct MacSettingsView: View {
         let terms: String = switch page {
         case .accountSync: SyncText.value("sync.settings.sync.section") + " iCloud " + SyncText.value("sync.service.meguri")
         case .collection: String(localized: "Collection", bundle: .module) + " Import Export"
-        case .integrations: "Integrations Migaku Sentence Mining AnkiConnect"
+        case .integrations: "Integrations Connectors Migaku Sentence Mining AnkiConnect"
         case .ankiServer: String(localized: "Anki Server", bundle: .module) + " Connection"
         }
         return terms.localizedStandardContains(query)
