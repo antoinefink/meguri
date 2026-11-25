@@ -62,6 +62,8 @@ import AVFoundation
         var onStop: (() -> Void)?
         var isPaused = false
         var playHold: Hold?
+        var submittedHold: Hold?
+        var checksPlayCancellation = false
         var pauseHold: Hold?
         var stopHold: Hold?
         var seekHold: Hold?
@@ -69,10 +71,12 @@ import AVFoundation
         var onSample: (() -> Void)?
         var plays = 0, pauses = 0, stops = 0, seeks = 0, samples = 0
         init(_ file: MediaFile, backend: Backend) { self.name = file.name; self.file = file; self.backend = backend }
-        func play() async {
+        func play() async throws {
             plays += 1
             await playHold?.wait()
+            if checksPlayCancellation { try Task.checkCancellation() }
             isPaused = false; backend?.played(name)
+            await submittedHold?.wait()
         }
         func pause() async {
             pauses += 1
@@ -268,6 +272,32 @@ import AVFoundation
         #expect(await rig.backend.nextPlay() == "q2.mp3")
     }
 
+    @Test(arguments: [false, true])
+    func routeLossDuringHeldStopDropsCompletionQueueAndManualReplacement(_ manual: Bool) async throws {
+        let rig = try await self.rig()
+        let stop = Hold()
+        defer { stop.release(); rig.controller.close() }
+        rig.controller.admitReview()
+        rig.controller.present(payload: payload(), update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        await rig.controller.transportSettled()
+        let q1 = try #require(rig.backend.clips.first)
+        q1.stopHold = stop
+        if manual { rig.controller.playEntry(payload: payload(), update: answer, side: .answer, index: 0) }
+        else { q1.onEnd?(true) }
+        await stop.reached()
+        #expect(rig.controller.current == nil)
+        rig.controller.sessionEvent(.pause)
+        rig.controller.sessionEvent(.available)
+        stop.release()
+        await rig.controller.transportSettled()
+        rig.controller.resume()
+        await rig.controller.transportSettled()
+        #expect(rig.controller.current == nil && !rig.controller.paused)
+        #expect(rig.backend.events == ["q1.mp3"])
+        #expect(rig.session.owners.isEmpty && rig.session.continuityOwners.isEmpty)
+    }
+
     @Test func routeLossDuringActivationDropsNeverStartedQ1AndQ2() async throws {
         let rig = try await self.rig()
         defer { rig.controller.close() }
@@ -386,6 +416,36 @@ import AVFoundation
         await closing.value
         await old.enqueue(success: false).value
         #expect(oldResults.isEmpty && newResults.isEmpty)
+    }
+
+    @Test(arguments: [true, false])
+    func routeLossDuringIssuedPlayPreservesDecodedClipForExplicitResume(_ scheduled: Bool) async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        await rig.controller.prepare(payload: payload(), update: question)?.value
+        let clip = try #require(rig.backend.clips.first)
+        let play = Hold()
+        defer { play.release() }
+        clip.checksPlayCancellation = true
+        if scheduled { clip.submittedHold = play } else { clip.playHold = play }
+        rig.controller.present(payload: payload(), update: question)
+        await play.reached()
+        if scheduled {
+            #expect(await rig.backend.nextPlay() == "q1.mp3")
+            clip.time = 1
+        }
+        rig.controller.sessionEvent(.pause)
+        #expect(rig.controller.paused && rig.controller.current?.name == "q1.mp3")
+        #expect(rig.session.owners.count == 1)
+        play.release(); clip.playHold = nil; clip.submittedHold = nil
+        await rig.controller.transportSettled()
+        rig.controller.sessionEvent(.available)
+        #expect(clip.isPaused && !clip.stopped && rig.session.owners.isEmpty)
+        #expect(rig.backend.events == (scheduled ? ["q1.mp3"] : []))
+        #expect(clip.time == (scheduled ? 1 : 0))
+        rig.controller.resume()
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        #expect(rig.backend.clips.filter { $0.name == "q1.mp3" }.count == 1)
     }
 
     @Test func heldPlayKeepsUIResponsiveAndBurstPauseResumeCoalesces() async throws {

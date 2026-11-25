@@ -237,6 +237,8 @@ public final class CardAudioController {
         preloads[update] = task
         return task
     }
+    func preparationTask(for update: CardUpdate) -> Task<Void, Never>? { preloads[update] }
+
     public func cancelPreparation(_ update: CardUpdate) {
         preloadSerials[update] = nil
         preloads.removeValue(forKey: update)?.cancel()
@@ -442,9 +444,9 @@ public final class CardAudioController {
             audioRevision += 1
             continuityAllowed = false
             session.releaseContinuity(continuityOwner)
-            // Only a word that submitted output has a position/queue to resume.
-            // Pending activation/play/decode belongs to the disconnected route.
-            if transport.hasStarted {
+            // Preserve only the current word whose play call was issued.
+            // Pending activation/decode belongs to the disconnected route.
+            if let clip, current != nil, transport.canPreserve(clip, serial: generation) {
                 cancelPreload()
                 pause()
             } else { replace() }
@@ -515,6 +517,7 @@ private final class AudioTransport {
         var intent: Intent
         var playing = false
         var hasStarted = false
+        var playIssued = false
         var readinessStage: CardAudioController.Readiness.Stage?
         var pauseRequired = false
         var keepSession = false
@@ -530,8 +533,14 @@ private final class AudioTransport {
     private var owned: OwnedClip?
     private var running = false
     private var playAttempt: Task<Void, Error>?
-    var hasStarted: Bool { owned?.hasStarted == true }
+    // An issued call may already have scheduled native output before its return
+    // reaches MainActor. Preserve that decoded item for explicit resume too.
+    private var hasSubmittedOutput: Bool { owned.map { $0.hasStarted || $0.playIssued } == true }
     var isEmpty: Bool { owned == nil }
+    func canPreserve(_ clip: any CardAudioClip, serial: UInt64) -> Bool {
+        guard let owned else { return false }
+        return owned.clip === clip && owned.serial == serial && owned.intent != .stopped && hasSubmittedOutput
+    }
     var onStopped: (() -> Void)?
     var onStarted: (((any CardAudioClip), CardAudioController.Entry, UInt64) -> Void)?
     var onFailure: ((UInt64, Bool) -> Void)?
@@ -574,7 +583,7 @@ private final class AudioTransport {
     }
     func revokePendingOutput() {
         playAttempt?.cancel()
-        if !hasStarted { release() }
+        if !hasSubmittedOutput { release() }
     }
     func releaseIfIdle() {
         guard owned == nil else { return }
@@ -641,12 +650,19 @@ private final class AudioTransport {
                 continue
             }
             if item.readinessStage != nil { item.readinessStage = .playPending }
-            let attempt = Task { try await item.clip.play() }
+            let attempt = Task { @MainActor in
+                try Task.checkCancellation()
+                guard item.intent == .playing, !item.pauseRequired else { throw CancellationError() }
+                item.playIssued = true
+                try await item.clip.play()
+                // Publish before this attempt finishes, without a parent-task hop.
+                // Cancellation can arrive after native scheduling succeeded.
+                item.playing = true; item.hasStarted = true
+                if item.readinessStage != nil { item.readinessStage = .playReturned }
+            }
             playAttempt = attempt
             do {
                 try await attempt.value
-                if item.readinessStage != nil { item.readinessStage = .playReturned }
-                item.playing = true; item.hasStarted = true
                 if item.intent == .playing, !item.pauseRequired {
                     onStarted?(item.clip, item.entry, item.serial)
                 }

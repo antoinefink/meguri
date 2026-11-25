@@ -95,7 +95,7 @@ public final class CardPagePair {
     private var hostSource: String?
     private var recovery: Task<Void, Never>?
     private var recoveryID = UUID()
-    private var htmlAudioOwner: UUID?
+    private(set) var htmlAudioOwner: UUID?
     private var lifecycle: Task<Void, Never>?
     private var presentationWork: Task<Void, Never>?
     private var presentationEpoch = UUID()
@@ -510,7 +510,12 @@ public final class CardPagePair {
     }
     public var audioIntent: UInt64 { audio.audioIntent }
     /// Review/lifecycle loss revokes pending visuals as well as current output.
-    public func revokeReviewAudio() { audio.sessionEvent(.pause); releaseHTMLAudio() }
+    public func revokeReviewAudio() {
+        suspended = true
+        audio.sessionEvent(.pause)
+        for page in pages { page.pauseMediaWithoutWaiting() }
+        releaseHTMLAudio()
+    }
     public func pauseAudio() { audio.pause() }
     public func resumeAudio() { if !closed && !suspended && !lifecycleSuspended { audio.resume() } }
     public func seekAudio(by seconds: TimeInterval) async { await audio.seek(by: seconds) }

@@ -59,7 +59,9 @@ extension WebKitSuites {
             try await pages.prepareFirst(item: item, payload: card)
             let early = try #require(pair.idle.update)
             // Join native preparation without waiting on any real audio hardware.
-            await audio.prepare(payload: card, update: early)?.value
+            let preparation = try #require(audio.preparationTask(for: early))
+            await preparation.value
+            #expect(backend.clips.count == 1)
             #expect(session.continuityOwners.isEmpty && session.owners.isEmpty && backend.events.isEmpty)
             pages.renderHead = { _, _, _ in [card] }
             try await pages.render(sessionID: 5, items: [item])

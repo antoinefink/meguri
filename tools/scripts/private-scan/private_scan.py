@@ -836,11 +836,11 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
-        '235b717424b1af93eeb4f1c0c887bfa3792b90935667e7d7c497fba39b623223',
+        '5eb9a4b590cb8371f05875fad2f11559b764044ef7e23edb9ba4616230cd71ec',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
-        '68546894753d8ed948a54295a64e2bdf91ad9ed43bf59d33cc06f2ca6df8c052',
+        '2888da55e5acda244183c0bcc59a6a57c5f5ca4284f921fa69c5aebff40aa440',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/CardAudioControllerTests.swift':
-        '6ea360a78b27d96d1c174cee86abdca2c8cfce74addcf2db36eb37802ce1b383',
+        '2e3405930fee781cfa8a40512115683ac47e4e9a513ed402dab2bda293d27177',
     'specs/render/audio-playback.md':
         '11eda11c77a802d0951393f3a2c5b3f96a5fd1187284a2157c8b54539f579311',
     'docs/process/review-log/meguri-sync-collection-backups-20261125.md':

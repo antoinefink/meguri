@@ -10,6 +10,7 @@ public final class AudioSessionCoordinator: CardAudioSession {
     public static let shared = AudioSessionCoordinator()
     public nonisolated enum Event: Sendable, Equatable { case stop, pause, available }
     private var owners: Set<UUID> = []
+    private var pendingActivations: Set<UUID> = []
     private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
     private var observers: [NSObjectProtocol] = []
     private let hardware: SessionHardware
@@ -21,6 +22,8 @@ public final class AudioSessionCoordinator: CardAudioSession {
     private var revision: UInt64 = 0
     private var hardwareUpdate: Task<Void, Never>?
     private var configurationWork: Task<Void, Never>?
+    private var continuityLifetime: UInt64 = 0
+    private var configurationPending = false
     public convenience init() {
         self.init(hardware: SessionHardware(), continuityEligible: {
             #if os(iOS)
@@ -45,8 +48,9 @@ public final class AudioSessionCoordinator: CardAudioSession {
         })
         observers.append(center.addObserver(forName: AVAudioSession.resumptionRecommendationNotification, object: nil, queue: nil) { [weak self] notification in
             guard let context = notification.userInfo?[AVAudioSession.resumptionContextKey] as? AVAudioSession.ResumptionContext else { return }
+            let recommendation = context.recommendation
             Task { @MainActor [weak self] in
-                if let event = Self.resumptionEvent(recommendation: context.recommendation, isActive: UIApplication.shared.applicationState == .active) {
+                if let event = Self.resumptionEvent(recommendation: recommendation, isActive: UIApplication.shared.applicationState == .active) {
                     self?.emit(event)
                 }
             }
@@ -96,12 +100,23 @@ public final class AudioSessionCoordinator: CardAudioSession {
             emit(.pause)
         }
     }
-    func configurationChanged(engine: ObjectIdentifier) {
-        guard configurationWork == nil, !continuityOwners.isEmpty, continuityEligible(), routeIdentity() == continuityRoute else { return }
-        let hardware = hardware, revision = revision, route = continuityRoute
+    func configurationChanged(engine _: ObjectIdentifier) {
+        guard !continuityOwners.isEmpty, continuityEligible(), routeIdentity() == continuityRoute else { return }
+        // Notifications request a reevaluation of our graph. A foreign engine
+        // cannot occupy the single slot and discard an owned graph's event.
+        configurationPending = true
+        runConfigurationWork()
+    }
+    private func runConfigurationWork() {
+        guard configurationWork == nil else { return }
         configurationWork = Task { [weak self] in
-            await hardware.configurationChanged(engine: engine, route: route, revision: revision)
+            while !Task.isCancelled, let self, self.configurationPending {
+                self.configurationPending = false
+                let lifetime = self.continuityLifetime, route = self.continuityRoute
+                await self.hardware.configurationChanged(route: route, lifetime: lifetime)
+            }
             self?.configurationWork = nil
+            if self?.configurationPending == true { self?.runConfigurationWork() }
         }
     }
     isolated deinit { for observer in observers { NotificationCenter.default.removeObserver(observer) } }
@@ -152,28 +167,34 @@ public final class AudioSessionCoordinator: CardAudioSession {
     func removeObserver(_ id: UUID) { listeners[id] = nil }
     func emit(_ event: Event) {
         if event != .available {
-            configurationWork?.cancel()
-            owners.removeAll(); continuityOwners.removeAll(); continuityRoute = nil
+            continuityLifetime += 1; configurationPending = false; configurationWork?.cancel()
+            // Submitted output keeps its lease until its owner physically stops.
+            owners.subtract(pendingActivations)
+            continuityOwners.removeAll(); continuityRoute = nil
             updateHardware()
         }
         for listener in Array(listeners.values) { listener(event) }
         for continuation in subscribers.values { continuation.yield(event) }
     }
     public func maintainContinuity(_ owner: UUID) {
-        guard continuityEligible(), continuityOwners.insert(owner).inserted else { return }
+        guard !continuityOwners.contains(owner), continuityEligible() else { return }
+        if continuityOwners.isEmpty { continuityLifetime += 1 }
+        continuityOwners.insert(owner)
         continuityRoute = routeIdentity()
         updateHardware()
     }
     public func releaseContinuity(_ owner: UUID) {
         guard continuityOwners.remove(owner) != nil else { return }
-        if continuityOwners.isEmpty { continuityRoute = nil; configurationWork?.cancel() }
+        if continuityOwners.isEmpty {
+            continuityLifetime += 1; continuityRoute = nil; configurationPending = false; configurationWork?.cancel()
+        }
         updateHardware()
     }
     private func updateHardware() {
         revision += 1
         let hardware = self.hardware, revision = self.revision
-        let audible = !owners.isEmpty, continuity = !continuityOwners.isEmpty
-        hardwareUpdate = Task { try? await hardware.set(audible: audible, continuity: continuity, revision: revision) }
+        let audible = !owners.isEmpty, continuity = !continuityOwners.isEmpty, lifetime = continuityLifetime
+        hardwareUpdate = Task { try? await hardware.set(audible: audible, continuity: continuity, revision: revision, lifetime: lifetime) }
     }
     func hardwareSettled() async {
         await hardwareUpdate?.value
@@ -184,8 +205,10 @@ public final class AudioSessionCoordinator: CardAudioSession {
         guard !owners.contains(owner) else { return }
         let route = routeIdentity()
         owners.insert(owner)
+        pendingActivations.insert(owner)
+        defer { pendingActivations.remove(owner) }
         revision += 1
-        do { try await hardware.set(audible: true, continuity: !continuityOwners.isEmpty, revision: revision) }
+        do { try await hardware.set(audible: true, continuity: !continuityOwners.isEmpty, revision: revision, lifetime: continuityLifetime) }
         catch {
             release(owner)
             throw error
@@ -216,6 +239,7 @@ actor SessionHardware {
     private var revision: UInt64 = 0
     private var active = false
     private var ducking: Bool?
+    private var continuityLifetime: UInt64 = 0
     private var silenceRequested = false
     private var silenceFailed = false
     private var audible = false
@@ -223,14 +247,16 @@ actor SessionHardware {
     private var outputWork: Task<Void, Never>?
     private var recoveryWork: Task<Void, Never>?
     init(perform: (@Sendable (Operation) throws -> Void)? = nil,
-         outputIdentity: ObjectIdentifier? = nil, isRendering: (@Sendable () -> Bool)? = nil) {
+         isRendering: (@Sendable () -> Bool)? = nil) {
         performOverride = perform
-        output = SilentOutput(perform: perform, identity: outputIdentity, isRendering: isRendering)
+        output = SilentOutput(perform: perform, isRendering: isRendering)
     }
 
-    func set(audible: Bool, continuity: Bool, revision: UInt64) async throws {
+    func set(audible: Bool, continuity: Bool, revision: UInt64, lifetime: UInt64 = 0) async throws {
         guard revision >= self.revision else { return }
         self.revision = revision; self.audible = audible
+        let lifetimeChanged = lifetime != continuityLifetime
+        if lifetimeChanged { continuityLifetime = lifetime; silenceFailed = false }
         if !continuity { silenceFailed = false }
         let needsSilence = continuity && !silenceFailed
         if !needsSilence { requestSilence(false, revision: revision) }
@@ -246,7 +272,7 @@ actor SessionHardware {
                     do { try perform(.activate) }
                     catch { try? deactivate(); throw error }
                 }
-                if needsSilence { requestSilence(true, revision: revision) }
+                if needsSilence { requestSilence(true, revision: revision, restart: lifetimeChanged && silenceRequested) }
             } else {
                 await outputWork?.value
                 guard revision == self.revision else { return }
@@ -261,8 +287,8 @@ actor SessionHardware {
             throw error
         }
     }
-    private func requestSilence(_ enabled: Bool, revision: UInt64) {
-        guard silenceRequested != enabled else { return }
+    private func requestSilence(_ enabled: Bool, revision: UInt64, restart: Bool = false) {
+        guard silenceRequested != enabled || restart else { return }
         silenceRequested = enabled; outputRevision = revision
         outputWork?.cancel()
         recoveryWork?.cancel()
@@ -270,15 +296,18 @@ actor SessionHardware {
         // Engine startup must never be a prerequisite of a normal word's
         // activation. Its own serial worker also owns delayed-start cleanup.
         outputWork = Task {
-            do { try await output.set(enabled: enabled, revision: revision) }
+            do {
+                if restart { try await output.set(enabled: false, revision: revision) }
+                try await output.set(enabled: enabled, revision: revision)
+            }
             catch { self.outputFailed(revision: revision) }
         }
     }
-    func configurationChanged(engine: ObjectIdentifier, route: String?, revision: UInt64) async {
-        guard !Task.isCancelled, revision >= self.revision, silenceRequested, !silenceFailed, recoveryWork == nil else { return }
+    func configurationChanged(route: String?, lifetime: UInt64) async {
+        guard !Task.isCancelled, lifetime == continuityLifetime, silenceRequested, !silenceFailed, recoveryWork == nil else { return }
         let output = output, outputRevision = outputRevision
         let recovery = Task {
-            do { try await output.recover(engine: engine, route: route, revision: outputRevision) }
+            do { try await output.recover(route: route, revision: outputRevision) }
             catch { self.outputFailed(revision: outputRevision) }
         }
         recoveryWork = recovery
@@ -296,7 +325,17 @@ actor SessionHardware {
     func settled() async { await outputWork?.value; await recoveryWork?.value }
     private func deactivate() throws {
         guard active else { return }
-        try perform(.deactivate)
+        do { try perform(.deactivate) }
+        catch {
+            #if os(iOS)
+            // iOS still deactivates when running I/O makes this call report busy.
+            let native = error as NSError
+            guard native.domain == NSOSStatusErrorDomain,
+                  native.code == AVAudioSession.ErrorCode.isBusy.rawValue else { throw error }
+            #else
+            throw error
+            #endif
+        }
         active = false
     }
     private func perform(_ operation: Operation) throws {
@@ -320,35 +359,34 @@ private actor SilentOutput {
     private let performOverride: (@Sendable (SessionHardware.Operation) throws -> Void)?
     private var revision: UInt64 = 0
     private var enabled = false
-    private let identityOverride: ObjectIdentifier?
     private let isRenderingOverride: (@Sendable () -> Bool)?
     #if os(iOS)
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
     #endif
-    init(perform: (@Sendable (SessionHardware.Operation) throws -> Void)?, identity: ObjectIdentifier?,
+    init(perform: (@Sendable (SessionHardware.Operation) throws -> Void)?,
          isRendering: (@Sendable () -> Bool)?) {
-        performOverride = perform; identityOverride = identity; isRenderingOverride = isRendering
+        performOverride = perform; isRenderingOverride = isRendering
     }
-    func recover(engine identity: ObjectIdentifier, route: String?, revision: UInt64) throws {
+    func recover(route: String?, revision: UInt64) throws {
         guard enabled, revision == self.revision else { return }
         if performOverride != nil {
-            guard identity == identityOverride, isRenderingOverride?() == false else { return }
+            guard isRenderingOverride?() == false else { return }
         } else {
             #if os(iOS)
             guard route != nil, AudioSessionCoordinator.selectedBluetoothRoute() == route,
-                  let engine, let player, ObjectIdentifier(engine) == identity,
+                  let engine, let player,
                   !engine.isRunning || !player.isPlaying else { return }
             #else
             return
             #endif
         }
         try Task.checkCancellation()
-        stop()
         try set(enabled: true, revision: revision)
     }
     func set(enabled: Bool, revision: UInt64) throws {
         guard revision >= self.revision else { return }
+        if enabled && self.enabled { stop() }
         self.revision = revision; self.enabled = enabled
         if !enabled { stop(); return }
         do {

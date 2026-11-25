@@ -462,6 +462,44 @@ extension WebKitSuites {
             #expect(try await page.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == false)
         }
 
+        @Test func reviewAudioRevocationPausesBothPagesAndFencesHTMLReportsUntilResume() async throws {
+            let fixture = MediaFixture()
+            fixture.add("/clip.mp4", try await TestMedia.mp4(), "video/mp4")
+            let pair = try await make(fixture)
+            let window = SpikeWindow(pair.container)
+            defer { pair.close(); window.close() }
+            try await pair.load()
+            let html = "<video id=media src=clip.mp4 muted playsinline></video>"
+            let prepared = try await pair.prepare(CardPayload(cardID: 1, question: html, answer: "answer"))
+            _ = try pair.present(prepared)
+            try await pair.current.waitForShown(prepared)
+            _ = try await pair.prepare(CardPayload(cardID: 2, question: html, answer: "answer"))
+            let pages = [pair.current, pair.idle]
+            for page in pages {
+                _ = try await page.webView.callAsyncJavaScript("await document.getElementById('media').play();", contentWorld: .page)
+            }
+            pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
+            #expect(pair.htmlAudioOwner != nil)
+            pair.revokeReviewAudio()
+            #expect(pair.htmlAudioOwner == nil)
+            // Model a report already on its way when review admission closed.
+            pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
+            #expect(pair.htmlAudioOwner == nil)
+            for page in pages {
+                try await CardBehaviorFixture.until("review revocation pauses HTML") {
+                    try await page.webView.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == true
+                }
+            }
+            await pair.suspend()
+            pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
+            #expect(pair.htmlAudioOwner == nil)
+            await pair.resume()
+            pair.admitReviewAudio()
+            _ = try await pair.current.webView.callAsyncJavaScript("await document.getElementById('media').play();", contentWorld: .page)
+            pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
+            #expect(pair.htmlAudioOwner != nil)
+        }
+
         @Test func sessionPausePreservesReviewEligibilityAndAvailabilityDoesNotRestartHTML() async throws {
             let fixture = MediaFixture()
             fixture.add("/clip.mp4", try await TestMedia.mp4(), "video/mp4")

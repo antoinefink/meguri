@@ -3,6 +3,9 @@ import Dispatch
 import Foundation
 import Synchronization
 import Testing
+#if os(iOS)
+import AVFoundation
+#endif
 
 @Suite struct AudioContinuityTests {
     private nonisolated final class Output: Sendable {
@@ -36,7 +39,7 @@ import Testing
         let output = Output(), keeper = UUID(), word = UUID()
         let engine = NSObject(), staleEngine = NSObject()
         let identity = ObjectIdentifier(engine)
-        let hardware = SessionHardware(perform: output.perform, outputIdentity: identity,
+        let hardware = SessionHardware(perform: output.perform,
             isRendering: { output.state.withLock { $0.rendering } })
         var route: String? = "a2dp:headset-A"
         let session = AudioSessionCoordinator(hardware: hardware, continuityEligible: { route != nil }, routeIdentity: { route })
@@ -49,9 +52,9 @@ import Testing
         await session.hardwareSettled()
         #expect(output.operations == initial)
         output.state.withLock { $0.rendering = false } // Apple stopped/uninitialized the engine.
+        // No yield: the foreign event occupies the work slot immediately
+        // before the owned event. The owned graph still gets reevaluated.
         session.configurationChanged(engine: ObjectIdentifier(staleEngine))
-        await session.hardwareSettled()
-        #expect(output.operations == initial)
         session.configurationChanged(engine: identity)
         await session.hardwareSettled()
         #expect(output.operations == initial + [.stopSilence, .startSilence])
@@ -66,6 +69,7 @@ import Testing
         await session.hardwareSettled()
         #expect(output.operations == repaired)
         session.routeChanged(previous: "a2dp:headset-A", disconnected: false)
+        session.release(word) // Model the audible owner's completed physical pause.
         await session.hardwareSettled()
         let ended = output.operations
         route = "a2dp:headset-A"
@@ -76,10 +80,41 @@ import Testing
         withExtendedLifetime((engine, staleEngine)) {}
     }
 
+    @Test func configurationRepairSurvivesAudibleRevisionsWithinContinuityLease() async throws {
+        let output = Output()
+        let hardware = SessionHardware(perform: output.perform,
+            isRendering: { output.state.withLock { $0.rendering } })
+        // One continuity lifetime spans unrelated word/HTML activation and
+        // release revisions. Its graph's revision remains the original one.
+        try await hardware.set(audible: false, continuity: true, revision: 1, lifetime: 1)
+        await hardware.settled()
+        try await hardware.set(audible: true, continuity: true, revision: 2, lifetime: 1)
+        try await hardware.set(audible: false, continuity: true, revision: 3, lifetime: 1)
+        let initial = output.operations
+        output.state.withLock { $0.rendering = false }
+        await hardware.configurationChanged(route: "a2dp:A", lifetime: 1)
+        #expect(output.operations == initial + [.stopSilence, .startSilence])
+        try await hardware.set(audible: false, continuity: false, revision: 4, lifetime: 2)
+        await hardware.settled()
+        let closed = output.operations
+        await hardware.configurationChanged(route: "a2dp:A", lifetime: 1)
+        #expect(output.operations == closed)
+        try await hardware.set(audible: false, continuity: true, revision: 5, lifetime: 3)
+        await hardware.settled()
+        output.state.withLock { $0.rendering = false }
+        let restarted = output.operations
+        await hardware.configurationChanged(route: "a2dp:A", lifetime: 1)
+        #expect(output.operations == restarted) // Prior lease cannot repair a new graph.
+        await hardware.configurationChanged(route: "a2dp:A", lifetime: 3)
+        #expect(output.operations == restarted + [.stopSilence, .startSilence])
+        try await hardware.set(audible: false, continuity: false, revision: 6, lifetime: 4)
+        await hardware.settled()
+    }
+
     @Test func failedConfigurationRepairFallsBackWithoutRepeatedAttempts() async throws {
         let output = Output(), engine = NSObject(), keeper = UUID(), word = UUID()
         let identity = ObjectIdentifier(engine)
-        let hardware = SessionHardware(perform: output.perform, outputIdentity: identity,
+        let hardware = SessionHardware(perform: output.perform,
             isRendering: { output.state.withLock { $0.rendering } })
         let session = AudioSessionCoordinator(hardware: hardware, continuityEligible: { true }, routeIdentity: { "a2dp:A" })
         session.maintainContinuity(keeper)
@@ -168,6 +203,9 @@ import Testing
             try await session.activate(audible)
             session.emit(event)
             await session.hardwareSettled()
+            #expect(!output.operations.contains(.deactivate)) // Audible cleanup still owns the lease.
+            session.release(audible)
+            await session.hardwareSettled()
             let stopped = output.operations
             session.emit(.available)
             session.release(audible); session.releaseContinuity(keeper)
@@ -202,6 +240,7 @@ import Testing
         #expect(output.operations.last == .category(ducking: true))
         session.emit(.pause)
         session.emit(.available)
+        session.release(word)
         gate.signal()
         await session.hardwareSettled()
         output.render(seconds: 600)
@@ -210,6 +249,37 @@ import Testing
         session.release(word); session.releaseContinuity(keeper)
         await session.hardwareSettled()
         #expect(output.operations == stopped)
+    }
+
+    @Test(arguments: [AudioSessionCoordinator.Event.pause, .stop])
+    func lifecycleRetainsAudibleLeaseUntilHeldPhysicalCleanupCompletes(_ event: AudioSessionCoordinator.Event) async throws {
+        let fixture = MediaFixture()
+        fixture.add("/word.mp3", Data([1]), "audio/mpeg")
+        let output = Output(), backend = CardAudioControllerTests.Backend()
+        let hardware = SessionHardware(perform: output.perform)
+        let session = AudioSessionCoordinator(hardware: hardware, continuityEligible: { true })
+        let audio = CardAudioController(resolver: try await fixture.resolved(), backend: backend, session: session)
+        let held = CardAudioControllerTests.Hold()
+        defer { held.release(); audio.close() }
+        audio.admitReview()
+        audio.present(payload: CardPayload(cardID: 1, question: "", answer: "", questionAudio: [.sound(name: "word.mp3")]),
+                      update: CardUpdate(card: 1, generation: 1, side: .question))
+        #expect(await backend.nextPlay() == "word.mp3")
+        let clip = try #require(backend.clips.first)
+        if event == .pause { clip.pauseHold = held } else { clip.stopHold = held }
+        session.emit(event)
+        await held.reached()
+        await session.hardwareSettled()
+        #expect(!output.operations.contains(.deactivate))
+        #expect(!clip.isPaused && !clip.stopped)
+        session.emit(.available)
+        #expect(backend.events == ["word.mp3"])
+        held.release()
+        await audio.transportSettled()
+        await session.hardwareSettled()
+        #expect(output.operations.filter { $0 == .deactivate }.count == 1)
+        #expect(event == .pause ? clip.isPaused : clip.stopped)
+        #expect(backend.events == ["word.mp3"])
     }
 
     @Test func failedSilentStartupCleansUpAndNormalPlaybackStillStarts() async throws {
@@ -255,6 +325,47 @@ import Testing
         #expect(output.operations.last == .deactivate)
     }
 
+    @Test func failedSilenceRetriesForNewGenerationBeforeOldOffSnapshot() async throws {
+        let output = Output()
+        // Deliver snapshots in the order the worker must tolerate: new on,
+        // then the old off, whose lower revision must remain ineffective.
+        let worker = SessionHardware(perform: output.perform)
+        output.fail(.startSilence)
+        try await worker.set(audible: false, continuity: true, revision: 1, lifetime: 1)
+        await worker.settled()
+        try await worker.set(audible: false, continuity: true, revision: 2, lifetime: 1)
+        await worker.settled()
+        #expect(output.operations.filter { $0 == .startSilence }.count == 1)
+        try await worker.set(audible: false, continuity: true, revision: 4, lifetime: 2)
+        await worker.settled()
+        let restarted = output.operations
+        #expect(restarted.filter { $0 == .startSilence }.count == 2)
+        try await worker.set(audible: false, continuity: false, revision: 3, lifetime: 1)
+        await worker.settled()
+        #expect(output.operations == restarted)
+        try await worker.set(audible: false, continuity: false, revision: 5, lifetime: 2)
+    }
+
+    @Test func failedSilenceIsSharedUntilLastReviewOwnerReleases() async throws {
+        let output = Output(), first = UUID(), second = UUID()
+        let hardware = SessionHardware(perform: output.perform)
+        let session = AudioSessionCoordinator(hardware: hardware, continuityEligible: { true })
+        output.fail(.startSilence)
+        session.maintainContinuity(first)
+        await session.hardwareSettled()
+        session.maintainContinuity(second)
+        session.releaseContinuity(first)
+        await session.hardwareSettled()
+        #expect(output.operations.filter { $0 == .startSilence }.count == 1)
+        // No hardware turn between the last release and a fresh review owner.
+        session.releaseContinuity(second)
+        session.maintainContinuity(first)
+        await session.hardwareSettled()
+        #expect(output.operations.filter { $0 == .startSilence }.count == 2)
+        session.releaseContinuity(first)
+        await session.hardwareSettled()
+    }
+
     @Test func partialActivationAndFailedReleaseAreReconciled() async throws {
         let output = Output()
         let hardware = SessionHardware(perform: output.perform)
@@ -263,7 +374,7 @@ import Testing
             try await hardware.set(audible: false, continuity: true, revision: 1)
             Issue.record("Synthetic activation must fail")
         } catch {}
-        #expect(output.operations.contains(.deactivate))
+        #expect(output.operations.filter { $0 == .deactivate }.count == 1)
         try await hardware.set(audible: true, continuity: false, revision: 2)
         #expect(output.operations.last == .activate)
         output.fail(.deactivate)
@@ -271,12 +382,37 @@ import Testing
             try await hardware.set(audible: false, continuity: false, revision: 3)
             Issue.record("Synthetic deactivation must fail")
         } catch {}
+        #expect(output.operations.filter { $0 == .deactivate }.count == 2)
         try await hardware.set(audible: false, continuity: false, revision: 4)
-        #expect(output.operations.last == .deactivate)
+        #expect(output.operations.last == .deactivate && output.operations.filter { $0 == .deactivate }.count == 3)
         let count = output.operations.count
         try await hardware.set(audible: true, continuity: true, revision: 2)
         #expect(output.operations.count == count) // Stale callback cannot reopen output.
     }
+
+    #if os(iOS)
+    @Test func busyNativeDeactivationRequiresReactivationButBusyActivationStillFails() async throws {
+        let output = Output()
+        let busy = NSError(domain: NSOSStatusErrorDomain, code: AVAudioSession.ErrorCode.isBusy.rawValue)
+        let hardware = SessionHardware(perform: { operation in
+            try output.perform(operation)
+            if operation == .deactivate { throw busy }
+        })
+        try await hardware.set(audible: true, continuity: false, revision: 1)
+        try await hardware.set(audible: false, continuity: false, revision: 2)
+        try await hardware.set(audible: false, continuity: false, revision: 3)
+        try await hardware.set(audible: true, continuity: false, revision: 4)
+        #expect(output.operations.filter { $0 == .activate }.count == 2)
+        #expect(output.operations.filter { $0 == .deactivate }.count == 1)
+        try await hardware.set(audible: false, continuity: false, revision: 5)
+        let failing = SessionHardware(perform: { operation in
+            if operation == .activate { throw busy }
+        })
+        await #expect(throws: NSError.self) {
+            try await failing.set(audible: true, continuity: false, revision: 1)
+        }
+    }
+    #endif
 
     @Test func ineligibleRouteDoesNotOpenOutputAndContinuityReleasePreservesHTML() async throws {
         let output = Output(), keeper = UUID(), html = UUID()
