@@ -85,6 +85,106 @@ fn stored_pipeline_display_browser_and_read_only() {
     assert_eq!(common::steps::dump(&h.collection), before);
     assert_eq!(h.collection.last_seq(), seq);
 }
+
+#[test]
+fn stored_field_positions_render_front_back_and_audio_for_sparse_and_dense_types() {
+    use meguri_engine::rendering::AvTag;
+    use meguri_storage::raw::SqlValue;
+
+    for cloze in [false, true] {
+        for ords in [[0, 1, 2], [2, 4, 6]] {
+            let h = common::fresh();
+            let front = if cloze { "{{cloze:Front}}" } else { "{{Front}}" };
+            let question = format!("<div class=mg-front>{front}</div>");
+            let answer = "{{FrontSide}}<hr><div class=mg-back>{{Back}}</div>";
+            let nt = notetypes::add(
+                &h.collection,
+                notetypes::NewNotetype {
+                    name: "Stored field positions".into(),
+                    kind: if cloze { notetypes::NotetypeKind::Cloze } else { notetypes::NotetypeKind::Standard },
+                    fields: vec!["Front".into(), "Back".into(), "Sibling".into()],
+                    templates: vec![notetypes::NewTemplate {
+                        name: "Face".into(),
+                        front: question.clone(),
+                        back: answer.into(),
+                        ..Default::default()
+                    }],
+                    css: Some(String::new()),
+                },
+            )
+            .unwrap()
+            .value
+            .id;
+            let note = notes::add(
+                &h.collection,
+                notes::AddNote {
+                    notetype_id: nt,
+                    fields: vec![
+                        if cloze { "{{c1::Synthetic many-field prompt}}" } else { "Synthetic many-field prompt" }.into(),
+                        "Synthetic many-field answer [sound:answer.mp3]".into(),
+                        "third [sound:sibling.mp3]".into(),
+                    ],
+                    tags: vec![],
+                    deck_id: DeckId(1),
+                    guid: None,
+                    update_add_defaults: false,
+                },
+                OpSource::UserUndoable,
+            )
+            .unwrap()
+            .value;
+            // Change the persisted rows, not just an in-memory render input.
+            // Descending updates avoid primary-key collisions with dense rows.
+            for position in (0..ords.len()).rev() {
+                common::tagging::raw(
+                    &h.collection,
+                    "UPDATE fields SET ord = ? WHERE ntid = ? AND ord = ?",
+                    &[SqlValue::Integer(ords[position]), SqlValue::Integer(nt.0), SqlValue::Integer(position as i64)],
+                );
+            }
+            let card = {
+                let rows = h.collection.reader(ReaderRole::Query).unwrap();
+                let stored = rows.notetype(nt).unwrap().unwrap();
+                assert_eq!(stored.fields.iter().map(|f| i64::from(f.ord)).collect::<Vec<_>>(), ords);
+                rows.cards_of_note(note.id).unwrap()[0].id
+            };
+            let before = common::steps::dump(&h.collection);
+            let seq = h.collection.last_seq();
+            for mode in [RenderMode::Preview, RenderMode::Review, RenderMode::Browser] {
+                let rendered = rendering::render_card(&h.collection, card, mode, Platform::Mac).unwrap();
+                assert_eq!(rendered.comparable.outcome, Outcome::Rendered);
+                let q = rendered.question.unwrap();
+                let a = rendered.answer.unwrap();
+                if cloze {
+                    assert!(q.contains("<span class=\"cloze\" data-cloze=\"Synthetic many-field prompt\""), "{q}");
+                } else {
+                    assert!(q.contains("<div class=mg-front>Synthetic many-field prompt</div>"), "{q}");
+                }
+                if mode != RenderMode::Browser {
+                    assert!(a.contains("Synthetic many-field prompt"), "{a}");
+                }
+                assert!(a.contains("<div class=mg-back>Synthetic many-field answer "), "{a}");
+                assert!(!q.contains("third") && !a.contains("third"));
+                assert!(rendered.comparable.question_av.is_empty());
+                if mode == RenderMode::Browser {
+                    assert!(a.contains("[sound:answer.mp3]"), "{a}");
+                    assert!(rendered.comparable.answer_av.is_empty());
+                } else {
+                    assert_eq!(rendered.comparable.answer_av, vec![AvTag::Sound { name: "answer.mp3".into() }]);
+                }
+                assert_eq!(rendered.media_refs, ["answer.mp3"]);
+            }
+            // Template overrides use the same field resolution, without AV extraction.
+            let preview = rendering::render_template(&h.collection, card, &question, answer).unwrap();
+            assert_eq!(preview.outcome, Outcome::Rendered);
+            assert!(preview.answer.as_deref().unwrap().contains("Synthetic many-field answer [sound:answer.mp3]"));
+            assert!(!preview.question.as_deref().unwrap().contains("third"));
+            assert_eq!(common::steps::dump(&h.collection), before);
+            assert_eq!(h.collection.last_seq(), seq);
+        }
+    }
+}
+
 #[test]
 fn exact_source_witness_handles_same_mtime_raw_sync_and_undo() {
     let (h, id) = fixture();

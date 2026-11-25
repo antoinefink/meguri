@@ -38,7 +38,9 @@ pub(super) fn from_captured(
     FieldMap::new(
         kind.fields
             .iter()
-            .map(|f| (f.name.as_str(), values.get(f.ord as usize).copied().unwrap_or(""))),
+            // N1: stored ords order the rows; their positions index note values.
+            .enumerate()
+            .map(|(position, f)| (f.name.as_str(), values.get(position).copied().unwrap_or(""))),
         &CardSpecials {
             ord: u32::from(card.ord),
             notetype_name: &kind.name,

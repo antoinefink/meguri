@@ -1397,6 +1397,13 @@ fn review_editor_many_fields_keep_logical_positions_with_sparse_numbers() {
         .chain((3..=14).map(|n| format!("Field {n}")))
         .collect();
     assert_eq!(names, expected_names);
+    for (position, template) in nt.templates.iter().enumerate() {
+        assert_eq!(
+            template.config.q_format,
+            format!("<div class=\"mg-front\">{{{{Front}}}}</div>\n<div class=\"mg-label\">side {}</div>", position + 1)
+        );
+        assert!(template.config.a_format.contains("<div class=\"mg-back\">{{Back}}</div>"));
+    }
     let values: Vec<_> = note.field_values().collect();
     assert_eq!(values.len(), spec.fields.len());
     assert_eq!(names[11], "Field 12");
