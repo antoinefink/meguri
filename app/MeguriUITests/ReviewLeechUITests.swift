@@ -23,7 +23,10 @@ final class ReviewLeechUITests: XCTestCase {
         let show = element(app, "review.session.leech.showInBrowse")
         XCTAssertTrue(show.waitForExistence(timeout: 10), "Browse is shown on the Mac, so the details offer it")
         // The recipe's question is its note's front and " side 1"; Browse lists the front.
-        let question = element(app, "review.session.leech.question").value as? String ?? ""
+        // The question is read after the notice shows, so it can follow the button.
+        let named = element(app, "review.session.leech.question")
+        XCTAssertTrue(named.waitForExistence(timeout: 10), "The details name the card")
+        let question = named.value as? String ?? ""
         XCTAssertTrue(question.hasSuffix(" side 1"), "The details name the card: \(question)")
         let front = String(question.dropLast(" side 1".count))
         try press(show, app, bundleIdentifier)
