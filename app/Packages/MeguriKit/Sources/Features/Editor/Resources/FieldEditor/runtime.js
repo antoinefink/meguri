@@ -90,11 +90,19 @@
         if (field.root.getSelection) return field.root.getSelection();
         return document.getSelection();
     }
+    function validRange(field, value) {
+        const validPoint = (node, offset) => node && field.rich.contains(node) &&
+            Number.isInteger(offset) && offset >= 0 &&
+            offset <= (node instanceof CharacterData ? node.length : node.childNodes.length);
+        return value && validPoint(value.startContainer, value.startOffset) && validPoint(value.endContainer, value.endOffset);
+    }
     function range(field) {
         const current = selection(field);
         if (current?.getComposedRanges) {
             const value = current.getComposedRanges({shadowRoots: [field.root]})[0];
-            if (value && field.rich.contains(value.startContainer) && field.rich.contains(value.endContainer)) {
+            // After DOM replacement WebKit can retain composed offsets from
+            // the old children. Check both points before making a live Range.
+            if (validRange(field, value)) {
                 const result = document.createRange();
                 result.setStart(value.startContainer, value.startOffset);
                 result.setEnd(value.endContainer, value.endOffset);
@@ -103,7 +111,7 @@
         }
         if (current?.rangeCount) {
             const result = current.getRangeAt(0);
-            if (field.rich.contains(result.startContainer) && field.rich.contains(result.endContainer)) return result.cloneRange();
+            if (validRange(field, result)) return result.cloneRange();
         }
         const result = document.createRange();
         result.selectNodeContents(field.rich); result.collapse(false);
@@ -130,8 +138,7 @@
             const [start, end] = field.sourceCaret ?? [field.source.value.length, field.source.value.length];
             field.source.setSelectionRange(start, end);
         } else {
-            try { selectRange(field, field.caret ?? range(field)); }
-            catch { field.caret = null; selectRange(field, range(field)); }
+            selectRange(field, validRange(field, field.caret) ? field.caret : range(field));
         }
     }
     function historyState(field) {
