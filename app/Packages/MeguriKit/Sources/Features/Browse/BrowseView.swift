@@ -74,11 +74,7 @@ public struct BrowseView: View {
                         // `browser/inspector` I3: a row change opens the note with no field focused.
                         host.browsing = true
                         // Option A: the fields' thumbnails and sound chips.
-                        host.mediaDirectory = inspector?.mediaDirectory
-                        host.onPlayMedia = { [weak inspector] in inspector?.playSound($0) }
-                        host.onOpenMedia = { [weak inspector] name in
-                            if let url = inspector?.mediaFile(name) { NSWorkspace.shared.open(url) }
-                        }
+                        host.show(media: inspector?.media)
                         return host
                     }
                 }

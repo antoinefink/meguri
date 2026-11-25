@@ -386,6 +386,10 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var browseOwner: BrowseModel?
     /// Browse (U270): its query, sidebar rows and counts, above the layout
     /// switch, so leaving Browse and coming back keeps them (`browser/workspace` V1).
+    /// The collection's media folder, for the field pages of Browse's
+    /// inspector and Edit Note: thumbnails, sound chips and their playback.
+    @ObservationIgnored public private(set) lazy var media = MediaFolder(
+        directory: configuration.collectionLocation.directory.appending(path: "collection.media", directoryHint: .isDirectory))
     public var browse: BrowseModel {
         if let browseOwner { return browseOwner }
         let value = BrowseModel(backend: CoreBrowseBackend(), store: BrowseDeviceStore(defaults: configuration.deviceDefaults))
@@ -406,8 +410,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         value.inspector.stepRecorded = { [weak self] seq, title in self?.collectionUndo.name(step: seq, title) }
         value.inspector.generation = { [weak self] in self?.generation ?? 0 }
         value.inspector.preview.resolver = { [weak self] in await self?.mediaResolverForReview() }
-        value.inspector.mediaDirectory = configuration.collectionLocation.directory.appending(path: "collection.media",
-                                                                                           directoryHint: .isDirectory)
+        value.inspector.media = media
         value.commands.openNoteType = { [weak self] id in
             guard let self else { return }
             self.noteTypes.selection = id
