@@ -847,11 +847,15 @@ PUBLIC_ARTIFACTS = {
         '1bf97e602e93e0809c259aae993be3b7328aab5ce181f192cfdf95cadc3bfa8d',
     'core/crates/meguri-storage/tests/activity.rs':
         'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
+    # Merged contract, whole-file PUBLIC review in cleanroom 20261124T192531Z-55996.
     'docs/design/native-interface-contract.md':
-        '2ba0dc17770ff4254aa00063825bf2bc29a8f2996b816a8c7e9fbddaa65ff6fc',
+        'ae75b265d0f65aba457ec52d2d585140c001f2e1a7c0e07b040d6ea90136ad7d',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
+    # Whole-file PUBLIC review in cleanroom 20261124T154119Z-15087.
+    'app/Packages/MeguriKit/Tests/AppModelTests/BrowseCardPreviewTests.swift':
+        'f5b4994c338dd6d93d99cadbf15c90761a44269fe7d6dc7f0fe1030d6ee11c95',
     'docs/process/review-log/mcp-note-attachments-20261122.md':
         '9ab4f1074eba351094ed1660f1a69fea51d46097a917c040eac6e1fbd7bf4ea8',
     'docs/process/review-log/meguri-collection-mcp-20261119.md':

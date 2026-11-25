@@ -194,7 +194,7 @@
         historyState(field);
     }
     function collapse(field, value) {
-        if (held) return;
+        if (held || browsing) return;
         if (value) commit(field, "collapse");
         field.collapsed = value; show(field);
         void emit("collapsedChanged", {ord: field.ord, collapsed: value});
@@ -205,7 +205,7 @@
         field.section.hidden = field.hidden;
         field.host.hidden = field.collapsed || field.mode !== "rich";
         field.source.hidden = field.collapsed || field.mode !== "html";
-        field.label.setAttribute("aria-expanded", String(!field.collapsed));
+        if (!browsing) field.label.setAttribute("aria-expanded", String(!field.collapsed));
         if (browsing && field.mode === "html" && !field.collapsed) requestAnimationFrame(() => grow(field.source));
         placeholder(field);
     }
@@ -481,10 +481,12 @@
     function grow(source) { source.style.height = "auto"; source.style.height = `${source.scrollHeight}px`; }
     function makeField(value) {
         const section = document.createElement("section"), header = document.createElement("header");
-        // N17.1: the name is the section's header; it still collapses the field (F3).
+        // N21.4: Browse names are labels, never individual disclosures.
+        // The separate Add/Edit form keeps N17.1's collapse button (F3).
         // The one mode control is native, in the keyboard bar or the Mac bottom bar.
-        const label = document.createElement("button");
-        label.type = "button"; label.className = "label";
+        const label = document.createElement(browsing ? "span" : "button");
+        if (!browsing) label.type = "button";
+        label.className = "label";
         label.textContent = value.name; label.id = `editor.field.${value.ord}.label`;
         header.append(label);
         const boundary = document.createElement("div"), host = document.createElement("div");
@@ -522,10 +524,10 @@
         section.append(header, boundary, source); container.append(section);
         const field = {ord: value.ord, baseline: value.baselineHtml ?? value.html,
             changed: Object.hasOwn(value, "baselineHtml"), pending: false, mode: value.mode,
-            collapsed: value.collapsed, hidden: value.hidden === true, section,
+            collapsed: browsing ? false : value.collapsed, hidden: value.hidden === true, section,
             rich, root, host: boundary, source, label, placeholder: placeholderLabel,
             timer: null, caret: null, sourceCaret: null, undo: [], redo: [], lastKind: null, lastEdit: 0};
-        label.addEventListener("click", () => collapse(field, !field.collapsed));
+        if (!browsing) label.addEventListener("click", () => collapse(field, !field.collapsed));
         // The box's own padding belongs to the field: a tap there gives it
         // focus. A tap in the text keeps the caret WebKit placed.
         boundary.addEventListener("click", event => {

@@ -129,6 +129,9 @@ SH
   chmod +x "$fake/bin/"*
   export PATH="$fake/bin:$PATH"
   export MEGURI_MAC_VM_CONFIG="$fake/vm.json"
+  # The fake guest answers only this route's enumerated commands, and the
+  # tests count them: the VM's claim (mac_vm.bats) stays out of them.
+  export MEGURI_MAC_VM_SHARED_CLAIM=0
   jq -n --arg ssh "$fake/bin/selected-wrapper" --arg tart "$fake/bin/tart" \
     '{ssh:$ssh,tart:$tart,vms:["selected"]}' >"$MEGURI_MAC_VM_CONFIG"
   printf '   gateway: 192.168.64.1\n' >"$fake/route"

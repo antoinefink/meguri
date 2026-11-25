@@ -50,6 +50,60 @@ import WebKit
         #expect(host.contentHeight > 0 && host.contentHeight < 400, "the page reports its fields' height, not its frame's")
     }
 
+    @Test(arguments: [true, false])
+    func browseFieldsCannotCollapseAndTheSeparateEditorStillCan(_ browsing: Bool) async throws {
+        let note = NoteRecord(id: 5, notetypeId: 42, fields: [Self.stored, ""], tags: [], guid: "g")
+        let draft = try NoteEditorDraft(editing: note, notetype: Self.type(collapsed: true),
+            deck: DeckNameEntry(id: 1, fullName: "D", filtered: false), generation: 1)
+        draft.hiddenFields = [1]
+        let host = try FieldEditorHost(draft: draft, isCurrent: { true })
+        host.browsing = browsing
+        host.webView.frame = CGRect(x: 0, y: 0, width: 280, height: 500)
+        defer { host.shutDown() }
+        try await host.start()
+        let shown = try await host.webView.callAsyncJavaScript("""
+            const section = document.querySelector('section');
+            const label = section.querySelector('.label');
+            const before = !section.querySelector('.fieldBoundary').hidden;
+            label.click(); section.click(); section.querySelector('.fieldBoundary').click();
+            return {before, after: !section.querySelector('.fieldBoundary').hidden,
+                disclosure: label.hasAttribute('aria-expanded'), button: label.tagName === 'BUTTON'};
+            """, contentWorld: .page) as? [String: Bool]
+        #expect(shown?["before"] == browsing)
+        #expect(shown?["after"] == true)
+        #expect(shown?["disclosure"] == !browsing && shown?["button"] == !browsing)
+        if browsing {
+            // The aggregate disclosure alone controls empty-field visibility.
+            try await host.setHiddenFields([])
+            #expect(try await host.webView.callAsyncJavaScript("""
+                const section = document.querySelectorAll('section')[1];
+                section.querySelector('.label').click(); section.click();
+                return !section.hidden && !section.querySelector('.fieldBoundary').hidden;
+                """, contentWorld: .page) as? Bool == true)
+            try await host.focusField(1)
+            // A detached WKWebView may not emit DOM focus. Deliver it through
+            // the real bridge, using the runtime's next sequence (as in FieldEditorTests).
+            // Awaiting setFocus alone does not join the host's message queue.
+            _ = try await host.webView.callAsyncJavaScript("""
+                const {loadId, seq} = await meguriEditorRuntime.receive({type:'flush', loadId:1, hold:false});
+                return await window.webkit.messageHandlers.meguriEditor.postMessage({type:'focus', loadId, seq, ord:1, mode:'rich'});
+                """, contentWorld: .world(name: "Meguri.FieldEditor.v1"))
+            for _ in 0..<200 where draft.focusedField != 1 || !host.fieldFocused {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(host.modeField == 1, "type-collapsed fields still support the formatting/source controls")
+            try await host.setMode(.html, ord: 1)
+            #expect(try await FieldEditorTests.replaceSource(host, ord: 1, value: "new empty-field text"))
+            try await host.flush(hold: false)
+            #expect(draft.values == [Self.stored, "new empty-field text"])
+            try await host.setHiddenFields([1])
+            #expect(try await host.webView.callAsyncJavaScript(
+                "return document.querySelectorAll('section')[1].hidden;", contentWorld: .page) as? Bool == true)
+        }
+        let allFieldsCollapsed: Bool = draft.notetype.fields.allSatisfy(\.collapsed)
+        #expect(allFieldsCollapsed, "the note type's setting is never rewritten")
+    }
+
     @Test func mediaNamesArePlainFileNamesOnly() throws {
         #expect(MediaName.plain("kip wurl.mp3") == "kip wurl.mp3")
         #expect(MediaName.plain("kip%20wurl.mp3") == "kip wurl.mp3")
@@ -79,10 +133,10 @@ import WebKit
         #expect(!FieldEditorHost.formats(editable: false, held: false, fieldFocused: true, mode: .rich))
     }
 
-    private static func type() -> NotetypeRecord {
+    private static func type(collapsed: Bool = false) -> NotetypeRecord {
         let fields = ["Front", "Back"].enumerated().map { index, name in
             NotetypeField(ord: UInt32(index), id: Int64(index), name: name, sticky: false, rtl: false, fontName: "Hiragino Mincho",
-                          fontSize: 40, description: "", plainText: false, collapsed: false, excludeFromSearch: false)
+                          fontSize: 40, description: "", plainText: false, collapsed: collapsed, excludeFromSearch: false)
         }
         return .init(id: 42, name: "Two fields", kind: 0, sortField: 0, css: "", base: [], fields: fields, templates: [])
     }
