@@ -844,7 +844,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
         '2ce95ae66faf33cfd5d50bc78a27d665df3d048913e5ba00ed1b07726f97c139',
     'app/MeguriUITests/MacBrowseInspectorTests.swift':
-        '636428a071b53d2b1fa37d59b49aec54d78ccf11dfa70d4912545b2dc989a4f3',
+        '9beb30fb37726aa7538b4f5eab5f6fe9e31b42d0c86e77cfd67fbc947408d928',
     'docs/process/review-log/meguri-sync-collection-backups-20261125.md':
         '7c0b0a10b44ae639c53a312462f26a50cd71368853473614c4745431e949ba56',
     'server/src/accounts/backups.rs':

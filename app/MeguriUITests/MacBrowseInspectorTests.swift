@@ -87,13 +87,14 @@ final class MacBrowseInspectorTests: XCTestCase {
         app.typeText("picturebeforepictureafter")
         for _ in "pictureafter" { app.typeKey(.leftArrow, modifierFlags: []) }
 
-        // Deliberately nonsquare and below the inspector's thumbnail limits:
-        // intrinsic AX dimensions distinguish a decoded bitmap from a broken img.
+        // Deliberately nonsquare and below the inspector's thumbnail limits.
         let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
             pixelsWide: 24, pixelsHigh: 12, bitsPerSample: 8, samplesPerPixel: 4,
             hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let red = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+        let blue = NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
         for y in 0..<12 {
-            for x in 0..<24 { bitmap.setColor(x < 12 ? .systemRed : .systemBlue, atX: x, y: y) }
+            for x in 0..<24 { bitmap.setColor(x < 12 ? red : blue, atX: x, y: y) }
         }
         let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
         let pasteboard = NSPasteboard.general
@@ -102,8 +103,45 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertTrue(pasteboard.setData(png, forType: .png))
         app.typeKey("v", modifierFlags: [.command])
         let image = field.images.firstMatch
-        XCTAssertTrue(waitUntil { image.exists && abs(image.frame.width - 24) < 1 && abs(image.frame.height - 12) < 1 },
-                      "Cmd-V inserts and decodes the synthetic bitmap")
+        func assertRenderedBitmap(_ name: String) throws {
+            XCTAssertTrue(waitUntil(timeout: 20) { image.exists }, "the field exposes the pasted image")
+            XCTAssertEqual(field.images.count, 1)
+            let frame = image.frame
+            XCTAssertTrue(field.frame.contains(frame), "the actual image is inside the edited field")
+            // AX encloses fractional WebKit geometry by rounding outwards:
+            // an exact 24 × 12 image can occupy a 25 × 13 AX rectangle.
+            XCTAssertTrue([CGFloat(24), 25].contains(frame.width), "24 pt nominal width, outward-rounded: \(frame)")
+            XCTAssertTrue([CGFloat(12), 13].contains(frame.height), "12 pt nominal height, outward-rounded: \(frame)")
+
+            // Capture only the actual image element, never the fixture bitmap.
+            let shot = image.screenshot()
+            let attachment = XCTAttachment(screenshot: shot)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            let cgImage = try XCTUnwrap(shot.image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+            let rendered = NSBitmapImageRep(cgImage: cgImage)
+            XCTAssertGreaterThanOrEqual(rendered.pixelsWide, 24)
+            XCTAssertGreaterThanOrEqual(rendered.pixelsHigh, 12)
+            // Interior 3 × 3 patches at 1/4 and 3/4 width avoid the caret,
+            // rounded crop edges and the JPEG seam. Allow lossy encoding,
+            // but require every sampled pixel to have the fixture's color.
+            for (fraction, isRed) in [(0.25, true), (0.75, false)] {
+                let x = Int(Double(rendered.pixelsWide) * fraction)
+                let y = rendered.pixelsHigh / 2
+                for dy in -1...1 {
+                    for dx in -1...1 {
+                        let color = try XCTUnwrap(rendered.colorAt(x: x + dx, y: y + dy)?.usingColorSpace(.sRGB))
+                        let dominant = isRed ? color.redComponent : color.blueComponent
+                        let opposite = isRed ? color.blueComponent : color.redComponent
+                        XCTAssertGreaterThan(dominant, 0.65, "\(name): \(color)")
+                        XCTAssertLessThan(max(color.greenComponent, opposite), 0.3, "\(name): \(color)")
+                        XCTAssertGreaterThan(dominant, 2 * max(color.greenComponent, opposite), "\(name): \(color)")
+                    }
+                }
+            }
+        }
+        try assertRenderedBitmap("browse-pasted-bitmap-at-caret-synthetic")
 
         let html = element(app, "editor.field.1.htmlToggle")
         XCTAssertTrue(html.isEnabled)
@@ -121,8 +159,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         }, "the other note has loaded before returning")
         press(table.outlineRows.element(boundBy: 0))
         XCTAssertTrue(shows(fields, originalFront))
-        XCTAssertTrue(waitUntil { image.exists && abs(image.frame.width - 24) < 1 && abs(image.frame.height - 12) < 1 },
-                      "the saved media reference resolves to a loaded image after switching rows")
+        try assertRenderedBitmap("browse-pasted-bitmap-after-row-switch-synthetic")
         field.click()
         html.click()
         XCTAssertTrue(waitUntil { field.value as? String == savedHTML }, "the pasted image and surrounding text persist exactly")
