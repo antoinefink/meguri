@@ -641,7 +641,9 @@ public final class BrowseModel {
         return activateByKey([clickedRow])
     }
 
-    /// The rows shown changed: Return and Space never act on a row out of sight.
+    /// The rows shown changed, or the sidebar is built again: Return and
+    /// Space never act on a row out of sight, nor on a click the sidebar
+    /// now showing did not see.
     public func forgetSidebarKeyRow() {
         keyRow = nil
         clickedRow = nil

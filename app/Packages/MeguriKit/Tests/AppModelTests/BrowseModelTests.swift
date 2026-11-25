@@ -295,6 +295,11 @@ import Testing
         // Without the keys on a row, a click is the list's selection, as before.
         #expect(model.sidebarSelectionChanged(to: [.state(.review)], byKey: false, click: .plain) == .restoreAfterEvent)
         #expect(model.query.tokens == [token(.state(.review))] && model.clickedRow == .state(.review))
+        // CodeRabbit on PR #220: a sidebar built again forgets the click too, so
+        // Return there is no second click that would remove the filter.
+        model.forgetSidebarKeyRow()
+        #expect(model.clickedRow == nil && !model.activateSidebarRowByKey())
+        #expect(model.query.tokens == [token(.state(.review))])
     }
 
     /// The rows follow the field both ways: a token edited or removed in

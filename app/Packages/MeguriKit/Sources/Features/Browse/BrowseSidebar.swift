@@ -76,6 +76,8 @@ public struct BrowseSidebar<Header: View>: View {
         .accessibilityIdentifier("browse.sidebar.list")
         .modifier(RenameSavedSearch(model: model))
         .onAppear {
+            // A sidebar built again starts with no row for Return and Space to act on.
+            model.forgetSidebarKeyRow()
             selection = model.listSelection
             model.useFormatter(locale: locale, timeZone: timeZone, clock: clock)
             model.appear()
