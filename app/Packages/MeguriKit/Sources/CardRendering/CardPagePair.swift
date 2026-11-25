@@ -500,6 +500,12 @@ public final class CardPagePair {
                 """, world: CardPage.world)
         }
     }
+    /// Called by ReviewPages when a real review starts presenting, before
+    /// preparation. Reused speculative first-card resources are admitted too.
+    public func admitReviewAudio(update: CardUpdate? = nil) {
+        guard !closed, !suspended, !lifecycleSuspended else { return }
+        audio.admitReview(update: update)
+    }
     public func pauseAudio() { audio.pause() }
     public func resumeAudio() { if !closed && !suspended && !lifecycleSuspended { audio.resume() } }
     public func seekAudio(by seconds: TimeInterval) async { await audio.seek(by: seconds) }

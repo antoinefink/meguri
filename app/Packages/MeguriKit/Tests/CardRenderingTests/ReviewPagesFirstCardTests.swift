@@ -42,6 +42,34 @@ extension WebKitSuites {
             #expect(pair.current.settled)
         }
 
+        @Test func speculativeFirstAudioCardIsAdmittedOnlyWhenReviewPresentsIt() async throws {
+            let fixture = MediaFixture()
+            fixture.add("/first.mp3", Data([1]), "audio/mpeg")
+            let resolver = try await fixture.resolved()
+            let backend = CardAudioControllerTests.Backend(), session = CardAudioControllerTests.Session()
+            let audio = CardAudioController(resolver: resolver, backend: backend, session: session)
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: resolver, audio: audio)
+            let pages = ReviewPages(pair: pair)
+            let window = SpikeWindow(pair.container)
+            defer { pages.close(); window.close() }
+            try await pages.load()
+            let item = Self.item(1, autoplay: true)
+            let card = CardPayload(cardID: 1, question: "First", answer: "Answer", questionAudio: [.sound(name: "first.mp3")])
+            try await pages.prepareFirst(item: item, payload: card)
+            let early = try #require(pair.idle.update)
+            // Join native preparation without waiting on any real audio hardware.
+            await audio.prepare(payload: card, update: early)?.value
+            #expect(session.continuityOwners.isEmpty && session.owners.isEmpty && backend.events.isEmpty)
+            pages.renderHead = { _, _, _ in [card] }
+            try await pages.render(sessionID: 5, items: [item])
+            try await pages.present(item: item, inputTime: 0)
+            #expect(pair.current.update == early && session.continuityOwners.count == 1)
+            await pages.suspend()
+            #expect(session.continuityOwners.isEmpty)
+            await pages.resume()
+            #expect(session.continuityOwners.isEmpty)
+        }
+
         @Test func reloadingWarmPagesLeavesTheirPreparedCard() async throws {
             let fixture = MediaFixture()
             let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved())
@@ -91,7 +119,7 @@ extension WebKitSuites {
             #expect(pair.current.payload?.question == "<p>Card 2</p>" && pair.current.settled)
         }
 
-        private static func item(_ id: Int64, token: UInt8? = nil) -> ReviewHeadItem {
+        private static func item(_ id: Int64, token: UInt8? = nil, autoplay: Bool = false) -> ReviewHeadItem {
             let state = ReviewSchedulingState.new(position: 1)
             let answer = ReviewAnswerState(state: state, delay: .days(amount: 1), left: 0, factor: 0,
                 revlog: .init(interval: 1, lastInterval: 0, kind: 0, factor: 0),
@@ -101,7 +129,7 @@ extension WebKitSuites {
                 renderKey: .init(bytes: Array(repeating: UInt8(id), count: 32)),
                 nextStates: .init(current: state, again: answer, hard: answer, good: answer, easy: answer),
                 predictedNext: .init(again: 2, hard: 2, good: 2, easy: 2), flag: 0, marked: false,
-                homePreset: .init(id: 1, autoplay: false, skipQuestionWhenReplayingAnswer: false, maximumAnswerSeconds: 60, questionSeconds: 0, answerSeconds: 0,
+                homePreset: .init(id: 1, autoplay: autoplay, skipQuestionWhenReplayingAnswer: false, maximumAnswerSeconds: 60, questionSeconds: 0, answerSeconds: 0,
                     questionAction: 0, answerAction: 0, waitForAudio: false, leechAction: 0))
         }
     }

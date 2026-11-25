@@ -35,6 +35,12 @@ public protocol CardAudioBackend: AnyObject {
 public protocol CardAudioSession: AnyObject {
     func activate(_ owner: UUID) async throws
     func release(_ owner: UUID)
+    func maintainContinuity(_ owner: UUID)
+    func releaseContinuity(_ owner: UUID)
+}
+public extension CardAudioSession {
+    func maintainContinuity(_ owner: UUID) {}
+    func releaseContinuity(_ owner: UUID) {}
 }
 
 public final class CardAudioController {
@@ -103,7 +109,7 @@ public final class CardAudioController {
     private var nextClip: (Entry, any CardAudioClip)?
     private var nextSerial: UInt64 = 0
     private var preloads: [CardUpdate: Task<Void, Never>] = [:]
-    private var prepared: [CardUpdate: (Entry, any CardAudioClip)] = [:]
+    private var prepared: [CardUpdate: (Entry, any CardAudioClip, autoplay: Bool)] = [:]
     private var preloadSerials: [CardUpdate: UInt64] = [:]
     private var preparationOrder: [CardUpdate] = []
     private var generation: UInt64 = 0
@@ -112,11 +118,16 @@ public final class CardAudioController {
     private var presentation: CardUpdate?
     private var lastTransition: CardUpdate?
     private var closed = false
-    private var sessionEvents: Task<Void, Never>?
+    private let session: any CardAudioSession
+    private let continuityOwner = UUID()
+    private var reviewAdmitted = false
+    private var continuityAllowed = false
+    private var queueAllowsContinuity = false
+    private var sessionObserver: UUID?
 
     public init(resolver: MediaPathResolver, backend: any CardAudioBackend = AVQueuePlayback(),
                 session: any CardAudioSession = AudioSessionCoordinator.shared, diagnostics: CardDiagnostics = CardDiagnostics()) {
-        self.resolver = resolver; self.backend = backend; self.diagnostics = diagnostics
+        self.resolver = resolver; self.backend = backend; self.diagnostics = diagnostics; self.session = session
         transport = AudioTransport(session: session)
         transport.onStopped = { [weak self] in self?.advance() }
         transport.onStarted = { [weak self] clip, entry, serial in
@@ -133,16 +144,21 @@ public final class CardAudioController {
         }
         transport.onSeekEnd = { [weak self] serial in self?.complete(serial, success: true) }
         if let coordinator = session as? AudioSessionCoordinator {
-            let events = coordinator.events()
-            sessionEvents = Task { [weak self] in
-                for await event in events {
-                    guard let self else { return }
-                    self.sessionEvent(event)
-                }
-            }
+            sessionObserver = coordinator.observe { [weak self] event in self?.sessionEvent(event) }
         }
     }
     isolated deinit { close() }
+
+    /// Only the actual native review surface admits continuity. In particular,
+    /// preparing the deck list's first card and preview playback never admit it.
+    public func admitReview(update: CardUpdate? = nil) {
+        guard !closed else { return }
+        reviewAdmitted = true; continuityAllowed = true
+        if let update, prepared[update]?.autoplay == true { maintainContinuity() }
+    }
+    private func maintainContinuity() {
+        if reviewAdmitted && continuityAllowed && !closed { session.maintainContinuity(continuityOwner) }
+    }
 
     private func entries(_ payload: CardPayload, update: CardUpdate, side: CardRenderSide) -> [Entry] {
         payload.audio(on: side).enumerated().compactMap { index, audio in
@@ -164,6 +180,8 @@ public final class CardAudioController {
         guard !closed, presentation != update else { return }
         beginTransition(to: update, policy: payload.audioPolicy)
         presentation = update
+        continuityAllowed = true
+        queueAllowsContinuity = payload.audioPolicy.autoplay
         queue = payload.audioPolicy.autoplay ? entries(payload, update: update, side: update.side) : []
         advance()
         if clip != nil { prepareNext() }
@@ -172,6 +190,8 @@ public final class CardAudioController {
     public func replay(payload: CardPayload, update: CardUpdate) {
         guard !closed else { return }
         replace()
+        continuityAllowed = true
+        queueAllowsContinuity = true
         if update.side == .answer, payload.audioPolicy.replayQuestion {
             queue = entries(payload, update: update, side: .question) + entries(payload, update: update, side: .answer)
         } else { queue = entries(payload, update: update, side: update.side) }
@@ -181,6 +201,8 @@ public final class CardAudioController {
     public func playEntry(payload: CardPayload, update: CardUpdate, side: CardRenderSide, index: Int) {
         guard !closed, payload.audio(on: side).indices.contains(index) else { return }
         replace()
+        continuityAllowed = true
+        queueAllowsContinuity = true
         if case .sound(let name) = payload.audio(on: side)[index] { queue = [Entry(update: update, side: side, index: index, name: name)] }
         advance()
     }
@@ -202,7 +224,8 @@ public final class CardAudioController {
                     let file = try await resolver.openAudioName(entry.name)
                     let clip = try await Self.prepareFile(file, backend: backend)
                     guard let self, !Task.isCancelled, self.preloadSerials[update] == serial, !self.closed else { await clip.stop(); return }
-                    self.prepared[update] = (entry, clip)
+                    self.prepared[update] = (entry, clip, autoplay: payload.audioPolicy.autoplay)
+                    if payload.audioPolicy.autoplay { self.maintainContinuity() }
                     return
                 } catch {
                     guard !Task.isCancelled else { return }
@@ -318,6 +341,7 @@ public final class CardAudioController {
 
     private func start(_ clip: any CardAudioClip, entry: Entry, serial: UInt64) {
         self.clip = clip
+        if queueAllowsContinuity { maintainContinuity() }
         if onPlaybackObservation != nil { readinessStage = .ready }
         armCompletion(clip, serial: serial)
         transport.install(clip, entry: entry, serial: serial, paused: paused,
@@ -412,13 +436,21 @@ public final class CardAudioController {
     public func sessionEvent(_ event: AudioSessionCoordinator.Event) {
         switch event {
         case .stop: stop()
-        case .pause: pause()
+        case .pause:
+            continuityAllowed = false
+            session.releaseContinuity(continuityOwner)
+            cancelNext(); cancelPreload(); queue.removeAll()
+            // A loading word has no position to preserve. Revoke its generation
+            // so its delayed decode cannot play on the replacement speaker route.
+            if clip == nil { replace() } else { pause() }
         case .available: break // Explicit user play is required.
         }
     }
     public func resume() {
         guard paused, current != nil else { return }
         paused = false
+        continuityAllowed = true
+        maintainContinuity()
         if let clip {
             armCompletion(clip, serial: generation)
             transport.resume()
@@ -450,12 +482,19 @@ public final class CardAudioController {
     private func cancelPreload() {
         for update in preparationOrder { cancelPreparation(update) }
     }
-    public func stop() { replace(); cancelPreload() }
+    public func stop() {
+        continuityAllowed = false
+        session.releaseContinuity(continuityOwner)
+        replace(); cancelPreload()
+    }
     public func close() {
         guard !closed else { return }
         closed = true; stop()
         onPlaybackObservation = nil
-        sessionEvents?.cancel(); sessionEvents = nil
+        if let sessionObserver, let coordinator = session as? AudioSessionCoordinator {
+            coordinator.removeObserver(sessionObserver)
+        }
+        sessionObserver = nil
     }
 }
 
@@ -580,7 +619,7 @@ private final class AudioTransport {
                 do { try await session.activate(owner) }
                 catch {
                     release()
-                    if item.intent != .stopped { onFailure?(item.serial, true) }
+                    if item.intent == .playing { onFailure?(item.serial, true) }
                     continue
                 }
                 // Re-evaluate pause/stop/seek intent after activation.

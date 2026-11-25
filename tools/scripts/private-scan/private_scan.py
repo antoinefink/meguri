@@ -835,6 +835,12 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
+        'ea9259e62ec24989694b965c9a276822dfa60f02eadbffbb2964aee084152013',
+    'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
+        '77211fbbfba063609f1e3663147da28342174e137fa131378fb9516434375bed',
+    'app/Packages/MeguriKit/Tests/CardRenderingTests/CardAudioControllerTests.swift':
+        'f1f9c281eb2e4feb9e5c76e163cf847439d5dacc20acabbceb9841771e244f14',
     'specs/render/audio-playback.md':
         '11eda11c77a802d0951393f3a2c5b3f96a5fd1187284a2157c8b54539f579311',
     'app/MeguriSnapshotTests/SentenceMiningPaneTests.swift':

@@ -30,6 +30,10 @@ import AVFoundation
     final class Session: CardAudioSession {
         var owners: Set<UUID> = []
         var activations = 0
+        var continuityOwners: Set<UUID> = []
+        var bluetooth = true
+        func maintainContinuity(_ owner: UUID) { if bluetooth { continuityOwners.insert(owner) } }
+        func releaseContinuity(_ owner: UUID) { continuityOwners.remove(owner) }
         var hold = false
         var held: CheckedContinuation<Void, Never>?
         var onHold: (() -> Void)?
@@ -147,6 +151,140 @@ import AVFoundation
     func descriptorIsClosed(_ clip: Clip) async -> Bool {
         do { _ = try await clip.file.read(offset: 0, count: 1); return false }
         catch { return true }
+    }
+
+    @Test(arguments: [true, false])
+    func reviewContinuitySurvivesEmptyQueuesAndOrdinaryCardTransitions(_ preloaded: Bool) async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        let card = CardPayload(cardID: 1, question: "", answer: "",
+                               questionAudio: [.sound(name: "q1.mp3")])
+        rig.controller.admitReview()
+        if preloaded {
+            await rig.controller.prepare(payload: card, update: question)?.value
+            #expect(rig.session.continuityOwners.count == 1 && rig.session.owners.isEmpty)
+        }
+        rig.controller.present(payload: card, update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        let continuity = rig.session.continuityOwners
+        #expect(continuity.count == 1)
+        rig.backend.clips[0].onEnd?(true)
+        await rig.controller.transportSettled()
+        #expect(rig.controller.current == nil && rig.session.owners.isEmpty)
+        #expect(rig.session.continuityOwners == continuity)
+        // No deadline or clock drives continuity: arbitrarily long idle time is
+        // exercised by the coordinator's synthetic rendering test as well.
+        let next = CardUpdate(card: 2, generation: 3, side: .question)
+        rig.controller.beginTransition(to: next, policy: .init())
+        rig.controller.present(payload: CardPayload(cardID: 2, question: "thinking", answer: ""), update: next)
+        await rig.controller.transportSettled()
+        #expect(rig.session.continuityOwners == continuity && rig.session.owners.isEmpty)
+        rig.controller.close()
+        #expect(rig.session.continuityOwners.isEmpty)
+    }
+
+    @Test(arguments: [true, false])
+    func firstManualWordEnablesContinuityAndDisabledAutoplayDoesNotRemoveIt(_ replay: Bool) async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        let card = CardPayload(cardID: 1, question: "", answer: "", questionAudio: [.sound(name: "q1.mp3")],
+                               audioPolicy: .init(autoplay: false))
+        rig.controller.admitReview()
+        await rig.controller.prepare(payload: card, update: question)?.value
+        rig.controller.present(payload: card, update: question)
+        #expect(rig.session.continuityOwners.isEmpty && rig.session.owners.isEmpty)
+        if replay { rig.controller.replay(payload: card, update: question) }
+        else { rig.controller.playEntry(payload: card, update: question, side: .question, index: 0) }
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        let continuity = rig.session.continuityOwners
+        #expect(continuity.count == 1)
+        rig.backend.clips.last(where: { $0.onEnd != nil })?.onEnd?(true)
+        await rig.controller.transportSettled()
+        rig.controller.present(payload: card, update: answer)
+        await rig.controller.prepare(payload: card, update: answer)?.value
+        #expect(rig.session.continuityOwners == continuity && rig.session.owners.isEmpty)
+    }
+
+    @Test func speculativePreparationAndPreviewPlaybackCannotAdmitContinuity() async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        await rig.controller.prepare(payload: payload(), update: question)?.value
+        #expect(rig.session.continuityOwners.isEmpty && rig.session.owners.isEmpty)
+        // Reuse the exact preloaded first card on actual review admission.
+        rig.controller.admitReview(update: question)
+        #expect(rig.session.continuityOwners.count == 1 && rig.session.owners.isEmpty)
+        rig.controller.stop()
+        let preview = CardAudioController(resolver: try await rig.fixture.resolved(), backend: rig.backend, session: rig.session)
+        defer { preview.close() }
+        preview.replay(payload: payload(), update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        #expect(rig.session.continuityOwners.isEmpty)
+    }
+
+    @Test(arguments: [true, false])
+    func lifecycleRevokesHeldPreparationAndRequiresFreshIntent(_ routeLoss: Bool) async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        rig.controller.admitReview()
+        rig.backend.hold = true
+        let prepared = rig.controller.prepare(payload: payload(), update: question)
+        await withCheckedContinuation { continuation in
+            rig.backend.onHold = { continuation.resume() }
+        }
+        let held = try #require(rig.backend.held)
+        rig.controller.sessionEvent(routeLoss ? .pause : .stop)
+        rig.controller.sessionEvent(.available)
+        rig.backend.hold = false; rig.backend.onHold = nil
+        held.resume()
+        await prepared?.value
+        #expect(rig.session.continuityOwners.isEmpty && rig.backend.events.isEmpty)
+        // A later speculative preparation cannot undo the lifecycle barrier.
+        await rig.controller.prepare(payload: payload(), update: answer)?.value
+        #expect(rig.session.continuityOwners.isEmpty)
+        rig.controller.replay(payload: payload(), update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        #expect(rig.session.continuityOwners.count == 1)
+    }
+
+    @Test func routeLossDiscardsLoadingWordAndWaitingWords() async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        rig.controller.admitReview()
+        rig.backend.hold = true
+        await withCheckedContinuation { continuation in
+            rig.backend.onHold = { continuation.resume() }
+            rig.controller.present(payload: payload(), update: question)
+        }
+        let held = try #require(rig.backend.held)
+        rig.controller.sessionEvent(.pause)
+        rig.controller.sessionEvent(.available)
+        rig.backend.hold = false; rig.backend.onHold = nil
+        let disposed = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        defer { disposed.continuation.finish() }
+        rig.backend.clips[0].onStop = { disposed.continuation.yield(()) }
+        held.resume()
+        try await Spike.deadline("disconnected load retired", timeout: .seconds(3)) {
+            for await _ in disposed.stream { return }
+            throw Spike.Failure("disconnected clip retained")
+        }
+        await rig.controller.transportSettled()
+        #expect(rig.controller.current == nil && rig.session.continuityOwners.isEmpty)
+        #expect(rig.backend.events.isEmpty)
+    }
+
+    @Test func silentOnlyMissingOnlyAndNonBluetoothDoNotAcquireContinuity() async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        rig.controller.admitReview()
+        let lists: [[CardAudio]] = [[], [.tts(language: "en", content: "silent")], [.sound(name: "absent.mp3")]]
+        for audio in lists {
+            let card = CardPayload(cardID: 1, question: "text", answer: "", questionAudio: audio)
+            await rig.controller.prepare(payload: card, update: question)?.value
+            #expect(rig.session.continuityOwners.isEmpty && rig.session.owners.isEmpty)
+        }
+        rig.session.bluetooth = false
+        await rig.controller.prepare(payload: payload(), update: question)?.value
+        #expect(rig.session.continuityOwners.isEmpty && rig.session.owners.isEmpty)
     }
 
     @Test(arguments: [true, false])

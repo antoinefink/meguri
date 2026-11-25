@@ -225,6 +225,7 @@ public final class ReviewPages: ReviewCardSurface {
         guard let pair else { throw BridgeError.internal("Missing review pages") }
         guard let rendered = cards[item.renderKey] else { throw BridgeError.internal("Missing rendered card") }
         let card = payload(rendered, item: item)
+        pair.admitReviewAudio()
         let early = first
         first = nil
         let update: CardUpdate
@@ -250,6 +251,7 @@ public final class ReviewPages: ReviewCardSurface {
         onWillPresent?()
         CATransaction.begin()
         defer { CATransaction.commit() }
+        pair.admitReviewAudio(update: update)
         _ = try pair.present(update, inputTime: inputTime)
         currentMediaRefs = rendered.mediaRefs
         updateVisibleMedia()
