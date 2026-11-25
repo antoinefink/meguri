@@ -836,7 +836,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'docs/process/review-log/meguri-sync-collection-backups-20261125.md':
-        'a2c98300371f81cb18abe2847ca1de877c8df8fd1e40ba555bde6461943882d9',
+        '1536bcbe9e55360cb8ecdd80221cfb9162e3fa33268e17c62934cd59b3de4797',
     'server/src/accounts/backups.rs':
         '8d9801640afbe5dbb862060d8aea8accb4ddf47063dc775278e176559b32622a',
     'server/tests/support/mod.rs':
