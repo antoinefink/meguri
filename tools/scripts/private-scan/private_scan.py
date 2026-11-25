@@ -835,6 +835,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/MeguriUITests/MacBrowseInspectorTests.swift':
+        '636428a071b53d2b1fa37d59b49aec54d78ccf11dfa70d4912545b2dc989a4f3',
     'docs/process/review-log/meguri-sync-collection-backups-20261125.md':
         '7c0b0a10b44ae639c53a312462f26a50cd71368853473614c4745431e949ba56',
     'server/src/accounts/backups.rs':
