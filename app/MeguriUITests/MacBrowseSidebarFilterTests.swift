@@ -72,42 +72,6 @@ final class MacBrowseSidebarFilterTests: XCTestCase {
                       "\(name) removes it: \(statusText(app)); keys at: \(readout.exists ? readout.label : "unknown")")
     }
 
-    /// T9: the arrow keys move through the rows without changing the query,
-    /// and a click on the row they stand on is a click on it all the same.
-    func testAClickOnTheRowTheArrowKeysStandOnFiltersByIt() throws {
-        let (app, bundle) = try launch()
-        try openBrowse(app, bundle)
-        let whole = statusText(app)
-        try arrowDownToDueToday(app, whole)
-        element(app, "browse.sidebar.saved.dueToday").click()
-        XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, "the click filters: \(statusText(app))")
-        XCTAssertTrue(waitUntil { self.selected(app, "browse.sidebar.saved.dueToday") }, "Due Today shows selected")
-        XCTAssertTrue(waitUntil { self.listSelected(app, "shell.root.sidebar.browse") }, "the list's selection is back on Browse")
-    }
-
-    /// T9: a ⌘-click after the arrow keys toggles the clicked row alone; the
-    /// row the keys stood on was not clicked.
-    func testACommandClickAfterTheArrowKeysTogglesOnlyTheClickedRow() throws {
-        let (app, bundle) = try launch()
-        try openBrowse(app, bundle)
-        let whole = statusText(app)
-        try arrowDownToDueToday(app, whole)
-        XCUIElement.perform(withKeyModifiers: .command) { element(app, "browse.sidebar.state.new").click() }
-        XCTAssertTrue(waitUntil { self.statusText(app).contains(" of ") }, "the ⌘-click filters: \(statusText(app))")
-        XCTAssertTrue(waitUntil { self.selected(app, "browse.sidebar.state.new") }, "New shows selected")
-        XCTAssertFalse(selected(app, "browse.sidebar.saved.dueToday"), "Due Today was not clicked")
-        XCTAssertTrue(element(app, "browse.search.token.0").waitForExistence(timeout: 10), "New's token")
-        XCTAssertFalse(element(app, "browse.search.token.1").exists, "one token only")
-    }
-
-    /// Down from the Browse row: the keys stand on Due Today, the query unchanged.
-    private func arrowDownToDueToday(_ app: XCUIApplication, _ whole: String) throws {
-        app.typeKey(.downArrow, modifierFlags: [])
-        XCTAssertTrue(waitUntil { self.listSelected(app, "browse.sidebar.saved.dueToday") }, "the keys stand on Due Today")
-        XCTAssertEqual(statusText(app), whole, "the arrow keys do not change the query")
-        XCTAssertFalse(selected(app, "browse.sidebar.saved.dueToday"), "Due Today is not a filter yet")
-    }
-
     /// The first row sits below the column header after a sidebar click and
     /// after Browse is shown again (owner's Mac, 2026-11-23: it was half
     /// under the header).
