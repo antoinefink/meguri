@@ -25,3 +25,13 @@ Independent reviewer `s-20261124T123814Z-b6a481ac` reviewed the complete integra
 Docker runs `selftest/20261124T203746Z-97957` and `image-tools-selftest/20261124T203749Z-98313` passed 84 scheduler, pool and transport cases and 22 posture cases. The transport fixture's ambiguous pause point was reproduced in isolation and corrected before the passing run. The selected host Swift compiler built the unchanged visual helper in `duo-visual-compile-check/20261124T203950Z-99664`. Read-only `sim-posture status` ran against the disconnected legacy coordinator state in `sim-posture/20261124T202344Z-82404`.
 
 Live acceptance requires an open → closed → open run on one remote Duo lease, with inner → outer → inner display evidence. The coordinator's SSH authentication was unavailable during this verification.
+
+## Resuming an interrupted VNC preparation
+
+On November 25 the M3 guest restarted after the simulator pool drained. A subsequent prepare cleared the original drain records and retained the same supervisor, Tart process and VNC holder. The coordinator then acquired a Duo from the pool. The Docker recovery suite passed in `selftest/20261125T070623Z-96951`.
+
+Independent fixer session `s-20261124T123814Z-b6a481ac` checked the interrupted cleanup and transient status cases in `cleanroom/20261125T070825Z-638`. The reviewer classified the complete files as public.
+
+- `tools/vm/vnc-session.py` at `d08738cffa81959447e282fb90a74424da923f534cb280929cfc6562e813fc5a`
+- `tools/vm/duo-fold.sh` at `e6383914de7e7f6bfcc44fdc7f31d4f7e29d644606888c0e6443248c64705b17`
+- `tools/tests/vnc_session_test.py` at `9222a6d7de7567b7a4c45fbca38b33689ca4f28c83891325ecdeadbaaab42fc0`

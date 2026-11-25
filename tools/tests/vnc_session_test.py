@@ -219,8 +219,19 @@ cmd = sys.argv[1]
 if 'pgrep' in cmd:
     if not (root / 'busy-tests').exists(): print('idle')
 elif 'stat -f' in cmd:
-    if not ((root / 'no-guest').exists() and (root / 'vm-mode').read_text() == 'vnc'): print('guest-user')
+    if not ((root / 'no-guest').exists() and (root / 'vm-mode').read_text() == 'vnc'):
+        print('guest-user')
+        if (root / 'vm-mode').read_text() == 'vnc': (root / 'guest-login').touch()
 else:
+    if 'remove_drain(sys.argv[1])' in cmd:
+        with (root / 'cleanup-attempts').open('a') as out: out.write('cleanup\\n')
+        if (root / 'fail-cleanup').exists():
+            print('fake-test-secret', file=sys.stderr)
+            sys.exit(255)
+        if (root / 'replace-recovery').exists():
+            recovery = root / 'build/vm-fold/recovery-pending'
+            recovery.rename(recovery.with_suffix('.retained'))
+            recovery.write_text('replacement')
     if 'drain guard expired' in cmd:
         from fixture_control import serve
         serve('transport')
@@ -229,7 +240,11 @@ else:
         words[index] = ('import sys; sys.path.insert(0, ' + repr(str(root / 'bin')) + '); '
                         "from fixture_control import serve; serve('guest')\\n" + words[index])
         cmd = shlex.join(words)
-    sys.exit(subprocess.call(['/bin/sh', '-c', 'exec ' + cmd]))
+    code = subprocess.call(['/bin/sh', '-c', 'exec ' + cmd])
+    if 'remove_drain(sys.argv[1])' in cmd and (root / 'lose-cleanup-response').exists():
+        (root / 'lose-cleanup-response').unlink()
+        sys.exit(255)
+    sys.exit(code)
 ''')
         tunnel = self.script("ssh", '''import json, os, pathlib, socket, sys, time
 root = pathlib.Path(os.environ['FAKE_ROOT'])
@@ -265,6 +280,25 @@ print('n127.0.0.1:' + str(listener['port']))
                      '            ' + repr(str(tunnel)) + ', "-N",')
         replace_once('            "/usr/sbin/lsof", "-nP",',
                      '            ' + repr(str(lsof)) + ', "-nP",')
+        # Lose a selected authenticated status reply after guest login. Count
+        # real RPCs rather than using sleeps or killing supervisor processes.
+        replace_once('    return result\n', '''    root = Path(os.environ['FAKE_ROOT'])
+    if action == 'status' and (root / 'guest-login').exists() and (root / 'fail-status').exists():
+        counter = root / 'status-count'
+        count = int(counter.read_text()) + 1 if counter.exists() else 1
+        counter.write_text(str(count))
+        if count == int((root / 'fail-status').read_text()):
+            if (root / 'disconnected-status').exists():
+                return dict(result, connected=False)
+            raise OSError('synthetic lost status response')
+    return result
+''')
+        replace_once('                (state / "drain-token").unlink()\n', '''                (state / "drain-token").unlink()
+                interruption = Path(os.environ['FAKE_ROOT']) / 'interrupt-cleanup'
+                if interruption.exists():
+                    interruption.unlink()
+                    os._exit(1)
+''')
         # Fixture-only authenticated exit joins Popen-owned synthetic children
         # even when a test deliberately makes Tart return SSH's unknown code.
         # Match complete handler lines, not the CLI's separate stop dispatch.
@@ -676,6 +710,188 @@ mg_sim_posture prepare
                 self.assertFalse(self.lease.exists())
                 (self.root / failure).unlink()
                 (self.root / "tunnel-args").unlink(missing_ok=True)
+
+    def pending_poststart(self):
+        (self.root / "fail-cleanup").touch()
+        result = self.call("prepare", 1)
+        self.assertIn(b"guest drain cleanup unconfirmed", result.stderr)
+        self.assertNotIn(b"restoration", result.stderr)
+        self.assertTrue(m.status(self.state, "guest")["connected"])
+        self.assertFalse(self.lease.exists())
+        self.assertFalse((self.state / "shutdown-pending").exists())
+        self.assertFalse((self.state / "drain-precommit").exists())
+        self.assertEqual((self.state / "drain-token").read_bytes(),
+                         (self.state / "recovery-pending").read_bytes())
+        return self.trace(), {name: (self.state / name).read_bytes() for name in
+                             ("owner", "vm", "holder.pid", "drain-token", "recovery-pending")}
+
+    def test_poststart_cleanup_retries_across_processes_without_restart_or_reconnect(self):
+        before, records = self.pending_poststart()
+        # Retrying uses the same authenticated owner and token binding.
+        result = self.call("prepare", 1)
+        self.assertIn(b"guest drain cleanup unconfirmed", result.stderr)
+        self.assertNotIn(b"restoration", result.stderr)
+        self.assertEqual(records, {name: (self.state / name).read_bytes() for name in records})
+        self.assertTrue(m.status(self.state, "guest")["connected"])
+        (self.root / "fail-cleanup").unlink()
+        self.call("prepare")
+        self.assertEqual(self.trace(), before)
+        self.assertEqual(self.trace().count("stop guest"), 1)
+        self.assertEqual(self.trace().count("--vnc-experimental"), 1)
+        for name in ("owner", "vm", "holder.pid"):
+            self.assertEqual((self.state / name).read_bytes(), records[name])
+        for name in ("drain-token", "recovery-pending"):
+            self.assertFalse((self.state / name).exists())
+        self.assertFalse((self.root / "pool/pool.lock").exists())
+        self.assertFalse(self.lease.exists())
+        cleanups = (self.root / "cleanup-attempts").read_bytes()
+        self.call("prepare")
+        self.assertEqual((self.root / "cleanup-attempts").read_bytes(), cleanups)
+
+    def test_poststart_cleanup_unreachable_guest_preserves_connection_and_evidence(self):
+        before, records = self.pending_poststart()
+        (self.root / "no-guest").touch()
+        result = self.call("prepare", 1)
+        self.assertIn(b"retry prepare when SSH is available", result.stderr)
+        self.assertNotIn(b"restoration", result.stderr)
+        self.assertEqual(self.trace(), before)
+        self.assertEqual(records, {name: (self.state / name).read_bytes() for name in records})
+        self.assertTrue(m.status(self.state, "guest")["connected"])
+        self.assertFalse(self.lease.exists())
+
+    def test_poststart_cleanup_resumes_after_guest_success_and_lost_response(self):
+        (self.root / "lose-cleanup-response").touch()
+        result = self.call("prepare", 1)
+        self.assertIn(b"guest drain cleanup unconfirmed", result.stderr)
+        self.assertNotIn(b"restoration", result.stderr)
+        self.assertFalse((self.root / "pool/pool.lock").exists())
+        self.assertTrue((self.state / "drain-token").exists())
+        self.assert_cleanup_resumes()
+
+    def test_poststart_cleanup_resumes_after_interruption_between_local_unlinks(self):
+        (self.root / "interrupt-cleanup").touch()
+        result = self.call("prepare", 1)
+        self.assertNotIn(b"restoration", result.stderr)
+        self.assertFalse((self.state / "drain-token").exists())
+        self.assertEqual(len((self.state / "recovery-pending").read_text()), 64)
+        before = self.trace()
+        cleanups = (self.root / "cleanup-attempts").read_bytes()
+        for name in ("shutdown-pending", "drain-precommit"):
+            with self.subTest(name=name):
+                marker = self.state / name
+                marker.write_bytes((self.state / "recovery-pending").read_bytes())
+                result = self.call("prepare", 1)
+                self.assertIn(b"stop or admission uncertain", result.stderr)
+                self.assertTrue(marker.exists())
+                self.assertEqual(self.trace(), before)
+                self.assertEqual((self.root / "cleanup-attempts").read_bytes(), cleanups)
+                marker.unlink()
+        self.assert_cleanup_resumes()
+
+    def assert_cleanup_resumes(self):
+        before = self.trace()
+        owner = (self.state / "owner").read_bytes()
+        self.assertTrue(m.status(self.state, "guest")["connected"])
+        self.call("prepare")
+        self.assertEqual(self.trace(), before)
+        self.assertEqual((self.state / "owner").read_bytes(), owner)
+        self.assertEqual(before.count("stop guest"), 1)
+        self.assertEqual(before.count("--vnc-experimental"), 1)
+        for name in ("drain-token", "recovery-pending"):
+            self.assertFalse((self.state / name).exists())
+        self.assertFalse(self.lease.exists())
+
+    def test_poststart_transient_status_after_login_retains_session_and_can_resume(self):
+        # First read after login, and the read after successful guest cleanup.
+        for nth in (1, 3):
+            with self.subTest(nth=nth):
+                (self.root / "fail-status").write_text(str(nth))
+                result = self.call("prepare", 1)
+                self.assertNotIn(b"restoration", result.stderr)
+                self.assertTrue((self.state / "recovery-pending").exists())
+                self.assertTrue((self.state / "drain-token").exists())
+                self.assert_cleanup_resumes()
+                (self.root / "fail-status").unlink()
+                (self.root / "status-count").unlink()
+                self.call("stop")
+                (self.root / "trace").unlink()
+
+    def test_poststart_proven_disconnect_still_restores_headless(self):
+        (self.root / "fail-status").write_text("1")
+        (self.root / "disconnected-status").touch()
+        result = self.call("prepare", 1)
+        self.assertIn(b"restored headless", result.stderr)
+        self.assertFalse((self.state / "recovery-pending").exists())
+        self.assertEqual((self.root / "vm-mode").read_text(), "headless")
+
+    def test_poststart_partial_cleanup_refuses_forged_lone_recovery(self):
+        self.call("prepare")
+        before = self.trace()
+        recovery = self.state / "recovery-pending"
+        recovery.write_text("f" * 64)
+        result = self.call("prepare", 1)
+        self.assertIn(b"does not predate the VNC supervisor", result.stderr)
+        self.assertEqual(recovery.read_text(), "f" * 64)
+        self.assertEqual(self.trace(), before)
+        self.assertFalse((self.root / "pool/pool.lock").exists())
+
+    def test_poststart_cleanup_refuses_uncertain_markers_and_competing_fence(self):
+        before, records = self.pending_poststart()
+        cleanups = (self.root / "cleanup-attempts").read_bytes()
+        for name in ("shutdown-pending", "drain-precommit"):
+            with self.subTest(name=name):
+                (self.state / name).write_bytes(records["drain-token"])
+                result = self.call("prepare", 1)
+                self.assertIn(b"stop or admission uncertain", result.stderr)
+                self.assertTrue((self.state / name).exists())
+                (self.state / name).unlink()
+        # Inject a competing fence after our scheduler holder is published.
+        jq = shutil.which("jq")
+        self.script("jq", '''import os, pathlib, sys
+if '--arg' in sys.argv and 'vm-fold-prepare' in sys.argv:
+    pathlib.Path(os.environ['FAKE_ROOT'], 'scheduler/mac-vm.guest.lock/sim-posture-pending').mkdir()
+os.execv(''' + repr(jq) + ''', ['jq', *sys.argv[1:]])
+''')
+        result = self.call("prepare", 1)
+        self.assertIn(b"competing scheduler fence", result.stderr)
+        self.assertTrue((self.lease / "sim-posture-pending").exists())
+        self.assertEqual(self.trace(), before)
+        self.assertEqual(records, {name: (self.state / name).read_bytes() for name in records})
+        self.assertEqual((self.root / "cleanup-attempts").read_bytes(), cleanups)
+
+    def test_poststart_cleanup_refuses_mismatched_recovery(self):
+        before, records = self.pending_poststart()
+        (self.state / "recovery-pending").write_text("0" * 64)
+        result = self.call("prepare", 1)
+        self.assertIn(b"records do not match", result.stderr)
+        self.assertEqual((self.state / "drain-token").read_bytes(), records["drain-token"])
+        self.assertEqual(self.trace(), before)
+        self.assertTrue(m.status(self.state, "guest")["connected"])
+
+    def test_poststart_cleanup_refuses_new_stop_on_old_connected_supervisor(self):
+        self.call("prepare")
+        before = self.trace()
+        token = "a" * 64
+        for name in ("drain-token", "recovery-pending"):
+            (self.state / name).write_text(token)
+        result = self.call("prepare", 1)
+        self.assertIn(b"does not predate the VNC supervisor", result.stderr)
+        self.assertEqual(self.trace(), before)
+        self.assertTrue(m.status(self.state, "guest")["connected"])
+        for name in ("drain-token", "recovery-pending"):
+            self.assertEqual((self.state / name).read_text(), token)
+
+    def test_poststart_cleanup_preserves_replacement_recovery_after_successful_ssh(self):
+        before, records = self.pending_poststart()
+        (self.root / "fail-cleanup").unlink()
+        (self.root / "replace-recovery").touch()
+        result = self.call("prepare", 1)
+        self.assertIn(b"cleanup metadata changed", result.stderr)
+        self.assertEqual((self.state / "recovery-pending").read_text(), "replacement")
+        self.assertEqual((self.state / "recovery-pending.retained").read_bytes(), records["recovery-pending"])
+        self.assertTrue(m.status(self.state, "guest")["connected"])
+        self.assertEqual(self.trace(), before)
+        self.assertNotIn(b"restoration", result.stderr)
 
     def test_missing_venv_fails_before_restart(self):
         (self.state / "venv/bin/python").unlink()
@@ -1404,6 +1620,32 @@ class DrainAndJoinTests(unittest.TestCase):
                 launch.assert_not_called()
                 cleanup.assert_not_called()
             self.assertEqual((state / "drain-token").read_text(), "owned-token")
+
+    def test_cleanup_timeout_has_distinct_sanitized_reason_and_preserves_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            (state / "drain-token").write_text("owned-token")
+            error = subprocess.TimeoutExpired(["fake-ssh", "private-control-data"], 120)
+            with mock.patch.object(subprocess, "run", side_effect=error) as cleanup:
+                with self.assertRaisesRegex(RuntimeError, "guest drain cleanup unconfirmed") as raised:
+                    m.clean_drain(state, "fake-ssh", "owned-token")
+            self.assertNotIn("private-control-data", str(raised.exception))
+            self.assertEqual(cleanup.call_args.kwargs["timeout"], 120)
+            self.assertEqual((state / "drain-token").read_text(), "owned-token")
+
+    def test_cleanup_does_not_remove_replaced_token_after_successful_ssh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            token = state / "drain-token"
+            token.write_text("owned-token")
+            def replace(*args, **kwargs):
+                token.rename(state / "retained-token")
+                token.write_text("replacement")
+                return subprocess.CompletedProcess([], 0)
+            with mock.patch.object(subprocess, "run", side_effect=replace):
+                with self.assertRaisesRegex(RuntimeError, "metadata changed"):
+                    m.clean_drain(state, "fake-ssh", "owned-token")
+            self.assertEqual(token.read_text(), "replacement")
 
     def test_delayed_guard_cannot_publish_after_confirmed_no_stop_cancellation(self):
         # Pause the real guard before token installation, or after accepting

@@ -1384,7 +1384,7 @@ PUBLIC_ARTIFACTS = {
     'docs/process/new-machine.md':
         'ca64a19aae880b88be34955af62194f9f8a358f361aa20d801e789a287534b6a',
     'tools/tests/vnc_session_test.py':
-        'bdebc576c9d50cedda7a28be98c2027dedc47e5d07d17990a6e7ad4c272f416a',
+        '9222a6d7de7567b7a4c45fbca38b33689ca4f28c83891325ecdeadbaaab42fc0',
     'tools/vm/vnc-holder.py':
         'd730c4b3e646d82f0b9540a3a4d1d39d40d46d6bfafb5f890da655f8c32a5d81',
     # Complete-file privacy reviews for the remote Duo tooling, 2026-11-24.

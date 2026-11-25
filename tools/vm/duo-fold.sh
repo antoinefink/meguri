@@ -165,6 +165,19 @@ send() {
 
 session_status() { python3 "$SESSION" status "$STATE" "$VM" "$TART"; }
 
+pending_cleanup() {
+  local name
+  for name in drain-token recovery-pending shutdown-pending drain-precommit; do
+    if [ -e "$STATE/$name" ] || [ -L "$STATE/$name" ]; then return 0; fi
+  done
+  return 1
+}
+
+poststart_cleanup() {
+  recheck_state || return 1
+  python3 "$SESSION" poststart-cleanup "$STATE" "$SSH" "$VM" "$LEASE" "$$" "$1"
+}
+
 start() {
   local host current
   [ $# -eq 0 ] || usage
@@ -176,6 +189,15 @@ start() {
     log "global VNC state belongs to another VM; retain evidence for operator recovery"; exit 1
   fi
   if [ "$(jq -r .connected <<<"$current")" = true ]; then
+    if pending_cleanup; then
+      poststart_cleanup check || exit 1
+      # This is an owned, already booted session. Never arm rollback, reconnect
+      # VNC or issue another stop/start when its cleanup SSH is unavailable.
+      mvl_wait_ready "$SSH" "$TART" "$VM" false "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
+        log "post-start cleanup cannot reach the logged-in guest; keep VNC connected and retry prepare when SSH is available; private evidence retained"; exit 1;
+      }
+      poststart_cleanup finish || exit 1
+    fi
     log "connected to $VM (reused)"; return 0
   fi
   # Never replace an existing or incomplete session on a regular prepare call.
@@ -201,12 +223,24 @@ start() {
   mvl_wait_ready "$SSH" "$TART" "$VM" true "$STATE/tart.log" "$STATE/guest.ssh" >"$STATE/readiness.log" 2>&1 || {
     log "VNC guest did not become accessible; inspect private $STATE logs"; exit 1;
   }
-  python3 "$SESSION" clean-drain "$STATE" "$SSH" || exit 1
+  # GUI login after our successful start confirms a working post-start session.
+  # Disarm before any further status read: a lost response is not proof of a
+  # failed start. Only a positively authenticated disconnect permits rollback.
+  RECOVER=""
+  current="$(session_status)" || exit 1
+  if [ "$(jq -r .connected <<<"$current")" != true ]; then
+    if [ "$(jq -r .conclusive <<<"$current")" = true ]; then
+      RECOVER=1
+      log "VNC transport disconnected before post-start confirmation"
+    else
+      log "post-start status inconclusive; retain evidence and retry prepare"
+    fi
+    exit 1
+  fi
+  poststart_cleanup finish || exit 1
   [ "$(session_status | jq -r .connected)" = true ] || {
     log "VNC transport disconnected after preparation"; exit 1;
   }
-  RECOVER=""
-  rm -f "$STATE/recovery-pending"
   log "connected to $VM"
 }
 

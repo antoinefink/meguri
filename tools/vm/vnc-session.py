@@ -75,6 +75,31 @@ def metadata_text(path):
         return value.decode()
 
 
+def record_version(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_nlink,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+@contextlib.contextmanager
+def pinned_record(path):
+    # Keep the inode alive through cleanup, including replacement checks.
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as source:
+        info = os.fstat(source.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o022 or info.st_nlink != 1):
+            raise RuntimeError("unsafe cleanup metadata; evidence retained")
+        value = source.read(65537)
+        if len(value) > 65536:
+            raise RuntimeError("cleanup metadata oversized; evidence retained")
+        yield value.decode(), info
+
+
+def unchanged_record(path, info):
+    if record_version(path.lstat()) != record_version(info):
+        raise RuntimeError("cleanup metadata changed; evidence retained")
+
+
 def primary(state, vm):
     if os.path.lexists(state / "vm") and metadata_text(state / "vm").strip() != vm:
         raise RuntimeError("global VNC state belongs to another VM; retain evidence for operator recovery")
@@ -158,6 +183,7 @@ def legacy_connected(state, vm, tart):
 
 def status(state, vm, tart=None):
     recorded = None
+    conclusive = True
     remote = (state / "tunnel.pid").exists()
     try:
         recorded = metadata_text(state / "vm").strip()
@@ -165,7 +191,8 @@ def status(state, vm, tart=None):
                     if os.path.lexists(state / "owner") else legacy_connected(state, vm, tart))
     except (OSError, ValueError, KeyError, IndexError, RuntimeError, subprocess.SubprocessError):
         connected = False
-    return {"vm": recorded, "connected": connected, "remote": remote}
+        conclusive = False
+    return {"vm": recorded, "connected": connected, "remote": remote, "conclusive": conclusive}
 
 
 def legacy_disconnected(state, vm):
@@ -706,25 +733,117 @@ def guest_command(script, token):
     return shlex.join(command)
 
 
-def clean_drain(state, ssh, token=None):
+def clean_guest_drain(state, ssh, script, token):
+    try:
+        with (state / "drain-cleanup.log").open("wb") as log:
+            result = subprocess.run([ssh, guest_command(script, token)],
+                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("guest drain cleanup unconfirmed; inspect private drain-cleanup.log; evidence retained") from None
+    if result.returncode:
+        raise RuntimeError("guest drain cleanup unconfirmed; inspect private drain-cleanup.log; evidence retained")
+
+
+def clean_drain(state, ssh, token=None, *, retain_token=False):
     if os.path.lexists(state / "shutdown-pending"):
         raise RuntimeError("remote shutdown completion unknown; guest fence retained")
     marker = state / "drain-token"
-    if marker.exists():
-        recorded = marker.read_text()
+    if not os.path.lexists(marker):
+        return
+    with contextlib.ExitStack() as stack:
+        recorded, marker_info = stack.enter_context(pinned_record(marker))
         if token is not None and recorded != token:
             raise RuntimeError("guest drain ownership changed; evidence retained")
         precommit = state / "drain-precommit"
-        if os.path.lexists(precommit) and metadata_text(precommit) != recorded:
+        admission = (stack.enter_context(pinned_record(precommit))
+                     if os.path.lexists(precommit) else None)
+        if admission is not None and admission[0] != recorded:
             raise RuntimeError("guest drain admission ownership changed; evidence retained")
-        script = CANCEL_DRAIN if os.path.lexists(precommit) else CLEAN_DRAIN
-        with (state / "drain-cleanup.log").open("wb") as log:
-            result = subprocess.run([ssh, guest_command(script, recorded)],
-                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log, timeout=20)
-        if result.returncode:
-            raise RuntimeError("guest drain cleanup unconfirmed; evidence retained")
-        precommit.unlink(missing_ok=True)
-        marker.unlink()
+        script = CANCEL_DRAIN if admission is not None else CLEAN_DRAIN
+        clean_guest_drain(state, ssh, script, recorded)
+        if os.path.lexists(state / "shutdown-pending"):
+            raise RuntimeError("remote shutdown completion unknown; guest fence retained")
+        unchanged_record(marker, marker_info)
+        if admission is not None:
+            unchanged_record(precommit, admission[1])
+            precommit.unlink()
+        elif os.path.lexists(precommit):
+            raise RuntimeError("guest drain admission changed; evidence retained")
+        if not retain_token:
+            marker.unlink()
+
+
+def poststart_cleanup(state, ssh, vm, lease, pid, phase):
+    """Finish only a drain that predates this authenticated supervisor's start.
+
+    The recovery token must predate the authenticated supervisor, including
+    when a prior successful cleanup already removed drain-token. Never accept
+    new stop records written beside an older connected session.
+    """
+    guard_state(state)
+    fence = ShutdownFence(lease, state, "")
+    with contextlib.ExitStack() as stack:
+        records = {name: stack.enter_context(pinned_record(state / name))
+                   for name in ("owner", "vm", "recovery-pending")}
+        if os.path.lexists(state / "drain-token"):
+            records["drain-token"] = stack.enter_context(pinned_record(state / "drain-token"))
+        holder, holder_info = stack.enter_context(pinned_record(Path(lease) / "holder.json"))
+        metadata = json.loads(holder)
+        if (metadata.get("pid") != int(pid) or metadata.get("holder") != "duo-fold"
+                or metadata.get("job") != "vm-fold-prepare"):
+            raise RuntimeError("post-start cleanup requires the prepare scheduler; evidence retained")
+        token = records["recovery-pending"][0]
+        if (not re.fullmatch(r"[0-9a-f]{64}", token) or records["vm"][0] != vm
+                or ("drain-token" in records and records["drain-token"][0] != token)):
+            raise RuntimeError("post-start cleanup records do not match; evidence retained")
+        owner_info = records["owner"][1]
+        for name in ("recovery-pending", "drain-token"):
+            if name not in records:
+                continue
+            info = records[name][1]
+            if (info.st_mtime_ns >= owner_info.st_mtime_ns
+                    or info.st_ctime_ns >= owner_info.st_ctime_ns):
+                raise RuntimeError("drain does not predate the VNC supervisor; post-start cleanup refused")
+
+        def validate_records(remaining):
+            # Caller holds the scheduler mutex. Repeat at final removal so an
+            # intervening fence/metadata replacement cannot consume recovery.
+            if set(Path(lease).iterdir()) != {Path(lease) / "holder.json"}:
+                raise RuntimeError("competing scheduler fence; post-start cleanup refused")
+            unchanged_record(Path(lease) / "holder.json", holder_info)
+            if any(os.path.lexists(state / name) for name in ("shutdown-pending", "drain-precommit")):
+                raise RuntimeError("stop or admission uncertain; post-start cleanup refused")
+            for name in remaining:
+                unchanged_record(state / name, records[name][1])
+            if "drain-token" not in remaining and os.path.lexists(state / "drain-token"):
+                raise RuntimeError("guest drain ownership changed; evidence retained")
+            primary(state, vm)
+
+        def validate(remaining):
+            with fence.scheduler():
+                validate_records(remaining)
+            reply = request(state, "status")
+            if not reply["connected"]:
+                raise RuntimeError("owned VNC session disconnected; post-start cleanup refused")
+
+        validate(records)
+        if phase == "check":
+            return
+        if phase != "finish":
+            raise ValueError("unknown cleanup phase")
+        # Keep the original pre-start recovery token through both local unlinks.
+        # Its ordering against the authenticated owner remains proof on resume;
+        # a later/forged token or an uncertain stop never grants cleanup.
+        if "drain-token" in records:
+            clean_drain(state, ssh, token, retain_token=True)
+        else:
+            clean_guest_drain(state, ssh, CLEAN_DRAIN, token)
+        validate(records)
+        with fence.scheduler():
+            validate_records(records)
+            if "drain-token" in records:
+                (state / "drain-token").unlink()
+            (state / "recovery-pending").unlink()
 
 
 
@@ -886,6 +1005,8 @@ def main():
             shutdown(state, *args)
         elif action == "clean-drain":
             clean_drain(state, *args)
+        elif action == "poststart-cleanup":
+            poststart_cleanup(state, *args)
     except RuntimeError as error:
         print("duo-fold: " + str(error), file=sys.stderr)
         return 1
