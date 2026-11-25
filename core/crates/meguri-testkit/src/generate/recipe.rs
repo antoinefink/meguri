@@ -32,6 +32,8 @@
 //!
 //! Cards of a `reversed` note share their state, so its counts are even.
 //! `broken` is a note type whose back template names a field it lacks.
+//! `many-fields` has imported-style gaps in stored field numbers; logical
+//! field positions still run from 0 to 13 (`notetypes/records` N1).
 //! `missing` references name files that are not written.
 
 use std::path::{Path, PathBuf};
@@ -428,6 +430,14 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
         }
         let id = NotetypeId(ids.notetypes.claim(timeline.crt_ms() + types.len() as i64));
         let mut record = notetype(id, kind.name(), &kind.shape(), None, &timeline, &mut structure);
+        if *kind == RecipeType::ManyFields {
+            // N1: stored numbers order the fields; positions index note values,
+            // the sort field and template requirements. Raw scopes keep these
+            // gaps, as a supported imported collection can (no local save).
+            for field in &mut record.fields {
+                field.ord = 2 * (field.ord + 1);
+            }
+        }
         if *kind == RecipeType::Broken {
             let names = field_names(Kind::Normal, 2);
             let (front, _) = base_templates(Kind::Normal, &names, 0);
