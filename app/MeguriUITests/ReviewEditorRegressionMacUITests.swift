@@ -46,7 +46,7 @@ import XCTest
         XCTAssertEqual(question.count, before.count + 1)
         XCTAssertEqual(question.sides, "q", "the existing controller queues the question audio")
         inject("repeat-r", bundle: bundle)
-        let modifiers: [XCUIKeyModifierFlags] = [.command, .control, .option, .shift]
+        let modifiers: [XCUIElement.KeyModifierFlags] = [.command, .control, .option, .shift]
         for flags in modifiers { app.typeKey("r", modifierFlags: flags) }
         XCTAssertEqual(try audio(app, bundle: bundle).count, question.count)
         capture(app.windows.firstMatch, "review-replay-question-\(appearance)-synthetic")
@@ -77,7 +77,7 @@ import XCTest
     }
 
     func testAddWindowPickersAddAnotherMainWorkspaceAndDiscard() throws {
-        let (app, bundle) = try launch()
+        let (app, _) = try launch()
         defer { app.terminate() }
         app.typeKey("n", modifierFlags: .command)
         var window = app.windows["editor.add.window"]
