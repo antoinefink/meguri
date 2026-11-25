@@ -13,6 +13,7 @@ pub trait RoundRetirer: Send + Sync {
 }
 pub struct PublicationBarrier {
     lock: Arc<AsyncMutex<()>>,
+    backup: Arc<AsyncMutex<()>>,
     round: Mutex<Option<Arc<dyn RoundRetirer>>>,
     // MCP collection jobs queue here before touching the publication lock.
     mcp: Arc<AsyncMutex<()>>,
@@ -22,6 +23,9 @@ pub struct PublicationBarrier {
     waiting: tokio::sync::Semaphore,
 }
 impl PublicationBarrier {
+    pub(crate) fn try_backup(&self) -> Option<OwnedMutexGuard<()>> {
+        self.backup.clone().try_lock_owned().ok()
+    }
     /// Standalone writes refuse contention without joining the waiter queue.
     /// Bounded MCP reads use enter() with their asynchronous timeout instead.
     /// Keep this barrier's Arc alongside the returned guard until work ends.
@@ -120,6 +124,7 @@ impl Barriers {
         }
         let gate = Arc::new(PublicationBarrier {
             lock: Arc::new(AsyncMutex::new(())),
+            backup: Arc::new(AsyncMutex::new(())),
             round: Mutex::new(None),
             mcp: Arc::new(AsyncMutex::new(())),
             #[cfg(feature = "test-hooks")]

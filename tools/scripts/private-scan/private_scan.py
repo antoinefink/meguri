@@ -835,6 +835,16 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'server/tests/backups.rs':
+        '14d661a1136929059b25441eefd000c15efc1ae1f62320774f1affd2af6740d2',
+    'server/src/storage/reset.rs':
+        'eb4b91a93c9976b7b07d3212f58e1e8e62b4deea0a9346e5e7c824c7dd052ee9',
+    'server/src/storage/mod.rs':
+        '7285b36d0b29aa93c82cb32b632239ea4b58cfd658eab661769dc0a756e05d46',
+    'server/src/storage/collection.rs':
+        'e27e2657c752118e14a57eee533d7070b2e40f29348c732b88058382a57c7537',
+    'server/src/storage/backups.rs':
+        'b74a5ce157bbeecad392c37e949d673d66f4bc3de3914f3f3afbeeb5118235e0',
     'server/web/tests/api.test.ts':
         'f686e358e8c4535f8408fcaa131cb53fd3dae474d4c8a7fb86c9e620cadeedf6',
     'server/web/tests/browser/mcp.spec.ts':
@@ -877,7 +887,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/mcp_transport/descriptors.rs':
         'c23fa9bc748dca54d7fc9464f896894b55ad21a238acd0128da736dd9e0accf8',
     'server/tests/mcp_oauth.rs':
-        '088eb8ae77b445f5c3d2566678cc9d9b594f7982f466b6d40dfac878a10fbf3a',
+        '1f3ce3b66d64e98c22f10b6a2411147895ebe7e03870ef77dd92fb11513c7a1d',
     'server/src/mcp_service/transport.rs':
         '6c0fed2e3865fbdf02cd4faa84340fc70e8b888f3834cd64529ade113705bab9',
     # Complete-content PUBLIC review: mcp-search-candidates, 2026-11-22.
@@ -926,9 +936,9 @@ PUBLIC_ARTIFACTS = {
     'server/src/accounts/oauth/tokens.rs':
         '91e82ec8f188a98952328e82c7bbf29def1c2c85a2ba7bd3daaea2e9b55ae312',
     'server/src/accounts/deletion.rs':
-        '1d0b85ee5ad9302685654ab0212d53a0d5feae132eba1f219a812e1cfd4cf270',
+        'a33371a855de6157e3ba332305384d8622943e270640735d90e6ce7da444bb4e',
     'server/src/storage/deletion.rs':
-        '50d1e9b315653da5886ad37f0c5da546b41115025fb34ddeb7cbcb1c4259a30b',
+        'a40673bd3bbe0871786e7fbbf6bb0b80ebd3f026acf28a636b19638528d15ec9',
     "docs/process/review-log/meguri-sync-local-sign-in-recovery-20261118.md":
         "3f81b8c9ba8d4c6d8bc4912d58bfa7fb1a346f2e825d2f601e0ffa097c8603a7",
     "docs/process/review-log/app-icon-20261118.md":
@@ -1227,11 +1237,11 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-collection.md":
         "85c3d211817ce238682043964f4e61835a5fbc83009134b69998242563c42ccb",
     "specs/sync/server-lifecycle.md":
-        "abacc93c438e5230f8cd8a60a671e8da7efd521465d0d98d189e95444ecd20f1",
+        "8cba86301f3a5621025ad0e4bcfb62f179252d5f26b96e31e34afaeb67d5052e",
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        '5b80364781b6b1eaa16529b666cfd1ca3e6a76098dcb8c2282e7406810640bea',
+        '6d34fd1d0afbb489682cef97814924900298b0d203a1549a44471c4a4679186b',
     "specs/servers/meguri-collection-mcp.md":
         "ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
@@ -1292,7 +1302,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/main.rs':
         '46699d99127a80945a264e9a461c17cdfcaf1f28cacf56ebf80ed9cd8d9882bf',
     'server/src/accounts/mod.rs':
-        '346cd0468f349b31790e32cf1c62f93169cc810a8fb75af4646338a41285052b',
+        'ffb70aadc3e86cbba4b71fa7aacac9d0241bb5d570a3fe4132ff91957ba6ac99',
     'server/src/accounts/provision.rs':
         'f75596225c443a3f33a58c5e1322ceba52326c4a7b507723c30b4f2aa6fc0416',
     'server/src/httpapi/AGENTS.md':
@@ -1300,13 +1310,13 @@ PUBLIC_ARTIFACTS = {
     'server/src/httpapi/ingress.rs':
         'aaee8e568d0a2c915288942b847f45ec262874d13887ce2911bbe0dac4f39ef6',
     'server/src/httpapi/mod.rs':
-        '3053d0d96124426ef439d115d9fcaecde48e3d378fcbaa99b1b921fefc57196d',
+        'e5bebfc8a507c9aa1916a3d3f286af48ff646fed6c0fcc0e379826618aa4f764',
     'server/src/httpapi/tests.rs':
         '370858800185720681b7f457ceded7bd414d1ae1d2defd513decb72ece76528d',
     'server/src/storage/schema.sql':
         '4842a61b5bf0e3b8e909364d5df7667aea59f054c7175313dd28f840f6c7a31b',
     'server/src/storage/semantic.rs':
-        'f5a3cc2e74103e01b6c38f407152892f38ef87f69b21b8a908fc7b2dc9de65b2',
+        '50df314a245ee5e41294b8c732ec0a5de9a4b8eab5fe1a9b0e4a1fd5e60de710',
     'server/src/storage/tests.rs':
         '4f31caea298b452a0e4071926355d60cf6856bb40075c78dcffbe19f04d29297',
     'server/tests/accounts.rs':
@@ -1334,7 +1344,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/protocol/mod.rs':
         '32c7e634ac02543ee958fa7df92aad82c2d7600c29271ed0d97a91423ac35d84',
     'server/src/storage/root.rs':
-        'e7f20fb65aeb45ae6e75c14c4b1eb5784608881a1126de47080e36da91bbea64',
+        'a060ba8e3453cae2c6ef4f4eb79287e634b9106138649dcfc12739b753a4df5a',
     'server/tools/candidate-output.py':
         '873c3ce682b93f23caa118b0d0b7f07792d7111e80a4ee1a51a0fe7631dd46f8',
     'docs/process/review-log/meguri-sync-U5.md':

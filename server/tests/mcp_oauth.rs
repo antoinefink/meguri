@@ -1272,3 +1272,24 @@ async fn mcp_collection_download_advertises_remaining_access_lifetime_and_refuse
     download_unauthorized(refused).await;
     drop(db);h.stop().await;
 }
+
+#[cfg(feature="test-hooks")]
+#[tokio::test]
+async fn mcp_collection_download_and_staged_upload_are_fenced_by_online_backup_restore() {
+    let h=Harness::new().await;let c=local_client();let identity=h.setup().await;let cookie=h.login("root.admin",PASSWORD).await;
+    attachment_collection(&h,identity["id"].as_str().unwrap());
+    h.service.capture_backups_at(time::OffsetDateTime::now_utc().unix_timestamp()).await.unwrap();
+    let points:Value=h.get("/api/me/backups",Some(&cookie)).await.json().await.unwrap();
+    let backup=points["data"][0]["id"].as_str().unwrap();
+    let tokens=grant(&h,&c,&cookie,true,false).await;let access=tokens["access_token"].as_str().unwrap();
+    let ticket=collection_ticket(&h,&c,access).await;
+    let staged=note_write_tool(&h,&c,access,"prepare_media_upload",json!({})).await;
+    assert_eq!(stage_attachment(&h,staged["upload_id"].as_str().unwrap(),attachment_png()).await.status(),200);
+    assert_eq!(h.post(&format!("/api/me/backups/{backup}/restore"),json!({}),Some(&cookie)).await.status(),200);
+    download_unauthorized(redeem_collection(&h,&c,&ticket).await).await;
+    attachment_failure(&h,&c,access,"create_note",json!({"deck_id":"1","note_type_id":"10","fields":{},"uploads":[{"upload_id":staged["upload_id"],"field":"Front"}]}),"attachment_unavailable").await;
+    // The original grant still authorizes fresh work in the new data epoch.
+    let fresh=collection_ticket(&h,&c,access).await;
+    assert_eq!(redeem_collection(&h,&c,&fresh).await.status(),200);
+    h.stop().await;
+}

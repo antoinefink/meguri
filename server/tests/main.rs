@@ -12,6 +12,8 @@
 pub mod accounts;
 #[path = "auth.rs"]
 pub mod auth;
+#[path = "backups.rs"]
+pub mod backups;
 #[path = "backup_round_trip.rs"]
 pub mod backup_round_trip;
 #[path = "codecs.rs"]

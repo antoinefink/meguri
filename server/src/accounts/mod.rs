@@ -4,6 +4,8 @@ mod barrier;
 mod credentials;
 mod deletion;
 mod reset;
+mod backups;
+pub use backups::Backup;
 mod provision;
 pub(crate) mod oauth;
 use crate::{
@@ -123,6 +125,7 @@ impl Service {
             #[cfg(feature = "test-hooks")]
             hooks: Arc::new(crate::test_hooks::Hooks::default()),
         });
+        service.recover_backup_restores().await?;
         service.recover_resets().await?;
         if service.admission_open().await? {
             service.resume_startup().await?;
@@ -135,6 +138,7 @@ impl Service {
             r.upgrade_deletions()?;
             r.upgrade_oauth()?;
             r.upgrade_resets()?;
+            r.upgrade_backups()?;
             Ok(())
         }).await?;
         service.recover_deletions().await?;

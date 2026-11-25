@@ -36,7 +36,7 @@ pub(crate) fn epoch(c: &Connection, id: &str) -> Result<i64> {
     Ok(epoch.unwrap_or(0))
 }
 pub(crate) fn admitted_epoch(c: &Connection, id: &str) -> Result<i64> {
-    if read(c,id)?.is_some() { return Err(unavailable()); }
+    if super::backups::pending(c,id)? || read(c,id)?.is_some() { return Err(unavailable()); }
     epoch(c,id)
 }
 fn decode(row: &rusqlite::Row<'_>) -> Result<Pending> {
@@ -111,7 +111,7 @@ impl DataRoot {
         self.check_initialized()?;
         let mut c=super::open(self.database(),false)?;
         let version:i64=c.pragma_query_value(None,"user_version",|r|r.get(0))?;
-        if version==5 { return Ok(()); }
+        if matches!(version,5|6) { return Ok(()); }
         if version!=4 { return Err(unavailable()); }
         let tx=c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(MIGRATION)?;

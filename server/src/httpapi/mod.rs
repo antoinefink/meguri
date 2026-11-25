@@ -208,6 +208,18 @@ pub async fn serve(
 ) -> std::io::Result<()> {
     let owner = service.clone();
     let stopping = service.clone();
+    let (backup_stop, mut backup_stopped) = tokio::sync::oneshot::channel::<()>();
+    let backup_owner = service.clone();
+    let backups = tokio::spawn(async move {
+        loop {
+            // A sweep completes before shutdown releases the service owner.
+            let _ = backup_owner.sweep_backups(crate::accounts::now).await;
+            tokio::select! {
+                _ = &mut backup_stopped => break,
+                _ = tokio::time::sleep(Duration::from_secs(300)) => {},
+            }
+        }
+    });
     let (router, mcp) = mounted_router(service);
     let stopping_mcp = mcp.clone();
     let result = axum::serve(
@@ -221,6 +233,8 @@ pub async fn serve(
         stopping.native_ingress.close();
     })
     .await;
+    let _ = backup_stop.send(());
+    let _ = backups.await;
     mcp.close();
     owner.browser_ingress.close();
     owner.native_ingress.close();
@@ -401,8 +415,12 @@ async fn media_upload(service: &Service, parts: &axum::http::request::Parts, bod
     service.accept_media_upload(id.to_owned(),bytes,permit).await?;
     Ok(data(serde_json::json!({"uploaded":true}),false))
 }
+fn backup_restore_id(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/me/backups/").and_then(|s|s.strip_suffix("/restore"))
+        .filter(|id| !id.is_empty() && !id.contains('/'))
+}
 fn mutation(path: &str) -> bool {
-    matches!(
+    backup_restore_id(path).is_some() || matches!(
         path,
         "/api/mcp/media-upload"
             | "/api/setup"
@@ -423,7 +441,7 @@ fn mutation(path: &str) -> bool {
             .is_some_and(|(id, action)| !id.is_empty() && action == "revoke")
 }
 async fn dispatch(
-    service: &Service,
+    service: &Arc<Service>,
     parts: &axum::http::request::Parts,
     bytes: Option<&[u8]>,
 ) -> Result<Response> {
@@ -466,6 +484,10 @@ async fn dispatch(
                 );
                 set_cookie(&mut response, Some((&secret, expires_at)));
                 Ok(response)
+            }
+            "/api/me/backups" => {
+                let a = authority(service, &parts.headers).await?;
+                Ok(data(service.backups(a).await?, false))
             }
             "/api/me/storage" => {
                 let a = authority(service, &parts.headers).await?;
@@ -572,6 +594,12 @@ async fn dispatch(
             Ok(data((), false))
         }
         _ => {
+            if let Some(id) = backup_restore_id(path) {
+                let _: Empty = parse(bytes)?;
+                let a = authority(service, &parts.headers).await?;
+                service.restore_backup(a, id.into()).await?;
+                return Ok(data((), false));
+            }
             if let Some((id, "revoke")) = path.strip_prefix("/api/me/mcp-grants/").and_then(|s| s.split_once('/')) {
                 if !id.is_empty() {
                     let _: Empty = parse(bytes)?;

@@ -154,3 +154,28 @@ Verify the exact built browser flow in Chrome with generated accounts. Cover the
 Show the approval account returned by the consent read that bound the pending request to its browser session and credential generation. If the session changes before a decision, clear the consent and show the restart message. Issue no code and navigate to no callback.
 
 Show a grant list only when the response account matches the current screen account. Clear its controls, pending status and confirmation on account change, disregard stale results, and refresh identity on a response mismatch. Announce revocation only when the response and current screen both match the account that started the action. Test these rules by changing the session between identity lookup and consent, between consent read and Allow, and while grant-list and revoke requests are pending. Verify both mismatch and ordinary successful revocation.
+
+## W11. Signed-in collection backup API
+
+The signed-in collection history uses `sync/server-lifecycle#L9`. Both routes
+inherit W1's session authentication, response envelope, no-store/security headers,
+browser admission, query rejection and closing-body handling. The account comes
+only from the captured browser session; no account selector is accepted.
+
+| Method and route | Input | Success `data` |
+|---|---|---|
+| `GET /api/me/backups` | No query | Array newest first of `{id: string, created_at: number, kind: "daily"\|"weekly"\|"monthly"\|"before_restore", size_bytes: number}` |
+| `POST /api/me/backups/{id}/restore` | Strict JSON `{}` and exact configured Origin | `null` |
+
+Times are Unix seconds and sizes are bytes. Empty history returns `[]`.
+The restore ID is a single opaque path component. Unknown and foreign IDs both
+return `route_not_found` (404) after authentication. Restore accepts the existing
+JSON content type and body bounds and rejects extra fields, malformed bodies,
+wrong content types and origins using existing errors. History is also available
+to administrators for their own account only. Members cannot select an
+administrator's history. A pending reset/restore or corrupt point produces
+`storage_unavailable` (503); concurrent history work or a live state changed
+since safety capture produces `busy` (409). Failures never disclose private
+paths or media names. Existing browser credentials survive successful restore.
+No web request is required for daily scheduling, and opening history does not
+trigger a native collection download or alter stamps.
