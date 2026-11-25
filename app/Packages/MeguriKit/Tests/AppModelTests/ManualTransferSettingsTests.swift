@@ -6,7 +6,11 @@ import Testing
 @Suite @MainActor struct ManualTransferSettingsTests {
     @Test func ankiServerStaysOutOfSettingsUnlessATestAsksForIt() {
         #expect(SettingsPage.showsAnkiServer == false)
+        #if os(macOS)
+        #expect(SettingsPage.visible == [.accountSync, .collection, .integrations])
+        #else
         #expect(SettingsPage.visible == [.accountSync, .collection])
+        #endif
     }
 
     @Test func offlineLoadingNeverLogsInOrTransfers() async {

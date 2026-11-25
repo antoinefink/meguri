@@ -144,6 +144,10 @@ sp_lock() {
   local tries=0 pid
   mkdir -p "$SP_LEASES" || { sp_log "cannot create $SP_LEASES"; exit 1; }
   until mkdir "$SP_LOCK" 2>/dev/null; do
+    [ ! -e "$SP_LOCK/sim-posture-pending" ] || {
+      sp_log "posture input completion uncertain; coordinator reconciliation required"
+      exit 1
+    }
     pid="$(cat "$SP_LOCK/pid" 2>/dev/null)"
     # A holder that died, or one that has held it for 10 minutes (claims take
     # seconds), left a stale lock.
@@ -523,9 +527,9 @@ sp_acquire() {
     sp_lock
     sp_claim "$kind" "$rt_id" "$type" "$holder" "$ttl"
     rc=$?
-    sp_unlock
     [ "$rc" -eq 0 ] && break
     [ "$rc" -eq 3 ] || exit 1
+    sp_unlock
     if [ "$(sp_now)" -ge "$deadline" ]; then
       sp_log "all $SP_MAX $kind pool devices stayed leased for $SP_WAIT s; see: sim-pool.sh status"
       exit 3
@@ -551,6 +555,7 @@ sp_acquire() {
     sp_disable_voiceover "$SP_UDID" || exit 1
   fi
   SP_PENDING=""
+  sp_unlock
   sp_log "leased $SP_NAME ($SP_UDID, $SP_HOW) to $holder for $ttl min; release it with: sim-pool.sh release $SP_UDID"
   printf '%s\n' "$SP_UDID"
 }
@@ -586,8 +591,8 @@ sp_renew() {
       *) sp_usage "renew: unexpected argument '$1'" ;;
     esac
   done
-  sp_pool_device "$udid"
   sp_lock
+  sp_pool_device "$udid"
   if [ ! -f "$SP_LEASES/$udid/lease.json" ]; then
     sp_unlock
     sp_log "$SP_NAME ($udid) is not leased"
@@ -609,19 +614,23 @@ sp_renew() {
 sp_reset_leased() {
   local udid="${1:-}"
   [ "$#" -le 1 ] || sp_usage "reset: unexpected argument '$2'"
+  sp_lock
   sp_pool_device "$udid"
   [ -d "$SP_LEASES/$udid" ] || { sp_log "$SP_NAME ($udid) is not leased; lease it before resetting it"; exit 1; }
   [ "$SP_STATE" = Booted ] || { sp_log "$SP_NAME is $SP_STATE, not booted"; exit 1; }
   sp_reset "$udid" || exit 1
+  sp_unlock
   sp_log "reset $SP_NAME ($udid); still booted and leased"
 }
 
 sp_release() {
   local udid="${1:-}" rc=0
   [ "$#" -le 1 ] || sp_usage "release: unexpected argument '$2'"
+  sp_lock
   sp_pool_device "$udid"
   if [ ! -d "$SP_LEASES/$udid" ]; then
     sp_log "$SP_NAME ($udid) is not leased; nothing to release"
+    sp_unlock
     return 0
   fi
   if [ "$SP_STATE" != Booted ]; then
@@ -629,7 +638,6 @@ sp_release() {
     sp_boot "$udid" "$SP_STATE" && sp_settle "$SP_NAME" && sp_prepare_springboard "$udid" "$SP_NAME" || rc=1
   fi
   [ "$rc" -ne 0 ] || sp_reset "$udid" || rc=1
-  sp_lock
   rm -rf "${SP_LEASES:?}/$udid"
   sp_unlock
   if [ "$rc" -eq 0 ]; then

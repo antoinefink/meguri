@@ -33,7 +33,7 @@
       "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/page.tsx",
       "adapted_into": "src/app.tsx",
       "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links including own Collection replace sample navigation and panels. Narrow screens use a compact brand/account row before equal-width text-only navigation; desktop keeps its sidebar and account footer.",
-      "adapted_sha256": "7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63"
+      "adapted_sha256": "2d32bd613d50aa1df4e388595c11bbeeed3ba1ffb4dbd780464085205753e20d"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
@@ -41,7 +41,7 @@
       "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
       "adapted_into": "src/app.tsx",
       "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links including own Collection replace sample navigation and panels. Narrow screens use a compact brand/account row before equal-width text-only navigation; desktop keeps its sidebar and account footer.",
-      "adapted_sha256": "7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63"
+      "adapted_sha256": "2d32bd613d50aa1df4e388595c11bbeeed3ba1ffb4dbd780464085205753e20d"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/ui/sidebar.tsx",

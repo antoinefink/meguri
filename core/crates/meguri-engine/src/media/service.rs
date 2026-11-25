@@ -122,8 +122,23 @@ impl MediaService {
     }
     /// Editor attachments outside a note transaction commit immediately.
     pub fn add(&self, name: &str, bytes: &[u8]) -> Result<String, EngineError> {
+        self.add_inner(None, name, bytes)
+    }
+    /// Keep the expected generation admitted through storage and publication.
+    pub fn add_for_generation(&self, expected: u64, name: &str, bytes: &[u8]) -> Result<String, EngineError> {
+        self.add_inner(Some(expected), name, bytes)
+    }
+    fn add_inner(&self, expected: Option<u64>, name: &str, bytes: &[u8]) -> Result<String, EngineError> {
         let reader = self.collection.operation_reader(ReaderRole::Query)?;
         let generation = self.collection.generation();
+        if let Some(expected) = expected
+            && generation.0 != expected
+        {
+            return Err(EngineError::StaleGeneration {
+                planned: crate::Generation(expected),
+                current: generation,
+            });
+        }
         let stored = self.state.store.add(name, bytes).map_err(error)?;
         self.collection.core.exec.stream.publish(
             generation,

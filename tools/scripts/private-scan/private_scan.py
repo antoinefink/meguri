@@ -835,6 +835,70 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
+        '942a5279b631f540be37d0031fd3e2032911b21a56a822b9551f6d0e11a295b4',
+    'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':
+        '98ba53131645b21b17821dc509811b58942f5cd0387b95b5c32cb2eaf5064396',
+    'app/Packages/MeguriKit/Tests/AppModelTests/BrowseFieldEditingTests.swift':
+        '404bf6becef924f30c15e86eee7fa80dce45010afff0a99de45f794a0127015f',
+    'app/Packages/MeguriKit/Tests/AppModelTests/BrowseInspectorCoreTests.swift':
+        '2ce95ae66faf33cfd5d50bc78a27d665df3d048913e5ba00ed1b07726f97c139',
+    'app/MeguriUITests/MacBrowseInspectorTests.swift':
+        '9beb30fb37726aa7538b4f5eab5f6fe9e31b42d0c86e77cfd67fbc947408d928',
+    'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
+        '2609f9fde767c011219bba509519fd667f167a6f3937ce865095b64795acd2a3',
+    'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
+        '836c8128dd2bd184b1a41329cf2920e59ef5cf000736d2ed561fbd3fd84bc1b7',
+    'app/Packages/MeguriKit/Tests/CardRenderingTests/CardAudioControllerTests.swift':
+        '5c88bf3b94b11c8a7dcea45903bb551d5db4826f9f6f8e59c5fbe6f00a8edcd9',
+    'specs/render/audio-playback.md':
+        '11eda11c77a802d0951393f3a2c5b3f96a5fd1187284a2157c8b54539f579311',
+    'docs/process/review-log/meguri-sync-collection-backups-20261125.md':
+        '7c0b0a10b44ae639c53a312462f26a50cd71368853473614c4745431e949ba56',
+    'server/src/accounts/backups.rs':
+        '8d9801640afbe5dbb862060d8aea8accb4ddf47063dc775278e176559b32622a',
+    'server/tests/support/mod.rs':
+        'fbaccbd87526b237ac1db6d1a2f17ff810838bb15366409b5f0ef254d4cecce8',
+    'server/tests/media_recovery.rs':
+        'd786705aa844ae1cc1e41c9164a6f65975bd6d94355c2bc926cf48559d7e0d8f',
+    'server/tests/deletion.rs':
+        'ab0089c0ae552f21ca4cced65c799cdaf3f49e2605c5a66aa8c712dc31827cbe',
+    'server/tests/backups.rs':
+        'bc445dc6d148029a6164588148d50a05f2c25ce21ce8ceff4730657784c38d5d',
+    'server/src/storage/reset.rs':
+        'eb4b91a93c9976b7b07d3212f58e1e8e62b4deea0a9346e5e7c824c7dd052ee9',
+    'server/src/storage/mod.rs':
+        '7285b36d0b29aa93c82cb32b632239ea4b58cfd658eab661769dc0a756e05d46',
+    'server/src/storage/collection.rs':
+        'e27e2657c752118e14a57eee533d7070b2e40f29348c732b88058382a57c7537',
+    'server/src/storage/backups.rs':
+        'baf12de62a3bd512fb3d90ce639fbe94c003d5cc0f547bdb40ccb4cb2d1dd7ab',
+    'server/web/tests/api.test.ts':
+        '07eedde417f5b6a0a338c665cf42673b01d56a852fda07c5fc011cccd9ea19be',
+    'server/web/tests/browser/mcp.spec.ts':
+        '261b286236452b954829529242b040eb4d3784019eeb0e321b2f10ae7ece1f10',
+    'server/web/tests/browser/backups.spec.ts':
+        '415de8426361101e7835eb600665c7af271f7553c7f573090d576a8cf7cc25ba',
+    # Complete-content public review, collection recovery fixture, 2026-11-25.
+    'server/tests/backup_round_trip.rs':
+        '6549998c8c16276260dc3acd8f05ec395dca05f29c29072a8d25c9cee6a2a1fd',
+    'app/MeguriSnapshotTests/SentenceMiningPaneTests.swift':
+        '3a36cc9a416d05baeca475a15c39b7c8a68a452a1967e31de47235eed1be50e7',
+    'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningPortTests.swift':
+        '62037f92f41a3f706093d5c233055a9e26afa54151fb441388fb844cca074067',
+    # Complete-content PUBLIC review: cleanroom 20261124T133218Z-2230.
+    'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningHTTP.swift':
+        '18e72c0d652f3b438b3c5811cbfe83fbbfb7aff0c9ef5db68c880a534b1d8317',
+    'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningListener.swift':
+        '00b15c38d211c08a3949cb883c52bcbfa9fb2dcc059d6ab3f1c93b046bd0171f',
+    'app/Packages/MeguriKit/Sources/AppModel/Integrations/MiningWebSocket.swift':
+        'bb35c52f2d96a87117c374f9cab80da43ce9c22c430883fc508f305a77cdaa46',
+    'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningEntryTests.swift':
+        '207a37c06ba700b606294f567677085ff72f583b713a5caf1e9ae3461b819687',
+    'app/Packages/MeguriKit/Tests/AppModelTests/SentenceMiningTests.swift':
+        '7a31f9686977ee8a856e1691f8bc78fced6f815a461005358bfd9d3ad716d521',
+    'core/crates/meguri-ffi/src/notes.rs':
+        'e9fdf9804387494879a07f43a8cf21fa59343f0a7f41d1759512aee5315d61ae',
     # Complete-content PUBLIC review: s-20261124T142356Z-950aa36a, 2026-11-24.
     'app/Packages/MeguriKit/Sources/Features/Stats/Charts/StatsChartFormat.swift':
         '1cf8eb49077cdd24dcc2303c5063cdc326376f8dff8a98ccc33cc7c56acb52fa',
@@ -847,9 +911,15 @@ PUBLIC_ARTIFACTS = {
         '1bf97e602e93e0809c259aae993be3b7328aab5ce181f192cfdf95cadc3bfa8d',
     'core/crates/meguri-storage/tests/activity.rs':
         'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
-    # Merged contract, whole-file PUBLIC review in cleanroom 20261124T192531Z-55996.
+    # Complete-content PUBLIC review: compact card statistics, privacy_review, 2026-11-25.
+    'app/Packages/MeguriKit/Sources/Features/Stats/Page/Sections/StatsCardsSection.swift':
+        'e4259a20833050402de0cb3727ad09b489321ba511751470e57626d558f88508',
+    'app/Packages/MeguriKit/Tests/StatsTests/StatsSectionViewsTests.swift':
+        'f7f5e48845f1d6ad2c4a240eff0ee7de5e6904344ba50330e7314b6c4850c5d0',
     'docs/design/native-interface-contract.md':
-        'ae75b265d0f65aba457ec52d2d585140c001f2e1a7c0e07b040d6ea90136ad7d',
+        '5333a492abf1bdfb639e463774c66d0f1b5c8616fea47aeb7bc4e50ff84a147a',
+    'specs/stats/statistics-page.md':
+        '41b9df08990e51d6eb84a23b1cd9dfc24c536b539d6892638b3f61bcbc0e53b3',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
@@ -868,7 +938,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/mcp_transport/descriptors.rs':
         'c23fa9bc748dca54d7fc9464f896894b55ad21a238acd0128da736dd9e0accf8',
     'server/tests/mcp_oauth.rs':
-        '088eb8ae77b445f5c3d2566678cc9d9b594f7982f466b6d40dfac878a10fbf3a',
+        'fb74eaa7b7aa836199eb566f51034baf429477c3303d7c8dd049dd56932cc578',
     'server/src/mcp_service/transport.rs':
         '6c0fed2e3865fbdf02cd4faa84340fc70e8b888f3834cd64529ade113705bab9',
     # Complete-content PUBLIC review: mcp-search-candidates, 2026-11-22.
@@ -883,7 +953,7 @@ PUBLIC_ARTIFACTS = {
         'ce8b31f955e6aac28cf117bcb041cee67566273a6c6583bd560285c46b23a4bc',
     # Complete-content PUBLIC review: mcp-sqlite-download, 2026-11-23.
     'server/src/mcp_service/export.rs':
-        'de4bcaceea675b072c5b13569ec3b347c838cd359af8866326b5900b3696c551',
+        '463edb515478d490e6d07a1010edada22a852bbd3c451000228d245ad35fca1d',
     'server/src/mcp_service/attachments/format/audio.rs':
         '1eca9c96b3c638ad66723119d54ed0537246a3fedcd3fe6fd9acb5e8fa8043a9',
     'server/src/mcp_service/attachments/format/images.rs':
@@ -917,9 +987,9 @@ PUBLIC_ARTIFACTS = {
     'server/src/accounts/oauth/tokens.rs':
         '91e82ec8f188a98952328e82c7bbf29def1c2c85a2ba7bd3daaea2e9b55ae312',
     'server/src/accounts/deletion.rs':
-        '1d0b85ee5ad9302685654ab0212d53a0d5feae132eba1f219a812e1cfd4cf270',
+        'a33371a855de6157e3ba332305384d8622943e270640735d90e6ce7da444bb4e',
     'server/src/storage/deletion.rs':
-        '50d1e9b315653da5886ad37f0c5da546b41115025fb34ddeb7cbcb1c4259a30b',
+        'a40673bd3bbe0871786e7fbbf6bb0b80ebd3f026acf28a636b19638528d15ec9',
     "docs/process/review-log/meguri-sync-local-sign-in-recovery-20261118.md":
         "3f81b8c9ba8d4c6d8bc4912d58bfa7fb1a346f2e825d2f601e0ffa097c8603a7",
     "docs/process/review-log/app-icon-20261118.md":
@@ -929,7 +999,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '17779a1e91c303db26256265114fbd015627340676ad9e56c957330e629b9077',
+        'e4726bf8b73dac5b88b54cb33be38c06d30630d414f7dcff4fe62e8eddfc3dc2',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1065,7 +1135,7 @@ PUBLIC_ARTIFACTS = {
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
     # Complete public-file review: owned_diagnostic_review, 2026-11-19.
     "docs/process/verification-status.md":
-        "72169adb46c2ff96e675b412cfc1a5959a8c9037bca6689fcf59d73f0d093f41",
+        "5accd9f059712aa180d62515ab215d93e886faf911a4fbc3e2dbb93a662e8764",
     # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
         "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",
@@ -1131,13 +1201,13 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/IBMPlexSans-Variable.woff2':
         'e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d',
     'server/web/upstream-records.json':
-        'd7199181ece5972ea365c5086cb612f6f605fee2512af49d1667e304f3d1691c',
+        'a3a66b858a72331499de6289e4745f834d34105b52655d1c22133fe0c599b099',
     'server/web/src/style.css':
-        '6a0fdbdf6a892c051129c554b5b940271763bfda3641b0a1fecfa5f5b7583e9f',
+        '39e6e70a5d5118f450375b13c90faa1e80f6d1de4d50f2047e348e16b5bfbd2b',
     'server/web/src/app.tsx':
-        '7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63',
+        '2d32bd613d50aa1df4e388595c11bbeeed3ba1ffb4dbd780464085205753e20d',
     'server/web/tests/browser/accounts.spec.ts':
-        'ca12f0a952651e7bbbf110916fc31759c4e43679e59d0da776523afd5f6fa06d',
+        'e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3',
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
@@ -1145,7 +1215,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/notices/rolldown-THIRD-PARTY-LICENSE.txt':
         'a877291d800ed43692f3f9ae09d8e01cc6f7293ad39d43896059c188ffbb8b7c',
     'server/web/DEPENDENCIES.md':
-        '008ba5ed27984c5cab72e56055f9a63e212b2688456cc33deced3ed12737df5b',
+        '062796f5dd9be0fb9339cec1c3174aabd2db8b92d21d443fd95637239de556a9',
     'server/build.rs':
         'a4dba10f1d809a0c05836778c7c075b2e2243d7c4aeeff12ddc6f9eec3cfc6e4',
     'docker/sync-web.Dockerfile':
@@ -1199,7 +1269,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/media/recovery.rs':
         'c5388c9f59ef653beb7d7472f3195dc106bb732ecb797475cfc4671c0735eba5',
     'server/tests/media.rs':
-        'e69e8be1cac53f5d20884055ae4cced7a5ea33d460994961f43427641584a752',
+        '9aa88101ecdefc8c46120f1adac02655aa3bfe628f458dca7b6f80a6b3297a93',
     'server/tests/media_disk_full.rs':
         '98c3a131c1bb05110a2338ae9aee42fd37d8608e8f2ea854475a33ad1518ac57',
     PUBLIC_NOTICE_PATH: PUBLIC_NOTICE_SHA256,
@@ -1218,11 +1288,11 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-collection.md":
         "85c3d211817ce238682043964f4e61835a5fbc83009134b69998242563c42ccb",
     "specs/sync/server-lifecycle.md":
-        "abacc93c438e5230f8cd8a60a671e8da7efd521465d0d98d189e95444ecd20f1",
+        "ae5b10969d39c9bae94095fdb81d025d63b502cdb1d87720e5983fdd9559c5bf",
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        '5b80364781b6b1eaa16529b666cfd1ca3e6a76098dcb8c2282e7406810640bea',
+        '2a4303891cc65b73e0667511fb3d2ef941999a255f9caa816bcb5516ff599d33',
     "specs/servers/meguri-collection-mcp.md":
         "ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
@@ -1283,21 +1353,21 @@ PUBLIC_ARTIFACTS = {
     'server/src/main.rs':
         '46699d99127a80945a264e9a461c17cdfcaf1f28cacf56ebf80ed9cd8d9882bf',
     'server/src/accounts/mod.rs':
-        '346cd0468f349b31790e32cf1c62f93169cc810a8fb75af4646338a41285052b',
+        'f83fbc6374f84b3189947e87de740cf4de749279c3d4783cca4bf97c1f1ec330',
     'server/src/accounts/provision.rs':
         'f75596225c443a3f33a58c5e1322ceba52326c4a7b507723c30b4f2aa6fc0416',
     'server/src/httpapi/AGENTS.md':
-        'ee08f06fbb1c5c420b5dbf55137846012523c0ec5aa37d6f73435f07bb722785',
+        'dbe717cde0b794b08a2fd368b90d75a4a7c9bc626c87de3dd4b7c1d04d22c89d',
     'server/src/httpapi/ingress.rs':
         'aaee8e568d0a2c915288942b847f45ec262874d13887ce2911bbe0dac4f39ef6',
     'server/src/httpapi/mod.rs':
-        '3053d0d96124426ef439d115d9fcaecde48e3d378fcbaa99b1b921fefc57196d',
+        'd3c7d5e496d2d59a7f5afd2f1ebd4b5b8e51063f6c5a71947a6aac1bb6f8cb67',
     'server/src/httpapi/tests.rs':
-        '370858800185720681b7f457ceded7bd414d1ae1d2defd513decb72ece76528d',
+        '502eb8ce076fa4fb2e8f81ce6a5efc00a3c4da7d4dad0c56eedaefece095704c',
     'server/src/storage/schema.sql':
         '4842a61b5bf0e3b8e909364d5df7667aea59f054c7175313dd28f840f6c7a31b',
     'server/src/storage/semantic.rs':
-        'f5a3cc2e74103e01b6c38f407152892f38ef87f69b21b8a908fc7b2dc9de65b2',
+        '50df314a245ee5e41294b8c732ec0a5de9a4b8eab5fe1a9b0e4a1fd5e60de710',
     'server/src/storage/tests.rs':
         '4f31caea298b452a0e4071926355d60cf6856bb40075c78dcffbe19f04d29297',
     'server/tests/accounts.rs':
@@ -1317,7 +1387,7 @@ PUBLIC_ARTIFACTS = {
 
     # Independently reviewed public transfer code and process evidence.
     'server/src/collection/schema.rs':
-        'e17519c1a370abb797bba2f0beebeb6813f80d954fc2e7a952a626c74d887fea',
+        'b6e1a6d0ad4657ad6d56b9d62cbb02e86ca153564335cceb6cdefd8c858accd2',
     'server/src/protocol/framing.rs':
         'a1349d00d0b25dd659e0e8fff5d3adc6b7ce63d20f861e17604e60071d79b777',
     'server/src/protocol/full.rs':
@@ -1325,7 +1395,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/protocol/mod.rs':
         '32c7e634ac02543ee958fa7df92aad82c2d7600c29271ed0d97a91423ac35d84',
     'server/src/storage/root.rs':
-        'e7f20fb65aeb45ae6e75c14c4b1eb5784608881a1126de47080e36da91bbea64',
+        'a060ba8e3453cae2c6ef4f4eb79287e634b9106138649dcfc12739b753a4df5a',
     'server/tools/candidate-output.py':
         '873c3ce682b93f23caa118b0d0b7f07792d7111e80a4ee1a51a0fe7631dd46f8',
     'docs/process/review-log/meguri-sync-U5.md':
@@ -1355,7 +1425,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '125a87c0294d5e6535bcc729ed24d21034d4a58615f60747d4765b21ac3c8578',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '079593aab3e69f01f91cb900ca3e328ffe3dea3706933bc527ba9e47d64586b4',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',
@@ -1371,6 +1441,50 @@ PUBLIC_ARTIFACTS = {
     'server/tools/package-smoke.mjs': '8a4ac4d7a54677a9fee3f64c4132de34e088d2f514c74c16083dbe9236ac456b',
     'tools/mg.d/meguri-provider-test.sh': 'bf637fbb25533a5cb354c079f4ee89d1518693e8e3b47c4c6d12b5c5467921f0',
     'tools/mg.d/meguri-native-provider.sh': '054b3eddd84f0d3f58a46075d4b0181a610a13ae728b87cfeda2ed09c779e94d',
+    # Independent full-file review in cleanroom/20261125T093743Z-19179.
+    'docs/process/review-log/duo-posture-rework-20261124.md':
+        'bbad727f0553d5bf9f23e6835b3a46f62fe4346ef3fffd2ad021ab47d15e3f25',
+    # Complete-file reviews recorded in duo-posture-rework-20261124.md.
+    'tools/vm/vnc-hosted.py':
+        'c8916ab8cd15022303ab060b6a5d7f0b29e31466ecd1329639db8cbdcd1274ba',
+    'tools/vm/tests/test_hosted_posture.py':
+        '3d7868c00eba12d3eb974b214440b27959564ff2ba87039f464d13d728e844d0',
+    'docs/process/sim-posture.md':
+        'c25258d6c316996e858f3cd1e6f248d1c702f5e38b48b7604909680d4ab236bc',
+    'tools/vm/sim-posture-visual.swift':
+        '69330e3a690576dd8a97e4072579c65c81145b48de69fe4225e1aa2ff3c789a0',
+    'tools/vm/sim-posture.py':
+        '71edf3b55e6058b98b025f9c38c536107d19f96faf24a1f3fd3566b275c309fe',
+    'tools/vm/tests/test_sim_posture.py':
+        'd91c8097797b98c7c249f20c361ef991e3ad7d6a907427a14777aeb2a677fec3',
+    # Independent reviews in duo-posture-rework-20261124.md.
+    'tools/scripts/vm-claim.py':
+        'f71d76cc817da0a7e83b3232c710f58da883b8e10c96eeca484abb459d3034c8',
+    'tools/vm/fold-claim.py':
+        '564946f07653219766b95394d127c760c4705ae0bdf02d70748b0b6c1392095c',
+    'tools/vm/tests/test_fold_claim.py':
+        '86fc1ba9df429f7fd4d32a5d38e631e861019922deea7ccc6bbb8ed4220a947d',
+    # Independent reviews in duo-posture-rework-20261124.md.
+    'tools/vm/AGENTS.md':
+        '01acd3234d195b3e59b52a4c63c115b144295dbd9a06134d688cdf959899e7fd',
+    'tools/vm/sim-posture-ocr.swift':
+        'e50ac5439716639e79a6f892332164440afac67be61efad7caee47867e2f50d1',
+    'docs/process/mac-ui-vm.md':
+        'd92608224bcd7d2dcff83454be03856dde7bab9a9420e9546dad123b41d0b0ee',
+    'tools/vm/duo-fold.sh':
+        '92ee39fb80652d04bbd1fd004b1aa0af4bc7c6c02e77a3c283422e6418a739f9',
+    # Complete-file review of the Duo transport repair, 2026-11-24.
+    'docs/process/new-machine.md':
+        '2e72954d450e927909eb814f062570b9dcf8aae54c81529bafd07e42a527c7eb',
+    'tools/tests/vnc_session_test.py':
+        '12f2aac01221f01874cc62b0559b1fba9797e01b8801870a6b13fa44dcb857e4',
+    'tools/vm/vnc-holder.py':
+        'd730c4b3e646d82f0b9540a3a4d1d39d40d46d6bfafb5f890da655f8c32a5d81',
+    # Complete-file privacy reviews for the remote Duo tooling, 2026-11-24.
+    'docs/process/review-log/duo-simulator-posture-20261124.md':
+        '678c5d137d1b74876d52382f3c27e53a0a3eef2d70fcae355f4d404f1eabb0c1',
+    'tools/vm/sim-posture-inspect.py':
+        '77b2400f8950ab9ec31ded8dbc093a41e9b1b88c8fd1104889ec32daeca7a239',
     'tools/tests/remote_wrapper.bats': '4c167356b41f7f6b30467e109e1855169fbfa2bbf6f4a06c83a98fd60912af5c',
     'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
     'tools/tests/meguri_provider_real_server.bats': '08ede8953f4bd60ee36a9ae0824347d1b5340cb48a412b95523241a1dd661cbe',

@@ -9,6 +9,9 @@ public protocol ReviewCardSurface: AnyObject {
     var onRecovery: (() -> Void)? { get set }
     var editing: Bool { get }
     func load() async throws
+    func beginPresentationAudio()
+    /// Terminal/error teardown; the next eligible card presentation reopens audio.
+    func invalidatePresentationAudio()
     func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws
     func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws
     func preload(item: ReviewHeadItem) async throws
@@ -33,6 +36,8 @@ public protocol ReviewCardSurface: AnyObject {
 }
 
 extension ReviewCardSurface {
+    public func beginPresentationAudio() {}
+    public func invalidatePresentationAudio() { pair?.invalidateReviewPresentation() }
     public var onWillPresent: (() -> Void)? { get { nil } set {} }
     public var reusable: Bool { true }
     public func prepareFirst(item: ReviewHeadItem, payload: CardPayload) async throws {}
@@ -221,21 +226,30 @@ public final class ReviewPages: ReviewCardSurface {
         if items.isEmpty { currentMediaRefs = [] }
         updateVisibleMedia()
     }
+    private var presentationAudioIntent: UInt64?
+    public func beginPresentationAudio() { presentationAudioIntent = pair?.audioIntent }
     public func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws {
         guard let pair else { throw BridgeError.internal("Missing review pages") }
         guard let rendered = cards[item.renderKey] else { throw BridgeError.internal("Missing rendered card") }
         let card = payload(rendered, item: item)
+        let audioIntent = presentationAudioIntent ?? pair.audioIntent
+        presentationAudioIntent = nil
+        pair.admitReviewAudio(intent: audioIntent)
         let early = first
         first = nil
         let update: CardUpdate
-        if let prepared, prepared.0 == item.renderKey { update = prepared.1 }
-        else if let early, Self.serves(early, item: item, payload: card, idle: pair.idle) {
+        // A pause, an audio interruption, a cancelled preload or a lost web
+        // process empties the idle page: a preload it no longer holds is
+        // prepared again.
+        if let prepared, prepared.0 == item.renderKey, pair.idle.update == prepared.1, pair.idle.settled, !pair.idle.closed {
+            update = prepared.1
+        } else if let early, Self.serves(early, item: item, payload: card, idle: pair.idle) {
             // The card prepared before the session (R1813) is this session's
             // own first card, with this session's own render: present it.
             update = early.update
             startTrace?.cardWasPreloaded()
         } else {
-            update = try await pair.prepare(card)
+            update = try await pair.prepare(card, audioIntent: audioIntent)
             observeHost(pair.idle, update: update, purpose: .warmup)
         }
         try Task.checkCancellation()
@@ -246,7 +260,8 @@ public final class ReviewPages: ReviewCardSurface {
         onWillPresent?()
         CATransaction.begin()
         defer { CATransaction.commit() }
-        _ = try pair.present(update, inputTime: inputTime)
+        pair.admitReviewAudio(update: update, intent: audioIntent)
+        _ = try pair.present(update, inputTime: inputTime, audioIntent: audioIntent)
         currentMediaRefs = rendered.mediaRefs
         updateVisibleMedia()
         if !inputActive { pair.pauseAudio() }
@@ -276,6 +291,8 @@ public final class ReviewPages: ReviewCardSurface {
         guard let pair else { return }
         guard let rendered = cards[item.renderKey] else { throw BridgeError.internal("Missing preloaded card") }
         let revision = mediaRevision
+        // The idle page is reused from here: it no longer holds an earlier preload.
+        prepared = nil
         let update = try await pair.prepare(payload(rendered, item: item))
         // An arrival can be delivered while the idle page is still settling.
         // Do not publish that older preparation after its invalidation.

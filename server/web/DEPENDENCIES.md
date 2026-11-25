@@ -242,3 +242,15 @@ input inventory drops the picker and its browser tests. The server
 HTTP tests cover the binary POST and note attachment without a browser.
 The inventory records the exact browser input and packaging-control
 changes. The dependency graph, upstream inputs and notices stay pinned.
+
+### Backup web verification fixes (2026-11-25)
+
+History rows are validated before rendering; restore succeeds only with a null
+result. An unknown result requires an explicit history refresh before another
+restore. Identity and storage reads use request ownership to reject stale
+answers. Focused regressions cover lost responses after a simulated commit,
+session retirement and slow storage; confirmation captures use the region.
+The complete web input inventory and adapted app hashes are refreshed from
+the final bytes. Dependency, advisory and trust-root rules are unchanged.
+MG execution, image rebuilding and independent exact-content review remain
+with the outer integrator; this refresh records no new passing evidence.

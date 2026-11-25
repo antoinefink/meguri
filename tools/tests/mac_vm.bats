@@ -33,6 +33,8 @@ setup() {
   export MEGURI_MAC_VM_POLL_SECONDS=1 MEGURI_MAC_VM_BOOT_SECONDS=6 MEGURI_MAC_VM_STOP_SECONDS=2
   unset MEGURI_MAC_UI_ALLOW_HOST MEGURI_MAC_UI_INTERVAL_MINUTES
   export FAKE_VM_DIR="$BATS_TEST_TMPDIR/vms" FAKE_VM_MIRROR="$BATS_TEST_TMPDIR" FAKE_VM_BIN="$BATS_TEST_TMPDIR/vm-bin"
+  # The VM's claim file, in this test's own VM file system (mirrored path).
+  export MEGURI_MAC_VM_CLAIM_PATH="$BATS_TEST_TMPDIR/vm-claim.lock" MEGURI_MAC_VM_CLAIM_POLL_SECONDS=1 MEGURI_MAC_VM_CLAIM_BEAT_SECONDS=1 MEGURI_MAC_VM_SHARED_CLAIM=1
   : >"$STUB_LOG"
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN" "$FAKE_VM_BIN" "$FAKE_VM_DIR"
@@ -786,6 +788,68 @@ exec '"$(command -v tar)"' "$@"'
   touch "$BATS_TEST_TMPDIR/first-done"
   wait "$first"
   [ "$(jq -r .details.mac_vm.name "$(tail -n 1 "$BATS_TEST_TMPDIR/first.out")")" = meguri-mac ]
+}
+
+@test "another Mac's job holds the VM's claim: this Mac's job waits, stops and starts nothing there, then runs" {
+  local lock other
+  lock="$(vm_fs meguri-mac "$MEGURI_MAC_VM_CLAIM_PATH")"
+  mkdir -p "$(dirname "$lock")"
+  # The other Mac's keeper, as the VM sees it: a process holding the file's lock.
+  perl -MFcntl=:flock -e 'open(my $f, "+>>", $ARGV[0]) or die; flock($f, LOCK_EX) or die;
+    syswrite($f, qq({"machine":"m5","job":"ui-test","worktree":"/other","started_at":"2030-01-01T00:00:00Z"}\n));
+    open(my $r, ">", "$ARGV[1].held"); close($r); sleep 1 until -e $ARGV[1];' "$lock" "$BATS_TEST_TMPDIR/other-done" 3>&- &
+  other=$!
+  bg_track "$other"
+  wait_for "$BATS_TEST_TMPDIR/other-done.held"
+  "$SB/tools/mg" mac-ui --suite a11y >"$BATS_TEST_TMPDIR/first.out" 2>"$BATS_TEST_TMPDIR/first.err" 3>&- &
+  local first=$!
+  bg_track "$first"
+  for _ in $(seq 1 150); do grep -q 'VM claim: waiting' "$BATS_TEST_TMPDIR/first.err" && break; sleep 0.1; done
+  grep -q 'VM claim: waiting for meguri-mac (ui-test on m5 in /other since 2030-01-01T00:00:00Z)' "$BATS_TEST_TMPDIR/first.err"
+  sleep 1
+  not_called "^vm-xcodebuild "
+  not_called "^vm-products "
+  not_called "pkill"
+  # Nothing of this checkout was copied into the VM meanwhile.
+  [ ! -e "$(vm_fs meguri-mac "$SB/build/app/DerivedData/Build/Products/Debug/Meguri.app/Contents/Info.plist")" ]
+  touch "$BATS_TEST_TMPDIR/other-done"
+  wait "$other"
+  wait "$first"
+  [ "$(jq -r .status "$(tail -n 1 "$BATS_TEST_TMPDIR/first.out")")" = pass ]
+  [ "$(jq -r .details.mac_vm.claim.waited_s "$(tail -n 1 "$BATS_TEST_TMPDIR/first.out")")" -ge 1 ]
+  called "^vm-xcodebuild "
+}
+
+@test "a job holds the VM's claim while it runs and frees it when it ends" {
+  local lock first
+  lock="$(vm_fs meguri-mac "$MEGURI_MAC_VM_CLAIM_PATH")"
+  FAKE_VM_XCODEBUILD_UNTIL="$BATS_TEST_TMPDIR/first-done" "$SB/tools/mg" mac-ui --suite a11y \
+    >"$BATS_TEST_TMPDIR/first.out" 2>/dev/null 3>&- &
+  first=$!
+  bg_track "$first"
+  wait_for "$BATS_TEST_TMPDIR/first-done.started"
+  # Held: another Mac's attempt would be refused, and told who holds it.
+  run perl -MFcntl=:flock -e 'open(my $f, "+>>", $ARGV[0]) or die; exit(flock($f, LOCK_EX | LOCK_NB) ? 0 : 3)' "$lock"
+  [ "$status" -eq 3 ]
+  # The fake VM rewrites the test's paths in a command, the holder's too.
+  [ "$(jq -r '"\(.job) \(.worktree)"' "$lock")" = "mac-ui $(vm_fs meguri-mac "$SB")" ]
+  touch "$BATS_TEST_TMPDIR/first-done"
+  wait "$first"
+  [ "$(jq -r .status "$(tail -n 1 "$BATS_TEST_TMPDIR/first.out")")" = pass ]
+  # Freed with the lease, within the keeper's next looks.
+  for _ in $(seq 1 60); do
+    perl -MFcntl=:flock -e 'open(my $f, "+>>", $ARGV[0]) or die; exit(flock($f, LOCK_EX | LOCK_NB) ? 0 : 3)' "$lock" && break
+    sleep 0.1
+  done
+  perl -MFcntl=:flock -e 'open(my $f, "+>>", $ARGV[0]) or die; exit(flock($f, LOCK_EX | LOCK_NB) ? 0 : 3)' "$lock"
+  [ ! -s "$lock" ]
+}
+
+@test "MEGURI_MAC_VM_SHARED_CLAIM=0 runs without the VM's claim" {
+  MEGURI_MAC_VM_SHARED_CLAIM=0 mg mac-ui --suite a11y
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.mac_vm.claim)" = null ]
+  [ ! -e "$(vm_fs meguri-mac "$MEGURI_MAC_VM_CLAIM_PATH")" ]
 }
 
 @test "a VM lease left by a run that died is taken over" {

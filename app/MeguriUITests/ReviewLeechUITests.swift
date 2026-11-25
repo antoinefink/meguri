@@ -4,12 +4,47 @@ import XCTest
 /// The leech notice as one icon in the review's top controls (N16.11), on the
 /// `leech-review` recipe: a threshold of 1 makes the next Again on a review
 /// card a leech answer. The icon comes first in the trailing controls, stays
-/// through the next card's reveal, shows its details on a press and goes when
-/// that card is answered. Captures, light and dark, for the owner's review.
+/// through the next card's reveal, shows on a press which card it was and what
+/// the answer did, and goes when that card is answered. Where Browse is shown
+/// (the Mac), the details open that card in Browse. Captures, light and dark,
+/// for the owner's review.
 @MainActor
 final class ReviewLeechUITests: XCTestCase {
     func testTaggedLeechLight() throws { try checkLeech(deck: "Leech Tag", dark: false, suspended: false) }
     func testSuspendedLeechDark() throws { try checkLeech(deck: "Leech Suspend", dark: true, suspended: true) }
+
+    /// N16.11 (2026-11-25): Show in Browse leaves the review for Browse on the leech card.
+    func testShowInBrowseOpensTheLeechCard() throws {
+        #if os(macOS)
+        let (app, bundleIdentifier) = try open("Leech Tag", dark: false)
+        try reveal(app, bundleIdentifier)
+        try press(element(app, "review.session.rate.again"), app, bundleIdentifier)
+        try press(element(app, "review.session.leech"), app, bundleIdentifier)
+        let show = element(app, "review.session.leech.showInBrowse")
+        XCTAssertTrue(show.waitForExistence(timeout: 10), "Browse is shown on the Mac, so the details offer it")
+        // The recipe's question is its note's front and " side 1"; Browse lists the front.
+        // The question is read after the notice shows, so it can follow the button.
+        let named = element(app, "review.session.leech.question")
+        XCTAssertTrue(named.waitForExistence(timeout: 10), "The details name the card")
+        let question = named.value as? String ?? ""
+        XCTAssertTrue(question.hasSuffix(" side 1"), "The details name the card: \(question)")
+        let front = String(question.dropLast(" side 1".count))
+        try press(show, app, bundleIdentifier)
+        XCTAssertTrue(element(app, "browse.results.table").waitForExistence(timeout: 20), "Browse opens")
+        XCTAssertFalse(element(app, "review.session.screen").exists, "The review is left, as by Back to Decks")
+        // The search is that one card: one of the fixture's six, and it is the answered one.
+        let status = element(app, "browse.status.text")
+        let one = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value BEGINSWITH %@", "1 of 6 "),
+                                                                   object: status)], timeout: 20)
+        XCTAssertEqual(one, .completed, "Browse lists the one card: \(status.value as? String ?? "")")
+        let row = app.staticTexts.matching(NSPredicate(format: "value == %@ OR label == %@", front, front)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "Browse lists the answered card, \(front)")
+        settle()
+        capture(app, "leech-show-in-browse")
+        #else
+        throw XCTSkip("Browse is not shown on this device, so the details offer no Show in Browse")
+        #endif
+    }
 
     private func checkLeech(deck: String, dark: Bool, suspended: Bool) throws {
         let (app, bundleIdentifier) = try open(deck, dark: dark)
@@ -45,11 +80,20 @@ final class ReviewLeechUITests: XCTestCase {
         let details = element(app, "review.session.leech.details")
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         settle()
+        // The answered card leads: its question, then that it was the previous card.
+        XCTAssertTrue(element(app, "review.session.leech.question").waitForExistence(timeout: 10), "The details name the card")
         // The Mac exposes a text's words as its value, touch as its label.
-        let text = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "leech threshold", "leech threshold")).firstMatch
-        XCTAssertTrue(text.exists, "The details say what a leech is")
+        let previous = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "Previous card", "Previous card")).firstMatch
+        XCTAssertTrue(previous.exists, "The details say it was the previous card")
+        let text = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "Tagged", "Tagged")).firstMatch
+        XCTAssertTrue(text.exists, "The details say the note was tagged")
         let suspendedText = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "unsuspend", "unsuspend")).firstMatch
         XCTAssertEqual(suspendedText.exists, suspended, "The suspended variant says the card is suspended")
+        #if os(macOS)
+        XCTAssertTrue(element(app, "review.session.leech.showInBrowse").exists, "Browse is shown on the Mac")
+        #else
+        XCTAssertFalse(element(app, "review.session.leech.showInBrowse").exists, "No Browse on this device, so no action")
+        #endif
         capture(app, "leech-\(name)-popover")
         dismiss(app, details)
 

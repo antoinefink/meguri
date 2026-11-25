@@ -7,9 +7,13 @@ It is not a backup: back it up separately before deleting or replacing it.
 
 ## Current coordinator and remote test VM
 
-M5 is the sole MG scheduler and Apple build coordinator. The headless
-`meguri-mac` guest stays on T9 attached to M3 Max. M3 Max hosts Tart; it does
-not run a second MG scheduler. Keep leases and jobs on M5, across its worktrees.
+M5 is the Apple build coordinator and schedules folding over SSH. Both Macs
+can schedule other VM jobs; MG's guest-wide claim serializes guest access
+(`tools/vm/AGENTS.md`). The headless `meguri-mac` guest stays on T9 attached to
+M3 Max, which hosts Tart and the resident VNC connection that folding reuses.
+M3 Max's per-user `mac-vm.json` names the kit's `bin/tart` and `bin/vm-ssh`
+directly. Each Mac keeps its leases across its own worktrees.
+
 The coordinator uses the existing SSD-local `bin/tart` and `bin/vm-ssh`
 wrappers over SSH. Those select `TART_HOME` and the guest's identity; do not
 copy their key or duplicate that logic on M5.
@@ -146,14 +150,62 @@ failures remain in that log for inspection on the hosting Mac. MG still checks
 Tart state and guest readiness. A dropped coordinator connection cannot
 terminate the detached guest. Nothing here stops or recreates it.
 
-Manual VNC starts (including `--vnc-experimental`) remain foreground SSH calls.
-They need their own explicitly managed SSH port-forward tunnel from M5 to the
-hosting Mac's VNC listener; a printed hosting-Mac loopback URL is not reachable
-from M5 directly. Keep the session password private and allow only the one
-holder connection (`mac-ui-vm.md`). The local `duo-fold.sh` helper does not
-create that remote tunnel; its local-address assumption is insufficient for
-remote VNC. Return to ordinary headless operation under the existing VM lease
-and recovery rules after a manual session.
+New remote posture sessions use an M3-resident supervisor and holder under
+`runtime/vnc-owner-v1`, using the actual hosting `bin/tart`. M5 schedules folding;
+both Macs may schedule ordinary jobs under the shared guest claim. Deploy and
+preflight before operator maintenance:
+`tools/mg sim-posture deploy`, `tools/mg sim-posture preflight`, then
+`tools/mg sim-posture maintenance-prepare` and `tools/mg sim-posture status`.
+The maintenance command declares, for that invocation only, that the operator
+has externally suspended dispatch on BOTH Macs and drained outstanding jobs
+and leases; MG cannot detect that administrative pause. Everyday `prepare`
+only reuses the connected hosted owner; initial boot/migration or a supported
+stopped-reservation resume requires maintenance. A disconnected hosted owner
+still cannot be replaced by this runtime, even in maintenance. See
+[resident deployment, migration and connection reuse](sim-posture.md#resident-deployment-and-the-one-drained-migration)
+for exact commands, prerequisites and pending lab acceptance. Control calls
+are short reconnectable SSH RPCs; Tart, RFB and private state survive their
+loss. There is no M5 VNC tunnel for a new remote session. An existing hosted
+connection is reused without a stop/start. Do not connect another RFB client.
+
+The following lifecycle and forward details apply to retained legacy/local
+routes. They do not authorize a new remote foreground VNC session or a second
+restart of the resident route.
+
+Preparation, manual `duo-fold.sh start` and `stop` support only the configured
+primary VM (the first entry), using its one M5 scheduler lease and the single
+existing main-checkout `build/vm-fold` state directory. Secondary lifecycle
+requests and state naming another VM are refused before teardown/start.
+They share MG's scheduler mutex primitives and
+refuse active guest simulator acquisitions, unknown lease expiry/inventory or
+running guest test jobs before stopping. Expired records, including orphans,
+are read without changing them. Repeated preparation never restarts an existing
+session. Read-only status/inspection can verify a previous-format session;
+its teardown and any ambiguous state require operator recovery, never PID cleanup.
+A fresh preparation checks the control socket's actual bind/listen before
+stopping, including macOS's maximum 103-byte socket pathname. Shorten the main
+checkout path if needed; no alternate state directory is created. SSH forward
+readiness uses macOS `lsof` evidence for the owned foreground SSH child's exact
+loopback listener, never a VNC probe connection. The holder reports actual RFB
+loss even while FIFO-idle; readiness requires live transports. A disconnected
+post-prepare status fails preparation; read-only status can successfully report
+disconnected. Linux/Docker tests substitute the macOS OS observation, not a live
+M5 transport acceptance check.
+
+A failed preparation keeps restoration armed after a completed shutdown,
+including a failed subsequent stopped-state query. It attempts ordinary headless
+service only after confirming stopped state and the owned remote run's exit.
+A lost/255/timed-out shutdown or unknown remote run completion retains evidence
+and refuses another start. Rerunning the installed wrapper or observing Tart's
+state cannot recover a lost command exit. These cases, unowned historical
+sessions and unavailable owners need operator reconciliation on M3 and M5;
+`stop` is not a guaranteed repair. Retain private evidence, do not clear PID/
+owner/pending records or prepare again to bypass the refusal. No automatic
+recovery command is provided for that unresolved state.
+
+Release the acquired simulator with `tools/mg sim release <udid>` before
+`tools/vm/duo-fold.sh stop`; wait for guest test jobs too. Raw Tart/holder/tunnel logs and the session
+password stay in private main-checkout state; never copy them into results.
 
 ## Moving a local VM (historical alternative)
 

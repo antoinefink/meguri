@@ -1,5 +1,8 @@
 import Foundation
 import XCTest
+#if os(macOS)
+import AppKit
+#endif
 
 /// Browse's inspector on the Mac (U273, restyled as Option A; `browser/workspace`
 /// V7, V12; N21.3, N21.4, N21.5, N21.8), over the generated typical recipe on the real core:
@@ -14,6 +17,153 @@ final class MacBrowseInspectorTests: XCTestCase {
     #if os(macOS)
     func testInspectorLight() throws { try inspector(appearance: "light") }
     func testInspectorDark() throws { try inspector(appearance: "dark") }
+
+    /// H4 and Browse M4: bare Return belongs to the field, including consecutive
+    /// Returns at an empty line. Use app-level keys to exercise shell routing.
+    func testConsecutiveReturnsPersist() throws {
+        guard CardSwapTimingGate.hypervisorPresent() == true else {
+            throw XCTSkip("Browse keyboard regression runs only in the Mac test VM")
+        }
+        let (app, bundle) = try launch(appearance: "light")
+        try openBrowse(app, bundle)
+        try showDeck(app, bundle, containing: "Español")
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count > 1 })
+        press(table.outlineRows.element(boundBy: 0))
+        let fields = element(app, "editor.fields").textViews
+        XCTAssertTrue(shows(fields, "palabra"))
+        let originalFront = try XCTUnwrap(fields.element(boundBy: 0).value as? String)
+        let field = fields.element(boundBy: 1)
+        field.click()
+        app.typeKey("a", modifierFlags: [.command])
+        app.typeText("returnbeforereturnafter")
+        for _ in "returnafter" { app.typeKey(.leftArrow, modifierFlags: []) }
+        for _ in 0..<2 { app.typeKey(.return, modifierFlags: []) }
+        app.typeText("returnmiddle")
+        for _ in 0..<3 { app.typeKey(.return, modifierFlags: []) }
+        app.typeText("returnlast")
+
+        let expected = "returnbefore<div><br></div><div>returnmiddle</div>" +
+            "<div><br></div><div><br></div><div>returnlastreturnafter</div>"
+        let html = element(app, "editor.field.1.htmlToggle")
+        XCTAssertTrue(html.isEnabled, "the field retains focus after every bare Return")
+        html.click()
+        XCTAssertTrue(waitUntil { field.value as? String == expected },
+                      "two then three Returns preserve intervening blank lines and text on both sides: \(field.value ?? "")")
+        html.click()
+        press(table.outlineRows.element(boundBy: 1))
+        XCTAssertTrue(waitUntil {
+            guard fields.count > 1, let front = fields.element(boundBy: 0).value as? String else { return false }
+            return front.contains("palabra") && front != originalFront
+        }, "the other note has loaded before returning")
+        press(table.outlineRows.element(boundBy: 0))
+        XCTAssertTrue(shows(fields, originalFront))
+        field.click()
+        XCTAssertTrue(html.isEnabled)
+        html.click()
+        XCTAssertTrue(waitUntil { field.value as? String == expected }, "all blank lines survive the row-switch save")
+    }
+
+    /// P7/P11/P16: a real system-clipboard bitmap is inserted by Cmd-V at the
+    /// caret, stored as media, and decoded again after loading another note.
+    func testCommandVPastesBitmapAtCaretAndPersists() throws {
+        // Check before launch or any pasteboard access; never inspect/save the
+        // workstation's clipboard. The only data written here is synthetic.
+        guard CardSwapTimingGate.hypervisorPresent() == true else {
+            throw XCTSkip("System clipboard regression runs only in the Mac test VM")
+        }
+        let (app, bundle) = try launch(appearance: "light")
+        try openBrowse(app, bundle)
+        try showDeck(app, bundle, containing: "Español")
+        let table = resultsTable(app)
+        XCTAssertTrue(waitUntil { table.outlineRows.count > 1 })
+        press(table.outlineRows.element(boundBy: 0))
+        let fields = element(app, "editor.fields").textViews
+        XCTAssertTrue(shows(fields, "palabra"))
+        let originalFront = try XCTUnwrap(fields.element(boundBy: 0).value as? String)
+        let field = fields.element(boundBy: 1)
+        field.click()
+        app.typeKey("a", modifierFlags: [.command])
+        app.typeText("picturebeforepictureafter")
+        for _ in "pictureafter" { app.typeKey(.leftArrow, modifierFlags: []) }
+
+        // Deliberately nonsquare and below the inspector's thumbnail limits.
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
+            pixelsWide: 24, pixelsHigh: 12, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let red = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+        let blue = NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
+        for y in 0..<12 {
+            for x in 0..<24 { bitmap.setColor(x < 12 ? red : blue, atX: x, y: y) }
+        }
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        defer { pasteboard.clearContents() }
+        XCTAssertTrue(pasteboard.setData(png, forType: .png))
+        app.typeKey("v", modifierFlags: [.command])
+        let image = field.images.firstMatch
+        func assertRenderedBitmap(_ name: String) throws {
+            XCTAssertTrue(waitUntil(timeout: 20) { image.exists }, "the field exposes the pasted image")
+            XCTAssertEqual(field.images.count, 1)
+            let frame = image.frame
+            XCTAssertTrue(field.frame.contains(frame), "the actual image is inside the edited field")
+            // AX encloses fractional WebKit geometry by rounding outwards:
+            // an exact 24 × 12 image can occupy a 25 × 13 AX rectangle.
+            XCTAssertTrue([CGFloat(24), 25].contains(frame.width), "24 pt nominal width, outward-rounded: \(frame)")
+            XCTAssertTrue([CGFloat(12), 13].contains(frame.height), "12 pt nominal height, outward-rounded: \(frame)")
+
+            // Capture only the actual image element, never the fixture bitmap.
+            let shot = image.screenshot()
+            let attachment = XCTAttachment(screenshot: shot)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            let cgImage = try XCTUnwrap(shot.image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+            let rendered = NSBitmapImageRep(cgImage: cgImage)
+            XCTAssertGreaterThanOrEqual(rendered.pixelsWide, 24)
+            XCTAssertGreaterThanOrEqual(rendered.pixelsHigh, 12)
+            // Interior 3 × 3 patches at 1/4 and 3/4 width avoid the caret,
+            // rounded crop edges and the JPEG seam. Allow lossy encoding,
+            // but require every sampled pixel to have the fixture's color.
+            for (fraction, isRed) in [(0.25, true), (0.75, false)] {
+                let x = Int(Double(rendered.pixelsWide) * fraction)
+                let y = rendered.pixelsHigh / 2
+                for dy in -1...1 {
+                    for dx in -1...1 {
+                        let color = try XCTUnwrap(rendered.colorAt(x: x + dx, y: y + dy)?.usingColorSpace(.sRGB))
+                        let dominant = isRed ? color.redComponent : color.blueComponent
+                        let opposite = isRed ? color.blueComponent : color.redComponent
+                        XCTAssertGreaterThan(dominant, 0.65, "\(name): \(color)")
+                        XCTAssertLessThan(max(color.greenComponent, opposite), 0.3, "\(name): \(color)")
+                        XCTAssertGreaterThan(dominant, 2 * max(color.greenComponent, opposite), "\(name): \(color)")
+                    }
+                }
+            }
+        }
+        try assertRenderedBitmap("browse-pasted-bitmap-at-caret-synthetic")
+
+        let html = element(app, "editor.field.1.htmlToggle")
+        XCTAssertTrue(html.isEnabled)
+        html.click()
+        let pattern = #"^picturebefore<img src="paste-[a-f0-9]{40}\.(jpg|png)">pictureafter$"#
+        XCTAssertTrue(waitUntil {
+            (field.value as? String ?? "").range(of: pattern, options: .regularExpression) != nil
+        }, "paste stores a media reference exactly between the text around the caret")
+        let savedHTML = try XCTUnwrap(field.value as? String)
+        html.click()
+        press(table.outlineRows.element(boundBy: 1))
+        XCTAssertTrue(waitUntil {
+            guard fields.count > 1, let front = fields.element(boundBy: 0).value as? String else { return false }
+            return front.contains("palabra") && front != originalFront
+        }, "the other note has loaded before returning")
+        press(table.outlineRows.element(boundBy: 0))
+        XCTAssertTrue(shows(fields, originalFront))
+        try assertRenderedBitmap("browse-pasted-bitmap-after-row-switch-synthetic")
+        field.click()
+        html.click()
+        XCTAssertTrue(waitUntil { field.value as? String == savedHTML }, "the pasted image and surrounding text persist exactly")
+    }
 
     /// Synthetic typical-1 collection only; run in the Mac test VM.
     func testPinnedPreviewInteractions() throws {

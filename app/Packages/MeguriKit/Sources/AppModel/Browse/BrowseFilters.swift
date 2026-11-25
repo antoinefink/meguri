@@ -163,4 +163,6 @@ public nonisolated enum BrowseSidebarTag: Hashable, Sendable {
     case tag(String)
     /// "Show All <N>…" under the Tags section (V6).
     case showAllTags
+    /// "Show All <N>…" under the Note Types section (V6).
+    case showAllNotetypes
 }

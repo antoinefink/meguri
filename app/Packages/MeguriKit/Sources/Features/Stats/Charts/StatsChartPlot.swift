@@ -59,15 +59,18 @@ public enum StatsPlotSize: Hashable, Sendable {
     case lead
     /// The other boxes.
     case regular
+    /// The macOS overview's compact Added and Started trend (S7.8).
+    case overview
     /// A chart's own page (N25.5's taller plot).
     case page
     /// One of two aligned panels in a regular box (Time of Day, S7.11).
     case panel
 
-    var height: CGFloat {
+    nonisolated var height: CGFloat {
         switch self {
         case .lead: 200
         case .regular: 150
+        case .overview: 120
         case .page: 320
         case .panel: 84
         }
@@ -77,7 +80,7 @@ public enum StatsPlotSize: Hashable, Sendable {
     var axisLabels: Int {
         switch self {
         case .lead, .page: 7
-        case .regular, .panel: 4
+        case .regular, .overview, .panel: 4
         }
     }
 }

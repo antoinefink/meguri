@@ -177,6 +177,19 @@ pub fn validate(c: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Checked scratch bound shared by collection exports, captures and restores.
+pub(crate) fn snapshot_reservation_bytes(pages: i64, page_size: i64) -> Option<u64> {
+    let pages = u64::try_from(pages).ok().filter(|n| *n > 0)?;
+    let page_size = u64::try_from(page_size).ok().filter(|n| *n > 0)?;
+    // Checkpoint can retain the full destination WAL beside the main file.
+    // Include both page bodies, 24 bytes per WAL frame and its 32-byte header.
+    // WAL-index mappings grow in 32 KiB blocks (about 4,096 frames each);
+    // 16 bytes per page plus 64 KiB bounds mapping rounding with spare margin.
+    let bodies = pages.checked_mul(page_size)?.checked_mul(2)?;
+    let frames = pages.checked_mul(24)?;
+    let wal_index = pages.checked_mul(16)?.checked_add(64 * 1024)?;
+    bodies.checked_add(frames)?.checked_add(wal_index)?.checked_add(32)
+}
 /// SQLite backup includes committed WAL pages without regenerating records or
 /// running VACUUM's schema programs. Destination was exclusively created by us.
 pub fn snapshot(source: &Connection, destination: &Path) -> Result<()> {
@@ -200,6 +213,19 @@ pub fn snapshot(source: &Connection, destination: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_reservation_covers_wal_overhead_and_refuses_overflow() {
+        // 10,000 frames need three 32 KiB WAL-index mappings.
+        let reserved = snapshot_reservation_bytes(10_000, 4096).unwrap();
+        let two_main_files = 2 * 10_000 * 4096_u64;
+        assert!(reserved >= two_main_files + 10_000 * 24 + 3 * 32 * 1024 + 32);
+        assert!(snapshot_reservation_bytes(1, 4096).unwrap() >= 2 * 4096 + 24 + 32 * 1024 + 32);
+        for (pages, page_size) in [(i64::MAX, 65536), (i64::MAX, 1), (1, i64::MAX),
+            (0, 4096), (-1, 4096), (1, 0), (1, -1)] {
+            assert_eq!(snapshot_reservation_bytes(pages, page_size), None);
+        }
+    }
     #[test]
     fn collection_stamp_preserves_foreign_key_rows_and_disables_actions_on_every_open() {
         use std::os::unix::fs::OpenOptionsExt;

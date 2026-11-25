@@ -5,7 +5,7 @@ use crate::storage::deletion::{self, Pending};
 /// Resolve before allocating a gate. Pending IDs authorize only resuming their
 /// persisted cleanup; a guessed or already completed ID never creates a gate.
 fn resolve(c: &Connection, id: &str) -> Result<Option<Account>> {
-    if crate::storage::reset::read(c, id)?.is_some() { return Err(Error::new("storage_unavailable")); }
+    if crate::storage::backups::pending(c,id)? || crate::storage::reset::read(c, id)?.is_some() { return Err(Error::new("storage_unavailable")); }
     if let Some(account) = read_account(c, id)? {
         if account.identity.role != "member" { return Err(Error::new("permission_denied")); }
         if deletion::read(c, id)?.is_some() { return Err(Error::new("storage_unavailable")); }
@@ -50,6 +50,7 @@ impl Service {
                     gate.retire()?;
                     let job = Pending { id: id.clone(), binding };
                     deletion::insert(&tx, &job)?;
+                    crate::storage::backups::clear(&tx,&id)?;
                     tx.execute("DELETE FROM media_names WHERE account_id=?1", [&id])?;
                     tx.execute("DELETE FROM media_blobs WHERE account_id=?1", [&id])?;
                     tx.execute("DELETE FROM credentials WHERE account_id=?1", [&id])?;

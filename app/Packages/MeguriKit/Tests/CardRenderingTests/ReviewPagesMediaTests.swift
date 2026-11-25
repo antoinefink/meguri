@@ -7,6 +7,77 @@ import WebKit
 
 extension WebKitSuites {
     @Suite(.timeLimit(.minutes(2))) struct ReviewPagesMediaTests {
+        @Test func coordinatorCapturesAudioBeforeRendering() async throws {
+            let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fixture = MediaFixture()
+            fixture.add("/q.mp3", Data([1]), "audio/mpeg")
+            let resolver = try await fixture.resolved()
+            let backend = CardAudioControllerTests.Backend(), session = CardAudioControllerTests.Session()
+            let audio = CardAudioController(resolver: resolver, backend: backend, session: session)
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: resolver, audio: audio)
+            let pages = ReviewPages(pair: pair), window = SpikeWindow(pair.container)
+            let gate = CardAudioControllerTests.Hold()
+            defer { gate.release(); pages.close(); window.close() }
+            let first = Self.item(1, autoplay: true)
+            pages.renderHead = { _, _, _ in
+                await gate.wait()
+                return [CardPayload(cardID: 1, question: "Question", answer: "Answer", questionAudio: [.sound(name: "q.mp3")])]
+            }
+            let model = ReviewCoordinator(deckID: 1, surface: pages,
+                store: ReviewRecordStore(file: directory.appending(path: "session.json")),
+                clock: .fixed(Date(timeIntervalSince1970: 1_800_000_000)), client: HeadClient(item: first))
+            let start = Task { await model.start() }
+            defer { start.cancel() }
+            try await Spike.deadline("coordinator render held", timeout: .seconds(3)) { await gate.reached() }
+            audio.sessionEvent(.pause)
+            gate.release()
+            await start.value
+            try await CardBehaviorFixture.until("coordinator card committed") { pair.current.presented }
+            try await pair.current.waitForShown(try #require(pair.current.update))
+            await audio.transportSettled()
+            #expect(model.phase == .question && audio.current == nil && backend.events.isEmpty)
+            #expect(session.continuityOwners.isEmpty)
+            pair.replay()
+            #expect(await backend.nextPlay() == "q.mp3")
+        }
+
+        @Test(arguments: [false, true])
+        func coordinatorPauseReleasesIdleOutputBeforeHeldCoreReturns(mediaUnavailable: Bool) async throws {
+            let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fixture = MediaFixture()
+            fixture.add("/q.mp3", Data([1]), "audio/mpeg")
+            let resolver = try await fixture.resolved()
+            let backend = CardAudioControllerTests.Backend(), session = CardAudioControllerTests.Session()
+            let audio = CardAudioController(resolver: resolver, backend: backend, session: session)
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: resolver, audio: audio)
+            let pages = ReviewPages(pair: pair), window = SpikeWindow(pair.container)
+            let gate = CardAudioControllerTests.Hold()
+            defer { gate.release(); pages.close(); window.close() }
+            let first = Self.item(1, autoplay: true), client = HeadClient(item: first)
+            pages.renderHead = { _, _, _ in [CardPayload(cardID: 1, question: "Question", answer: "Answer",
+                questionAudio: [.sound(name: "q.mp3")])] }
+            let model = ReviewCoordinator(deckID: 1, surface: pages,
+                store: ReviewRecordStore(file: directory.appending(path: "session.json")),
+                clock: .fixed(Date(timeIntervalSince1970: 1_800_000_000)), client: client)
+            await model.start()
+            #expect(await backend.nextPlay() == "q.mp3")
+            await audio.transportSettled()
+            backend.clips.first?.onEnd?(true)
+            await audio.transportSettled()
+            #expect(audio.current == nil && session.continuityOwners.count == 1)
+            client.beforeHead = { await gate.wait() }
+            model.requestRefresh()
+            try await Spike.deadline("core head held", timeout: .seconds(3)) { await gate.reached() }
+            if mediaUnavailable { model.mediaUnavailable() } else { model.beginPause() }
+            // Check before releasing the original Core operation.
+            #expect(session.continuityOwners.isEmpty && session.owners.isEmpty)
+            gate.release()
+            await model.settled()
+            #expect(session.continuityOwners.isEmpty && backend.events == ["q.mp3"])
+        }
+
         @Test(arguments: [false, true])
         func renderedHeadPriorityRoutesThroughItsCollectionIncludingCacheHits(emptyFirst: Bool) async throws {
             let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -389,7 +460,8 @@ extension WebKitSuites {
             var currentHead: ReviewHead {
                 ReviewHead(items: items ?? [item], counts: .init(new: 1, learning: 0, review: 0), validUntil: Int64.max, terminalState: terminal)
             }
-            func head(sessionID: UInt64) async throws -> ReviewHead { currentHead }
+            var beforeHead: (() async -> Void)?
+            func head(sessionID: UInt64) async throws -> ReviewHead { await beforeHead?(); return currentHead }
             func undoStatus(sessionID: UInt64, redo: Bool) async throws -> ReviewUndoStatus { .unavailable(reason: .none) }
             func end(sessionID: UInt64) async throws {}
             func answer(sessionID: UInt64, item: ReviewHeadItem, rating: ReviewRating, at: Int64, elapsed: UInt64) async throws -> ReviewAnswerOutcome {
@@ -422,7 +494,7 @@ extension WebKitSuites {
             func close() async throws {}
         }
 
-        private static func item(_ id: Int64) -> ReviewHeadItem {
+        private static func item(_ id: Int64, autoplay: Bool = false) -> ReviewHeadItem {
             let state = ReviewSchedulingState.new(position: 1)
             let answer = ReviewAnswerState(state: state, delay: .days(amount: 1), left: 0, factor: 0,
                 revlog: .init(interval: 1, lastInterval: 0, kind: 0, factor: 0),
@@ -432,7 +504,7 @@ extension WebKitSuites {
                 renderKey: .init(bytes: Array(repeating: UInt8(id), count: 32)),
                 nextStates: .init(current: state, again: answer, hard: answer, good: answer, easy: answer),
                 predictedNext: .init(again: 2, hard: 2, good: 2, easy: 2), flag: 0, marked: false,
-                homePreset: .init(id: 1, autoplay: false, skipQuestionWhenReplayingAnswer: false, maximumAnswerSeconds: 60, questionSeconds: 0, answerSeconds: 0,
+                homePreset: .init(id: 1, autoplay: autoplay, skipQuestionWhenReplayingAnswer: false, maximumAnswerSeconds: 60, questionSeconds: 0, answerSeconds: 0,
                     questionAction: 0, answerAction: 0, waitForAudio: false, leechAction: 0))
         }
     }

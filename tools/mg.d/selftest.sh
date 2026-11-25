@@ -1,7 +1,7 @@
 # tools/mg self-tests. Sourced by tools/mg.
 
 mg_job selftest docker:dev mg_selftest \
-  "tools/mg self-tests (bats, four files at once, sequential within each file) in the dev container; args go to bats, e.g. --filter doctor, --jobs 1 or test files by path (tools/tests/gate.bats), which replace the full list"
+  "tools/mg self-tests (bats, four files at once, sequential within each file) in the dev container; args go to bats, e.g. --filter doctor, --jobs 1 or test files by path (tools/tests/gate.bats), which replace the full list; --shard M/N runs share M of N of the files (the hosted shards)"
 mg_job selftest-host host mg_selftest_host \
   "tools/mg host self-tests: macOS bash, real doctor, Docker placement, image rebuild (tools/tests/mg_host_selftest.sh)"
 mg_job selftest-xcframework host mg_selftest_xcframework \
@@ -9,7 +9,8 @@ mg_job selftest-xcframework host mg_selftest_xcframework \
 
 # mg_tap_report <tap file> <test-runner rc> <repro prefix>
 # Records counts and one failure per `not ok` line. With a repro prefix, a
-# failure's repro is `<prefix> '<regex of the test name>'`.
+# failure's repro is `<prefix> '<regex of the test name>'`. The name leaves out
+# the time bats appends to a test line when it writes a report (mg_selftest).
 mg_tap_report() {
   local tap="$1" rc="$2" prefix="$3" report
   report="$(jq -R -n -c '
@@ -17,7 +18,7 @@ mg_tap_report() {
       if ($l | test("^ok ")) then
         (if ($l | test(" # [Ss][Kk][Ii][Pp]")) then .skipped += 1 else .passed += 1 end)
       elif ($l | test("^not ok ")) then
-        .failed += 1 | .fails += [{name: ($l | sub("^not ok [0-9]+ "; "")), msg: ""}]
+        .failed += 1 | .fails += [{name: ($l | sub("^not ok [0-9]+ "; "") | sub(" # in [0-9]+ ms$"; "")), msg: ""}]
       elif ($l | test("^# ")) and (.fails | length) > 0 then
         .fails[(.fails | length) - 1].msg += (($l | .[2:]) + "\n")
       elif ($l | test("^1\\.\\.[0-9]+$")) then
@@ -58,9 +59,62 @@ mg_tap_report() {
   fi
 }
 
+# Seconds each test file took on a hosted runner, `<seconds><TAB><file name>`:
+# what --shard balances. A file it does not list counts as the mean, so a new
+# test file needs no line here.
+MG_SELFTEST_SECONDS=tools/tests/selftest-seconds.tsv
+
+# mg_selftest__shard <M> <N> <file>...: the files of share M of N, one per
+# line, longest first. For a given N every file lands in exactly one share:
+# files go, longest first (then by name), to the share with the fewest seconds
+# so far (the lowest of equals). tests/selftest_args.bats checks that.
+mg_selftest__shard() {
+  local index="$1" count="$2"
+  shift 2
+  printf '%s\n' "$@" |
+    awk -v weights="$MG_SELFTEST_SECONDS" '
+      BEGIN {
+        while ((getline line < weights) > 0) {
+          if (line ~ /^#/ || split(line, f, "\t") != 2 || f[1] !~ /^[0-9]+(\.[0-9]+)?$/) continue
+          seconds[f[2]] = f[1] + 0; sum += f[1]; n++
+        }
+        mean = n > 0 ? sum / n : 1
+      }
+      {
+        name = $0; sub(/^.*\//, "", name)
+        w = (name in seconds) ? seconds[name] : mean
+        printf "%.3f\t%s\n", (w > 0.001 ? w : 0.001), $0
+      }' |
+    LC_ALL=C sort -t "$(printf '\t')" -k1,1nr -k2,2 |
+    awk -F '\t' -v want="$index" -v count="$count" '
+      {
+        best = 1
+        for (i = 2; i <= count; i++) if (load[i] + 0 < load[best] + 0) best = i
+        load[best] += $1
+        if (best == want) print $2
+      }'
+}
+
+mg_selftest__usage() {
+  mg_failure usage "selftest: $1" "$2"
+  mg_message "selftest: $1"
+  mg_status error
+}
+
 mg_selftest() {
   local tap="$MG_RUN_DIR/selftest.tap" rc arg
   local defaults=(--jobs 4 --no-parallelize-within-files) files=(tools/tests/*.bats)
+  # --shard M/N (or --shard=M/N) is ours, not bats': it leaves the arguments.
+  local shard="" sharded=false args=() shard_next=false
+  for arg in ${1+"$@"}; do
+    if [ "$shard_next" = true ]; then shard="$arg"; shard_next=false; continue; fi
+    case "$arg" in
+      --shard) shard_next=true; sharded=true ;;
+      --shard=*) shard="${arg#--shard=}"; sharded=true ;;
+      *) args+=("$arg") ;;
+    esac
+  done
+  set -- ${args[0]+"${args[@]}"}
   # Bats rejects its file-only flag with one job. An explicit job count
   # therefore replaces both defaults and retains Bats' own CLI semantics.
   for arg in ${1+"$@"}; do
@@ -88,6 +142,27 @@ mg_selftest() {
         ;;
     esac
   done
+  if [ "$sharded" = true ]; then
+    local index="${shard%%/*}" count="${shard#*/}" all="${#files[@]}" line
+    if [[ ! "$shard" =~ ^[1-9][0-9]*/[1-9][0-9]*$ ]] || [ "$index" -gt "$count" ]; then
+      mg_selftest__usage "--shard takes M/N with 1 <= M <= N, not '$shard'" "tools/mg selftest --shard 1/4"
+      return 0
+    fi
+    if [ "$all" -eq 0 ]; then
+      mg_selftest__usage "--shard splits the full list; it does not go with named test files" "tools/mg selftest --shard $shard"
+      return 0
+    fi
+    if [ "$count" -gt "$all" ]; then
+      mg_selftest__usage "--shard $shard asks for more shares than the $all test files" "tools/mg selftest --shard 1/4"
+      return 0
+    fi
+    local every=("${files[@]}")
+    files=()
+    while IFS= read -r line; do files+=("$line"); done < <(mg_selftest__shard "$index" "$count" "${every[@]}")
+    mg_detail shard "$(mg_json_array ${files[0]+"${files[@]}"} |
+      jq -c --argjson index "$index" --argjson count "$count" --argjson all "$all" \
+        '{index: $index, count: $count, files: ., all_files: $all}')"
+  fi
   # Bats keeps every test's temporary directory until the run ends: a full
   # run holds more than 8 GB of sandboxes. /tmp is a tmpfs of half the
   # machine's memory, so where it is under 16 GB (8 GB on a hosted runner)
@@ -100,10 +175,24 @@ mg_selftest() {
   fi
   mg_detail scratch "$(jq -nc --arg tmp "${scratch:-${TMPDIR:-/tmp}}" --arg mb "$size" \
     '{tmpdir: $tmp, tmp_tmpfs_mb: ($mb | tonumber? // null)}')"
+  # Bats' junit report gives each file's seconds (details.file_seconds: what
+  # tests/selftest-seconds.tsv is measured from), unless the caller asked for
+  # a report of their own.
+  local report=(--report-formatter junit --output "$MG_RUN_DIR/junit")
+  for arg in ${1+"$@"}; do
+    case "$arg" in --report-formatter|--report-formatter=*|-o|--output|--output=*) report=(); break ;; esac
+  done
+  [ "${#report[@]}" -eq 0 ] || mkdir -p "$MG_RUN_DIR/junit"
   TMPDIR="${scratch:-${TMPDIR:-/tmp}}" \
-    bats --formatter tap ${defaults[0]+"${defaults[@]}"} ${1+"$@"} ${files[0]+"${files[@]}"} | tee "$tap"
+    bats --formatter tap ${defaults[0]+"${defaults[@]}"} ${1+"$@"} ${report[0]+"${report[@]}"} \
+      ${files[0]+"${files[@]}"} | tee "$tap"
   rc=${PIPESTATUS[0]}
   [ -z "$scratch" ] || rm -rf "$scratch"
+  if [ -f "$MG_RUN_DIR/junit/report.xml" ]; then
+    mg_detail file_seconds "$(sed -n 's/^<testsuite name="\([^"]*\)".* time="\([0-9.]*\)" timestamp=.*/\1\t\2/p' \
+      "$MG_RUN_DIR/junit/report.xml" |
+      jq -R -n -c '[inputs | split("\t") | {(.[0]): (.[1] | tonumber)}] | add // {}')"
+  fi
   mg_artifact tap "$tap"
   mg_tap_report "$tap" "$rc" "tools/mg selftest --filter"
 }
@@ -129,10 +218,10 @@ mg_selftest_xcframework() {
 }
 
 mg_job image-tools-selftest docker:image-tools mg_image_tools_selftest \
-  "Tests of the image-tools scripts in their container: dev-icon, contact-sheet, hierarchy-check (U8), image-diff, screen-status, critic and gallery (U10), perf-compare (U12); args go to unittest, e.g. -k overlap"
+  "Tests of the image-tools scripts and Duo posture in their container; args go to unittest, e.g. -k posture"
 
 # Every script directory with a tests/ folder that runs in image-tools.
-MG_IMAGE_TOOLS_TESTED="tools/scripts/dev-icon tools/scripts/hierarchy-check tools/scripts/contact-sheet tools/scripts/image-diff tools/scripts/screen-status tools/scripts/critic tools/scripts/gallery tools/scripts/perf-compare tools/scripts/research"
+MG_IMAGE_TOOLS_TESTED="tools/scripts/dev-icon tools/scripts/hierarchy-check tools/scripts/contact-sheet tools/scripts/image-diff tools/scripts/screen-status tools/scripts/critic tools/scripts/gallery tools/scripts/perf-compare tools/scripts/research tools/vm"
 
 mg_image_tools_selftest() {
   local dir rc=0 log failed=0 ran=0 n f
