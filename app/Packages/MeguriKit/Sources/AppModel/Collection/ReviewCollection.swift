@@ -2191,12 +2191,14 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// review as Back to Decks does, then opens Browse on that one card.
     public var reviewShowInBrowse: ((Int64) -> Void)? {
         guard deckImportBrowseAvailable else { return nil }
+        let expected = generation
         return { [weak self] cardID in
             Task { [weak self] in
                 guard let self else { return }
                 await self.finishReview()
-                // Edit Note's Keep Editing, or a failed end, leaves the review open.
-                guard self.review == nil else { return }
+                // Edit Note's Keep Editing, or a failed end, leaves the review open. A
+                // collection that replaced this one meanwhile has no such card to show.
+                guard self.review == nil, self.generation == expected else { return }
                 self.navigation.browseSearch = "cid:\(cardID)"
                 self.navigation.setPath([], for: .browse)
                 self.navigation.scrollToTop(.section(.browse))

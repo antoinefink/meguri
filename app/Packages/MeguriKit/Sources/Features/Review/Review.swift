@@ -906,8 +906,12 @@ struct ReviewLeechDetails: View {
             }
         }
         .padding()
-        // As wide as its lines, up to a primary action's width; longer text wraps.
-        .frame(maxWidth: ContentWidth.primaryAction, alignment: .leading)
+        // A primary action's width, stated as the ideal too: a popover takes
+        // its size from the ideal one, and without a width there the lines are
+        // measured unwrapped, so a line that wraps leaves the popover one line
+        // short and its padding clipped.
+        .frame(idealWidth: ContentWidth.primaryAction, maxWidth: ContentWidth.primaryAction, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review.session.leech.details")
     }

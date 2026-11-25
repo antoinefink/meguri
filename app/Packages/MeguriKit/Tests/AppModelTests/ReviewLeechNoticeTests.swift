@@ -42,7 +42,8 @@ extension ReviewCoordinatorTests {
         #expect(await fixture.model.end())
     }
 
-    /// A question read that comes back after its notice went changes nothing.
+    /// A question read that comes back after another leech answer replaced its
+    /// notice never names that other card.
     @Test func aLateQuestionNeverReachesAnotherNotice() async throws {
         let fixture = Fixture()
         fixture.client.questions = [1: "余程"]
@@ -50,10 +51,24 @@ extension ReviewCoordinatorTests {
         fixture.model.reveal(); await fixture.model.settled()
         fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(2), marks: [], removed: [1]),
             leech: true, suspended: false, rolledOver: false)
+        fixture.client.holdsQuestion = true
         fixture.model.rate(.again); await fixture.model.settled()
-        fixture.model.showNotice("Another notice")
+        // Card 1's read is under way and held.
+        let read = try #require(fixture.model.leechQuestionRead)
+        while fixture.client.questionReads.isEmpty { await Task.yield() }
+        // Card 2 becomes a leech too: its notice replaces card 1's.
+        fixture.client.holdsQuestion = false
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(3), marks: [], removed: [2]),
+            leech: true, suspended: false, rolledOver: false)
+        fixture.model.rate(.again); await fixture.model.settled()
         await fixture.model.leechQuestionSettled()
-        #expect(fixture.model.leechNotice == nil && fixture.model.notice == "Another notice")
+        // Card 1's read returns only now.
+        fixture.client.releaseQuestion()
+        await read.value
+        let notice = try #require(fixture.model.leechNotice)
+        #expect(notice.cardID == 2 && notice.question == nil)
+        #expect(fixture.client.questionReads == [1, 2])
         #expect(await fixture.model.end())
     }
 

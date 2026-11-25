@@ -22,9 +22,20 @@ final class ReviewLeechUITests: XCTestCase {
         try press(element(app, "review.session.leech"), app, bundleIdentifier)
         let show = element(app, "review.session.leech.showInBrowse")
         XCTAssertTrue(show.waitForExistence(timeout: 10), "Browse is shown on the Mac, so the details offer it")
+        // The recipe's question is its note's front and " side 1"; Browse lists the front.
+        let question = element(app, "review.session.leech.question").value as? String ?? ""
+        XCTAssertTrue(question.hasSuffix(" side 1"), "The details name the card: \(question)")
+        let front = String(question.dropLast(" side 1".count))
         try press(show, app, bundleIdentifier)
         XCTAssertTrue(element(app, "browse.results.table").waitForExistence(timeout: 20), "Browse opens")
         XCTAssertFalse(element(app, "review.session.screen").exists, "The review is left, as by Back to Decks")
+        // The search is that one card: one of the fixture's six, and it is the answered one.
+        let status = element(app, "browse.status.text")
+        let one = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value BEGINSWITH %@", "1 of 6 "),
+                                                                   object: status)], timeout: 20)
+        XCTAssertEqual(one, .completed, "Browse lists the one card: \(status.value as? String ?? "")")
+        let row = app.staticTexts.matching(NSPredicate(format: "value == %@ OR label == %@", front, front)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "Browse lists the answered card, \(front)")
         settle()
         capture(app, "leech-show-in-browse")
         #else

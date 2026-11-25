@@ -1074,6 +1074,8 @@ public final class ReviewCoordinator {
     }
     /// The leech notice's question read, for tests.
     func leechQuestionSettled() async { await leechQuestion?.value }
+    /// The read itself, for a test that outlives the notice it was started for.
+    var leechQuestionRead: Task<Void, Never>? { leechQuestion }
     /// N16.11: the first card presented after the leech answer keeps the notice;
     /// any other card presented after it ends it.
     private func presentedForLeechNotice(_ card: Int64) {
