@@ -57,13 +57,14 @@ struct BrowseTagField: NSViewRepresentable {
         weak var field: NSTokenField?
         private weak var editor: NSTextView?
         private var selectionObserver: NSObjectProtocol?
+        private var mouseMonitor: Any?
         private var generation = 0
         private var editingCommit: (([String]) -> Void)?
         private var accepting = false
         private var dismissed: Query?
         private var offered: Query?
         private let suggestions = BrowseTagSuggestions()
-        private let popover = NSPopover()
+        let popover = NSPopover()
 
         init(_ parent: BrowseTagField) {
             self.parent = parent
@@ -134,7 +135,24 @@ struct BrowseTagField: NSViewRepresentable {
                 // chooses the available edge and keeps the popover on screen.
                 popover.show(relativeTo: field.bounds, of: field, preferredEdge: .minY)
                 field.window?.makeFirstResponder(editor)
+                mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+                    MainActor.assumeIsolated { self?.dismissIfOutside(event) }
+                    return event
+                }
             }
+        }
+
+        func dismissIfOutside(_ event: NSEvent) {
+            guard popover.isShown, let field else { return }
+            // Semitransient popovers permit editing in their parent window,
+            // but AppKit can leave them open over nonfocusable whitespace.
+            // Pass every event on: the field and the clicked control still own it.
+            if event.window === popover.contentViewController?.view.window { return }
+            if event.window === field.window,
+               field.bounds.contains(field.convert(event.locationInWindow, from: nil)) { return }
+            generation += 1
+            if let editor { dismissed = Query(editor) }
+            closeSuggestions()
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -173,18 +191,34 @@ struct BrowseTagField: NSViewRepresentable {
             // replace objectValue while editing: other tokens and undo survive.
             editor.insertText(name, replacementRange: offered.range)
             editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+            // Return can end NSTokenField editing. Resume this field rather
+            // than letting acceptance move typing to the next key view.
+            if field.currentEditor() == nil {
+                field.window?.makeFirstResponder(field)
+                if let editor = field.currentEditor() as? NSTextView {
+                    editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+                }
+            }
             accepting = false
             scheduleRefresh()
         }
 
         private func closeSuggestions() {
             offered = nil
+            removeMouseMonitor()
             popover.close()
+        }
+
+        private func removeMouseMonitor() {
+            if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
+            mouseMonitor = nil
         }
 
         func popoverWillClose(_ notification: Notification) {
             // Outside dismissal must survive queued SwiftUI/name refreshes.
             if let editor { dismissed = Query(editor) }
+            offered = nil
+            removeMouseMonitor()
         }
 
         func stopEditing() {
@@ -247,6 +281,7 @@ private final class BrowseTagSuggestions: NSViewController, NSTableViewDataSourc
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        scroll.setAccessibilityIdentifier("browse.inspector.tagSuggestions.viewport")
         table.headerView = nil
         table.backgroundColor = .clear
         table.rowSizeStyle = .medium
@@ -262,7 +297,8 @@ private final class BrowseTagSuggestions: NSViewController, NSTableViewDataSourc
         table.autoresizingMask = [.width]
         table.dataSource = self
         table.delegate = self
-        table.accept = { [weak self] row in self?.accept?(row) }
+        table.target = self
+        table.action = #selector(chooseSuggestion(_:))
         scroll.documentView = table
         view = scroll
     }
@@ -298,6 +334,15 @@ private final class BrowseTagSuggestions: NSViewController, NSTableViewDataSourc
 
     func numberOfRows(in tableView: NSTableView) -> Int { names.count }
 
+    @objc private func chooseSuggestion(_ sender: NSTableView) {
+        // NSTableView tracks selection through mouse-up. Releasing outside
+        // the clicked row cancels acceptance while retaining native tracking.
+        guard let event = NSApp.currentEvent, event.type == .leftMouseUp,
+              sender.clickedRow >= 0,
+              sender.row(at: sender.convert(event.locationInWindow, from: nil)) == sender.clickedRow else { return }
+        accept?(sender.clickedRow)
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let cell = BrowseTagSuggestionCell()
         let label = NSTextField(labelWithString: names[row])
@@ -327,13 +372,7 @@ private final class BrowseTagSuggestionScrollView: NSScrollView {
 }
 
 private final class BrowseTagSuggestionTable: NSTableView {
-    var accept: ((Int) -> Void)?
     override var acceptsFirstResponder: Bool { false }
-
-    override func mouseDown(with event: NSEvent) {
-        let row = row(at: convert(event.locationInWindow, from: nil))
-        if row >= 0 { accept?(row) }
-    }
 }
 
 private final class BrowseTagSuggestionCell: NSTableCellView {

@@ -22,7 +22,7 @@ final class MacBrowseInspectorTests: XCTestCase {
     func testTagsAutocompleteDark() throws { try tagsAutocomplete(appearance: "dark") }
 
     /// Production inspector + real core over typical-1. Seed only synthetic
-    /// tags through the editor itself; no separate completion-demo route.
+    /// tags through native paste into the editor; no completion-demo route.
     private func tagsAutocomplete(appearance: String) throws {
         guard CardSwapTimingGate.hypervisorPresent() == true else {
             throw XCTSkip("Browse tag completion runs only in the Mac test VM")
@@ -36,9 +36,12 @@ final class MacBrowseInspectorTests: XCTestCase {
         let fields = element(app, "editor.fields").textViews
         XCTAssertTrue(shows(fields, "palabra"))
         let firstFront = try XCTUnwrap(fields.element(boundBy: 0).value as? String)
-        let paths = (1...16).map { "Study::Languages::Autocomplete::LongBranch" + String(format: "%02d", $0) }
+        let paths = ["Adjectives", "Adverbs", "Articles", "Conditionals", "Nouns", "Prepositions", "Pronouns", "Tenses", "Verbs"]
+            .map { "Spanish::Grammar::" + $0 }
+        let query = "spanish::grammar::"
         let tags = element(app, "browse.inspector.tags")
         let list = element(app, "browse.inspector.tagSuggestions")
+        let viewport = app.scrollViews.matching(identifier: "browse.inspector.tagSuggestions.viewport").firstMatch
         func suggestion(_ index: Int) -> XCUIElement {
             element(app, "browse.inspector.tagSuggestion.\(index)")
         }
@@ -49,11 +52,19 @@ final class MacBrowseInspectorTests: XCTestCase {
                 $0.label + " " + String(describing: $0.value ?? "")
             }).joined(separator: " ")
         }
+        // This test is VM-only. Never read or retain the workstation clipboard.
+        let pasteboard = NSPasteboard.general
+        defer { pasteboard.clearContents() }
+        func paste(_ text: String) {
+            pasteboard.clearContents()
+            XCTAssertTrue(pasteboard.setString(text, forType: .string))
+            app.typeKey("v", modifierFlags: [.command])
+        }
         tags.click()
         app.typeKey("a", modifierFlags: [.command])
-        app.typeText(paths.joined(separator: " ") + " ")
+        paste(paths.joined(separator: " ") + " ")
         app.typeKey(.tab, modifierFlags: [])
-        XCTAssertTrue(waitUntil { tagText().contains(paths[15]) })
+        XCTAssertTrue(waitUntil { tagText().contains(paths[8]) })
         press(table.outlineRows.element(boundBy: 1))
         XCTAssertTrue(waitUntil {
             guard fields.count > 0, let front = fields.element(boundBy: 0).value as? String else { return false }
@@ -62,16 +73,18 @@ final class MacBrowseInspectorTests: XCTestCase {
         let secondFront = try XCTUnwrap(fields.element(boundBy: 0).value as? String)
         tags.click()
         app.typeKey("a", modifierFlags: [.command])
-        app.typeText(paths[0] + " Kept::Token longbranch")
+        paste(paths[0] + " Kept::Token " + query)
         XCTAssertTrue(list.waitForExistence(timeout: 10))
-        XCTAssertTrue(waitUntil { suggestion(0).label == paths[1] }, "component prefix, case insensitive; held tag excluded")
+        XCTAssertTrue(waitUntil { suggestion(0).label == paths[1] }, "full prefix, case insensitive; held tag excluded")
         XCTAssertGreaterThan(list.tableRows.count, 6, "more results than the bounded viewport")
         XCTAssertEqual(list.tableRows.matching(NSPredicate(format: "selected == true")).count, 0,
                        "typing starts without a highlighted suggestion")
-        XCTAssertGreaterThanOrEqual(list.frame.width, tags.frame.width - 2)
-        XCTAssertLessThanOrEqual(list.frame.width, 460, "hierarchies get useful width without a screen-wide panel")
-        XCTAssertLessThanOrEqual(list.frame.height, 240, "the suggestion list scrolls instead of growing tall")
-        XCTAssertFalse(list.frame.intersects(tags.frame), "held tokens and editable text remain uncovered")
+        XCTAssertTrue(viewport.exists, "measure the scroll viewport, not the table document")
+        XCTAssertGreaterThanOrEqual(viewport.frame.width, tags.frame.width - 2)
+        XCTAssertLessThanOrEqual(viewport.frame.width, 460, "hierarchies get useful width without a screen-wide panel")
+        XCTAssertLessThanOrEqual(viewport.frame.height, 240, "the suggestion list scrolls instead of growing tall")
+        XCTAssertGreaterThan(list.frame.height, viewport.frame.height, "the document exceeds its bounded scroll viewport")
+        XCTAssertFalse(viewport.frame.intersects(tags.frame), "held tokens and editable text remain uncovered")
         XCTAssertTrue(tags.isHittable)
         // A popover is a separate native window. Retain the VM screen so its
         // actual material, field anchor and surrounding inspector are visible.
@@ -80,7 +93,24 @@ final class MacBrowseInspectorTests: XCTestCase {
         for _ in 0..<8 { app.typeKey(.downArrow, modifierFlags: []) }
         XCTAssertTrue(waitUntil { list.tableRows.element(boundBy: 7).isSelected })
         XCTAssertTrue(suggestion(7).isHittable, "keyboard selection scrolls into view")
+        XCTAssertTrue(viewport.frame.intersects(suggestion(7).frame), "the selected row is visible inside the viewport")
         screen(app, "browse-tags-keyboard-selection-\(appearance)-synthetic")
+
+        // Blank header area above the token field is in the same parent
+        // window and cannot take focus: semitransient alone misses this click.
+        let whitespace = tags.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0))
+            .withOffset(CGVector(dx: 0, dy: -8))
+        whitespace.click()
+        XCTAssertTrue(waitUntil { !list.exists }, "nonfocusable inspector whitespace dismisses completion")
+        XCTAssertFalse(tagText().contains(paths[8]), "outside dismissal never accepts the selected row")
+        app.typeText("x")
+        XCTAssertFalse(list.exists, "whitespace leaves ordinary typing in the field")
+        app.typeKey(.delete, modifierFlags: [])
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        tags.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9)).click()
+        app.typeKey(.downArrow, modifierFlags: [.command])
+        XCTAssertTrue(waitUntil { list.exists }, "clicking inside the field keeps completion usable")
+        for _ in 0..<8 { app.typeKey(.downArrow, modifierFlags: []) }
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(waitUntil { !list.exists })
         XCTAssertFalse(tagText().contains(paths[8]), "Escape never accepts the highlighted tag")
@@ -95,10 +125,14 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertTrue(waitUntil { tagText().contains("AfterKeyboard") }, "acceptance keeps the editor ready for typing")
         capture(app, "browse-tags-after-keyboard-accept-\(appearance)-synthetic")
 
-        app.typeText("longbranch")
+        app.typeText(query)
         XCTAssertTrue(list.waitForExistence(timeout: 10))
         XCTAssertTrue(waitUntil { suggestion(0).label == paths[1] })
-        XCTAssertEqual(list.tableRows.count, 14, "held and newly accepted tags are both excluded")
+        XCTAssertEqual(list.tableRows.count, 7, "held and newly accepted tags are both excluded")
+        suggestion(0).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .click(forDuration: 0.2, thenDragTo: whitespace)
+        XCTAssertFalse(tagText().contains(paths[1]), "dragging out cancels pointer acceptance")
+        XCTAssertTrue(list.exists)
         suggestion(0).click()
         XCTAssertTrue(waitUntil { !list.exists && tagText().contains(paths[1]) })
         app.typeText("Fresh::Created ")
@@ -119,7 +153,7 @@ final class MacBrowseInspectorTests: XCTestCase {
         XCTAssertFalse(tagText().contains(paths[2]), "an unaccepted suggestion is never saved")
         tags.click()
         app.typeKey(.downArrow, modifierFlags: [.command])
-        app.typeText(" longbranch")
+        app.typeText(" " + query)
         XCTAssertTrue(list.waitForExistence(timeout: 10))
         press(table.outlineRows.element(boundBy: 0))
         XCTAssertTrue(shows(fields, firstFront))
