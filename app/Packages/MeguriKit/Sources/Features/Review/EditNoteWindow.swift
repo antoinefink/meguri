@@ -36,7 +36,7 @@ final class EditNoteWindow: NSObject, NSWindowDelegate {
         self.flow = flow
         self.parent = parent
         let controller = NSHostingController(rootView: AnyView(EmptyView()))
-        window = NSWindow(contentViewController: controller)
+        window = CloseKeyWindow(contentViewController: controller)
         super.init()
         controller.rootView = AnyView(form.modifier(CloseWhenFinished(flow: flow) { [weak self] in self?.close() }))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -88,6 +88,19 @@ final class EditNoteWindow: NSObject, NSWindowDelegate {
         text = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         if text.isEmpty { return String(localized: "Edit Note", bundle: .module) }
         return text.count > 80 ? String(text.prefix(79)) + "…" : text
+    }
+}
+
+/// ⌘W closes this window as its close button does (the app's File menu has
+/// no Close item): the flow is asked first, so a change asks to be kept.
+private final class CloseKeyWindow: NSWindow {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers == "w" {
+            performClose(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 

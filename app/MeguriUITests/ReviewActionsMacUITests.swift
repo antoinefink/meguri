@@ -81,9 +81,10 @@ final class ReviewActionsMacUITests: XCTestCase {
         XCTAssertFalse(element(app, "review.session.rate.good").exists)
     }
 
-    /// Option A (2026-11-24): Edit Note is a sheet on the review window. Back
-    /// to Decks cannot end the review under it, Cancel sits beside Done at
-    /// its bottom trailing corner, and Esc returns to the same card.
+    /// F1 (2026-11-25): Edit Note is its own window over the review. Back to
+    /// Decks cannot end the review while it is open, Cancel sits beside Save
+    /// at its bottom trailing corner, and ⌘W, Esc or Discard return to the
+    /// same unanswered card.
     func testEditNoteWindowKeepsTheReview() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()

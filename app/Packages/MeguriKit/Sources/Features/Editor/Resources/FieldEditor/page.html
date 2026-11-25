@@ -28,8 +28,8 @@ html.mac, html.mac body { background: transparent; }
 html.mac body { padding: 0 16px 8px; font: 13px -apple-system; }
 html.mac main { display: grid; grid-template-columns: 140px minmax(0, 1fr); column-gap: 8px; row-gap: 8px; align-items: start; }
 html.mac section { display: contents; }
-html.mac header { grid-column: 1; text-align: end; }
-html.mac .label { display: block; min-height: 0; padding: 4px 0 0; font: 13px -apple-system; font-weight: 400; text-align: end;
+html.mac header { grid-column: 1; display: flex; justify-content: flex-end; }
+html.mac .label { display: inline-block; width: auto; min-height: 0; padding: 4px 0 0; font: 13px -apple-system; font-weight: 400; text-align: end;
     overflow-wrap: anywhere; color: CanvasText; color: -apple-system-label; }
 html.mac .label::after { content: ":"; }
 html.mac .fieldBoundary, html.mac textarea { grid-column: 2; box-sizing: border-box; min-height: 22px; padding: 3px 6px; margin: 0;

@@ -244,7 +244,7 @@ struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: Vie
             content()
             HStack { modeToggle; Spacer(); cancel(); confirm() }.padding()
         }
-        .frame(minWidth: 480, idealWidth: 580, maxWidth: .infinity, minHeight: 320, idealHeight: 520, maxHeight: .infinity)
+        .frame(minWidth: 480, idealWidth: 580, maxWidth: .infinity, minHeight: 320, idealHeight: 440, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
     }
     private func subtitleText(_ subtitle: String) -> some View {
