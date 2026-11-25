@@ -205,6 +205,9 @@ import XCTest
         XCTAssertEqual(collection["collectionReady"], "true")
         for keyboard in [false, true] {
             if keyboard {
+                let close = app.menuBars.menuBarItems["File"].menuItems.matching(NSPredicate(format: "title == %@", "Close Window"))
+                XCTAssertEqual(close.count, 1, "File must contain one Close Window command")
+                XCTAssertTrue(close.firstMatch.isEnabled)
                 main.typeKey("w", modifierFlags: .command)
             } else {
                 let close = main.buttons[XCUIIdentifierCloseWindow]

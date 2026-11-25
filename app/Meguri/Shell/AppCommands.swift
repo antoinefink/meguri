@@ -362,6 +362,12 @@ struct AppCommands: Commands {
                 .disabled(context?.canNewDeck != true)
         }
         CommandGroup(replacing: .saveItem) {
+            #if os(macOS)
+            // Replacing this group also removes the system's Close command.
+            // Use the key window's normal close path, including its delegate guard.
+            Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
+                .keyboardShortcut("w", modifiers: .command)
+            #endif
             Button(LocalizedStringKey(context?.noteTypeSaveAsks == true ? "Save…" : "Save")) { context?.saveNoteType() }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(context?.canSaveNoteType != true)
