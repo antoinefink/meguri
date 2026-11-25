@@ -1,0 +1,5 @@
+# Seconds each test file took on a hosted runner (the sum of its tests, from
+# details.file_seconds of a Linux · selftest shard receipt). `tools/mg selftest
+# --shard M/N` balances the shards by them (tools/mg.d/selftest.sh). A file
+# without a line counts as the mean; a line for a file that is gone fails
+# tests/selftest_args.bats.

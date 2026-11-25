@@ -5,8 +5,9 @@ name: Verify Meguri
 # request and master push starts this workflow; "Select suites" decides what
 # runs, and a suite the change does not affect still reports, as a quick pass
 # that says it was not selected, so no check waits forever. Linux · selftest
-# is the exception: it skips (a skipped check counts as passing), so a pull
-# request outside tools/, .github/ and docker/ takes no runner for it.
+# and its jobs are the exception: they skip (a skipped check counts as
+# passing), so a pull request outside tools/, .github/ and docker/ takes no
+# runner for them.
 #
 # - Linux · core: one result for the Core suite. It passes only when every
 #   shard ran and passed `tools/mg core-test --quick` and the lint job passed
@@ -23,9 +24,15 @@ name: Verify Meguri
 # - Linux · server, conformance, package-smoke: unchanged suites.
 # - Linux · checks: every run. static-checks against the base, lint-ui,
 #   design-docs and core-deny, one after another on one runner.
-# - Linux · selftest: `tools/mg selftest` and `image-tools-selftest`, for
-#   pull requests that change tools/, .github/ or docker/, every master push
-#   and manual and scheduled runs.
+# - Linux · selftest: one result for the self-tests, for pull requests that
+#   change tools/, .github/ or docker/, every master push and manual and
+#   scheduled runs. It passes only when every shard and the image-tools job
+#   ran and passed on this commit and the shards together ran every test
+#   file once.
+# - Linux · selftest · shard M/N: `tools/mg selftest --shard M/N`, share M of
+#   N of the bats files (tools/mg.d/selftest.sh splits them by the seconds in
+#   tools/tests/selftest-seconds.tsv).
+# - Linux · selftest · image-tools: `tools/mg image-tools-selftest`.
 # - macOS · Swift packages: advisory. `tools/mg swift-test --package
 #   MeguriCore` on the hosted Xcode 27 runner, for changes to the packages or
 #   the core's FFI interface.
@@ -70,6 +77,7 @@ jobs:
       selftest: ${{ steps.select.outputs.selftest }}
       swift: ${{ steps.select.outputs.swift }}
       core_shards: ${{ steps.select.outputs.core_shards }}
+      selftest_shards: ${{ steps.select.outputs.selftest_shards }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -165,13 +173,16 @@ jobs:
             # The one list of Core shards: the shard matrix and the check in
             # "Linux · core" both read it.
             echo 'core_shards=[1,2,3,4]'
+            # The one list of selftest shards: the shard matrix and the check
+            # in "Linux · selftest" both read it.
+            echo 'selftest_shards=[1,2,3,4]'
           } >>"$GITHUB_OUTPUT"
           {
             echo "### Selected suites"
             echo
             echo "- Core (4 shards, lint and the timing-sensitive job): **$core**"
             echo "- server, conformance, package-smoke: **$linux**"
-            echo "- selftest: **$selftest** (Linux · checks runs on every change)"
+            echo "- selftest (4 shards and the image-tools job): **$selftest** (Linux · checks runs on every change)"
             echo "- Swift packages (macOS, advisory): **$swift**"
             if [[ -n "$added" ]]; then
               echo
@@ -1015,20 +1026,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The tools/mg self-tests (bats, in the dev image) and the image-tools
-  # script tests, for changes to tools/ or .github/ only, on one runner.
-  selftest:
-    name: Linux · selftest
+  # The tools/mg self-tests (bats, in the dev image), for changes to tools/,
+  # .github/ or docker/ only: share M of N of the test files on each runner
+  # (`tools/mg selftest --shard M/N`), so the suite takes the time of its
+  # slowest share instead of the sum.
+  selftest-shard:
+    name: Linux · selftest · shard ${{ matrix.shard }}/${{ strategy.job-total }}
     needs: [suites, image]
     if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.selftest == 'yes' }}
     permissions:
       contents: read
       packages: read
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 45
+    timeout-minutes: 30
     concurrency:
-      group: meguri-verification-${{ github.ref }}-selftest-${{ needs.suites.outputs.selftest == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
+      group: meguri-verification-${{ github.ref }}-selftest-${{ matrix.shard }}-${{ needs.suites.outputs.selftest == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
       cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.suites.outputs.selftest_shards) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1049,14 +1066,51 @@ jobs:
         shell: bash
         run: sudo chown -R 0:0 "$GITHUB_WORKSPACE"
 
-      - name: selftest
+      - name: selftest shard ${{ matrix.shard }}
         shell: bash
-        run: .github/mg-step.sh selftest selftest
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ needs.suites.outputs.selftest_shards }}
+        run: .github/mg-step.sh "selftest shard $SHARD/$(jq length <<<"$SHARDS")" selftest --shard "$SHARD/$(jq length <<<"$SHARDS")"
 
-      # The Python tests of the scripts that run in the image-tools container
-      # (dev-icon, contact-sheet, hierarchy-check and the others it lists).
+      - name: Give the checkout back to the runner user
+        if: always()
+        shell: bash
+        run: sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: meguri-linux-selftest-shard-${{ matrix.shard }}-result
+          path: ${{ runner.temp }}/receipts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The Python tests of the scripts that run in the image-tools container
+  # (dev-icon, contact-sheet, hierarchy-check and the others it lists). The
+  # job builds that image itself; it does not use the dev image.
+  selftest-image-tools:
+    name: Linux · selftest · image-tools
+    needs: suites
+    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.selftest == 'yes' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    concurrency:
+      group: meguri-verification-${{ github.ref }}-selftest-image-tools-${{ needs.suites.outputs.selftest == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # As for the shards: the container's root runs git in /work.
+      - name: Give the checkout to root for the container
+        shell: bash
+        run: sudo chown -R 0:0 "$GITHUB_WORKSPACE"
+
       - name: image-tools-selftest
-        if: ${{ !cancelled() }}
         shell: bash
         run: .github/mg-step.sh image-tools-selftest image-tools-selftest
 
@@ -1068,10 +1122,108 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: meguri-linux-selftest-result
+          name: meguri-linux-selftest-image-tools-result
           path: ${{ runner.temp }}/receipts/
           if-no-files-found: ignore
           retention-days: 7
+
+  # The selftest result. It skips, like its jobs, when the self-tests are not
+  # selected (a skipped check counts as passing, and takes no runner). When
+  # they are, !cancelled() makes it report even when a shard or the
+  # image-tools job failed, was cancelled or never started, and then it fails.
+  selftest:
+    name: Linux · selftest
+    needs: [suites, selftest-shard, selftest-image-tools]
+    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.selftest == 'yes' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - name: Download the shard receipts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          pattern: meguri-linux-selftest-shard-*-result
+          path: ${{ runner.temp }}/shards
+
+      - name: Download the image-tools receipt
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: meguri-linux-selftest-image-tools-result
+          path: ${{ runner.temp }}/image-tools
+
+      - name: Require every shard and the image-tools tests to pass on this commit
+        shell: bash
+        env:
+          SHARD_JOBS: ${{ needs.selftest-shard.result }}
+          IMAGE_TOOLS_JOB: ${{ needs.selftest-image-tools.result }}
+          SHARDS: ${{ needs.suites.outputs.selftest_shards }}
+        run: |
+          fail() {
+            echo "::error::$1"
+            printf '### Linux · selftest: failed\n\n%s\n' "$1" >>"$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          # The image-tools tests first, failing only after the shards: their
+          # failure must not hide the shard results.
+          tools="$RUNNER_TEMP/image-tools/image-tools-selftest.json"
+          tools_error=
+          if [[ "$IMAGE_TOOLS_JOB" != success ]]; then
+            tools_error="Linux · selftest · image-tools ended $IMAGE_TOOLS_JOB (failed, cancelled or not started)."
+          elif [[ ! -f "$tools" ]]; then
+            tools_error="Linux · selftest · image-tools left no receipt."
+          elif ! jq -e --arg sha "$GITHUB_SHA" '
+              .status == "pass" and .commit.sha == $sha and .commit.dirty == false
+              and .job == "image-tools-selftest" and .args == [] and .summary.failed == 0 and .summary.passed > 0' "$tools" >/dev/null; then
+            tools_error="The image-tools receipt is not a passing image-tools-selftest run on $GITHUB_SHA."
+          fi
+          printf 'image-tools: %s\n\n' "${tools_error:-$(jq -r '.message' "$tools")}" >>"$GITHUB_STEP_SUMMARY"
+          count="$(jq length <<<"$SHARDS")"
+          ((count > 0)) || fail "The shard list is empty."
+          jq -e '. == [range(1; length + 1)]' <<<"$SHARDS" >/dev/null || fail "The shard list $SHARDS is not 1..N."
+          {
+            echo "### Linux · selftest: $count shards"
+            echo
+            echo "| Shard | Files | Passed | Failed | Skipped | Slowest file |"
+            echo "| --- | --- | --- | --- | --- | --- |"
+          } >>"$GITHUB_STEP_SUMMARY"
+          receipts=()
+          for shard in $(jq -r '.[]' <<<"$SHARDS"); do
+            receipt="$RUNNER_TEMP/shards/meguri-linux-selftest-shard-$shard-result/selftest.json"
+            if [[ ! -f "$receipt" ]]; then
+              echo "| $shard | no receipt | | | | |" >>"$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            receipts+=("$receipt")
+            jq -r --arg shard "$shard" '
+              "| \($shard) | \(.details.shard.files | length? // "?") | \(.summary.passed) | \(.summary.failed) | \(.summary.skipped) | \(
+                (.details.file_seconds // {} | to_entries | max_by(.value) | "\(.key), \(.value | round) s")? // "") |"' \
+              "$receipt" >>"$GITHUB_STEP_SUMMARY"
+          done
+          echo >>"$GITHUB_STEP_SUMMARY"
+          [[ "$SHARD_JOBS" == success ]] || fail "The selftest shards ended $SHARD_JOBS (failed, cancelled or not started)."
+          for shard in $(jq -r '.[]' <<<"$SHARDS"); do
+            receipt="$RUNNER_TEMP/shards/meguri-linux-selftest-shard-$shard-result/selftest.json"
+            [[ -f "$receipt" ]] || fail "Shard $shard left no receipt."
+            jq -e --arg sha "$GITHUB_SHA" --arg spec "$shard/$count" --argjson index "$shard" --argjson count "$count" '
+              .status == "pass" and .commit.sha == $sha and .commit.dirty == false
+              and .job == "selftest" and .args == ["--shard", $spec]
+              and .summary.failed == 0 and .summary.passed > 0
+              and .details.shard.index == $index and .details.shard.count == $count
+              and (.details.shard.files | length) > 0' "$receipt" >/dev/null ||
+              fail "Shard $shard's receipt is not a passing --shard $shard/$count run on $GITHUB_SHA."
+          done
+          # Every test file in exactly one shard: the shards' lists share no
+          # file and together hold as many as each shard counted in tools/tests.
+          jq -e -s '
+            ([.[].details.shard.files[]]) as $files
+            | ([.[].details.shard.all_files] | unique) as $all
+            | ($all | length) == 1 and ($files | length) == $all[0] and ($files | unique | length) == $all[0]' \
+            "${receipts[@]}" >/dev/null ||
+            fail "The shards did not run every test file exactly once: $(jq -c -s '{ran: ([.[].details.shard.files[]] | length), distinct: ([.[].details.shard.files[]] | unique | length), test_files: ([.[].details.shard.all_files] | unique)}' "${receipts[@]}")."
+          jq -r -s '"\([.[].summary.passed] | add) passed and \([.[].summary.skipped] | add) skipped in \([.[].details.shard.files[]] | length) test files, each in one shard."' \
+            "${receipts[@]}" >>"$GITHUB_STEP_SUMMARY"
+          [[ -z "$tools_error" ]] || fail "$tools_error"
 
   # Advisory until it has passed on ten pull requests (docs/process/tiers.md):
   # Antoine (2026-11-21) let unsigned Swift package tests run on GitHub's

@@ -3687,6 +3687,58 @@ EOF
   validate "$result"
 }
 
+@test "selftest records its shard and each file's seconds, and names a failure without bats' timing" {
+  selftest_tap_fixture
+  # A bats that writes the junit report it was asked for, as the real one does.
+  cat >"$BATS_TEST_TMPDIR/selftest-bin/bats" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$@" >"$SELFTEST_BATS_ARGS"
+out=""
+while [ "$#" -gt 0 ]; do
+  [ "$1" != --output ] || out="$2"
+  shift
+done
+[ -z "$out" ] || cat >"$out/report.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites time="1.750">
+<testsuite name="a.bats" tests="2" failures="1" errors="0" skipped="0" time="1.500" timestamp="2026-11-25T09:21:07" hostname="x">
+    <testcase classname="a.bats" name="selected pass" time="1.488" />
+</testsuite>
+<testsuite name="b.bats" tests="1" failures="0" errors="0" skipped="0" time="0.250" timestamp="2026-11-25T09:21:08" hostname="x">
+</testsuite>
+</testsuites>
+XML
+printf '%s' "$SELFTEST_TAP"
+exit "${SELFTEST_RC:-0}"
+EOF
+  export SELFTEST_TAP=$'1..3\nok 1 selected pass # in 1488 ms\nnot ok 2 selected failure # in 12 ms\n# assertion failed\nok 3 selected skip # skip unavailable\n' SELFTEST_RC=1
+  mg selftest --shard 2/3
+  [ "$status" -eq 1 ]
+  [ "$(field -c .summary)" = '{"total":3,"passed":1,"failed":1,"skipped":1}' ]
+  [ "$(field -c '[.failures[].id]')" = '["selected failure"]' ]
+  [ "$(field '.failures[0].repro')" = "tools/mg selftest --filter 'selected failure'" ]
+  [ "$(field -c .args)" = '["--shard","2/3"]' ]
+  jq -e '.details.file_seconds == {"a.bats": 1.5, "b.bats": 0.25}' "$result"
+  local all
+  all="$(cd "$SB" && printf '%s\n' tools/tests/*.bats | wc -l)"
+  jq -e --argjson all "$all" '.details.shard | .index == 2 and .count == 3 and .all_files == $all
+    and (.files | length) > 0 and (.files | length) < $all' "$result"
+  # Bats gets the shard's files and our report request, never --shard.
+  ! grep -q -- 'shard' "$SELFTEST_BATS_ARGS"
+  [ "$(grep '\.bats$' "$SELFTEST_BATS_ARGS" | jq -R -n -c '[inputs]')" = "$(field -c .details.shard.files)" ]
+  [ "$(grep -A1 -x -- '--report-formatter' "$SELFTEST_BATS_ARGS" | tail -n 1)" = junit ]
+  [ -f "$(grep -A1 -x -- '--output' "$SELFTEST_BATS_ARGS" | tail -n 1)/report.xml" ]
+  validate "$result"
+
+  # A report the caller asks for replaces ours.
+  mkdir "$BATS_TEST_TMPDIR/report"
+  mg selftest --report-formatter tap13 --output "$BATS_TEST_TMPDIR/report"
+  [ "$(grep -c -x -- '--report-formatter' "$SELFTEST_BATS_ARGS")" -eq 1 ]
+  [ "$(grep -c -x -- '--output' "$SELFTEST_BATS_ARGS")" -eq 1 ]
+  [ "$(field '.details | has("shard") or has("file_seconds")')" = false ]
+  validate "$result"
+}
+
 # These exercise the real nested runner with isolated fixture files.
 @test "selftest overlaps files but keeps each file sequential by default" {
   rm "$SB/tools/tests/"*.bats
