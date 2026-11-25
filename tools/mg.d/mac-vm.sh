@@ -639,10 +639,10 @@ mg__mac_vm_claim() {
   local record st pid n=0 i announced="" who
   name="$(jq -r .name <<<"$MG_MAC_VM")"
   ssh="$(jq -r .ssh <<<"$MG_MAC_VM")"
-  start="$(mg__epoch)"
-  mg_on_exit "mg__mac_vm_claim_nudge '$state'"
+  start="$(date -u +%s)"
+  ! declare -F mg_on_exit >/dev/null || mg_on_exit "mg__mac_vm_claim_nudge '$state'"
   holder="$(jq -nc --arg m "$(hostname -s 2>/dev/null || hostname)" --arg job "$MG_JOB" --arg run "$MG_RUN_ID" \
-    --arg wt "$MG_ROOT" --arg at "$(mg__iso "$start")" '{machine: $m, job: $job, run_id: $run, worktree: $wt, started_at: $at}')"
+    --arg wt "$MG_ROOT" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{machine: $m, job: $job, run_id: $run, worktree: $wt, started_at: $at}')"
   while :; do
     record="$(cat "$state" 2>/dev/null)"
     st="$(jq -r '.state // empty' <<<"$record" 2>/dev/null)"
@@ -651,17 +651,17 @@ mg__mac_vm_claim() {
       if [ "$st" = taken ]; then
         # It looks at the lease every $beat s: one that is still there after
         # that has seen this job hold it, and keeps the claim for it.
-        mg_sleep $((${beat%.*} + 1))
+        mg__mac_vm_claim_sleep $((${beat%.*} + 1))
         if [ "$(cat "$state" 2>/dev/null)" = "$record" ] && mg__mac_vm_claim_keeper "$state" "$pid"; then
-          mg__mac_vm_detail "$(jq -nc --argjson w "$(($(mg__epoch) - start))" '{claim: {kept: true, waited_s: $w}}')"
+          mg__mac_vm_detail "$(jq -nc --argjson w "$(($(date -u +%s) - start))" '{claim: {kept: true, waited_s: $w}}')"
           return 0
         fi
       else
-        if [ $(($(mg__epoch) - start)) -ge "$wait" ]; then
+        if [ $(($(date -u +%s) - start)) -ge "$wait" ]; then
           mg__mac_vm_fail mac-vm-busy "$name stayed claimed for $wait s (this Mac's keeper, pid $pid, state ${st:-unknown})"
           return 1
         fi
-        mg_sleep 1
+        mg__mac_vm_claim_sleep 1
       fi
       continue
     fi
@@ -682,13 +682,13 @@ mg__mac_vm_claim() {
         st="$(jq -r '.state // empty' <<<"$record" 2>/dev/null)"
         [ "$st" = starting ] || break
       fi
-      mg_sleep 0.5
+      mg__mac_vm_claim_sleep 0.5
       i=$((i + 1))
     done
     case "$st" in
       taken)
-        mg__mac_vm_detail "$(jq -nc --argjson w "$(($(mg__epoch) - start))" '{claim: {waited_s: $w}}')"
-        [ -z "$announced" ] || echo "VM claim: took $name after $(($(mg__epoch) - start)) s" >&2
+        mg__mac_vm_detail "$(jq -nc --argjson w "$(($(date -u +%s) - start))" '{claim: {waited_s: $w}}')"
+        [ -z "$announced" ] || echo "VM claim: took $name after $(($(date -u +%s) - start)) s" >&2
         return 0
         ;;
       busy)
@@ -704,7 +704,7 @@ mg__mac_vm_claim() {
         return 2
         ;;
     esac
-    if [ $(($(mg__epoch) - start)) -ge "$wait" ]; then
+    if [ $(($(date -u +%s) - start)) -ge "$wait" ]; then
       mg__mac_vm_fail mac-vm-busy "$name stayed claimed for $wait s ($who)"
       return 1
     fi
@@ -712,8 +712,14 @@ mg__mac_vm_claim() {
       echo "VM claim: waiting for $name ($who)" >&2
       announced=1
     fi
-    mg_sleep "$poll"
+    mg__mac_vm_claim_sleep "$poll"
   done
+}
+
+# A TERM trap interrupts mg_sleep at once; a harness that sources this file
+# alone has only sleep. The claim uses no other helper of host.sh.
+mg__mac_vm_claim_sleep() {
+  if declare -F mg_sleep >/dev/null; then mg_sleep "$1"; else sleep "$1"; fi
 }
 
 # mg__mac_vm_claim_nudge <state file>: as the job ends, tells this Mac's
