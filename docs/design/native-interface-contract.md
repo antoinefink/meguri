@@ -98,6 +98,19 @@ Supporting requirements: R131, R134, R135, R1975, R1976, R1980–R1982.
 - Preserve storage boundaries and write-on-change behavior (R112, R114).
 - Preserve existing backup behavior if touched, including R150's no-media backup note. Do not add unimplemented backup controls.
 
+Integrations, Antoine's explicit design of 2026-11-25: two native checkbox rows,
+each with a small trailing round light and plain short receiver state. Keep the
+port in the checkbox label; normal status says Listening or Off without repeating
+the address. The narrow indicator exception uses the system `circle.fill` symbol
+in caption-2 size: semantic green for a bound receiver, secondary for Off or a
+wait/start, orange for Port in use. Text always identifies the state; the symbol
+is decorative and hidden from accessibility. Listening means the socket bound,
+not that a client connected or the checkbox is enabled. Keep Waiting and Starting
+distinct, full state/remedy details in native hover help and accessibility hints, and
+actionable collection/destination errors inline. No separate redundant status
+rows or Destination footer. Native verification remains required at the public
+Settings width, including keyboard/VoiceOver, light/dark and conflict states.
+
 ## N6. Address test and credentials
 
 - Place a compact “Test” button beside the server URL field, outside the text field.
