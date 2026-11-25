@@ -235,7 +235,14 @@ import notify
         XCTAssertTrue(emptyDeckAdd.isEnabled)
         try click(emptyDeckAdd, app, bundle)
 
+        #if os(macOS)
+        let addWindow = app.windows["editor.add.window"]
+        XCTAssertTrue(addWindow.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.windows.matching(identifier: "editor.add.window").count, 1)
+        let editor = addWindow.descendants(matching: .any)["editor.add"].firstMatch
+        #else
         let editor = element(app, "editor.add")
+        #endif
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
         let fields = editor.descendants(matching: .any)["editor.fields"].firstMatch
         XCTAssertTrue(fields.waitForExistence(timeout: 10))
@@ -249,18 +256,29 @@ import notify
         XCTAssertFalse(emptyAdd.isEnabled, "Add stays disabled until the first field has content")
         XCTAssertFalse(element(app, "editor.add.fieldStatus").exists)
         for (name, content) in [("Front", front), ("Back", back)] {
+            #if os(macOS)
+            app.activate()
+            #endif
             // Production declares a named multiline textbox. Require its
             // native AX input, rather than the field's header.
             let inputs = fields.descendants(matching: .textView).matching(NSPredicate(format: "label == %@", name))
             let input = try XCTUnwrap(waitForHittable(inputs), "Expected an actionable \(name) multiline text view")
             XCTAssertEqual(inputs.count, 1)
             XCTAssertTrue(input.isEnabled)
+            #if os(macOS)
+            // As in the native drive macros: click the current input's center,
+            // then type through the app without asking XCTest to refocus it.
+            input.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+            app.typeText(content)
+            #else
             try click(input, app, bundle)
             try app.bringToFront(bundleIdentifier: bundle)
             input.typeText(content)
+            #endif
             // Require the live native AX String, allowing exactly one terminal LF.
             var characterCount = -1
             var exactWithTerminalLF = false
+            var firstMismatchScalars: String?
             let typed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 guard input.exists, let value = input.value as? String else {
                     characterCount = -1; exactWithTerminalLF = false
@@ -268,10 +286,16 @@ import notify
                 }
                 characterCount = min(value.count, 128)
                 exactWithTerminalLF = value == content + "\n"
+                // This journey authors every byte in a fresh synthetic collection.
+                // Keep value diagnostics here only; never add them to shared input helpers.
+                if value != content && !exactWithTerminalLF && firstMismatchScalars == nil {
+                    firstMismatchScalars = value.unicodeScalars.prefix(128)
+                        .map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
+                }
                 return value == content || exactWithTerminalLF
             }, object: nil)
             XCTAssertEqual(XCTWaiter().wait(for: [typed], timeout: 20), .completed,
-                "Native typing must reach \(name); AX String character count (capped at 128)=\(characterCount), exactWithTerminalLF=\(exactWithTerminalLF)")
+                "Native typing must reach \(name); AX String character count (capped at 128)=\(characterCount), exactWithTerminalLF=\(exactWithTerminalLF); first mismatched synthetic AX value scalars (capped at 128)=[\(firstMismatchScalars ?? "unavailable")]")
         }
         let add = editor.buttons["editor.add.save"].firstMatch
         let addReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -280,7 +304,11 @@ import notify
         XCTAssertEqual(XCTWaiter().wait(for: [addReady], timeout: 20), .completed,
             "The real field-change events must make Add actionable")
         XCTAssertEqual(add.label, "Add")
+        #if os(macOS)
+        add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        #else
         try click(add, app, bundle)
+        #endif
         // N17.1: the confirmation names the deck; the sheet stays open on a cleared form.
         #if os(macOS)
         XCTAssertTrue(waitForText(element(app, "editor.add.result"), "Added to Default"))
@@ -294,7 +322,11 @@ import notify
             app.debugDescription)
         XCTAssertTrue(closeEditor.isEnabled)
         // The ordinary Close runs the held-flush guard on the post-save draft.
+        #if os(macOS)
+        closeEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        #else
         try click(closeEditor, app, bundle)
+        #endif
         XCTAssertTrue(editor.waitForNonExistence(timeout: 20))
         let addedToDeck = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             deckPage.exists && HomeControls.deckCounts(app) == [1, 0, 0] && !emptyAddButtons.firstMatch.exists
