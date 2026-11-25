@@ -276,17 +276,29 @@ import notify
             XCTAssertEqual(inputs.count, 1)
             XCTAssertTrue(input.isEnabled)
             #if os(macOS)
-            // Keep native focus and send each hardware key once. WebKit may
-            // represent a trailing Space as NBSP while a word is unfinished.
+            // Keep native focus and send each hardware key once.
             input.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
             for character in content {
                 app.typeKey(String(character).lowercased(), modifierFlags: character.isUppercase ? .shift : [])
             }
-            let typed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                input.exists && matchesNativeAX(input.value as? String, expected: content)
+            // Focused WebKit AX may include an uncommitted inline prediction.
+            // Complete ordinary editing before judging the field's value.
+            let beforeBlur = input.value as? String
+            app.typeKey(.tab, modifierFlags: [])
+            // The native mode control follows bridge focus messages, processed
+            // in sequence after the preceding field's blur commit is accepted.
+            let modeAfterTab = editor.descendants(matching: .any).matching(identifier:
+                name == "Front" ? "editor.field.1.htmlToggle" : "editor.add.htmlToggle").firstMatch
+            let committed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                modeAfterTab.exists && (name == "Front" ? modeAfterTab.isEnabled : !modeAfterTab.isEnabled)
             }, object: nil)
-            XCTAssertEqual(XCTWaiter().wait(for: [typed], timeout: 20), .completed,
-                "Native typing must reach the exact \(name) value: expected \(describeValue(content)); actual \(describeValue(input.value as? String))")
+            let commitResult = XCTWaiter().wait(for: [committed], timeout: 20)
+            let afterBlur = fields.descendants(matching: .textView)
+                .matching(NSPredicate(format: "label == %@", name)).firstMatch.value as? String
+            let evidence = "expected \(describeValue(content)); before blur \(describeValue(beforeBlur)); after blur \(describeValue(afterBlur))"
+            XCTAssertEqual(commitResult, .completed, "\(name) Tab must finish the editor's blur commit: \(evidence)")
+            XCTAssertTrue(matchesNativeAX(afterBlur, expected: content),
+                "Completed native editing must leave the exact \(name) value: \(evidence)")
             #else
             try click(input, app, bundle)
             try app.bringToFront(bundleIdentifier: bundle)
@@ -296,9 +308,9 @@ import notify
             }, object: nil)
             XCTAssertEqual(XCTWaiter().wait(for: [typed], timeout: 20), .completed,
                 "Native typing must reach the exact \(name) value")
-            #endif
             XCTAssertTrue(matchesNativeAX(input.value as? String, expected: content),
                 "Native typing must leave the exact \(name) value: expected \(describeValue(content)); actual \(describeValue(input.value as? String))")
+            #endif
         }
         let add = editor.buttons["editor.add.save"].firstMatch
         let addReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -306,7 +318,7 @@ import notify
         }, object: nil)
         XCTAssertEqual(XCTWaiter().wait(for: [addReady], timeout: 20), .completed,
             "The real field-change events must make Add actionable")
-        // Recheck both fields after Front's blur and the form's live updates.
+        // Recheck both fields after completed editing and the form's live updates.
         for (name, content) in [("Front", front), ("Back", back)] {
             let input = fields.descendants(matching: .textView).matching(NSPredicate(format: "label == %@", name)).firstMatch
             XCTAssertTrue(matchesNativeAX(input.value as? String, expected: content),
