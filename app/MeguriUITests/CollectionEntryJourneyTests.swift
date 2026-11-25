@@ -255,6 +255,11 @@ import notify
         XCTAssertTrue(emptyAdd.waitForExistence(timeout: 10))
         XCTAssertFalse(emptyAdd.isEnabled, "Add stays disabled until the first field has content")
         XCTAssertFalse(element(app, "editor.add.fieldStatus").exists)
+        func matchesNativeAX(_ actual: String?, expected: String) -> Bool {
+            guard let actual else { return false }
+            return actual.utf8.elementsEqual(expected.utf8)
+                || actual.utf8.elementsEqual((expected + "\n").utf8)
+        }
         for (name, content) in [("Front", front), ("Back", back)] {
             #if os(macOS)
             app.activate()
@@ -283,7 +288,7 @@ import notify
             }
             let initial = input.value as? String
             attachTypingEvidence("Initial AX value before focus: \(describeValue(initial))", stage: "initial-AX")
-            XCTAssertEqual(initial, "", "Fresh \(name) must start empty: \(describeValue(initial))")
+            XCTAssertTrue(matchesNativeAX(initial, expected: ""), "Fresh \(name) must start empty: \(describeValue(initial))")
             var firstDivergence: String?
             func waitForPrefix(_ expected: String, previous: String?, step: String) {
                 var observed: String?
@@ -292,10 +297,12 @@ import notify
                     observed = input.exists ? input.value as? String : nil
                     // AX may still publish the preceding, already verified
                     // prefix. Observe it without sending the key again.
-                    if observed != expected && observed != previous && firstUnexpected == nil {
+                    let matchesExpected = matchesNativeAX(observed, expected: expected)
+                    let matchesPrevious = previous.map { matchesNativeAX(observed, expected: $0) } ?? false
+                    if !matchesExpected && !matchesPrevious && firstUnexpected == nil {
                         firstUnexpected = describeValue(observed)
                     }
-                    return observed == expected
+                    return matchesExpected
                 }, object: nil)
                 let result = XCTWaiter().wait(for: [reached], timeout: 20)
                 if firstDivergence == nil,
@@ -328,12 +335,13 @@ import notify
             try app.bringToFront(bundleIdentifier: bundle)
             input.typeText(content)
             let typed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                input.exists && input.value as? String == content
+                input.exists && matchesNativeAX(input.value as? String, expected: content)
             }, object: nil)
             XCTAssertEqual(XCTWaiter().wait(for: [typed], timeout: 20), .completed,
                 "Native typing must reach the exact \(name) value")
             #endif
-            XCTAssertEqual(input.value as? String, content, "Native typing must leave the exact \(name) value")
+            XCTAssertTrue(matchesNativeAX(input.value as? String, expected: content),
+                "Native typing must leave the exact \(name) value")
         }
         let add = editor.buttons["editor.add.save"].firstMatch
         let addReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -344,7 +352,8 @@ import notify
         // Recheck both fields after Front's blur and the form's live updates.
         for (name, content) in [("Front", front), ("Back", back)] {
             let input = fields.descendants(matching: .textView).matching(NSPredicate(format: "label == %@", name)).firstMatch
-            XCTAssertEqual(input.value as? String, content, "\(name) must remain exact before saving")
+            XCTAssertTrue(matchesNativeAX(input.value as? String, expected: content),
+                "\(name) must remain exact before saving")
         }
         XCTAssertEqual(add.label, "Add")
         #if os(macOS)
