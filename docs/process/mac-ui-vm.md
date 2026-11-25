@@ -1,16 +1,15 @@
 # Mac UI tests and simulators in a VM
 
-Current topology (2026-11-25): M5 is the build coordinator and schedules VM
-jobs over SSH; M3 Max, which hosts the VM, may schedule its own (Antoine,
-2026-11-25: "you being able to use the VM on this machine and the other
-agents using it over SSH"). The dedicated headless `meguri-mac` VM lives on T9
-attached to M3 Max. Each Mac keeps its own VM lease; the VM's claim, a lock
-inside the VM, lets one Mac's job in at a time (`tools/vm/AGENTS.md`). The
-private coordinator wrappers use the kit at `/Volumes/T9/Meguri VM`
-on the M3 Max; M3 Max's own `mac-vm.json` names the kit's `bin/tart` and
-`bin/vm-ssh` directly. See
+Current topology (2026-11-25): M5 is the build coordinator and schedules
+folding over SSH. Both Macs can schedule other VM jobs under MG's guest-wide
+claim (`tools/vm/AGENTS.md`). The dedicated headless `meguri-mac` VM lives on
+T9 attached to M3 Max, which hosts the resident VNC connection that folding
+reuses. The private coordinator wrappers use the kit at
+`/Volumes/T9/Meguri VM` on M3 Max. See
 [`new-machine.md`](new-machine.md#current-coordinator-and-remote-test-vm) for
-atomic installation, removal of old activation overrides and verification.
+configuration, atomic installation, removal of old activation overrides and
+verification.
+
 The provisioning and dated results below describe the original installation.
 
 Antoine decided on 2026-10-15 that Mac UI-driving suites run in a macOS virtual machine on this Mac. Before, they ran on the real screen, at most once an hour. Plan unit U8b implements the change. The same day he extended it: everything that would disturb his Mac runs in the VM, as soon and as often as useful. Plan unit U8c moves the simulators there. This page records provisioning and subsequent verification. The 2026-10-19 supplement below moves the remaining Mac app-hosted checks into the VM.
@@ -63,8 +62,9 @@ The coordinator's default per-user config,
 `vms: ["meguri-mac"]`, using absolute paths. Install it as documented in
 [`new-machine.md`](new-machine.md#install-the-coordinator-wrappers), clearing
 old activation overrides in every shell. The SSD paths above are used only
-on the hosting Mac. Manual VNC needs a separate tunnel; the remote launcher
-does not detach VNC sessions or rewrite their addresses.
+on the hosting Mac. New posture sessions instead use the detached M3-resident
+owner and short SSH RPC described in [sim-posture.md](sim-posture.md); no M5 VNC
+tunnel or additional RFB client is used.
 
 `tools/mg mac-ui`, `tools/mg a11y --platform mac` and `tools/mg drive --platform mac` build on the host, take the VM's lease (one run at a time per VM, across checkouts), start the VM headless when it is stopped, and then follow the steps above. They copy `app/Fixtures` and a drive's script and fixtures too. They run as often as needed, with the host locked or not. Their `result.json` has `details.mac_runner: "vm"`. `tools/mg doctor` shows the VM's state. Conventions and traps: `tools/vm/AGENTS.md`.
 
@@ -139,9 +139,23 @@ Verified on 2026-10-17 from the U8d worktree, with a watcher that polled `lsappi
 
 ## Fold positions (2026-11-01)
 
-Only Device Hub's buttons change the iPhone Duo's fold position. `tools/vm/duo-fold.sh` reaches them from the headless VM over Tart's VNC server: `start`, then `tools/mg sim acquire foldable`, `hub <udid>`, `fold closed|half|open`, `shot <udid> <display> <file>` and `stop`. Display 1 is outer and 3 is inner. `tools/mg` jobs still work during the session.
+Only Device Hub's buttons change the iPhone Duo's fold position. `tools/mg sim-posture open|closed <leased-udid>` uses the existing persistent VNC holder, a private exact-target compact or expanded canvas calibration and fresh three-glyph/title evidence (or a positive legacy tooltip) before its single joined click. Calibration first verifies the leased signed window/title, moves only the held VNC pointer to the safe titlebar, and presents a fresh verified neutral image for approval; it emits zero clicks or keys. It verifies displays 1 (outer) and 3 (inner) afterwards. See the [coordinator calibration and proof procedure](sim-posture.md). The cycle is pending at writing; the integrator records actual native acceptance with sanitized run IDs, click counts and inner/outer classifications in the [verification section of PR #205](https://github.com/antoinefink/meguri/pull/205), which carries the evolving status. Prepare before acquiring `foldable`; release through **`tools/mg sim release <udid>`** before manual `tools/vm/duo-fold.sh stop`, and wait for guest jobs before stopping too. Posture itself never prepares, reconnects or restarts anything. `tools/mg` jobs still work during the session.
 
-Keep one VNC connection. Reconnecting for each click crashed Tart twice (an assertion in `_VZVirtualMachineAccessor addAccessorObserver`) and took down what ran in the VM; `tools/vm/vnc-holder.py` holds the connection for the whole session. A restart shuts the simulators down and voids their leases.
+Keep one VNC connection: reconnecting crashes Tart and stops guest jobs. Preparation reuses a persistent holder. Fresh preparation and manual `stop` require MG's scheduler lease, idle guest tests and no active or unknown acquisitions. The guest `pool.lock` excludes legacy renewals through shutdown. A private owner joins its child transports; PID files never authorize teardown. Recovery requires confirmed shutdown and remote run completion. Uncertainty retains evidence; it never triggers another start.
+
+Folding lifecycle operations support only the configured primary VM, M5's local scheduler lease and the shared guest claim. A normal folding request waits before taking the M5 slot when a still-live older keeper cannot prove its acquisition, so the keeper can release naturally. Both Macs may schedule ordinary jobs. New resident routes use coordinator `build/vmh3` and private M3 kit state; the following `build/vm-fold`/`vmf2` and forward details describe legacy/local routes. Secondary requests or state naming another VM are refused before teardown/start. Fresh preparation preflights the actual UNIX control socket bind/listen before stopping; its pathname must fit macOS's 103-byte limit. Failed pre-child setup removes only records it created. The SSH forward must have OS evidence (`lsof` on M5) of the owned foreground child's exact loopback listener; no readiness probe connects to VNC. Actual RFB disconnect exits the holder even while it waits on its FIFO; intentional `quit` remains orderly. Ready requires functioning transports, and disconnected status after prepare fails the job. Read-only status may successfully report disconnected.
+
+When two stable observations prove the canonical pre-supervisor session disconnected, normal prepare/status/inspect/calibrate/open/closed/stop commands select the fixed private sibling `build/vmf2`, retaining `build/vm-fold/venv` and the primary scheduler lease. Routing and bounded, nofollow VM metadata admission are repeated under that lease before mutation. The canonical orphan stays untouched; live or ambiguous orphan evidence refuses managed-session work. Keep both state directories private.
+
+A completed shutdown followed by failed state confirmation keeps preparation's restoration armed. A lost remote stop exit, unknown remote run exit, unavailable owner or historical unowned session cannot be repaired by a blind wrapper retry or by clearing records. Retain private evidence for operator reconciliation on M3 and M5; `stop` may refuse and no automatic command resolves lost remote completion. Restoration starts headless service only with stopped-state and owned-run completion proof. Linux/Docker checks use synthetic macOS socket observations; actual M5 listener/RFB verification and real fold verification remain separate operator work.
+
+`tools/mg sim-posture status` and `inspect` also admit the previous operator format without adopting, reconnecting or changing it. Private metadata, same-user process identity and start time must link the holder/FIFO, its established loopback socket, the SSH listener and the configured Tart VM/remote target. Missing or ambiguous evidence reports disconnected. Previous-format teardown remains refused. Keep state, Tart URIs and logs private in the main checkout's `build/vm-fold/`.
+
+For hardware inspection, `tools/mg sim-posture inspect <leased-udid>` holds the scheduler lease, validates this checkout's live acquisition, unique booted pool Duo, device type and pinned runtime, then opens the selected Xcode's signed DeviceHub (`com.apple.dt.Devices`, `DevicesTrampoline`) as the guest console user. It captures through the existing holder and waits for a complete PNG in a private temporary directory outside Git. Only the local path is reported; never publish the desktop. Remove the capture after calibration. Inspection never prepares VNC or boots/resets a simulator. The interactive `calibrate` route records measured control centers and three private glyphs only after operator approval of its fresh neutral image and repeated neutral title/window/pointer/glyph validation; independent live calibration is required for native acceptance.
+
+Resize defect (2026-11-24, operator live evidence): seven complete 3840×2400 PNGs through one Tart 2.32.1 / vncdotool 1.4.2 connection had all six successive pairwise differences confined to the boot negotiation's 1280×720 region. The isolated resizing test had passed; it did not establish live full-frame refresh. The holder now resynchronizes protocol width/height from `screen.size` before delegating `captureScreen` through a client/factory subclass (`api.connect` supports `factory_class` in 1.4.2). The deterministic regression checks request bounds and unchanged library arguments. Live full-frame refresh after this fix and native fold calibration are required for native acceptance; outcomes belong in PR #205's verification section.
+
+Resident remote preparation from M5 first requires `tools/mg sim-posture deploy` and `tools/mg sim-posture preflight` as documented in [sim-posture.md](sim-posture.md). For initial setup or supported stopped-reservation recovery, an operator externally suspends dispatch on BOTH Macs and drains outstanding jobs/leases, then invokes `tools/mg sim-posture maintenance-prepare`. That invocation declares the external pause; MG cannot detect it and it overrides no claim or fence. Ordinary `tools/mg sim-posture prepare` only reuses the connected hosted session and otherwise refuses with maintenance instructions. A disconnected hosted owner still cannot be replaced by this runtime. Confirm `tools/mg sim-posture status` before acquiring the foldable; repeated preparation/status/inspection uses that same connection. Ordinary master job boot behavior is unchanged.
 
 ## Growing the disk (2026-11-01)
 

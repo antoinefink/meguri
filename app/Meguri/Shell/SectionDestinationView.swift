@@ -22,6 +22,7 @@ private struct ReviewDestination: View {
         ReviewView(model: model, walk: walk, status: showsStatus ? AnyView(CloudSyncStatusButton(collection: collection)) : nil,
             editNote: ReviewEditNote(flow: collection.editNoteFlow, open: { Task { await collection.openEditNote() } },
                 form: AnyView(EditNoteView(collection: collection))),
+            showInBrowse: collection.reviewShowInBrowse,
             visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } }
     }
 }
@@ -121,7 +122,7 @@ struct ShellFeatures {
         // (N22.1). The iPad's Browse row waits for its own layout; W14: Note Types has a sidebar
         // row at regular width, and the tab layout reaches it from Settings (U286).
         features.availableSections = AppSection.productSidebar(on: .current, statistics: StatsRollout.enabled)
-        // X2.5's Show opens Browse where Browse is shown.
+        // X2.5's Show and the leech popover's Show in Browse (N16.11) open Browse where it is shown.
         collection.deckImportBrowseAvailable = features.availableSections.contains(.browse)
         let statsPage: StatsPage?
         if StatsRollout.enabled {

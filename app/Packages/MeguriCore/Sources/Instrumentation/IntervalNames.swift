@@ -336,6 +336,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let addNotetypeSelection = BridgeCall("add_notetype_selection")
     public static let notetypeLastDeck = BridgeCall("notetype_last_deck")
     public static let tagComplete = BridgeCall("tag_complete")
+    public static let editorPasteImagesAsPNG = BridgeCall("editor_paste_images_as_png")
     public static let editorFieldHTML = BridgeCall("editor_field_html")
     public static let startDeleteNotes = BridgeCall("start_delete_notes")
     public static let notetypeNames = BridgeCall("notetype_names")
@@ -376,6 +377,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let startClearUnusedTags = BridgeCall("start_clear_unused_tags")
     public static let trackedMediaNames = BridgeCall("tracked_media_names")
     public static let addMedia = BridgeCall("add_media")
+    public static let editorAddPicture = BridgeCall("editor_add_picture")
     public static let flushForBackground = BridgeCall("flush_for_background")
     public static let suspend = BridgeCall("suspend")
     public static let resume = BridgeCall("resume")
@@ -791,14 +793,14 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,
         deckDeletionJobResult, addDeck, startRenameDeck, startMoveDecks, startCollapseDecks,
         selectDeck, deckDeletionSummary, startDeleteDecks, noteDeletionJobResult, addNote,
-        addNoteForScreen, addMinedNote, updateNote, patchNote, cardDeck, noteCards, readNote, checkNoteFields, addDefaults, addNotetypeSelection, notetypeLastDeck, tagComplete, editorFieldHTML, startDeleteNotes, notetypeNames,
+        addNoteForScreen, addMinedNote, updateNote, patchNote, cardDeck, noteCards, readNote, checkNoteFields, addDefaults, addNotetypeSelection, notetypeLastDeck, tagComplete, editorFieldHTML, editorPasteImagesAsPNG, startDeleteNotes, notetypeNames,
         readNotetype, addNotetype, addStockNotetype, cloneNotetype, ensureImageOcclusionNotetype,
         renameNotetype, setNotetypeCss, setNotetypeFieldOptions, setNotetypeTemplateOptions, notetypeCardText, notetypeCardTextEdit, tagMutationJobResult,
         tagTree, flagNames, setTagsCollapsed, renameFlag, restoreFlagName,
         addNoteTags, startAddNoteTags, removeNoteTags, startRemoveNoteTags, setCardFlag,
         startSetCardFlag, toggleCardFlag, startToggleCardFlag, markNotes, startMarkNotes,
         unmarkNotes, startUnmarkNotes, toggleNoteMark, startToggleNoteMark, startRenameTag,
-        startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, trackedMediaNames, flushForBackground,
+        startReparentTags, startDeleteTags, startClearUnusedTags, addMedia, editorAddPicture, trackedMediaNames, flushForBackground,
         suspend, resume, checkRollover, fsrsPolicyStatus, enableFsrs, undoJobResult, peekUndo, peekRedo,
         tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startUndoStep, startRedo, startAddNotes, noteAdditionJobResult,
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,

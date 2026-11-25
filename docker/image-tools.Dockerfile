@@ -11,7 +11,7 @@
 FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS image-tools
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates ffmpeg fonts-dejavu-core jq python3 \
+ && apt-get install -y --no-install-recommends ca-certificates ffmpeg fonts-dejavu-core jq procps python3 \
       python3-jsonschema python3-numpy python3-pil python3-yaml \
  && rm -rf /var/lib/apt/lists/* \
  && ffmpeg -hide_banner -version | head -n 1 \

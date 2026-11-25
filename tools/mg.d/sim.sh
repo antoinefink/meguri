@@ -22,6 +22,81 @@
 mg_job sim host mg_sim \
   "Shared iOS simulator pool, in the macOS test VM (queued without it; acquire and gc wait for the VM's lease): acquire <iphone|ipad> [--holder <label>] [--ttl-min N] | renew <udid> [--ttl-min N] | release <udid> | status | gc [--older-than-hours N] [--list]"
 
+mg_job sim-posture host mg_sim_posture \
+  "Duo posture: open|closed|calibrate|inspect <leased-udid>; deploy|preflight|prepare|status|receipt [--vm <name>]; operator-only maintenance-prepare declares BOTH schedulers externally paused and jobs/leases drained"
+
+mg_sim_posture() {
+  local action="${1:-}" out rc
+  if [ "$action" = inspect ] || [ "$action" = open ] || [ "$action" = closed ] || [ "$action" = calibrate ]; then
+    if [ $# -ne 2 ]; then
+      mg_failure usage "usage: tools/mg sim-posture open|closed|calibrate|inspect <leased-udid>"
+      mg_status error; return 0
+    fi
+    out="$("$MG_TOOLS/vm/duo-fold.sh" "$action" "$2")" && rc=0 || rc=$?
+    case "$rc" in
+      3) mg__mac_vm_unreachable "posture scheduler lease stayed busy" "sim-posture $action $2"; return 0 ;;
+      5) mg__mac_vm_unreachable "posture guest transport unavailable" "sim-posture $action $2"; return 0 ;;
+    esac
+    if [ "$rc" -ne 0 ]; then
+      mg_failure "posture-$action" "Duo $action failed; see log.txt. Native calibration may be required. The existing VNC session was not restarted."
+      mg_status fail; return 0
+    fi
+    if [ "$action" = inspect ]; then
+      mg_detail inspection "$out"
+      mg_message "sim-posture: private guest desktop capture complete; operator calibration required"
+    else
+      mg_detail "$action" "$out"
+      mg_message "sim-posture: $action complete"
+    fi
+    mg_status pass; return 0
+  fi
+  case "$action" in deploy|preflight|prepare|maintenance-prepare|status|receipt) shift ;; *)
+    mg_failure usage "usage: tools/mg sim-posture deploy|preflight|prepare|maintenance-prepare|status|receipt [--vm <name>]"
+    mg_status error; return 0 ;;
+  esac
+  if [ $# -ne 0 ] && { [ $# -ne 2 ] || [ "$1" != --vm ]; }; then
+    mg_failure usage "usage: tools/mg sim-posture deploy|preflight|prepare|maintenance-prepare|status|receipt [--vm <name>]"
+    mg_status error; return 0
+  fi
+  if [ "$action" = receipt ]; then
+    if out="$("$MG_TOOLS/vm/duo-fold.sh" receipt "$@")"; then
+      mg_detail receipt "$out"
+      mg_message "sim-posture: existing receipt queried; fences retained"
+      mg_status pass
+    else
+      mg_failure hosted-receipt "Existing receipt unavailable; no input issued; fences retained"
+      mg_status fail
+    fi
+    return 0
+  fi
+  if [ "$action" = deploy ] || [ "$action" = preflight ]; then
+    if out="$("$MG_TOOLS/vm/duo-fold.sh" "$action" "$@")"; then
+      mg_detail hosted "$out"
+      mg_message "sim-posture: resident components ready"
+      mg_status pass
+    else
+      mg_failure hosted-readiness "Resident components not ready; no drain or restart issued"
+      mg_status fail
+    fi
+    return 0
+  fi
+  if { [ "$action" = prepare ] || [ "$action" = maintenance-prepare ]; } && ! "$MG_TOOLS/vm/duo-fold.sh" "$action" "$@"; then
+    mg_failure vnc-prepare "VNC preparation failed; see log.txt and the coordinator's private build/vm-fold logs"
+    mg_status fail; return 0
+  fi
+  if ! out="$("$MG_TOOLS/vm/duo-fold.sh" status "$@")"; then
+    mg_failure vnc-status "Could not read persistent VNC session status; see log.txt"
+    mg_status error; return 0
+  fi
+  mg_detail vnc "$out"
+  if { [ "$action" = prepare ] || [ "$action" = maintenance-prepare ]; } && [ "$(jq -r .connected <<<"$out")" != true ]; then
+    mg_failure vnc-prepare "VNC transport disconnected after preparation; inspect private build/vm-fold logs"
+    mg_status fail; return 0
+  fi
+  mg_message "sim-posture: $(jq -r 'if .connected then "connected" elif .conclusive == false then "unknown" else "not connected" end' <<<"$out")"
+  mg_status pass
+}
+
 mg_sim__usage() {
   mg_failure usage "usage: tools/mg sim acquire <kind> [--holder <label>] [--ttl-min N] | renew <udid> [--ttl-min N] | release <udid> | status | gc [--older-than-hours N] [--list]" \
     "tools/mg sim status"
