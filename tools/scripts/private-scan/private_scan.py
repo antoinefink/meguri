@@ -835,10 +835,12 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'server/web/tests/api.test.ts':
+        'f686e358e8c4535f8408fcaa131cb53fd3dae474d4c8a7fb86c9e620cadeedf6',
     'server/web/tests/browser/mcp.spec.ts':
         'b4045b73d11cd3fcc38fddc1cfcee477bfca005e24347c1ba098f44ef74ab5af',
     'server/web/tests/browser/backups.spec.ts':
-        '72c9bdbc3cba06f72cd258cab249832d479bd88483c9382caab72224e3f8896b',
+        'd9c0899e0b90f48f30519c811d56b181c1593c2f497ebb696dc1c9c6b8ba73cd',
     # Complete-content public review, collection recovery fixture, 2026-11-25.
     'server/tests/backup_round_trip.rs':
         'f4c2931a964617aee54b1ffc21a438b2f72aba3fbd59f75fa9d891be88936914',
@@ -936,7 +938,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        'dcfb5f12b1d4883ee5f01683f289e79a04b200cdef20a724ba429f4750d98cc1',
+        '7e8bc3ff20571a429ce57396995255d0ccb55c11eb19bd60efa3029791a17b21',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1138,11 +1140,11 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/IBMPlexSans-Variable.woff2':
         'e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d',
     'server/web/upstream-records.json':
-        '6474b82fd50c40b5c288011d7baee17f2c226821568ee19ab78a1a940fad18b4',
+        '48df6d6d3025955abbdb188a7ab0a84563111a47331f8255154c29e1906a5c9c',
     'server/web/src/style.css':
         '39e6e70a5d5118f450375b13c90faa1e80f6d1de4d50f2047e348e16b5bfbd2b',
     'server/web/src/app.tsx':
-        '1d02bba9fbfc89f325ed88ec87b0f5fd99b2661bd697f1a7ca5efc046ea84f91',
+        '5b9247335eb1a8e33001ad9b1ece46483db8cc57382188dcbc02d1dae1530be8',
     'server/web/tests/browser/accounts.spec.ts':
         'e212183bbaeedd51ec25b8302607b0ec7dcbb75333dba4b0ea861f179fb8a0d3',
     'server/web/scripts/run.sh':
@@ -1152,7 +1154,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/notices/rolldown-THIRD-PARTY-LICENSE.txt':
         'a877291d800ed43692f3f9ae09d8e01cc6f7293ad39d43896059c188ffbb8b7c',
     'server/web/DEPENDENCIES.md':
-        '008ba5ed27984c5cab72e56055f9a63e212b2688456cc33deced3ed12737df5b',
+        '062796f5dd9be0fb9339cec1c3174aabd2db8b92d21d443fd95637239de556a9',
     'server/build.rs':
         'a4dba10f1d809a0c05836778c7c075b2e2243d7c4aeeff12ddc6f9eec3cfc6e4',
     'docker/sync-web.Dockerfile':

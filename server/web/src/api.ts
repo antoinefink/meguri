@@ -15,6 +15,17 @@ export type ErrorField = "username" | "password" | "token" | "current_password" 
 export class ApiError extends Error {
   constructor(public code: string, public status = 0, public field: ErrorField | undefined = undefined) { super("Account request failed"); }
 }
+export function parseBackupHistory(value: unknown): CollectionBackup[] {
+  const ids = new Set<string>();
+  if (!Array.isArray(value) || !value.every(item => {
+    if (!item || typeof item !== "object" || typeof item.id !== "string" || !item.id.length || ids.has(item.id)
+      || !["daily", "weekly", "monthly", "before_restore"].includes(item.kind)
+      || !Number.isInteger(item.created_at) || !Number.isFinite(new Date(item.created_at * 1000).getTime())
+      || !Number.isSafeInteger(item.size_bytes) || item.size_bytes < 0) return false;
+    ids.add(item.id); return true;
+  })) throw new ApiError("invalid_response");
+  return value;
+}
 const fields: readonly string[] = ["username", "password", "token", "current_password", "new_password"];
 export async function api<T>(path: string, body?: object, signal?: AbortSignal): Promise<T> {
   let response: Response;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import test from "node:test";
 import assert from "node:assert/strict";
-import { api, ApiError, errorMessage } from "../src/api.js";
+import { api, ApiError, errorMessage, parseBackupHistory } from "../src/api.js";
 test("W3 requests use exact envelopes, same-origin cookies, no-store and no automatic reissue", async t => {
   const cases: [string, object | undefined, unknown][] = [
     ["/api/status", undefined, { setup_required: true }],
@@ -55,4 +55,21 @@ test("malformed envelopes fail closed without a second fetch", async t => {
   t.mock.method(globalThis, "fetch", async () => { calls++; return Response.json({ unexpected: "secret" }); });
   await assert.rejects(api("/api/me"), error => error instanceof ApiError && error.code === "invalid_response");
   assert.equal(calls, 1);
+});
+test("backup history validates complete wire rows before rendering", () => {
+  const row = { id: "opaque /?% identifier", created_at: 0, kind: "daily", size_bytes: 0 };
+  assert.deepEqual(parseBackupHistory([]), []);
+  for (const kind of ["daily", "weekly", "monthly", "before_restore"]) {
+    for (const created_at of [-8640000000000, 0, 8640000000000]) {
+      const value = [{ ...row, kind, created_at, size_bytes: Number.MAX_SAFE_INTEGER }];
+      assert.deepEqual(parseBackupHistory(value), value);
+    }
+  }
+  for (const value of [null, {}, [null], [1], [row, row],
+    ...["", null, 12].map(id => [{ ...row, id }]),
+    ...["yearly", "toString", null, 1].map(kind => [{ ...row, kind }]),
+    ...[null, "0", 0.5, NaN, Infinity, 8640000000001, -8640000000001].map(created_at => [{ ...row, created_at }]),
+    ...[null, "0", -1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1].map(size_bytes => [{ ...row, size_bytes }]),
+    [{ id: row.id }],
+  ]) assert.throws(() => parseBackupHistory(value), error => error instanceof ApiError && error.code === "invalid_response");
 });

@@ -58,6 +58,7 @@ export function App() {
   const [bootstrapError, setBootstrapError] = useState<OutcomeValue | null>(null), [notice, setNotice] = useState<OutcomeValue | null>(null);
   const [signingOut, setSigningOut] = useState(false), logoutBusy = useRef(false);
   const [identityVisit, setIdentityVisit] = useState(0);
+  const identityRequest = useRef<AbortController | null>(null);
   const main = useRef<HTMLElement>(null), startup = useRef(false), alive = useRef(true);
   const go = (path: string, message?: string, replace = false) => {
     if (replace) history.replaceState(null, "", path); else history.pushState(null, "", path);
@@ -65,7 +66,10 @@ export function App() {
     setNotice(message ? { text: message } : null);
   };
   const clearToken = () => setPage(previous => ({ ...previous, token: "" }));
-  const sessionLoss = () => { setMe(null); go("/login", "Your session is no longer available. Sign in again.", true); };
+  function clearIdentity() {
+    identityRequest.current?.abort(); identityRequest.current = null; setMe(null);
+  }
+  const sessionLoss = () => { clearIdentity(); go("/login", "Your session is no longer available. Sign in again.", true); };
   async function bootstrap() {
     if (startup.current) return;
     startup.current = true; setLoading(true); setBootstrapError(null);
@@ -88,7 +92,7 @@ export function App() {
     };
     const onHash = () => { if (location.hash) onHistory(); };
     window.addEventListener("popstate", onHistory); window.addEventListener("hashchange", onHash);
-    const onPageHide = () => { setPage(previous => ({ ...previous, token: "", visit: previous.visit + 1 })); setMe(null); };
+    const onPageHide = () => { setPage(previous => ({ ...previous, token: "", visit: previous.visit + 1 })); clearIdentity(); };
     const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) { takeFragment(location, history); location.reload(); } };
     window.addEventListener("pagehide", onPageHide); window.addEventListener("pageshow", onPageShow);
     return () => {
@@ -106,15 +110,16 @@ export function App() {
   useEffect(() => {
     if (loading || bootstrapError || !me || !protectedPath(page.path)) return;
     const controller = new AbortController();
+    identityRequest.current = controller;
     void api<Me>("/api/me", undefined, controller.signal).then(identity => {
-      if (!controller.signal.aborted) setMe(identity);
+      if (identityRequest.current === controller && !controller.signal.aborted && alive.current) setMe(identity);
     }).catch(caught => {
-      if (controller.signal.aborted) return;
+      if (identityRequest.current !== controller || controller.signal.aborted || !alive.current) return;
       const error = asError(caught);
       if (error.status === 401) sessionLoss();
       else setNotice({ error: true, text: errorMessage(error) });
     });
-    return () => controller.abort();
+    return () => { controller.abort(); if (identityRequest.current === controller) identityRequest.current = null; };
   }, [page.visit, loading, identityVisit]);
   useLayoutEffect(() => {
     if (!loading && document.activeElement?.getAttribute("role") !== "alert") main.current?.focus();
@@ -130,14 +135,14 @@ export function App() {
     try {
       await api("/api/logout", {});
       if (!alive.current) return;
-      setMe(null);
+      clearIdentity();
       if (keepCapability) setNotice({ text: "Signed out. You can now use this link." });
       else go("/login", "Signed out.", true);
     } catch (caught) {
       if (!alive.current) return;
       const error = asError(caught);
       if (error.status === 401) {
-        setMe(null); if (!keepCapability) go("/login", "Your session has ended.", true);
+        clearIdentity(); if (!keepCapability) go("/login", "Your session has ended.", true);
       } else setNotice({ error: true, text: errorMessage(error) });
     } finally { logoutBusy.current = false; if (alive.current) setSigningOut(false); }
   }
@@ -147,14 +152,14 @@ export function App() {
   if (loading) content = <p role="status">Opening Meguri…</p>;
   else if (bootstrapError) content = <Card><CardHeader><CardTitle>Could not open your account</CardTitle></CardHeader><CardContent><Outcome value={bootstrapError} /><Button onClick={() => void bootstrap()}>Try loading again</Button></CardContent></Card>;
   else if (!navigation.some(path => path === page.path)) content = <Card><CardHeader><CardTitle>Page not found</CardTitle><CardDescription>This address does not match a Meguri account page.</CardDescription></CardHeader><CardContent>{link(me ? accountHomePath : "/login", me ? "Go to Collection" : "Go to sign in")}</CardContent></Card>;
-  else if (page.path === "/oauth/consent") content = <Consent key={page.visit} request={page.token} clearRequest={clearToken} me={me} onLogin={setMe} onSessionLoss={() => setMe(null)} link={link} />;
+  else if (page.path === "/oauth/consent") content = <Consent key={page.visit} request={page.token} clearRequest={clearToken} me={me} onLogin={setMe} onSessionLoss={clearIdentity} link={link} />;
   else if (capabilityPage && me) content = <Card className="auth-card"><CardHeader><CardTitle>Check your account</CardTitle><CardDescription>You are signed in as {me.username} ({me.role === "admin" ? "administrator" : "member"}).</CardDescription></CardHeader><CardContent className="stack"><p>This link may be intended for a different account. Sign out before using it.</p><Button aria-disabled={signingOut} onClick={() => void logout(true)}>{signingOut ? "Signing out…" : `Sign out ${me.username}`}</Button>{link(accountHomePath, "Return to your account")}</CardContent></Card>;
   else if (page.path === "/accounts" && me?.role !== "admin") content = <Card><CardHeader><CardTitle>Administrator access required</CardTitle><CardDescription>Your member account does not have permission to manage accounts.</CardDescription></CardHeader><CardContent>{link(accountHomePath, "Return to Collection")}</CardContent></Card>;
   else if (page.path === "/accounts" && me) content = <Accounts me={me} sessionLoss={sessionLoss} />;
   else if (page.path === "/collection" && me) content = <Collection key={`${page.visit}:${me.id}`} sessionLoss={sessionLoss} />;
   else if (page.path === "/connection" && me) content = <Connection key={`${page.visit}:${me.id}`} me={me} sessionLoss={sessionLoss} refreshIdentity={() => setIdentityVisit(value => value + 1)} />;
   else if (page.path === "/login" && me) content = <Card className="auth-card"><CardHeader><CardTitle>Signed in as {me.username}</CardTitle></CardHeader><CardContent className="stack">{link(accountHomePath, "Open Collection")}<Button variant="outline" aria-disabled={signingOut} onClick={() => void logout()}>Sign out</Button></CardContent></Card>;
-  else if (["/login", "/setup", "/invite", "/reset", "/settings"].includes(page.path) && (!protectedPath(page.path) || me)) content = <CredentialsForm key={page.visit} mode={page.path.slice(1) as FormMode} token={page.token} clearToken={clearToken} onLogin={identity => { setMe(identity); go(accountHomePath, "Signed in.", true); }} onSuccess={message => { setMe(null); if (page.path === "/setup") setSetup(false); go("/login", message, true); }} onSessionLoss={sessionLoss} link={link} />;
+  else if (["/login", "/setup", "/invite", "/reset", "/settings"].includes(page.path) && (!protectedPath(page.path) || me)) content = <CredentialsForm key={page.visit} mode={page.path.slice(1) as FormMode} token={page.token} clearToken={clearToken} onLogin={identity => { setMe(identity); go(accountHomePath, "Signed in.", true); }} onSuccess={message => { clearIdentity(); if (page.path === "/setup") setSetup(false); go("/login", message, true); }} onSessionLoss={sessionLoss} link={link} />;
   else content = <p role="status">Opening account page…</p>;
   const links: [string, string][] = [["/collection", "Collection"], ["/connection", "Connection"], ["/settings", "Password"], ...(me?.role === "admin" ? [["/accounts", "Accounts"] as [string, string]] : [])];
   const accountIdentity = me && <>

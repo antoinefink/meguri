@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, asError, errorMessage } from "./api";
+import { api, ApiError, asError, errorMessage, parseBackupHistory } from "./api";
 import type { AccountStorage, CollectionBackup } from "./api";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Outcome } from "./ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, Outcome } from "./ui";
 import type { OutcomeValue } from "./ui";
 import { storageValue } from "./storage";
 
@@ -20,13 +20,17 @@ export function Collection({ sessionLoss }: { sessionLoss: () => void }) {
   const [backups, setBackups] = useState<CollectionBackup[] | null>(null), [historyLoading, setHistoryLoading] = useState(true);
   const [historyOutcome, setHistoryOutcome] = useState<OutcomeValue | null>(null), [restoreOutcome, setRestoreOutcome] = useState<OutcomeValue | null>(null);
   const [selected, setSelected] = useState<CollectionBackup | null>(null), [busy, setBusy] = useState(false);
-  const alive = useRef(true), authorityLost = useRef(false), submitting = useRef(false), readingStorage = useRef(false), readingHistory = useRef(false);
+  const [restoreUnknown, setRestoreUnknown] = useState(false);
+  const alive = useRef(true), authorityLost = useRef(false), submitting = useRef(false), readingHistory = useRef(false);
+  const storageRequest = useRef<AbortController | null>(null);
   const controller = useRef(new AbortController()), cancel = useRef<HTMLButtonElement>(null), trigger = useRef<HTMLButtonElement | null>(null);
   const returnFocus = useRef(false), historyHeading = useRef<HTMLHeadingElement>(null);
   useLayoutEffect(() => {
     if (selected) cancel.current?.focus();
     else if (returnFocus.current) {
-      if (trigger.current?.isConnected) trigger.current.focus(); else historyHeading.current?.focus();
+      if (document.activeElement?.getAttribute("role") !== "alert") {
+        if (trigger.current?.isConnected) trigger.current.focus(); else historyHeading.current?.focus();
+      }
       returnFocus.current = false;
     }
   }, [selected]);
@@ -34,49 +38,64 @@ export function Collection({ sessionLoss }: { sessionLoss: () => void }) {
     if (!alive.current || authorityLost.current) return;
     const error = asError(caught);
     if (error.status === 401 || error.code === "stale_authority") {
-      authorityLost.current = true; controller.current.abort(); sessionLoss(); return;
+      authorityLost.current = true; controller.current.abort(); storageRequest.current?.abort(); sessionLoss(); return;
     }
     report({ error: true, text: errorMessage(error) });
   }
   async function loadStorage() {
-    if (readingStorage.current || authorityLost.current) return;
-    readingStorage.current = true; setLoading(true); setOutcome(null);
+    if (authorityLost.current) return;
+    storageRequest.current?.abort();
+    const request = new AbortController(); storageRequest.current = request;
+    setLoading(true); setStorage(null); setOutcome(null);
     try {
-      const value = await api<AccountStorage | null>("/api/me/storage", undefined, controller.current.signal);
-      if (alive.current && !authorityLost.current) setStorage(value);
-    } catch (caught) { handleError(caught, setOutcome); }
-    finally { readingStorage.current = false; if (alive.current && !authorityLost.current) setLoading(false); }
+      const value = await api<AccountStorage | null>("/api/me/storage", undefined, request.signal);
+      if (storageRequest.current === request && alive.current && !authorityLost.current) setStorage(value);
+    } catch (caught) { if (storageRequest.current === request) handleError(caught, setOutcome); }
+    finally { if (storageRequest.current === request && alive.current && !authorityLost.current) setLoading(false); }
   }
   async function loadHistory() {
     if (readingHistory.current || authorityLost.current) return;
     readingHistory.current = true; setHistoryLoading(true); setHistoryOutcome(null);
+    if (restoreUnknown) void loadStorage();
     try {
-      const value = await api<CollectionBackup[]>("/api/me/backups", undefined, controller.current.signal);
-      if (alive.current && !authorityLost.current) setBackups(value);
+      const value = parseBackupHistory(await api<unknown>("/api/me/backups", undefined, controller.current.signal));
+      if (alive.current && !authorityLost.current) { setBackups(value); setRestoreUnknown(false); }
     } catch (caught) { handleError(caught, setHistoryOutcome); }
     finally { readingHistory.current = false; if (alive.current && !authorityLost.current) setHistoryLoading(false); }
   }
   useEffect(() => {
     void loadStorage(); void loadHistory();
-    return () => { alive.current = false; controller.current.abort(); };
+    return () => { alive.current = false; controller.current.abort(); storageRequest.current?.abort(); };
   }, []);
   function closeConfirmation(focusHistory = false) {
     if (focusHistory) trigger.current = null;
     returnFocus.current = true; setSelected(null);
   }
   async function restore() {
-    if (!selected || submitting.current || authorityLost.current || readingHistory.current || readingStorage.current) return;
+    if (!selected || submitting.current || authorityLost.current || readingHistory.current || restoreUnknown) return;
     submitting.current = true; setBusy(true); setRestoreOutcome(null);
     try {
-      await api<null>(`/api/me/backups/${encodeURIComponent(selected.id)}/restore`, {}, controller.current.signal);
+      const result = await api<unknown>(`/api/me/backups/${encodeURIComponent(selected.id)}/restore`, {}, controller.current.signal);
+      if (result !== null) throw new ApiError("invalid_response");
       if (!alive.current || authorityLost.current) return;
       closeConfirmation(true);
       setRestoreOutcome({ text: `Restored the server collection and media from ${backupLabel(selected)}. On each device, download the restored server copy before continuing to study or sync.` });
-      await Promise.all([loadHistory(), loadStorage()]);
-    } catch (caught) { handleError(caught, setRestoreOutcome); }
+      void loadStorage(); await loadHistory();
+    } catch (caught) {
+      handleError(caught, value => {
+        const error = asError(caught);
+        if (error.status === 0 || error.status >= 500 || error.code === "invalid_response") {
+          storageRequest.current?.abort(); storageRequest.current = null;
+          setStorage(null); setLoading(false); setOutcome(null);
+          setRestoreUnknown(true); closeConfirmation(true);
+          setRestoreOutcome({ error: true, text: "The restore result is unknown. Refresh history and review the backups before choosing another restore. Another restore replaces the previous pre-restore safety copy. No retry was sent automatically." });
+        } else setRestoreOutcome(value);
+      });
+    }
     finally { submitting.current = false; if (alive.current && !authorityLost.current) setBusy(false); }
   }
-  const blocked = busy || loading || historyLoading || !!historyOutcome || !!selected;
+  function dismissRestoreError() { setRestoreOutcome(null); closeConfirmation(true); historyHeading.current?.focus(); }
+  const blocked = busy || restoreUnknown || historyLoading || !!historyOutcome || !!selected;
   return <div className="stack">
     <header className="page-heading"><h1>Collection</h1></header>
     <Card><CardHeader><CardTitle level={2}>Storage on server</CardTitle></CardHeader>
@@ -93,16 +112,19 @@ export function Collection({ sessionLoss }: { sessionLoss: () => void }) {
         <Button variant="outline" aria-disabled={busy || historyLoading || !!selected} onClick={() => {
           if (!submitting.current && !selected) void loadHistory();
         }}>Refresh history</Button></div>
-      <CardDescription>Recover your collection database and media from an earlier point.</CardDescription>
       <p className="muted">Daily backups for seven days, then four weekly and twelve monthly backups.</p>
     </CardHeader><CardContent>
-      <Outcome value={restoreOutcome} />
+      <div onKeyDown={event => { if (event.key === "Escape" && restoreOutcome?.error) { event.preventDefault(); dismissRestoreError(); } }}>
+        <Outcome value={restoreOutcome} />
+        {restoreOutcome?.error && <Button variant="outline" onClick={dismissRestoreError}>Dismiss</Button>}
+      </div>
+      {restoreUnknown && <p>Restore is unavailable until you refresh and review backup history.</p>}
       {selected && <section id="backup-restore-confirmation" className="confirmation backup-confirmation" aria-labelledby="backup-restore-title" aria-describedby="backup-restore-effects" onKeyDown={event => {
         if (event.key === "Escape" && !submitting.current) { event.preventDefault(); closeConfirmation(); }
       }}>
         <h3 id="backup-restore-title">Restore backup from {backupLabel(selected)}?</h3>
         <div id="backup-restore-effects" className="stack">
-          <p>This replaces the collection database, including review history and scheduling, and all media on this server with this backup.</p>
+          <p>This replaces your collection on the server, including its review history, scheduling and media.</p>
           <p>A safety copy of the current server collection and media is saved before restoring.</p>
           <p>After restoring, download the restored server copy on each device before continuing to study or sync.</p>
         </div>
@@ -110,7 +132,9 @@ export function Collection({ sessionLoss }: { sessionLoss: () => void }) {
           <Button variant="destructive" aria-disabled={busy} onClick={() => void restore()}>{busy ? "Restoring…" : "Restore backup"}</Button></div>
         <p role="status">{busy ? "Restoring the server collection and media…" : ""}</p>
       </section>}
-      <Outcome value={historyOutcome} />
+      <div onKeyDown={event => { if (event.key === "Escape" && historyOutcome) { event.preventDefault(); historyHeading.current?.focus(); } }}>
+        <Outcome value={historyOutcome} />
+      </div>
       <p role="status">{historyLoading ? "Loading backup history…" : backups && !historyOutcome ? `${backups.length} ${backups.length === 1 ? "backup" : "backups"} available.` : ""}</p>
       {!historyLoading && !historyOutcome && backups?.length === 0 && <p className="backup-empty">No backups yet. Backups are created automatically each day while the server is running.</p>}
       {!!backups?.length && <>
@@ -122,7 +146,7 @@ export function Collection({ sessionLoss }: { sessionLoss: () => void }) {
             <span className="backup-kind"><span className="sr-only">Type: </span>{backupKind[backup.kind]}</span>
             <span className="backup-size"><span className="sr-only">Size: </span>{storageValue(backup.size_bytes)}</span>
             <Button variant="outline" aria-disabled={blocked} aria-expanded={selected?.id === backup.id} aria-controls={selected?.id === backup.id ? "backup-restore-confirmation" : undefined} onClick={event => {
-              if (blocked || submitting.current || authorityLost.current || readingHistory.current || readingStorage.current) return;
+              if (blocked || submitting.current || authorityLost.current || readingHistory.current) return;
               trigger.current = event.currentTarget; setRestoreOutcome(null); setSelected(backup);
             }}>Restore<span className="sr-only"> backup from {backupLabel(backup)}</span></Button>
           </li>;

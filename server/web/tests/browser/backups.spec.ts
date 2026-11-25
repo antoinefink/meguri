@@ -30,22 +30,38 @@ function barrier() {
   const promise = new Promise<void>(resolve => { release = resolve; });
   return { promise, release };
 }
-async function fixture(page: Page, origin: string) {
+async function fixture(page: Page, origin: string, holdIdentity = false, holdStorage = false) {
   const state = {
     history: [...demo], storage: currentStorage as AccountStorage | null, historyReads: 0, storageReads: 0, restores: [] as string[],
     historyError: null as Failure, storageError: null as Failure, restoreError: null as Failure, loseRestoreResponse: false,
+    restoreResult: null as unknown,
     historyGate: null as Promise<void> | null, storageGate: null as Promise<void> | null, restoreGate: null as Promise<void> | null,
   };
   // Observe completion after application promise callbacks, including late
   // failures. This makes negative assertions independent of timing sleeps.
-  await page.addInitScript(() => {
+  await page.addInitScript(({ holdIdentity, holdStorage }) => {
     const original = window.fetch.bind(window);
+    let identitySignal: AbortSignal | null | undefined;
+    const replace = window.history.replaceState.bind(window.history);
+    window.history.replaceState = (...args: Parameters<typeof window.history.replaceState>) => {
+      if (holdIdentity && args[2] === "/login") {
+        document.documentElement.dataset.identityAbortedAtSessionEnd = String(identitySignal?.aborted);
+        window.dispatchEvent(new Event("release-identity-json"));
+      }
+      replace(...args);
+    };
     window.fetch = async (...args) => {
+      if (holdIdentity && args[0] === "/api/me" && args[1]?.signal) identitySignal = args[1].signal;
       const response = await original(...args), json = response.json.bind(response);
       response.json = async () => {
         try {
           const value = await json(), root = document.documentElement, path = new URL(response.url).pathname;
-          if (root.dataset.holdBackupJson === path) {
+          if (holdIdentity && path === "/api/me" && args[1]?.signal) {
+            root.dataset.identityJsonWaiting = "true";
+            await new Promise<void>(resolve => window.addEventListener("release-identity-json", () => resolve(), { once: true }));
+          }
+          if ((holdStorage && path === "/api/me/storage") || root.dataset.holdBackupJson === path) {
+            holdStorage = false;
             root.dataset.backupJsonWaiting = path;
             await new Promise<void>(resolve => window.addEventListener("release-backup-json", () => resolve(), { once: true }));
           }
@@ -59,7 +75,7 @@ async function fixture(page: Page, origin: string) {
       };
       return response;
     };
-  });
+  }, { holdIdentity, holdStorage });
   await page.context().addCookies([{ name: "__Host-meguri-session", value: "synthetic-session", url: origin, secure: true, httpOnly: true, sameSite: "Strict" }]);
   await page.route("**/api/**", async route => {
     const req = route.request(), path = new URL(req.url()).pathname;
@@ -67,6 +83,7 @@ async function fixture(page: Page, origin: string) {
     const fail = (error: NonNullable<Failure>) => route.fulfill({ status: error.status, contentType: "application/json", body: JSON.stringify({ error: { code: error.code } }) });
     if (path === "/api/status") return data({ setup_required: false });
     if (path === "/api/me") return data({ id: "demo-account", username: "demo.study", role: "member", server_url: origin });
+    if (path === "/api/logout") return data(null);
     if (path === "/api/me/mcp-grants") return data({ account_id: "demo-account", grants: [] });
     if (path === "/api/me/storage") {
       expect(req.method()).toBe("GET");
@@ -84,11 +101,12 @@ async function fixture(page: Page, origin: string) {
       expect(req.headers()["content-type"]).toBe("application/json");
       state.restores.push(match[1]!); const error = state.restoreError;
       await state.restoreGate;
-      if (state.loseRestoreResponse) return route.abort("connectionfailed");
       if (error) return fail(error);
-      state.history = [point("demo-new-safety", "2026-11-25T14:30:00Z", "before_restore", currentStorage.total_bytes), ...state.history];
+      state.history = [point("demo-new-safety", "2026-11-25T14:30:00Z", "before_restore", state.storage?.total_bytes ?? 0),
+        ...state.history.filter(item => item.id !== "demo-new-safety")];
       state.storage = restoredStorage;
-      return data(null);
+      if (state.loseRestoreResponse) return route.abort("connectionfailed");
+      return data(state.restoreResult);
     }
     throw new Error(`Unexpected synthetic API ${path}`);
   });
@@ -108,7 +126,11 @@ async function audit(page: Page, name: string, screenshot = false) {
   expect(result.violations).toEqual([]);
   if (screenshot) {
     await page.evaluate(async () => { await document.fonts.ready; });
-    await page.screenshot({ path: `/out/collection-backups-${name}.png`, fullPage: true });
+    if (name === "confirmation") await confirmation(page).screenshot({ path: `/out/collection-backups-${name}.png` });
+    else {
+      await page.evaluate(() => { window.scrollTo(0, 0); });
+      await page.screenshot({ path: `/out/collection-backups-${name}.png`, fullPage: true });
+    }
   }
 }
 
@@ -128,8 +150,7 @@ test("populated calendar history and safe keyboard restore confirmation screensh
   await trigger.focus(); await page.keyboard.press("Enter");
   const confirm = confirmation(page), cancel = confirm.getByRole("button", { name: "Cancel", exact: true });
   await expect(cancel).toBeFocused();
-  await expect(confirm).toContainText("review history and scheduling");
-  await expect(confirm).toContainText("all media on this server");
+  await expect(confirm).toContainText("This replaces your collection on the server, including its review history, scheduling and media.");
   await expect(confirm).toContainText("A safety copy");
   await expect(confirm).toContainText("on each device");
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
@@ -205,22 +226,93 @@ test("restore submits once, announces completion and refreshes both history and 
   expect(state.historyReads).toBe(2); expect(state.storageReads).toBe(2);
 });
 
-test("restore refusal and lost response are announced without automatic resubmission", async ({ page, baseURL }) => {
+test("slow storage permits recovery and its stale answer cannot replace the post-restore read", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!, false, true);
+  await page.goto("/collection");
+  await expect(page.locator("html")).toHaveAttribute("data-backup-json-waiting", "/api/me/storage");
+  await expect(history(page).getByRole("listitem")).toHaveCount(7);
+  await expect(restoreButton(page)).toHaveAttribute("aria-disabled", "false");
+  const fresh = barrier(); state.storageGate = fresh.promise;
+  await restoreButton(page).click();
+  await confirmation(page).getByRole("button", { name: "Restore backup", exact: true }).click();
+  await expect(history(page).getByRole("listitem")).toHaveCount(8);
+  await expect(restoreButton(page)).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("status").filter({ hasText: "Loading storage…" })).toBeVisible();
+  fresh.release();
+  await expect(page.locator(".collection-storage")).toContainText(storageValue(restoredStorage.total_bytes));
+  await page.evaluate(() => window.dispatchEvent(new Event("release-backup-json")));
+  await expect.poll(() => page.evaluate(() => (JSON.parse(document.documentElement.dataset.apiConsumed ?? "{}") as Record<string, number>)["/api/me/storage"] ?? 0)).toBe(2);
+  await expect(page.locator(".collection-storage")).toContainText(storageValue(restoredStorage.total_bytes));
+  expect(state.storageReads).toBe(2); expect(state.restores).toEqual(["demo-nov16"]);
+});
+
+test("server failure requires explicit history review before another restore", async ({ page, baseURL }) => {
   const state = await fixture(page, baseURL!); await ready(page);
   state.restoreError = { status: 503, code: "storage_unavailable" };
   await restoreButton(page).click();
   await confirmation(page).getByRole("button", { name: "Restore backup", exact: true }).click();
   await expect(history(page).getByRole("alert")).toBeFocused();
-  await expect(history(page).getByRole("alert")).toContainText("The result is not confirmed");
+  await expect(history(page).getByRole("alert")).toContainText("The restore result is unknown");
   expect(state.restores).toHaveLength(1); expect(state.historyReads).toBe(1); expect(state.storageReads).toBe(1);
   await audit(page, "restore-error");
-  await confirmation(page).getByRole("button", { name: "Cancel" }).click();
-  await expect(restoreButton(page)).toBeFocused();
-  state.restoreError = null; state.loseRestoreResponse = true;
-  await restoreButton(page).click();
-  await confirmation(page).getByRole("button", { name: "Restore backup", exact: true }).click();
-  await expect(history(page).getByRole("alert")).toContainText("No further request was sent automatically");
-  expect(state.restores).toHaveLength(2);
+  await page.keyboard.press("Escape");
+  await expect(history(page).getByRole("alert")).toHaveCount(0);
+  await expect(history(page).getByRole("heading", { name: "Backup history", exact: true })).toBeFocused();
+  await expect(restoreButton(page)).toHaveAttribute("aria-disabled", "true");
+  await restoreButton(page).evaluate((button: HTMLButtonElement) => button.click());
+  expect(state.restores).toHaveLength(1);
+  await history(page).getByRole("button", { name: "Refresh history" }).click();
+  await expect(restoreButton(page)).toHaveAttribute("aria-disabled", "false");
+});
+
+for (const result of ["lost", "malformed"] as const) {
+  test(`${result} response after commit preserves the first safety point until history review`, async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!, false, result === "lost");
+    if (result === "lost") {
+      await page.goto("/collection");
+      await expect(history(page).getByRole("listitem")).toHaveCount(7);
+      await expect(page.locator("html")).toHaveAttribute("data-backup-json-waiting", "/api/me/storage");
+    } else await ready(page);
+    state.loseRestoreResponse = result === "lost"; state.restoreResult = {};
+    await restoreButton(page).click();
+    await confirmation(page).getByRole("button", { name: "Restore backup", exact: true }).click();
+    await expect(history(page).getByRole("alert")).toBeFocused();
+    await expect(history(page).getByRole("alert")).toContainText("The restore result is unknown");
+    await expect(history(page).getByRole("alert")).toContainText("previous pre-restore safety copy");
+    await expect(confirmation(page)).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: "Storage unavailable" })).toBeVisible();
+    if (result === "lost") {
+      await page.evaluate(() => window.dispatchEvent(new Event("release-backup-json")));
+      await expect.poll(() => page.evaluate(() => (JSON.parse(document.documentElement.dataset.apiConsumed ?? "{}") as Record<string, number>)["/api/me/storage"] ?? 0)).toBe(1);
+    }
+    await expect(page.locator(".collection-storage")).toHaveCount(0);
+    await expect(history(page).getByRole("status").filter({ hasText: "Restored the server collection" })).toHaveCount(0);
+    const firstSafety = state.history[0];
+    expect(firstSafety?.id).toBe("demo-new-safety"); expect(state.storage).toEqual(restoredStorage);
+    await history(page).getByRole("button", { name: "Dismiss", exact: true }).click();
+    await restoreButton(page).evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
+    expect(state.restores).toEqual(["demo-nov16"]); expect(state.history[0]).toBe(firstSafety);
+    expect(state.historyReads).toBe(1); expect(state.storageReads).toBe(1);
+    await history(page).getByRole("button", { name: "Refresh history" }).click();
+    await expect(history(page).getByRole("listitem")).toHaveCount(8);
+    await expect(restoreButton(page)).toHaveAttribute("aria-disabled", "false");
+    for (const value of Object.values(restoredStorage)) await expect(page.locator(".collection-storage")).toContainText(storageValue(value));
+    expect(state.storageReads).toBe(2);
+    expect(state.restores).toHaveLength(1); expect(state.history[0]).toBe(firstSafety);
+  });
+}
+
+test("malformed history never renders restore choices and a missing backend route focuses its alert", async ({ page, baseURL }) => {
+  const state = await fixture(page, baseURL!);
+  state.history = [{ ...demo[0]!, created_at: 8640000000001 }];
+  await page.goto("/collection");
+  await expect(history(page).getByRole("alert")).toContainText("The server response could not be confirmed");
+  await expect(history(page).getByRole("listitem")).toHaveCount(0);
+  state.historyError = { status: 404, code: "route_not_found" };
+  await history(page).getByRole("button", { name: "Refresh history" }).click();
+  await expect(history(page).getByRole("alert")).toContainText("This operation is unavailable");
+  await expect(history(page).getByRole("alert")).toBeFocused();
+  await expect(page.getByRole("main")).not.toBeFocused();
 });
 
 test("a completed restore stays announced when the follow-up reads fail", async ({ page, baseURL }) => {
@@ -258,6 +350,26 @@ for (const failure of [{ status: 401, code: "authentication_failed" }, { status:
       await expect(history(page)).toHaveCount(0);
     });
   }
+}
+
+for (const end of ["session loss", "sign out"] as const) {
+  test(`${end} synchronously retires a sibling identity response before navigation`, async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!, true);
+    const gate = barrier(); state.historyGate = gate.promise;
+    if (end === "session loss") state.historyError = { status: 401, code: "authentication_failed" };
+    await page.goto("/collection");
+    await expect(page.locator("html")).toHaveAttribute("data-identity-json-waiting", "true");
+    if (end === "session loss") gate.release();
+    else await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    // replaceState releases the stale parsed identity in the same turn that
+    // ends the session, before React's navigation-effect cleanup can run.
+    await expect(page.locator("html")).toHaveAttribute("data-identity-aborted-at-session-end", "true");
+    await expect.poll(() => page.evaluate(() => (JSON.parse(document.documentElement.dataset.apiConsumed ?? "{}") as Record<string, number>)["/api/me"] ?? 0)).toBe(2);
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Signed in as demo.study", exact: true })).toHaveCount(0);
+    gate.release();
+  });
 }
 
 for (const operation of ["history", "restore"] as const) {
