@@ -164,28 +164,29 @@ impl Service {
     }
     pub async fn logout(&self, token: &str) -> Result<()> {
         let hash = crypto::bearer(token).map_err(|_| Error::new("authentication_failed"))?;
-        self.metadata
-            .run(move |c| {
-                admission(c)?;
-                // Keep revoked digest records, so a formerly valid cookie remains
-                // idempotently clearable without granting any renewed authority.
-                let exists = c
-                    .query_row(
-                        "SELECT hash FROM credentials WHERE hash=?1 AND kind='session'",
-                        [hash.as_slice()],
-                        |r| r.get::<_, Vec<u8>>(0),
-                    )
-                    .optional()?;
-                if !exists.is_some_and(|v| crypto::same_digest(&v, &hash)) {
-                    return Err(Error::new("authentication_failed"));
-                }
-                c.execute(
-                    "UPDATE credentials SET revoked=1 WHERE hash=?1 AND kind='session'",
-                    [hash.as_slice()],
-                )?;
-                Ok(())
-            })
-            .await
+        let id = self.metadata.run(move |c| {
+            admission(c)?;
+            c.query_row("SELECT account_id FROM credentials WHERE hash=?1 AND kind='session'", [hash.as_slice()], |r|r.get::<_,String>(0))
+                .optional()?.ok_or(Error::new("authentication_failed"))
+        }).await?;
+        // Serialize only with browser collection commits. Sign-out remains
+        // independent of MCP/native publication and can invalidate a paused
+        // consent/grant action before its committing recheck.
+        let gate = self.barriers.get(&id)?;
+        let guard = gate.enter_browser_commit().await;
+        self.metadata.files_try(move |root| {
+            let _browser_commit = (gate, guard);
+            let c = crate::storage::open(root.database(), false)?;
+            c.busy_timeout(std::time::Duration::ZERO)?;
+            admission(&c)?;
+            // Retain revoked rows for idempotent sign-out of a formerly valid
+            // cookie. An absent/foreign cookie never revokes another session.
+            let stored = c.query_row("SELECT hash FROM credentials WHERE hash=?1 AND account_id=?2 AND kind='session'",
+                params![hash.as_slice(),id], |r|r.get::<_,Vec<u8>>(0)).optional()?;
+            if !stored.is_some_and(|v|crypto::same_digest(&v,&hash)) {return Err(Error::new("authentication_failed"));}
+            c.execute("UPDATE credentials SET revoked=1 WHERE hash=?1 AND kind='session'",[hash.as_slice()])?;
+            Ok(())
+        }).await
     }
     pub async fn change_password(
         &self,

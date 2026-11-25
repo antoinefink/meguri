@@ -9,3 +9,5 @@ The independent plan reviewer read the full public candidates, including the syn
 - `docs/process/provenance/sessions/s-20261125T141722Z-04a248bf.json` — `c43d75d9efcc503dbb9c0f5852f77655487bace88a34ab70babd760af87e780e`
 
 The review reconciled compact account navigation, bound Browse requests to the displayed account and collection generation, and required current sync stamps for deletions of recreated IDs.
+
+The server reviewer inspected the complete Rust patch exported by cleanroom run `20261125T141926Z-84121`. The new server test uses generated accounts and synthetic vocabulary. Its exact approved bytes for the initial implementation are `07151331ac0489f0bf4b9ce42ca6fadf87ee0b555d8c1f5bac99c5678b0c69ea`. The first check found a fixture integer type error. The independent review also requested fixes for required account identity, visible text projection, large notes and logout contention.

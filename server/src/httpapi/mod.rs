@@ -453,8 +453,11 @@ fn backup_restore_id(path: &str) -> Option<&str> {
     path.strip_prefix("/api/me/backups/").and_then(|s|s.strip_suffix("/restore"))
         .filter(|id| !id.is_empty() && !id.contains('/'))
 }
+fn browse_route(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/me/browse/").filter(|s| matches!(*s,"catalog"|"page"|"detail"|"create"|"edit"|"delete"))
+}
 fn mutation(path: &str) -> bool {
-    backup_restore_id(path).is_some() || matches!(
+    browse_route(path).is_some() || backup_restore_id(path).is_some() || matches!(
         path,
         "/api/mcp/media-upload"
             | "/api/setup"
@@ -553,6 +556,22 @@ async fn dispatch(
         .0;
     let (ip, _https) = effective_peer(&parts.headers, socket, service);
     let bytes = bytes.ok_or(Error::new("invalid_request"))?;
+    if let Some(action) = browse_route(path) {
+        use crate::{accounts::browse::Operation, collection::mcp};
+        let op = match action {
+            "catalog" => Operation::Catalog(parse(bytes)?),
+            "page" => Operation::Page(parse(bytes)?),
+            "detail" => Operation::Detail(parse(bytes)?),
+            "create" => Operation::Create(parse::<mcp::browse::Create>(bytes)?),
+            "edit" => Operation::Edit(parse(bytes)?),
+            "delete" => Operation::Delete(parse(bytes)?),
+            _ => return Err(Error::new("route_not_found")),
+        };
+        let a = authority(service, &parts.headers).await?;
+        let expected = expected_account(&parts.headers)?;
+        if expected.as_ref().is_some_and(|id| *id != a.identity().id) { return Err(Error::new("stale_authority")); }
+        return Ok(data(service.browse(a, expected, op).await?, false));
+    }
     match path {
         "/api/mcp/authorization/preview" => {
             let body: crate::accounts::oauth::ReadRequest = parse(bytes)?;

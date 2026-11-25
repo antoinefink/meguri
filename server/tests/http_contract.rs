@@ -94,6 +94,12 @@ fn mutations(id: &str) -> Vec<(String, Value)> {
             json!({"username":"unknown","password":PASSWORD}),
         ),
         ("/api/logout".into(), json!({})),
+        ("/api/me/browse/catalog".into(), json!({"limit":20})),
+        ("/api/me/browse/page".into(), json!({"query":"literal"})),
+        ("/api/me/browse/detail".into(), json!({"card_id":"1"})),
+        ("/api/me/browse/create".into(), json!({"generation":"g","deck_id":"1","note_type_id":"10","fields":{}})),
+        ("/api/me/browse/edit".into(), json!({"note_id":"1","revision":"r","fields":{}})),
+        ("/api/me/browse/delete".into(), json!({"note_id":"1","revision":"r","confirmation":"c"})),
         (
             "/api/password".into(),
             json!({"current_password":"wrong","new_password":NEW_PASSWORD}),

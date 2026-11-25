@@ -64,7 +64,7 @@ impl Error {
                 StatusCode::SERVICE_UNAVAILABLE
             }
             "attachment_invalid" | "attachment_unavailable" => StatusCode::BAD_REQUEST,
-            "attachment_conflict" | "busy" => StatusCode::CONFLICT,
+            "browse_conflict" | "attachment_conflict" | "busy" => StatusCode::CONFLICT,
             "invalid_request" => StatusCode::BAD_REQUEST,
             "unsupported_content_type" => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "request_too_large" => StatusCode::PAYLOAD_TOO_LARGE,

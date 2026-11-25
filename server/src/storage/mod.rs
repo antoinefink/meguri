@@ -65,6 +65,18 @@ impl Metadata {
         .await
         .map_err(|_| Error::new("storage_unavailable"))?
     }
+    /// Point operations cannot wait for worker capacity under publication.
+    pub(crate) async fn files_try<T: Send + 'static>(
+        &self, f: impl FnOnce(&DataRoot) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let permit = self.capacity.clone().try_acquire_owned().map_err(|_| Error::new("busy"))?;
+        let root = self.root.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            root.validate()?;
+            f(&root)
+        }).await.map_err(|_| Error::new("storage_unavailable"))?
+    }
     pub async fn files<T: Send + 'static>(
         &self,
         f: impl FnOnce(&DataRoot) -> Result<T> + Send + 'static,

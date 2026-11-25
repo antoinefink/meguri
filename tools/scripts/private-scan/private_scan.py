@@ -835,6 +835,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "server/tests/browse.rs":
+        "07151331ac0489f0bf4b9ce42ca6fadf87ee0b555d8c1f5bac99c5678b0c69ea",
     'app/Packages/MeguriCore/Tests/CoreBridgeTests/MutationServiceTests.swift':
         '942a5279b631f540be37d0031fd3e2032911b21a56a822b9551f6d0e11a295b4',
     'app/Packages/MeguriKit/Sources/Features/Editor/FieldPicturePaste.swift':
