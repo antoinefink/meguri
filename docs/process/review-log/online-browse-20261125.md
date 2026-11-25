@@ -63,3 +63,9 @@ The history fixture now asserts the events Chromium delivered for each navigatio
 
 - `server/web/tests/browser/browse.spec.ts` — `d3c5c4507819b1bd3d778585bab96cb7490cac01741ca0f3f1ff36c2bb09d7f8`
 - `server/web/scripts/audit-assessment.json` — `b8077355d45a759b03bf533748a1d427017ff2de9df731ccffee4720dc748b77`
+
+Run `20261125T154013Z-91393` made editable and unavailable detail responses mutually exclusive. The independent reviewer verified both wire shapes and the exact frontend assessment.
+
+- `server/web/src/api.ts` — `fee24cd8cfd5c3f9564632b7395dd0a19f16af62a96cfb4257258fa5cbbae1da`
+- `server/web/tests/browse-api.test.ts` — `69914d921adddb199ea8631c029c2b3fc9586d79d9ffac7eea6d37d5d453c3ae`
+- `server/web/scripts/audit-assessment.json` — `35d049ed611bbf8e6b2d43943c906727d7dfc2ea5f2840b84564bd22f51fc2cc`

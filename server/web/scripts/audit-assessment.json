@@ -130,8 +130,8 @@
         "sha256": "1ed4afb68d79be9a0a6ea2ec5a4e1a836fe8d5c7728caf1d95ab1d3275d5c749"
       },
       "src/api.ts": {
-        "bytes": 11818,
-        "sha256": "f19533df2233862fb2aab364ae6ea1c5aaed22ab5ead6d8b537bd6100f83cae0"
+        "bytes": 11874,
+        "sha256": "fee24cd8cfd5c3f9564632b7395dd0a19f16af62a96cfb4257258fa5cbbae1da"
       },
       "src/app.tsx": {
         "bytes": 14758,
@@ -198,8 +198,8 @@
         "sha256": "07eedde417f5b6a0a338c665cf42673b01d56a852fda07c5fc011cccd9ea19be"
       },
       "tests/browse-api.test.ts": {
-        "bytes": 4359,
-        "sha256": "ad85b1cc4682e5ddc5836295e87efb1a0f238a8fbaae7a049d94a5613dc91747"
+        "bytes": 4968,
+        "sha256": "69914d921adddb199ea8631c029c2b3fc9586d79d9ffac7eea6d37d5d453c3ae"
       },
       "tests/browser/account-actions.spec.ts": {
         "bytes": 8792,

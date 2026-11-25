@@ -25,6 +25,10 @@ test("Browse rejects mismatched accounts before interpreting collection records"
 test("Browse detail checks note/card relationship and required field names", () => {
   const detail = { account_id: "account", card, note: { note_id: "42", note_type_id: "10", fields: { Example: "raw <b>markup</b>" }, tags: [], revision: "r" }, field_names: ["Example"], sibling_ids: [card.card_id], confirmation: "c" };
   assert.deepEqual(parseBrowse("detail", detail, "account"), detail);
+  assert.throws(() => parseBrowse("detail", { ...detail, note: null }, "account"), (e: unknown) => e instanceof ApiError && e.code === "invalid_response");
+  for (const unavailable of ["Unavailable", null, undefined]) {
+    assert.throws(() => parseBrowse("detail", { ...detail, card: { ...card, unavailable } }, "account"), (e: unknown) => e instanceof ApiError && e.code === "invalid_response");
+  }
   assert.throws(() => parseBrowse("detail", { ...detail, field_names: ["Absent"] }, "account"));
   assert.throws(() => parseBrowse("detail", { ...detail, sibling_ids: [] }, "account"));
 });
@@ -32,6 +36,9 @@ test("Browse detail checks note/card relationship and required field names", () 
 test("Browse accepts explicit unavailable details and catalog entries without inventing edit authority", () => {
   const unavailable = { account_id: "account", card: { ...card, unavailable: "Card 9007199254740993 · Note 42. Unavailable for browser editing." } };
   assert.deepEqual(parseBrowse("detail", unavailable, "account"), unavailable);
+  for (const note of [null, {}, undefined]) {
+    assert.throws(() => parseBrowse("detail", { ...unavailable, note }, "account"), (e: unknown) => e instanceof ApiError && e.code === "invalid_response");
+  }
   assert.throws(() => parseBrowse("detail", { ...unavailable, card: { ...card, unavailable: true } }, "account"));
   const catalog = { account_id: "account", generation: "g", decks: [{ deck_id: "1", name: "Deck 1 · Unavailable", filtered: false, unavailable: "Unavailable" }],
     note_types: [{ note_type_id: "10", name: "Note type 10 · Unavailable", field_names: [], unavailable: "Unavailable" }], next_cursor: null };

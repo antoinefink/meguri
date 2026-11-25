@@ -115,7 +115,7 @@ export function parseBrowse<K extends keyof BrowseResponses>(kind: K, value: unk
     && value.decks.every(deck => record(deck) && exactId(deck.deck_id) && typeof deck.name === "string" && typeof deck.filtered === "boolean" && (deck.unavailable === undefined || typeof deck.unavailable === "string"))
     && Array.isArray(value.note_types) && value.note_types.every(nt => record(nt) && exactId(nt.note_type_id) && typeof nt.name === "string" && strings(nt.field_names) && (nt.unavailable === undefined || typeof nt.unavailable === "string"));
   if (kind === "page") valid = cursor && (value.examined_through === null || exactId(value.examined_through)) && Array.isArray(value.cards) && value.cards.length <= 50 && value.cards.every(browseCard);
-  if (kind === "detail") valid = (browseCard(value.card) && typeof value.card.unavailable === "string") || browseCard(value.card) && record(value.note) && value.card.note_id === value.note.note_id
+  if (kind === "detail") valid = (browseCard(value.card) && typeof value.card.unavailable === "string" && !("note" in value)) || browseCard(value.card) && !("unavailable" in value.card) && record(value.note) && value.card.note_id === value.note.note_id
     && exactId(value.note.note_id) && exactId(value.note.note_type_id) && typeof value.note.revision === "string"
     && strings(value.note.tags) && record(value.note.fields) && Object.values(value.note.fields).every(field => typeof field === "string")
     && strings(value.field_names) && value.field_names.every(name => Object.hasOwn((value.note as BrowseNote).fields, name))
