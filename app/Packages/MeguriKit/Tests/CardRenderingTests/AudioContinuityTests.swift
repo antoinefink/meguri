@@ -32,6 +32,100 @@ import Testing
         var frames: Int { state.withLock { $0.renderedFrames } }
     }
 
+    @Test func configurationRepairsOnlyStoppedOutputOnTheSameRouteAndLease() async throws {
+        let output = Output(), keeper = UUID(), word = UUID()
+        let engine = NSObject(), staleEngine = NSObject()
+        let identity = ObjectIdentifier(engine)
+        let hardware = SessionHardware(perform: output.perform, outputIdentity: identity,
+            isRendering: { output.state.withLock { $0.rendering } })
+        var route: String? = "a2dp:headset-A"
+        let session = AudioSessionCoordinator(hardware: hardware, continuityEligible: { route != nil }, routeIdentity: { route })
+        session.maintainContinuity(keeper)
+        await session.hardwareSettled()
+        try await session.activate(word)
+        let initial = output.operations
+        session.configurationChanged(engine: identity) // Category notification; still rendering.
+        session.routeChanged(previous: route, disconnected: false)
+        await session.hardwareSettled()
+        #expect(output.operations == initial)
+        output.state.withLock { $0.rendering = false } // Apple stopped/uninitialized the engine.
+        session.configurationChanged(engine: ObjectIdentifier(staleEngine))
+        await session.hardwareSettled()
+        #expect(output.operations == initial)
+        session.configurationChanged(engine: identity)
+        await session.hardwareSettled()
+        #expect(output.operations == initial + [.stopSilence, .startSilence])
+        // Recovery never activates, changes ducking, or submits a word.
+        let repaired = output.operations
+        session.configurationChanged(engine: identity)
+        await session.hardwareSettled()
+        #expect(output.operations == repaired)
+        output.state.withLock { $0.rendering = false }
+        route = "a2dp:headset-B" // Same port type, different UID.
+        session.configurationChanged(engine: identity)
+        await session.hardwareSettled()
+        #expect(output.operations == repaired)
+        session.routeChanged(previous: "a2dp:headset-A", disconnected: false)
+        await session.hardwareSettled()
+        let ended = output.operations
+        route = "a2dp:headset-A"
+        session.configurationChanged(engine: identity)
+        session.emit(.available)
+        await session.hardwareSettled()
+        #expect(output.operations == ended && ended.last == .deactivate)
+        withExtendedLifetime((engine, staleEngine)) {}
+    }
+
+    @Test func failedConfigurationRepairFallsBackWithoutRepeatedAttempts() async throws {
+        let output = Output(), engine = NSObject(), keeper = UUID(), word = UUID()
+        let identity = ObjectIdentifier(engine)
+        let hardware = SessionHardware(perform: output.perform, outputIdentity: identity,
+            isRendering: { output.state.withLock { $0.rendering } })
+        let session = AudioSessionCoordinator(hardware: hardware, continuityEligible: { true }, routeIdentity: { "a2dp:A" })
+        session.maintainContinuity(keeper)
+        await session.hardwareSettled()
+        output.state.withLock { $0.rendering = false }
+        output.fail(.startSilence)
+        session.configurationChanged(engine: identity)
+        await session.hardwareSettled()
+        let failed = output.operations
+        session.configurationChanged(engine: identity)
+        await session.hardwareSettled()
+        #expect(output.operations == failed && failed.last == .deactivate)
+        try await session.activate(word)
+        #expect(output.operations.last == .activate)
+        #expect(output.operations.filter { $0 == .startSilence }.count == 2)
+        session.release(word); session.releaseContinuity(keeper)
+        await session.hardwareSettled()
+        withExtendedLifetime(engine) {}
+    }
+
+    @Test func disconnectionDuringSystemActivationRefusesFirstWordBeforeRouteNotification() async throws {
+        let gate = DispatchSemaphore(value: 0)
+        let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        defer { gate.signal(); entered.continuation.finish() }
+        let output = Output(), word = UUID()
+        let hardware = SessionHardware(perform: { operation in
+            if operation == .activate { entered.continuation.yield(()); gate.wait() }
+            try output.perform(operation)
+        })
+        var route: String? = "a2dp:A"
+        let session = AudioSessionCoordinator(hardware: hardware, continuityEligible: { route != nil }, routeIdentity: { route })
+        var events: [AudioSessionCoordinator.Event] = []
+        let observer = session.observe { events.append($0) }
+        defer { session.removeObserver(observer) }
+        let activation = Task { try await session.activate(word) }
+        try await Spike.deadline("system activation held", timeout: .seconds(3)) {
+            for await _ in entered.stream { return }
+            throw Spike.Failure("Activation did not enter")
+        }
+        route = nil // The system route has changed; no notification delivered yet.
+        gate.signal()
+        await #expect(throws: CancellationError.self) { try await activation.value }
+        await session.hardwareSettled()
+        #expect(events == [.pause] && output.operations.last == .deactivate)
+    }
+
     @Test func zeroOutputPersistsAcrossLongGapsWithoutSessionChurn() async throws {
         let output = Output(), keeper = UUID(), word = UUID(), html = UUID()
         let hardware = SessionHardware(perform: output.perform)
@@ -89,13 +183,13 @@ import Testing
         let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
         defer { gate.signal(); entered.continuation.finish() }
         let output = Output(), keeper = UUID(), word = UUID()
-        let hardware = SessionHardware { operation in
+        let hardware = SessionHardware(perform: { operation in
             if operation == .startSilence {
                 entered.continuation.yield(())
                 gate.wait()
             }
             try output.perform(operation)
-        }
+        })
         let session = AudioSessionCoordinator(hardware: hardware, continuityEligible: { true })
         session.maintainContinuity(keeper)
         try await Spike.deadline("silent worker entered", timeout: .seconds(3)) {

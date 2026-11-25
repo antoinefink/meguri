@@ -246,6 +246,47 @@ import AVFoundation
         #expect(rig.session.continuityOwners.count == 1)
     }
 
+    @Test func routeLossRetainsQ2OnlyAfterQ1ActuallyStarted() async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        rig.controller.admitReview()
+        rig.controller.present(payload: payload(), update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        await rig.controller.transportSettled()
+        let q1 = try #require(rig.backend.clips.first)
+        q1.time = 1.25
+        rig.controller.sessionEvent(.pause)
+        await rig.controller.transportSettled()
+        rig.controller.sessionEvent(.pause) // Retained paused position survives another loss.
+        rig.controller.sessionEvent(.available)
+        #expect(rig.controller.paused && q1.time == 1.25 && rig.backend.events == ["q1.mp3"])
+        rig.controller.resume()
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        await rig.controller.transportSettled()
+        #expect(q1.time == 1.25)
+        q1.onEnd?(true)
+        #expect(await rig.backend.nextPlay() == "q2.mp3")
+    }
+
+    @Test func routeLossDuringActivationDropsNeverStartedQ1AndQ2() async throws {
+        let rig = try await self.rig()
+        defer { rig.controller.close() }
+        rig.session.hold = true
+        await withCheckedContinuation { continuation in
+            rig.session.onHold = { continuation.resume() }
+            rig.controller.present(payload: payload(), update: question)
+        }
+        rig.controller.sessionEvent(.pause)
+        #expect(rig.session.owners.isEmpty) // Release before held activation returns.
+        rig.session.held?.resume(); rig.session.held = nil
+        await rig.controller.transportSettled()
+        rig.controller.resume()
+        #expect(rig.controller.current == nil && rig.backend.events.isEmpty)
+        rig.session.hold = false
+        rig.controller.replay(payload: payload(), update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+    }
+
     @Test func routeLossDiscardsLoadingWordAndWaitingWords() async throws {
         let rig = try await self.rig()
         defer { rig.controller.close() }

@@ -850,6 +850,7 @@ public final class ReviewCoordinator {
         let logger = Logger(subsystem: "Meguri", category: "ReviewStartup")
         logger.notice("render.begin")
         #endif
+        surface.beginPresentationAudio()
         try await surface.render(sessionID: sessionID, items: head.items)
         try Task.checkCancellation()
         startTrace?.mark(.rendered)
@@ -927,7 +928,7 @@ public final class ReviewCoordinator {
         surface.pair?.ownsKeyboardFocus = false
         timer.pause(at: uptime()); activeTime.pause(at: uptime())
         deadlineTimer?.invalidate(); deadlineTimer = nil
-        surface.pair?.pauseAudio()
+        surface.pair?.revokeReviewAudio()
     }
     public func pause() async throws {
         beginPause()

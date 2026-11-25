@@ -230,7 +230,7 @@ public final class CardPagePair {
     /// Settles runtime/appearance, then awaits host-context publication.
     /// An absent/failing host leaves probes unavailable without failing render.
     @discardableResult
-    public func prepare(_ payload: CardPayload) async throws -> CardUpdate {
+    public func prepare(_ payload: CardPayload, audioIntent: UInt64? = nil) async throws -> CardUpdate {
         #if DEBUG
         let startupLogger = Logger(subsystem: "Meguri", category: "ReviewStartup")
         startupLogger.notice("prepare.begin")
@@ -243,7 +243,7 @@ public final class CardPagePair {
         if reconstruct { try target.prepareReplacementDocument() }
         if let previous = target.update { audio.cancelPreparation(previous) }
         target.begin(payload, update: update)
-        audio.prepare(payload: payload, update: update)
+        audio.prepare(payload: payload, update: update, intent: audioIntent)
         do {
             try await withTaskCancellationHandler {
                 try Task.checkCancellation()
@@ -302,8 +302,9 @@ public final class CardPagePair {
     /// The reorder is first, synchronous and in the caller's CA transaction.
     /// Return the token to the independent frame probe; never end it at rAF.
     @discardableResult
-    public func present(_ update: CardUpdate, inputTime: TimeInterval = ProcessInfo.processInfo.systemUptime) throws -> SwapToken {
+    public func present(_ update: CardUpdate, inputTime: TimeInterval = ProcessInfo.processInfo.systemUptime, audioIntent: UInt64? = nil) throws -> SwapToken {
         guard !closed, !suspended, !lifecycleSuspended, idle.update == update, idle.settled else { throw CardPage.Failure.notPrepared }
+        let audioIntent = audioIntent ?? audio.audioIntent
         let old = current
         let next = idle
         // A tap counts only for the card it was on: the next card needs its own.
@@ -326,18 +327,18 @@ public final class CardPagePair {
         focus(next)
         let token = swaps.beginSwap(to: update.card, inputTime: inputTime)
         next.visibleToken = token.sequence
-        if let payload = next.payload { audio.beginTransition(to: update, policy: payload.audioPolicy) }
+        if audio.allowsAudio(audioIntent), let payload = next.payload { audio.beginTransition(to: update, policy: payload.audioPolicy) }
         if let previous = preparedAnswer { audio.cancelPreparation(previous.answer) }
         generation += 1
         let answer = CardUpdate(card: update.card, generation: generation, side: .answer)
         preparedAnswer = (update, answer)
-        if let payload = next.payload { audio.prepare(payload: payload, update: answer) }
+        if audio.allowsAudio(audioIntent), let payload = next.payload { audio.prepare(payload: payload, update: answer, intent: audioIntent) }
         commitSerial += 1
         let serial = commitSerial
         CATransaction.setCompletionBlock { [weak self, weak next] in
             Task { @MainActor in
                 guard let self, !self.closed, !self.suspended, !self.lifecycleSuspended, self.commitSerial == serial, let next, self.current === next, next.update == update else { return }
-                if let payload = next.payload { self.audio.present(payload: payload, update: update) }
+                if let payload = next.payload { self.audio.present(payload: payload, update: update, intent: audioIntent) }
                 do { try await next.present(token: token.sequence) }
                 catch { next.diagnostics.record("presentFailed", update: update) }
                 guard next.update == update, self.current === next, !self.closed, !self.suspended,
@@ -351,6 +352,7 @@ public final class CardPagePair {
     /// Returns after matching shown hooks and host-context publication.
     @discardableResult
     public func showAnswer(inputTime: TimeInterval = ProcessInfo.processInfo.systemUptime) async throws -> SwapToken {
+        let audioIntent = audio.audioIntent
         let page = current
         guard !closed, !suspended, !lifecycleSuspended, !page.needsReconstruction, page.presented, let previous = page.update, previous.side == .question, let payload = page.payload else { throw CardPage.Failure.notPrepared }
         #if DEBUG
@@ -393,7 +395,7 @@ public final class CardPagePair {
         cancelPresentationWork()
         page.begin(payload, update: update)
         page.visibleToken = token.sequence
-        audio.present(payload: payload, update: update)
+        audio.present(payload: payload, update: update, intent: audioIntent)
         #if DEBUG
         logger.debug("answerIdentity.begin")
         #endif
@@ -502,10 +504,13 @@ public final class CardPagePair {
     }
     /// Called by ReviewPages when a real review starts presenting, before
     /// preparation. Reused speculative first-card resources are admitted too.
-    public func admitReviewAudio(update: CardUpdate? = nil) {
+    public func admitReviewAudio(update: CardUpdate? = nil, intent: UInt64? = nil) {
         guard !closed, !suspended, !lifecycleSuspended else { return }
-        audio.admitReview(update: update)
+        audio.admitReview(update: update, intent: intent)
     }
+    public var audioIntent: UInt64 { audio.audioIntent }
+    /// Review/lifecycle loss revokes pending visuals as well as current output.
+    public func revokeReviewAudio() { audio.sessionEvent(.pause); releaseHTMLAudio() }
     public func pauseAudio() { audio.pause() }
     public func resumeAudio() { if !closed && !suspended && !lifecycleSuspended { audio.resume() } }
     public func seekAudio(by seconds: TimeInterval) async { await audio.seek(by: seconds) }

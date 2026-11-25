@@ -1,4 +1,5 @@
 @testable import CardRendering
+import CoreBridge
 import Darwin
 import Foundation
 import Testing
@@ -427,6 +428,32 @@ import Testing
             await #expect(throws: (any Error).self) { try await file.read(offset: 0, count: 1) }
             await resolver.close()
         }
+    }
+
+    @Test func disconnectedPlayAttemptCannotSubmitAfterNativeAdmissionGate() async throws {
+        let fixture = try CopyFixture()
+        try CopyFixture.silentWAV.write(to: fixture.source)
+        let resolver = try await MediaPathResolver.open(root: fixture.root, trackedNames: [])
+        let gate = CardAudioControllerTests.Hold()
+        let backend = AVQueuePlayback(), session = CardAudioControllerTests.Session()
+        backend.beforeNativePlay = { await gate.wait() }
+        var submissions = 0
+        backend.onNativePlayInterval = { _, _ in submissions += 1 }
+        let audio = CardAudioController(resolver: resolver, backend: backend, session: session)
+        defer { gate.release(); audio.close() }
+        audio.admitReview()
+        audio.present(payload: CardPayload(cardID: 1, question: "q", answer: "a",
+            questionAudio: [.sound(name: "user-name.WAV")]),
+            update: CardUpdate(card: 1, generation: 1, side: .question))
+        try await Spike.deadline("native play admission", timeout: .seconds(3)) { await gate.reached() }
+        audio.sessionEvent(.pause)
+        #expect(session.owners.isEmpty && session.continuityOwners.isEmpty)
+        gate.release()
+        await audio.transportSettled()
+        #expect(submissions == 0 && audio.current == nil)
+        audio.resume()
+        #expect(submissions == 0)
+        await resolver.close()
     }
 
     @Test func nativePreparedResourcesSurvivePauseSeekUntilStop() async throws {

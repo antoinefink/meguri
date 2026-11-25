@@ -14,10 +14,13 @@ public final class AudioSessionCoordinator: CardAudioSession {
     private var observers: [NSObjectProtocol] = []
     private let hardware: SessionHardware
     private let continuityEligible: () -> Bool
+    private let routeIdentity: () -> String?
+    private var continuityRoute: String?
     private var continuityOwners: Set<UUID> = []
     private var listeners: [UUID: (Event) -> Void] = [:]
     private var revision: UInt64 = 0
     private var hardwareUpdate: Task<Void, Never>?
+    private var configurationWork: Task<Void, Never>?
     public convenience init() {
         self.init(hardware: SessionHardware(), continuityEligible: {
             #if os(iOS)
@@ -29,14 +32,16 @@ public final class AudioSessionCoordinator: CardAudioSession {
             #endif
         })
     }
-    init(hardware: SessionHardware, continuityEligible: @escaping () -> Bool) {
+    init(hardware: SessionHardware, continuityEligible: @escaping () -> Bool,
+         routeIdentity: @escaping () -> String? = { AudioSessionCoordinator.selectedBluetoothRoute() }) {
         self.hardware = hardware
         self.continuityEligible = continuityEligible
+        self.routeIdentity = routeIdentity
         #if !os(macOS)
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: nil) { [weak self] notification in
+        observers.append(center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: .main) { [weak self] notification in
             guard let event = Self.deactivationEvent(notification) else { return }
-            Task { @MainActor [weak self] in self?.emit(event) }
+            MainActor.assumeIsolated { self?.emit(event) }
         })
         observers.append(center.addObserver(forName: AVAudioSession.resumptionRecommendationNotification, object: nil, queue: nil) { [weak self] notification in
             guard let context = notification.userInfo?[AVAudioSession.resumptionContextKey] as? AVAudioSession.ResumptionContext else { return }
@@ -46,20 +51,58 @@ public final class AudioSessionCoordinator: CardAudioSession {
                 }
             }
         })
-        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] notification in
+        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] notification in
             let lost = (notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if lost || (!self.continuityOwners.isEmpty && !self.continuityEligible()) { self.emit(.pause) }
+            let previous = (notification.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription).flatMap(Self.bluetoothRoute)
+            MainActor.assumeIsolated {
+                self?.routeChanged(previous: previous, disconnected: lost)
             }
         })
-        observers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: nil) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.emit(.stop) }
+        observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] notification in
+            guard let engine = notification.object as? AVAudioEngine else { return }
+            let engineID = ObjectIdentifier(engine)
+            MainActor.assumeIsolated {
+                self?.configurationChanged(engine: engineID)
+            }
+        })
+        observers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.emit(.stop) }
         })
         observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { [weak self] _ in
             Task { @MainActor [weak self] in self?.emit(.available) }
         })
         #endif
+    }
+    nonisolated static func selectedBluetoothRoute() -> String? {
+        #if os(iOS)
+        bluetoothRoute(AVAudioSession.sharedInstance().currentRoute)
+        #else
+        nil
+        #endif
+    }
+    #if os(iOS)
+    nonisolated private static func bluetoothRoute(_ route: AVAudioSessionRouteDescription) -> String? {
+        let ports = route.outputs.filter { [.bluetoothA2DP, .bluetoothHFP, .bluetoothLE].contains($0.portType) }
+        guard !ports.isEmpty else { return nil }
+        return ports.map { $0.portType.rawValue + ":" + $0.uid }.sorted().joined(separator: "|")
+    }
+    #endif
+    // Category changes on the selected device are ordinary. A different UID,
+    // or loss of the selected previous route, revokes every pending audio intent.
+    func routeChanged(previous: String?, disconnected: Bool) {
+        let selected = routeIdentity()
+        if disconnected && (continuityRoute == nil || previous == nil || previous == continuityRoute)
+            || (!continuityOwners.isEmpty && (!continuityEligible() || selected != continuityRoute)) {
+            emit(.pause)
+        }
+    }
+    func configurationChanged(engine: ObjectIdentifier) {
+        guard configurationWork == nil, !continuityOwners.isEmpty, continuityEligible(), routeIdentity() == continuityRoute else { return }
+        let hardware = hardware, revision = revision, route = continuityRoute
+        configurationWork = Task { [weak self] in
+            await hardware.configurationChanged(engine: engine, route: route, revision: revision)
+            self?.configurationWork = nil
+        }
     }
     isolated deinit { for observer in observers { NotificationCenter.default.removeObserver(observer) } }
 
@@ -109,7 +152,8 @@ public final class AudioSessionCoordinator: CardAudioSession {
     func removeObserver(_ id: UUID) { listeners[id] = nil }
     func emit(_ event: Event) {
         if event != .available {
-            owners.removeAll(); continuityOwners.removeAll()
+            configurationWork?.cancel()
+            owners.removeAll(); continuityOwners.removeAll(); continuityRoute = nil
             updateHardware()
         }
         for listener in Array(listeners.values) { listener(event) }
@@ -117,10 +161,12 @@ public final class AudioSessionCoordinator: CardAudioSession {
     }
     public func maintainContinuity(_ owner: UUID) {
         guard continuityEligible(), continuityOwners.insert(owner).inserted else { return }
+        continuityRoute = routeIdentity()
         updateHardware()
     }
     public func releaseContinuity(_ owner: UUID) {
         guard continuityOwners.remove(owner) != nil else { return }
+        if continuityOwners.isEmpty { continuityRoute = nil; configurationWork?.cancel() }
         updateHardware()
     }
     private func updateHardware() {
@@ -131,10 +177,12 @@ public final class AudioSessionCoordinator: CardAudioSession {
     }
     func hardwareSettled() async {
         await hardwareUpdate?.value
+        await configurationWork?.value
         await hardware.settled()
     }
     public func activate(_ owner: UUID) async throws {
         guard !owners.contains(owner) else { return }
+        let route = routeIdentity()
         owners.insert(owner)
         revision += 1
         do { try await hardware.set(audible: true, continuity: !continuityOwners.isEmpty, revision: revision) }
@@ -143,6 +191,12 @@ public final class AudioSessionCoordinator: CardAudioSession {
             throw error
         }
         guard owners.contains(owner) else { throw CancellationError() }
+        // Hardware activation may outlast disconnection and its notification.
+        // Never let that late return submit the first word on a replacement route.
+        if let route, routeIdentity() != route {
+            emit(.pause)
+            throw CancellationError()
+        }
     }
     public func release(_ owner: UUID) {
         guard owners.remove(owner) != nil else { return }
@@ -167,9 +221,11 @@ actor SessionHardware {
     private var audible = false
     private let output: SilentOutput
     private var outputWork: Task<Void, Never>?
-    init(perform: (@Sendable (Operation) throws -> Void)? = nil) {
+    private var recoveryWork: Task<Void, Never>?
+    init(perform: (@Sendable (Operation) throws -> Void)? = nil,
+         outputIdentity: ObjectIdentifier? = nil, isRendering: (@Sendable () -> Bool)? = nil) {
         performOverride = perform
-        output = SilentOutput(perform: perform)
+        output = SilentOutput(perform: perform, identity: outputIdentity, isRendering: isRendering)
     }
 
     func set(audible: Bool, continuity: Bool, revision: UInt64) async throws {
@@ -209,6 +265,7 @@ actor SessionHardware {
         guard silenceRequested != enabled else { return }
         silenceRequested = enabled; outputRevision = revision
         outputWork?.cancel()
+        recoveryWork?.cancel()
         let output = self.output
         // Engine startup must never be a prerequisite of a normal word's
         // activation. Its own serial worker also owns delayed-start cleanup.
@@ -216,6 +273,17 @@ actor SessionHardware {
             do { try await output.set(enabled: enabled, revision: revision) }
             catch { self.outputFailed(revision: revision) }
         }
+    }
+    func configurationChanged(engine: ObjectIdentifier, route: String?, revision: UInt64) async {
+        guard !Task.isCancelled, revision >= self.revision, silenceRequested, !silenceFailed, recoveryWork == nil else { return }
+        let output = output, outputRevision = outputRevision
+        let recovery = Task {
+            do { try await output.recover(engine: engine, route: route, revision: outputRevision) }
+            catch { self.outputFailed(revision: outputRevision) }
+        }
+        recoveryWork = recovery
+        await withTaskCancellationHandler { await recovery.value } onCancel: { recovery.cancel() }
+        recoveryWork = nil
     }
     private func outputFailed(revision: UInt64) {
         // A newer off/on request owns its own failure result.
@@ -225,7 +293,7 @@ actor SessionHardware {
         if !audible { try? deactivate() }
     }
     private var outputRevision: UInt64 = 0
-    func settled() async { await outputWork?.value }
+    func settled() async { await outputWork?.value; await recoveryWork?.value }
     private func deactivate() throws {
         guard active else { return }
         try perform(.deactivate)
@@ -251,14 +319,37 @@ actor SessionHardware {
 private actor SilentOutput {
     private let performOverride: (@Sendable (SessionHardware.Operation) throws -> Void)?
     private var revision: UInt64 = 0
+    private var enabled = false
+    private let identityOverride: ObjectIdentifier?
+    private let isRenderingOverride: (@Sendable () -> Bool)?
     #if os(iOS)
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
     #endif
-    init(perform: (@Sendable (SessionHardware.Operation) throws -> Void)?) { performOverride = perform }
+    init(perform: (@Sendable (SessionHardware.Operation) throws -> Void)?, identity: ObjectIdentifier?,
+         isRendering: (@Sendable () -> Bool)?) {
+        performOverride = perform; identityOverride = identity; isRenderingOverride = isRendering
+    }
+    func recover(engine identity: ObjectIdentifier, route: String?, revision: UInt64) throws {
+        guard enabled, revision == self.revision else { return }
+        if performOverride != nil {
+            guard identity == identityOverride, isRenderingOverride?() == false else { return }
+        } else {
+            #if os(iOS)
+            guard route != nil, AudioSessionCoordinator.selectedBluetoothRoute() == route,
+                  let engine, let player, ObjectIdentifier(engine) == identity,
+                  !engine.isRunning || !player.isPlaying else { return }
+            #else
+            return
+            #endif
+        }
+        try Task.checkCancellation()
+        stop()
+        try set(enabled: true, revision: revision)
+    }
     func set(enabled: Bool, revision: UInt64) throws {
         guard revision >= self.revision else { return }
-        self.revision = revision
+        self.revision = revision; self.enabled = enabled
         if !enabled { stop(); return }
         do {
             try Task.checkCancellation()

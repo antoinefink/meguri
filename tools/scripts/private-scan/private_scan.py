@@ -836,11 +836,11 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift':
-        '6020dbe8a0c07e90a84a61b13ff0783228f361201f143e5fae0c73fc23266927',
+        '235b717424b1af93eeb4f1c0c887bfa3792b90935667e7d7c497fba39b623223',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift':
-        '77211fbbfba063609f1e3663147da28342174e137fa131378fb9516434375bed',
+        '68546894753d8ed948a54295a64e2bdf91ad9ed43bf59d33cc06f2ca6df8c052',
     'app/Packages/MeguriKit/Tests/CardRenderingTests/CardAudioControllerTests.swift':
-        'f1f9c281eb2e4feb9e5c76e163cf847439d5dacc20acabbceb9841771e244f14',
+        '6ea360a78b27d96d1c174cee86abdca2c8cfce74addcf2db36eb37802ce1b383',
     'specs/render/audio-playback.md':
         '11eda11c77a802d0951393f3a2c5b3f96a5fd1187284a2157c8b54539f579311',
     'app/MeguriSnapshotTests/SentenceMiningPaneTests.swift':

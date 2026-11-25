@@ -3,6 +3,7 @@
 import CoreBridge
 import Foundation
 import Testing
+import WebKit
 
 extension WebKitSuites {
     /// The card prepared before a session (R1813, N16.8) is shown only when the
@@ -68,6 +69,128 @@ extension WebKitSuites {
             #expect(session.continuityOwners.isEmpty)
             await pages.resume()
             #expect(session.continuityOwners.isEmpty)
+        }
+
+        @Test func lossBeforeCommitFinishesVisualsWithoutRevivingAutoplayOrAnswerLookahead() async throws {
+            let fixture = MediaFixture()
+            fixture.add("/q.mp3", Data([1]), "audio/mpeg")
+            fixture.add("/a.mp3", Data([1]), "audio/mpeg")
+            let resolver = try await fixture.resolved()
+            let backend = CardAudioControllerTests.Backend(), session = CardAudioControllerTests.Session()
+            let audio = CardAudioController(resolver: resolver, backend: backend, session: session)
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: resolver, audio: audio)
+            let pages = ReviewPages(pair: pair), window = SpikeWindow(pair.container)
+            defer { pages.close(); window.close() }
+            try await pages.load()
+            let item = Self.item(1, autoplay: true)
+            pages.renderHead = { _, _, _ in [CardPayload(cardID: 1, question: "Question", answer: "Answer",
+                questionAudio: [.sound(name: "q.mp3")], answerAudio: [.sound(name: "a.mp3")])] }
+            try await pages.render(sessionID: 5, items: [item])
+            // This is after ReviewPages' actual prepare await, before its CA
+            // transaction/commit. The visual work must still commit normally.
+            pages.onWillPresent = { audio.sessionEvent(.pause) }
+            try await pages.present(item: item, inputTime: 0)
+            try await Self.shown(pair)
+            await audio.transportSettled()
+            #expect(pair.current.update?.side == .question && audio.current == nil)
+            #expect(backend.events.isEmpty && session.continuityOwners.isEmpty)
+            #expect(!backend.clips.contains { $0.name == "a.mp3" })
+            pair.replay() // Explicit action on the now-visible card remains valid.
+            #expect(await backend.nextPlay() == "q.mp3")
+        }
+
+        @Test func lossDuringActualPresentPreparationCannotCreateFreshAutoplay() async throws {
+            let fixture = MediaFixture()
+            fixture.add("/q.mp3", Data([1]), "audio/mpeg")
+            let resolver = try await fixture.resolved()
+            let backend = CardAudioControllerTests.Backend(), session = CardAudioControllerTests.Session()
+            let audio = CardAudioController(resolver: resolver, backend: backend, session: session)
+            let configuration = CardWebConfiguration(store: .nonPersistent())
+            let receipts = SettlementGate()
+            configuration.configuration.userContentController.add(receipts, contentWorld: CardPage.world, name: "audioPreparationHeld")
+            defer {
+                receipts.events.continuation.finish()
+                configuration.configuration.userContentController.removeScriptMessageHandler(forName: "audioPreparationHeld", contentWorld: CardPage.world)
+            }
+            let pair = CardPagePair(configuration: configuration, resolver: resolver, audio: audio)
+            let pages = ReviewPages(pair: pair), window = SpikeWindow(pair.container)
+            defer { pages.close(); window.close() }
+            try await pages.load()
+            let item = Self.item(1, autoplay: true)
+            pages.renderHead = { _, _, _ in [CardPayload(cardID: 1, question: "Question", answer: "Answer",
+                questionAudio: [.sound(name: "q.mp3")])] }
+            try await pages.render(sessionID: 5, items: [item])
+            let idle = pair.idle
+            try await idle.run("""
+                const handler = webkit.messageHandlers.meguriCard;
+                const post = handler.postMessage;
+                window.audioHeldHandler = handler;
+                let held;
+                handler.postMessage = function(message) {
+                    if (message.signal === 'settled') {
+                        held = message;
+                        webkit.messageHandlers.audioPreparationHeld.postMessage(null);
+                    } else post.call(handler, message);
+                };
+                window.releaseAudioPreparation = function() {
+                    handler.postMessage = post;
+                    if (held) post.call(handler, held);
+                };
+                """, world: CardPage.world)
+            let presentation = Task { try await pages.present(item: item, inputTime: 0) }
+            defer { presentation.cancel() }
+            try await Spike.deadline("actual present prepare held", timeout: .seconds(3)) {
+                for await _ in receipts.events.stream { return }
+                throw Spike.Failure("No held preparation")
+            }
+            audio.sessionEvent(.pause)
+            try await idle.run("releaseAudioPreparation();", world: CardPage.world)
+            try await presentation.value
+            try await Self.shown(pair)
+            await audio.transportSettled()
+            #expect(backend.events.isEmpty && audio.current == nil && session.continuityOwners.isEmpty)
+        }
+
+        @Test func routeLossDuringTypedComparisonFinishesAnswerWithoutAutoplay() async throws {
+            let fixture = MediaFixture()
+            fixture.add("/a.mp3", Data([1]), "audio/mpeg")
+            let resolver = try await fixture.resolved()
+            let backend = CardAudioControllerTests.Backend(), session = CardAudioControllerTests.Session()
+            let audio = CardAudioController(resolver: resolver, backend: backend, session: session)
+            let compare = CardAudioControllerTests.Hold()
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: resolver, audio: audio,
+                compare: { _, _ in await compare.wait(); return "Compared" })
+            let pages = ReviewPages(pair: pair), window = SpikeWindow(pair.container)
+            defer { compare.release(); pages.close(); window.close() }
+            try await pages.load()
+            let item = Self.item(1, autoplay: true)
+            pages.renderHead = { _, _, _ in [CardPayload(cardID: 1, question: "<input id=typeans>",
+                answer: TypeAnswerDescriptor.placeholderHTML, answerAudio: [.sound(name: "a.mp3")], typeIn: .init(expected: "typed"))] }
+            try await pages.render(sessionID: 5, items: [item])
+            try await pages.present(item: item, inputTime: 0)
+            try await Self.shown(pair)
+            let reveal = Task { try await pages.reveal(inputTime: 1) }
+            defer { reveal.cancel() }
+            try await Spike.deadline("typed comparison held", timeout: .seconds(3)) { await compare.reached() }
+            audio.sessionEvent(.pause)
+            compare.release()
+            try await reveal.value
+            #expect(pair.current.update?.side == .answer && audio.current == nil)
+            #expect(backend.events.isEmpty && session.continuityOwners.isEmpty)
+            pair.replay()
+            #expect(await backend.nextPlay() == "a.mp3")
+        }
+
+        private static func shown(_ pair: CardPagePair) async throws {
+            try await CardBehaviorFixture.until("review question committed") { pair.current.presented }
+            let update = try #require(pair.current.update)
+            try await pair.current.waitForShown(update)
+        }
+        private final class SettlementGate: NSObject, WKScriptMessageHandler {
+            let events = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+            func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+                events.continuation.yield(())
+            }
         }
 
         @Test func reloadingWarmPagesLeavesTheirPreparedCard() async throws {
