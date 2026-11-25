@@ -10,6 +10,8 @@ nonisolated public enum SheetRoute: Hashable, Identifiable, Sendable {
     case deckImport
     case collectionExport
     case deckName(DeckActionsModel.Action)
+    /// Names a preset in the collection-owned Deck Options draft (N20.9).
+    case newDeckOptionsPreset
     /// Explicit server-transfer preparation, decisions and retained history.
     case manualTransfer
     case cloudSync(CloudSyncEntry)

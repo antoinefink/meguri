@@ -353,6 +353,72 @@ import Testing
         #expect(!model.advancedExpanded)
     }
 
+    @Test(arguments: [false, true])
+    func newPresetOwnsMainWindowAdmissionUntilCancelled(interactively: Bool) async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions, history = owner.collectionUndo
+        let undo = PresetAdmissionUndo()
+        history.service = undo
+        await history.waitForRefresh(); await history.refreshNow()
+        model.open(deckID: 1); await model.waitForCompletion()
+        owner.navigation.setPath([.deckOptions(DeckID(1))], for: .home)
+        // A previous Settings presentation must not host this main-window form.
+        owner.navigation.sheetHost = .settings
+        #expect(history.canUndo && history.canRedo && owner.deckOptionsAllowed)
+        model.beginNewPreset(); model.presetName = "Temporary"
+        #expect(owner.navigation.sheet == .newDeckOptionsPreset && owner.navigation.sheetHost == .main)
+        #expect(model.namingPreset && model.canCreatePreset)
+        #expect(!history.canUndo && !history.canRedo && !owner.deckOptionsAllowed)
+        #expect(!owner.deckSearchAvailable(layout: .sidebar) && !owner.deckActions.canPresent(.create))
+        history.undo(); history.redo()
+        await history.waitForCompletion()
+        #expect(await undo.writes == 0)
+        #expect(!model.requestLeave() && !model.canOpen(deckID: 2))
+        if interactively { owner.navigation.dismissSheet() } else { model.cancelNewPreset() }
+        #expect(owner.navigation.sheet == nil && !model.namingPreset && !model.canCreatePreset)
+        #expect(history.canUndo && history.canRedo && owner.deckOptionsAllowed)
+        #expect(owner.deckSearchAvailable(layout: .sidebar) && owner.deckActions.canPresent(.create))
+        #expect(!model.hasChanges && core.session?.calls.isEmpty == true)
+        model.beginNewPreset()
+        #expect(model.namingPreset && model.presetName.isEmpty && !model.canCreatePreset)
+        model.cancelNewPreset()
+        // An unchanged page may open another deck after either dismissal path.
+        model.open(deckID: 2); await model.waitForCompletion()
+        #expect(model.deckID == 2 && model.phase == .editing && owner.navigation.sheet == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func newPresetCannotReplaceAnotherHostsSheet(settings: Bool) async throws {
+        let (owner, _) = await makeOwner()
+        let model = owner.deckOptions
+        let host: AppNavigation.SheetHost = settings ? .settings : .main
+        model.open(deckID: 1); await model.waitForCompletion()
+        for route in [SheetRoute.collectionExport, .noteTypeSave, .add(deck: nil), .deckName(.create)] {
+            owner.navigation.present(route); owner.navigation.sheetHost = host
+            model.beginNewPreset()
+            #expect(owner.navigation.sheet == route && owner.navigation.sheetHost == host)
+            #expect(!model.namingPreset && !model.canCreatePreset)
+            model.cancelNewPreset()
+            #expect(owner.navigation.sheet == route)
+            owner.navigation.dismissSheet()
+        }
+    }
+
+    @Test func endingTheDraftReleasesOnlyItsOwnSheet() async throws {
+        let (owner, _) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        owner.navigation.setPath([.deckOptions(DeckID(1))], for: .home)
+        model.beginNewPreset()
+        owner.navigation.collectionReplaced()
+        #expect(model.phase == .closed && !model.namingPreset && owner.navigation.sheet == nil)
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.beginNewPreset()
+        owner.navigation.present(.collectionExport)
+        model.invalidate()
+        #expect(model.phase == .closed && owner.navigation.sheet == .collectionExport)
+    }
+
     @Test func newPresetValidatesNameSelectsCanonicalDraftAndKeepsPriorEdits() async throws {
         let (owner, core) = await makeOwner()
         let model = owner.deckOptions
@@ -368,6 +434,7 @@ import Testing
         // Nothing can switch or save while the canonical Add is in flight.
         model.selectPreset(2); model.save(); model.setValue(.newPerDay, 55)
         await model.waitForCompletion()
+        #expect(owner.navigation.sheet == nil && !model.namingPreset && owner.deckOptionsAllowed)
         #expect(model.selectedPreset == -1 && model.selected?.name == "Default1894701600")
         #expect(model.selectedUseCount == 0 && model.value(.newPerDay) == 20)
         #expect(model.selected?.displayOrder[.reviewOrder] == 0)
@@ -407,9 +474,11 @@ import Testing
         model.beginNewPreset(); model.presetName = "Held"; model.createPreset()
         await gate.entered()
         #expect(model.addingPreset && !model.canSave && !model.canSwitchPreset)
+        #expect(owner.navigation.sheet == .newDeckOptionsPreset && !owner.deckOptionsAllowed)
         model.cancelNewPreset(); model.reload(); model.save()
         #expect(model.namingPreset && core.opens == 1)
         owner.receiveLifecycle(.ready(generation: 12))
+        #expect(owner.navigation.sheet == nil && !model.namingPreset)
         gate.release(); await model.waitForCompletion()
         #expect(model.phase == .closed && model.presets.isEmpty && model.outcome == .ended)
         #expect(core.session?.calls == ["add Held"])
@@ -452,6 +521,23 @@ import Testing
         owner.deckOptions.locale = Locale(identifier: "en_US")
         owner.deckOptions.openSession = { [core] _ in try core.open() }
         return (owner, core)
+    }
+}
+
+/// Available history in both directions, recording any write admitted by the modal guard.
+private actor PresetAdmissionUndo: UndoService {
+    private(set) var writes = 0
+    func peekUndo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus {
+        .available(step: ReviewStepInfo(id: 1, name: "Deck Options", kind: .other, session: nil, longWrite: nil))
+    }
+    func peekRedo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus { try peekUndo(scope: scope) }
+    func startUndo(scope: ReviewUndoScope) throws(BridgeError) -> CoreUndoStart {
+        writes += 1
+        throw .cancelled
+    }
+    func startRedo(scope: ReviewUndoScope) throws(BridgeError) -> CoreUndoStart {
+        writes += 1
+        throw .cancelled
     }
 }
 

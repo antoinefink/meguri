@@ -164,7 +164,10 @@ public final class DeckOptionsPageModel {
     public var saveFailure: SaveFailure?
     /// Kept with the draft across layout changes; reset whenever a new page opens.
     public var advancedExpanded = false
-    public private(set) var namingPreset = false
+    /// The shell's route owns modal admission, including interactive dismissal.
+    public var namingPreset: Bool {
+        owner?.navigation.sheet == .newDeckOptionsPreset && owner?.navigation.sheetHost == .main
+    }
     public var presetName = ""
     public private(set) var addingPreset = false
     public private(set) var selectingPreset = false
@@ -208,7 +211,7 @@ public final class DeckOptionsPageModel {
         let current = revision
         session = nil; opening = nil; presets = []; issues = []; fieldText = [:]
         changedElsewhere = false; confirmingDiscard = false; saveFailure = nil; outcome = nil
-        advancedExpanded = false; namingPreset = false; presetName = ""; addingPreset = false; selectingPreset = false; presetCreationFailed = false
+        advancedExpanded = false; presetName = ""; addingPreset = false; selectingPreset = false; presetCreationFailed = false
         leftWhileSaving = false; saveCancelled = false; changedWhileLoading = false
         self.deckID = deckID; deckName = owner.fullDeckName(deckID) ?? ""
         generation = owner.generation; phase = .loading
@@ -386,20 +389,29 @@ public final class DeckOptionsPageModel {
     }
 
     public func beginNewPreset() {
-        guard canSwitchPreset, !selectingPreset else { return }
+        guard canSwitchPreset, !selectingPreset, let owner, owner.generation == generation,
+              owner.deckOptionsAllowed else { return }
         commitAll()
         selectionRequest &+= 1
-        presetName = ""; presetCreationFailed = false; namingPreset = true
+        presetName = ""; presetCreationFailed = false
+        owner.navigation.present(.newDeckOptionsPreset)
     }
 
     public var canCreatePreset: Bool {
         phase == .editing && namingPreset && !addingPreset && !presetCreationFailed
             && !presetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && owner?.generation == generation
+            && owner?.deckNamesAllowed(host: .main, route: .newDeckOptionsPreset) == true
     }
 
     public func cancelNewPreset() {
         guard !addingPreset else { return }
-        namingPreset = false; presetName = ""; presetCreationFailed = false
+        finishNamingPreset()
+    }
+
+    private func finishNamingPreset() {
+        presetName = ""; presetCreationFailed = false
+        if namingPreset { owner?.navigation.dismissSheet() }
     }
 
     public func createPreset() {
@@ -414,7 +426,7 @@ public final class DeckOptionsPageModel {
             await previous?.value
             guard current == revision else { return }
             if issues.contains(where: { $0.severity == .error && ($0.preset == nil || $0.preset == selectedPreset) }) {
-                addingPreset = false; namingPreset = false
+                addingPreset = false; finishNamingPreset()
                 return
             }
             do {
@@ -423,7 +435,7 @@ public final class DeckOptionsPageModel {
                 guard current == revision else { return }
                 presets = updated.presets; selectedPreset = updated.openingPreset; issues = checked
                 for row in DeckOptionsPageRow.allCases { fieldText[row] = formatted(row) }
-                addingPreset = false; namingPreset = false; presetName = ""
+                addingPreset = false; finishNamingPreset()
             } catch {
                 guard current == revision else { return }
                 addingPreset = false; presetCreationFailed = true
@@ -586,7 +598,7 @@ public final class DeckOptionsPageModel {
         let previous = session, closing = deckID
         session = nil; opening = nil; presets = []; issues = []; fieldText = [:]
         changedElsewhere = false; confirmingDiscard = false
-        namingPreset = false; addingPreset = false; selectingPreset = false; presetName = ""; presetCreationFailed = false
+        finishNamingPreset(); addingPreset = false; selectingPreset = false
         deckID = nil; phase = .closed; self.outcome = outcome
         if let previous { Task { await previous.cancel() } }
         // The model, not the view, returns to the deck page (a page that is

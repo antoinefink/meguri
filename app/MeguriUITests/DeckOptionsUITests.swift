@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 #if os(macOS)
 import AppKit
+import ApplicationServices
 
 /// Deck Options' keys on the Mac (N20.9, `sched/deck-options` O15.3): ⌥⌘O
 /// opens the page on the shown deck, ⌘↩ saves as ⌘S does, and Save returns
@@ -175,6 +176,73 @@ final class DeckOptionsUITests: XCTestCase {
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
+    func testNewPresetBlocksWindowCommandsAndKeepsNativeTextUndo() throws {
+        let (app, bundle) = try launch(extra: ["-AppleKeyboardUIMode", "3"])
+        defer { app.terminate() }
+        let save = element(app, "deckOptions.options.save")
+        app.typeKey("o", modifierFlags: [.command, .option])
+        XCTAssertTrue(save.waitForExistence(timeout: 20))
+        let limit = element(app, "deckOptions.options.option.newPerDay")
+        let changed = (limit.value as? String) == "37" ? "38" : "37"
+        limit.clickOrTap(); app.typeKey("a", modifierFlags: .command); app.typeText(changed)
+        app.typeKey("s", modifierFlags: .command)
+        XCTAssertTrue(save.waitForNonExistence(timeout: 20))
+        app.typeKey("o", modifierFlags: [.command, .option])
+        XCTAssertTrue(save.waitForExistence(timeout: 20))
+        let edit = app.menuBars.menuBarItems["Edit"]
+        edit.click()
+        XCTAssertTrue(edit.menuItems["Undo Deck Options"].isEnabled, "A real collection step is available before opening")
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+
+        element(app, "deckOptions.options.newPreset").clickOrTap()
+        let name = element(app, "deckOptions.newPreset.name")
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        name.clickOrTap(); app.typeText("Q")
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(waitForValue(name, ""), "The sheet keeps the field's native text undo")
+        app.typeKey("z", modifierFlags: [.command, .shift])
+        XCTAssertTrue(waitForValue(name, "Q"))
+
+        // Full keyboard access moves focus onto a native sheet button. Prove
+        // that focus left Name before checking the collection-undo regression.
+        app.typeKey("\t", modifierFlags: [])
+        let running = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+            .first { !$0.isTerminated })
+        let application = AXUIElementCreateApplication(running.processIdentifier)
+        var focused: CFTypeRef?
+        XCTAssertEqual(AXUIElementCopyAttributeValue(application, kAXFocusedUIElementAttribute as CFString, &focused), .success)
+        let focusValue = try XCTUnwrap(focused)
+        XCTAssertEqual(CFGetTypeID(focusValue), AXUIElementGetTypeID())
+        let control = focusValue as! AXUIElement
+        var role: CFTypeRef?
+        XCTAssertEqual(AXUIElementCopyAttributeValue(control, kAXRoleAttribute as CFString, &role), .success)
+        XCTAssertEqual(role as? String, kAXButtonRole as String)
+        edit.click()
+        let undo = edit.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", "Undo")).firstMatch
+        XCTAssertTrue(undo.waitForExistence(timeout: 10))
+        XCTAssertFalse(undo.isEnabled, "Focus outside Name must not expose collection Undo")
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        let file = app.menuBars.menuBarItems["File"]
+        file.click()
+        XCTAssertFalse(file.menuItems["Import…"].isEnabled)
+        XCTAssertFalse(file.menuItems["Export Collection…"].isEnabled)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        let view = app.menuBars.menuBarItems["View"]
+        view.click()
+        XCTAssertFalse(view.menuItems["Browse"].isEnabled)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        app.typeKey("z", modifierFlags: .command)
+        app.typeKey("b", modifierFlags: [.command, .shift])
+        XCTAssertTrue(name.exists, "Window commands leave the naming sheet in place")
+        element(app, "deckOptions.newPreset.cancel").clickOrTap()
+        XCTAssertTrue(name.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(save.exists, "Closing returns to the same Deck Options page")
+        XCTAssertTrue(waitForValue(limit, changed), "The saved collection step was never undone behind the sheet")
+        edit.click()
+        XCTAssertTrue(edit.menuItems["Undo Deck Options"].isEnabled, "Closing restores the collection's Undo")
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+    }
+
     private func capture(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         attachment.name = name
@@ -182,7 +250,7 @@ final class DeckOptionsUITests: XCTestCase {
         add(attachment)
     }
 
-    private func launch() throws -> (XCUIApplication, String) {
+    private func launch(extra: [String] = []) throws -> (XCUIApplication, String) {
         let build = try BuildUnderTest.current()
         guard build.hasHooks else { throw XCTSkip("generated fixtures require a hook build") }
         let bundle = try build.bundleIdentifier
@@ -191,7 +259,7 @@ final class DeckOptionsUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(
             fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"),
-            now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
+            now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false, extra: extra).arguments
         app.launch()
         XCTAssertTrue(element(app, "home.collection.add").waitForExistence(timeout: 20))
         let row = app.descendants(matching: .any).matching(NSPredicate(

@@ -2,11 +2,13 @@ import AppModel
 import SwiftUI
 
 /// Native name entry; creation changes only the open core draft.
-struct NewDeckOptionsPresetForm: View {
+public struct NewDeckOptionsPresetForm: View {
     @Bindable var model: DeckOptionsPageModel
     @FocusState private var nameFocused: Bool
 
-    var body: some View {
+    public init(model: DeckOptionsPageModel) { self.model = model }
+
+    public var body: some View {
         #if os(macOS)
         VStack(alignment: .leading) {
             Text("deckOptions.preset.newTitle", bundle: .module).font(.headline)

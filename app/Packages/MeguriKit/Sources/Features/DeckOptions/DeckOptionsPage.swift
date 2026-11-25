@@ -37,10 +37,6 @@ public struct DeckOptionsPage: View {
             .onExitCommand { leave() }
             #endif
             .toolbar { toolbar }
-            .sheet(isPresented: Binding(get: { appVisible && model.namingPreset }, set: { if !$0 { model.cancelNewPreset() } })) {
-                NewDeckOptionsPresetForm(model: model)
-                    .environment(\.locale, locale)
-            }
             // N20.9: while the draft differs, Cancel replaces back and swipe back is off.
             .navigationBarBackButtonHidden(model.hasChanges || model.phase == .saving)
             .confirmationDialog(Text("deckOptions.discard.title", bundle: .module), isPresented: Binding(
