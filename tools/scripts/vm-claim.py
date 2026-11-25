@@ -9,8 +9,9 @@ kernel drops it when that process ends, so it never goes stale: a lost
 connection, a killed keeper and a restarted VM all free it.
 
 Started detached by mg__mac_vm_claim, one per lease. It writes its state to
---state (starting, then taken, busy, unreachable or error; releasing or lost
-at the end) and leaves when no live job holds the lease any more.
+--state (starting, then taken, busy, unreachable or error; lost while it asks
+again after its session ended; releasing at the end) and leaves when no live
+job holds the lease any more.
 Python 3.8+, standard library only.
 """
 
@@ -103,60 +104,90 @@ def main():
             out.write(json.dumps(record) + "\n")
         os.replace(tmp, args.state)
 
-    write("starting")
     holder = json.dumps(json.loads(args.holder), separators=(",", ":"))
     command = "exec /usr/bin/perl -e %s %s %s" % (
         shlex.quote(GUEST), shlex.quote(args.path), shlex.quote(holder))
-    try:
-        session = subprocess.Popen([args.ssh, command], stdin=subprocess.PIPE,
-                                   stdout=subprocess.PIPE, cwd="/")
-    except OSError as error:
-        write("unreachable", reason=str(error))
-        return 2
 
-    line = b""
-    deadline = time.monotonic() + args.answer
-    while not line.endswith(b"\n"):
-        left = deadline - time.monotonic()
-        if left <= 0 or not select.select([session.stdout], [], [], left)[0]:
-            break
-        chunk = os.read(session.stdout.fileno(), 4096)
-        if not chunk:
-            break
-        line += chunk
-    verdict = line.decode("utf-8", "replace").split("\n", 1)[0].strip()
-
-    if verdict != "TAKEN":
+    def ask():
+        """One attempt: (session, None) when taken, else (None, (state, extra))."""
+        try:
+            session = subprocess.Popen([args.ssh, command], stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE, cwd="/")
+        except OSError as error:
+            return None, ("unreachable", {"reason": str(error)})
+        line = b""
+        deadline = time.monotonic() + args.answer
+        while not line.endswith(b"\n"):
+            left = deadline - time.monotonic()
+            if left <= 0 or not select.select([session.stdout], [], [], left)[0]:
+                break
+            chunk = os.read(session.stdout.fileno(), 4096)
+            if not chunk:
+                break
+            line += chunk
+        verdict = line.decode("utf-8", "replace").split("\n", 1)[0].strip()
+        if verdict == "TAKEN":
+            return session, None
         session.kill()
         status = session.wait()
         if verdict.startswith("BUSY"):
-            write("busy", holder=verdict[4:].strip())
-            return 3
+            return None, ("busy", {"holder": verdict[4:].strip()})
         if verdict.startswith("ERROR"):
-            write("error", reason=verdict[5:].strip())
-            return 1
-        write("unreachable", reason="no answer from the VM (ssh exit %s)" % status)
-        return 2
+            return None, ("error", {"reason": verdict[5:].strip()})
+        return None, ("unreachable", {"reason": "no answer from the VM (ssh exit %s)" % status})
+
+    def end(session):
+        try:
+            session.stdin.close()
+        except OSError:
+            pass
+        try:
+            session.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            session.kill()
+            session.wait()
+
+    write("starting")
+    session, refused = ask()
+    if session is None:
+        write(refused[0], **refused[1])
+        return {"busy": 3, "error": 1}.get(refused[0], 2)
 
     # A job that ends nudges its keeper (SIGUSR1), which then looks at the
     # lease at once and often for a moment, instead of at its next beat.
     nudged = [0.0]
     signal.signal(signal.SIGUSR1, lambda *_: nudged.__setitem__(0, time.monotonic() + 3))
     write("taken")
-    lost = False
     beat = 0.0
     while lease_held(args.lease):
         now = time.monotonic()
-        if now >= beat:
+        lost = False
+        if session is not None and now >= beat:
             beat = now + args.beat
             try:
                 session.stdin.write(b"\n")
                 session.stdin.flush()
             except OSError:
                 lost = True
-        if lost or session.poll() is not None:
-            lost = True
-            break
+        if session is not None and (lost or session.poll() is not None):
+            # The session ended while the lease is still held (a lost
+            # connection, a restarted VM): the claim is gone with it. The
+            # lease's job may be retaining the VM (vm-xcode-pending), so the
+            # keeper asks for the claim again until the lease ends. Another
+            # Mac can take it meanwhile; nothing held in the VM can prevent
+            # that once its holder's session is gone.
+            print("vm-claim: the session that held the claim ended; asking again",
+                  file=sys.stderr, flush=True)
+            end(session)
+            session = None
+            write("lost")
+        if session is None:
+            session, refused = ask()
+            if session is not None:
+                print("vm-claim: claim taken again", file=sys.stderr, flush=True)
+                write("taken")
+                beat = 0.0
+                continue
         wake = time.monotonic() + args.beat
         while time.monotonic() < wake and time.monotonic() >= nudged[0]:
             time.sleep(0.1)
@@ -164,24 +195,13 @@ def main():
             time.sleep(0.1)
     # Said before the lock goes, so a job that takes the lease now starts a
     # keeper of its own instead of adopting this one.
-    write("lost" if lost else "releasing")
-    try:
-        session.stdin.close()
-    except OSError:
-        pass
-    try:
-        session.wait(timeout=20)
-    except subprocess.TimeoutExpired:
-        session.kill()
-        session.wait()
+    write("releasing")
+    if session is not None:
+        end(session)
     try:
         os.unlink(args.state)
     except OSError:
         pass
-    if lost:
-        print("vm-claim: the session that held the claim ended; the claim is gone",
-              file=sys.stderr)
-        return 4
     return 0
 
 

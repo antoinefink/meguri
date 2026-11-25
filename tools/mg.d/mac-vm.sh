@@ -647,16 +647,20 @@ mg__mac_vm_claim() {
     record="$(cat "$state" 2>/dev/null)"
     st="$(jq -r '.state // empty' <<<"$record" 2>/dev/null)"
     pid="$(jq -r '.pid // empty' <<<"$record" 2>/dev/null)"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    if mg__mac_vm_claim_keeper "$state" "$pid"; then
       if [ "$st" = taken ]; then
         # It looks at the lease every $beat s: one that is still there after
         # that has seen this job hold it, and keeps the claim for it.
         mg_sleep $((${beat%.*} + 1))
-        if [ "$(cat "$state" 2>/dev/null)" = "$record" ] && kill -0 "$pid" 2>/dev/null; then
+        if [ "$(cat "$state" 2>/dev/null)" = "$record" ] && mg__mac_vm_claim_keeper "$state" "$pid"; then
           mg__mac_vm_detail "$(jq -nc --argjson w "$(($(mg__epoch) - start))" '{claim: {kept: true, waited_s: $w}}')"
           return 0
         fi
       else
+        if [ $(($(mg__epoch) - start)) -ge "$wait" ]; then
+          mg__mac_vm_fail mac-vm-busy "$name stayed claimed for $wait s (this Mac's keeper, pid $pid, state ${st:-unknown})"
+          return 1
+        fi
         mg_sleep 1
       fi
       continue
@@ -717,7 +721,21 @@ mg__mac_vm_claim() {
 mg__mac_vm_claim_nudge() {
   local pid
   pid="$(jq -r '.pid // empty' "$1" 2>/dev/null)"
-  [ -z "$pid" ] || kill -USR1 "$pid" 2>/dev/null || :
+  ! mg__mac_vm_claim_keeper "$1" "$pid" || kill -USR1 "$pid" 2>/dev/null || :
+}
+
+# mg__mac_vm_claim_keeper <state file> <pid>: whether <pid> is the live
+# keeper of that state file, by its command line. A state file whose keeper
+# died names a pid the system may have given to another process: that one is
+# neither trusted with the claim nor sent a signal.
+mg__mac_vm_claim_keeper() {
+  local command
+  [ -n "$2" ] && kill -0 "$2" 2>/dev/null || return 1
+  command="$(ps -o command= -p "$2" 2>/dev/null)" || return 1
+  case "$command" in
+    *"vm-claim.py --ssh "*" --state $1 --token "*) return 0 ;;
+  esac
+  return 1
 }
 
 # ---------------------------------------------------------------------------

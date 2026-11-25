@@ -34,7 +34,7 @@ setup() {
   unset MEGURI_MAC_UI_ALLOW_HOST MEGURI_MAC_UI_INTERVAL_MINUTES
   export FAKE_VM_DIR="$BATS_TEST_TMPDIR/vms" FAKE_VM_MIRROR="$BATS_TEST_TMPDIR" FAKE_VM_BIN="$BATS_TEST_TMPDIR/vm-bin"
   # The VM's claim file, in this test's own VM file system (mirrored path).
-  export MEGURI_MAC_VM_CLAIM_PATH="$BATS_TEST_TMPDIR/vm-claim.lock" MEGURI_MAC_VM_CLAIM_POLL_SECONDS=1 MEGURI_MAC_VM_CLAIM_BEAT_SECONDS=1
+  export MEGURI_MAC_VM_CLAIM_PATH="$BATS_TEST_TMPDIR/vm-claim.lock" MEGURI_MAC_VM_CLAIM_POLL_SECONDS=1 MEGURI_MAC_VM_CLAIM_BEAT_SECONDS=1 MEGURI_MAC_VM_SHARED_CLAIM=1
   : >"$STUB_LOG"
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN" "$FAKE_VM_BIN" "$FAKE_VM_DIR"
@@ -810,6 +810,8 @@ exec '"$(command -v tar)"' "$@"'
   not_called "^vm-xcodebuild "
   not_called "^vm-products "
   not_called "pkill"
+  # Nothing of this checkout was copied into the VM meanwhile.
+  [ ! -e "$(vm_fs meguri-mac "$SB/build/app/DerivedData/Build/Products/Debug/Meguri.app/Contents/Info.plist")" ]
   touch "$BATS_TEST_TMPDIR/other-done"
   wait "$other"
   wait "$first"

@@ -70,6 +70,16 @@ wait_for_vm() {
     { log "$VM did not answer: ${MVL_REASON:-unknown}"; exit 1; }
 }
 
+# A restart ends every claim on the VM (tools/mg.d/mac-vm.sh): never while
+# another Mac's job holds it. A VM that does not answer runs no job.
+claim_free() {
+  local holder
+  if holder="$(mvl_claim_holder "$SSH")"; then
+    log "$VM is in use by another Mac's job ($(jq -r '"\(.job // "a job") on \(.machine // "?") in \(.worktree // "?") since \(.started_at // "?")"' <<<"$holder" 2>/dev/null || echo unknown)); not restarting it"
+    exit 1
+  fi
+}
+
 start() {
   local url i
   [ "${1:-}" = --vm ] && [ -n "${2:-}" ] && VM="$2"
@@ -79,6 +89,7 @@ start() {
     python3 -m venv "$STATE/venv" &&
       "$STATE/venv/bin/pip" install --quiet "vncdotool==$VNCDOTOOL_VERSION"
   } || { log "could not install vncdotool"; exit 1; }
+  claim_free
   "$TART" stop "$VM" --timeout 60 2>/dev/null
   : >"$STATE/tart.log"
   (
@@ -111,6 +122,7 @@ stop() {
   fi
   rm -f "$FIFO" "$STATE/holder.pid"
   lease vm-fold-stop
+  claim_free
   "$TART" stop "$VM" --timeout 60 || exit 1
   : >"$STATE/tart.log"
   mvl_start "$TART" "$VM" "$STATE/tart.log"
