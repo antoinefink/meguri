@@ -519,8 +519,8 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         case "contentHeight": contentHeight = EditorBridgeMessage.number(message.body["height"])!
         case "caret":
             caret = EditorBridgeMessage.number(message.body["top"])!...EditorBridgeMessage.number(message.body["bottom"])!
-        case "playMedia": if let name = MediaName.plain(message.body["name"] as! String) { onPlayMedia?(name) }
-        case "openMedia": if let name = MediaName.plain(message.body["name"] as! String) { onOpenMedia?(name) }
+        case "playMedia": if let name = (message.body["name"] as? String).flatMap(MediaName.plain) { onPlayMedia?(name) }
+        case "openMedia": if let name = (message.body["name"] as? String).flatMap(MediaName.plain) { onOpenMedia?(name) }
         default: throw EditorRuntimeError.invalidMessage
         }
         refreshAccessory()

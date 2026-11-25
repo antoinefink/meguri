@@ -60,6 +60,8 @@ import WebKit
         #expect(try EditorBridgeMessage(["type": "playMedia", "loadId": 1, "seq": 1, "name": "../x.mp3"], ordinals: [0]).type == "playMedia")
         #expect(try EditorBridgeMessage(["type": "openMedia", "loadId": 1, "seq": 1, "name": "https://example.org/a.png"],
                                         ordinals: [0]).type == "openMedia")
+        // A chip the note's HTML imitates without a name is ignored too, never a failed load.
+        #expect(try EditorBridgeMessage(["type": "playMedia", "loadId": 1, "seq": 1, "name": NSNull()], ordinals: [0]).type == "playMedia")
         #expect(throws: (any Error).self) {
             try EditorBridgeMessage(["type": "playMedia", "loadId": 1, "seq": 1, "name": 3], ordinals: [0])
         }

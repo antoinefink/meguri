@@ -536,7 +536,13 @@
             // A chip plays its sound; a thumbnail opens the larger view (the host does both).
             rich.addEventListener("click", event => {
                 const chip = event.target.closest?.("[data-meguri-chip]");
-                if (chip) { event.preventDefault(); void emit("playMedia", {name: chip.getAttribute("data-meguri-name")}); return; }
+                // A chip the note's own HTML imitates may carry no name: it plays nothing.
+                if (chip) {
+                    event.preventDefault();
+                    const name = chip.getAttribute("data-meguri-name");
+                    if (name) void emit("playMedia", {name});
+                    return;
+                }
                 if (event.target.localName === "img" && event.target.getAttribute("src")) {
                     void emit("openMedia", {name: event.target.getAttribute("src")});
                 }
