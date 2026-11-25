@@ -865,6 +865,8 @@ PUBLIC_ARTIFACTS = {
     'core/crates/meguri-storage/tests/activity.rs':
         'd5dc18eda6c1284885c9a23b32805add3ab078b91fbd63cead5bd9adc27f0b24',
     # Merged contract, whole-file PUBLIC review in cleanroom 20261124T192531Z-55996.
+    'docs/design/native-interface-contract.md':
+        '50c5a5853c9f846cc214bd20fe336d5b1da2898716f05709aa0cad9908574624',
     # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
     'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
         '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
