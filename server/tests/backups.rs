@@ -313,7 +313,7 @@ async fn restore_rechecks_intervening_media_and_logout_and_serializes_with_daily
 async fn lost_restore_caller_cannot_settle_authenticated_history_before_intent_or_cleanup() {
     struct ResumeOnDrop(std::sync::Arc<meguri_sync_server::test_hooks::Pause>);
     impl Drop for ResumeOnDrop {fn drop(&mut self) {self.0.resume();}}
-    for phase in ["backup_restore_preparing", "backup_snapshot_pinned", "backup_restore_before_commit", "backup_restore_cleanup"] {
+    for phase in ["backup_restore_preparing", "backup_snapshot_pinned", "backup_restore_before_commit", "backup_restore_intent_committed", "backup_restore_cleanup"] {
         let h = Harness::new().await;
         h.setup().await;
         let admin = h.login("root.admin", PASSWORD).await;
@@ -339,7 +339,7 @@ async fn lost_restore_caller_cannot_settle_authenticated_history_before_intent_o
             .header("x-meguri-expected-account", &id).send().await.unwrap(), 409, "busy").await;
         error(h.post(&format!("/api/me/backups/{backup}/restore"), json!({}), Some(&cookie)).await, 409, "busy").await;
         assert_eq!(history(&h, &admin).await, independent);
-        if phase != "backup_restore_cleanup" {
+        if !matches!(phase, "backup_restore_intent_committed" | "backup_restore_cleanup") {
             // Preserve the no-early-safety-point invariant without asking the
             // public history route to report settled during an active restore.
             let c = rusqlite::Connection::open(h.database()).unwrap();
@@ -471,6 +471,10 @@ async fn failed_cutover_keeps_account_fenced_until_startup_and_pre_restore_point
     let (mut child,base)=child_service(&owner,"backup_restore_after_pointer",false,&temp.path().join("unused")).await;
     let client=reqwest::Client::builder().no_proxy().build().unwrap();
     error(client.post(format!("{base}/api/me/backups/{backup}/restore")).header("cookie",&cookie).header("origin",ORIGIN).json(&json!({})).send().await.unwrap(),503,"provision_unavailable").await;
+    // The worker has exited with its durable intent still present: without a
+    // live restore lease history and another restore report the typed 503.
+    error(client.get(format!("{base}/api/me/backups")).header("cookie",&cookie).header("x-meguri-expected-account",id).send().await.unwrap(),503,"storage_unavailable").await;
+    error(client.post(format!("{base}/api/me/backups/{backup}/restore")).header("cookie",&cookie).header("origin",ORIGIN).header("x-meguri-expected-account",id).json(&json!({})).send().await.unwrap(),503,"storage_unavailable").await;
     let native=client.post(format!("{base}/sync/meta")).header("anki-sync",json!({"v":11,"k":key,"c":"fixture","s":""}).to_string())
         .body(zstd::stream::encode_all(br#"{"v":11}"#.as_slice(),0).unwrap()).send().await.unwrap();assert_ne!(native.status(),200);
     let storage:Value=client.get(format!("{base}/api/me/storage")).header("cookie",&cookie).send().await.unwrap().json().await.unwrap();assert!(storage["data"].is_null());

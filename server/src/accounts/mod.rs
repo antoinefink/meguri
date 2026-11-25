@@ -6,6 +6,7 @@ mod deletion;
 mod reset;
 mod backups;
 pub use backups::Backup;
+pub(crate) use backups::RestoreCaller;
 mod provision;
 pub(crate) mod oauth;
 use crate::{

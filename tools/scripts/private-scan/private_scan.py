@@ -838,7 +838,7 @@ PUBLIC_ARTIFACTS = {
     'docs/process/review-log/meguri-sync-collection-backups-20261125.md':
         'a2c98300371f81cb18abe2847ca1de877c8df8fd1e40ba555bde6461943882d9',
     'server/src/accounts/backups.rs':
-        'beb1848a3cfe689881074df7ceb4096dfd36c8497cdb4a69023711b63cf9f4c8',
+        '8d9801640afbe5dbb862060d8aea8accb4ddf47063dc775278e176559b32622a',
     'server/tests/support/mod.rs':
         'fbaccbd87526b237ac1db6d1a2f17ff810838bb15366409b5f0ef254d4cecce8',
     'server/tests/media_recovery.rs':
@@ -846,7 +846,7 @@ PUBLIC_ARTIFACTS = {
     'server/tests/deletion.rs':
         'ab0089c0ae552f21ca4cced65c799cdaf3f49e2605c5a66aa8c712dc31827cbe',
     'server/tests/backups.rs':
-        '35fdd9a3e691f6be45654b772cf843543b0ed78fe1a082c94f7a7910df845109',
+        'bc445dc6d148029a6164588148d50a05f2c25ce21ce8ceff4730657784c38d5d',
     'server/src/storage/reset.rs':
         'eb4b91a93c9976b7b07d3212f58e1e8e62b4deea0a9346e5e7c824c7dd052ee9',
     'server/src/storage/mod.rs':
@@ -958,7 +958,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        'ad960eeefde05b6fe79722164c90728ab4719fa518ef9e9272008abc00ffdb2d',
+        'e4726bf8b73dac5b88b54cb33be38c06d30630d414f7dcff4fe62e8eddfc3dc2',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1251,7 +1251,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        '13ea0f91d6c87d98a1a3923db80344d2c435208b5c0419134ace2836bfe28437',
+        '0e1a49d4f0a66e447f932e9760dccf131d5be7c0efc694a2ff11c6ec95a25d85',
     "specs/servers/meguri-collection-mcp.md":
         "ea88b7499265974b3955511e3611d075a855c4cd5e3c446202759f56942b34a8",
     "docs/plans/2026-11-22-1323-feat-mcp-note-attachments-plan.md":
@@ -1312,17 +1312,17 @@ PUBLIC_ARTIFACTS = {
     'server/src/main.rs':
         '46699d99127a80945a264e9a461c17cdfcaf1f28cacf56ebf80ed9cd8d9882bf',
     'server/src/accounts/mod.rs':
-        'ffb70aadc3e86cbba4b71fa7aacac9d0241bb5d570a3fe4132ff91957ba6ac99',
+        'f83fbc6374f84b3189947e87de740cf4de749279c3d4783cca4bf97c1f1ec330',
     'server/src/accounts/provision.rs':
         'f75596225c443a3f33a58c5e1322ceba52326c4a7b507723c30b4f2aa6fc0416',
     'server/src/httpapi/AGENTS.md':
-        'ee08f06fbb1c5c420b5dbf55137846012523c0ec5aa37d6f73435f07bb722785',
+        'dbe717cde0b794b08a2fd368b90d75a4a7c9bc626c87de3dd4b7c1d04d22c89d',
     'server/src/httpapi/ingress.rs':
         'aaee8e568d0a2c915288942b847f45ec262874d13887ce2911bbe0dac4f39ef6',
     'server/src/httpapi/mod.rs':
-        '60cbff1cbde7ddb223e4e4a5358458035304d53301410e6ac75a2d3c91c4ea00',
+        'd3c7d5e496d2d59a7f5afd2f1ebd4b5b8e51063f6c5a71947a6aac1bb6f8cb67',
     'server/src/httpapi/tests.rs':
-        '6d5fb8c47e98e5a474bced2b8d36fb8f259bd87f29bbd386fcac8ca63bc948c8',
+        '502eb8ce076fa4fb2e8f81ce6a5efc00a3c4da7d4dad0c56eedaefece095704c',
     'server/src/storage/schema.sql':
         '4842a61b5bf0e3b8e909364d5df7667aea59f054c7175313dd28f840f6c7a31b',
     'server/src/storage/semantic.rs':

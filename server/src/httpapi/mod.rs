@@ -254,10 +254,18 @@ async fn backup_sweeps(service: Arc<Service>, mut stopped: tokio::sync::oneshot:
         }
     }
 }
+// This guard belongs to the handler, never the detached browser worker.
+struct RestoreConnection(Arc<crate::accounts::RestoreCaller>);
+impl Drop for RestoreConnection {
+    fn drop(&mut self) {self.0.cancel();}
+}
 async fn handle(State(service): State<Arc<Service>>, request: Request) -> Response {
     if request.uri().path().starts_with("/sync/") || request.uri().path().starts_with("/msync/") {
         return secure(crate::protocol::handle(service, request).await);
     }
+    let restore_connection = (request.method() == Method::POST
+        && backup_restore_id(request.uri().path()).is_some())
+        .then(|| RestoreConnection(Arc::default()));
     let browser_api = request.uri().path().starts_with("/api/");
     let oauth_route = oauth::route(request.uri().path());
     let browser = browser_api || oauth_route;
@@ -279,7 +287,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
         match early {
             Err(e) => ingress::retain(api_error(e, ticket_route), body, None, service),
             Ok(()) if exempt => {
-                let response = dispatch(&service, &parts, None)
+                let response = dispatch(&service, &parts, None, None)
                     .await
                     .unwrap_or_else(IntoResponse::into_response);
                 ingress::retain(response, body, None, service)
@@ -291,9 +299,10 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
                     // cancellation must not free its slot while slow work runs.
                     let deadline =
                         tokio::time::Instant::now() + Duration::from_secs(ingress::BODY_SECONDS);
+                    let restore_caller = restore_connection.as_ref().map(|c| c.0.clone());
                     let worker = tokio::spawn(async move {
                         let mut body = body;
-                        let response = dispatch_browser(&service, &parts, &mut body, deadline)
+                        let response = dispatch_browser(&service, &parts, &mut body, deadline, restore_caller.as_deref())
                             .await
                             .unwrap_or_else(|e| api_error(e, ticket_route));
                         ingress::retain(response, body, Some(permit), service)
@@ -309,7 +318,7 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
         // their own envelopes, admission and authentication above.
         match web_asset(&parts) {
             Some(response) => response,
-            None => dispatch(&service, &parts, None)
+            None => dispatch(&service, &parts, None, None)
                 .await
                 .unwrap_or_else(IntoResponse::into_response),
         }
@@ -358,6 +367,7 @@ async fn dispatch_browser(
     parts: &axum::http::request::Parts,
     body: &mut Body,
     deadline: tokio::time::Instant,
+    restore_caller: Option<&crate::accounts::RestoreCaller>,
 ) -> Result<Response> {
     if oauth::route(parts.uri.path()) {
         return oauth::dispatch(service, parts, body, deadline).await;
@@ -369,7 +379,7 @@ async fn dispatch_browser(
         return collection_download(service, parts).await;
     }
     if parts.method != Method::POST {
-        return dispatch(service, parts, None).await;
+        return dispatch(service, parts, None, None).await;
     }
     if !mutation(parts.uri.path()) {
         return Err(Error::new("route_not_found"));
@@ -382,7 +392,7 @@ async fn dispatch_browser(
         return Err(Error::new("admission_closed"));
     }
     let bytes = service.browser_ingress.read(body, deadline).await?;
-    dispatch(service, parts, Some(&bytes)).await
+    dispatch(service, parts, Some(&bytes), restore_caller).await
 }
 // Retain the common admission, unread body and private response headers. Ticket
 // failures disclose neither OAuth metadata nor whether a credential ever existed.
@@ -468,6 +478,7 @@ async fn dispatch(
     service: &Arc<Service>,
     parts: &axum::http::request::Parts,
     bytes: Option<&[u8]>,
+    restore_caller: Option<&crate::accounts::RestoreCaller>,
 ) -> Result<Response> {
     let path = parts.uri.path();
     let method = &parts.method;
@@ -621,8 +632,8 @@ async fn dispatch(
             if let Some(id) = backup_restore_id(path) {
                 let _: Empty = parse(bytes)?;
                 let a = authority(service, &parts.headers).await?;
-                let account_id = service.restore_backup_for_account(
-                    a, id.into(), expected_account(&parts.headers)?,
+                let account_id = service.restore_backup_for_caller(
+                    a, id.into(), expected_account(&parts.headers)?, restore_caller,
                 ).await?;
                 return Ok(data(serde_json::json!({"account_id": account_id}), false));
             }

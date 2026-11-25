@@ -186,7 +186,15 @@ read every saved database or media file. Restore verifies the selected database
 and media payloads and reports corruption as `storage_unavailable` (503).
 A same-account admitted restore excludes history for its entire operation,
 including preparation, safety capture and cleanup, even if its HTTP caller
-disconnects before durable intent. Such history reads return `busy` (409).
+disconnects before durable intent. For authenticated, matching-account requests,
+this in-process lease returns `busy` (409) before testing durable intent, for both
+history and another restore. Authority and expected-account failures still take
+precedence. Before acquiring the restore lease, cancellation of the HTTP caller
+must prevent subsequent admission, even when its detached ingress worker remains
+blocked. A fresh successful history response after that cancellation rules out
+that request later creating a safety point or changing live state. Cancellation
+and account lease acquisition share a strict linearization boundary; after
+admission the worker finishes while retaining its ingress/root and restore leases.
 Without an active restore lease, a pending durable reset/restore intent still
 returns `storage_unavailable` (503).
 A history snapshot excludes restore admission until its rows have been read.

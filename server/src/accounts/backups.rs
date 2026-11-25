@@ -11,6 +11,21 @@ pub struct BackupHistory {
     pub backups: Vec<Backup>,
 }
 
+/// Cancellation and restore lease acquisition share one linearization boundary.
+/// The HTTP worker keeps its ingress/root leases even after this caller closes.
+#[derive(Default)]
+pub(crate) struct RestoreCaller(std::sync::Mutex<bool>);
+impl RestoreCaller {
+    pub(crate) fn cancel(&self) {
+        *self.0.lock().unwrap() = true;
+    }
+    fn admit<T>(&self, work: impl FnOnce() -> Result<T>) -> Result<T> {
+        let cancelled = self.0.lock().map_err(|_| Error::new("storage_unavailable"))?;
+        if *cancelled {return Err(Error::new("invalid_request"));}
+        work()
+    }
+}
+
 fn check_expected_account(id: &str, expected: Option<&str>) -> Result<()> {
     if expected.is_some_and(|expected| expected != id) {
         return Err(Error::new("stale_authority"));
@@ -293,10 +308,10 @@ impl Service {
             let account = check_browser(&tx, &authority, "authentication_failed")?;
             let id = account.identity.id;
             check_expected_account(&id, expected_account.as_deref())?;
-            crate::storage::reset::admitted_epoch(&tx, &id)?;
-            // Validate authority and durable fences even on lease contention.
-            // Keep the optional guard (and gate) until after the tx is dropped.
+            // Authority and account matching precede busy; an active restore
+            // precedes its durable intent. Keep the guard through the snapshot.
             if history.is_none() {return Err(Error::new("busy"));}
+            crate::storage::reset::admitted_epoch(&tx, &id)?;
             #[cfg(feature = "test-hooks")]
             tokio::runtime::Handle::current().block_on(hooks.hit("backup_history_admitted"));
             let backups = store::list(&tx, &id)?;
@@ -316,29 +331,53 @@ impl Service {
         backup: String,
         expected_account: Option<String>,
     ) -> Result<String> {
+        self.restore_backup_for_caller(authority, backup, expected_account, None).await
+    }
+    pub(crate) async fn restore_backup_for_caller(
+        self: &Arc<Self>,
+        authority: BrowserAuthority,
+        backup: String,
+        expected_account: Option<String>,
+        caller: Option<&RestoreCaller>,
+    ) -> Result<String> {
         let actor = authority.clone();
+        let gate = self.barriers.get(&authority.identity().id)?;
         let (id, epoch) = self.metadata.run(move |c| {
+            let history_owner = gate;
+            let history = history_owner.try_history();
             let tx = c.transaction()?;
             admission(&tx)?;
             let account = check_browser(&tx, &actor, "authentication_failed")?;
             let id = account.identity.id;
             check_expected_account(&id, expected_account.as_deref())?;
+            if history.is_none() {return Err(Error::new("busy"));}
             let epoch = crate::storage::reset::admitted_epoch(&tx, &id)?;
             Ok((id, epoch))
         }).await?;
         // No await between ownership and spawn. The detached worker and every
         // blocking stage retain the same gate and restore lease until cleanup.
-        let work = BackupWork::acquire_restore(self.barriers.get(&id)?)?;
-        let owner = self.clone();
-        tokio::spawn(async move {
-            owner.restore_backup_inner(authority, backup, id, epoch, work).await.map_err(|e| {
-                if matches!(e.code, "invalid_collection" | "media_integrity") {
-                    Error::new("storage_unavailable")
-                } else {
-                    e
-                }
-            })
-        }).await.map_err(|_| Error::new("storage_unavailable"))?
+        self.pause("backup_restore_before_admission").await;
+        let start = || {
+            let work = BackupWork::acquire_restore(self.barriers.get(&id)?)?;
+            let owner = self.clone();
+            Ok(tokio::spawn(async move {
+                owner.restore_backup_inner(authority, backup, id, epoch, work).await.map_err(|e| {
+                    if matches!(e.code, "invalid_collection" | "media_integrity") {
+                        Error::new("storage_unavailable")
+                    } else {
+                        e
+                    }
+                })
+            }))
+        };
+        // No await between checking caller liveness, acquiring the account
+        // lease and spawning mutation. Cancellation after this point is safe:
+        // authenticated history stays busy until the admitted worker settles.
+        let worker = match caller {
+            Some(caller) => caller.admit(start)?,
+            None => start()?,
+        };
+        worker.await.map_err(|_| Error::new("storage_unavailable"))?
     }
     async fn restore_backup_inner(
         &self,
@@ -486,6 +525,8 @@ impl Service {
             generation.retain();
             tx.commit()?;
             phase("backup_restore_after_intent")?;
+            #[cfg(feature = "test-hooks")]
+            tokio::runtime::Handle::current().block_on(hooks.hit("backup_restore_intent_committed"));
             drop(c);
             drop(safety);
             root.finish_backup_restore(&job)?;

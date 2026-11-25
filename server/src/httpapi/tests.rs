@@ -397,3 +397,145 @@ fn expected_account_header_is_optional_for_legacy_callers_but_unambiguous() {
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
     }
 }
+
+#[cfg(feature = "test-hooks")]
+async fn backup_fixture() -> (tempfile::TempDir, Arc<Service>, String, String, String) {
+    let (temp, service) = fixture(false).await;
+    let token = std::fs::read_to_string(temp.path().join("owner/state/setup-token")).unwrap();
+    let ip = "127.0.0.1".parse().unwrap();
+    service.claim(ip, "setup", token.trim().into(), "restore.member", "synthetic password 123".into()).await.unwrap();
+    let (identity, secret, _) = service.browser_login_session(ip, "restore.member", "synthetic password 123".into()).await.unwrap();
+    service.capture_backups_at(crate::accounts::now()).await.unwrap();
+    let id = identity.id;
+    let history = service.backups(service.browser_authority(&secret).await.unwrap(), Some(id.clone())).await.unwrap();
+    let backup = serde_json::to_value(history).unwrap()["backups"][0]["id"].as_str().unwrap().to_owned();
+    (temp, service, format!("{COOKIE}={secret}"), id, backup)
+}
+
+#[cfg(feature = "test-hooks")]
+fn backup_request(cookie: &str, account: &str, backup: Option<&str>) -> Request {
+    let mut req = match backup {
+        Some(backup) => request(&format!("/api/me/backups/{backup}/restore"), Body::from("{}")),
+        None => Request::builder().uri("/api/me/backups").body(Body::empty()).unwrap(),
+    };
+    req.headers_mut().insert("cookie", cookie.parse().unwrap());
+    req.headers_mut().insert("x-meguri-expected-account", account.parse().unwrap());
+    req
+}
+
+#[cfg(feature = "test-hooks")]
+async fn backup_json(response: Response) -> serde_json::Value {
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["connection"], "close");
+    serde_json::from_slice(&to_bytes(response.into_body(), 16384).await.unwrap()).unwrap()
+}
+
+#[cfg(feature = "test-hooks")]
+async fn backup_live_state(service: &Service, id: &str) -> (std::path::PathBuf, i64, i64, i64) {
+    let id = id.to_owned();
+    service.metadata.files(move |root| {
+        let path = root.collection_path(&id)?;
+        let c = crate::collection::schema::open(&path, false)?;
+        let (scm, modified, usn) = c.query_row("SELECT scm,mod,usn FROM col WHERE id=1", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok((path, scm, modified, usn))
+    }).await.unwrap()
+}
+
+#[cfg(feature = "test-hooks")]
+struct ResumeBackupPause(Arc<crate::test_hooks::Pause>);
+#[cfg(feature = "test-hooks")]
+impl Drop for ResumeBackupPause {
+    fn drop(&mut self) {self.0.resume();}
+}
+
+#[cfg(feature = "test-hooks")]
+struct CompleteRestoreBody {
+    frame: Option<Bytes>,
+    dropped: Arc<AtomicUsize>,
+}
+#[cfg(feature = "test-hooks")]
+impl Drop for CompleteRestoreBody {
+    fn drop(&mut self) {self.dropped.fetch_add(1, Ordering::SeqCst);}
+}
+#[cfg(feature = "test-hooks")]
+impl HttpBody for CompleteRestoreBody {
+    type Data = Bytes;
+    type Error = std::io::Error;
+    fn poll_frame(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<std::result::Result<Frame<Bytes>, Self::Error>>> {
+        Poll::Ready(self.frame.take().map(|bytes| Ok(Frame::data(bytes))))
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+async fn cancelled_http_restore_before_lease_cannot_mutate_after_settled_history() {
+    let (_temp, service, cookie, id, backup) = backup_fixture().await;
+    let before = backup_json(handle(State(service.clone()), backup_request(&cookie, &id, None)).await).await;
+    let state = backup_live_state(&service, &id).await;
+    let pause = service.hooks.arm("backup_restore_before_admission");
+    let _release = ResumeBackupPause(pause.clone());
+    // This pause is reached only after the actual route has read strict {},
+    // checked Origin, authenticated the cookie and matched the expected account.
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let req = backup_request(&cookie, &id, Some(&backup)).map(|_| Body::new(CompleteRestoreBody {
+        frame: Some(Bytes::from_static(b"{}")), dropped: dropped.clone(),
+    }));
+    let caller = tokio::spawn(handle(State(service.clone()), req));
+    tokio::time::timeout(Duration::from_secs(30), pause.arrived()).await.unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    assert_eq!(dropped.load(Ordering::SeqCst), 0, "the blocked worker retains the complete incoming receiver");
+    let root_owner = Arc::downgrade(&service);
+    drop(service);
+    let service = root_owner.upgrade().expect("the blocked worker retains service/root ownership");
+    assert_eq!(backup_json(handle(State(service.clone()), backup_request(&cookie, &id, None)).await).await, before);
+    // Cancellation must not release the blocked outer worker's ingress lease.
+    let held = (0..ingress::CAPACITY - 1).map(|_| service.browser_ingress.enter().unwrap()).collect::<Vec<_>>();
+    assert_eq!(service.browser_ingress.enter().unwrap_err().code, "rate_limited");
+    drop(held);
+    pause.resume();
+    // Join the actual orphaned worker, rather than inferring non-mutation from
+    // a delay or polling history while a late admission might still be pending.
+    tokio::time::timeout(Duration::from_secs(30), service.browser_ingress.idle()).await.unwrap();
+    assert_eq!(backup_json(handle(State(service.clone()), backup_request(&cookie, &id, None)).await).await, before);
+    assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    assert_eq!(backup_live_state(&service, &id).await, state);
+    drop(service);
+    assert!(root_owner.upgrade().is_none());
+}
+
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+async fn cancelled_http_restore_after_lease_stays_busy_through_committed_intent_and_finishes() {
+    for phase in ["backup_restore_preparing", "backup_restore_intent_committed", "backup_restore_cleanup"] {
+        let (_temp, service, cookie, id, backup) = backup_fixture().await;
+        let before = backup_json(handle(State(service.clone()), backup_request(&cookie, &id, None)).await).await;
+        let state = backup_live_state(&service, &id).await;
+        let pause = service.hooks.arm(phase);
+        let _release = ResumeBackupPause(pause.clone());
+        let caller = tokio::spawn(handle(State(service.clone()), backup_request(&cookie, &id, Some(&backup))));
+        tokio::time::timeout(Duration::from_secs(30), pause.arrived()).await.unwrap();
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        for selected in [None, Some(backup.as_str())] {
+            code(handle(State(service.clone()), backup_request(&cookie, &id, selected)).await, StatusCode::CONFLICT, "busy").await;
+            // Busy never masks a mismatching expected account or invalid cookie.
+            let mismatch = backup_request(&cookie, &crate::crypto::random_token().unwrap(), selected);
+            code(handle(State(service.clone()), mismatch).await, StatusCode::CONFLICT, "stale_authority").await;
+            let mismatch = backup_request(&format!("{COOKIE}={}", crate::crypto::random_token().unwrap()), &id, selected);
+            code(handle(State(service.clone()), mismatch).await, StatusCode::UNAUTHORIZED, "authentication_failed").await;
+        }
+        if phase == "backup_restore_intent_committed" {
+            let count = service.metadata.run(|c| Ok(c.query_row("SELECT count(*) FROM backup_restores", [], |r| r.get::<_, i64>(0))?)).await.unwrap();
+            assert_eq!(count, 1, "409 must take precedence while durable intent and the live lease coexist");
+        }
+        pause.resume();
+        tokio::time::timeout(Duration::from_secs(30), service.browser_ingress.idle()).await.unwrap();
+        let after = backup_json(handle(State(service.clone()), backup_request(&cookie, &id, None)).await).await;
+        assert_eq!(after["data"]["backups"].as_array().unwrap().len(), before["data"]["backups"].as_array().unwrap().len() + 1);
+        assert_eq!(after["data"]["backups"].as_array().unwrap().iter().filter(|p| p["kind"] == "before_restore").count(), 1);
+        let restored = backup_live_state(&service, &id).await;
+        assert_ne!(restored.0, state.0);
+        assert!(restored.1 > state.1 && restored.2 > state.2);
+    }
+}
