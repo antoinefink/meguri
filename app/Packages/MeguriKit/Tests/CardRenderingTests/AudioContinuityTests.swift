@@ -443,6 +443,53 @@ import AVFoundation
         #expect(output.operations.filter { $0 == .deactivate }.count == cleanupAttempts + 1)
     }
 
+    @Test(arguments: [SessionHardware.Operation.activate, .category(ducking: true)])
+    func failedNewerSnapshotRefusesStillPendingAudibleActivation(failure: SessionHardware.Operation) async throws {
+        let output = Output()
+        let hardware = SessionHardware(perform: output.perform)
+        output.fail(failure)
+        // The continuity snapshot overtakes a word still waiting to reach the
+        // hardware actor; updateHardware ignores this newer snapshot's error.
+        await #expect(throws: Output.Failure.self) {
+            try await hardware.set(audible: true, continuity: true, revision: 2, lifetime: 1)
+        }
+        let failed = output.operations
+        await #expect(throws: CancellationError.self) {
+            try await hardware.set(audible: true, continuity: false, revision: 1)
+        }
+        #expect(output.operations == failed)
+        // A fresh registered request can recover through the normal path.
+        try await hardware.set(audible: true, continuity: false, revision: 3, lifetime: 1)
+        #expect(output.operations.last == .activate)
+        try await hardware.set(audible: false, continuity: false, revision: 4, lifetime: 1)
+    }
+
+    @Test func staleAudibleAdmissionRequiresConfirmedDuckedSuccessor() async throws {
+        let output = Output()
+        let hardware = SessionHardware(perform: output.perform)
+        try await hardware.set(audible: true, continuity: false, revision: 2)
+        let confirmed = output.operations
+        try await hardware.set(audible: true, continuity: true, revision: 1)
+        try await hardware.set(audible: false, continuity: false, revision: 1)
+        #expect(output.operations == confirmed)
+
+        // Confirmed activation for unducked silence cannot admit a word.
+        try await hardware.set(audible: false, continuity: true, revision: 3, lifetime: 1)
+        await hardware.settled()
+        let silent = output.operations
+        await #expect(throws: CancellationError.self) {
+            try await hardware.set(audible: true, continuity: false, revision: 2)
+        }
+        #expect(output.operations == silent)
+
+        try await hardware.set(audible: false, continuity: false, revision: 4, lifetime: 1)
+        let revoked = output.operations
+        await #expect(throws: CancellationError.self) {
+            try await hardware.set(audible: true, continuity: true, revision: 2)
+        }
+        #expect(output.operations == revoked && revoked.last == .deactivate)
+    }
+
     @Test func partialActivationAndFailedReleaseAreReconciled() async throws {
         let output = Output()
         let hardware = SessionHardware(perform: output.perform)
@@ -463,7 +510,9 @@ import AVFoundation
         try await hardware.set(audible: false, continuity: false, revision: 4)
         #expect(output.operations.last == .deactivate && output.operations.filter { $0 == .deactivate }.count == 3)
         let count = output.operations.count
-        try await hardware.set(audible: true, continuity: true, revision: 2)
+        await #expect(throws: CancellationError.self) {
+            try await hardware.set(audible: true, continuity: true, revision: 2)
+        }
         #expect(output.operations.count == count) // Stale callback cannot reopen output.
     }
 

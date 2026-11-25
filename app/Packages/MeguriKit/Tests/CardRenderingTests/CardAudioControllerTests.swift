@@ -64,6 +64,8 @@ import AVFoundation
         var playHold: Hold?
         var submittedHold: Hold?
         var checksPlayCancellation = false
+        var playError: (any Error)?
+        enum Failure: Error { case scheduling }
         var pauseHold: Hold?
         var stopHold: Hold?
         var seekHold: Hold?
@@ -74,12 +76,19 @@ import AVFoundation
         func play(permit: CardAudioPlayPermit) async throws {
             plays += 1
             await playHold?.wait()
+            if let playError {
+                // Match the native backend: cancellation is harmless, while an
+                // ordinary scheduling failure tears down before it surfaces.
+                if !(playError is CancellationError) { await stop() }
+                throw playError
+            }
             if checksPlayCancellation { try Task.checkCancellation() }
             _ = try permit.trySchedule {
                 isPaused = false; backend?.played(name)
                 return true
             }
             await submittedHold?.wait()
+            if checksPlayCancellation { try Task.checkCancellation() }
         }
         func pause() async {
             pauses += 1
@@ -429,8 +438,9 @@ import AVFoundation
         let clip = try #require(rig.backend.clips.first)
         let play = Hold()
         defer { play.release() }
-        // Ignore task cancellation here: the permit itself must fence a late
-        // submission when route loss wins while play is held.
+        // Before submission the permit itself must fence a late native call;
+        // after submission cancellation must preserve explicit resume.
+        clip.checksPlayCancellation = scheduled
         if scheduled { clip.submittedHold = play } else { clip.playHold = play }
         rig.controller.present(payload: payload(), update: question)
         await play.reached()
@@ -462,6 +472,61 @@ import AVFoundation
             rig.controller.replay(payload: payload(), update: question)
             #expect(await rig.backend.nextPlay() == "q1.mp3")
             #expect(rig.backend.clips.filter { $0.name == "q1.mp3" }.count == 2)
+        }
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func pauseDuringResumedPlayRetiresOnlyGenuineFailure(_ routeLoss: Bool, _ cancelled: Bool) async throws {
+        let rig = try await self.rig()
+        let play = Hold(), stop = Hold()
+        defer { play.release(); stop.release(); rig.controller.close() }
+        rig.controller.admitReview()
+        rig.controller.present(payload: payload(), update: question)
+        #expect(await rig.backend.nextPlay() == "q1.mp3")
+        await rig.controller.transportSettled()
+        let clip = try #require(rig.backend.clips.first)
+        clip.time = 1.25
+        rig.controller.pause()
+        await rig.controller.transportSettled()
+
+        clip.playHold = play
+        if cancelled { clip.playError = CancellationError() }
+        else { clip.playError = Clip.Failure.scheduling }
+        clip.stopHold = stop
+        rig.controller.resume()
+        await play.reached()
+        if !cancelled {
+            // The scheduling error has entered native teardown, but has not
+            // surfaced to the transport when the pause cancels its task.
+            play.release()
+            await stop.reached()
+        }
+        if routeLoss { rig.controller.sessionEvent(.pause) }
+        else { rig.controller.pause() }
+        #expect(rig.controller.paused && rig.controller.current?.name == "q1.mp3")
+        #expect(rig.session.owners.count == 1)
+        #expect(try await clip.file.read(offset: 0, count: 1) == Data([1]))
+        #expect(rig.backend.events == ["q1.mp3"])
+        if cancelled { play.release() }
+        stop.release()
+        await rig.controller.transportSettled()
+        rig.controller.sessionEvent(.available)
+        #expect(rig.session.owners.isEmpty && rig.backend.events == ["q1.mp3"])
+        #expect(clip.time == 1.25)
+        #expect(clip.stopped == !cancelled)
+        #expect(await descriptorIsClosed(clip) == !cancelled)
+        #expect(rig.diagnostics.entries.filter { $0.kind == "audioDecode" }.count == (cancelled ? 0 : 1))
+
+        clip.playHold = nil; clip.playError = nil; clip.stopHold = nil
+        rig.controller.resume()
+        await rig.controller.transportSettled()
+        if cancelled {
+            #expect(rig.controller.current?.name == "q1.mp3" && !rig.controller.paused)
+            #expect(rig.backend.events == ["q1.mp3", "q1.mp3"])
+            #expect(rig.session.owners.count == 1 && !clip.stopped)
+        } else {
+            #expect(rig.controller.current == nil && !rig.controller.paused)
+            #expect(rig.backend.events == ["q1.mp3"] && rig.session.owners.isEmpty)
         }
     }
 

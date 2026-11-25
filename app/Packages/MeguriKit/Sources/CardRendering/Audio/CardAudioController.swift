@@ -169,6 +169,12 @@ public final class CardAudioController {
             if sessionFailure {
                 self.diagnostics.record("audioSession", update: self.diagnosticUpdate(entry), name: entry.name, index: entry.index)
             }
+            if self.paused {
+                // A genuine play failure has already stopped the native owner.
+                // Retire it without carrying the disconnected queue forward.
+                self.cancelNext()
+                self.queue.removeAll()
+            }
             self.complete(serial, success: false, reportFailure: !sessionFailure)
         }
         transport.onSeekEnd = { [weak self] serial in self?.complete(serial, success: true) }
@@ -696,8 +702,13 @@ private final class AudioTransport {
                 if item.intent == .playing, !item.pauseRequired {
                     onStarted?(item.clip, item.entry, item.serial)
                 }
+            } catch is CancellationError {
+                // A revoked/cancelled attempt leaves previously submitted audio
+                // safe to pause and explicitly resume.
             } catch {
-                if !attempt.isCancelled, item.intent == .playing { onFailure?(item.serial, false) }
+                // Cancellation can race an ordinary native scheduling failure.
+                // That failure stops the backend, even if this clip played before.
+                if item.intent != .stopped { onFailure?(item.serial, false) }
             }
             playAttempt = nil
         }

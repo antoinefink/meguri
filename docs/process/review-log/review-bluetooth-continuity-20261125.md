@@ -19,15 +19,18 @@ On iPhone with AirPods, a short word lost its opening syllable after a quiet int
 - A subsequent native backend check stopped inside the real player's pre-scheduling hook. The controller retained an unsubmitted clip. The full Mac playback run `20261125T113758Z-75319` reported both failing assertions and `20261125T114111Z-80691` reproduced them on their own. Filtered fix `20261125T114125Z-83116` gives each play attempt a permit shared by revocation and the actual native scheduling call. Both original disconnect regression tests were retained. The Mac transport run `20261125T114407Z-88267` passed 67 tests.
 - Filtered runs `20261125T113941Z-78494` and `20261125T114318Z-85599` covered partial session activation followed by cleanup failure, entering waiting, finished or error, and returning to an eligible card. The iPhone package was rebuilt after these changes. See PR #219 for the combined iPhone and Mac results and the physical listening follow-up.
 
+- Review `20261125T114929Z-98698` also found that automatic refresh after an error could restore controls for an invalidated card. Fix `20261125T115239Z-4631` clears the previously presented key. Review `20261125T115401Z-6625` verified it. Mac run `20261125T115423Z-7211` passed all 151 selected tests, including same-card refresh from the question and answer sides and explicit continuation from waiting and finished.
+- External review found an overtaken hardware activation and a decoder failure during pause. Filtered fixes `20261125T115654Z-12573` and `20261125T115717Z-13108` require confirmed audible activation, retire a clip after genuine backend failure, and verify the visible WebKit player is active before revocation. Filtered review `20261125T120024Z-16229` covers those files. The PR records final combined test results.
+
 ## Privacy review
 
-Independent filtered review `20261125T114929Z-98698` covers the final changes. The independent filtered reviewers approved these complete Swift files as public implementation and synthetic tests. The independent spec and session reviewer approved the complete policy and all listed session records as public operational material. Only files flagged by the private scan have pins. Repository paths and SHA-256 follow.
+The independent filtered reviews above cover the final files. The independent filtered reviewers approved these complete Swift files as public implementation and synthetic tests. The independent spec and session reviewer approved the complete policy and all listed session records as public operational material. Only files flagged by the private scan have pins. Repository paths and SHA-256 follow.
 
 ```text
 11eda11c77a802d0951393f3a2c5b3f96a5fd1187284a2157c8b54539f579311  specs/render/audio-playback.md
-dddd0fd56f5c638f7b42e9947c0686f460e0865dfc819b683a424e1c51e37035  app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift
-b450be1bf82f4ba013062d4a26e6117fcdd7b2bb5f06ec79b3fde0cd90f0867c  app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift
-c3a8e80fe46dcb9c945f9c4260bb98cb144dc94ff6cc08084aa72accd302156f  app/Packages/MeguriKit/Tests/CardRenderingTests/CardAudioControllerTests.swift
+2609f9fde767c011219bba509519fd667f167a6f3937ce865095b64795acd2a3  app/Packages/MeguriKit/Sources/CardRendering/Audio/AudioSessionCoordinator.swift
+836c8128dd2bd184b1a41329cf2920e59ef5cf000736d2ed561fbd3fd84bc1b7  app/Packages/MeguriKit/Tests/CardRenderingTests/AudioContinuityTests.swift
+5c88bf3b94b11c8a7dcea45903bb551d5db4826f9f6f8e59c5fbe6f00a8edcd9  app/Packages/MeguriKit/Tests/CardRenderingTests/CardAudioControllerTests.swift
 b6a10e67d9cd661046765f7cb53346e0fb9bbb9b391e2376d6c325d9c1bd96cd  docs/process/provenance/sessions/s-20261125T105050Z-ab1a331e.json
 40ae09ceff113d80ef9286b5913c26f4234922206633d4339aff3c58dd010609  docs/process/provenance/sessions/s-20261125T105240Z-45547158.json
 d89f7d4e33e88979b87775ca86ff3e57e55c862e7c00a930a2c697ef6e6a9066  docs/process/provenance/sessions/s-20261125T105356Z-a7c0cd1d.json

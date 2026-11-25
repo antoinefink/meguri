@@ -254,7 +254,15 @@ actor SessionHardware {
     }
 
     func set(audible: Bool, continuity: Bool, revision: UInt64, lifetime: UInt64 = 0) async throws {
-        guard revision >= self.revision else { return }
+        guard revision >= self.revision else {
+            // A pending word may be overtaken by a snapshot whose physical
+            // activation failed. Only a confirmed audible successor admits it;
+            // never replay stale intent over a newer silent or revoked lease.
+            if audible {
+                guard self.audible, activation == .active, ducking == true else { throw CancellationError() }
+            }
+            return
+        }
         self.revision = revision; self.audible = audible
         let lifetimeChanged = lifetime != continuityLifetime
         if lifetimeChanged { continuityLifetime = lifetime; silenceFailed = false }
@@ -264,6 +272,8 @@ actor SessionHardware {
         do {
             if audible || needsSilence {
                 if ducking != audible {
+                    // A throwing category change may have partially applied.
+                    ducking = nil
                     try perform(.category(ducking: audible))
                     ducking = audible
                 }

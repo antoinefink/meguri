@@ -473,15 +473,20 @@ extension WebKitSuites {
             let window = SpikeWindow(pair.container)
             defer { pair.close(); window.close() }
             try await pair.load()
-            let html = "<video id=media src=clip.mp4 muted playsinline></video>"
+            let html = "<video id=media src=clip.mp4 muted playsinline loop></video>"
             let prepared = try await pair.prepare(CardPayload(cardID: 1, question: html, answer: "answer"))
             _ = try pair.present(prepared)
             try await pair.current.waitForShown(prepared)
             _ = try await pair.prepare(CardPayload(cardID: 2, question: html, answer: "answer"))
             let pages = [pair.current, pair.idle]
-            for page in pages {
-                _ = try await page.webView.callAsyncJavaScript("await document.getElementById('media').play();", contentWorld: .page)
-            }
+            let visible = pair.current, idle = pair.idle
+            // The real runtime pauses unpresented media; idle play() may reject
+            // with AbortError. Its stale reports must not acquire a lease either.
+            #expect(try await idle.webView.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == true)
+            idle.onSignal?(idle, "mediaPlayback", ["playing": true])
+            #expect(pair.htmlAudioOwner == nil)
+            _ = try await visible.webView.callAsyncJavaScript("await document.getElementById('media').play();", contentWorld: .page)
+            #expect(try await visible.webView.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == false)
             pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
             #expect(pair.htmlAudioOwner != nil)
             let oldIntent = pair.audioIntent
@@ -490,18 +495,21 @@ extension WebKitSuites {
             audio.admitReview(intent: oldIntent)
             #expect(pair.htmlAudioOwner == nil)
             // Model a report already on its way when review admission closed.
-            pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
-            #expect(pair.htmlAudioOwner == nil)
             for page in pages {
+                page.onSignal?(page, "mediaPlayback", ["playing": true])
+                #expect(pair.htmlAudioOwner == nil)
                 try await CardBehaviorFixture.until("review revocation pauses HTML") {
                     try await page.webView.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == true
                 }
             }
             if terminal {
+                // Terminal invalidation clears both native page bindings while
+                // retaining their documents for the physical pause barrier.
+                #expect(pages.allSatisfy { $0.update == nil && !$0.presented })
                 // Neither transport Resume nor lifecycle availability may reopen old HTML.
                 pair.resumeAudio()
                 await pair.resume()
-                pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
+                for page in pages { page.onSignal?(page, "mediaPlayback", ["playing": true]) }
                 #expect(pair.htmlAudioOwner == nil && !pair.current.presented)
                 _ = try await pair.current.webView.callAsyncJavaScript("await document.getElementById('media').play().catch(()=>{});", contentWorld: .page)
                 try await CardBehaviorFixture.until("old HTML stays fenced") {
@@ -527,8 +535,14 @@ extension WebKitSuites {
                 pair.admitReviewAudio()
             }
             _ = try await pair.current.webView.callAsyncJavaScript("await document.getElementById('media').play();", contentWorld: .page)
+            #expect(try await pair.current.webView.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == false)
             pair.current.onSignal?(pair.current, "mediaPlayback", ["playing": true])
             #expect(pair.htmlAudioOwner != nil)
+            let resumedOwner = pair.htmlAudioOwner
+            pair.idle.onSignal?(pair.idle, "mediaPlayback", ["playing": true])
+            pair.idle.onSignal?(pair.idle, "mediaPlayback", ["playing": false])
+            #expect(pair.htmlAudioOwner == resumedOwner)
+            #expect(try await pair.idle.webView.callAsyncJavaScript("return document.getElementById('media').paused;", contentWorld: .page) as? Bool == true)
         }
 
         @Test func sessionPausePreservesReviewEligibilityAndAvailabilityDoesNotRestartHTML() async throws {
