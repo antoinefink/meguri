@@ -108,6 +108,5 @@ pub fn editor_paste_images_as_png() -> Result<bool, CoreError> {
 pub fn editor_add_picture(expected_generation: u64, name: String, bytes: Vec<u8>) -> Result<String, CoreError> {
     callback::enter("editor_add_picture");
     let media = runtime::host()?.media()?;
-    media.check_generation(expected_generation)?;
-    Ok(media.add(&name, &bytes)?)
+    Ok(media.add_for_generation(expected_generation, &name, &bytes)?)
 }
