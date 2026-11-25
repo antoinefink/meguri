@@ -22,6 +22,7 @@ struct ReviewCardHost {
     var obscuredTop: CGFloat = 0
 
     private func key(_ input: String, command: Bool, shift: Bool, repeated: Bool = false) -> Bool {
+        guard model.phase == .question || model.phase == .answer else { return false }
         guard let pages = model.surface as? ReviewPages, pages.presenter.isAvailable,
               ReviewInputOwnership.admits(cardFocused: ReviewInputOwnership.cardFocused(in: pair.current.webView),
                   // An open Edit Note form owns the keys like a sheet (N11.1, E2).
@@ -34,6 +35,10 @@ struct ReviewCardHost {
         case " ", "\r", "\n":
             if model.phase == .question { model.reveal() }
             else if model.phase == .answer { model.rate(.good) }
+            return true
+        case "r", "R":
+            guard !shift, model.phase == .question || model.phase == .answer else { return false }
+            pair.replay()
             return true
         case "1": model.rate(.again); return true
         case "2": model.rate(.hard); return true
@@ -89,6 +94,7 @@ extension ReviewCardHost: NSViewControllerRepresentable {
                   ReviewInputOwnership.cardFocused(in: pair.current.webView) else { return event }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard flags.isDisjoint(with: [.option, .control]) else { return event }
+            if event.charactersIgnoringModifiers?.lowercased() == "r", flags.contains(.function) { return event }
             return key(event.charactersIgnoringModifiers ?? "", command: flags.contains(.command),
                        shift: flags.contains(.shift), repeated: event.isARepeat) ? nil : event
         }
@@ -165,7 +171,7 @@ extension ReviewCardHost: UIViewControllerRepresentable {
             focusChanged?()
         }
         override var keyCommands: [UIKeyCommand]? {
-            [" ", "\r", "1", "2", "3", "4", "e", "-", "@", UIKeyCommand.inputEscape].map {
+            [" ", "\r", "1", "2", "3", "4", "r", "e", "-", "@", UIKeyCommand.inputEscape].map {
                 let command = UIKeyCommand(input: $0, modifierFlags: [], action: #selector(pressed(_:)))
                 command.wantsPriorityOverSystemBehavior = false
                 return command

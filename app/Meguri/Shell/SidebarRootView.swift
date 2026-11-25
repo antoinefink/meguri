@@ -19,15 +19,7 @@ struct SidebarRootView: View {
             features.review(review, navigation)
                 .toolbar(removing: .sidebarToggle)
         } else {
-            if features.nativeMacWorkspace, case .add = navigation.sheet {
-                HSplitView {
-                    workspace
-                    features.addPanel()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } else {
-                workspace
-            }
+            workspace
         }
         #else
         workspace

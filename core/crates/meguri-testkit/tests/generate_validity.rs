@@ -1411,7 +1411,7 @@ fn recipe_learn_ahead_only_changes_the_collection_setting() {
     );
     for name in Recipe::names().unwrap() {
         let expected = match name.as_str() {
-            "owned-sync-review" | "local-review" => 0,
+            "owned-sync-review" | "local-review" | "review-editor" => 0,
             _ => 1200,
         };
         assert_eq!(Recipe::named(&name).unwrap().learn_ahead_secs, expected, "{name}");

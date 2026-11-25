@@ -8,9 +8,13 @@ The storage reader sorts fields by stored ordinal and preserves each row's numbe
 
 ## Session record review
 
-An independent reviewer (`metadata_review`) read both complete session records, including their paths, and admitted their contents as public operational metadata.
+An independent reviewer (`metadata_review`) read each complete session record, including its path, and admitted its contents as public operational metadata.
 
 | Session | SHA-256 |
 | --- | --- |
 | `s-20261125T204705Z-a4cccc69` | `842b74e1b4a9b559907781493b1f5d49df10eb41d49010a4e44b7ad68d5f0362` |
 | `s-20261125T204711Z-ce6a10fc` | `a649400bfa0eb037a5f04e6c14bd55afd50bc121872bce1d6aae286d2ffcd291` |
+| `s-20261125T205344Z-c62797ef` | `e6cf48aa7ca13848aaebd8cd2249d19c8d323a346ecc74b57d83cc586f886e22` |
+| `s-20261125T205411Z-6adbfd92` | `c7326e3710115a489880c52c517c7df55520b83cece19ed42a3dfc7e815c08a4` |
+
+The same reviewer read the complete 4,666-byte `core/crates/meguri-testkit/fixtures/recipes/review-editor.yaml` exported by the implementation session. All text, HTML, media declarations and names are authored synthetic fixture data. Admitted SHA-256 `47fca0bec62e69b0a5d8cf51dab5a6c740c8f17923383f130453125ac480195b` matches the committed fixture.

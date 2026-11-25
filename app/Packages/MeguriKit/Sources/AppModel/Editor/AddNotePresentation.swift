@@ -11,6 +11,8 @@ public final class AddNotePresentation {
     }
     public private(set) var issue: Issue?
     public private(set) var opening = false
+    /// Reopening Add brings the existing Mac window forward.
+    public private(set) var windowRequest: UInt64 = 0
     @ObservationIgnored private weak var owner: ReviewCollection?
     @ObservationIgnored private var prepare: (@MainActor (Int64?) async -> Bool)?
 
@@ -24,9 +26,15 @@ public final class AddNotePresentation {
     }
 
     public func canPresent(presetDeck: Int64? = nil) -> Bool {
-        guard let owner, prepare != nil, !opening, owner.canBeginAddAction,
+        guard let owner else { return false }
+        #if os(macOS)
+        let presentationFree = owner.navigation.sheet == nil || owner.navigation.sheet.isAddNote
+        #else
+        let presentationFree = owner.navigation.sheet == nil
+        #endif
+        guard prepare != nil, !opening, owner.canBeginAddAction,
               owner.review == nil, owner.navigation.review == nil,
-              owner.navigation.sheet == nil, owner.reviewIsActive else { return false }
+              presentationFree, owner.reviewIsActive else { return false }
         // A normal empty deck need not be in the tree. The real preparation
         // validates its persisted ID; no name-derived or invented ID is used.
         if let presetDeck, owner.deck(presetDeck)?.filtered == true { return false }
@@ -84,6 +92,7 @@ public final class AddNotePresentation {
                 return
             }
             navigation.commitAddSheet(route)
+            windowRequest &+= 1
         }
     }
 }

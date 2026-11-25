@@ -64,6 +64,17 @@ struct NativeCommandContext {
         collection.deckActions.present(.create, host: host)
     }
 
+    /// Add's separate native window does not make the main workspace modal.
+    /// Its own focused field still owns all editing commands.
+    private var workspaceOwnsCommands: Bool {
+        #if os(macOS)
+        if case .add = collection.navigation.sheet {
+            return NSApp.keyWindow?.identifier?.rawValue != "editor.add.window"
+        }
+        #endif
+        return collection.navigation.sheet == nil
+    }
+
     // MARK: Edit
 
     var canFind: Bool { host == .main && (canFindInBrowse || DeckSearchFocus.available(collection, layout: layout)) }
@@ -74,7 +85,7 @@ struct NativeCommandContext {
     }
     /// N21.8, T10: in Browse, Find… focuses Browse's search field.
     private var canFindInBrowse: Bool {
-        layout == .sidebar && collection.navigation.section == .browse && collection.navigation.sheet == nil
+        layout == .sidebar && collection.navigation.section == .browse && workspaceOwnsCommands
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
 
@@ -168,7 +179,7 @@ struct NativeCommandContext {
     /// while review presents a card, when Card › Show in Browse takes the
     /// key, and while a sheet holds the window.
     var canShowBrowse: Bool {
-        host == .main && layout == .sidebar && collection.navigation.sheet == nil
+        host == .main && layout == .sidebar && workspaceOwnsCommands
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
     func showBrowse() {
@@ -179,7 +190,7 @@ struct NativeCommandContext {
     /// N25.11: View › Statistics (⇧⌘S) selects the Statistics row, with the page's kept deck
     /// and period (S13), under the guards of View › Browse.
     var canShowStatistics: Bool {
-        statsPage != nil && host == .main && layout == .sidebar && collection.navigation.sheet == nil
+        statsPage != nil && host == .main && layout == .sidebar && workspaceOwnsCommands
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
     func showStatistics() {
@@ -224,7 +235,7 @@ struct NativeCommandContext {
     /// W14: View › Note Types (⇧⌘T) selects the sidebar row, outside review,
     /// with no sheet over the window, and once a collection exists.
     var canShowNoteTypes: Bool {
-        host == .main && layout == .sidebar && collection.navigation.sheet == nil
+        host == .main && layout == .sidebar && workspaceOwnsCommands
             && collection.review == nil && collection.navigation.review == nil && collection.hasCollection
     }
     func showNoteTypes() {
