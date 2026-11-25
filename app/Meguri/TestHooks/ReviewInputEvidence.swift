@@ -26,22 +26,6 @@ extension TestHooks {
                 ) { notification in
                     let command = notification.object as? String ?? "snapshot"
                     MainActor.assumeIsolated {
-                        if command == "focus-review-control", let window = NSApp.keyWindow {
-                            // Focus the production AppKit button, never WebKit or
-                            // a substitute responder, to prove window-level R.
-                            @MainActor func button(in view: NSView) -> NSButton? {
-                                if let button = view as? NSButton,
-                                   button.accessibilityIdentifier() == "review.session.rate.good" { return button }
-                                for child in view.subviews {
-                                    if let found = button(in: child) { return found }
-                                }
-                                return nil
-                            }
-                            if let content = window.contentView, let control = button(in: content) {
-                                window.makeFirstResponder(control)
-                            }
-                            return
-                        }
                         if command != "snapshot", let window = NSApp.keyWindow {
                             let key: (String, UInt16)
                             switch command {
@@ -61,15 +45,20 @@ extension TestHooks {
                         let pair = source.collection?.review?.pair
                         let audio = pair?.nativeReviewAudioReadiness
                         let sides = audio?.replaySides.map { $0 == .question ? "q" : "a" }.joined(separator: ",") ?? ""
-                        let responder = NSApp.keyWindow?.firstResponder
+                        let window = NSApp.keyWindow
+                        let responder = window?.firstResponder
+                        let reviewWindowActive = window != nil && window === pair?.container.window && NSApp.isActive
+                        let responderInWindow = responder != nil
+                            && (responder === window || (responder as? NSView)?.window === window)
                         let cardFocused = pair.map { ReviewInputOwnership.cardFocused(in: $0.current.webView) } ?? false
                         let focus: String
                         if cardFocused { focus = "card" }
                         else if responder is NSText || responder is NSTextField { focus = "field" }
-                        else if responder is NSControl { focus = "native" }
+                        else if reviewWindowActive && responderInWindow { focus = "native" }
                         else { focus = responder == nil ? "none" : "other" }
                         let fields = ["requests": String(audio?.replayRequests ?? 0), "sides": sides,
                                       "live": source.collection == nil ? "false" : "true", "focus": focus,
+                                      "firstResponderClass": responder.map { NSStringFromClass($0.classForCoder) } ?? "none",
                                       "addWindowKey": NSApp.keyWindow?.identifier?.rawValue == "editor.add.window" ? "true" : "false"]
                         let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
                         guard let data, let text = String(data: data, encoding: .utf8) else { return }

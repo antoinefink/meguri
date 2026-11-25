@@ -67,19 +67,16 @@ import XCTest
         XCTAssertTrue(element(app, "review.session.rate.good").waitForExistence(timeout: 10))
         let good = app.buttons["review.session.rate.good"]
         XCTAssertTrue(wait { good.exists && good.isEnabled && good.isHittable })
-        // Start within the long answer, with text continuing behind the grades.
-        // Capture before changing native focus.
-        card.scroll(byDeltaX: 0, deltaY: 10000)
-        card.scroll(byDeltaX: 0, deltaY: -750)
-        capture(app.windows.firstMatch, "review-\(appearance)-long-scroll-over-grades-before-focus-synthetic")
-        // Focus the actual native grade button after reveal, without touching WebKit.
-        inject("focus-review-control", bundle: bundle)
-        XCTAssertEqual(try audio(app, bundle: bundle).focus, "native")
+        // Observe the real Show Answer click's responder before any further scroll or focus change.
+        let revealed = try inputEvidence(bundle: bundle)
+        XCTAssertEqual(revealed["focus"], "native", "Show Answer left responder \(revealed["firstResponderClass"] ?? "none")")
         app.typeKey("r", modifierFlags: [])
         let answer = try audio(app, bundle: bundle)
         XCTAssertEqual(answer.count, question.count + 1)
         XCTAssertTrue(answer.sides.split(separator: ",").contains("a"), "the existing replay policy queues answer audio")
-        card.scroll(byDeltaX: 0, deltaY: 750)
+        // Start within the long answer, with text continuing behind the grades.
+        card.scroll(byDeltaX: 0, deltaY: 10000)
+        card.scroll(byDeltaX: 0, deltaY: -750)
         capture(app.windows.firstMatch, "review-\(appearance)-long-scroll-over-grades-synthetic")
         // Capture after another scroll too: text must never paint through any button.
         card.scroll(byDeltaX: 0, deltaY: -260)
