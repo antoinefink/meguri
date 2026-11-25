@@ -96,7 +96,12 @@ fn stored_field_positions_render_front_back_and_audio_for_sparse_and_dense_types
             let h = common::fresh();
             let front = if cloze { "{{cloze:Front}}" } else { "{{Front}}" };
             let question = format!("<div class=mg-front>{front}</div>");
-            let answer = "{{FrontSide}}<hr><div class=mg-back>{{Back}}</div>";
+            // Cloze validation requires an explicit cloze reference on each side.
+            let answer = if cloze {
+                "<div class=mg-front>{{cloze:Front}}</div><hr><div class=mg-back>{{Back}}</div>"
+            } else {
+                "{{FrontSide}}<hr><div class=mg-back>{{Back}}</div>"
+            };
             let nt = notetypes::add(
                 &h.collection,
                 notetypes::NewNotetype {
@@ -150,18 +155,25 @@ fn stored_field_positions_render_front_back_and_audio_for_sparse_and_dense_types
             };
             let before = common::steps::dump(&h.collection);
             let seq = h.collection.last_seq();
+            // Public cloze tests cover hidden/encoded questions and revealed answers.
+            let expected_question = if cloze {
+                "<div class=mg-front><span class=\"cloze\" data-cloze=\"Synthetic&#x20;many&#x2D;field&#x20;prompt\" data-ordinal=\"1\">[...]</span></div>"
+            } else {
+                "<div class=mg-front>Synthetic many-field prompt</div>"
+            };
+            let expected_answer_front = if cloze {
+                "<div class=mg-front><span class=\"cloze\" data-ordinal=\"1\">Synthetic many-field prompt</span></div>"
+            } else {
+                expected_question
+            };
             for mode in [RenderMode::Preview, RenderMode::Review, RenderMode::Browser] {
                 let rendered = rendering::render_card(&h.collection, card, mode, Platform::Mac).unwrap();
                 assert_eq!(rendered.comparable.outcome, Outcome::Rendered);
                 let q = rendered.question.unwrap();
                 let a = rendered.answer.unwrap();
-                if cloze {
-                    assert!(q.contains("<span class=\"cloze\" data-cloze=\"Synthetic many-field prompt\""), "{q}");
-                } else {
-                    assert!(q.contains("<div class=mg-front>Synthetic many-field prompt</div>"), "{q}");
-                }
-                if mode != RenderMode::Browser {
-                    assert!(a.contains("Synthetic many-field prompt"), "{a}");
+                assert!(q.contains(expected_question), "{q}");
+                if cloze || mode != RenderMode::Browser {
+                    assert!(a.contains(expected_answer_front), "{a}");
                 }
                 assert!(a.contains("<div class=mg-back>Synthetic many-field answer "), "{a}");
                 assert!(!q.contains("third") && !a.contains("third"));
@@ -177,8 +189,11 @@ fn stored_field_positions_render_front_back_and_audio_for_sparse_and_dense_types
             // Template overrides use the same field resolution, without AV extraction.
             let preview = rendering::render_template(&h.collection, card, &question, answer).unwrap();
             assert_eq!(preview.outcome, Outcome::Rendered);
+            assert!(preview.question.as_deref().unwrap().contains(expected_question));
+            assert!(preview.answer.as_deref().unwrap().contains(expected_answer_front));
             assert!(preview.answer.as_deref().unwrap().contains("Synthetic many-field answer [sound:answer.mp3]"));
             assert!(!preview.question.as_deref().unwrap().contains("third"));
+            assert!(!preview.answer.as_deref().unwrap().contains("third"));
             assert_eq!(common::steps::dump(&h.collection), before);
             assert_eq!(h.collection.last_seq(), seq);
         }
